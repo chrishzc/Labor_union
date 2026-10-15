@@ -78,6 +78,7 @@ function subsidyItem(caseNo: string, substatus: 'claim_lineage_missing' | 'submi
     requested_amount_ntd: missing ? 0 : 23100,
     approved_amount_ntd: 0,
     net_allocated_ntd: 0,
+    service_end_confirmed: true, estimated_subsidy_amount_ntd: missing ? null : 23100, estimate_unavailable_reason: null, confirmed_approved_amount_ntd: null, outstanding_amount_ntd: null,
     overpayment_identity: null,
     overpayment_remaining_ntd: null,
   };

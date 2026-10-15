@@ -80,6 +80,14 @@ period。跨年時只取 `end_date` 所屬年度，避免同一次匯出混合�
 成立資格，或使沒有 claim batch 的歷史訂單被排除。補助時數、單價與金額仍由 Government Subsidy
 reconciliation formula 計算，Reporting 不得自行重定義。
 
+### 帳務收款的服務確認與預估（2026-10-15 最新人工裁決）
+
+帳務政府補助清單主要分組為「待確認服務結束」與「已確認服務結束」，不把待申請／待核准作為人員的主要操作狀態。服務確認沿用 Orders settlement 的 service_completion completed 與正式來源 identity，並有正式實際服務結束日；不能由日期已過、有申請或政府核准反推確認。申請、核准、分配、沖正等既有狀態仍保留於案件補助明細，不修改正式業務狀態機。
+
+預估補助由本 Domain 的 reconciliation query 既有服務量、資格上限、Payroll 凍結單價與正式雙胞胎 450 規則提供。無 claim 時，缺資格／服務量／單價或無法形成整數金額為 null 並附原因，不使用一般身分的預設單價填補；已有 claim 時使用該選定批次的 requested snapshot，不因現況更改送件快照。
+
+Orders government projection GET additive 回傳 service_end_confirmed、estimated_subsidy_amount_ntd、estimate_unavailable_reason、confirmed_approved_amount_ntd、outstanding_amount_ntd。未形成核准時後兩者為 null，不能把 compatibility 的 approved=0 視為正式核准額；已有正式核准時沿本節既有 approved−net allocated 投影待收。前端只顯示與加總後端數字，不自行計算應收或借用客戶退款金額；預估與已核准待收分開小計，缺值不顯示 0，沒有政府入款顯示尚未入款。Query 零寫入，無 schema migration、補造 claim、補記付款或歷史回寫。
+
 ## 2. SSOT
 
 | 概念 | 唯一權威 | 性質 |

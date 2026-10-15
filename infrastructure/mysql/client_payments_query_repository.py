@@ -75,6 +75,7 @@ def _summary(row) -> ClientFinanceCaseSummary:
         _nonnegative(row["open_payable_amount_ntd"], "open_payable_amount_ntd"),
         _nonnegative(row["obligation_count"], "obligation_count"),
         _nonnegative(row["ledger_entry_count"], "ledger_entry_count"),
+        _nonnegative(row["receipt_entry_count"], "receipt_entry_count"),
     )
 
 
@@ -105,7 +106,7 @@ def _ledger_entries(rows) -> tuple[ClientFinanceLedgerEntryFact, ...]:
     for row in rows:
         entry_id = _positive(row["entry_id"], "entry_id")
         entry_type = str(row["entry_type"])
-        if entry_type not in {"receipt", "refund", "adjustment", "reversal"}:
+        if entry_type not in {"receipt", "refund", "adjustment", "reversal", "subsidy_return", "subsidy_advance"}:
             raise ValueError("client_finance_ledger_entry_invalid")
         if entry_id not in entries:
             entries[entry_id] = ClientFinanceLedgerEntryFact(
@@ -205,7 +206,10 @@ SELECT account.case_no, account.aggregate_version,
            AS open_payable_amount_ntd,
        COUNT(DISTINCT obligation.obligation_identity) AS obligation_count,
        (SELECT COUNT(*) FROM client_ledger_entries ledger
-         WHERE ledger.case_no=account.case_no) AS ledger_entry_count
+         WHERE ledger.case_no=account.case_no) AS ledger_entry_count,
+       (SELECT COUNT(*) FROM client_ledger_entries receipt
+         WHERE receipt.case_no=account.case_no
+           AND receipt.entry_type='receipt') AS receipt_entry_count
 FROM client_finance_accounts account
 LEFT JOIN client_obligations obligation
        ON obligation.case_no=account.case_no

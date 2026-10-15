@@ -10,6 +10,7 @@ from typing import Any
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
 from shared_kernel.validation import require_canonical_text
+from subsystems.government_subsidy.reconciliation_register_query import project_receivable_estimate
 from subsystems.orders.government_subsidy_projection_query import (
     GovernmentSubsidyClaimItemProjectionFact,
     GovernmentSubsidyOrderProjectionFacts,
@@ -55,11 +56,12 @@ class MySqlOrderGovernmentSubsidyProjectionRepository:
             key = case_no.casefold()
             identity_status = _optional_text(row.get("identity_status"))
             actual_end_date = _optional_date(row.get("actual_end_date"))
+            estimate = project_receivable_estimate(dict(row))
             builder = builders.get(key)
             if builder is None:
-                builder = _CaseFactsBuilder(case_no, identity_status, actual_end_date)
+                builder = _CaseFactsBuilder(case_no, identity_status, actual_end_date, estimate)
                 builders[key] = builder
-            elif builder.case_no != case_no or builder.identity_status != identity_status or builder.actual_end_date != actual_end_date:
+            elif builder.case_no != case_no or builder.identity_status != identity_status or builder.actual_end_date != actual_end_date or builder.estimate != estimate:
                 raise GovernmentSubsidyProjectionContractError(
                     "order identity facts are inconsistent"
                 )
@@ -113,10 +115,11 @@ class MySqlOrderGovernmentSubsidyProjectionRepository:
 
 
 class _CaseFactsBuilder:
-    def __init__(self, case_no: str, identity_status: str | None, actual_end_date: date | None) -> None:
+    def __init__(self, case_no: str, identity_status: str | None, actual_end_date: date | None, estimate) -> None:
         self.case_no = case_no
         self.identity_status = identity_status
         self.actual_end_date = actual_end_date
+        self.estimate = estimate
         self.claims: dict[int, GovernmentSubsidyClaimItemProjectionFact] = {}
         self.overpayments: dict[str, GovernmentSubsidyOverpaymentProjectionFact] = {}
 
@@ -157,6 +160,8 @@ class _CaseFactsBuilder:
                     key=lambda item: (item.batch_id, item.identity.casefold()),
                 )
             ),
+            estimated_subsidy_amount_ntd=self.estimate.amount_ntd,
+            estimate_unavailable_reason=self.estimate.unavailable_reason,
         )
 
 
@@ -236,6 +241,9 @@ SELECT
     o.case_no AS case_no,
     c.identity_status AS identity_status,
     o.actual_end_date AS actual_end_date,
+    o.status AS order_status, o.service_days, o.service_hours_per_day,
+    payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+    br.survey_details, correction.effective_values_json AS beclass_effective_values,
     i.id AS claim_item_id,
     i.batch_id AS batch_id,
     account.aggregate_version AS batch_version,
@@ -254,6 +262,9 @@ SELECT
     overpayment.projection_version AS overpayment_version
 FROM orders o
 JOIN clients c ON c.id = o.client_id
+LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
+LEFT JOIN beclass_records br ON (br.query_no=o.case_no OR br.bound_case_no=o.case_no)
+LEFT JOIN beclass_record_correction_states correction ON correction.beclass_record_id=br.id
 LEFT JOIN subsidy_claim_batch_items i ON i.case_no = o.case_no
 LEFT JOIN subsidy_claim_batches batch ON batch.id = i.batch_id
 LEFT JOIN government_subsidy_batch_accounts account

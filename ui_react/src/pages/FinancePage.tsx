@@ -14,19 +14,20 @@ import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_quer
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { accountsPayableExportClient } from '../api/accounts_payable/accounts_payable_export_client';
-import { adaptAccountsPayablePreview } from '../adapters/finance/accounts_payable_query_adapter';
 import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
-import { ClientSubsidyReturnQueryPanel } from '../components/ClientSubsidyReturnQueryPanel';
 import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
-import { CashRequirementsPanel } from '../components/CashRequirementsPanel';
 import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
 
-type FinanceTab = 'client-receipts' | 'staff-payables' | 'accounts-payable' | 'cross-order' | 'finance-import' | 'payment-destination';
+import { FinanceReceiptsWorkspace } from '../components/FinanceReceiptsWorkspace';
+import { FinancePaymentsWorkspace } from '../components/FinancePaymentsWorkspace';
+import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
+import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
+
+type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 type FinanceImportReviewSnapshot = {
   batchIdentity: string;
@@ -89,7 +90,13 @@ export const FinancePage: React.FC = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
-  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'staff-payables' || entry.tab === 'cross-order' || entry.tab === 'accounts-payable' ? entry.tab : 'client-receipts');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'payment-destination' ? 'payment-destination' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'client-receipts' : 'receipts');
+  const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments'>('receipts');
+  const [subsidyCase, setSubsidyCase] = useState(entry.tab === 'subsidy-advance' || entry.tab === 'cross-order' ? entry.caseNo : '');
+  const activeWorkspace = activeTab === 'staff-payables' ? 'payments' : activeTab === 'client-receipts' ? detailReturn : activeTab;
+  const openCase = (caseNo: string) => { setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeWorkspace === 'payments' ? 'payments' : 'receipts'); setActiveTab('client-receipts'); };
+  const openBank = () => { setSubsidyCase(''); setActiveTab('finance-import'); };
+
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
   const [selectedCase, setSelectedCase] = useState(entry.caseNo);
   const [caseQuery, setCaseQuery] = useState(entry.caseNo);
@@ -100,9 +107,6 @@ export const FinancePage: React.FC = () => {
   const [payables, setPayables] = useState<LoadState<ReturnType<typeof adaptStaffPayablesQuery>>>({ kind: 'idle' });
   const [historicalStaffCase, setHistoricalStaffCase] = useState('');
   const [targetMonth, setTargetMonth] = useState(currentMonth);
-  const [accountsPayable, setAccountsPayable] = useState<LoadState<ReturnType<typeof adaptAccountsPayablePreview>>>({ kind: 'idle' });
-  const [payableView, setPayableView] = useState<'estimate' | 'confirmed'>('confirmed');
-  const [payableDownload, setPayableDownload] = useState<LoadState<string>>({ kind: 'idle' });
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
@@ -133,32 +137,6 @@ export const FinancePage: React.FC = () => {
   };
   const current = (key: string, sequence: number, controller: AbortController) =>
     sequences.current.get(key) === sequence && !controller.signal.aborted;
-  useEffect(() => {
-    controllers.current.get('payable-download')?.abort();
-    setPayableDownload({ kind: 'idle' });
-  }, [targetMonth, activeTab, payableView]);
-
-  const downloadPayables = async () => {
-    const { controller, sequence } = start('payable-download');
-    setPayableDownload({ kind: 'loading' });
-    try {
-      const artifact = await accountsPayableExportClient.download(targetMonth, controller.signal);
-      if (!current('payable-download', sequence, controller)) return;
-      const url = URL.createObjectURL(artifact.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = artifact.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setPayableDownload({ kind: 'ready', data: artifact.filename });
-    } catch (error) {
-      if (current('payable-download', sequence, controller)) {
-        setPayableDownload({ kind: 'error', message: financeErrorMessage(error, '應付帳款下載失敗，請稍後再試。') });
-      }
-    }
-  };
   const schedule = (
     key: string,
     execute: (request: { controller: AbortController; sequence: number }) => void,
@@ -262,16 +240,6 @@ export const FinancePage: React.FC = () => {
     const caseNos = [...new Set(payables.data.obligations.map((item) => item.caseNo))];
     setHistoricalStaffCase((value) => caseNos.includes(value) ? value : caseNos[0] ?? '');
   }, [payables]);
-
-  useEffect(() => {
-    if (activeTab !== 'accounts-payable' || payableView !== 'confirmed') return;
-    return schedule('accounts-payable', (request) => {
-      setAccountsPayable({ kind: 'loading' });
-      void accountsPayableQueryClient.query(targetMonth, { signal: request.controller.signal })
-        .then((data) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable(data.rows.length ? { kind: 'ready', data: adaptAccountsPayablePreview(data) } : { kind: 'empty' }); })
-        .catch((error: unknown) => { if (current('accounts-payable', request.sequence, request.controller)) setAccountsPayable({ kind: 'error', message: financeErrorMessage(error, '應付帳款查詢失敗，請重新整理。') }); });
-    });
-  }, [activeTab, targetMonth, reload, payableView]);
 
   const loadSourceReview = async (batchIdentity: string) => {
     const request = start('source-review');
@@ -387,61 +355,22 @@ export const FinancePage: React.FC = () => {
     <div data-surface-id="finance.page">
       {entry.fromWorkbench && entry.caseNo && <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>← 返回案件處理</a>}
       <header className="page-header-banner finance-page-header">
-        <div>
-          <h1 className="page-title">💰 財務查詢與對帳工作台</h1>
-          <p className="page-subtitle">查詢客戶收款、逐人薪資與每月付款，或核對銀行交易明細。</p>
-        </div>
-        <div className="finance-header-actions">
-          <span className="finance-status-pill">
-            {activeTab === 'finance-import' ? '● 預覽確認後正式匯入' : '● 需要最新資料時請重新整理'}
-          </span>
-        </div>
+        <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收款、付款與銀行對帳，依工作集中處理。</p></div>
+        <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => setActiveTab('payment-destination')}>帳務設定</button>
       </header>
-
-      <nav className="finance-tab-bar" aria-label="財務查詢工作區">
-        {([
-          ['client-receipts', '客戶收款'],
-          ['staff-payables', '月嫂應付款'],
-          ['accounts-payable', '應付帳款'],
-          ['cross-order', '客戶補助退款'],
-          ['finance-import', '銀行交易明細匯入'],
-        ] as const).map(([id, label]) => (
-          <button
-            key={id}
-            data-surface-id={`finance.tab.${id}`}
-            className={activeTab === id ? 'active' : ''}
-            onClick={() => setActiveTab(id)}
-          >
-            {label}
-            {id === 'staff-payables' && <small aria-hidden="true">逐人薪資明細</small>}
-            {id === 'accounts-payable' && <small aria-hidden="true">每月付款清單</small>}
-          </button>
-        ))}
-        <div className="finance-settings-nav" role="group" aria-label="帳務設定">
-          <span>設定</span>
-          <button type="button" data-surface-id="finance.tab.payment-destination" className={activeTab === 'payment-destination' ? 'active' : ''} onClick={() => setActiveTab('payment-destination')}>契約收款帳戶</button>
-        </div>
+      <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
+        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => setActiveTab(id)}>{label}</button>)}
       </nav>
-
-      <div className="finance-toolbar">
-        <span>{activeTab === 'finance-import'
-          ? '上傳檔案 → 預覽 → 匯入完成'
-          : activeTab === 'cross-order'
-            ? '依案件查詢應退補助金額與應退款日期'
-            : '查詢結果以目前選取頁籤為準'}</span>
-        {activeTab !== 'finance-import' && activeTab !== 'cross-order' && (
-          <button className="finance-reload-btn" onClick={() => setReload((value) => value + 1)}>
-            重新整理
-          </button>
-        )}
-      </div>
-
+      {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
+      {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
+      {activeTab === 'payments' && <FinancePaymentsWorkspace revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId => { if (staffId !== undefined) setSelectedStaff(staffId); setActiveTab('staff-payables'); }} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank} />}
+      {subsidyCase && <CaseSubsidyDetailDrawer key={subsidyCase} caseNo={subsidyCase} onClose={() => setSubsidyCase('')} onOpenBank={openBank} onChanged={() => setReload(value => value + 1)} />}
       {activeTab === 'client-receipts' && (
         <section className="finance-workspace">
           <div className="finance-section-heading">
             <div>
               <h2>客戶收款資料</h2>
-              <p>正常收款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行交易明細匯入」查看該批次的人工核對清單。</p>
+              <p>正常收款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行對帳」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -475,30 +404,9 @@ export const FinancePage: React.FC = () => {
 
           {receipt.kind === 'ready' && (
             <>
-              <div className="finance-kpi-grid">
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">案件編號</span>
-                  <span className="finance-kpi-value" style={{ fontSize: '1.15rem' }}>{receipt.data.caseNo}</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">應收項目數</span>
-                  <span className="finance-kpi-value orange">{receipt.data.obligations.length} 筆</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">銀行交易筆數</span>
-                  <span className="finance-kpi-value green">{receipt.data.bankFacts.length} 筆</span>
-                </div>
-              </div>
-
-              <div className="finance-meta">
-                <span>案件 {receipt.data.caseNo} 的收款資料</span>
-                <span className="finance-badge finance-badge-paid">收款資料已載入</span>
-              </div>
-
               <table className="finance-table">
                 <thead>
                   <tr>
-                    <th>收款項目</th>
                     <th>階段</th>
                     <th>應收</th>
                     <th>到期日</th>
@@ -506,9 +414,8 @@ export const FinancePage: React.FC = () => {
                 </thead>
                 <tbody>
                   {receipt.data.obligations.map((item) => (
-                    <tr key={item.id}>
-                      <td><code>{item.id}</code></td>
-                      <td><span className="finance-badge finance-badge-stage">{item.stage}</span></td>
+                    <tr key={item.id} data-obligation-id={item.id}>
+                      <td><span className="finance-badge finance-badge-stage">{{ deposit: '訂金', first: '第一期', second: '第二期', adjustment: '調整款' }[item.stage]}</span></td>
                       <td><strong>{item.amountDue}</strong></td>
                       <td>{item.dueDate}</td>
                     </tr>
@@ -538,7 +445,7 @@ export const FinancePage: React.FC = () => {
               </div>
 
               <div className="finance-detail-block">
-                <h3>已載入銀行交易</h3>
+                <h3>待核對銀行交易</h3>
                 <div className="finance-table-container">
                   <table className="finance-table">
                     <thead>
@@ -572,19 +479,14 @@ export const FinancePage: React.FC = () => {
           )}
         </section>
       )}
+      {activeTab === 'client-receipts' && selectedCase && <FinanceCaseHistory caseNo={selectedCase} revision={reload} />}
       {activeTab === 'payment-destination' && <PaymentDestinationConfigurationPanel reload={reload} />}
-
-      {activeTab === 'cross-order' && (
-        <ClientSubsidyReturnQueryPanel targetMonth={targetMonth} onMonthChange={setTargetMonth}
-          onOpenPayables={() => setActiveTab('accounts-payable')} initialCaseNo={entry.caseNo} />
-      )}
-
       {activeTab === 'staff-payables' && (
         <section className="finance-workspace">
           <div className="finance-section-heading">
             <div>
               <h2>月嫂應付款與付款事件</h2>
-              <p>正常付款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行交易明細匯入」查看該批次的人工核對清單。</p>
+              <p>正常付款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行對帳」查看該批次的人工核對清單。</p>
             </div>
           </div>
 
@@ -607,30 +509,9 @@ export const FinancePage: React.FC = () => {
 
           {payables.kind === 'ready' && (
             <>
-              <div className="finance-kpi-grid">
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">月嫂編號</span>
-                  <span className="finance-kpi-value" style={{ fontSize: '1.15rem' }}>Staff #{payables.data.staffId}</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">應付項目筆數</span>
-                  <span className="finance-kpi-value orange">{payables.data.obligations.length} 筆</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">已付款事件</span>
-                  <span className="finance-kpi-value green">{payables.data.events.length} 筆</span>
-                </div>
-              </div>
-
-              <div className="finance-meta">
-                <span>Staff #{payables.data.staffId} 的應付款資料</span>
-                <span className="finance-badge finance-badge-paid">應付款資料已載入</span>
-              </div>
-
               <table className="finance-table">
                 <thead>
                   <tr>
-                    <th>收款項目</th>
                     <th>案件</th>
                     <th>應付</th>
                     <th>已付</th>
@@ -641,8 +522,7 @@ export const FinancePage: React.FC = () => {
                 </thead>
                 <tbody>
                   {payables.data.obligations.map((item) => (
-                    <tr key={item.id}>
-                      <td><code>{item.id}</code></td>
+                    <tr key={item.id} data-obligation-id={item.id}>
                       <td><strong>{item.caseNo}</strong></td>
                       <td>{item.amountDue}</td>
                       <td style={{ color: '#16a34a' }}>{item.netPaid}</td>
@@ -699,114 +579,11 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'accounts-payable' && (
-        <section className="finance-workspace">
-          <nav className="finance-tab-bar finance-payable-tabs" role="tablist" aria-label="應付帳款檢視">
-            {([['estimate', '預估資金需求'], ['confirmed', '已確定款項清冊']] as const).map(([view, label]) => (
-              <button key={view} type="button" role="tab"
-                id={view === 'estimate' ? 'cash-requirements-tab' : 'confirmed-payables-tab'}
-                aria-controls={view === 'estimate' ? 'cash-requirements-panel' : 'confirmed-payables-panel'}
-                aria-selected={payableView === view} tabIndex={payableView === view ? 0 : -1}
-                className={payableView === view ? 'active' : ''} onClick={() => setPayableView(view)}
-                onKeyDown={event => {
-                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-                  event.preventDefault();
-                  const next = event.key === 'Home' ? 'estimate' : event.key === 'End' ? 'confirmed' : view === 'estimate' ? 'confirmed' : 'estimate';
-                  setPayableView(next);
-                  event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(next === 'estimate' ? '#cash-requirements-tab' : '#confirmed-payables-tab')?.focus();
-                }}>
-                {label}
-              </button>
-            ))}
-          </nav>
-          {payableView === 'estimate' ? <CashRequirementsPanel revision={reload} /> : <div role="tabpanel" id="confirmed-payables-panel" aria-labelledby="confirmed-payables-tab">
-          <div className="finance-section-heading">
-            <div>
-              <h2>應付帳款清冊（已確定款項）</h2>
-              <p>列出已建立且符合付款日的未付款項；服務或帳務更正後，金額仍可能更新。下載 Excel 交給會計時會保存相同檔案，不會執行付款。</p>
-            </div>
-          </div>
-
-          <div className="finance-filter-bar">
-            <label>
-              月份
-              <input
-                className="finance-input"
-                type="month"
-                value={targetMonth}
-                onChange={(event) => setTargetMonth(event.target.value)}
-              />
-            </label>
-            <button type="button" className="finance-btn-primary" data-control-id="finance.accounts-payable.export-xlsx"
-              disabled={accountsPayable.kind !== 'ready' || payableDownload.kind === 'loading'}
-              onClick={() => void downloadPayables()}>
-              {payableDownload.kind === 'loading' ? '正在準備下載…' : '下載應付帳款 Excel'}
-            </button>
-          </div>
-
-          {payableDownload.kind === 'error' && <div role="alert" className="finance-state error">{payableDownload.message}</div>}
-          {payableDownload.kind === 'ready' && <div role="status">已送出下載：{payableDownload.data}</div>}
-
-          <StateMessage state={accountsPayable} empty="本月沒有符合付款條件的未付款項。已付清或結清、付款日未確定、受款資料待確認的項目不會列入。可到「客戶收款 → 本案月嫂應付」查看個案原因。" />
-
-          {accountsPayable.kind === 'ready' && (
-            <>
-              <div className="finance-kpi-grid">
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">目標付款日</span>
-                  <span className="finance-kpi-value" style={{ fontSize: '1.15rem' }}>{accountsPayable.data.targetPaymentDate}</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">應付總筆數</span>
-                  <span className="finance-kpi-value orange">{accountsPayable.data.rowCount} 筆</span>
-                </div>
-                <div className="finance-kpi-item">
-                  <span className="finance-kpi-label">應付總金額</span>
-                  <span className="finance-kpi-value" style={{ color: '#a43c12' }}>{accountsPayable.data.totalAmount}</span>
-                </div>
-              </div>
-
-              <div className="finance-meta">
-                <span>付款日 {accountsPayable.data.targetPaymentDate}｜{accountsPayable.data.rowCount}筆｜{accountsPayable.data.totalAmount}</span>
-              </div>
-
-              <table className="finance-table">
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th>類型</th>
-                    <th>受款人</th>
-                    <th>銀行代號／帳號</th>
-                    <th>身分證字號</th>
-                    <th>金額</th>
-                    <th>案件</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accountsPayable.data.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.paymentDate}</td>
-                      <td><span className="finance-badge finance-badge-stage">{row.paymentType}</span></td>
-                      <td><strong>{row.recipientName}</strong></td>
-                      <td><code>{row.bankDisplay}</code></td>
-                      <td><code>{row.identityDisplay}</code></td>
-                      <td><strong style={{ color: '#a43c12' }}>{row.amount}</strong></td>
-                      <td>{row.caseNumbers.join('、') || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-          </div>}
-        </section>
-      )}
-
       {activeTab === 'finance-import' && (
         <section className="finance-workspace">
           <div className="finance-section-heading">
             <div>
-              <h2>銀行交易明細匯入</h2>
+              <h2>銀行對帳</h2>
               <p>選擇銀行交易明細工作簿、核對預覽，再確認匯入；完成結果會自動顯示。</p>
             </div>
           </div>
@@ -894,29 +671,6 @@ export const FinancePage: React.FC = () => {
 
             {batchPreview.kind === 'ready' && (
               <div style={{ marginTop: '14px', padding: '16px', background: '#fffaf7', border: '1px solid #fed9b8', borderRadius: '12px', textAlign: 'left' }}>
-                <div className="finance-kpi-grid" style={{ marginBottom: '12px' }}>
-                  <div className="finance-kpi-item">
-                    <span className="finance-kpi-label">可自動入帳</span>
-                    <span className="finance-kpi-value green">{batchPreview.data.counts.ready_dispatch}</span>
-                  </div>
-                  <div className="finance-kpi-item">
-                    <span className="finance-kpi-label">已存在</span>
-                    <span className="finance-kpi-value">{batchPreview.data.counts.existing}</span>
-                  </div>
-                  <div className="finance-kpi-item">
-                    <span className="finance-kpi-label">待人工確認</span>
-                    <span className="finance-kpi-value orange">{sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '—'}</span>
-                  </div>
-                  <div className="finance-kpi-item">
-                    <span className="finance-kpi-label">待業務配對</span>
-                    <span className="finance-kpi-value orange">{batchPreview.data.counts.business_pending}</span>
-                  </div>
-                  <div className="finance-kpi-item">
-                    <span className="finance-kpi-label">阻擋筆數</span>
-                    <span className="finance-kpi-value" style={{ color: '#dc2626' }}>{batchPreview.data.counts.blocked}</span>
-                  </div>
-                </div>
-
                 <div className="finance-scope-note">
                   可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜需人工處理 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
                   {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0

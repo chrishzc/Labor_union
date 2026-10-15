@@ -14,7 +14,7 @@
 - api-schema: `api/schemas/accounts_payable_export.py`
 - source: `infrastructure/mysql/accounts_payable_export_sources.py`
 - archive: `infrastructure/archive/accounts_payable.py`
-- cash planning: `subsystems/staff_payables/cash_requirements_query.py`
+- cash planning: `subsystems/staff_payables/cash_requirements_query.py` — 付款統一清單來源，唯讀保留 staff_id 供逐人明細精確定位；金額與日期規則不變。
 - cash planning source: `infrastructure/mysql/cash_requirements_repository.py`
 
 ## Contracts

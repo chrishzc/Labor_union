@@ -31,7 +31,7 @@ class ClientFinanceObligationView(_StrictModel):
 
 class ClientFinanceLedgerEntryView(_StrictModel):
     entry_id: int = Field(gt=0)
-    entry_type: Literal["receipt", "refund", "adjustment", "reversal"]
+    entry_type: Literal["receipt", "refund", "adjustment", "reversal", "subsidy_return", "subsidy_advance"]
     amount_ntd: int = Field(gt=0)
     occurred_on: date
     reconciliation_reference: str = Field(min_length=1, max_length=191)
@@ -47,6 +47,7 @@ class ClientFinanceCaseSummaryView(_StrictModel):
     open_payable_amount_ntd: int = Field(ge=0)
     obligation_count: int = Field(ge=0)
     ledger_entry_count: int = Field(ge=0)
+    receipt_entry_count: int = Field(ge=0)
 
 
 class ClientFinanceCaseView(_StrictModel):

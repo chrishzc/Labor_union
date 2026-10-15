@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW
 
 ## Modules
+- `subsidy-advance-recovery-workbench` — 政府入款後的工會墊款 Query／Preview／Apply 與正式回收 readback；path: `modules/subsidy-advance-recovery-workbench.md`
 - `client-subsidy-return-query` — 以案件為入口的補助退款唯讀查詢，正式金額與明示預估分開；path: `modules/client-subsidy-return-query.md`
 - `deposit-skip` — 一般市民由管理員允許訂金未付仍推進，不變更應收與核銷狀態；path: `modules/deposit-skip.md`
 - `receipt-reconciliation` — 客戶銀行收款的精確核銷、明示超收處理與 owner Preview／Apply；path: `modules/receipt-reconciliation.md`
@@ -32,5 +33,6 @@
 - layout_status: `custom_current`
 - layout_basis: FinancePage spans multiple Client Finance modules, so its frontend composition tests use the mirrored subsystem integration root.
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/`
+- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/` — 沿用 test index 的後端跨層 owner 查詢／adapter／HTTP contract 驗證位置。
 - current owner-local integration coverage remains catalogued in `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`.
 - material module tests use the exact canonical root declared by their module leaf.

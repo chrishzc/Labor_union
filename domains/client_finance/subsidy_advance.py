@@ -66,6 +66,33 @@ class SubsidyAdvanceRecovery:
             raise ValueError("subsidy_advance_recovery_amount_invalid")
 
 
+@dataclass(frozen=True, slots=True)
+class SubsidyPayoutFundingFacts:
+    completed_on: date | None
+    due_on: date | None
+    paid_on: date
+    entitled_amount_ntd: int
+    allocated_at_payment_ntd: int
+    link_id: int
+    claim_item_id: int
+    batch_version: int
+
+
+def subsidy_payout_is_advance(facts: SubsidyPayoutFundingFacts, payout_amount: int) -> bool:
+    """Classify the existing payout, never create a second customer payment."""
+    if facts.entitled_amount_ntd <= 0 or payout_amount != facts.entitled_amount_ntd:
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    if facts.allocated_at_payment_ntd == facts.entitled_amount_ntd:
+        return False
+    if facts.allocated_at_payment_ntd != 0:
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    if facts.completed_on is None or facts.due_on != subsidy_advance_due_date(facts.completed_on):
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    if not is_first_month_of_quarter(facts.completed_on) or facts.paid_on < facts.due_on:
+        raise ValueError('subsidy_advance_not_due')
+    return True
+
+
 def build_subsidy_advance_decision(
     facts: SubsidyAdvanceFacts,
     business_date: date,

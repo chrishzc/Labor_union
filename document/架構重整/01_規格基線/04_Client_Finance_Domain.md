@@ -182,6 +182,8 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 
 ### Immutable Ledger／Reversal
 
+收款工作區的「已收款」依 canonical ledger 中 `entry_type=receipt` 的實際收款紀錄篩選。既有案件摘要增加唯讀 `receipt_entry_count`，只計同案件的 receipt；退款、adjustment、reversal、補助退款及代墊紀錄不得單獨使案件符合此篩選。部分收款且仍有待收餘額的案件仍納入，不以餘額為零或一般帳務紀錄筆數推定已收款；此篩選不代表已全額收清，也不改寫歷史或原帳務規則。
+
 原交易永不 UPDATE。reversal 指向同 case、同 obligation kind、同 ledger 的原交易；不得超過仍可沖銷餘額。
 
 已確認禁止 reversal-of-reversal。若 reversal 疑似錯誤，系統先產生異常警報並停止自動修復，顯示原交易、reversal、有效淨額、受影響義務及合法 recovery actions。只有人員確認實際情況後，才可透過 Client Finance Preview／Apply 新增反方向 adjustment；不得由 projector、scanner 或 ledger reducer 自動補 adjustment。
@@ -246,6 +248,14 @@ obligation 必須先以不可變 entitlement link 對應 claim item；不得以 
 時，禁止自動打平，建立 typed anomaly 與人工 Preview。`subsidy_refund_*` 與
 `subsidy_return_*` 的 legacy projection 欄位只允許 preserve-data migration 讀取；
 不再是正式 writer 或 query SSOT。
+
+#### 代墊補助款銷帳頁面（2026-10-15 使用者要求）
+
+- `ADVREC-01`：於「收款 → 政府補助 → 工會墊款與回收紀錄」及共用「案件補助明細」提供銷帳操作（依最新核准預覽整合，不再設獨立主頁籤），處理政府補助入帳後回收工會先前墊付款；列出正式 `subsidy_advance`、政府入款分配、既有回收金額及待入款／可銷帳／已銷帳／需核對狀態，支援案件或客戶搜尋與狀態篩選。預估退款不是墊款事實，不納入。
+- `ADVREC-02`：只能依既有不可變 obligation → claim item link、正式政府 receipt allocation 及其 committed outbox fact 回收。對應必須唯一，核准、入款、entitlement 與墊款金額一致，且無沖正；條件不符顯示原因，不得猜配或任意輸入銷帳金額。既有自動 recovery 繼續有效，人工與自動不得重複建立回收。
+- `ADVREC-03`：人工操作使用 Query → Preview → Confirm → Apply → fresh readback。Apply 鎖定 current facts，檢查 Client Finance account／Government Subsidy batch version 及 human Preview fingerprint；同一交易只追加既有 recovery link、推進 Client Finance version、保存 actor／reason／來源 evidence、冪等 receipt 與 projection-refresh outbox。資料變更回 typed conflict，同 key 不同 command 拒絕，不新增客戶 payout 或改寫政府 ledger。
+- `ADVREC-04`：管理員使用 `GET /api/v1/client-finance/subsidy-advance-recoveries`（bounded cursor list）、`POST /api/v1/client-finance/subsidy-advance-recoveries/{advance_id}/preview`、`POST .../{advance_id}/apply`；沿用既有資料表，不包含 schema migration、銀行付款或 external provider effect。頁面逐批完整載入、失敗不顯示部分合計；結果不明先重新查詢，不能僅以 HTTP receipt 宣稱已銷帳。
+- `ADVREC-05`（2026-10-15 銜接確認）：銀行匯入及人工客戶補助退款核銷一律由 Client Finance owner 依正式 entitlement、銀行實際付款日及當日政府淨分配判斷 payout 類型。符合既有季度第一月結案、退款到期與全額規則，且付款當日尚無政府資金者，同一次核銷建立 `subsidy_advance` ledger 與原補助退還義務 allocation，立即納入銷帳清冊；不再新增另一筆客戶 payout。政府已足額分配者維持 `subsidy_return`，部分款、對應缺失或非唯一者 typed review；政府於客戶出款後才入帳，不因較晚核銷而抹除先前代墊事實。前端 strict preview 必須接受兩種正式 payout 類型。代墊退匯／沖正重開原 payable，不重開客戶 receivable。舊已提交 ledger 不由本次修正改寫或 backfill。
 
 一般退款與客戶補助退還不得共用 ledger transaction type 或 reversal type：
 

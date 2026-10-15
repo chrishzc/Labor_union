@@ -1,12 +1,13 @@
 """Preview/apply workflow for client refunds, subsidy returns, and reversals."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Callable, Protocol
 from domains.client_finance.client_refund_reversal import (ClientFinanceCorrectionType,ClientRefundBankFact,ClientRefundObligation,ClientRefundPurpose,ClientRefundReturnBankFact,ClientRefundReversalCandidate,ClientReversalTarget,build_client_refund_candidate,build_client_refund_overage_candidate,build_client_refund_return_candidate,build_client_reversal_candidate)
 from shared_kernel.errors import ErrorCategory,TypedError
 from shared_kernel.fingerprints import PreviewFingerprint,fingerprint_payload
 from shared_kernel.identities import ActorContext,CorrelationId,ExpectedVersion,IdempotencyKey
 from shared_kernel.validation import require_canonical_text,require_nonnegative_integer
+from domains.client_finance.subsidy_advance import SubsidyPayoutFundingFacts, subsidy_payout_is_advance
 CLIENT_FINANCE_CANDIDATE_STALE="client_finance_candidate_stale"; CLIENT_FINANCE_IDEMPOTENCY_CONFLICT="client_finance_idempotency_conflict"
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalSelection:
@@ -14,7 +15,7 @@ class ClientRefundReversalSelection:
  def __post_init__(self): require_canonical_text(self.case_no,"case number",191); _selection_shape(self)
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalFacts:
- account_version:int; bank_facts:tuple[ClientRefundBankFact,...]=(); obligations:tuple[ClientRefundObligation,...]=(); reversal_targets:tuple[ClientReversalTarget,...]=(); refund_return_bank_facts:tuple[ClientRefundReturnBankFact,...]=()
+ account_version:int; bank_facts:tuple[ClientRefundBankFact,...]=(); obligations:tuple[ClientRefundObligation,...]=(); reversal_targets:tuple[ClientReversalTarget,...]=(); refund_return_bank_facts:tuple[ClientRefundReturnBankFact,...]=(); subsidy_payout:SubsidyPayoutFundingFacts|None=None
  def __post_init__(self): require_nonnegative_integer(self.account_version,"client account version")
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalPreview: candidate:ClientRefundReversalCandidate; account_version:int; fingerprint:PreviewFingerprint
@@ -59,15 +60,26 @@ class ClientRefundReversalWorkflow:
     if preview.candidate.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:self._repository.establish_over_refund_recovery(preview.candidate,receipt.account_version)
     self._repository.append_outbox(preview.candidate,receipt.account_version);self._repository.save_receipt(request.idempotency_key,StoredClientRefundReversalReceipt(command,receipt));unit.commit();return receipt
   except ClientRefundReversalError:raise
+  except ValueError as e:raise _error(request.correlation_id,ErrorCategory.DOMAIN_BLOCKED,str(e)) from e
   except ClientRefundReversalStorageError as e:raise _error(request.correlation_id,ErrorCategory.UNAVAILABLE if e.retryable else ErrorCategory.INTERNAL,"transaction_failed",retryable=e.retryable) from e
   except Exception as e:raise _error(request.correlation_id,ErrorCategory.INTERNAL,"transaction_failed") from e
 def _preview(s,f):
  _facts(s,f)
- if s.correction_type is ClientFinanceCorrectionType.REFUND:c=build_client_refund_candidate(s.case_no,f.bank_facts,f.obligations,s.refund_purpose,allow_partial_refund_recovery=s.allow_partial_refund_recovery)
+ if s.correction_type is ClientFinanceCorrectionType.REFUND:
+  purpose=s.refund_purpose
+  if purpose in {ClientRefundPurpose.SUBSIDY_RETURN,ClientRefundPurpose.SUBSIDY_ADVANCE}:
+   if f.subsidy_payout is None:raise ValueError('subsidy_advance_settlement_ambiguous')
+   purpose=ClientRefundPurpose.SUBSIDY_ADVANCE if subsidy_payout_is_advance(f.subsidy_payout,sum(b.amount.amount for b in f.bank_facts)) else ClientRefundPurpose.SUBSIDY_RETURN
+  c=build_client_refund_candidate(s.case_no,f.bank_facts,f.obligations,purpose,allow_partial_refund_recovery=s.allow_partial_refund_recovery)
  elif s.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:c=build_client_refund_overage_candidate(s.case_no,f.bank_facts,f.obligations)
  elif s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN:c=build_client_refund_return_candidate(s.case_no,f.refund_return_bank_facts[0],f.reversal_targets[0])
  else:c=build_client_reversal_candidate(s.case_no,f.reversal_targets)
- return ClientRefundReversalPreview(c,f.account_version,fingerprint_payload({"selection":_payload(s),"version":f.account_version,"candidate":c.fingerprint.value}))
+ funding=asdict(f.subsidy_payout) if f.subsidy_payout is not None else None
+ if funding is not None:
+  for key in ('completed_on','due_on','paid_on'):funding[key]=funding[key].isoformat() if funding[key] else None
+ payload={"selection":_payload(s),"version":f.account_version,"candidate":c.fingerprint.value}
+ if funding is not None:payload['subsidy_payout']=funding
+ return ClientRefundReversalPreview(c,f.account_version,fingerprint_payload(payload))
 def _selection_shape(s):
  refund=s.correction_type in {ClientFinanceCorrectionType.REFUND,ClientFinanceCorrectionType.REFUND_OVERAGE}
  refund_return=s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN

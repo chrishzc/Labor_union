@@ -44,6 +44,7 @@ from api.routes import (
     client_deposit_skip,
     client_receipt_reconciliation,
     client_refund_reversal,
+    subsidy_advance_settlement,
     contract_signing,
     contract_external_signing,
     client_payments,
@@ -343,6 +344,7 @@ app.include_router(client_deposit_reversal.router)
 app.include_router(client_deposit_skip.router)
 app.include_router(client_receipt_reconciliation.router)
 app.include_router(client_refund_reversal.router)
+app.include_router(subsidy_advance_settlement.router)
 app.include_router(financial_adjustment.router)
 app.include_router(staff_payout.router)
 app.include_router(payroll.router)

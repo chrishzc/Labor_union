@@ -61,6 +61,7 @@ def test_staff_amounts_preserve_each_owner_balance_and_skip_paid_or_settled():
     assert len(rows) == 2
     assert sum(r.unpaid_amount_ntd for r in rows) == 33000
     assert rows[0].source_amount_ntd == 24000
+    assert all(r.staff_id == 1 for r in rows)  # exact staff drilldown, never recipient-name matching
     assert all(r.certainty == "confirmed" for r in rows)
     assert all(r.payment_date == date(2026, 11, 15) and not r.date_is_estimate for r in rows)
 

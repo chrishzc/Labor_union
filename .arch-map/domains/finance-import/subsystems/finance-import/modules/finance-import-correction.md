@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `infrastructure/mysql/finance_import_repository.py`
+  - `infrastructure/mysql/finance_import_owning_domain_composite.py` — 補助退款只委派 Client Finance owner；代墊判斷與人工核銷共用 owner funding facts，不在 importer 重算。
   - `ui_react/src/api/finance_import/finance_import_correction_client.ts`
   - `ui_react/src/components/FinanceImportCorrectionForm.tsx`
   - `ui_react/src/pages/FinancePage.tsx` — 銀行流水人工核对列的 exact-row 更正入口。

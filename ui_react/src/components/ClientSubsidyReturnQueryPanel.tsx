@@ -4,7 +4,7 @@ import { clientSubsidyReturnQueryClient, type ClientSubsidyReturnQuery } from '.
 import { ApiHttpError } from '../api/shared/typed_errors';
 
 type QueryState = { kind: 'loading' } | { kind: 'ready'; data: ClientSubsidyReturnQuery } | { kind: 'error'; message: string };
-type Props = { targetMonth: string; onMonthChange: (month: string) => void; onOpenPayables: () => void; initialCaseNo?: string };
+type Props = { targetMonth: string; onMonthChange: (month: string) => void; onOpenPayables: () => void; onOpenAdvanceSettlement?: () => void; initialCaseNo?: string };
 const formatMoney = (amount: number) => `NT$ ${amount.toLocaleString('zh-TW')}`;
 function errorMessage(error: unknown): string {
   if (error instanceof ApiHttpError) {
@@ -14,7 +14,7 @@ function errorMessage(error: unknown): string {
   return '補助退款資料暫時無法取得，請重新查詢。';
 }
 
-export function ClientSubsidyReturnQueryPanel({ targetMonth, onMonthChange, onOpenPayables, initialCaseNo = '' }: Props) {
+export function ClientSubsidyReturnQueryPanel({ targetMonth, onMonthChange, onOpenPayables, onOpenAdvanceSettlement, initialCaseNo = '' }: Props) {
   const [result, setResult] = useState<QueryState>({ kind: 'loading' });
   const [reload, setReload] = useState(0);
   const [draft, setDraft] = useState(initialCaseNo);
@@ -40,7 +40,10 @@ export function ClientSubsidyReturnQueryPanel({ targetMonth, onMonthChange, onOp
   return <section className="finance-workspace subsidy-refund-panel" aria-labelledby="subsidy-refund-heading">
     <div className="finance-section-heading">
       <div><h2 id="subsidy-refund-heading">客戶補助退款</h2><p>查看各案件應退補助金額與應退款日期，補助款一次全額退清。</p></div>
-      <button type="button" className="finance-btn-primary" onClick={onOpenPayables}>前往應付帳款</button>
+      <div className="subsidy-refund-actions">
+        {onOpenAdvanceSettlement && <button type="button" className="finance-reload-btn" onClick={onOpenAdvanceSettlement}>代墊補助款銷帳清冊</button>}
+        <button type="button" className="finance-btn-primary" onClick={onOpenPayables}>前往應付帳款</button>
+      </div>
     </div>
     <p className="subsidy-refund-note">列出有補助資格、需由客戶先付款的案件；取消案件、全補助且客戶不需付款的案件與已完成補助退款的案件不列入。</p>
     <form className="subsidy-refund-case-form" onSubmit={event => { event.preventDefault(); query(); }}>

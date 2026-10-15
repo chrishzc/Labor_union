@@ -1,10 +1,10 @@
+import { readFileSync } from 'node:fs';
 /**
  * File: finance_query_page.test.tsx
  * Description: 驗證FinancePage active-tab query budget、server資料與正常三步匯入邊界。
  */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchPreview, type FinanceImportBatchOutcome } from '../../../../../../../api/finance_import/finance_import_mutation_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
@@ -13,15 +13,20 @@ import { clientReceiptQueryClient } from '../../../../../../../api/client_financ
 import { staffPayablesQueryClient } from '../../../../../../../api/staff_payables/staff_payables_query_client';
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import { accountsPayableExportClient } from '../../../../../../../api/accounts_payable/accounts_payable_export_client';
+import { cashRequirementsQueryClient } from '../../../../../../../api/accounts_payable/cash_requirements_query_client';
+import { clientFinanceHistoryClient } from '../../../../../../../api/client_finance/client_finance_history_client';
 import { clientSubsidyReturnQueryClient } from '../../../../../../../api/client_finance/client_subsidy_return_query_client';
 import { financeImportBlockerMessage } from '../../../../../../../adapters/finance/finance_import_query_adapter';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 
 describe('FinancePage query and guarded import presentation', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { cleanup(); window.location.hash = ''; vi.unstubAllGlobals(); });
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.location.hash = '#finance?tab=client-receipts&case_no=CASE-FIN-001';
+    vi.spyOn(clientFinanceHistoryClient, 'query').mockResolvedValue({ case_no: 'CASE-FIN-001', account_version: '0', obligations: [], ledger_entries: [] });
+    vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([]);
     vi.spyOn(clientSubsidyReturnQueryClient, 'query').mockResolvedValue({ rows: [], next_cursor: null });
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
@@ -58,7 +63,7 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(financeImportBlockerMessage([])).toBe('預覽未通過，請重新檢查。');
   });
 
-  it('shows full mock payment details and downloads through the authenticated export endpoint', async () => {
+  it('keeps sensitive payment fields out of the list and downloads through the authenticated export endpoint', async () => {
     const data = ACCOUNTS_PAYABLE_RESPONSE.data;
     vi.mocked(accountsPayableQueryClient.query).mockResolvedValue({ ...data, rows: data.rows.map(row => ({
       ...row, bank_account: '000012345678', recipient_identity_card: 'MOCK-ID-001',
@@ -73,9 +78,9 @@ describe('FinancePage query and guarded import presentation', () => {
     vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: createUrl, revokeObjectURL: vi.fn() }));
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '應付帳款' }));
-    expect(await screen.findByText(/000012345678/)).toBeInTheDocument();
-    expect(screen.getByText('MOCK-ID-001')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    await screen.findByRole('region', { name: '付款清單' });
+    expect(screen.queryByText(/000012345678|MOCK-ID-001/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '下載應付帳款 Excel' }));
     expect(await screen.findByText('已送出下載：mock-payables.xlsx')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/accounts-payable/export?target_month='),
@@ -99,7 +104,7 @@ describe('FinancePage query and guarded import presentation', () => {
 
   it('loads only the active tab and requires a selected workbook before import controls appear', async () => {
     render(<FinancePage />);
-    await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-C-1"]')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
     expect(clientReceiptQueryClient.query).toHaveBeenCalledTimes(1);
     const casePayable = await screen.findByRole('region', { name: '本案月嫂應付查核' });
@@ -112,51 +117,42 @@ describe('FinancePage query and guarded import presentation', () => {
     expect(staffDirectoryClient.queryPage).not.toHaveBeenCalled();
     expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '月嫂應付款' }));
-    await waitFor(() => expect(screen.getByText('OBL-S-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    fireEvent.click(screen.getByRole('button', { name: '人員與歷史付款' }));
+    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument());
     expect(screen.getByRole('columnheader', { name: '應付日' })).toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
     expect(staffPayablesQueryClient.query).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/^Version$|｜Version/)).not.toBeInTheDocument();
     expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '應付帳款' }));
-    await waitFor(() => expect(screen.getByText(/\*{8}9012/)).toBeInTheDocument());
-    expect(accountsPayableQueryClient.query).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    await waitFor(() => expect(cashRequirementsQueryClient.queryAll).toHaveBeenCalledTimes(1));
+    expect(accountsPayableQueryClient.query).not.toHaveBeenCalled();
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/敏感資料已遮罩|去敏保護啟用/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
-    expect(screen.getByText('上傳檔案 → 預覽 → 匯入完成')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+    expect(screen.getByRole('heading', { name: '銀行對帳' })).toBeInTheDocument();
     expect(screen.queryByText('已載入批次')).not.toBeInTheDocument();
     expect(screen.queryByText('歷史 Reprocess Run（loaded scope）')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
   });
 
-  it('presents customer subsidy refunds and retains the payment month when opening accounts payable', async () => {
-    const orderWorkbenchSource = readFileSync('src/pages/OrderWorkbenchV2Page.tsx', 'utf8');
-    expect(orderWorkbenchSource).not.toContain('跨訂單帳務查詢');
-    expect(orderWorkbenchSource).not.toContain('OrderGovernmentSubsidyLane');
-    expect(orderWorkbenchSource).not.toContain('OrderTerminalAggregateLane');
-
+  it('merges old subsidy/payable deep links into the payment workspace', async () => {
+    window.location.hash = '#finance?tab=cross-order';
     render(<FinancePage />);
-    await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '客戶補助退款' }));
-
-    expect(screen.getByRole('heading', { name: '客戶補助退款' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /政府補助結算支線|完全結案彙總/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('依應退款月份篩選'));
-    fireEvent.change(screen.getByLabelText('應退款月份'), { target: { value: '2026-11' } });
-    await waitFor(() => expect(clientSubsidyReturnQueryClient.query).toHaveBeenLastCalledWith(expect.objectContaining({ targetMonth: '2026-11' })));
-    fireEvent.click(screen.getByRole('button', { name: '前往應付帳款' }));
-    expect(screen.getByLabelText('月份')).toHaveValue('2026-11');
+    expect(await screen.findByRole('region', { name: '付款清單' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '客戶補助退款' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('會計清冊月份'), { target: { value: '2026-11' } });
+    expect(screen.getByLabelText('會計清冊月份')).toHaveValue('2026-11');
   });
 
   it('searches all server pages so a new case can be selected for receipt review', async () => {
     render(<FinancePage />);
-    await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-C-1"]')).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('搜尋案件'), { target: { value: '116990824' } });
 
@@ -182,7 +178,8 @@ describe('FinancePage query and guarded import presentation', () => {
     render(<FinancePage />);
     expect(await screen.findByRole('option', { name: /CASE-FIN-002｜第二頁客戶/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '月嫂應付款' }));
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    fireEvent.click(screen.getByRole('button', { name: '人員與歷史付款' }));
     expect(await screen.findByRole('option', { name: '第二頁人員' })).toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });
@@ -312,21 +309,16 @@ async function uploadAndPreview(file = IMPORT_FILE): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
-  await screen.findByText('可自動入帳', { selector: '.finance-kpi-label' });
-  await waitFor(() => {
-    const item = screen.getByText('待人工確認', { selector: '.finance-kpi-label' }).parentElement;
-    expect(item?.querySelector('.finance-kpi-value')?.textContent).not.toBe('—');
-  });
+  await waitFor(() => expect(document.querySelector('.finance-scope-note')).toHaveTextContent(/需人工處理 \d+/));
 }
 
 function assertPreviewCounts(plan: Pick<FinanceImportBatchPreview, 'counts'>, reviewCount: number): void {
-  for (const [label, key] of [
-    ['可自動入帳', 'ready_dispatch'], ['已存在', 'existing'], ['待人工確認', 'manual_review'],
-    ['待業務配對', 'business_pending'], ['阻擋筆數', 'blocked'],
-  ] as const) {
-    const item = screen.getByText(label, { selector: '.finance-kpi-label' }).parentElement;
-    expect(item?.querySelector('.finance-kpi-value')?.textContent).toBe(String(key === 'manual_review' ? reviewCount : plan.counts[key]));
-  }
+  const summary = document.querySelector('.finance-scope-note');
+  expect(summary).toHaveTextContent(`可自動入帳 ${plan.counts.ready_dispatch}`);
+  expect(summary).toHaveTextContent(`已存在 ${plan.counts.existing}`);
+  expect(summary).toHaveTextContent(`需人工處理 ${reviewCount}`);
+  expect(summary).toHaveTextContent(`待業務配對 ${plan.counts.business_pending}`);
+  expect(summary).toHaveTextContent(`阻擋 ${plan.counts.blocked}`);
 }
 
 function confirmImport(): void {
@@ -354,7 +346,7 @@ describe('Finance import preview and replay boundary', () => {
     const { applyRequests } = installImportHttp([plan]);
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     expect(previewSpy).toHaveBeenCalledOnce();
     await expect(previewSpy.mock.results[0].value).resolves.toEqual(plan);
@@ -373,7 +365,7 @@ describe('Finance import preview and replay boundary', () => {
     plan.counts.blocked = 2;
     installImportHttp([plan]);
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     assertPreviewCounts(plan, plan.counts.manual_review);
     expect(screen.getByText(/目前不可匯入：存在可能重複的銀行交易/)).toBeInTheDocument();
@@ -383,7 +375,7 @@ describe('Finance import preview and replay boundary', () => {
   it('replays the exact first command after a lost response and binds the displayed reason', async () => {
     const { applyRequests } = installImportHttp([await importPreview()], { loseFirstApply: true });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '原始原因' } });
     confirmImport();
@@ -401,7 +393,7 @@ describe('Finance import preview and replay boundary', () => {
     const otherFile = new File(['other finance fixture'], 'other.xlsx');
     const { applyRequests } = installImportHttp([plan, await importPreview('c'.repeat(64), otherFile), plan], { loseFirstApply: true });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '第一份原因' } });
     confirmImport();
@@ -423,7 +415,7 @@ describe('Finance import preview and replay boundary', () => {
   it('does not show a completion receipt during queued or running observations', async () => {
     const { applyRequests, fetchSpy } = installImportHttp([await importPreview()], { statuses: ['queued', 'running', 'succeeded'] });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await act(async () => { confirmImport(); });
@@ -440,7 +432,7 @@ describe('Finance import preview and replay boundary', () => {
   it.each(['failed', 'cancelled'] as const)('%s never becomes a successful import receipt', async (status) => {
     installImportHttp([await importPreview()], { statuses: [status] });
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview();
     confirmImport();
     await screen.findByText('未完成正式入帳；請重新預覽並查看本頁人工核對清單。');
@@ -473,7 +465,7 @@ describe('Finance import preview and replay boundary', () => {
     }));
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行交易明細匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     await uploadAndPreview(file);
     expect(previewSpy).toHaveBeenCalledOnce();
     const decoded = await previewSpy.mock.results[0].value;

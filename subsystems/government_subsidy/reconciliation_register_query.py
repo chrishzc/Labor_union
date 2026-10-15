@@ -6,6 +6,7 @@ Description: 依既有補助公式建立成立訂單的季度、年度、營運�
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
@@ -385,6 +386,41 @@ def _subsidy_terms(
     if payroll_hourly_rate_ntd is None:
         raise ValueError("government_subsidy_payroll_rate_snapshot_missing")
     return subsidy_hours, Decimal(str(payroll_hourly_rate_ntd))
+
+
+@dataclass(frozen=True, slots=True)
+class SubsidyReceivableEstimate:
+    amount_ntd: int | None
+    unavailable_reason: str | None
+
+
+def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
+    """Reuse the register's service-volume, eligibility and frozen-rate rules.
+
+    This is a read-only estimate, never a claim, approval or receivable root.
+    Missing facts stay unknown instead of becoming a zero-value subsidy.
+    """
+    if source.get("identity_status") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
+        return SubsidyReceivableEstimate(None, "eligibility_pending")
+    days = source.get("service_days")
+    hours = source.get("service_hours_per_day")
+    if days is None or hours is None:
+        return SubsidyReceivableEstimate(None, "service_volume_pending")
+    days, hours = Decimal(str(days)), Decimal(str(hours))
+    if not days.is_finite() or not hours.is_finite() or days <= 0 or hours <= 0:
+        return SubsidyReceivableEstimate(None, "service_volume_pending")
+    total_hours, _ = _service_volume(source, hours, days)
+    rate = _effective_payroll_rate(source)
+    if rate is None:
+        return SubsidyReceivableEstimate(None, "rate_snapshot_missing")
+    rate = Decimal(str(rate))
+    if not rate.is_finite() or rate <= 0:
+        return SubsidyReceivableEstimate(None, "rate_snapshot_missing")
+    subsidy_hours, unit_price = _subsidy_terms(source["identity_status"], total_hours, rate)
+    amount = subsidy_hours * unit_price
+    if not amount.is_finite() or amount != amount.to_integral_value():
+        return SubsidyReceivableEstimate(None, "amount_not_integer")
+    return SubsidyReceivableEstimate(int(amount), None)
 
 
 def _subsidy_hour_limit(eligibility: object) -> Decimal:

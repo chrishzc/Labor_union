@@ -1,6 +1,7 @@
 """Focused tests for the Order Workbench Government Subsidy side-lane projection."""
 
 from datetime import date, datetime, timezone
+from dataclasses import replace
 
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
@@ -255,6 +256,59 @@ def test_every_normal_order_has_owner_projection_or_traceable_claim_gap() -> Non
     assert gap.claim_quarter == 3
     assert (gap.claim_application_year, gap.claim_application_month) == (2026, 10)
     assert gap.claim_submitted_at is None
+
+
+def test_receivable_estimate_is_separate_from_unknown_approval_and_current_outstanding():
+    facts = {
+        "CASE-GAP": replace(_facts("CASE-GAP"), estimated_subsidy_amount_ntd=12000),
+        "CASE-SUBMITTED": _facts("CASE-SUBMITTED", claims=(_claim("CASE-SUBMITTED"),)),
+        "CASE-APPROVED": _facts("CASE-APPROVED", claims=(_claim("CASE-APPROVED", status=GovernmentSubsidyBatchStatus.PARTIALLY_PAID, approved_amount_ntd=2000, net_allocated_ntd=500),)),
+    }
+    page = query_government_subsidy_projection_page(_Source(*(_timeline(case) for case in facts)), _Repository(facts), GovernmentSubsidyProjectionQuery(50))
+    rows = {item.case_no: item for item in page.items}
+    assert rows["CASE-GAP"].estimated_subsidy_amount_ntd == 12000
+    assert rows["CASE-GAP"].confirmed_approved_amount_ntd is None
+    assert rows["CASE-GAP"].outstanding_amount_ntd is None
+    assert rows["CASE-SUBMITTED"].estimated_subsidy_amount_ntd == 2400
+    assert rows["CASE-SUBMITTED"].confirmed_approved_amount_ntd is None
+    assert rows["CASE-SUBMITTED"].outstanding_amount_ntd is None
+    assert rows["CASE-APPROVED"].confirmed_approved_amount_ntd == 2000
+    assert rows["CASE-APPROVED"].outstanding_amount_ntd == 1500
+
+
+def test_service_end_requires_completed_owner_evidence_not_a_date_or_claim():
+    timeline = _timeline("CASE-PENDING")
+    stages = tuple(replace(stage, settlement=tuple(replace(part, status="unavailable", source=SourceLineage("Orders", None, None)) if part.code == "service_completion" else part for part in stage.settlement)) for stage in timeline.stages)
+    source = _Source(replace(timeline, stages=stages))
+    facts = _facts("CASE-PENDING")  # recorded end date alone is insufficient
+    first = query_government_subsidy_projection_page(source, _Repository({facts.case_no: facts}), GovernmentSubsidyProjectionQuery(50))
+    assert first.items[0].service_end_confirmed is False
+    second = query_government_subsidy_projection_page(_Source(timeline), _Repository({facts.case_no: facts}), GovernmentSubsidyProjectionQuery(50))
+    assert second.items[0].service_end_confirmed is True
+    assert second.etag != first.etag
+
+
+def test_projection_api_preserves_null_amounts_and_exact_estimate_contract():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.orders_stage_projection import router
+    from api.dependencies.orders_stage_projection import get_orders_stage_projection_application
+    from api.dependencies.order_government_subsidy_projection import get_order_government_subsidy_projection_repository
+    from api.dependencies.admin_auth import require_system_admin
+    from subsystems.access.authentication_session import AdminPrincipal
+    api = FastAPI()
+    api.include_router(router)
+    api.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(1, "test-admin", "驗證", "system_admin")
+    api.dependency_overrides[get_orders_stage_projection_application] = lambda: _Source(_timeline("CASE-GAP"))
+    facts = replace(_facts("CASE-GAP"), estimated_subsidy_amount_ntd=12000)
+    api.dependency_overrides[get_order_government_subsidy_projection_repository] = lambda: _Repository({facts.case_no: facts})
+    result = TestClient(api).get('/api/orders/government-subsidy-projections')
+    assert result.status_code == 200, result.text
+    row = result.json()['data']['items'][0]
+    assert row['estimated_subsidy_amount_ntd'] == 12000
+    assert row['confirmed_approved_amount_ntd'] is None
+    assert row['outstanding_amount_ntd'] is None
+    assert row['service_end_confirmed'] is True
 
 
 def test_substatus_filter_and_counts_are_server_side_and_counts_ignore_filter() -> None:

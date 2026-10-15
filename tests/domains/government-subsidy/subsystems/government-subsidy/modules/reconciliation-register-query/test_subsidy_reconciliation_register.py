@@ -8,6 +8,17 @@ from domains.government_subsidy.claim_schedule import project_claim_schedule
 from subsystems.government_subsidy import reconciliation_register_query as register
 
 
+def test_receivable_estimate_reuses_caps_and_frozen_rates_and_never_fills_unknowns_with_zero():
+    general = {"identity_status": "一般市民", "order_status": "服務中", "service_days": 20, "service_hours_per_day": 8, "payroll_hourly_rate_ntd": 300}
+    assert register.project_receivable_estimate(general).amount_ntd == 12000
+    assert register.project_receivable_estimate({**general, "identity_status": "補助市民", "payroll_hourly_rate_ntd": 350}).amount_ntd == 42000
+    assert register.project_receivable_estimate({**general, "service_days": 1}).amount_ntd == 2400
+    assert register.project_receivable_estimate({**general, "survey_details": {"特殊計費:胎數": "雙胞胎"}}).amount_ntd == 18000
+    for key, value, reason in [("payroll_hourly_rate_ntd", None, "rate_snapshot_missing"), ("service_days", None, "service_volume_pending"), ("service_hours_per_day", 0, "service_volume_pending"), ("identity_status", None, "eligibility_pending")]:
+        estimate = register.project_receivable_estimate({**general, key: value})
+        assert estimate.amount_ntd is None and estimate.unavailable_reason == reason
+
+
 def test_claim_schedule_uses_service_quarter_and_crosses_year_without_fabricating_a_day():
     assert project_claim_schedule(date(2026, 7, 1)) == (3, 2026, 10)
     assert project_claim_schedule(date(2026, 9, 30)) == (3, 2026, 10)

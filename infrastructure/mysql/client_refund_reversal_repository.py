@@ -25,6 +25,7 @@ from domains.client_finance.client_refund_reversal import (
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
+from domains.client_finance.subsidy_advance import SubsidyPayoutFundingFacts
 from subsystems.client_finance.client_refund_reversal_workflow import (
     ClientRefundReversalApplyRequest,
     ClientRefundReversalFacts,
@@ -119,7 +120,7 @@ class MySqlClientRefundReversalRepository:
                 _persist_underpayment_source(
                     cursor, request, candidate, resulting_version, self._refund_row_metadata
                 )
-            elif candidate.reversal_entry_type in {"refund", "subsidy_return"}:
+            elif candidate.reversal_entry_type in {"refund", "subsidy_return", "subsidy_advance"}:
                 _reopen_payable_obligations(cursor, candidate, totals, resulting_version)
             else:
                 _reopen_receivable_obligations(cursor, candidate, totals, resulting_version)
@@ -249,7 +250,11 @@ class MySqlClientRefundReversalRepository:
         obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
         recipient_account = _single_refund_recipient_account(obligation_rows)
         self._refund_row_metadata = _refund_metadata(bank_rows)
+        funding = {}
+        if selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:
+            funding['subsidy_payout'] = _load_subsidy_payout_funding(cursor, selection, bank_rows, lock)
         return {
+            **funding,
             "bank_facts": _refund_bank_facts(
                 bank_rows,
                 selection.case_no,
@@ -290,7 +295,8 @@ class MySqlClientRefundReversalRepository:
         reference_prefix = (
             "client-refund-return"
             if candidate.correction_type is ClientFinanceCorrectionType.REFUND_RETURN
-            else _reconciliation_prefix(request.selection.refund_purpose)
+            else ('client-subsidy-advance' if entry.entry_type == 'subsidy_advance'
+                  else _reconciliation_prefix(request.selection.refund_purpose))
         )
         cursor.execute(
             "UPDATE finance_import_rows SET reconciliation_status='reconciled',"
@@ -391,6 +397,49 @@ def _load_refund_return_bank_rows(cursor, identities, lock):
         row_ids,
     )
     return tuple(cursor.fetchall())
+
+
+def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock):
+    if len(selection.obligation_identities) != 1 or len(bank_rows) != 1:
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    suffix = ' FOR UPDATE' if lock else ''
+    cursor.execute(
+        'SELECT link.id link_id,link.entitled_amount_ntd,item.id claim_item_id,item.case_no claim_case_no,'
+        'item.batch_id,account.aggregate_version batch_version,obligation.due_date,orders.actual_end_date '
+        'FROM client_obligations obligation JOIN orders ON orders.case_no=obligation.case_no '
+        'JOIN client_subsidy_return_claim_item_links link ON link.obligation_identity=obligation.obligation_identity '
+        'JOIN subsidy_claim_batch_items item ON item.id=link.claim_item_id '
+        'JOIN government_subsidy_batch_accounts account ON account.batch_id=item.batch_id '
+        'WHERE obligation.obligation_identity=%s AND obligation.case_no=%s ORDER BY link.id' + suffix,
+        (selection.obligation_identities[0], selection.case_no),
+    )
+    rows = tuple(cursor.fetchall())
+    if len(rows) != 1 or rows[0]['claim_case_no'] != selection.case_no:
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    row = rows[0]
+    paid_on = bank_rows[0]['transaction_date']
+    if not isinstance(paid_on, date):
+        raise ValueError('subsidy_advance_settlement_ambiguous')
+    cursor.execute(
+        'SELECT allocation.id,allocation.allocation_type,allocation.allocated_amount '
+        'FROM government_subsidy_allocations allocation '
+        'JOIN government_subsidy_transactions transaction_root ON transaction_root.id=allocation.transaction_id '
+        'AND transaction_root.claim_batch_id=allocation.claim_batch_id '
+        "WHERE allocation.claim_item_id=%s AND allocation.claim_batch_id=%s AND transaction_root.transaction_status='succeeded' "
+        'AND DATE(transaction_root.occurred_at)<=%s ORDER BY allocation.id' + suffix,
+        (row['claim_item_id'], row['batch_id'], paid_on),
+    )
+    allocated = 0
+    for allocation in cursor.fetchall():
+        if allocation['allocation_type'] not in {'receipt', 'reversal'}:
+            raise ValueError('subsidy_advance_settlement_ambiguous')
+        amount = _integer_money(allocation['allocated_amount']).amount
+        allocated += amount if allocation['allocation_type'] == 'receipt' else -amount
+    return SubsidyPayoutFundingFacts(
+        row['actual_end_date'], row['due_date'], paid_on,
+        _integer_money(row['entitled_amount_ntd']).amount, allocated,
+        int(row['link_id']), int(row['claim_item_id']), int(row['batch_version']),
+    )
 
 
 def _load_refund_obligation_rows(cursor, selection, lock):

@@ -51,7 +51,7 @@ export const ClientReceiptPreviewSchema = z.strictObject({
 });
 
 const correctionEntry = z.strictObject({
-  identity, entry_type: z.enum(['refund', 'subsidy_return']), amount: money, occurred_on: date,
+  identity, entry_type: z.enum(['refund', 'subsidy_return', 'subsidy_advance']), amount: money, occurred_on: date,
   reversal_of_entry_identity: identity.nullable(), finance_import_row_identity: identity,
 });
 const correctionAllocation = z.strictObject({ entry_identity: identity, obligation_identity: identity, amount: money });

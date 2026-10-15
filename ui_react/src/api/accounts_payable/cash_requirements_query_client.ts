@@ -13,6 +13,7 @@ const RowSchema = z.strictObject({
   source_amount_ntd: z.number().int().nonnegative().nullable(), unpaid_amount_ntd: z.number().int().nonnegative().nullable(),
   payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), date_is_estimate: z.boolean(),
   pending_reasons: z.array(z.string().min(1)),
+  staff_id: z.number().int().positive().nullable().optional(),
 });
 const PageSchema = z.strictObject({ rows: z.array(RowSchema), next_cursor: z.string().min(1).max(50).nullable() });
 const ResponseSchema = z.strictObject({ success: z.boolean(), message: z.string(), data: PageSchema, error: z.string().nullable().optional() });

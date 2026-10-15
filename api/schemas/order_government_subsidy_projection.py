@@ -38,6 +38,11 @@ class OrderGovernmentSubsidyProjectionView(BaseModel):
     requested_amount_ntd: int = Field(ge=0)
     approved_amount_ntd: int = Field(ge=0)
     net_allocated_ntd: int = Field(ge=0)
+    service_end_confirmed: bool
+    estimated_subsidy_amount_ntd: int | None = Field(ge=0)
+    estimate_unavailable_reason: str | None
+    confirmed_approved_amount_ntd: int | None = Field(ge=0)
+    outstanding_amount_ntd: int | None = Field(ge=0)
     overpayment_identity: str | None
     overpayment_remaining_ntd: int | None = Field(default=None, ge=0)
 

@@ -123,6 +123,7 @@ def get_all_client_payments(
                         open_payable_amount_ntd=item.open_payable_amount_ntd,
                         obligation_count=item.obligation_count,
                         ledger_entry_count=item.ledger_entry_count,
+                        receipt_entry_count=item.receipt_entry_count,
                     )
                     for item in result.cases
                 ]

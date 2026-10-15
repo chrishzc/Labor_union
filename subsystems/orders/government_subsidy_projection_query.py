@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 import hashlib
 import json
@@ -108,6 +108,8 @@ class GovernmentSubsidyOrderProjectionFacts:
     actual_end_date: date | None
     claim_items: tuple[GovernmentSubsidyClaimItemProjectionFact, ...]
     overpayments: tuple[GovernmentSubsidyOverpaymentProjectionFact, ...]
+    estimated_subsidy_amount_ntd: int | None = None
+    estimate_unavailable_reason: str | None = None
 
 
 class GovernmentSubsidyOrderProjectionRepository(Protocol):
@@ -164,6 +166,11 @@ class OrderGovernmentSubsidyProjection:
     net_allocated_ntd: int
     overpayment_identity: str | None
     overpayment_remaining_ntd: int | None
+    service_end_confirmed: bool = False
+    estimated_subsidy_amount_ntd: int | None = None
+    estimate_unavailable_reason: str | None = None
+    confirmed_approved_amount_ntd: int | None = None
+    outstanding_amount_ntd: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +209,7 @@ def query_government_subsidy_projection_page(
         _validate_source_page(source_page, source_cursor)
 
         normal_case_nos: list[str] = []
+        service_confirmations: dict[str, bool] = {}
         for source_item in source_page.items:
             identity_key = source_item.case_no.casefold()
             if last_source_key is not None and identity_key <= last_source_key:
@@ -211,6 +219,12 @@ def query_government_subsidy_projection_page(
             last_source_key = identity_key
             if source_item.lifecycle_status not in _NON_NORMAL_LIFECYCLE_STATUSES:
                 normal_case_nos.append(source_item.case_no)
+                service_confirmations[identity_key] = any(
+                    settlement.code == "service_completion"
+                    and settlement.status == "completed"
+                    and settlement.source.identity is not None
+                    for stage in source_item.stages for settlement in stage.settlement
+                )
 
         facts_by_case = _facts_by_case(
             repository.query_order_projection_facts(tuple(normal_case_nos))
@@ -220,6 +234,9 @@ def query_government_subsidy_projection_page(
         )
         for case_no in normal_case_nos:
             projection = _project(facts_by_case[case_no.casefold()])
+            projection = replace(projection, service_end_confirmed=(
+                service_confirmations[case_no.casefold()] and projection.service_end_date is not None
+            ))
             if (
                 request.case_no_search is not None
                 and request.case_no_search.casefold() not in projection.case_no.casefold()
@@ -335,6 +352,8 @@ def _project(
             net_allocated_ntd=0,
             overpayment_identity=None,
             overpayment_remaining_ntd=None,
+            estimated_subsidy_amount_ntd=facts.estimated_subsidy_amount_ntd,
+            estimate_unavailable_reason=facts.estimate_unavailable_reason,
         )
 
     batches = _claim_batches(facts.claim_items)
@@ -551,6 +570,15 @@ def _projection_from_items(
     batch_id = items[0].batch_id
     unit_prices = {item.unit_price_ntd for item in items}
     schedule = project_claim_schedule(facts.actual_end_date)
+    approved = all(item.status in {
+        GovernmentSubsidyBatchStatus.APPROVED,
+        GovernmentSubsidyBatchStatus.PARTIALLY_PAID,
+        GovernmentSubsidyBatchStatus.PAID,
+    } for item in items)
+    approved_amount = sum(item.approved_amount_ntd for item in items) if approved else None
+    net_allocated = sum(item.net_allocated_ntd for item in items)
+    if approved_amount is not None and net_allocated > approved_amount:
+        raise GovernmentSubsidyProjectionContractError("allocated amount exceeds approved amount")
     return OrderGovernmentSubsidyProjection(
         case_no=facts.case_no,
         substatus_code=substatus_code,
@@ -576,6 +604,9 @@ def _projection_from_items(
         overpayment_remaining_ntd=(
             None if overpayment is None else overpayment.remaining_amount_ntd
         ),
+        estimated_subsidy_amount_ntd=sum(item.requested_amount_ntd for item in items),
+        confirmed_approved_amount_ntd=approved_amount,
+        outstanding_amount_ntd=None if approved_amount is None else approved_amount - net_allocated,
     )
 
 
@@ -606,6 +637,11 @@ def _response_etag(
                 "requested_amount_ntd": item.requested_amount_ntd,
                 "approved_amount_ntd": item.approved_amount_ntd,
                 "net_allocated_ntd": item.net_allocated_ntd,
+                "service_end_confirmed": item.service_end_confirmed,
+                "estimated_subsidy_amount_ntd": item.estimated_subsidy_amount_ntd,
+                "estimate_unavailable_reason": item.estimate_unavailable_reason,
+                "confirmed_approved_amount_ntd": item.confirmed_approved_amount_ntd,
+                "outstanding_amount_ntd": item.outstanding_amount_ntd,
                 "overpayment_identity": item.overpayment_identity,
                 "overpayment_remaining_ntd": item.overpayment_remaining_ntd,
             }

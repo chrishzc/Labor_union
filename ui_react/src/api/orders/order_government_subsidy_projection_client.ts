@@ -60,6 +60,11 @@ export const OrderGovernmentSubsidyProjectionSchema = z.strictObject({
   requested_amount_ntd: NonnegativeIntSchema,
   approved_amount_ntd: NonnegativeIntSchema,
   net_allocated_ntd: NonnegativeIntSchema,
+  service_end_confirmed: z.boolean(),
+  estimated_subsidy_amount_ntd: NonnegativeIntSchema.nullable(),
+  estimate_unavailable_reason: z.enum(['eligibility_pending', 'service_volume_pending', 'rate_snapshot_missing', 'amount_not_integer']).nullable(),
+  confirmed_approved_amount_ntd: NonnegativeIntSchema.nullable(),
+  outstanding_amount_ntd: NonnegativeIntSchema.nullable(),
   overpayment_identity: z.string().min(1).nullable(),
   overpayment_remaining_ntd: NonnegativeIntSchema.nullable(),
 });
@@ -164,4 +169,21 @@ export async function getOrderGovernmentSubsidyProjections(
 
 export const orderGovernmentSubsidyProjectionClient = {
   getProjections: getOrderGovernmentSubsidyProjections,
+  async queryAll(params: Omit<OrderGovernmentSubsidyProjectionQueryParams, 'after_case_no' | 'page_size'> = {}, options?: OrderGovernmentSubsidyProjectionQueryOptions): Promise<OrderGovernmentSubsidyProjection[]> {
+    const items: OrderGovernmentSubsidyProjection[] = [];
+    const identities = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      options?.signal?.throwIfAborted();
+      const page = await getOrderGovernmentSubsidyProjections({ ...params, page_size: 200, after_case_no: cursor }, options);
+      for (const row of page.items) {
+        if (identities.has(row.case_no) || (cursor && row.case_no <= cursor)) throw new Error('補助查詢案件重複或順序異常。');
+        identities.add(row.case_no); items.push(row);
+      }
+      if (page.next_cursor && ((cursor && page.next_cursor <= cursor) || page.items.length === 0 || page.items.some(row => row.case_no > page.next_cursor!))) throw new Error('補助查詢游標異常。');
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
+    options?.signal?.throwIfAborted();
+    return items;
+  },
 };

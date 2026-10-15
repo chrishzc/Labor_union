@@ -52,6 +52,7 @@ class CashRequirementRow:
     payment_date: date | None
     date_is_estimate: bool
     pending_reasons: tuple[str, ...]
+    staff_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +93,7 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}", case.case_no, item.recipient_name,
             "staff_payable", "confirmed" if item.source == "formal_obligation" else "estimated", source,
             None if item.amount_due is None else item.amount_due.amount,
-            None if item.balance is None else item.balance.amount, item.effective_due_date, False, tuple(reasons),
+            None if item.balance is None else item.balance.amount, item.effective_due_date, False, tuple(reasons), item.staff_id,
         ))
     for refund in case.refunds:
         if refund.amount_ntd <= 0:

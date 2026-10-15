@@ -50,6 +50,7 @@ class ClientFinanceCaseSummary:
     open_payable_amount_ntd: int
     obligation_count: int
     ledger_entry_count: int
+    receipt_entry_count: int
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,13 +10,17 @@
 ## Implementation
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
-- composition: `ui_react/src/pages/FinancePage.tsx`
+- composition: `ui_react/src/pages/FinancePage.tsx` — 唯一三個主工作區：收款、付款、銀行對帳；舊深連結解析至對應工作區／同案明細，帳務設定獨立。
 - workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
-- customer subsidy payable presentation: `ui_react/src/components/ClientSubsidyReturnQueryPanel.tsx` — FinancePage 的客戶補助退款案件清單，支援姓名／案件搜尋與選用應退款月份，一次呈現全部符合條件案件與合計，不提供分頁操作；明示後端的預估金額、未知日期，不計算退款資格或金額。
-- customer subsidy payable client: `ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — strict 解碼 `/api/v1/finance-reports/client-subsidy-returns` typed projection，`queryAll` 自動循游標取完所有符合結果，核對案件唯一性與游標；只做 GET，條件改變或 unmount 取消整次查詢，失敗不交付部分結果。
-- cash planning presentation: `ui_react/src/components/CashRequirementsPanel.tsx` — FinancePage「應付帳款」內的「預估資金需求」頁籤；依後端金額做月份小計，保留未知金額／日期、來源及待確認原因；另一頁籤「已確定款項清冊」保留既有下載。
-- cash planning client: `ui_react/src/api/accounts_payable/cash_requirements_query_client.ts` — strict bounded GET 分批完整載入；拒絕重複項目及未前進游標，失敗不交付部分合計，離開頁籤取消請求。
+- shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 收款／付款清單，沿用既有 owner 摘要、government projection、cash planning；正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
+- government receipt grouping: `ui_react/src/components/FinanceReceiptsWorkspace.tsx` — 主要狀態為待確認／已確認服務結束，直接使用後端 service_end_confirmed；預估與 nullable 已核准待收分開小計，未知金額不顯示0；原申請／入款紀錄留在共用明細。
+- shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — 由同一案件入口集中補助與退款／代墊／回收；只讀 typed owner facts，回收委派既有 SubsidyAdvanceSettlementPanel。
+- immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。
+- history adapter: `infrastructure/mysql/client_payments_query_repository.py`、`api/schemas/client_payments.py` — 既有 read model 接受已存在的 subsidy_return／subsidy_advance 類型，不改 writer 或歷史資料。
+- receipt filter contract: `subsystems/client_finance/client_payments_query.py` → `api/routes/client_payments.py` → strict history client；摘要 `receipt_entry_count` 只計 canonical receipt，收款頁「已收款」以其是否大於零篩選，其他 ledger 類型不作收款證據。跨層驗證：`tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_summary_query.py`。
+- government read client: `ui_react/src/api/orders/order_government_subsidy_projection_client.ts` — 既有 bounded projection GET；完整循游標載入並核對唯一性／游標，失敗不交付部分結果。
+- retained source clients: `ui_react/src/api/accounts_payable/cash_requirements_query_client.ts`、`ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — 預估與正式未退款仍由原 owner 投影。`ClientSubsidyReturnQueryPanel.tsx`、`CashRequirementsPanel.tsx` 不再是 Finance 主入口；不刪除其仍有效的來源測試。
 
 ## Contracts
 - `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。
@@ -32,6 +36,7 @@
 - test_root: `ui_react/src/tests/finance_query_clients.test.ts`
 - test_root: `ui_react/src/tests/finance_request_lifecycle.test.tsx`
 - integration_root: `ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/`
+- cross-workspace verification: parent subsystem integration_root `ui_react/src/tests/domains/client-finance/subsystems/client-finance/integration/finance_workspaces.test.tsx`
 
 - integration_root: `ui_react/src/tests/fixtures/finance/finance_query_contract_fixtures.ts` — 同一 FinancePage composition 的 query client／adapter／transport／page／cutover tests 共用 typed fixture；僅此既有檔案，不宣告整個 fixtures 目錄。
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date
 import hashlib
 import json
 
@@ -14,10 +13,6 @@ from domains.client_finance.reconciliation import (
 from domains.client_finance.client_refund_reversal import (
     ClientFinanceCorrectionType,
     ClientRefundPurpose,
-)
-from domains.client_finance.subsidy_advance import (
-    is_first_month_of_quarter,
-    subsidy_advance_due_date,
 )
 from domains.finance_import.correction import FinanceImportCorrectionCandidate
 from domains.finance_import.planning import (
@@ -226,11 +221,6 @@ class MySqlFinanceImportOwningDomainComposite:
         selection = _client_subsidy_return_selection(
             self._connection,
             candidate,
-        )
-        selection = _subsidy_payout_selection(
-            self._connection,
-            candidate,
-            selection,
         )
         repository = MySqlClientRefundReversalRepository(self._connection)
         workflow = ClientRefundReversalWorkflow(
@@ -614,53 +604,6 @@ def _client_subsidy_return_selection(connection, candidate):
     )
 
 
-def _subsidy_payout_selection(connection, candidate, selection):
-    if len(selection.obligation_identities) != 1:
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-    row = _subsidy_payout_facts(
-        connection,
-        selection.obligation_identities[0],
-        _row_id(candidate.row_identity),
-    )
-    if row is None:
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-    if _has_government_receipt(row):
-        return selection
-    _require_eligible_subsidy_advance(row, _candidate_amount(candidate))
-    return replace(selection, refund_purpose=ClientRefundPurpose.SUBSIDY_ADVANCE)
-
-
-def _subsidy_payout_facts(connection, obligation_identity, row_identity):
-    with connection.cursor() as cursor:
-        cursor.execute(_SUBSIDY_PAYOUT_FACTS_SQL, (row_identity, obligation_identity))
-        return cursor.fetchone()
-
-
-def _has_government_receipt(row):
-    allocated = int(row["allocated_amount_ntd"] or 0)
-    entitled = int(row["entitled_amount_ntd"] or 0)
-    if allocated == entitled and entitled > 0:
-        return True
-    if allocated:
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-    return False
-
-
-def _require_eligible_subsidy_advance(row, payout_amount):
-    completed_on = row.get("actual_end_date")
-    occurred_on = row.get("transaction_date")
-    due_date = row.get("due_date")
-    entitled = int(row["entitled_amount_ntd"] or 0)
-    if not isinstance(completed_on, date) or not isinstance(occurred_on, date):
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-    if not isinstance(due_date, date) or due_date != subsidy_advance_due_date(completed_on):
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-    if not is_first_month_of_quarter(completed_on) or occurred_on < due_date:
-        raise ValueError("subsidy_advance_not_due")
-    if entitled <= 0 or payout_amount != entitled:
-        raise ValueError("subsidy_advance_settlement_ambiguous")
-
-
 def _client_refund_selection(connection, candidate):
     targets = _target_identities(candidate)
     placeholders = ",".join("%s" for _ in targets)
@@ -979,33 +922,6 @@ def _row_id(identity):
     if not value.isdigit() or int(value) <= 0:
         raise ValueError("invalid_finance_import_identity")
     return value
-
-
-_SUBSIDY_PAYOUT_FACTS_SQL = """
-SELECT obligation.due_date,
-       order_row.actual_end_date,
-       finance_row.transaction_date,
-       link.entitled_amount_ntd,
-       COALESCE(
-           SUM(
-               CASE WHEN allocation.allocation_type='receipt'
-               THEN allocation.allocated_amount ELSE 0 END
-           ),
-           0
-       ) AS allocated_amount_ntd
-FROM client_obligations obligation
-JOIN orders order_row ON order_row.case_no=obligation.case_no
-JOIN finance_import_rows finance_row ON finance_row.id=%s
-LEFT JOIN client_subsidy_return_claim_item_links link
-  ON link.obligation_identity=obligation.obligation_identity
-LEFT JOIN government_subsidy_allocations allocation
-  ON allocation.claim_item_id=link.claim_item_id
-WHERE obligation.obligation_identity=%s
-GROUP BY obligation.due_date,
-         order_row.actual_end_date,
-         finance_row.transaction_date,
-         link.entitled_amount_ntd
-"""
 
 
 __all__ = [

@@ -107,31 +107,22 @@ describe('cash planning panel', () => {
 });
 
 describe('existing payable composition', () => {
-  it('keeps confirmed query and download separate while allowing keyboard tab navigation', async () => {
+  it('keeps accounting export independent while replacing the old two tabs with filters', async () => {
     window.location.hash = '#finance?tab=accounts-payable';
     const confirmed = vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
     const forecast = vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([row()]);
     const download = vi.spyOn(accountsPayableExportClient, 'download');
     render(<FinancePage />);
-    const tabs = screen.getByRole('tablist', { name: '應付帳款檢視' });
-    const estimate = within(tabs).getByRole('tab', { name: '預估資金需求' });
-    const posted = within(tabs).getByRole('tab', { name: '已確定款項清冊' });
-    await waitFor(() => expect(confirmed).toHaveBeenCalledTimes(1));
-    expect(posted).toHaveAttribute('aria-selected', 'true');
-    expect(forecast).not.toHaveBeenCalled();
-    expect(await screen.findByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
-    fireEvent.keyDown(posted, { key: 'ArrowLeft' });
-    expect(estimate).toHaveFocus();
-    await screen.findByRole('region', { name: '2026-11 資金需求' });
-    expect(screen.queryByRole('button', { name: '下載應付帳款 Excel' })).not.toBeInTheDocument();
-    expect(confirmed).toHaveBeenCalledTimes(1); expect(download).not.toHaveBeenCalled();
+    await screen.findByLabelText('付款摘要');
+    expect(screen.queryByRole('tablist', { name: '應付帳款檢視' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'service_pending' } });
+    expect(screen.queryByText('月嫂甲')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
+    expect(forecast).toHaveBeenCalledTimes(1); expect(confirmed).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     await waitFor(() => expect(forecast).toHaveBeenCalledTimes(2));
-    expect(confirmed).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(estimate, { key: 'End' });
-    expect(posted).toHaveFocus();
-    await waitFor(() => expect(confirmed).toHaveBeenCalledTimes(2));
-    expect(forecast).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
+    expect(confirmed).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
   });
 });

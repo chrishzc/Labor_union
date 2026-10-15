@@ -5,6 +5,11 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  subsidy-advance-recovery-workbench:
+    layout_status: custom_current
+    test_root: tests/domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench/
+    presentation_test_root: ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench/
+    architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench.md
   client-subsidy-return-query:
     test_root: tests/domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query/
     architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/client-subsidy-return-query.md
