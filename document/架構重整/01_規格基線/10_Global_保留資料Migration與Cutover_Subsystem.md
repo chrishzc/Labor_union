@@ -416,3 +416,62 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 
 本次 write set 限新 initializer／launchers、對應 Module tests、launcher README、本節及 migration 地圖；
 沒有新 schema release，current manifest／descriptor 不改。驗收來源為本節與人工空庫初始化要求。
+
+### 9.3 NAS 新庫結構精簡與退役清單（2026-10-15）
+
+最新人工 Authority：先釐清 18 張用途不明與 15 張舊異常機制表，再整理退役清單、精簡新庫 schema；
+既有資料庫先不刪表。本節取代 §9.2 的 NAS 初始化來源，保留空庫、development、identity、lock、
+互動、journal、TLS 與 partial fail-closed 契約；不改 Domain business rules。
+
+`db/schema_assembly/labor_union_fresh_table_retirements_v1.json` 是本次逐表 disposition 的 current register，
+每筆保留 owner、正式規格、source evidence、replacement／migration-only 理由及 existing-data 保留政策。
+包含先前 5 張明確退役候選，共核對 38 張：保留 `government_payers` singleton；其餘 37 張不進 NAS 新庫。
+15 張舊異常表只承載已退役的 recovery/projector/reclassification 層，不是 Orders 歷史訂單 root／ledger；
+其舊 release/schema tests 是歷史重現證據，不是新庫 requirement。政府入款／reversal／offset 與 payer 保留，
+2026-10-15 已退休的政府退款出款／追償／收款帳戶表不進新庫。HCM／請假／補件／指派／projection／LINE
+各自改由現行 owner 的 event／receipt／root 保存；只服務舊資料轉換的 review/event 表不進新庫。
+舊 LINE binding root、leave substitution batch、staff monthly settlement 因 retained FK／歷史 Query 相依保留。
+
+必要要求與驗收（SPEC_READY，convergence READY；無 blocking research）：
+
+| ID | current requirement／必要驗收 | 直接證據／oracle |
+|---|---|---|
+| FRESH-01 | NAS 使用 final DDL＋canonical system seed，不重播 ALTER／DROP／PREPARE 升級片段 | compact SQL static shape；真 MySQL 初始化 |
+| FRESH-02 | register omit 表與其 triggers 缺席，所有 retain 表／欄位／index／FK／check／trigger／view 不變 | synthetic source → compact target metadata equality；無 retained→omitted FK／trigger／view |
+| FRESH-03 | system seed 的有效值／identity／relationships 等價，不帶業務 fixture／PII／credential | 來源必須由 builder 新建 local lu_test_*、執行 canonical bootstrap；seed rows 比較 |
+| FRESH-04 | 舊庫 metadata／rows 不改，current gate 接受 omit 表 absent 或 historical present；現行物件 drift 仍失敗 | legacy sentinel before/after；retained column/index tamper negative |
+| FRESH-05 | 空庫／非空／重跑／partial／雙擊 Y/N 契約維持 | 重用 initializer 與 Windows focused regressions |
+
+方案（NO_RESEARCH，依已驗證的 source/model）：
+
+- 唯一生成來源仍為既有 hash-locked assembly／validation manifest；其 SQL／preserve-release bytes 不改。
+  `scripts/compact_fresh_schema.py` builder 自行建立獨立 local `lu_test_compact_source_*`，不接受既有 source DB。
+  完整 canonical bootstrap 通過後，以 SHOW CREATE 匯出 retained final DDL、必要系統資料與 retained triggers/views。
+  generation 不啟動 runtime／worker／provider；最後只清理 builder 自己新建的 disposable DB。
+- 生成 asset 為 `db/fresh_schema/labor_union_fresh_current.sql` 與 hash-bound manifest；NAS 直接載入此一 current
+  profile。manifest 綁 source assembly、validation manifest、retirement register 與 SQL bytes；來源改變就 fail closed，
+  必須重生，不 fallback 回舊 replay。語法只含 final CREATE、必要 INSERT 與 session FK-check 設定。
+- 建立 final tables 時 session 暫停 FK checks，資料來自同一已驗證的空庫 bootstrap；完成後恢復。
+  generated columns 不 INSERT；created-at default CURRENT_TIMESTAMP 沿用執行時預設，不將生成時間固化。
+  表／trigger／view 的 definer、來源 DB qualifiers 與 AUTO_INCREMENT counter 不固化部署身分；不改結構語意。
+- canonical descriptor comparator 只投影掉 register 明列的 retired table-owned objects；retained descriptors 完整驗證。
+  historical present 表不需 DROP，absent 表也不再成為版本落後或重建理由。沒有既有資料的 DDL／DML／backfill。
+  依後續人工明確授權，本機完整初始化及 operator reset 也共用此 compact profile；preserve-data artifacts 保留。
+
+後續 Authority（同日）：將原本本機初始化與 `reset_DB` 統一改用精簡 schema，既有資料庫升級維持原路徑、
+不刪表；focused 測試通過後僅提交此 slice 並 push origin/main。完整 disposable bootstrap 的預設路徑與
+reset runner 均載入同一 hash-checked compact SQL；不得再重播歷史 ALTER。明確 `base_only`／`max_schema_part`
+只供既有 preserve-data predecessor／歷史重現 fixture，仍保留原 assembly，不是自動 fallback。
+`init_db.py` 僅為 schema-fragment 工具 library，並無獨立可執行初始化入口；其低階歷史片段工具不改。
+reset 的 localhost/development、target identity、prior plan、exact RESET、加密 root backup、MFA／recovery
+preservation、terminal receipt 與失敗保留備份契約不變。只有明確 reset 才可 DROP 目標；完整初始化仍拒絕覆蓋已存在庫。
+驗收沿用 FRESH-01～05，新增本機完整 bootstrap／reset 的 371 表 inventory 與 current gate、reset 前後 root/MFA/
+recovery readback／登入、無確認／plan drift／非 localhost 的零 destructive effect；既有升級與歷史重現 focused oracle 不變。
+
+本段同時為 bounded execution package：owner Global migration；write set 限 register、compact builder/asset/loader、
+NAS/local bootstrap/reset plan composition、canonical descriptor retirement projection、此 owner 的 focused tests、既有操作說明與地圖。
+順序為逐表裁決 → static/hash check → synthetic source generation → compact target metadata/seed/readiness →
+legacy read-only preservation 與 drift negative → launcher regression。無並行 writer／Agent requirement。
+效果分類：新 disposable／NAS 空庫的 schema-only 與 canonical system-seed；business backfill／既有 DB destructive
+效果為零。失敗保留 journal，不修改既有 DB、不自動重跑 partial；權限、schema dependency 或 oracle 不符就停止。
+這是單一 current spec 覆蓋的 PACKAGE_REUSED；generation／engine receipt 放 ignored scratch，不建立重複規格或任務文件。

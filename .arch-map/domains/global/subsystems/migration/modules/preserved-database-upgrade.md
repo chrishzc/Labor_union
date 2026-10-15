@@ -20,6 +20,7 @@
   - `db/migration_releases/labor_union_2026_10_13_staff_union_number_v1.json`
   - `db/migration_releases/labor_union_2026_10_13_staff_union_number_v1.descriptors.json` — 必驗 column charset／collation 與 full-column unique index，partial／drift fail closed。
   - `scripts/migrate_preserved_database_additive_schema.py`
+  - `scripts/fresh_schema_policy.py` — descriptor comparator 僅排除正式退役的 table-owned objects；舊表 present/absent 均不要求 DDL，保留物件仍嚴格驗證。
   - `scripts/local_database_additive_update.py`
   - `scripts/update_local_database.py`
   - `scripts/collect_local_additive_engine_evidence.py` — library-only；沒有獨立命令入口。
@@ -28,6 +29,7 @@
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
 - config:
+  - `db/schema_assembly/labor_union_fresh_table_retirements_v1.json` — current 逐表決策；既有表／資料不刪除。
   - `db/schema_parts/230_client_hcm_email.sql` — fresh nullable HCM email；BeClass email 獨立保存。
   - `db/schema_parts/1049_client_hcm_email.sql` — schema-only preserve-data email upgrade，無 backfill。
   - `db/migration_releases/labor_union_2026_10_13_client_hcm_email_v1.json`

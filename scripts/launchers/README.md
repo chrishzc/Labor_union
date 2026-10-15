@@ -89,6 +89,13 @@ Windows 指定參數執行時不詢問 Y/N，也不等待按鍵，保留原本�
 設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
 目標不是 `union_db`、指向 localhost、資料庫不存在或已有 table／view／routine／event 都停止。
 初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
+NAS 新庫直接使用 `db/fresh_schema/labor_union_fresh_current.sql` 的最終結構，
+目前為 371 張表、1 個 view、377 個 trigger、758 條指令，不再重播 1,946 條歷史升級指令。
+[逐表退役清單](../../db/schema_assembly/labor_union_fresh_table_retirements_v1.json) 列出 38 張複核表的用途、
+規格依據與決策：保留政府付款方主檔，其餘 37 張不建立於新庫；既有資料庫的表與資料保留。
+NAS 空庫、本機完整初始化及 `reset_DB` 共用此精簡 profile；明確指定舊版 fixture 的初始化及保留資料升級仍走原 assembly／migration。
+SQL 與 manifest 由 `scripts/compact_fresh_schema.py` 從新建的本機測試庫產生，綁定原 assembly、
+validation manifest 與退役清單的雜湊；來源改變時會停止並要求重新產生，請勿手改 SQL。
 成功必須通過與 NAS 啟動器相同的 current gate，然後才執行 `start_nas_development`。
 MySQL DDL 可能已提交；失敗時查看 `scratch/nas_schema_initialization/<run>/journal.jsonl`，
 不要直接重跑或執行 reset。腳本不會自動清空 partial database。
@@ -157,6 +164,10 @@ workers 仍可能處理待辦工作及已配置的 LINE 通知，請使用隔離
 ```
 
 兩者都不應在 API、React、monitor 或 workers 正在使用目標資料庫時執行。`reset_DB.bat` 不得用於需要保留的資料。
+`reset_DB` 在 exact `RESET` 確認後以同一份 compact SQL 重建 371 張表，保留既有 root 帳號、MFA 與復原碼消耗狀態，
+清除業務資料、非 root 帳號及 sessions；無確認的預檢／dry-run 不改資料。
+本機 disposable 完整初始化預設也載入 compact SQL，且拒絕覆蓋已存在的庫。
+`base_only`／`max_schema_part` 是保留資料升級測試與舊版重現的明確 fixture 模式，仍沿用歷史片段。
 
 ## Runtime ownership
 

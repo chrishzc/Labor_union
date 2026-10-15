@@ -11,16 +11,14 @@ def _config(database="lu_test_current", host="127.0.0.1"):
 
 def _assembly(tmp_path: Path):
     base = tmp_path / "schema.sql"
-    part = tmp_path / "1012_current.sql"
     base.write_text(
-        "DROP DATABASE IF EXISTS union_db; CREATE DATABASE union_db; USE union_db;",
+        "CREATE TABLE current_table (id INT PRIMARY KEY);",
         encoding="utf-8",
     )
-    part.write_text("CREATE TABLE current_table (id INT PRIMARY KEY);", encoding="utf-8")
     return type("Assembly", (), {
         "assembly_id": "current-test",
         "base_schema_path": base,
-        "active_artifact_paths": (part,),
+        "active_artifact_paths": (),
     })()
 
 
@@ -45,7 +43,6 @@ def test_validate_target_rejects_remote_and_production():
 def test_preview_uses_canonical_assembly_without_connecting(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
     monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
-    monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
     result = resetter.reset(
         target_database="lu_test_current",
         config=_config(),
@@ -189,7 +186,6 @@ def test_connected_identity_query_uses_mapping_rows():
 def test_apply_requires_plan_backup_and_exact_confirmation_before_connect(monkeypatch, tmp_path):
     assembly = _assembly(tmp_path)
     monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
-    monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
     with pytest.raises(resetter.FakeDatabaseResetError, match="exact"):
         resetter.reset(
             apply=True,
@@ -225,11 +221,9 @@ def test_rebuild_executes_target_not_default_database(monkeypatch, tmp_path):
         def rollback(self): self.rolled_back = True
         def close(self): self.closed = True
 
-    monkeypatch.setattr(resetter, "load_schema_paths", lambda _cursor, paths: [p.name for p in paths])
-    monkeypatch.setattr(resetter, "expected_database_objects", lambda _manifest: {})
     monkeypatch.setattr(resetter, "verify_database_objects", lambda *_args: [])
     report = resetter.rebuild_schema(
-        assembly, {}, "lu_test_current", config=_config(), connection_factory=lambda **_: Connection()
+        assembly, {"expected": {}}, "lu_test_current", config=_config(), connection_factory=lambda **_: Connection()
     )
     assert "USE `lu_test_current`" in executed
     assert all("union_db" not in statement for statement in executed)
@@ -248,3 +242,31 @@ def test_terminal_receipt_verify_and_replay_are_read_only(monkeypatch, tmp_path)
             **{mode: True},
         )
         assert result["status"] == expected
+
+
+def test_changed_schema_invalidates_reset_plan_before_connecting(monkeypatch, tmp_path):
+    assembly = _assembly(tmp_path)
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    plan = tmp_path / "plan.json"
+    settings = dict(target_database="lu_test_current", config=_config(),
+                    environment={"APP_ENV": "development"}, plan_receipt=plan,
+                    connection_factory=lambda **_: pytest.fail("stale plan must not connect or DROP"))
+    resetter.reset(**settings)
+    assembly.base_schema_path.write_text("CREATE TABLE changed_table(id INT);", encoding="utf-8")
+    with pytest.raises(resetter.FakeDatabaseResetError, match="plan drift"):
+        resetter.reset(**settings, apply=True, confirm_apply="APPLY lu_test_current",
+                       receipt_path=tmp_path / "terminal.json")
+
+
+def test_real_reset_preview_uses_compact_baseline_without_connecting():
+    from scripts.compact_fresh_schema import SQL_PATH, load_compact_plan
+    expected = load_compact_plan()
+    assembly, manifest = resetter._canonical_bootstrap_contract()
+    assert assembly.base_schema_path == SQL_PATH and not assembly.active_artifact_paths
+    assert manifest["expected"] == expected["expected"]
+    result = resetter.reset(target_database="lu_test_current", config=_config(),
+                            environment={"APP_ENV": "development"},
+                            connection_factory=lambda **_: pytest.fail("preview must not connect"))
+    assert result["assembly_id"] == expected["assembly_id"]
+    assert result["base_schema_sha256"] == resetter._sha256_bytes(SQL_PATH)
+    assert result["schema_parts"] == []

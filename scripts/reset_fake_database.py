@@ -22,20 +22,15 @@ from uuid import uuid4
 import pymysql
 
 from infrastructure.mysql.mysql_adapter import DB_CONFIG
-from scripts.init_db import load_schema_paths
-from scripts.schema_assembly import SchemaAssembly, load_schema_assembly
+from scripts.compact_fresh_schema import SQL_PATH, load_compact_plan
+from scripts.schema_assembly import SchemaAssembly
 from scripts.sql_statements import split_sql
 from scripts.reset_root_authentication import (
     RootPreservationError, capture_root_authentication,
     restore_root_authentication, save_root_authentication,
 )
 from scripts.verify_validation_schema_manifest import (
-    DEFAULT_MANIFEST_PATH,
-    expected_database_objects,
-    load_manifest,
-    selected_schema_parts,
     verify_database_objects,
-    verify_manifest,
 )
 
 
@@ -88,33 +83,28 @@ def validate_target(
     return target
 
 
-def _canonical_bootstrap_contract(
-    manifest_path: Path = DEFAULT_MANIFEST_PATH,
-) -> tuple[SchemaAssembly, dict[str, object]]:
+def _canonical_bootstrap_contract() -> tuple[SchemaAssembly, dict[str, object]]:
     """Validate hash-locked schema inputs before any connection is opened."""
     try:
-        assembly = load_schema_assembly()
-        manifest = load_manifest(manifest_path)
-        errors = verify_manifest(manifest)
-        if errors:
-            raise ValueError("; ".join(errors))
-        if tuple(selected_schema_parts(manifest)) != assembly.active_artifact_paths:
-            raise ValueError("validation manifest differs from canonical schema assembly")
+        plan = load_compact_plan()
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise FakeDatabaseResetError(f"canonical schema preflight failed: {exc}") from exc
-    return assembly, manifest
+    return SchemaAssembly(plan["assembly_id"], SQL_PATH, (), {}), {
+        "release_id": plan["release_id"], "expected": plan["expected"],
+    }
 
 
 def _base_schema_for(path: Path, database: str) -> str:
     """Render the canonical base schema for one validated local target."""
-    source = path.read_text(encoding="utf-8")
-    if database == _OPERATOR_TARGET:
-        return source
-    if not _TARGET_PATTERN.fullmatch(database):
+    if database != _OPERATOR_TARGET and not _TARGET_PATTERN.fullmatch(database):
         raise FakeDatabaseResetError(
             "base schema requires union_db or a disposable lu_test_* target"
         )
-    return source.replace("union_db", database)
+    return (
+        f"DROP DATABASE IF EXISTS `{database}`;\n"
+        f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"
+        f"USE `{database}`;\n" + path.read_text(encoding="utf-8")
+    )
 
 
 def _partition_base_statements(
@@ -310,11 +300,10 @@ def rebuild_schema(
             for statement in base_statements:
                 cursor.execute(statement)
             cursor.execute(f"USE `{target_database}`")
-            loaded_parts = load_schema_paths(cursor, assembly.active_artifact_paths)
             for statement in base_views:
                 cursor.execute(statement)
             errors = verify_database_objects(
-                cursor, target_database, expected_database_objects(manifest)
+                cursor, target_database, manifest["expected"]
             )
             if errors:
                 raise FakeDatabaseResetError(
@@ -339,7 +328,7 @@ def rebuild_schema(
         "assembly_id": assembly.assembly_id,
         "target_database": target_database,
         "base_statement_count": len(base_statements),
-        "schema_parts": loaded_parts,
+        "schema_parts": [assembly.base_schema_path.name],
         "base_view_count": len(base_views),
         "schema_postcheck": "pass",
         "business_fixture_rows_loaded": 0,

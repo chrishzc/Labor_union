@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.reset_fake_database import split_sql
 from scripts.init_db import load_schema_paths
+from scripts.compact_fresh_schema import SQL_PATH, load_compact_plan
 from scripts.verify_validation_schema_manifest import (
     DEFAULT_MANIFEST_PATH,
     expected_database_objects,
@@ -76,6 +77,12 @@ def _dry_run_payload(arguments, manifest: dict[str, object]) -> dict[str, object
     ]
     if getattr(arguments, "base_only", False):
         selected_parts = []
+    compact = None
+    if maximum_part is None and not getattr(arguments, "base_only", False):
+        compact = load_compact_plan()
+        statements = compact["steps"]
+        selected_parts = [str(SQL_PATH)]
+        views = compact["expected"]["views"]
     payload = {
         "mode": "dry-run",
         "database": database,
@@ -84,6 +91,9 @@ def _dry_run_payload(arguments, manifest: dict[str, object]) -> dict[str, object
         "schema_parts": selected_parts,
         "view_count": len(views),
     }
+    if compact is not None:
+        payload["assembly_id"] = compact["assembly_id"]
+        payload["schema_sha256"] = hashlib.sha256(SQL_PATH.read_bytes()).hexdigest()
     payload["plan_fingerprint"] = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -145,16 +155,26 @@ def bootstrap(arguments) -> dict[str, object]:
         arguments.confirm_database,
     )
     manifest = _verified_manifest(Path(getattr(arguments, "manifest", DEFAULT_MANIFEST_PATH)))
+    compact = (load_compact_plan() if not getattr(arguments, "base_only", False)
+               and getattr(arguments, "max_schema_part", None) is None else None)
     connection = _connect(arguments)
     try:
         with connection.cursor() as cursor:
             _require_absent_database(cursor, database)
-            statements, views = _partition_base_statements(database)
+            if compact is not None:
+                cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                cursor.execute(f"USE `{database}`")
+                statements = [step["sql"] for step in compact["steps"]]
+                views = []
+            else:
+                statements, views = _partition_base_statements(database)
             for statement in statements:
                 cursor.execute(statement)
             cursor.execute(f"USE `{database}`")
             maximum_part = getattr(arguments, "max_schema_part", None)
-            if getattr(arguments, "base_only", False):
+            if compact is not None:
+                parts = [SQL_PATH.name]
+            elif getattr(arguments, "base_only", False):
                 parts = []
             elif maximum_part is not None:
                 parts = _load_schema_parts_through(cursor, maximum_part, manifest)
@@ -162,7 +182,7 @@ def bootstrap(arguments) -> dict[str, object]:
                 parts = load_schema_paths(cursor, selected_schema_parts(manifest))
             for view in views:
                 cursor.execute(view)
-            _verify_complete_schema(cursor, database, arguments, manifest)
+            _verify_complete_schema(cursor, database, arguments, manifest, compact=compact)
         connection.commit()
     except Exception:
         connection.rollback()
@@ -174,15 +194,16 @@ def bootstrap(arguments) -> dict[str, object]:
         "release_id": manifest["release_id"],
         "base_statement_count": len(statements),
         "schema_parts": parts,
-        "view_count": len(views),
+        "view_count": len(compact["expected"]["views"]) if compact is not None else len(views),
     }
 
 
-def _verify_complete_schema(cursor, database: str, arguments, manifest: dict[str, object]) -> None:
+def _verify_complete_schema(cursor, database: str, arguments, manifest: dict[str, object], *, compact=None) -> None:
     if getattr(arguments, "base_only", False):
         return
     if getattr(arguments, "max_schema_part", None) is not None:
         return
-    errors = verify_database_objects(cursor, database, expected_database_objects(manifest))
+    expected = compact["expected"] if compact is not None else expected_database_objects(manifest)
+    errors = verify_database_objects(cursor, database, expected)
     if errors:
         raise RuntimeError("validation schema postcheck failed: " + "; ".join(errors))

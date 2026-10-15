@@ -2450,6 +2450,17 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    # Current fresh databases omit retired structures; deployed historical
+    # structures may remain. Neither case schedules DDL or weakens contracts
+    # for any retained owner object.
+    from scripts.fresh_schema_policy import retired_fresh_tables
+    retired = retired_fresh_tables()
+    described = set(descriptor.get("tables", {})) | set(descriptor.get("parent_columns", {}))
+    if described & retired:
+        descriptor = deepcopy(descriptor)
+        _limit_descriptor_to_owned_tables(descriptor, frozenset(described - retired))
+        if not descriptor["tables"] and not descriptor["parent_columns"] and not descriptor.get("views"):
+            return "exact"
     if artifact == "1038_twins_payroll_order_details_view.sql":
         state = _twins_payroll_order_details_view_state(
             snapshot.get("views", ()),

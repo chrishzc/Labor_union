@@ -62,6 +62,29 @@ def test_disposable_schema_bootstrap_requires_exact_lu_test_confirmation():
     assert _require_disposable_database("lu_test_finance", "lu_test_finance") == "lu_test_finance"
 
 
+def test_default_bootstrap_plan_uses_compact_schema():
+    from scripts.compact_fresh_schema import SQL_PATH, load_compact_plan
+    plan = load_compact_plan()
+    arguments = Namespace(database="lu_test_compact_plan", confirm_database="lu_test_compact_plan")
+    payload = bootstrapper._dry_run_payload(arguments, bootstrapper._verified_manifest(bootstrapper.DEFAULT_MANIFEST_PATH))
+    assert payload["assembly_id"] == plan["assembly_id"]
+    assert payload["schema_parts"] == [str(SQL_PATH)]
+    assert payload["base_statement_count"] == len(plan["steps"])
+
+
+@pytest.mark.parametrize("mode", [{"base_only": True}, {"max_schema_part": 168}])
+def test_explicit_historical_bootstrap_plan_keeps_original_assembly(monkeypatch, mode):
+    monkeypatch.setattr(bootstrapper, "load_compact_plan", lambda: pytest.fail("historical fixture must keep its original path"))
+    arguments = Namespace(database="lu_test_predecessor", confirm_database="lu_test_predecessor", **mode)
+    payload = bootstrapper._dry_run_payload(arguments, bootstrapper._verified_manifest(bootstrapper.DEFAULT_MANIFEST_PATH))
+    assert "assembly_id" not in payload
+    assert all("fresh_current" not in path for path in payload["schema_parts"])
+    if mode.get("base_only"):
+        assert payload["schema_parts"] == []
+    else:
+        assert payload["schema_parts"] and all(int(re.match(r"\d+", Path(path).name).group()) <= 168 for path in payload["schema_parts"])
+
+
 def test_disposable_schema_bootstrap_rejects_union_db_and_keeps_it_out_of_base_ddl():
     try:
         _require_disposable_database("union_db", "union_db")

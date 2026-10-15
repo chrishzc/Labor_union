@@ -1,6 +1,7 @@
 """Real MySQL reset: root, random MFA and consumed recovery facts survive."""
 import os
 import secrets
+from argparse import Namespace
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -9,6 +10,9 @@ import pytest
 from cryptography.fernet import Fernet
 
 from scripts import reset_fake_database as resetter
+from scripts import bootstrap_disposable_mysql_schema as bootstrapper
+from scripts.compact_fresh_schema import load_compact_plan
+from scripts.fresh_schema_policy import retired_fresh_tables
 from scripts import reset_root_authentication as preservation
 from subsystems.access import authentication_session as auth
 from subsystems.access.totp import _totp_code, totp_step
@@ -29,7 +33,10 @@ def test_root_and_authenticator_survive_real_schema_reset(monkeypatch, tmp_path)
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "random")
     username, password = "reset-root-" + secrets.token_hex(4), secrets.token_urlsafe(24)
     assembly, manifest = resetter._canonical_bootstrap_contract()
-    resetter.rebuild_schema(assembly, manifest, config["database"], config=config)
+    # First creation exercises the real default local initializer, then reset
+    # exercises the operator's same executor with disposable authentication.
+    bootstrapper.bootstrap(Namespace(**config, confirm_database=config["database"]))
+    _assert_compact_current(config)
     root_id = auth.bootstrap_root_admin(connection_factory=connect, username=username, password=password, display_name="Synthetic reset root")
     auth.create_admin_user(connection_factory=connect, username="synthetic-non-root", password=secrets.token_urlsafe(24), display_name="Not retained")
     challenge = auth.issue_password_login_challenge(username, password, connection_factory=connect)
@@ -65,6 +72,7 @@ def test_root_and_authenticator_survive_real_schema_reset(monkeypatch, tmp_path)
     recovered = preservation.load_root_authentication(backup, config)
     result = preservation.restore_root_authentication(recovered, config)
     assert result["status"] == "preserved"
+    _assert_compact_current(config)
     if preservation.capture_root_authentication(config) != before:
         pytest.fail("root facts changed across reset", pytrace=False)
     c = connect()
@@ -86,3 +94,20 @@ def test_root_and_authenticator_survive_real_schema_reset(monkeypatch, tmp_path)
     verified = auth.complete_password_login_challenge(connection_factory=connect, challenge_id=login.challenge_id,
                                                      challenge_token=login.challenge_token, factor_code=valid_code)
     assert auth.get_admin_session(verified[0], connection_factory=connect).is_root
+
+
+def _assert_compact_current(config):
+    from scripts.initialize_nas_schema import _verify_current
+    plan = load_compact_plan()
+    connection = pymysql.connect(**config)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema=%s", (config["database"],))
+            names = {row[0] for row in cursor.fetchall()}
+            assert names == plan["expected"]["tables"] | plan["expected"]["views"]
+            assert not names & retired_fresh_tables()
+            cursor.execute("SELECT payer_identity FROM government_payers")
+            assert cursor.fetchall() == (("hccg",),)
+    finally:
+        connection.close()
+    _verify_current({k: v for k, v in config.items() if k != "autocommit"})

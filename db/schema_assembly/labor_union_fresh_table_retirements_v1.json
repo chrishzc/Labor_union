@@ -1,0 +1,465 @@
+{
+  "contract": "labor-union-fresh-table-retirements/v1",
+  "authority": "2026-10-15 使用者：先確認18張用途不明及15張舊異常表，再整理退役清單、精簡新庫schema；既有資料庫不刪表。含先前已確認5張候選。",
+  "scope": "new-empty-database-only",
+  "existing_database_policy": "no_drop_no_data_change",
+  "source_baseline": "577a90ae83d5bda515d951d26d7e070dc2658028",
+  "reviewed_tables": [
+    {
+      "table": "access_control_apply_receipts",
+      "decision": "omit_fresh",
+      "owner": "Access Control",
+      "reason": "角色／動態 grant 早已退役，兩個 capability-grants API 固定 410；current enabled-session/root-account 模型不消費舊 grant event/receipt。",
+      "authority": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#41-正式內部使用者存取模型",
+      "implementation_evidence": "api/routes/capability_grants.py",
+      "source_artifacts": [
+        "147_access_capability_grants.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "access_control_events",
+      "decision": "omit_fresh",
+      "owner": "Access Control",
+      "reason": "角色／動態 grant 早已退役，兩個 capability-grants API 固定 410；current enabled-session/root-account 模型不消費舊 grant event/receipt。",
+      "authority": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#41-正式內部使用者存取模型",
+      "implementation_evidence": "api/routes/capability_grants.py",
+      "source_artifacts": [
+        "147_access_capability_grants.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "admin_capability_grants",
+      "decision": "omit_fresh",
+      "owner": "Access Control",
+      "reason": "同上：無差異化業務權限或 dynamic grant/revoke。",
+      "authority": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#41-正式內部使用者存取模型",
+      "implementation_evidence": "api/routes/capability_grants.py",
+      "source_artifacts": [
+        "147_access_capability_grants.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "anomaly_reclassification_batch_receipts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "current-only/no-reclassification-history 裁決已取代舊 anomaly 必要性移轉框架；僅保留 immutable 舊 release/schema contract evidence。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#1-domain-定位與最新裁決",
+      "implementation_evidence": "db/schema_parts/1009_anomaly_reclassification_disposition.sql",
+      "source_artifacts": [
+        "1009_anomaly_reclassification_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "anomaly_reclassification_dispositions",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "current-only/no-reclassification-history 裁決已取代舊 anomaly 必要性移轉框架；僅保留 immutable 舊 release/schema contract evidence。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#1-domain-定位與最新裁決",
+      "implementation_evidence": "db/schema_parts/1009_anomaly_reclassification_disposition.sql",
+      "source_artifacts": [
+        "1009_anomaly_reclassification_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "anomaly_reclassification_receipts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "current-only/no-reclassification-history 裁決已取代舊 anomaly 必要性移轉框架；僅保留 immutable 舊 release/schema contract evidence。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#1-domain-定位與最新裁決",
+      "implementation_evidence": "db/schema_parts/1009_anomaly_reclassification_disposition.sql",
+      "source_artifacts": [
+        "1009_anomaly_reclassification_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "anomaly_root_fact_projection_receipts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "舊 root-fact anomaly recovery/projector 快照與 receipt；現行只投影 LINE-006，owner correctness/歷史訂單事實由原 owner 保存，不依賴這兩張舊 recovery 表。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#1-domain-定位與最新裁決",
+      "implementation_evidence": "scripts/plan_legacy_ui_dataset_integration.py",
+      "source_artifacts": [
+        "127_anomaly_root_fact_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "anomaly_root_fact_snapshots",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "舊 root-fact anomaly recovery/projector 快照與 receipt；現行只投影 LINE-006，owner correctness/歷史訂單事實由原 owner 保存，不依賴這兩張舊 recovery 表。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#1-domain-定位與最新裁決",
+      "implementation_evidence": "scripts/plan_legacy_ui_dataset_integration.py",
+      "source_artifacts": [
+        "127_anomaly_root_fact_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "client_hcm_correction_events",
+      "decision": "omit_fresh",
+      "owner": "Client Profile",
+      "reason": "HCM 主檔修改已統一 Client Profile Q/P/A/version/events/receipts；case_import_hcm_correction_events 保存 intake review 採用，不使用獨立 client_hcm correction 模型。1017 保留舊 release。",
+      "authority": "document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md",
+      "implementation_evidence": "infrastructure/mysql/client_profile_repository.py",
+      "source_artifacts": [
+        "1017_client_hcm_correction_versioning.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "client_hcm_correction_receipts",
+      "decision": "omit_fresh",
+      "owner": "Client Profile",
+      "reason": "HCM 主檔修改已統一 Client Profile Q/P/A/version/events/receipts；case_import_hcm_correction_events 保存 intake review 採用，不使用獨立 client_hcm correction 模型。1017 保留舊 release。",
+      "authority": "document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md",
+      "implementation_evidence": "infrastructure/mysql/client_profile_repository.py",
+      "source_artifacts": [
+        "1017_client_hcm_correction_versioning.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "finance_alert_events",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "90 的舊 finance alerts/lifecycle 無 runtime SQL consumer；現行業務異常使用 current_anomaly_issues，operational reminders 使用 system_alerts，import warning 使用自己的 occurrence/tracking。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md",
+      "implementation_evidence": "infrastructure/mysql/current_anomaly_issue_repository.py",
+      "source_artifacts": [
+        "90_finance_alerts.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "finance_alerts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "90 的舊 finance alerts/lifecycle 無 runtime SQL consumer；現行業務異常使用 current_anomaly_issues，operational reminders 使用 system_alerts，import warning 使用自己的 occurrence/tracking。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md",
+      "implementation_evidence": "infrastructure/mysql/current_anomaly_issue_repository.py",
+      "source_artifacts": [
+        "90_finance_alerts.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_overpayment_return_excess_recoveries",
+      "decision": "omit_fresh",
+      "owner": "Government Subsidy",
+      "reason": "2026-10-15 裁決已移除溢付款退回、出款/核銷/追償及政府收款帳戶維護；正常 receipt/allocation/reversal/offset 與 singleton payer 保留。舊 schema/release/data 不刪。",
+      "authority": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#10-人工核准紀錄",
+      "implementation_evidence": "infrastructure/mysql/government_subsidy_repository.py",
+      "source_artifacts": [
+        "212_government_subsidy_return_excess_recovery.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_overpayment_return_excess_recovery_events",
+      "decision": "omit_fresh",
+      "owner": "Government Subsidy",
+      "reason": "2026-10-15 裁決已移除溢付款退回、出款/核銷/追償及政府收款帳戶維護；正常 receipt/allocation/reversal/offset 與 singleton payer 保留。舊 schema/release/data 不刪。",
+      "authority": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#10-人工核准紀錄",
+      "implementation_evidence": "infrastructure/mysql/government_subsidy_repository.py",
+      "source_artifacts": [
+        "212_government_subsidy_return_excess_recovery.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_overpayment_return_payables",
+      "decision": "omit_fresh",
+      "owner": "Government Subsidy",
+      "reason": "2026-10-15 裁決已移除溢付款退回、出款/核銷/追償及政府收款帳戶維護；正常 receipt/allocation/reversal/offset 與 singleton payer 保留。舊 schema/release/data 不刪。",
+      "authority": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#10-人工核准紀錄",
+      "implementation_evidence": "infrastructure/mysql/government_subsidy_repository.py",
+      "source_artifacts": [
+        "169_government_subsidy_overpayment_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_overpayment_return_payouts",
+      "decision": "omit_fresh",
+      "owner": "Government Subsidy",
+      "reason": "2026-10-15 裁決已移除溢付款退回、出款/核銷/追償及政府收款帳戶維護；正常 receipt/allocation/reversal/offset 與 singleton payer 保留。舊 schema/release/data 不刪。",
+      "authority": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#10-人工核准紀錄",
+      "implementation_evidence": "infrastructure/mysql/government_subsidy_repository.py",
+      "source_artifacts": [
+        "169_government_subsidy_overpayment_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_payer_receiving_accounts",
+      "decision": "omit_fresh",
+      "owner": "Government Subsidy",
+      "reason": "2026-10-15 裁決已移除溢付款退回、出款/核銷/追償及政府收款帳戶維護；正常 receipt/allocation/reversal/offset 與 singleton payer 保留。舊 schema/release/data 不刪。",
+      "authority": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md#10-人工核准紀錄",
+      "implementation_evidence": "infrastructure/mysql/government_subsidy_repository.py",
+      "source_artifacts": [
+        "169_government_subsidy_overpayment_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "government_payers",
+      "decision": "retain_fresh",
+      "owner": "Government Subsidy",
+      "reason": "14 §4.5.1 明訂 hccg singleton payer SSOT；沒有直接 adapter SQL 不是刪除理由，保留 current 必要系統資料。",
+      "authority": "document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md#government-payer",
+      "implementation_evidence": "db/schema_parts/169_government_subsidy_overpayment_disposition.sql",
+      "source_artifacts": [
+        "169_government_subsidy_overpayment_disposition.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_occurrences",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1011_historical_baseline_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_projector_receipts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1011_historical_baseline_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_successors",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1011_historical_baseline_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_umbrella_memberships",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1011_historical_baseline_projector.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_active_membership_snapshots",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_occurrence_state_events",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_post_commit_readbacks",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_projector_deliveries",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_projector_receipts",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "historical_baseline_v2_source_checkpoints",
+      "decision": "omit_fresh",
+      "owner": "Anomalies",
+      "reason": "1011/1014 是 occurrence/umbrella/projector recovery 層，不是 Orders 歷史訂單 root；current-only Anomalies 不再建立此歷程。無 runtime/ops consumer，僅 schema tests；舊 release 留作歷史重現。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#9-cutover-與退役邊界",
+      "implementation_evidence": "db/schema_parts/1011_historical_baseline_projector.sql",
+      "source_artifacts": [
+        "1014_historical_baseline_projector_v2.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "import_warning_resubmission_associations",
+      "decision": "omit_fresh",
+      "owner": "Case Import/Anomalies",
+      "reason": "IMPORT-003 補件解除 anomaly 已退役；正常 HCM intake correction 以 canonical review/version/receipt 採用，current warning tracking/resolution 不使用這張舊 association。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md#23-從-runtime-anomaly-退役的-13-碼",
+      "implementation_evidence": "infrastructure/mysql/hcm_resubmission_repository.py",
+      "source_artifacts": [
+        "195_import_warning_tracking.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "line_identity_binding_events",
+      "decision": "omit_fresh",
+      "owner": "LINE Identity",
+      "reason": "舊單一 binding root 的 legacy_imported event lineage，僅歷史 migration descriptor 消費；現行 role-scoped binding/events 為唯一 writer。舊 binding root 因契約資料 FK 保留，但新庫不生成舊事件歷程。",
+      "authority": "document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md#91-唯一-root-與共用契約",
+      "implementation_evidence": "infrastructure/mysql/line_identity_management_repository.py",
+      "source_artifacts": [
+        "155_line_identity_review_configuration.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "line_identity_migration_anomalies",
+      "decision": "omit_fresh",
+      "owner": "LINE Identity",
+      "reason": "155 中從既有 owner projections 整理 legacy identity 的 migration-only review；空庫無舊 projection；現行 role binding 走正式 identity workflow。",
+      "authority": "document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md#91-唯一-root-與共用契約",
+      "implementation_evidence": "db/schema_parts/155_line_identity_review_configuration.sql",
+      "source_artifacts": [
+        "155_line_identity_review_configuration.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "line_order_group_migration_anomalies",
+      "decision": "omit_fresh",
+      "owner": "LINE",
+      "reason": "156 中掃描舊 orders group reference 的 migration-only 異常；空庫無此舊資料；正常群組綁定與 LINE-006 使用各自現行 owner。",
+      "authority": "document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md",
+      "implementation_evidence": "db/schema_parts/156_line_publication_media_order_group.sql",
+      "source_artifacts": [
+        "156_line_publication_media_order_group.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "matching_holiday_work_agreement_participants",
+      "decision": "omit_fresh",
+      "owner": "Scheduling",
+      "reason": "2026-09-22 已退休獨立 agreement；Orders 正式服務日期版本與 receipt 是唯一現行確認。",
+      "authority": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+      "implementation_evidence": "subsystems/orders/service_date_confirmation_workflow.py",
+      "source_artifacts": [
+        "1032_matching_holiday_work_agreements.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "matching_holiday_work_agreements",
+      "decision": "omit_fresh",
+      "owner": "Scheduling",
+      "reason": "2026-09-22 已退休獨立 agreement；Orders 正式服務日期版本與 receipt 是唯一現行確認。",
+      "authority": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+      "implementation_evidence": "subsystems/orders/service_date_confirmation_workflow.py",
+      "source_artifacts": [
+        "1032_matching_holiday_work_agreements.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "order_assignment_change_audits",
+      "decision": "omit_fresh",
+      "owner": "Scheduling/Orders",
+      "reason": "96 是舊 UI 同步服務條件/指派快照 audit，無 current consumer；現行正式 assignment plan/replacement/service-date workflow 保存自己的 immutable event/receipt。",
+      "authority": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+      "implementation_evidence": "subsystems/scheduling/assignment_plan_workflow.py",
+      "source_artifacts": [
+        "96_order_assignment_sync_audit.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "order_lifecycle_projection_outbox",
+      "decision": "omit_fresh",
+      "owner": "Orders/Anomalies",
+      "reason": "106 舊 alert-code projection queue 只剩歷史 schema/migration checks，無 producer/consumer；現行 Orders lifecycle events/receipts 與 generic background_jobs/current issue recheck 保留。",
+      "authority": "document/架構重整/01_規格基線/06_Anomalies_Domain.md",
+      "implementation_evidence": "scripts/migrate_order_lifecycle_control_facts.py",
+      "source_artifacts": [
+        "106_order_lifecycle_control_facts.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "staff_leave_requests",
+      "decision": "omit_fresh",
+      "owner": "Scheduling",
+      "reason": "183 的 pending/approved 舊模型已由 Scheduling-owned pending/accepted/resolved request aggregate/event/receipt 與 canonical leave/substitution receipt 取代。",
+      "authority": "document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md#53-請假",
+      "implementation_evidence": "infrastructure/mysql/staff_leave_intake_repository.py",
+      "source_artifacts": [
+        "183_staff_leave_requests.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "staff_matching_preference_migration_reviews",
+      "decision": "omit_fresh",
+      "owner": "Staff/Scheduling",
+      "reason": "188 從舊 staff_time_slots 收集無法轉換資料的 migration-only review；新庫無舊資料，正式 preference/availability aggregates/events/receipts 保留。",
+      "authority": "document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md",
+      "implementation_evidence": "db/schema_parts/188_matching_preferences_and_staff_availability.sql",
+      "source_artifacts": [
+        "188_matching_preferences_and_staff_availability.sql"
+      ],
+      "existing_database": "preserve_unchanged"
+    }
+  ]
+}

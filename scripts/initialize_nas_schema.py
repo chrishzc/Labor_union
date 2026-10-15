@@ -82,8 +82,8 @@ def load_configuration(path: Path = ROOT / ".env") -> dict:
     return settings
 
 
-def schema_plan():
-    """Freeze validated SQL in memory before any connection or mutation."""
+def source_schema_plan():
+    """Historical assembly used only to regenerate and verify the compact baseline."""
     assembly = load_schema_assembly()
     manifest = load_manifest()
     if verify_manifest(manifest) or tuple(selected_schema_parts(manifest)) != assembly.active_artifact_paths:
@@ -118,6 +118,17 @@ def schema_plan():
         "schema_parts": [path.name for path in assembly.active_artifact_paths],
         "steps": steps + base_views, "expected": expected_database_objects(manifest),
     }
+
+
+def schema_plan():
+    """Load the generated final schema, never replay historical upgrade steps."""
+    from scripts.compact_fresh_schema import load_compact_plan
+    try:
+        return load_compact_plan()
+    except (OSError, ValueError, KeyError) as error:
+        raise InitializationBlocked(
+            "Compact fresh schema verification failed; regenerate the baseline from current sources"
+        ) from error
 
 
 def _require_empty(cursor, database):

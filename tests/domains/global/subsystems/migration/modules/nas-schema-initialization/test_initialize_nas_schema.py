@@ -55,13 +55,17 @@ def test_process_override_of_an_omitted_default_is_rejected(env_file, monkeypatc
         nas.load_configuration(env_file)
 
 
-def test_canonical_plan_preserves_order_and_removes_database_controls():
+def test_compact_plan_creates_final_objects_without_historical_upgrades():
     plan = nas.schema_plan()
-    assembly = nas.load_schema_assembly()
-    assert plan["schema_parts"] == [p.name for p in assembly.active_artifact_paths]
+    from scripts.compact_fresh_schema import MANIFEST_PATH, SQL_PATH
+    from scripts.fresh_schema_policy import retired_fresh_tables
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    assert plan["schema_parts"] == [SQL_PATH.name]
     assert all(not nas.DATABASE_CONTROL.match(s["sql"]) for s in plan["steps"])
-    artifacts = list(dict.fromkeys(s["artifact"] for s in plan["steps"]))
-    assert artifacts == [assembly.base_schema_path.name, *plan["schema_parts"]]
+    assert not any(s["sql"].upper().startswith(("ALTER ", "DROP ", "PREPARE ", "EXECUTE ")) for s in plan["steps"])
+    assert not plan["expected"]["tables"] & retired_fresh_tables()
+    assert "government_payers" in plan["expected"]["tables"]
+    assert len(plan["steps"]) == manifest["statement_count"]
     assert any(s["sql"].upper().startswith("INSERT") for s in plan["steps"])
 
 
@@ -70,6 +74,27 @@ def test_corrupt_manifest_stops_before_any_connection(monkeypatch):
     connect = Mock()
     monkeypatch.setattr(nas.pymysql, "connect", connect)
     with pytest.raises(nas.InitializationBlocked, match="manifest verification"):
+        nas.source_schema_plan()
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("changed", ["sql", "bindings"])
+def test_stale_compact_asset_is_rejected_before_connection(tmp_path, monkeypatch, changed):
+    from scripts import compact_fresh_schema as compact
+    manifest = json.loads(compact.MANIFEST_PATH.read_text(encoding="utf-8"))
+    sql = tmp_path / "current.sql"
+    sql.write_bytes(compact.SQL_PATH.read_bytes())
+    if changed == "sql":
+        sql.write_text(sql.read_text(encoding="utf-8") + "\n-- drift\n", encoding="utf-8")
+    else:
+        manifest["source_bindings"]["retirement_policy_sha256"] = "0" * 64
+    manifest_path = tmp_path / "current.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(compact, "SQL_PATH", sql)
+    monkeypatch.setattr(compact, "MANIFEST_PATH", manifest_path)
+    connect = Mock()
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    with pytest.raises(nas.InitializationBlocked, match="regenerate"):
         nas.schema_plan()
     connect.assert_not_called()
 

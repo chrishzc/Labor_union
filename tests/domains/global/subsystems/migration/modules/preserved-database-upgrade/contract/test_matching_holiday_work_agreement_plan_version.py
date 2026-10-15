@@ -165,24 +165,30 @@ def test_owner_release_accepts_mysql_explicit_charset_in_segment_cast() -> None:
     ) == "exact"
 
 
-def test_plan_version_rename_accepts_only_the_exact_legacy_predecessor() -> None:
-    owner = migration._canonical_artifact_descriptor(OWNER_ARTIFACT)
-    rename = migration._canonical_artifact_descriptor(RENAME_ARTIFACT)
+def test_historical_release_rename_accepts_only_the_exact_legacy_predecessor() -> None:
+    # Immutable replay still validates its original contract; current readiness
+    # deliberately does not schedule upgrades for this retired owner.
+    owner = load_migration_release_manifest(
+        ROOT / "db/migration_releases" / OWNER_MANIFEST, ROOT,
+    ).owned_object_descriptors(ROOT)[OWNER_ARTIFACT]
+    rename = load_migration_release_manifest(
+        ROOT / "db/migration_releases" / RENAME_MANIFEST, ROOT,
+    ).owned_object_descriptors(ROOT)[RENAME_ARTIFACT]
     predecessor = _legacy_predecessor_snapshot()
 
-    assert migration.local_additive_descriptor_state(
-        predecessor, owner, OWNER_ARTIFACT
+    assert migration._release_descriptor_metadata_state(
+        predecessor, OWNER_ARTIFACT, owner
     ) == "exact"
-    assert migration.local_additive_descriptor_state(
-        predecessor, rename, RENAME_ARTIFACT
+    assert migration._release_descriptor_metadata_state(
+        predecessor, RENAME_ARTIFACT, rename
     ) == "absent"
 
     successor = _canonical_owner_snapshot()
-    assert migration.local_additive_descriptor_state(
-        successor, owner, OWNER_ARTIFACT
+    assert migration._release_descriptor_metadata_state(
+        successor, OWNER_ARTIFACT, owner
     ) == "exact"
-    assert migration.local_additive_descriptor_state(
-        successor, rename, RENAME_ARTIFACT
+    assert migration._release_descriptor_metadata_state(
+        successor, RENAME_ARTIFACT, rename
     ) == "exact"
 
     legacy_column = next(
@@ -190,9 +196,12 @@ def test_plan_version_rename_accepts_only_the_exact_legacy_predecessor() -> None
         if row["column_name"] == "plan_communication_version"
     )
     legacy_column["column_type"] = "bigint unsigned"
-    assert migration.local_additive_descriptor_state(
-        predecessor, owner, OWNER_ARTIFACT
+    assert migration._release_descriptor_metadata_state(
+        predecessor, OWNER_ARTIFACT, owner
     ) == "drift"
+    assert migration.local_additive_descriptor_state(
+        predecessor, migration._canonical_artifact_descriptor(OWNER_ARTIFACT), OWNER_ARTIFACT,
+    ) == "exact"
 
 
 def test_plan_version_rename_preservation_compares_the_legacy_projection(
