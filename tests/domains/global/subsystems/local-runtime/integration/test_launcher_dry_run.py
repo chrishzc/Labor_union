@@ -5,7 +5,10 @@ from pathlib import Path
 from scripts.launcher_preflight import PROFILE_REQUIREMENTS, inspect_profile
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = next(
+    parent for parent in Path(__file__).resolve().parents
+    if (parent / "pyproject.toml").is_file() and (parent / "scripts" / "launchers").is_dir()
+)
 LAUNCHERS = ROOT / "scripts" / "launchers"
 
 
@@ -81,7 +84,8 @@ def test_windows_supervisor_owns_current_processes_and_scoped_cleanup() -> None:
 
 def test_unix_launcher_requires_current_schema_and_cleans_owned_processes() -> None:
     source = _source("start_local_development.sh")
-    readiness = '"$PY" -m scripts.update_local_database --require-current'
+    # Match the actual startup gate, not the earlier --dry-run configuration check.
+    readiness = '\n"$PY" -m scripts.check_runtime_database\n'
 
     assert source.index(readiness) < source.index("api.main:app")
     assert "npm run dev" in source
