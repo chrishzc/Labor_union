@@ -305,6 +305,9 @@ def _snapshot(connection):
             "terms_events": "SELECT COUNT(*) AS total FROM order_terms_change_events WHERE case_no=%s",
             "terms_receipts": "SELECT COUNT(*) AS total FROM order_terms_apply_receipts WHERE case_no=%s",
             "lifecycle_events": "SELECT COUNT(*) AS total FROM order_lifecycle_state_events WHERE case_no=%s",
+            "payment_terms_events": "SELECT COUNT(*) AS total FROM client_payment_terms_events WHERE case_no=%s",
+            "client_obligations": "SELECT COUNT(*) AS total FROM client_obligations WHERE case_no=%s",
+            "staff_obligations": "SELECT COUNT(*) AS total FROM staff_obligations WHERE case_no=%s",
             "command_claims": (
                 "SELECT COUNT(*) AS total FROM application_command_claims "
                 "WHERE command_family='orders_terms' AND aggregate_identity=%s"
@@ -363,8 +366,9 @@ def _apply(client, query, preview, terms, key):
             "proposed_terms": terms,
             "expected_order_version": query["order_version"],
             "expected_scheduling_version": query["scheduling_version"],
-            "expected_client_finance_version": query["client_finance_version"],
-            "expected_payroll_version": query["payroll_version"],
+            # Query also exposes roots outside this Preview's actual read set.
+            "expected_client_finance_version": preview["client_finance_version"],
+            "expected_payroll_version": preview["payroll_version"],
             "preview_fingerprint": preview["preview_fingerprint"],
             "requires_formal_apply": requires_formal_apply,
             **(
@@ -396,13 +400,20 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
 
         changed = {**query["terms"], "planned_start_date": "2026-10-02"}
         preview = _preview(client, changed)
-        assert preview["requires_formal_apply"] is False
+        # Orders spec §3.2: moving an existing payment deadline is formal even
+        # before assignments or obligations exist; an empty service time survives.
+        assert preview["requires_formal_apply"] is True
+        assert preview["client_finance_impact"]["payment_terms"]["first_payment_due_date"] == "2026-10-02"
+        assert preview["client_finance_impact"]["actions"] == []
+        assert preview["payroll_impact"] is None
         assert _snapshot(connection) == before
         receipt = _data(_apply(client, query, preview, changed, "issue337-empty-apply"))
         readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
         after, permanent_counts = _snapshot(connection)
 
         assert receipt["order_version"] == query["order_version"] + 1
+        assert receipt["client_finance_version"] == query["client_finance_version"] + 1
+        assert readback["client_finance_version"] == receipt["client_finance_version"]
         assert receipt["scheduling_version"] == query["scheduling_version"]
         assert receipt["scheduling_generation"] == query["scheduling_generation"]
         assert readback["terms"] == changed
@@ -413,7 +424,39 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
         assert after["service_hours_per_day"] == before[0]["service_hours_per_day"]
         assert after["requires_cooking"] == before[0]["requires_cooking"]
         assert after["floor_fee"] == before[0]["floor_fee"]
-        assert permanent_counts == before[1]
+        assert permanent_counts == {
+            **before[1],
+            **{
+                name: before[1][name] + 1
+                for name in (
+                    "terms_events", "terms_receipts", "lifecycle_events",
+                    "command_claims", "payment_terms_events",
+                )
+            },
+        }
+        assert permanent_counts["client_obligations"] == 0
+        assert permanent_counts["staff_obligations"] == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT terms.policy_version,terms.client_hourly_rate_ntd,"
+                "terms.deposit_service_days,terms.deposit_due_date,"
+                "terms.first_payment_due_date,terms.second_payment_due_date,"
+                "event.first_payment_due_date AS event_first_payment_due_date,event.reason "
+                "FROM client_payment_terms terms "
+                "JOIN client_payment_terms_events event ON event.id=terms.current_event_id "
+                "WHERE terms.case_no=%s",
+                (_CASE_NO,),
+            )
+            assert dict(cursor.fetchone()) == {
+                "policy_version": "issue337-client-policy-v1",
+                "client_hourly_rate_ntd": 400,
+                "deposit_service_days": 5,
+                "deposit_due_date": date(2026, 9, 20),
+                "first_payment_due_date": date(2026, 10, 2),
+                "second_payment_due_date": None,
+                "event_first_payment_due_date": date(2026, 10, 2),
+                "reason": "Issue 337 disposable acceptance",
+            }
 
         complete = {
             **readback["terms"],
@@ -425,9 +468,13 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
             },
         }
         complete_preview = _preview(client, complete)
+        assert complete_preview["requires_formal_apply"] is False
         _data(_apply(client, readback, complete_preview, complete, "issue337-complete-apply"))
         complete_readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
         assert complete_readback["terms"]["service_time"] == complete["service_time"]
+        assert complete_readback["client_finance_version"] == readback["client_finance_version"]
+        assert complete_readback["payroll_version"] == readback["payroll_version"]
+        assert _snapshot(connection)[1] == permanent_counts
 
         failed_before = _snapshot(connection)
         partial = {
