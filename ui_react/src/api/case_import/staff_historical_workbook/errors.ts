@@ -77,12 +77,12 @@ export function mapStaffHistoricalWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? '月嫂歷史檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? '月嫂歷史檔案套用服務暫時無法使用，請稍後以相同 Idempotency-Key 重試。'
+            ? '月嫂歷史匯入服務暫時無法回覆，結果尚未確認。請保留本頁，稍後點選「查詢這次匯入結果」。'
             : '月嫂歷史檔案套用目前無法完成。';
     return new StaffHistoricalWorkbookApplyError(error.code || `HTTP_${error.status}`, message, error.retryable, error.status);
   }
-  if (error instanceof ApiTimeoutError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_timeout', '月嫂歷史檔案套用逾時，請以相同 Idempotency-Key 重試。', true);
-  if (error instanceof ApiNetworkError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_network_error', '月嫂歷史檔案套用連線失敗，請以相同 Idempotency-Key 重試。', true);
-  if (error instanceof ApiAbortError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_aborted', '月嫂歷史檔案套用已取消，請先確認結果再重試。', true);
+  if (error instanceof ApiTimeoutError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_timeout', '等待月嫂歷史匯入回應逾時，結果尚未確認，資料可能已寫入。請保留本頁並點選「查詢這次匯入結果」，勿重新上傳。', true);
+  if (error instanceof ApiNetworkError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_network_error', '月嫂歷史匯入連線中斷，結果尚未確認，資料可能已寫入。請保留本頁並點選「查詢這次匯入結果」，勿重新上傳。', true);
+  if (error instanceof ApiAbortError) return new StaffHistoricalWorkbookApplyError('staff_historical_apply_aborted', '已停止等待月嫂歷史匯入回應，結果尚未確認。請保留本頁並點選「查詢這次匯入結果」。', true);
   return new StaffHistoricalWorkbookApplyError('staff_historical_apply_unexpected_error', '月嫂歷史檔案套用發生未預期錯誤。');
 }

@@ -140,12 +140,12 @@ export function mapHcmWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? 'HCM 檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? 'HCM 檔案套用服務暫時無法使用，請以相同 Idempotency-Key 重試。'
+            ? 'HCM 匯入服務暫時無法回覆，結果尚未確認。請保留本頁，稍後點選「查詢這次匯入結果」。'
             : 'HCM 檔案套用目前無法完成。';
     return new HcmWorkbookApplyError(error.code || `HTTP_${error.status}`, message, { retryable: error.retryable, status: error.status });
   }
-  if (error instanceof ApiTimeoutError) return new HcmWorkbookApplyError('hcm_apply_timeout', 'HCM 檔案套用逾時，請以相同 Idempotency-Key 重試。', { retryable: true });
-  if (error instanceof ApiNetworkError) return new HcmWorkbookApplyError('hcm_apply_network_error', 'HCM 檔案套用連線失敗，請以相同 Idempotency-Key 重試。', { retryable: true });
-  if (error instanceof ApiAbortError) return new HcmWorkbookApplyError('hcm_apply_aborted', 'HCM 檔案套用已取消，請先確認結果再重試。', { retryable: true });
+  if (error instanceof ApiTimeoutError) return new HcmWorkbookApplyError('hcm_apply_timeout', '等待 HCM 匯入回應逾時，結果尚未確認，資料可能已寫入。請保留本頁並點選「查詢這次匯入結果」，勿重新上傳。', { retryable: true });
+  if (error instanceof ApiNetworkError) return new HcmWorkbookApplyError('hcm_apply_network_error', 'HCM 匯入連線中斷，結果尚未確認，資料可能已寫入。請保留本頁並點選「查詢這次匯入結果」，勿重新上傳。', { retryable: true });
+  if (error instanceof ApiAbortError) return new HcmWorkbookApplyError('hcm_apply_aborted', '已停止等待 HCM 匯入回應，結果尚未確認。請保留本頁並點選「查詢這次匯入結果」。', { retryable: true });
   return new HcmWorkbookApplyError('hcm_apply_unexpected_error', 'HCM 檔案套用發生未預期錯誤。');
 }

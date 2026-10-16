@@ -116,7 +116,7 @@ describe('HCM workbook preview client', () => {
     expect(uploaded.name).toBe('current.xlsx');
   });
 
-  it('每個 request 即時讀取 memory token，且固定使用 30 秒 timeout', async () => {
+  it('每個 request 即時讀取 memory token，且使用 1 分鐘 timeout', async () => {
     const snapshot = await HcmWorkbookSnapshot.fromFile(await hcmFile('A'));
     const envelope = {
       ...HCM_WORKBOOK_PREVIEW_ENVELOPE_FIXTURE,
@@ -136,7 +136,7 @@ describe('HCM workbook preview client', () => {
     const secondHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers);
     expect(firstHeaders.get('Authorization')).toBe('Bearer hcm-preview-token-a');
     expect(secondHeaders.get('Authorization')).toBe('Bearer hcm-preview-token-b');
-    expect(HCM_WORKBOOK_PREVIEW_TIMEOUT_MS).toBe(30_000);
+    expect(HCM_WORKBOOK_PREVIEW_TIMEOUT_MS).toBe(60_000);
   });
 
   it('缺少 Session 時在送出網路請求前 fail closed', async () => {

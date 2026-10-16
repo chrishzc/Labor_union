@@ -23,7 +23,7 @@ export const HCM_WORKBOOK_PREVIEW_PATH =
   '/api/v1/case-import/hcm/workbooks/preview';
 export const HCM_WORKBOOK_APPLY_PATH =
   '/api/v1/case-import/hcm/workbooks/apply';
-export const HCM_WORKBOOK_PREVIEW_TIMEOUT_MS = 30_000;
+export const HCM_WORKBOOK_PREVIEW_TIMEOUT_MS = 60_000;
 export const HCM_WORKBOOK_MAXIMUM_BYTES = 20 * 1024 * 1024;
 
 export interface HcmWorkbookPreviewRequestOptions {

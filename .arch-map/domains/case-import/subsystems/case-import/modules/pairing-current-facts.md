@@ -18,6 +18,8 @@
 - `infrastructure/mysql/client_beclass_workbook_import_repository.py`
 - `api/routes/client_beclass_import.py`
 - `api/schemas/client_beclass_import.py`
+- `ui_react/src/api/case_import/client_beclass_workbook/client.ts` — immutable workbook Preview／Apply transport。
+- `ui_react/src/api/case_import/client_beclass_workbook/errors.ts` — typed 匯入失敗與結果待確認說明。
 - `domains/case_import/cooking_requirement.py`
 - `subsystems/case_import/hcm_beclass_reconciliation.py`
 - `infrastructure/mysql/hcm_beclass_reconciliation_adapter.py`
@@ -41,4 +43,7 @@
 - cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_registry_correction_disposable_mysql.py` — independent registry edits, absent roots and repeated assigned corrections; Case Import subsystem owns this integration proof.
 
 ## Verification
+- layout_status: `custom_current`
+- layout_basis: Backend owner-local tests use the canonical Python root; React transport tests mirror this Module under the existing frontend test layout.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/`
+- test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/` — Client BeClass transport 與逾時結果確認。
