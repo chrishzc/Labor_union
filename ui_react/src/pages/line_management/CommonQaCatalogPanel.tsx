@@ -1,6 +1,6 @@
 /** Governed Knowledge workflow for LINE common questions and approved answers. */
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpenCheck, Download, Pencil, Plus, SearchCheck, ShieldCheck } from 'lucide-react';
+import { ChevronDown, CircleHelp, Download, Pencil, Plus, RefreshCw, Search, SearchCheck } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
 import { Drawer } from '../../components/Drawer';
 
@@ -91,7 +91,7 @@ function decodeQa(item: KnowledgeItem): ManagedQa | null {
   }
 }
 
-export const CommonQaCatalogPanel: React.FC = () => {
+export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuestion?: string }> = ({ initialQaId, initialQuestion }) => {
   const [items, setItems] = useState<ManagedQa[]>([]);
   const [latestIndex, setLatestIndex] = useState<KnowledgeIndex | null>(null);
   const [readStatus, setReadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -102,6 +102,7 @@ export const CommonQaCatalogPanel: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [editingItem, setEditingItem] = useState<ManagedQa | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [initialEditorOpened, setInitialEditorOpened] = useState(false);
   const [modalNotice, setModalNotice] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     id: '', question: '', answer: '', category: '月嫂媒合', tag: '常見問題', aliases: '', notes: '',
@@ -215,6 +216,19 @@ export const CommonQaCatalogPanel: React.FC = () => {
 
   const closeEditor = () => { setEditingItem(null); setIsCreating(false); setModalNotice(null); };
 
+  useEffect(() => {
+    if (readStatus !== 'ready' || initialEditorOpened) return;
+    if (initialQaId) {
+      const item = items.find((row) => row.qa.id === initialQaId);
+      if (item) openEdit(item);
+      else { setNotice('目前問答清單中找不到這個題目，請搜尋確認。'); setNoticeKind('info'); }
+    } else if (initialQuestion) {
+      openCreate();
+      setFormData((current) => ({ ...current, question: initialQuestion }));
+    }
+    setInitialEditorOpened(true);
+  }, [readStatus, items, initialQaId, initialQuestion, initialEditorOpened]);
+
   const save = async (event?: React.SyntheticEvent) => {
     event?.preventDefault();
     const qaId = formData.id.trim().toUpperCase();
@@ -253,58 +267,81 @@ export const CommonQaCatalogPanel: React.FC = () => {
   return (
     <div className="ai-editor-card qa-catalog-panel">
       <div className="ai-editor-header qa-catalog-header">
-        <div className="qa-catalog-title">
-          <h2><BookOpenCheck aria-hidden="true" />常見問答</h2>
-          {readStatus === 'ready' && <span className="category-badge">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
+        <div>
+          <h2>常見問答</h2>
+          <p className="studio-description">管理客服可以使用的標準答案。</p>
         </div>
         <div className="qa-catalog-actions">
-          <button type="button" className="line-secondary-btn" disabled={busy} onClick={() => void importBuiltinCatalog()}><Download aria-hidden="true" />匯入／補齊內建 54 題</button>
-          <button type="button" className="line-secondary-btn" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />更新問答搜尋資料</button>
+          <details className="studio-more-actions">
+            <summary className="line-secondary-btn">更多操作<ChevronDown aria-hidden="true" /></summary>
+            <div className="studio-action-menu">
+              <button type="button" disabled={busy} onClick={() => void importBuiltinCatalog()}><Download aria-hidden="true" />匯入／補齊內建 54 題</button>
+              <button type="button" disabled={busy || publishedCount === 0} onClick={() => void requestIndex()}><SearchCheck aria-hidden="true" />更新問答搜尋資料</button>
+              <button type="button" disabled={busy || readStatus === 'loading'} onClick={() => void loadState()}><RefreshCw aria-hidden="true" />重新整理</button>
+            </div>
+          </details>
           <button type="button" className="line-primary-btn" disabled={busy} onClick={openCreate}><Plus aria-hidden="true" />新增問答</button>
         </div>
       </div>
 
-      <div className="line-warning" role="status">
-        <ShieldCheck aria-hidden="true" /> {readStatus === 'loading' ? '正在讀取問答資料…' : readStatus === 'error' ? '問答資料讀取失敗，請重新整理。' : items.length === 0 ? '目前尚無題目，可匯入內建 54 題。' : `已載入 ${items.length} 筆問答。編輯後需發布新答案；問答搜尋資料更新完成後才會啟用。停用會保留歷程，並更新搜尋資料以移除舊答案。`}
+      {readStatus !== 'ready' && <div className={readStatus === 'error' ? 'line-error' : 'studio-description'} role="status">{readStatus === 'loading' ? '正在讀取問答資料…' : '問答資料讀取失敗，請重新整理。'}</div>}
+      {readStatus === 'ready' && items.length === 0 && <div className="line-warning" role="status">目前尚無題目，可匯入內建 54 題。</div>}
+      <div className="studio-status-row">
+        <div className={`qa-index-status is-${latestIndex?.index_status ?? 'missing'}`} role="status">
+          <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
+          {readStatus === 'ready' && <span className="studio-count">共 {items.length} 筆 · {publishedCount} 筆已發布</span>}
+        </div>
+        <details className="studio-help"><summary><CircleHelp aria-hidden="true" />發布與生效說明</summary><p>編輯後需發布新答案；問答搜尋資料更新完成後才會啟用。停用會保留歷程，並更新搜尋資料以移除舊答案。</p>{latestIndex && <small>索引版本：{latestIndex.index_version}</small>}</details>
       </div>
-      <div className={`qa-index-status is-${latestIndex?.index_status ?? 'missing'}`} role="status">
-        <strong>問答搜尋資料：</strong>{readStatus === 'loading' ? '讀取中' : readStatus === 'error' ? '無法確認更新狀態' : latestIndex ? indexLabels[latestIndex.index_status] : '尚未建立'}
-        {readStatus === 'ready' && latestIndex && <details><summary>技術資訊</summary>索引版本：{latestIndex.index_version}</details>}
-      </div>
-      {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'line-warning'} role="status">{notice}</div>}
+      {notice && <div className={noticeKind === 'error' ? 'line-error' : noticeKind === 'success' ? 'line-success' : 'studio-description'} role="status">{notice}</div>}
 
-      <div className="form-group-row qa-catalog-filters">
-        <div className="form-field-half"><label htmlFor="qa-catalog-search">搜尋常見問答</label><input id="qa-catalog-search" type="search" value={query} placeholder="題號、分類、問題或別名" onChange={(event) => setQuery(event.target.value)} /></div>
-        <div className="form-field-half"><label htmlFor="qa-catalog-status">問答狀態</label><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部</option><option value="draft">草稿</option><option value="reviewed">待啟用（舊資料）</option><option value="published">已發布</option><option value="retired">已停用</option></select></div>
+      <div className="studio-qa-toolbar">
+        <label className="studio-search"><span className="sr-only">搜尋常見問答</span><Search aria-hidden="true" /><input id="qa-catalog-search" type="search" value={query} placeholder="搜尋題號、分類、問題、答案或常見問法" onChange={(event) => setQuery(event.target.value)} /></label>
+        <label><span className="sr-only">問答狀態</span><select id="qa-catalog-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">全部狀態</option><option value="draft">草稿</option><option value="reviewed">待啟用（舊資料）</option><option value="published">已發布</option><option value="retired">已停用</option></select></label>
+        {readStatus === 'ready' && <small>顯示 {filteredItems.length}／{items.length} 筆</small>}
       </div>
-      {readStatus === 'ready' && <small>顯示 {filteredItems.length}／{items.length} 筆問答項目</small>}
-
       <div className="qa-catalog-list">
         {filteredItems.map((item) => (
-          <details key={item.id} className="ai-rule-item-card qa-catalog-item">
+          <article key={item.id} className="studio-qa-row">
+          <details className="qa-catalog-item studio-qa-item">
             <summary className="qa-catalog-summary">
-              <div><strong>{item.qa.id} · {item.qa.question}</strong><span className="category-badge qa-catalog-category">{item.qa.category} / {item.qa.tag}</span><span className={`qa-lifecycle-badge is-${item.lifecycle_status}`}>{lifecycleLabels[item.lifecycle_status]} · v{item.current_version}</span></div>
-              <div className="qa-catalog-actions">
-                {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={(event) => { event.preventDefault(); void transition(item, 'publish'); }}>發布</button>}
-                {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={(event) => { event.preventDefault(); void transition(item, 'retire'); }}>停用</button>}
-                <button type="button" className="line-secondary-btn" disabled={busy} title="編輯此題目" onClick={(event) => { event.preventDefault(); openEdit(item); }}><Pencil aria-hidden="true" />編輯</button>
-              </div>
+              <div className="studio-question-title"><strong>{item.qa.question}</strong><small>{item.qa.category} · {item.qa.aliases.length} 種常見問法</small></div>
+              <span className={`qa-lifecycle-badge is-${item.lifecycle_status}`}>{lifecycleLabels[item.lifecycle_status]}</span>
             </summary>
-            <div className="qa-catalog-detail"><div><strong>常見問法：</strong>{item.qa.aliases.join('、') || '—'}</div><div><strong>標準回答：</strong>{item.qa.answer || '尚無答案'}</div>{item.qa.notes && <div><strong>備註：</strong>{item.qa.notes}</div>}<details className="qa-catalog-technical"><summary>技術資訊</summary><small>Knowledge #{item.id} · {item.source_identity} · 來源 {item.qa.source_ref}</small></details></div>
+            <div className="qa-catalog-detail">
+              <div><strong>常見問法：</strong>{item.qa.aliases.join('、') || '—'}</div>
+              <div className="studio-answer-text"><strong>標準回答：</strong>{item.qa.answer || '尚無答案'}</div>
+              {item.qa.notes && <div><strong>備註：</strong>{item.qa.notes}</div>}
+              <div className="qa-catalog-actions">
+                {(item.lifecycle_status === 'draft' || item.lifecycle_status === 'reviewed') && <button type="button" className="line-primary-btn" disabled={busy || !item.qa.answer} onClick={() => void transition(item, 'publish')}>發布</button>}
+                {item.lifecycle_status === 'published' && <button type="button" className="line-danger-btn" disabled={busy} onClick={() => void transition(item, 'retire')}>停用</button>}
+              </div>
+              <details className="studio-technical"><summary>題號、版本與來源資訊</summary><small>{item.qa.id} · v{item.current_version} · {item.qa.category} / {item.qa.tag}<br />Knowledge #{item.id} · {item.source_identity} · 來源 {item.qa.source_ref}</small></details>
+            </div>
           </details>
+          <button type="button" className="studio-text-button studio-row-edit" disabled={busy} title="編輯此題目" aria-label={`編輯問答：${item.qa.question}`} onClick={() => openEdit(item)}><Pencil aria-hidden="true" />編輯</button>
+          </article>
         ))}
-        {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="line-warning" role="status">目前沒有符合條件的問答。</div>}
+        {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="studio-empty" role="status">目前沒有符合條件的問答。</div>}
       </div>
+      <p className="studio-list-footer">修改會先儲存為草稿，確認後再發布。</p>
 
-      <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增問答草稿' : `編輯問答（${editingItem?.qa.id}）`} size="wide" closeDisabled={busy} closeLabel="關閉問答編輯器" footer={<div className="line-drawer-footer"><button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button></div>}>
+      <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增問答草稿' : `編輯問答（${editingItem?.qa.id}）`} size="normal" className="studio-qa-drawer" closeDisabled={busy} closeLabel="關閉問答編輯器" footer={<div className="line-drawer-footer">
+        {editingItem && (editingItem.lifecycle_status === 'draft' || editingItem.lifecycle_status === 'reviewed') && <button type="button" disabled={busy || !editingItem.qa.answer} className="line-secondary-btn" onClick={() => { if (window.confirm('發布目前已儲存的草稿？尚未儲存的編輯內容不會納入；搜尋資料更新完成後才生效。')) void transition(editingItem, 'publish').then((ok) => { if (ok) closeEditor(); }); }}>發布已儲存草稿</button>}
+        {editingItem?.lifecycle_status === 'published' && <button type="button" disabled={busy} className="line-danger-btn" onClick={() => { if (window.confirm('停用目前已發布的問答？歷程將保留。')) void transition(editingItem, 'retire').then((ok) => { if (ok) closeEditor(); }); }}>停用這則問答</button>}
+        <button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button>
+      </div>}>
+        <p className="studio-description">編輯後會先建立草稿，確認答案後再發布。</p>
         <form className="qa-editor-form" onSubmit={save} noValidate>
-          {modalNotice && <div className="line-error" role="alert">{modalNotice}</div>}
-          <label className="qa-editor-field"><span>題目編號 *</span><input required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
+          {(modalNotice || (noticeKind === 'error' && notice)) && <div className="line-error" role="alert">{modalNotice || notice}</div>}
           <label className="qa-editor-field"><span>標準問題 *</span><input required value={formData.question} onChange={(event) => setFormData({ ...formData, question: event.target.value })} /></label>
-          <label className="qa-editor-field"><span>標準回答</span><textarea rows={5} value={formData.answer} placeholder="可先留空；補齊後才能發布。" onChange={(event) => setFormData({ ...formData, answer: event.target.value })} /></label>
-          <label className="qa-editor-field"><span>常見問法／別名（每行一筆）</span><textarea rows={4} value={formData.aliases} onChange={(event) => setFormData({ ...formData, aliases: event.target.value })} /></label>
-          <div className="qa-editor-columns"><label className="qa-editor-field"><span>業務分類</span><input value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value })} /></label><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
-          <label className="qa-editor-field"><span>內部備註</span><input value={formData.notes} onChange={(event) => setFormData({ ...formData, notes: event.target.value })} /></label>
+          <label className="qa-editor-field"><span>標準回答</span><textarea rows={7} value={formData.answer} placeholder="可先留空；補齊後才能發布。" onChange={(event) => setFormData({ ...formData, answer: event.target.value })} /></label>
+          <label className="qa-editor-field"><span>常見問法／別名（每行一筆）</span><textarea rows={3} value={formData.aliases} onChange={(event) => setFormData({ ...formData, aliases: event.target.value })} /></label>
+          <details className="studio-editor-secondary" open={isCreating || undefined}><summary>分類與其他資訊</summary>
+            <label className="qa-editor-field"><span>題目編號 *</span><input required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
+            <div className="qa-editor-columns"><label className="qa-editor-field"><span>業務分類</span><input value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value })} /></label><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
+            <label className="qa-editor-field"><span>內部備註</span><input value={formData.notes} onChange={(event) => setFormData({ ...formData, notes: event.target.value })} /></label>
+          </details>
         </form>
       </Drawer>
     </div>

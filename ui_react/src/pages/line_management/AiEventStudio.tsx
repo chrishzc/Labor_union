@@ -10,8 +10,7 @@ import {
   Laptop,
   Navigation,
   Play,
-  Route,
-  Tag,
+  ShieldCheck,
 } from 'lucide-react';
 import { sessionClient } from '../../api/auth/session_client';
 import '../LineManagementPage.css';
@@ -100,7 +99,7 @@ export const AiEventStudio: React.FC = () => {
         }
       })
       .catch(() => {
-        if (active) setCatalogNotice('正式 navigation/event catalog 讀取失敗；本頁不以本機示範規則替代。');
+        if (active) setCatalogNotice('引導動作讀取失敗，請稍後重新整理。');
       });
 
     return () => { active = false; };
@@ -164,6 +163,7 @@ export const AiEventStudio: React.FC = () => {
   };
 
   const executePreview = async (testText: string) => {
+    if (routerBusy || !testText.trim()) return;
     const score = routerScore.trim() === '' ? null : Number(routerScore);
     const sourceEventId = `studio-router-${Date.now()}`;
     setRouterNotice(null);
@@ -200,14 +200,14 @@ export const AiEventStudio: React.FC = () => {
         if (cardElement) {
           cardElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        setRouterNotice(`成功命中事件規則【${matchedRoute}】，信心度 ${payload.data.confidence}%`);
+        setRouterNotice('已找到符合的引導動作。');
         setRouterNoticeKind('success');
       } else {
-        setRouterNotice(`未命中固定事件規則（kind: ${payload.data.kind}），將走語意比對或轉接。`);
+        setRouterNotice('未命中固定引導動作，請查看詳細結果。');
         setRouterNoticeKind('info');
       }
     } catch {
-      setRouterNotice('Server-owned router preview 失敗；未以本機規則替代。');
+      setRouterNotice('引導動作預覽失敗，請稍後再試。');
       setRouterNoticeKind('error');
     } finally {
       setRouterBusy(false);
@@ -219,237 +219,64 @@ export const AiEventStudio: React.FC = () => {
   };
 
   return (
-    <div className="ai-studio-container">
-      <div className="ai-studio-sidebar">
-        <div className="ai-sidebar-top">
-          <h3><Bot aria-hidden="true" />AI 客服事件規則庫</h3>
-        </div>
-
+    <div className="ai-studio-container studio-guidance-layout">
+      <aside className="ai-studio-sidebar">
+        <div className="ai-sidebar-top"><h3><Bot aria-hidden="true" />引導動作</h3></div>
         <div className="ai-editor-form ai-rule-search-form">
-          <label htmlFor="server-ai-rule-search">搜尋正式規則</label>
-          <input
-            id="server-ai-rule-search"
-            aria-label="搜尋正式事件規則"
-            type="search"
-            placeholder="處理規則、分類或常見問法"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
-          <small>
-            {catalog
-              ? `規則版本 ${catalog.revision} · ${groupedRules.length} 組客服處理規則`
-              : '正在讀取客服處理規則…'}
-          </small>
+          <label htmlFor="server-ai-rule-search">搜尋引導動作</label>
+          <input id="server-ai-rule-search" type="search" placeholder="搜尋動作、分類或常見問法" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+          <small>{catalog ? `共 ${groupedRules.length} 組引導動作` : '正在讀取引導動作…'}</small>
         </div>
-
         {catalogNotice && <div className="line-warning" role="status">{catalogNotice}</div>}
-
         <div className="ai-rule-cards-list">
           {filteredRules.map((rule) => {
             const isSelected = selectedRule?.routeKey === rule.routeKey;
             const isMatched = routerPreview?.route_key === rule.routeKey;
             return (
-              <div
-                key={`${rule.routeKey}:${rule.tier}`}
-                id={`rule-card-${rule.routeKey}`}
-                className={`ai-rule-item-card${isSelected ? ' is-selected' : ''}${isMatched ? ' is-matched' : ''}`}
-                onClick={() => setSelectedRouteKey(rule.routeKey)}
-              >
-                <div className="ai-card-title-row">
-                  <div>
-                    <strong>{rule.routeKey}</strong>
-                    <span className="category-badge ai-rule-tier">{rule.tier}</span>
-                  </div>
-                  {isMatched && (
-                    <span className="ai-rule-state is-matched">
-                      <CheckCircle2 aria-hidden="true" />命中
-                    </span>
-                  )}
-                  {!isMatched && isSelected && (
-                    <span className="ai-rule-state is-selected">
-                      <Navigation aria-hidden="true" />檢視中
-                    </span>
-                  )}
-                </div>
-                <div className="ai-card-tags-row">
-                  {rule.aliases.slice(0, 4).map((alias) => (
-                    <span key={alias} className="tag-chip-sm">{alias}</span>
-                  ))}
-                  {rule.aliases.length > 4 && (
-                    <span className="tag-chip-sm ai-rule-more-count">
-                      +{rule.aliases.length - 4}
-                    </span>
-                  )}
-                </div>
-                <div className="ai-card-metric-row">
-                  <span>共 {rule.aliases.length} 個觸發詞</span>
-                  <small>{rule.publicRoute ? '有目標頁面' : '純導航'}</small>
-                </div>
-              </div>
+              <button type="button" key={`${rule.routeKey}:${rule.tier}`} id={`rule-card-${rule.routeKey}`} aria-pressed={isSelected} className={`ai-rule-item-card studio-rule-choice${isSelected ? ' is-selected' : ''}${isMatched ? ' is-matched' : ''}`} onClick={() => setSelectedRouteKey(rule.routeKey)}>
+                <span className="ai-card-title-row"><strong>{rule.aliases[0] || rule.routeKey}</strong>{isMatched && <span className="ai-rule-state is-matched"><CheckCircle2 aria-hidden="true" />命中</span>}</span>
+                <span className="ai-card-metric-row">{rule.aliases.length} 種常見問法 · {rule.publicRoute ? '導向服務頁面' : '依系統流程處理'}</span>
+              </button>
             );
           })}
-          {catalog && filteredRules.length === 0 && (
-            <div className="line-warning" role="status">
-              沒有符合目前搜尋條件的正式事件規則。
-            </div>
-          )}
+          {catalog && filteredRules.length === 0 && <p className="studio-empty" role="status">沒有符合條件的引導動作。</p>}
         </div>
-      </div>
+        <p className="studio-readonly-note"><ShieldCheck aria-hidden="true" />由系統管理，供檢視與測試</p>
+      </aside>
 
       <div className="ai-studio-editor-pane">
-        <div className="line-success" role="status">
-          查看客服回覆與導向規則，或輸入問句預覽處理方式。
-        </div>
-
         {selectedRule ? (
           <div className="ai-editor-card ai-rule-detail-card">
-            <div className="ai-editor-header">
-              <div className="ai-editor-heading-group">
-                <h4><Route aria-hidden="true" />事件規則：<code>{selectedRule.routeKey}</code></h4>
-                <span className="category-badge ai-rule-detail-tier">
-                  層級：{selectedRule.tier}
-                </span>
-              </div>
-              <span className="ai-rule-revision">
-                Rev {selectedRule.revision} · {selectedRule.sourceIdentity}
-              </span>
+            <div className="ai-editor-header"><div><h2>{selectedRule.aliases[0] || selectedRule.routeKey}</h2><p className="studio-description">查看觸發問法、服務入口與引導結果。</p></div><span className="studio-muted-badge">唯讀引導動作</span></div>
+            <div className="studio-guidance-target"><Navigation aria-hidden="true" /><div><small>觸發後的服務入口</small><strong>{selectedRule.publicRoute ? '導向服務頁面' : '依系統流程處理'}</strong></div>
+              {selectedRule.publicRoute && getTrueLiffUrl(selectedRule.publicRoute) && <a href={getTrueLiffUrl(selectedRule.publicRoute)!} target="_blank" rel="noreferrer" className="ai-route-link is-liff"><ExternalLink aria-hidden="true" />開啟服務頁面</a>}
             </div>
-
-            <div className="ai-rule-detail-body">
-              <div className="ai-rule-fact-grid">
-                <div className="ai-rule-fact-card">
-                  <strong><Route aria-hidden="true" />處理規則代碼
-                  </strong>
-                  <code className="ai-route-key">ID: {selectedRule.routeKey}</code>
-                </div>
-                <div className="ai-rule-fact-card">
-                  <strong><Navigation aria-hidden="true" />目標導航頁面（Public Route）
-                  </strong>
-                  {selectedRule.publicRoute ? (
-                    <div className="ai-route-stack">
-                      <div className="ai-route-row">
-                        <code className="ai-public-route">
-                          {selectedRule.publicRoute}
-                        </code>
-                        <div className="ai-route-actions">
-                          {getTrueLiffUrl(selectedRule.publicRoute) && (
-                            <a
-                              href={getTrueLiffUrl(selectedRule.publicRoute)!}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="ai-route-link is-liff"
-                              title="開啟正式 LINE LIFF 網址（https://liff.line.me/...）"
-                            >
-                              <ExternalLink aria-hidden="true" />開啟真實 LIFF
-                            </a>
-                          )}
-                          <a
-                            href={getLocalTestUrl(selectedRule.publicRoute)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ai-route-link"
-                            title="以本機 FastAPI 靜態頁面開啟（例如 /line-identity）"
-                          >
-                            <Laptop aria-hidden="true" />本機預覽
-                          </a>
-                        </div>
-                      </div>
-                      {getTrueLiffUrl(selectedRule.publicRoute) && (
-                        <div className="ai-liff-url">
-                          <span>真實 LIFF 連結：</span>
-                          <code>
-                            {getTrueLiffUrl(selectedRule.publicRoute)}
-                          </code>
-                        </div>
-                      )}
-                      {!liffId && (
-                        <small className="ai-route-config-note">尚未從 runtime config 取得 LIFF ID，因此不顯示正式 LIFF 連結。</small>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="ai-route-empty">未設定跳轉頁面（純事件分流）</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="ai-alias-section">
-                <div className="ai-alias-header">
-                  <strong><Tag aria-hidden="true" />觸發別名庫（共 {selectedRule.aliases.length} 組問法）
-                  </strong>
-                  <small>選擇任一問法即可帶入下方模擬器測試</small>
-                </div>
-                <div className="ai-alias-list">
-                  {selectedRule.aliases.map((alias) => (
-                    <button
-                      type="button"
-                      key={alias}
-                      className="ai-alias-button"
-                      title="點擊將此問句填入下方測試並執行"
-                      onClick={() => {
-                        setRouterInput(alias);
-                        void executePreview(alias);
-                      }}
-                    >
-                      問法：{alias}
-                      <span><Play aria-hidden="true" />測試</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="ai-rule-quick-row">
-                <button
-                  type="button"
-                  className="line-primary-btn"
-                  onClick={() => {
-                    const firstAlias = selectedRule.aliases[0] || selectedRule.routeKey;
-                    setRouterInput(firstAlias);
-                    void executePreview(firstAlias);
-                  }}
-                >
-                  <Play aria-hidden="true" />以首選問句模擬此規則
-                </button>
-              </div>
+            <div className="ai-alias-section"><div className="ai-alias-header"><strong>常見觸發問法</strong><small>點選帶入問句，再按「預覽引導動作」。</small></div>
+              <div className="ai-alias-list">{selectedRule.aliases.map((alias) => <button type="button" key={alias} className="ai-alias-button" disabled={routerBusy} onClick={() => { setRouterInput(alias); setRouterPreview(null); setRouterNotice(null); }}>{alias}</button>)}</div>
             </div>
+            <details className="studio-technical"><summary>連結與技術資訊</summary>
+              <dl className="studio-facts"><dt>動作代碼</dt><dd><code>{selectedRule.routeKey}</code></dd><dt>分類</dt><dd>{selectedRule.tier}</dd><dt>版本與來源</dt><dd>Rev {selectedRule.revision} · {selectedRule.sourceIdentity}</dd><dt>目錄版本</dt><dd>規則版本 {catalog?.revision}</dd><dt>目標路徑</dt><dd>{selectedRule.publicRoute || '未設定跳轉頁面'}</dd></dl>
+              {selectedRule.publicRoute && <div className="ai-route-actions">
+                {getTrueLiffUrl(selectedRule.publicRoute) && <a href={getTrueLiffUrl(selectedRule.publicRoute)!} target="_blank" rel="noreferrer" className="ai-route-link is-liff"><ExternalLink aria-hidden="true" />開啟真實 LIFF</a>}
+                <a href={getLocalTestUrl(selectedRule.publicRoute)} target="_blank" rel="noreferrer" className="ai-route-link"><Laptop aria-hidden="true" />本機預覽</a>
+              </div>}
+              {selectedRule.publicRoute && getTrueLiffUrl(selectedRule.publicRoute) && <p className="ai-liff-url">正式 LIFF 連結：{getTrueLiffUrl(selectedRule.publicRoute)}</p>}
+              {!liffId && <p className="studio-description">尚未取得 LIFF ID，目前無法顯示正式服務連結。</p>}
+            </details>
           </div>
-        ) : (
-          <div className="ai-editor-card ai-rule-detail-card">
-            <div className="line-warning" role="status">請從左側點選一組事件規則進行查看。</div>
-          </div>
-        )}
+        ) : <div className="ai-editor-card"><p className="studio-empty">{catalogNotice ? '暫時無法查看引導動作。' : catalog ? '目前沒有可查看的引導動作。' : '正在讀取引導動作…'}</p></div>}
 
-        <div className="ai-simulator-card">
-          <section className="ai-router-simulator" aria-labelledby="ai-router-simulator-title">
-            <div className="ai-router-simulator-heading">
-              <div>
-                <h4 id="ai-router-simulator-title"><Navigation aria-hidden="true" />客服問句處理測試</h4>
-                <p>輸入問句，查看系統會如何處理；此預覽不會儲存變更，也不會產生實際 AI 回覆。</p>
-              </div>
-            </div>
-            <label htmlFor="server-router-input">測試問句</label>
-            <div className="ai-router-input-row">
-            <input
-              id="server-router-input"
-              aria-label="客服測試問句"
-              value={routerInput}
-              onChange={(event) => setRouterInput(event.target.value)}
-            />
-            <button type="button" className="line-primary-btn" disabled={routerBusy || !routerInput.trim()} onClick={() => void previewServerRouter()}>
-              <Play aria-hidden="true" />{routerBusy ? '測試中…' : '預覽問句處理方式'}
-            </button>
-            </div>
-            {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未預覽問句處理方式。</p>}
-            {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
-            {routerPreview && (
-              <div className="ai-router-result" aria-label="問句處理預覽結果">
-                <div><span>問句分類</span><strong>{routerPreview.semantic_bucket}</strong></div>
-                <div><span>處理規則</span><strong>{routerPreview.route_key ?? '未命中固定路由'}</strong></div>
-                <div><span>信心度</span><strong>{routerPreview.confidence}%</strong></div>
-                <div><span>結果類型</span><strong>{routerPreview.kind}</strong></div>
-              </div>
-            )}
-          </section>
-        </div>
+        <div className="ai-simulator-card"><section className="ai-router-simulator" aria-labelledby="ai-router-simulator-title">
+          <div className="ai-router-simulator-heading"><div><h3 id="ai-router-simulator-title">預覽引導動作</h3><p>確認問句會如何引導；不儲存變更、不產生實際 AI 回覆。</p></div></div>
+          <label htmlFor="server-router-input">測試問句</label>
+          <div className="ai-router-input-row"><input id="server-router-input" aria-label="客服測試問句" value={routerInput} disabled={routerBusy} onChange={(event) => setRouterInput(event.target.value)} /><button type="button" className="line-primary-btn" disabled={routerBusy || !routerInput.trim()} onClick={() => void previewServerRouter()}><Play aria-hidden="true" />{routerBusy ? '預覽中…' : '預覽引導動作'}</button></div>
+          {!routerNotice && !routerPreview && <p className="ai-router-empty">尚未預覽引導動作。</p>}
+          {routerNotice && <div className={`ai-router-notice is-${routerNoticeKind ?? 'info'}`} role="status">{routerNotice}</div>}
+          {routerPreview && <div aria-label="問句處理預覽結果">
+            {routerPreview.route_key && <p className="studio-description">引導動作：{groupedRules.find((rule) => rule.routeKey === routerPreview.route_key)?.aliases[0] || '已命中系統引導動作'}</p>}
+            <details className="studio-technical"><summary>詳細結果</summary><div className="ai-router-result"><div><span>問句分類</span><strong>{routerPreview.semantic_bucket}</strong></div><div><span>引導動作代碼</span><strong>{routerPreview.route_key ?? '未命中固定動作'}</strong></div><div><span>信心度</span><strong>{routerPreview.confidence}%</strong></div><div><span>結果類型</span><strong>{routerPreview.kind}</strong></div></div></details>
+          </div>}
+        </section></div>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ const qaContent = (id: string, answer: string) => JSON.stringify({
   schema: 'line.common_qa.v1', id, category: '月嫂媒合', tag: '常見問題',
   question: `${id} 的標準問題`, aliases: [`${id} 的別名`], answer,
   source_ref: 'document/line/QA問答集.xlsx', notes: null, migration_status: 'ready',
+
 });
 
 const items = [
@@ -58,8 +59,8 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/knowledge/items?limit=500', expect.objectContaining({ credentials: 'include' }));
 
     fireEvent.change(screen.getByLabelText('問答狀態'), { target: { value: 'published' } });
-    expect(screen.getByText(/QA-003 · QA-003 的標準問題/)).toBeInTheDocument();
-    expect(screen.queryByText(/QA-001 · QA-001 的標準問題/)).not.toBeInTheDocument();
+    expect(screen.getByText(/QA-003 的標準問題/)).toBeInTheDocument();
+    expect(screen.queryByText(/QA-001 的標準問題/)).not.toBeInTheDocument();
   });
 
   it('草稿可直接發布，並可停用、編修與重建索引', async () => {
@@ -67,7 +68,7 @@ describe('正式 Knowledge QA 管理 panel', () => {
     render(React.createElement(CommonQaCatalogPanel));
     await waitFor(() => expect(screen.getByText(/共 3 筆/)).toBeInTheDocument());
 
-    expect(screen.getByText(/已載入 3 筆問答/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('更多操作'));
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: '匯入／補齊內建 54 題' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', expect.objectContaining({ method: 'POST' })));
@@ -75,10 +76,12 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(await screen.findByText(/本次補入 51 題、發布 39 題/)).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '送審完成' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('QA-001 的標準問題'));
     fireEvent.click(screen.getAllByRole('button', { name: '發布' })[0]);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST' })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/1/publish', expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify({ expected_version: 1, reason: 'AI 客服工作室：publish QA-001' }) })));
     expect(await screen.findByText('新答案已發布，問答搜尋資料更新完成後才會啟用。')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByText('QA-003 的標準問題'));
     fireEvent.click(screen.getByRole('button', { name: '停用' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items/3/retire', expect.objectContaining({ method: 'POST' })));
 
@@ -89,5 +92,26 @@ describe('正式 Knowledge QA 管理 panel', () => {
     expect(screen.getByRole('heading', { name: '編輯問答（QA-001）' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '儲存為草稿' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items', expect.objectContaining({ method: 'POST' })));
+  });
+  it('跨頁指定題目會開啟正式資料編輯器，儲存仍建立同一來源的新草稿', async () => {
+    const fetchMock = mockKnowledgeApi();
+    render(<CommonQaCatalogPanel initialQaId="QA-003" />);
+    expect(await screen.findByRole('heading', { name: '編輯問答（QA-003）' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('標準回答'), { target: { value: '調整後的正式草稿答案' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存為草稿' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/items', expect.objectContaining({ method: 'POST' })));
+    const write = fetchMock.mock.calls.find(([url, init]) => String(url) === '/api/v1/knowledge/items' && init?.method === 'POST');
+    const payload = JSON.parse(String(write?.[1]?.body));
+    expect(payload.source_identity).toBe('line-common-qa:QA-003');
+    expect(JSON.parse(payload.content).answer).toBe('調整後的正式草稿答案');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/publish'))).toBe(false);
+  });
+
+  it('從知識缺口帶入問題時只開啟新草稿，不會自動寫入或發布', async () => {
+    const fetchMock = mockKnowledgeApi();
+    render(<CommonQaCatalogPanel initialQuestion="需要補強的新問題" />);
+    expect(await screen.findByLabelText('標準問題 *')).toHaveValue('需要補強的新問題');
+    expect(screen.getByLabelText('題目編號 *')).toHaveValue('');
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
   });
 });
