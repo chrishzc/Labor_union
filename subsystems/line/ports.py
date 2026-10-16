@@ -123,6 +123,9 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupPage,
     LinkedLineAdmin,
     OrderLineAudience,
+    LineOrderGroupWorkspacePage,
+    LineOrderGroupWorkspaceRecord,
+    LineOrderGroupWorkspaceEventPage,
 )
 from subsystems.line.notification_failure_current_fact import (
     LineNotificationFailureCurrentFactQuery,
@@ -795,6 +798,16 @@ class LineRichMenuMediaAssetQueryRepositoryPort(Protocol):
 
 
 class LineOrderGroupBindingRepositoryPort(Protocol):
+    def workspace_list(
+        self, *, search: str | None, status: str | None, page: int, page_size: int
+    ) -> LineOrderGroupWorkspacePage: ...
+
+    def workspace_get(self, case_no: str) -> LineOrderGroupWorkspaceRecord | None: ...
+
+    def workspace_events(
+        self, case_no: str, *, page: int, page_size: int
+    ) -> LineOrderGroupWorkspaceEventPage: ...
+
     def get(self, case_no: str) -> LineOrderGroupBindingSnapshot | None: ...
 
     def get_by_group(self, group_id: str) -> LineOrderGroupBindingSnapshot | None: ...

@@ -51,3 +51,47 @@ export type LineOrderGroupRecord = z.infer<typeof LineOrderGroupRecordSchema>;
 export type LineOrderGroupPage = z.infer<typeof LineOrderGroupPageSchema>;
 export type LineOrderGroupEvent = z.infer<typeof LineOrderGroupEventSchema>;
 export type LineOrderGroupEventPage = z.infer<typeof LineOrderGroupEventPageSchema>;
+
+export const LineOrderGroupParticipantSchema = z.strictObject({
+  role: z.enum(['customer', 'staff']),
+  name: z.string().nullable(),
+  membership_status: z.enum(['joined', 'left', 'pending', 'unknown']),
+});
+export const LineOrderGroupWorkspaceEventSchema = z.strictObject({
+  event_key: z.string().min(1),
+  case_no: z.string().min(1),
+  event_type: z.string().min(1),
+  occurred_at: z.string().datetime({ offset: true }),
+  participant_role: z.enum(['customer', 'staff']).nullable(),
+  participant_name: z.string().nullable(),
+});
+export const LineOrderGroupWorkspaceRecordSchema = z.strictObject({
+  case_no: z.string().min(1),
+  status: LineOrderGroupStatusSchema,
+  customer_name: z.string().nullable(),
+  bound_at: z.string().datetime({ offset: true }).nullable(),
+  last_invitation_at: z.string().datetime({ offset: true }).nullable(),
+  members: z.array(LineOrderGroupParticipantSchema),
+  latest_event: LineOrderGroupWorkspaceEventSchema.nullable(),
+}).refine(value => value.latest_event === null || value.latest_event.case_no === value.case_no, {
+  message: '最近動態的案件不一致。',
+});
+export const LineOrderGroupWorkspacePageSchema = z.strictObject({
+  items: z.array(LineOrderGroupWorkspaceRecordSchema),
+  page: z.number().int().positive(),
+  page_size: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  total_pages: z.number().int().nonnegative(),
+});
+export const LineOrderGroupWorkspaceEventPageSchema = z.strictObject({
+  items: z.array(LineOrderGroupWorkspaceEventSchema),
+  page: z.number().int().positive(),
+  page_size: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  total_pages: z.number().int().nonnegative(),
+});
+export type LineOrderGroupParticipant = z.infer<typeof LineOrderGroupParticipantSchema>;
+export type LineOrderGroupWorkspaceEvent = z.infer<typeof LineOrderGroupWorkspaceEventSchema>;
+export type LineOrderGroupWorkspaceRecord = z.infer<typeof LineOrderGroupWorkspaceRecordSchema>;
+export type LineOrderGroupWorkspacePage = z.infer<typeof LineOrderGroupWorkspacePageSchema>;
+export type LineOrderGroupWorkspaceEventPage = z.infer<typeof LineOrderGroupWorkspaceEventPageSchema>;

@@ -4,12 +4,42 @@
  */
 import type {
   LineOrderGroupEvent, LineOrderGroupRecord, LineOrderGroupStatus,
+  LineOrderGroupWorkspaceEvent, LineOrderGroupWorkspaceRecord,
 } from '../../api/line_order_groups/line_order_group_query_schemas';
 
 const STATUS_LABELS: Record<LineOrderGroupStatus, string> = {
   unbound: '尚未綁定', bound: '已綁定', inviting: '邀請中', active: '運作中',
   attention: '需要處理', replaced: '已替換', released: '已解除',
 };
+
+export function lineOrderGroupStatusLabel(status: LineOrderGroupStatus): string {
+  return STATUS_LABELS[status];
+}
+
+export function lineOrderGroupEventLabel(event: LineOrderGroupWorkspaceEvent): string {
+  const person = event.participant_name || (event.participant_role === 'customer' ? '客戶' : event.participant_role === 'staff' ? '月嫂' : '成員');
+  const labels: Record<string, string> = {
+    bound: '已綁定服務群組', replaced: '已更換綁定群組', released: '已解除群組綁定',
+    invitation_relayed: '邀請已排入發送', member_joined: `${person}已加入群組`,
+    member_left: `${person}已離開群組`, group_activated: '群組開始運作',
+  };
+  return labels[event.event_type] ?? '群組紀錄已更新';
+}
+
+export function lineOrderGroupReason(record: LineOrderGroupWorkspaceRecord): string {
+  if (record.status === 'released') return '綁定已解除';
+  if (record.status === 'unbound') return '尚無群組綁定';
+  const affected = (state: 'left' | 'pending') => {
+    const roles = new Set(record.members.filter(member => member.membership_status === state).map(member => member.role));
+    return [roles.has('customer') ? '客戶' : '', roles.has('staff') ? '月嫂' : ''].filter(Boolean).join('與');
+  };
+  if (affected('left')) return `${affected('left')}已離開群組`;
+  if (record.members.length === 0 || record.members.some(member => member.membership_status === 'unknown')) return '加入狀況待確認';
+  if (record.status === 'bound' && !record.last_invitation_at) return '尚無邀請紀錄';
+  if (affected('pending')) return `${affected('pending')}尚未確認加入`;
+  const roles = new Set(record.members.map(member => member.role));
+  return roles.has('customer') && roles.has('staff') ? '客戶與月嫂皆已加入' : '已收到成員加入紀錄';
+}
 
 function maskIdentity(value: string | null, emptyLabel: string): string {
   if (value === null) return emptyLabel;

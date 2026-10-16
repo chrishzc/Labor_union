@@ -6,6 +6,9 @@ Description: 定義客服查詢、結案與回覆 Preview／Apply 的框架無�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
+from typing import Literal
 
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -29,6 +32,65 @@ class CustomerServiceListQuery:
     search: str | None = None
     page: int = 1
     page_size: int = 25
+
+
+class CustomerServiceReminderSource(StrEnum):
+    HANDOFF = "handoff"
+    COMPLAINT = "complaint"
+    FEEDBACK = "feedback"
+    ORDER = "order"
+    SERVICE = "service"
+    BINDING = "binding"
+    UNKNOWN = "unknown"
+
+
+CustomerServiceReminderStatus = Literal["open", "waiting", "handling"]
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceReminderQuery:
+    status: CustomerServiceReminderStatus = "open"
+    source: CustomerServiceReminderSource | None = None
+    search: str | None = None
+    page: int = 1
+    page_size: int = 25
+
+    def __post_init__(self) -> None:
+        if self.status not in ("open", "waiting", "handling"):
+            raise ValueError("invalid customer service reminder status")
+        if self.source is not None and not isinstance(self.source, CustomerServiceReminderSource):
+            raise ValueError("invalid customer service reminder source")
+        if self.page < 1 or not 1 <= self.page_size <= 100:
+            raise ValueError("invalid customer service reminder page")
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceReminder:
+    ticket_id: int
+    client_name: str | None
+    case_no: str | None
+    status: Literal["waiting", "handling"]
+    assigned_admin_name: str | None
+    source: CustomerServiceReminderSource
+    sources: tuple[CustomerServiceReminderSource, ...]
+    reason: str
+    is_priority: bool
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceReminderSummary:
+    waiting: int
+    handling: int
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceReminderPage:
+    items: tuple[CustomerServiceReminder, ...]
+    total: int
+    page: int
+    page_size: int
+    summary: CustomerServiceReminderSummary
 
 
 @dataclass(frozen=True, slots=True)

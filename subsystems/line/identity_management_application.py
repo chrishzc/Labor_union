@@ -21,6 +21,7 @@ from shared_kernel.ports import OutboxIntent
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
+    LineIdentityCandidateQuery,
     LineIdentityCurrentFactQuery,
     LineIdentityCurrentFactReadback,
     LineIdentityRevocationPreview,
@@ -46,6 +47,12 @@ from subsystems.line.rich_menu_binding import (
 IDENTITY_MENU_RESET_INTENT = "line.identity.revocation.menu_reset"
 
 
+def _management_detail(unit_of_work, line_user_id, subject_type):
+    if subject_type is None:
+        return unit_of_work.identity_management.detail(line_user_id)
+    return unit_of_work.identity_management.detail(line_user_id, subject_type)
+
+
 class LineIdentityManagementApplication:
     def __init__(
         self,
@@ -58,6 +65,14 @@ class LineIdentityManagementApplication:
     def list(self, query: LineIdentityBindingListQuery):
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.list(query)
+
+    def replacement_candidates(self, query: LineIdentityCandidateQuery):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.identity_management.replacement_candidates(query)
+
+    def subject_contexts(self, subjects):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.identity_management.subject_contexts(subjects)
 
     def unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
         with self._unit_of_work_factory() as unit_of_work:
@@ -143,9 +158,9 @@ class LineIdentityManagementApplication:
                 "status": "bound",
             }
 
-    def detail(self, line_user_id: LineUserId):
+    def detail(self, line_user_id: LineUserId, subject_type=None):
         with self._unit_of_work_factory() as unit_of_work:
-            return unit_of_work.identity_management.detail(line_user_id)
+            return _management_detail(unit_of_work, line_user_id, subject_type)
 
     def current_fact(self, line_user_id: LineUserId) -> LineIdentityCurrentFactReadback:
         """Return the zero-write LINE identity owner readback."""
@@ -260,9 +275,10 @@ class LineIdentityManagementApplication:
     def preview_revocation(
         self,
         line_user_id: LineUserId,
+        subject_type=None,
     ) -> LineIdentityRevocationPreview:
         with self._unit_of_work_factory() as unit_of_work:
-            binding = unit_of_work.identity_management.detail(line_user_id)
+            binding = _management_detail(unit_of_work, line_user_id, subject_type)
             publication = unit_of_work.identity_management.default_menu_publication()
         blockers = _revocation_blockers(binding.status, publication)
         return LineIdentityRevocationPreview(
@@ -276,9 +292,10 @@ class LineIdentityManagementApplication:
         self,
         line_user_id: LineUserId,
         target_subject_reference: str,
+        subject_type=None,
     ) -> LineIdentityReplacementPreview:
         with self._unit_of_work_factory() as unit_of_work:
-            binding = unit_of_work.identity_management.detail(line_user_id)
+            binding = _management_detail(unit_of_work, line_user_id, subject_type)
             candidate = unit_of_work.identity_management.subject_candidate(
                 binding.subject_type,
                 target_subject_reference,
@@ -296,7 +313,10 @@ class LineIdentityManagementApplication:
         require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
         _require_reason(command.reason)
         with self._unit_of_work_factory() as unit_of_work:
-            current = unit_of_work.identities.get(command.line_user_id)
+            current = (
+                unit_of_work.identities.get(command.line_user_id, command.subject_type)
+                if command.subject_type is not None else unit_of_work.identities.get(command.line_user_id)
+            )
             if current is None or current.subject_type is None:
                 raise LookupError("line_identity_binding_not_found")
             if current.subject_reference == command.target_subject_reference:
@@ -339,7 +359,7 @@ class LineIdentityManagementApplication:
                     command.line_user_id.value,
                 )
             )
-            result = unit_of_work.identity_management.detail(command.line_user_id)
+            result = _management_detail(unit_of_work, command.line_user_id, command.subject_type)
             unit_of_work.commit()
         return result
 
@@ -348,7 +368,7 @@ class LineIdentityManagementApplication:
         require_line_capability(command.actor, LineCapability.IDENTITY_BINDING_MANAGE)
         _require_reason(command.reason)
         with self._unit_of_work_factory() as unit_of_work:
-            request = _request_revocation_in_uow(unit_of_work, command)
+            request = _request_revocation_in_uow(unit_of_work, command, subject_type=command.subject_type)
             unit_of_work.commit()
         return request
 
@@ -630,6 +650,8 @@ def _completion_key(request, manual: bool) -> IdempotencyKey:
 
 def _require_same_request(request, command) -> None:
     if request.line_user_id != command.line_user_id:
+        raise RuntimeError("line_identity_revocation_idempotency_conflict")
+    if command.subject_type is not None and request.subject_type != command.subject_type:
         raise RuntimeError("line_identity_revocation_idempotency_conflict")
     expected = (
         command.expected_version,

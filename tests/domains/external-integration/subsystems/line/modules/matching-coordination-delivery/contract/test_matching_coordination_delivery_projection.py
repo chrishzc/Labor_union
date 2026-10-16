@@ -1,4 +1,5 @@
 """Focused owner-lineage regression for M3 -> LINE materialization."""
+import json
 
 from infrastructure.mysql.line_matching_coordination_delivery_projection import (
     MySqlLineMatchingCoordinationDeliveryProjection,
@@ -6,8 +7,9 @@ from infrastructure.mysql.line_matching_coordination_delivery_projection import 
 
 
 class _Cursor:
-    def __init__(self, calls):
+    def __init__(self, calls, description):
         self.calls = calls
+        self.description = description
         self.row = None
 
     def __enter__(self):
@@ -28,7 +30,9 @@ class _Cursor:
         elif "FROM line_identity_role_bindings" in statement:
             self.row = {"binding_status": "bound", "aggregate_version": 3}
         elif "FROM line_configuration_current" in statement:
-            self.row = {"revision": 7}
+            self.row = {'configuration_kind': 'message_templates', 'revision': 7, 'definition_snapshot': json.dumps({
+                'templates': [{'id': 'LU96-M3-ZERO-POOL-CARD-V1', 'message_type': 'text', 'content': self.description, 'variables': []}],
+            })}
         else:
             self.row = None
 
@@ -37,15 +41,16 @@ class _Cursor:
 
 
 class _Connection:
-    def __init__(self):
+    def __init__(self, description):
         self.calls = []
+        self.description = description
 
     def cursor(self):
-        return _Cursor(self.calls)
+        return _Cursor(self.calls, self.description)
 
 
-def _project():
-    connection = _Connection()
+def _project(selector='assignment.client_snapshot', description='請確認這次服務條件。'):
+    connection = _Connection(description)
     command = type("Command", (), {"case_no": "CASE-219"})()
     receipt = type("Receipt", (), {"decision_event_id": "decision:219"})()
     payload = MySqlLineMatchingCoordinationDeliveryProjection(connection).project(
@@ -53,7 +58,7 @@ def _project():
         receipt,
         "match-219:notify:customer",
         {
-            "recipient_selector": "assignment.client_snapshot",
+            "recipient_selector": selector,
             "result_state": "accepted",
         },
     )
@@ -92,3 +97,16 @@ def test_draft_snapshot_is_fail_closed_behind_confirmation_gate():
     assert "s.status='draft' AND NOT EXISTS (" in recipient_sql
     assert "COALESCE(gate_e.confirmation_value,'pending')" in recipient_sql
     assert "NOT IN ('confirmed','manually_confirmed')" in recipient_sql
+
+
+def test_new_card_reads_configured_copy_without_changing_actions_or_case_fields():
+    _, before = _project('matching.request.participants', '原本的說明文字。')
+    _, after = _project('matching.request.participants', '更新後的通知說明。')
+    old_bubble = before['message']['contents']['contents'][-1]
+    new_bubble = after['message']['contents']['contents'][-1]
+    assert old_bubble['body']['contents'][-1]['text'] == '原本的說明文字。'
+    assert new_bubble['body']['contents'][-1]['text'] == '更新後的通知說明。'
+    assert old_bubble['body']['contents'][:-1] == new_bubble['body']['contents'][:-1]
+    assert old_bubble['footer'] == new_bubble['footer']
+    assert before['recipient_snapshot'] == after['recipient_snapshot']
+    assert before['interaction']['token'] == after['interaction']['token']

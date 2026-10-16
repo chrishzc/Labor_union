@@ -150,6 +150,36 @@ class LineIdentityBindingManagementView:
     revocation_request_id: int | None = None
     revocation_status: LineIdentityRevocationStatus | None = None
     revoked_at: datetime | None = None
+    subject_display_reference: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentitySubjectContext:
+    subject_type: LineBindingSubjectType
+    subject_reference: str
+    subject_name: str
+    subject_display_reference: str | None
+    current_line_user_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityCandidateQuery:
+    subject_type: LineBindingSubjectType
+    search: str = ""
+    page: int = 1
+    page_size: int = 25
+
+    def __post_init__(self):
+        if self.page < 1 or not 1 <= self.page_size <= 100 or len(self.search) > 191:
+            raise ValueError("line_identity_candidate_query_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityCandidatePage:
+    items: tuple[LineIdentitySubjectContext, ...]
+    total: int
+    page: int
+    page_size: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +250,7 @@ class RequestLineIdentityRevocationCommand:
     reason: str
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    subject_type: LineBindingSubjectType | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +262,7 @@ class ReplaceLineIdentitySubjectCommand:
     reason: str
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
+    subject_type: LineBindingSubjectType | None = None
 
 
 @dataclass(frozen=True, slots=True)

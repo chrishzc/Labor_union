@@ -1,3 +1,4 @@
+import { CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE } from './fixtures/customer_service_reminder_fixtures';
 /**
  * File: line_management_no_fake_mutation.test.tsx
  * Description: 驗證 LINE successor 不暴露未授權控制項，且未觸發 Preview／Apply 或 provider 請求。
@@ -5,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CustomerServiceClient } from '../../../../../../api/customer_service/customer_service_client';
+import type { CustomerServiceClient, CustomerServiceReminderClient } from '../../../../../../api/customer_service/customer_service_client';
 import { CustomerServiceClientError } from '../../../../../../api/customer_service/customer_service_errors';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
@@ -16,7 +17,7 @@ import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOME
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
 
-type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
+type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'> & Partial<CustomerServiceReminderClient>;
 type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'>;
 
 afterEach(() => vi.restoreAllMocks());
@@ -25,6 +26,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
   it('查詢失敗先顯示可讀訊息，技術錯誤碼預設收合', async () => {
     const unavailable = new CustomerServiceClientError('unavailable', 'HTTP_503', 'Service Unavailable', 503, true);
     const customer: CustomerServiceQueryClient = {
+      listReminders: vi.fn().mockRejectedValue(unavailable),
       getSummary: vi.fn().mockRejectedValue(unavailable),
       listTickets: vi.fn().mockRejectedValue(unavailable),
       getTicketDetail: vi.fn().mockRejectedValue(new Error('not used')),
@@ -33,12 +35,10 @@ describe('LINE 管理頁禁止假 mutation', () => {
     render(<LineManagementPage customerService={customer} />);
 
     const alerts = await screen.findAllByRole('alert');
-    expect(alerts).toHaveLength(2);
-    for (const alert of alerts) {
-      expect(within(alert).getByText('Service Unavailable')).toBeInTheDocument();
-      expect(within(alert).getByText('HTTP_503')).toBeInTheDocument();
-      expect(alert.querySelector('details')).not.toHaveAttribute('open');
-    }
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent('客服案件暫時無法載入');
+    expect(alerts[0]).not.toHaveTextContent('HTTP_503');
+    expect(alerts[0]).not.toHaveTextContent('Service Unavailable');
   });
 
   it('未授權控制項不進入畫面，合法流程在未操作前維持零 mutation', async () => {
@@ -48,6 +48,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
     const previewResolve = vi.fn();
     const applyResolve = vi.fn();
     const customerCandidate = {
+      listReminders: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE),
       getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
       listTickets: vi.fn().mockResolvedValue({
         ...CUSTOMER_SERVICE_PAGE_FIXTURE,
@@ -112,42 +113,36 @@ describe('LINE 管理頁禁止假 mutation', () => {
         lineConfiguration={configuration}
         richMenuDraft={richMenuDraft}
         onboardingClient={onboardingClient}
+        notificationTemplateClient={{ get: vi.fn(async (ruleId: string) => ({ rule_id: ruleId, template_id: 'deposit_template', name: '訂金確認通知', content: '正式訂金通知內容', revision: 1, variables: [], sample_preview: '正式訂金通知內容' })), update: vi.fn() }}
       />
     );
-    await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('ORD-TEST-0031')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole('button', { name: '查看明細' })[0]);
-    await screen.findByRole('button', { name: '檢查結案影響' });
-    expect(screen.queryByRole('button', { name: /未開放/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(screen.queryByRole('button', { name: '檢查結案影響' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看明細' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
     expect((await screen.findAllByText('案件進度')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
-    await screen.findByText('U123••••cdef');
+    await screen.findByText('測試客戶甲');
     expect(screen.queryByRole('button', { name: /產生綁定邀請/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
-    await screen.findByRole('button', { name: '檢查解除影響' });
+    fireEvent.click(screen.getByRole('button', { name: '查看測試客戶甲的客戶身分' }));
+    await screen.findByRole('button', { name: '解除此身分' });
     expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: '關閉身分明細' }));
 
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    const ruleWorkspace = (await screen.findByRole('heading', { name: 'LINE 通知與發送' })).closest('section');
+    const ruleWorkspace = (await screen.findByRole('heading', { name: '通知設定' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
-    fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: 'Onboarding 訊息' }));
-    await within(ruleWorkspace as HTMLElement).findByRole('heading', { name: /新好友加入即時歡迎詞與功能導覽/ });
-    expect(within(ruleWorkspace as HTMLElement).queryByText('執行與送達狀態請查通知紀錄')).not.toBeInTheDocument();
+    await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯新好友歡迎訊息內容' });
+    expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/多日排程關懷設定/)).not.toBeInTheDocument();
-    expect(within(ruleWorkspace as HTMLElement).queryByText(/Webhook 自動推播中|Webhook自動推播中/)).not.toBeInTheDocument();
-    fireEvent.click(within(ruleWorkspace as HTMLElement).getByRole('button', { name: '規則目錄與編輯' }));
-    const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });
-    expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();
-    fireEvent.click(ruleCard);
+    fireEvent.click(await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯訂金確認通知內容' }));
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: '關閉通知內容' }));
 
     expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '三方服務群組' }));
@@ -178,6 +173,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const customer: CustomerServiceQueryClient = {
+      listReminders: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_REMINDER_PAGE_FIXTURE),
       getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),
       listTickets: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_PAGE_FIXTURE),
       getTicketDetail: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_DETAIL_FIXTURE),
@@ -206,7 +202,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
         richMenuDraft={richMenuDraft}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
     const caseProgressLabel = await screen.findByText('案件進度', { selector: 'span.richmenu-btn-text' });
     fireEvent.click(caseProgressLabel.closest('button') as HTMLButtonElement);
 

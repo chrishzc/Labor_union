@@ -264,7 +264,20 @@ Numbered Query 必須由 repository `COUNT` 與 `LIMIT/OFFSET` 取得 server met
 metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋。此 Query 固定唯讀、
 0 commit／receipt／outbox／provider call；LINE Integration 不接管 Orders 案件根事實。
 
+#### Order group observation workspace（2026-10-16 人工裁決）
+
+依使用者核准的精簡預覽，管理端三方服務群組使用 additive
+`GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`
+及 `GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`。
+清單支援長度不超過 50 的案件編號字面包含搜尋、closed status 與 bounded server 分頁，先列需要處理，再依更新時間排序；不是未建群案件的完整待辦。
+所有舊 limit／numbered／detail Query 保持原契約。新 Query 沿用 `ORDER_GROUP_READ` 授權，固定零寫入、零 commit／receipt／outbox／provider call，不改綁定、邀請、狀態 writer 或 schema。
+
+清單與側欄只提供必要姓名、原綁定狀態、最近事件、目前綁定時間、目前群組的最近邀請排入時間及客戶／指派月嫂加入狀況。成員來源沿用 Orders 目前客戶與指派 audience，LINE 身分須由 canonical role binding 與 owner projection 一致確認；失配標記無法確認。加入／離開以目前群組綁定版本後已收到的 membership 事件為證據，不沿用先前群組的 joined 投影，不視為即時完整群組名單，也不判定工會幹部是否全部到齊。新工作區不輸出群組 ID、LINE user ID、actor ID、邀請原文或指紋。
+
+不同來源歷程使用 `binding:<id>`／`runtime:<id>` 唯一事件鍵並依 server 分頁，英文事件代碼由 presentation 轉成中文；未知事件保留中性說明，不假推斷成功／失敗。邀請排入不等於 provider 已送達或成員已加入。網頁僅查詢，綁定與發送邀請仍由已授權人員在 LINE 群組內操作；需正式訂金核銷與既有身分資格。其他 LINE 工作區不變。
+
 #### Notification Rule Administration（2026-08-20）
+
 
 LINE Configuration 擁有通知規則 revision 與 closed grammar；LINE Notification 擁有 derived decision／intent，
 LINE Delivery 擁有 delivery task。規則只接受已登錄 event、recipient selector、schedule、frequency 與 predicate；

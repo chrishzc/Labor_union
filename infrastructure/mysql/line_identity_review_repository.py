@@ -302,7 +302,7 @@ class MySqlLineIdentityRepository:
                     actor_id,
                 )
                 return snapshot
-            self._lock_role_scope(cursor, claim)
+            self._lock_role_scope(cursor, claim, existing_role_replacement=True)
             cursor.execute(
                 _IDENTITY_SELECT_BY_ROLE_SQL + " FOR UPDATE",
                 (claim.line_user_id.value, claim.subject_type.value),
@@ -495,7 +495,7 @@ class MySqlLineIdentityRepository:
             claim.subject_reference,
         )
 
-    def _lock_role_scope(self, cursor, claim):
+    def _lock_role_scope(self, cursor, claim, *, existing_role_replacement=False):
         cursor.execute(
             _IDENTITY_ROLE_SCOPE_LOCK_SQL,
             (claim.line_user_id.value,),
@@ -512,10 +512,12 @@ class MySqlLineIdentityRepository:
             LineBindingSubjectType.CUSTOMER: int(counts.get("customer_count") or 0),
             LineBindingSubjectType.STAFF: int(counts.get("staff_count") or 0),
         }
-        conflicting_count = sum(
-            count
-            for subject_type, count in active_counts.items()
-            if subject_type is not claim.subject_type
+        # Replacing an existing customer/staff role cannot revoke its legal counterpart.
+        # New-claim entry points keep their existing admission rule; admin stays exclusive.
+        conflicting_count = (
+            active_counts[LineBindingSubjectType.ADMIN]
+            if existing_role_replacement and claim.subject_type is not LineBindingSubjectType.ADMIN
+            else sum(count for role, count in active_counts.items() if role is not claim.subject_type)
         )
         if conflicting_count:
             raise RuntimeError("line_identity_role_change_requires_revocation")
@@ -875,6 +877,17 @@ def _review_filter_parts(query):
     if query.review_types:
         clauses.append("review_type IN (" + ",".join(["%s"] * len(query.review_types)) + ")")
         parameters.extend(item.value for item in query.review_types)
+    if query.search.strip():
+        pattern = f"%{query.search.strip()}%"
+        clauses.append("(line_review_requests.subject_reference LIKE %s OR "
+                       "EXISTS (SELECT 1 FROM clients c WHERE line_review_requests.subject_type='customer' "
+                       "AND CAST(c.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci=line_review_requests.subject_reference AND (c.name LIKE %s OR "
+                       "EXISTS (SELECT 1 FROM orders o WHERE o.client_id=c.id AND o.case_no LIKE %s))) OR "
+                       "EXISTS (SELECT 1 FROM staff s WHERE line_review_requests.subject_type='staff' "
+                       "AND CAST(s.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci=line_review_requests.subject_reference AND s.name LIKE %s) OR "
+                       "EXISTS (SELECT 1 FROM admin_users a WHERE line_review_requests.subject_type='admin' "
+                       "AND CAST(a.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci=line_review_requests.subject_reference AND a.display_name LIKE %s))")
+        parameters.extend([pattern] * 5)
     return clauses, parameters
 
 

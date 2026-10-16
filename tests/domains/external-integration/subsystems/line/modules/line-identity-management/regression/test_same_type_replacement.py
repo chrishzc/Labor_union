@@ -96,6 +96,22 @@ def test_bound_identity_replacement_updates_same_type_and_appends_one_rebound_ev
     )
 
 
+@pytest.mark.parametrize("role,other_role", [(LineBindingSubjectType.CUSTOMER, LineBindingSubjectType.STAFF), (LineBindingSubjectType.STAFF, LineBindingSubjectType.CUSTOMER)])
+def test_same_role_replacement_preserves_a_legal_customer_staff_dual_binding(role, other_role) -> None:
+    cursor = ScriptedCursor(one_rows=(
+        None, {"line_user_id": "U-dual"},
+        {"admin_count": 0, "customer_count": 1, "staff_count": 1},
+        {"line_user_id": "U-dual", "binding_status": "bound", "subject_type": role.value, "subject_reference": "7", "aggregate_version": 3},
+    ))
+    repository = MySqlLineIdentityRepository(FakeConnection(cursor))
+    result = repository.replace_subject(LineIdentityClaim(LineUserId("U-dual"), role, "8"), ExpectedVersion(3), "admin:1", IdempotencyKey(f"dual-{role.value}"), "dual-correlation")
+    assert result.subject_type is role and result.subject_reference == "8"
+    updates = [(sql, params) for sql, params in cursor.executed if sql.startswith("UPDATE line_identity_role_bindings")]
+    assert len(updates) == 1
+    assert updates[0][1][-3:] == ("U-dual", role.value, 3)
+    assert other_role.value not in updates[0][1]
+
+
 def test_bound_identity_replacement_rejects_unchanged_reference() -> None:
     cursor = ScriptedCursor(
         one_rows=(

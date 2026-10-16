@@ -295,3 +295,40 @@ export const CustomerServiceReplyApplyResponseSchema = z
     error: z.string().nullable(),
   })
   .strict();
+
+export const CustomerServiceReminderSourceSchema = z.enum([
+  'handoff', 'complaint', 'feedback', 'order', 'service', 'binding', 'unknown',
+]);
+export type CustomerServiceReminderSource = z.infer<typeof CustomerServiceReminderSourceSchema>;
+export const CustomerServiceReminderParamsSchema = z.object({
+  status: z.enum(['open', 'waiting', 'handling']).optional(),
+  source: CustomerServiceReminderSourceSchema.optional(),
+  search: z.string().max(191).optional(),
+  page: z.number().int().positive().optional(),
+  page_size: z.number().int().min(1).max(100).optional(),
+}).strict();
+export type CustomerServiceReminderParams = z.infer<typeof CustomerServiceReminderParamsSchema>;
+export const CustomerServiceReminderSchema = z.object({
+  ticket_id: z.number().int().positive(),
+  client_name: z.string().nullable(),
+  case_no: z.string().nullable(),
+  status: z.enum(['waiting', 'handling']),
+  assigned_admin_name: z.string().nullable(),
+  source: CustomerServiceReminderSourceSchema,
+  sources: z.array(CustomerServiceReminderSourceSchema).min(1),
+  reason: z.enum(['explicit_human_request', 'explicit_wrong_answer', 'complaint', 'unresolved_feedback', 'order_change_requested', 'service_referral', 'binding_failure', 'unknown']),
+  is_priority: z.boolean(),
+  updated_at: CustomerServiceDateTimeSchema.nullable(),
+}).strict().refine(value => value.sources.includes(value.source), '客服來源不一致');
+export const CustomerServiceReminderPageSchema = z.object({
+  items: z.array(CustomerServiceReminderSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  page_size: z.number().int().min(1).max(100),
+  summary: z.object({ waiting: z.number().int().nonnegative(), handling: z.number().int().nonnegative() }).strict(),
+}).strict();
+export type CustomerServiceReminderPage = z.infer<typeof CustomerServiceReminderPageSchema>;
+export type CustomerServiceReminderItem = z.infer<typeof CustomerServiceReminderSchema>;
+export const CustomerServiceReminderResponseSchema = z.object({
+  success: z.boolean(), message: z.string(), data: CustomerServiceReminderPageSchema, error: z.string().nullable(),
+}).strict();

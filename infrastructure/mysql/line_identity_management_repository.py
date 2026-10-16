@@ -9,6 +9,9 @@ from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBi
 from shared_kernel.identities import ExpectedVersion
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
+    LineIdentityCandidateQuery,
+    LineIdentityCandidatePage,
+    LineIdentitySubjectContext,
     LineIdentityBindingManagementView,
     LineIdentityBindingPage,
     LineIdentityCurrentFactBinding,
@@ -137,9 +140,12 @@ class MySqlLineIdentityManagementRepository:
             items = tuple(_binding_view(row) for row in cursor.fetchall() or ())
         return LineIdentityBindingPage(items, total, query.page, query.page_size)
 
-    def detail(self, line_user_id: LineUserId) -> LineIdentityBindingManagementView:
+    def detail(self, line_user_id: LineUserId, subject_type=None) -> LineIdentityBindingManagementView:
         with self._connection.cursor() as cursor:
-            cursor.execute(_DETAIL_SQL, (line_user_id.value,))
+            cursor.execute(
+                _DETAIL_SQL + (" AND b.subject_type=%s" if subject_type is not None else ""),
+                (line_user_id.value, subject_type.value) if subject_type is not None else (line_user_id.value,),
+            )
             rows = tuple(cursor.fetchall() or ())
             active_rows = tuple(
                 row for row in rows
@@ -201,6 +207,53 @@ class MySqlLineIdentityManagementRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_ACTIVE_CLIENT_CASES_SQL, (line_user_id.value,))
             return tuple(cursor.fetchall() or ())
+
+    def replacement_candidates(self, query: LineIdentityCandidateQuery) -> LineIdentityCandidatePage:
+        table, id_column, line_column, name_column = _SUBJECT_COLUMNS[query.subject_type]
+        reference = _display_reference(query.subject_type, "t")
+        clauses = [f"(t.{line_column} IS NULL OR t.{line_column}='')",
+                   "NOT EXISTS (SELECT 1 FROM line_identity_role_bindings rb "
+                   f"WHERE rb.subject_type=%s AND rb.subject_reference=CAST(t.{id_column} AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                   "AND rb.binding_status<>'revoked')"]
+        parameters: list[Any] = [query.subject_type.value]
+        if query.search.strip():
+            clauses.append(f"(t.{name_column} LIKE %s OR CAST(t.{id_column} AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci LIKE %s OR {reference} LIKE %s)")
+            parameters.extend([f"%{query.search.strip()}%"] * 3)
+        where = " AND ".join(clauses)
+        with self._connection.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) AS total FROM {table} t WHERE {where}", tuple(parameters))
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(
+                f"SELECT t.{id_column} AS subject_reference,t.{name_column} AS subject_name,"
+                f"{reference} AS subject_display_reference FROM {table} t WHERE {where} "
+                f"ORDER BY t.{id_column} DESC LIMIT %s OFFSET %s",
+                (*parameters, query.page_size, (query.page - 1) * query.page_size),
+            )
+            items = tuple(_subject_context(row, query.subject_type) for row in cursor.fetchall() or ())
+        return LineIdentityCandidatePage(items, total, query.page, query.page_size)
+
+    def subject_contexts(self, subjects):
+        result = {}
+        for role in LineBindingSubjectType:
+            references = sorted({reference for subject_type, reference in subjects if subject_type == role and reference})
+            if not references:
+                continue
+            table, id_column, _, name_column = _SUBJECT_COLUMNS[role]
+            placeholders = ",".join("%s" for _ in references)
+            with self._connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT t.{id_column} AS subject_reference,t.{name_column} AS subject_name,"
+                    f"{_display_reference(role, 't')} AS subject_display_reference,"
+                    "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(rb.line_user_id) ELSE NULL END "
+                    "FROM line_identity_role_bindings rb WHERE rb.subject_type=%s "
+                    f"AND rb.subject_reference=CAST(t.{id_column} AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci AND rb.binding_status='bound') AS current_line_user_id "
+                    f"FROM {table} t WHERE CAST(t.{id_column} AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci IN ({placeholders})",
+                    (role.value, *references),
+                )
+                for row in cursor.fetchall() or ():
+                    context = _subject_context(row, role)
+                    result[(role, context.subject_reference)] = context
+        return result
 
     def subject_candidate(
         self,
@@ -364,8 +417,9 @@ def _filters(query: LineIdentityBindingListQuery) -> tuple[list[str], tuple[Any,
         parameters.append(query.subject_type.value)
     if query.search.strip():
         pattern = f"%{query.search.strip()}%"
-        clauses.append("(b.line_user_id LIKE %s OR " + _SUBJECT_NAME_SQL + " LIKE %s)")
-        parameters.extend((pattern, pattern))
+        clauses.append("(b.line_user_id LIKE %s OR " + _SUBJECT_NAME_SQL + " LIKE %s OR b.subject_reference LIKE %s "
+                       "OR (b.subject_type='customer' AND EXISTS (SELECT 1 FROM orders o WHERE o.client_id=c.id AND o.case_no LIKE %s)))")
+        parameters.extend((pattern,) * 4)
     return clauses, tuple(parameters)
 
 
@@ -380,6 +434,7 @@ def _binding_view(row: dict[str, Any]) -> LineIdentityBindingManagementView:
         subject_reference=str(row["subject_reference"]),
         subject_name=str(row.get("subject_name") or "-"),
         updated_at=row.get("updated_at_utc"),
+        subject_display_reference=row.get("subject_display_reference"),
         revocation_request_id=(
             int(row["revocation_request_id"])
             if row.get("revocation_request_id") is not None
@@ -557,7 +612,9 @@ _BASE_SELECT = (
     "SELECT b.line_user_id,b.binding_status,b.aggregate_version,b.subject_type,"
     "b.subject_reference,b.updated_at_utc,"
     + _SUBJECT_NAME_SQL
-    + " AS subject_name,r.id AS revocation_request_id,r.request_status,"
+    + " AS subject_name,CASE WHEN b.subject_type='customer' THEN "
+    "(SELECT o.case_no FROM orders o WHERE o.client_id=c.id ORDER BY o.created_at DESC,o.case_no DESC LIMIT 1) "
+    "ELSE NULL END AS subject_display_reference,r.id AS revocation_request_id,r.request_status,"
     "(SELECT MAX(e.occurred_at_utc) FROM line_identity_role_binding_events e "
     "WHERE e.line_user_id=b.line_user_id AND e.subject_type=b.subject_type "
     "AND e.action='revoked') AS revoked_at_utc "
@@ -567,7 +624,7 @@ _BASE_SELECT = (
     "LEFT JOIN admin_users a ON b.subject_type='admin' AND a.id=CAST(b.subject_reference AS UNSIGNED) "
     "LEFT JOIN line_identity_revocation_requests r ON r.id = ("
     "SELECT r2.id FROM line_identity_revocation_requests r2 "
-    "WHERE r2.line_user_id=b.line_user_id "
+    "WHERE r2.line_user_id=b.line_user_id AND r2.subject_type=b.subject_type "
     "AND (r2.active_marker=1 OR (b.binding_status IN ('revoked','revocation_pending') "
     "AND r2.request_status IN ('completed','manual_completed','pending_menu_reset','menu_reset_failed'))) "
     "ORDER BY (r2.active_marker IS NOT NULL) DESC, r2.id DESC LIMIT 1) "
@@ -645,6 +702,17 @@ _REQUEST_COMPLETE_SQL = (
     "completion_reason=%s,last_error_code=NULL,last_error_message=NULL "
     "WHERE id=%s AND request_status IN ('pending_menu_reset','menu_reset_failed')"
 )
+def _display_reference(role, alias):
+    if role is LineBindingSubjectType.CUSTOMER:
+        return f"(SELECT o.case_no FROM orders o WHERE o.client_id={alias}.id ORDER BY o.created_at DESC,o.case_no DESC LIMIT 1)"
+    return "NULL"
+
+
+def _subject_context(row, role):
+    return LineIdentitySubjectContext(role, str(row["subject_reference"]), str(row.get("subject_name") or "未具名對象"),
+                                      row.get("subject_display_reference"), row.get("current_line_user_id"))
+
+
 _SUBJECT_COLUMNS = {
     LineBindingSubjectType.CUSTOMER: ("clients", "id", "line_user_id", "name"),
     LineBindingSubjectType.STAFF: ("staff", "id", "line_user_id", "name"),

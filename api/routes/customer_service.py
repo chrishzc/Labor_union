@@ -17,6 +17,7 @@ from api.schemas.base import BaseResponse
 from api.schemas.customer_service import (
     CustomerServiceDetailView,
     CustomerServicePageView,
+    CustomerServiceReminderPageView,
     CustomerServiceReplyApplyRequest,
     CustomerServiceReplyApplyView,
     CustomerServiceReplyPreviewRequest,
@@ -64,6 +65,9 @@ from subsystems.customer_service.contracts import (
     ApplyCustomerServiceTicketReply,
     ApplyCustomerServiceTicketUpdate,
     CustomerServiceListQuery,
+    CustomerServiceReminderQuery,
+    CustomerServiceReminderSource,
+    CustomerServiceReminderStatus,
     PreviewCustomerServiceTicketReply,
     PreviewCustomerServiceTicketUpdate,
 )
@@ -285,6 +289,21 @@ def list_tickets(
     _: AdminPrincipal = Depends(require_customer_service_reader),
 ):
     return BaseResponse(data=_application().list(CustomerServiceListQuery(status, category, search, page, page_size)))
+
+
+@router.get("/reminders", response_model=BaseResponse[CustomerServiceReminderPageView])
+def reminders(
+    request: Request,
+    status: CustomerServiceReminderStatus = "open",
+    source: CustomerServiceReminderSource | None = None,
+    search: str | None = Query(None, max_length=191),
+    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
+    _: AdminPrincipal = Depends(require_customer_service_reader),
+):
+    if set(request.query_params) - {"status", "source", "search", "page", "page_size"}:
+        raise HTTPException(status_code=422, detail={"code": "customer_service_reminder_filter_invalid", "message": "客服提醒查詢條件不支援"})
+    result = _call(_application().reminders, CustomerServiceReminderQuery(status, source, search, page, page_size))
+    return BaseResponse(data=CustomerServiceReminderPageView.model_validate(result))
 
 
 @router.get("/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])

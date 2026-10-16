@@ -11,6 +11,9 @@ from subsystems.line.matching_coordination_delivery import (
     MatchingCoordinationDeliveryError,
 )
 from subsystems.scheduling.matching_line_cards import customer_profiles_card
+from domains.line.configuration import LineConfigurationKind
+from infrastructure.mysql.line_configuration_publication_repository import MySqlLineConfigurationRepository
+from subsystems.line.message_configuration import notification_description
 
 
 class MySqlLineMatchingCoordinationDeliveryProjection:
@@ -40,7 +43,8 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
                 "line_matching_recipient_binding_missing"
             )
         binding = self._binding(line_user_id)
-        configuration = self._configuration()
+        template_snapshot = self._configuration()
+        configuration = {"active": True, "revision": template_snapshot.revision.value}
         interaction = None
         if selector == "matching.request.participants":
             # Keep the raw token only in the transient delivery envelope.  The
@@ -54,7 +58,7 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
                     command.case_no,
                     (),
                     token,
-                    "請確認這項具體協商建議。",
+                    notification_description(template_snapshot, "LU96-M3-ZERO-POOL-CARD-V1"),
                 )
             )
             interaction = {
@@ -175,18 +179,13 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
             )
         return {"active": True, "revision": int(row["aggregate_version"])}
 
-    def _configuration(self) -> dict[str, Any]:
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT revision FROM line_configuration_current "
-                "WHERE configuration_kind='message_templates'"
-            )
-            row = cursor.fetchone()
-        if not isinstance(row, Mapping) or row.get("revision") is None:
+    def _configuration(self):
+        snapshot = MySqlLineConfigurationRepository(self._connection).get(LineConfigurationKind.MESSAGE_TEMPLATES)
+        if snapshot.revision.value == 0:
             raise MatchingCoordinationDeliveryError(
                 "line_matching_configuration_invalid"
             )
-        return {"active": True, "revision": int(row["revision"])}
+        return snapshot
 
 
 def _message_text(payload: Mapping[str, Any]) -> str:

@@ -37,6 +37,11 @@ from subsystems.line.order_group_contracts import (
     LineOrderGroupNumberedPage,
     LineOrderGroupPage,
     OrderLineAudience,
+    LineOrderGroupParticipant,
+    LineOrderGroupWorkspaceEvent,
+    LineOrderGroupWorkspaceRecord,
+    LineOrderGroupWorkspacePage,
+    LineOrderGroupWorkspaceEventPage,
 )
 
 
@@ -109,6 +114,129 @@ class MySqlLineMediaMetadataRepository:
 class MySqlLineOrderGroupBindingRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def workspace_list(self, *, search, status, page, page_size) -> LineOrderGroupWorkspacePage:
+        conditions = []
+        parameters = []
+        if status:
+            conditions.append("g.binding_status=%s")
+            parameters.append(status)
+        if search:
+            conditions.append("g.case_no LIKE %s ESCAPE '='")
+            literal = search.replace("=", "==").replace("%", "=%").replace("_", "=_")
+            parameters.append(f"%{literal}%")
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM line_order_group_bindings g" + where, parameters)
+            total = int(cursor.fetchone()["total"])
+            cursor.execute(
+                _WORKSPACE_RECORD_SQL + where +
+                " ORDER BY CASE WHEN g.binding_status='attention' THEN 0 ELSE 1 END,"
+                "g.updated_at_utc DESC,g.case_no LIMIT %s OFFSET %s",
+                [*parameters, page_size, (page - 1) * page_size],
+            )
+            rows = tuple(cursor.fetchall())
+        return LineOrderGroupWorkspacePage(
+            self._workspace_records(rows), page, page_size, total, (total + page_size - 1) // page_size,
+        )
+
+    def workspace_get(self, case_no) -> LineOrderGroupWorkspaceRecord | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_WORKSPACE_RECORD_SQL + " WHERE g.case_no=%s", (case_no,))
+            row = cursor.fetchone()
+        return self._workspace_records((row,))[0] if row else None
+
+    def _workspace_people(self, cases):
+        slots = ",".join(["%s"] * len(cases))
+        identity_customer = (
+            " LEFT JOIN line_identity_role_bindings identity_binding ON "
+            "identity_binding.subject_type='customer' AND identity_binding.binding_status='bound' "
+            "AND identity_binding.subject_reference=CAST(c.id AS CHAR CHARACTER SET utf8mb4) "
+            "COLLATE utf8mb4_unicode_ci AND identity_binding.line_user_id=c.line_user_id "
+        )
+        identity_staff = (
+            " LEFT JOIN line_identity_role_bindings identity_binding ON "
+            "identity_binding.subject_type='staff' AND identity_binding.binding_status='bound' "
+            "AND identity_binding.subject_reference=CAST(s.id AS CHAR CHARACTER SET utf8mb4) "
+            "COLLATE utf8mb4_unicode_ci AND identity_binding.line_user_id=s.line_user_id "
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no,'customer' AS role,c.name,identity_binding.line_user_id "
+                "FROM orders o LEFT JOIN clients c ON c.id=o.client_id " + identity_customer +
+                f"WHERE o.case_no IN ({slots}) UNION ALL "
+                "SELECT assigned.case_no,'staff' AS role,s.name,identity_binding.line_user_id "
+                "FROM (SELECT a.case_no,a.staff_id FROM case_staff_assignments a "
+                f"WHERE a.case_no IN ({slots}) AND a.status IN ('planned','active') "
+                f"UNION SELECT o.case_no,o.staff_id FROM orders o WHERE o.case_no IN ({slots}) "
+                "AND o.staff_id IS NOT NULL) assigned JOIN staff s ON s.id=assigned.staff_id " + identity_staff +
+                "ORDER BY case_no,role,name",
+                (*cases, *cases, *cases),
+            )
+            return tuple(cursor.fetchall())
+
+    def _workspace_records(self, rows) -> tuple[LineOrderGroupWorkspaceRecord, ...]:
+        if not rows:
+            return ()
+        cases = tuple(str(row["case_no"]) for row in rows)
+        people = self._workspace_people(cases)
+        slots = ",".join(["%s"] * len(cases))
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT case_no,line_user_id,event_type FROM ("
+                "SELECT e.case_no,e.line_user_id,e.event_type,ROW_NUMBER() OVER ("
+                "PARTITION BY e.case_no,e.line_user_id ORDER BY e.occurred_at_utc DESC,e.id DESC) AS rn "
+                "FROM line_order_group_runtime_events e JOIN line_order_group_bindings g ON g.case_no=e.case_no " +
+                _WORKSPACE_BIND_JOIN +
+                f" WHERE e.case_no IN ({slots}) AND e.event_type IN ('member_joined','member_left') "
+                "AND e.occurred_at_utc>=latest_binding.occurred_at_utc) ranked WHERE rn=1",
+                cases,
+            )
+            membership = {
+                (str(row["case_no"]), str(row["line_user_id"])): str(row["event_type"])
+                for row in cursor.fetchall()
+            }
+            cursor.execute(
+                "SELECT * FROM (SELECT events.*,ROW_NUMBER() OVER (PARTITION BY case_no "
+                "ORDER BY occurred_at_utc DESC,event_key DESC) AS rn FROM (" +
+                _workspace_event_sql(slots) + ") events) ranked WHERE rn=1",
+                (*cases, *cases),
+            )
+            latest = {str(row["case_no"]): _workspace_event(row, people) for row in cursor.fetchall()}
+        result = []
+        for row in rows:
+            case = str(row["case_no"])
+            members = []
+            for person in people:
+                if str(person["case_no"]) != case:
+                    continue
+                identity = person["line_user_id"]
+                event = membership.get((case, str(identity))) if identity else None
+                state = "unknown" if not identity or row["bound_at_utc"] is None else {
+                    "member_joined": "joined", "member_left": "left",
+                }.get(event, "pending")
+                members.append(LineOrderGroupParticipant(person["role"], person["name"], state))
+            bound_at = _workspace_time(row["bound_at_utc"])
+            invited_at = _workspace_time(row["last_invitation_at_utc"])
+            if bound_at is None or invited_at is not None and invited_at < bound_at:
+                invited_at = None
+            result.append(LineOrderGroupWorkspaceRecord(
+                case, LineOrderGroupBindingStatus(row["binding_status"]), row["customer_name"],
+                bound_at, invited_at, tuple(members), latest.get(case),
+            ))
+        return tuple(result)
+
+    def workspace_events(self, case_no, *, page, page_size) -> LineOrderGroupWorkspaceEventPage:
+        people = self._workspace_people((case_no,))
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_EVENTS_COUNT_SQL, (case_no, case_no))
+            total = int(cursor.fetchone()["total"])
+            cursor.execute(
+                _workspace_event_sql("%s") + " ORDER BY occurred_at_utc DESC,event_key DESC LIMIT %s OFFSET %s",
+                (case_no, case_no, page_size, (page - 1) * page_size),
+            )
+            events = tuple(_workspace_event(row, people) for row in cursor.fetchall())
+        return LineOrderGroupWorkspaceEventPage(events, page, page_size, total, (total + page_size - 1) // page_size)
 
     def get(self, case_no: str) -> LineOrderGroupBindingSnapshot | None:
         with self._connection.cursor() as cursor:
@@ -439,6 +567,45 @@ def _group_event_record(row):
 
 def _optional_text(value):
     return None if value is None else str(value)
+
+
+def _workspace_time(value):
+    return aware_utc(value) if value is not None else None
+
+
+def _workspace_event(row, people) -> LineOrderGroupWorkspaceEvent:
+    matches = [person for person in people if person["line_user_id"] is not None
+               and str(person["case_no"]) == str(row["case_no"])
+               and person["line_user_id"] == row["line_user_id"]]
+    person = matches[0] if len(matches) == 1 else None
+    return LineOrderGroupWorkspaceEvent(
+        str(row["event_key"]), str(row["case_no"]), str(row["event_type"]),
+        aware_utc(row["occurred_at_utc"]), person["role"] if person else None, person["name"] if person else None,
+    )
+
+
+def _workspace_event_sql(slots):
+    return (
+        "SELECT CONCAT('binding:',id) AS event_key,case_no,action AS event_type,"
+        "occurred_at_utc,NULL AS line_user_id FROM line_order_group_binding_events "
+        f"WHERE case_no IN ({slots}) UNION ALL "
+        "SELECT CONCAT('runtime:',id) AS event_key,case_no,event_type,occurred_at_utc,"
+        f"line_user_id FROM line_order_group_runtime_events WHERE case_no IN ({slots})"
+    )
+
+
+_WORKSPACE_BIND_JOIN = (
+    " LEFT JOIN line_order_group_binding_events latest_binding ON latest_binding.id=("
+    "SELECT b.id FROM line_order_group_binding_events b WHERE b.case_no=g.case_no "
+    "AND b.resulting_version=g.aggregate_version AND b.resulting_group_id=g.group_id "
+    "ORDER BY b.id DESC LIMIT 1) "
+)
+_WORKSPACE_RECORD_SQL = (
+    "SELECT g.case_no,g.binding_status,c.name AS customer_name,"
+    "latest_binding.occurred_at_utc AS bound_at_utc,g.last_invitation_at_utc "
+    "FROM line_order_group_bindings g LEFT JOIN orders o ON o.case_no=g.case_no "
+    "LEFT JOIN clients c ON c.id=o.client_id " + _WORKSPACE_BIND_JOIN
+)
 
 
 _MEDIA_COLUMNS = (

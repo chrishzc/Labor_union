@@ -273,6 +273,8 @@ class CanonicalLineReviewResponse(BaseModel):
     due_at: datetime | None
     line_user_id: str
     display_name: str
+    current_line_user_id: str | None = None
+    subject_display_reference: str | None = None
     decision_reason: str | None
     reviewed_by_actor_id: str | None
     reviewed_at: datetime | None

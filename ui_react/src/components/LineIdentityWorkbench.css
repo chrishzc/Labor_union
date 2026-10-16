@@ -1,0 +1,99 @@
+/* File: LineIdentityWorkbench.css — 沿用 LINE tokens 的身分三分頁與操作抽屜。 */
+.line-identity-workspace{min-width:0;color:var(--line-color-text)}
+.line-identity-workspace>h2{margin:0 0 20px;font-size:1.65rem;line-height:1.3}
+.identity-card{background:#fff;border:1px solid var(--line-color-border);border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(74,69,67,.04)}
+.identity-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line-color-border-subtle)}
+.identity-tabs{display:flex;align-items:center;gap:6px;padding:6px;border:1px solid var(--line-color-border);border-radius:16px;box-shadow:var(--shadow-sm)}
+.identity-tabs button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 14px;border:1px solid transparent;border-radius:10px;background:#fff;color:var(--line-color-text-muted);font-size:.875rem;font-weight:750;cursor:pointer;white-space:nowrap}
+.identity-tabs button:hover{background:var(--line-color-page)}
+.identity-tabs button[aria-selected=true]{background:var(--line-color-primary);border-color:var(--line-color-primary);color:#fff}
+.identity-count{min-width:23px;padding:1px 6px;background:var(--md-sys-color-surface-container-high);border-radius:6px;font-size:.8125rem}
+.identity-tabs button[aria-selected=true] .identity-count{background:rgba(255,255,255,.18)}
+.identity-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:8px 14px;border:1px solid var(--line-color-border);border-radius:10px;background:#fff;color:var(--line-color-primary);font-size:.875rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.identity-button svg{width:18px;height:18px}
+.identity-button:hover:not(:disabled){background:var(--line-color-page);border-color:var(--line-color-primary)}
+.identity-button.primary{background:var(--line-color-primary);border-color:var(--line-color-primary);color:#fff}
+.identity-button.primary:hover:not(:disabled){background:var(--line-color-primary-hover)}
+.identity-button.danger{background:#b91c1c;border-color:#b91c1c;color:#fff}
+.identity-button:disabled{opacity:.55;cursor:not-allowed}
+.identity-filters{display:flex;flex-wrap:wrap;gap:12px;padding:20px 22px}
+.identity-search{display:block;position:relative;flex:1;min-width:220px;max-width:380px}
+.identity-search>svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--line-color-primary);pointer-events:none}
+.identity-search input,.identity-filters select,.identity-field select,.identity-field textarea{width:100%;min-height:44px;padding:9px 12px;border:1px solid var(--line-color-border);border-radius:10px;background:#fff;color:var(--line-color-text);font:inherit;font-size:.875rem}
+.identity-search input{padding-left:38px}
+.identity-filters>select{width:200px;font-weight:600}
+.identity-table{width:100%;border-collapse:collapse;text-align:left}
+.identity-table th{padding:14px 22px;background:var(--line-color-page);border-block:1px solid var(--line-color-border-subtle);font-size:.875rem;font-weight:700;color:var(--line-color-text-muted)}
+.identity-table td{padding:19px 22px;border-bottom:1px solid var(--line-color-border-subtle);font-size:.875rem;vertical-align:middle}
+.identity-table tbody tr:last-child td{border-bottom:0}
+.identity-table tbody tr:hover{background:#fffdfc}
+.identity-table td:first-child{width:29%}
+.identity-table th:last-child,.identity-table td:last-child{text-align:right;width:110px}
+.identity-table strong{font-size:1rem}
+.identity-secondary{display:block;margin-top:5px;font-size:.8125rem;line-height:1.7;color:var(--line-color-text-muted);overflow-wrap:anywhere}
+.identity-status{display:inline-flex;min-height:28px;align-items:center;padding:3px 10px;border:1px solid var(--line-color-border-subtle);border-radius:999px;background:var(--md-sys-color-surface-container-high);color:var(--line-color-text-muted);font-size:.8125rem;font-weight:700;white-space:nowrap}
+.identity-status.good{background:#dcfce7;border-color:#bbf7d0;color:#166534}
+.identity-status.attention{background:#ffedd5;border-color:#fed7aa;color:#9a3412}
+.identity-warning-text{color:#9a3412}
+.identity-row-action{min-width:44px;min-height:40px;padding:7px 10px;border:0;border-radius:8px;background:transparent;color:var(--line-color-primary);font-size:.875rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.identity-row-action:hover{background:var(--line-color-page)}
+.identity-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 22px;border-top:1px solid var(--line-color-border-subtle);font-size:.8125rem;color:var(--line-color-text-muted)}
+.identity-pagination>div{display:flex;gap:8px}
+.identity-pagination .identity-button{font-size:.8125rem}
+.identity-message{margin:0;padding:20px 22px;font-size:.875rem}
+.identity-error{color:#991b1b;font-size:.875rem;line-height:1.8;margin:12px 0}
+.identity-empty{padding:64px 22px;text-align:center}
+.identity-empty h3{margin:0 0 16px;font-size:1.1rem}
+.identity-drawer .drawer-container{width:590px;max-width:100vw}
+.identity-drawer .drawer-body{padding:24px 26px;background:#fffdfc;font-size:.875rem}
+.identity-drawer .drawer-header{padding:23px 26px}
+.identity-drawer .drawer-title{font-size:1.25rem}
+.identity-drawer .drawer-footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:16px 26px}
+.identity-person{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin:0 0 24px}
+.identity-person h3{font-size:1.3rem;margin:0}
+.identity-facts{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;margin:0 0 24px}
+.identity-facts dt{font-size:.8125rem;color:var(--line-color-text-muted);margin-bottom:5px}
+.identity-facts dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.identity-note{padding:13px 16px;border:1px solid var(--line-color-border-subtle);border-radius:10px;background:var(--line-color-page);color:var(--line-color-text-muted);font-size:.875rem;line-height:1.8;margin:20px 0}
+.identity-note.warning{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
+.identity-field{display:block;margin:18px 0;font-size:.875rem;font-weight:700}
+.identity-action-form{border:0;padding:0;margin:0;min-width:0}
+.identity-field textarea,.identity-field select{display:block;margin-top:8px;font-weight:400}
+.identity-field textarea{resize:vertical;min-height:94px;line-height:1.7}
+.identity-check{display:flex;align-items:flex-start;gap:10px;margin:20px 0;font-size:.875rem;line-height:1.7}
+.identity-check input{width:17px;height:17px;flex:0 0 17px;margin-top:5px;accent-color:var(--line-color-primary)}
+.identity-comparison{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;border:1px solid var(--line-color-border-subtle);border-radius:10px;background:#fff;padding:16px;margin:20px 0}
+.identity-comparison span{display:block;font-size:.8125rem;color:var(--line-color-text-muted);margin-bottom:12px}
+.identity-comparison strong,.identity-comparison small{display:block;overflow-wrap:anywhere}
+.identity-comparison small{margin-top:8px;color:var(--line-color-text-muted);line-height:1.7}
+.identity-decisions{display:flex;gap:12px;padding:20px 0 0;margin-top:20px;border:0;border-top:1px solid var(--line-color-border-subtle)}
+.identity-decisions legend{padding-top:20px;font-weight:700}
+.identity-decisions label{display:flex;align-items:center;gap:10px;padding:12px 18px;border:1px solid var(--line-color-border);border-radius:10px;flex:1;cursor:pointer}
+.identity-decisions input{accent-color:var(--line-color-primary)}
+.identity-order-options{display:flex;flex-direction:column;gap:12px;margin-top:18px}
+.identity-order-option{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px;border:1px solid var(--line-color-border);border-radius:10px;background:#fff}
+@media(max-width:700px){
+ .identity-top{padding:14px;flex-wrap:wrap;justify-content:flex-end;gap:12px}
+ .identity-tabs{flex:1 0 100%;gap:3px;padding:5px}
+ .identity-tabs button{flex:1;padding:8px 5px;font-size:.8125rem;gap:5px}
+ .identity-filters{padding:16px 14px;gap:10px}
+ .identity-search{min-width:100%;max-width:none}
+ .identity-filters>select{width:100%}
+ .identity-table,.identity-table tbody,.identity-table tr,.identity-table td{display:block;width:auto!important}
+ .identity-table thead{display:none}
+ .identity-table tr{position:relative;padding:20px 15px;border-top:1px solid var(--line-color-border-subtle)}
+ .identity-table td{padding:0;border:0}
+ .identity-table td:first-child{padding-right:90px;margin-bottom:15px}
+ .identity-table td[data-label=角色]{position:absolute;right:15px;top:20px;text-align:right}
+ .identity-table td[data-label=狀態]{margin-bottom:14px}
+ .identity-table td[data-label=更新時間],.identity-table td[data-label=申請時間],.identity-table td[data-label=登記時間]{display:inline-block;padding-top:10px;color:var(--line-color-text-muted);font-size:.8125rem}
+ .identity-table td:last-child{float:right;margin-top:0}
+ .identity-table td[data-label=申請事項],.identity-table td[data-label=待配對事項]{margin-bottom:12px}
+ .identity-table tr:after{content:"";display:block;clear:both}
+ .identity-pagination{padding:14px;flex-wrap:wrap}
+ .identity-drawer .drawer-header{padding:18px 20px}
+ .identity-drawer .drawer-body{padding:22px 20px}
+ .identity-drawer .drawer-footer{padding:14px 20px}
+ .identity-drawer .drawer-footer .identity-button{flex:1;padding-inline:9px}
+ .identity-comparison{gap:14px;padding:12px}
+}

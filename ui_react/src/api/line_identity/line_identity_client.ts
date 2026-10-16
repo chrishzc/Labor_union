@@ -8,6 +8,11 @@ import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
 import { LineIdentityClientError, mapLineIdentityError } from './line_identity_errors';
 import {
+  LineIdentityCandidateQuerySchema,
+  LineIdentityCandidatePageSchema,
+  type LineIdentityCandidateQuery,
+  type LineIdentityCandidatePage,
+  type LineBindingSubjectType,
   LineIdentityBindingListQuerySchema,
   LineIdentityBindingPageViewSchema,
   LineIdentityBindingViewSchema,
@@ -56,9 +61,11 @@ import {
 export interface LineIdentityRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  subjectType?: LineBindingSubjectType;
 }
 
 export interface LineIdentityClient {
+  listReplacementCandidates?(query: LineIdentityCandidateQuery, options?: LineIdentityRequestOptions): Promise<LineIdentityCandidatePage>;
   listUnboundCandidates(
     options?: LineIdentityRequestOptions
   ): Promise<UnboundPairingCandidatesView>;
@@ -260,7 +267,7 @@ export async function getLineIdentityBinding(
   options?: LineIdentityRequestOptions
 ): Promise<LineIdentityBindingView> {
   try {
-    const raw = await transport.get(bindingPath(lineUserId), requestOptions(options));
+    const raw = await transport.get(bindingPath(lineUserId), { ...requestOptions(options), ...roleParams(options) });
     return decodeEnvelope(LineIdentityBindingViewSchema, raw);
   } catch (error) {
     throw mapLineIdentityError(error, 'query');
@@ -277,7 +284,7 @@ export async function previewLineIdentityReplacement(
     const raw = await transport.post(
       `${bindingPath(lineUserId)}/replacement/preview`,
       undefined,
-      { ...requestOptions(options), params: { target_subject_reference: target } }
+      { ...requestOptions(options), params: { target_subject_reference: target, ...(options?.subjectType ? {subject_type: options.subjectType} : {}) } }
     );
     return decodeEnvelope(LineIdentityReplacementPreviewViewSchema, raw);
   } catch (error) {
@@ -303,7 +310,7 @@ export async function applyLineIdentityReplacement(
     const raw = await transport.post(
       `${bindingPath(lineUserId)}/replacement/apply`,
       normalizedPayload,
-      requestOptions(options)
+      { ...requestOptions(options), ...roleParams(options) }
     );
     return decodeEnvelope(LineIdentityBindingViewSchema, raw);
   } catch (error) {
@@ -319,7 +326,7 @@ export async function previewLineIdentityRevocation(
     const raw = await transport.post(
       `${bindingPath(lineUserId)}/revocation/preview`,
       undefined,
-      requestOptions(options)
+      { ...requestOptions(options), ...roleParams(options) }
     );
     return decodeEnvelope(LineIdentityRevocationPreviewViewSchema, raw);
   } catch (error) {
@@ -340,7 +347,7 @@ export async function applyLineIdentityRevocation(
     const raw = await transport.post(
       `${bindingPath(lineUserId)}/revocation/apply`,
       normalizedPayload,
-      requestOptions(options)
+      { ...requestOptions(options), ...roleParams(options) }
     );
     return decodeEnvelope(LineIdentityRevocationRequestViewSchema, raw);
   } catch (error) {
@@ -473,7 +480,22 @@ export async function applyLineIdentityReviewDecision(
   }
 }
 
+function roleParams(options?: LineIdentityRequestOptions) {
+  return options?.subjectType ? { params: { subject_type: options.subjectType } } : {};
+}
+
+export async function listLineIdentityReplacementCandidates(query: LineIdentityCandidateQuery, options?: LineIdentityRequestOptions): Promise<LineIdentityCandidatePage> {
+  try {
+    const params = LineIdentityCandidateQuerySchema.parse(query);
+    const raw = await transport.get('/api/v1/line/identity-bindings/replacement-candidates', {...requestOptions(options), params});
+    return decodeEnvelope(LineIdentityCandidatePageSchema, raw);
+  } catch (error) { throw mapLineIdentityError(error, 'query'); }
+}
+
 class DefaultLineIdentityClient implements LineIdentityClient {
+  listReplacementCandidates(query: LineIdentityCandidateQuery, options?: LineIdentityRequestOptions) {
+    return listLineIdentityReplacementCandidates(query, options);
+  }
   listUnboundCandidates(
     options?: LineIdentityRequestOptions
   ): Promise<UnboundPairingCandidatesView> {

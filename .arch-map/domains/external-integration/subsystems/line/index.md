@@ -7,6 +7,7 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `customer-service-reminders` — React 客服案件唯讀提醒、來源投影與未結案分頁；path: `modules/customer-service-reminders.md`
 - `worker-runtime-monitoring` — canonical worker cycle orchestration、success／failure heartbeat 與 runtime health classification；path: `modules/worker-runtime-monitoring.md`
 - `delivery-provider-transport` — committed delivery task 共用的 provider outcome contract 與 LINE Messaging API transport adapter；path: `modules/delivery-provider-transport.md`
 - `delivery-task-presentation` — LINE delivery task查詢工作台的business-facing presentation；path: `modules/delivery-task-presentation.md`
@@ -100,3 +101,5 @@ layout_status: `custom_current`
 上述修正的source基準為PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`；記錄中的
 53項回歸只涵蓋指定情境，非全M1～M4通過。main合併、部署、實際DB與手機／provider狀態
 須分別核對；本索引不把尚缺的請假客戶決策或告警到一次性review link證據標為superseded／passed。
+
+- [LINE identity workspace](modules/line-identity-workspace.md) — 三任務 React 身分管理 presentation。

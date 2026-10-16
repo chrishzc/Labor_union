@@ -25,6 +25,8 @@ from subsystems.customer_service.contracts import (
     ApplyCustomerServiceTicketReply,
     ApplyCustomerServiceTicketUpdate,
     CustomerServiceListQuery,
+    CustomerServiceReminderQuery,
+    CustomerServiceReminderPage,
     CustomerServiceTicketReplyPreview,
     CustomerServiceTicketReplyResult,
     CustomerServiceTicketUpdatePreview,
@@ -45,6 +47,9 @@ class CustomerServiceApplication:
 
     def list(self, query: CustomerServiceListQuery):
         return self._read(lambda repository: repository.list(query))
+
+    def reminders(self, query: CustomerServiceReminderQuery) -> CustomerServiceReminderPage:
+        return self._read(lambda repository: repository.list_reminders(query))
 
     def detail(self, ticket_id: int):
         return self._read(lambda repository: repository.detail(ticket_id))

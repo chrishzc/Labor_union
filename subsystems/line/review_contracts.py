@@ -70,8 +70,11 @@ class LineReviewListQuery:
     page_size: int = 25
     cursor: str | None = None
     page: int | None = None
+    search: str = ""
 
     def __post_init__(self) -> None:
+        if len(self.search) > 191:
+            raise ValueError("LINE review search exceeds maximum")
         _validate_enum_filter(self.statuses, LineReviewStatus, "review statuses")
         _validate_enum_filter(self.review_types, LineReviewType, "review types")
         require_positive_integer(self.page_size, "LINE review page size")

@@ -57,6 +57,7 @@ export const LineIdentityBindingViewSchema = z
     subject_type: LineBindingSubjectTypeSchema,
     subject_reference: z.string(),
     subject_name: z.string(),
+    subject_display_reference: z.string().nullable().optional(),
     updated_at: NullableDateTimeSchema.optional(),
     revocation_request_id: z.number().int().nullable().optional(),
     revocation_status: LineIdentityRevocationStatusSchema.nullable().optional(),
@@ -156,6 +157,8 @@ export const LineIdentityReviewViewSchema = z
     due_at: NullableDateTimeSchema,
     line_user_id: z.string(),
     display_name: z.string(),
+    current_line_user_id: z.string().nullable().optional(),
+    subject_display_reference: z.string().nullable().optional(),
     decision_reason: z.string().nullable(),
     reviewed_by_actor_id: z.string().nullable(),
     reviewed_at: NullableDateTimeSchema,
@@ -194,6 +197,7 @@ export const LineIdentityReviewSummaryViewSchema = z
 
 export const LineIdentityReviewListQuerySchema = z
   .object({
+    search: z.string().max(191).optional(),
     review_status: LineIdentityReviewStatusSchema.optional(),
     review_type: LineIdentityReviewTypeSchema.optional(),
     page: z.number().int().min(1).optional(),
@@ -369,3 +373,10 @@ export type UnboundProvisionalCandidate = z.infer<typeof UnboundProvisionalCandi
 export type UnboundPairingCandidatesView = z.infer<typeof UnboundPairingCandidatesViewSchema>;
 export type PairProvisionalRegistrationRequest = z.infer<typeof PairProvisionalRegistrationRequestSchema>;
 export type PairProvisionalRegistrationResultView = z.infer<typeof PairProvisionalRegistrationResultViewSchema>;
+
+export const LineIdentityCandidateQuerySchema = z.object({subject_type: LineBindingSubjectTypeSchema, search: z.string().max(191).optional(), page: z.number().int().min(1).optional(), page_size: z.number().int().min(1).max(100).optional()}).strict();
+export const LineIdentityCandidateSchema = z.object({subject_type: LineBindingSubjectTypeSchema, subject_reference: z.string(), subject_name: z.string(), subject_display_reference: z.string().nullable().optional(), current_line_user_id: z.string().nullable().optional()}).strict();
+export const LineIdentityCandidatePageSchema = z.object({items:z.array(LineIdentityCandidateSchema),total:z.number().int().nonnegative(),page:z.number().int().positive(),page_size:z.number().int().positive().max(100)}).strict();
+export type LineIdentityCandidateQuery = z.infer<typeof LineIdentityCandidateQuerySchema>;
+export type LineIdentityCandidate = z.infer<typeof LineIdentityCandidateSchema>;
+export type LineIdentityCandidatePage = z.infer<typeof LineIdentityCandidatePageSchema>;

@@ -22,6 +22,7 @@ from api.dependencies.line_identity import (
     get_liff_token_verifier,
     get_line_identity_application,
     get_line_identity_review_application,
+    get_line_identity_management_application,
 )
 from api.dependencies.line_runtime import publish_line_wakeup_best_effort
 from api.error_contracts import typed_http_error
@@ -471,19 +472,22 @@ def list_reviews(
 def list_reviews_numbered(
     review_status: LineReviewStatus | None = LineReviewStatus.PENDING,
     review_type: LineReviewType | None = None,
+    search: str = Query(default="", max_length=191),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
 ):
     query = LineReviewListQuery(
         statuses=(review_status,) if review_status else (),
         review_types=(review_type,) if review_type else (),
+        search=search,
         page=page,
         page_size=page_size,
     )
     result = get_line_identity_review_application().list(query)
+    contexts = _review_contexts(result.items)
     return BaseResponse(
         data=CanonicalLineReviewNumberedPageResponse(
-            items=[_review_response(item) for item in result.items],
+            items=[_review_response(item, context=contexts.get((item.subject_type, item.subject_reference))) for item in result.items],
             page=result.page or page,
             page_size=result.page_size or page_size,
             total=result.total or 0,
@@ -521,7 +525,8 @@ def review_detail(request_id: int):
         snapshot = get_line_identity_review_application().get(LineReviewRequestId(request_id))
     except LineReviewNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return BaseResponse(data=_review_response(snapshot))
+    contexts = _review_contexts((snapshot,))
+    return BaseResponse(data=_review_response(snapshot, context=contexts.get((snapshot.subject_type, snapshot.subject_reference))))
 
 
 @review_router.post(
@@ -771,7 +776,12 @@ def _apply_response(result, preview_fingerprint):
     )
 
 
-def _review_response(snapshot, *, outcome=None, receipt_identity=None):
+def _review_contexts(snapshots):
+    subjects = tuple({(item.subject_type, item.subject_reference) for item in snapshots if item.subject_type and item.subject_reference})
+    return get_line_identity_management_application().subject_contexts(subjects) if subjects else {}
+
+
+def _review_response(snapshot, *, outcome=None, receipt_identity=None, context=None):
     return CanonicalLineReviewResponse(
         request_id=snapshot.request_id.value,
         review_type=snapshot.review_type.value,
@@ -782,7 +792,9 @@ def _review_response(snapshot, *, outcome=None, receipt_identity=None):
         assigned_admin_id=snapshot.assigned_admin_id,
         due_at=snapshot.due_at,
         line_user_id=_canonical_line_user_id(snapshot.line_user_id.value),
-        display_name=f"{snapshot.subject_type.value} #{snapshot.subject_reference}",
+        display_name=context.subject_name if context else (f"{snapshot.subject_type.value} #{snapshot.subject_reference}" if snapshot.subject_type else "姓名待確認"),
+        current_line_user_id=context.current_line_user_id if context else None,
+        subject_display_reference=context.subject_display_reference if context else None,
         decision_reason=snapshot.decision_reason,
         reviewed_by_actor_id=snapshot.reviewed_by_actor_id,
         reviewed_at=snapshot.reviewed_at,

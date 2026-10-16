@@ -26,6 +26,7 @@ Service owner 原子結案並 release hold。LINE 不擁有客服、Payroll 或 
 - `infrastructure/mysql/customer_service_repository.py`
 - `infrastructure/mysql/customer_service_escalation_repository.py`
 - `subsystems/line/human_escalation_delivery.py`
+- 客訴／runtime critical 新告警組裝時讀取既有訊息設定的說明文字；去敏摘要、目標快照與管理入口仍沿原流程。一般轉真人通知不套用客訴文案，既有 delivery task 不重寫。
 - `subsystems/line/delivery_worker.py`
 - `infrastructure/mysql/line_delivery_task_repository.py`
 - `api/routes/customer_service.py`

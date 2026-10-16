@@ -6,6 +6,7 @@ Description: 保存客服需求，並僅依 canonical LINE binding 查詢客戶�
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime, timezone
 
 from domains.customer_service.ticket import (
     CustomerServiceCategory,
@@ -17,6 +18,11 @@ from domains.customer_service.ticket import (
 from subsystems.customer_service.contracts import (
     CreateCustomerServiceMessage,
     CustomerServiceListQuery,
+    CustomerServiceReminder,
+    CustomerServiceReminderPage,
+    CustomerServiceReminderQuery,
+    CustomerServiceReminderSource,
+    CustomerServiceReminderSummary,
 )
 
 
@@ -195,6 +201,83 @@ class MySqlCustomerServiceRepository:
             items = [_ticket_view(_ticket(row)) for row in cursor.fetchall() or ()]
         return {"items": items, "total": total, "page": query.page, "page_size": query.page_size}
 
+    def list_reminders(self, query: CustomerServiceReminderQuery) -> CustomerServiceReminderPage:
+        clauses = ["t.status IN ('waiting','handling')"]
+        params: list[Any] = []
+        if query.status != "open":
+            clauses.append("t.status=%s")
+            params.append(query.status)
+        if query.source is not None:
+            recognized = f"EXISTS (SELECT 1 FROM customer_service_ticket_events e WHERE e.ticket_id=t.id AND ({_REMINDER_SOURCE_CASE}) IS NOT NULL)"
+            if query.source is CustomerServiceReminderSource.UNKNOWN:
+                clauses.append(f"NOT {recognized}")
+            else:
+                clauses.append(f"EXISTS (SELECT 1 FROM customer_service_ticket_events e WHERE e.ticket_id=t.id AND ({_REMINDER_SOURCE_CASE})=%s)")
+                params.append(query.source.value)
+        if query.search and query.search.strip():
+            clauses.append("(t.case_no LIKE %s OR CAST(t.id AS CHAR) LIKE %s)")
+            pattern = f"%{query.search.strip().removeprefix('#')}%"
+            params.extend((pattern, pattern))
+        where = " AND ".join(clauses)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT SUM(status='waiting') AS waiting,SUM(status='handling') AS handling "
+                "FROM customer_service_tickets WHERE status IN ('waiting','handling')"
+            )
+            summary = cursor.fetchone() or {}
+            cursor.execute(f"SELECT COUNT(*) AS total FROM customer_service_tickets t WHERE {where}", tuple(params))
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(
+                "SELECT t.id,c.name AS client_name,t.case_no,t.status,"
+                "a.display_name AS assigned_admin_name,t.updated_at_utc AS updated_at,"
+                "EXISTS (SELECT 1 FROM customer_service_escalations x WHERE x.ticket_id=t.id "
+                "AND x.workflow_status<>'resolved' AND x.urgency='high') AS is_priority "
+                "FROM customer_service_tickets t LEFT JOIN clients c ON c.id=t.client_id "
+                "LEFT JOIN admin_users a ON a.id=t.assigned_to_admin_user_id "
+                f"WHERE {where} ORDER BY is_priority DESC,t.updated_at_utc DESC,t.id DESC LIMIT %s OFFSET %s",
+                (*params, query.page_size, (query.page - 1) * query.page_size),
+            )
+            rows = list(cursor.fetchall() or ())
+            source_rows: list[dict[str, Any]] = []
+            if rows:
+                placeholders = ",".join("%s" for _ in rows)
+                cursor.execute(
+                    f"SELECT e.ticket_id,e.id,({_REMINDER_SOURCE_CASE}) AS source,"
+                    "(SELECT x.trigger_code FROM customer_service_escalations x "
+                    "WHERE x.ticket_id=e.ticket_id AND x.source_event_identity=e.event_key "
+                    "ORDER BY x.id DESC LIMIT 1) AS trigger_code "
+                    f"FROM customer_service_ticket_events e WHERE e.ticket_id IN ({placeholders}) ORDER BY e.id DESC",
+                    tuple(int(row["id"]) for row in rows),
+                )
+                source_rows = list(cursor.fetchall() or ())
+        sources_by_ticket: dict[int, list[tuple[CustomerServiceReminderSource, str | None]]] = {}
+        for row in source_rows:
+            if row["source"] is not None:
+                source = CustomerServiceReminderSource(row["source"])
+                items = sources_by_ticket.setdefault(int(row["ticket_id"]), [])
+                if not any(item[0] is source for item in items):
+                    items.append((source, row.get("trigger_code")))
+        items = []
+        for row in rows:
+            sources = sources_by_ticket.get(int(row["id"]), [(CustomerServiceReminderSource.UNKNOWN, None)])
+            source, trigger = sources[0]
+            reason = _REMINDER_REASONS[source]
+            if source is CustomerServiceReminderSource.HANDOFF and trigger == "explicit_wrong_answer":
+                reason = "explicit_wrong_answer"
+            updated_at = row.get("updated_at")
+            if isinstance(updated_at, datetime) and updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            items.append(CustomerServiceReminder(
+                ticket_id=int(row["id"]), client_name=row.get("client_name"), case_no=row.get("case_no"),
+                status=row["status"], assigned_admin_name=row.get("assigned_admin_name"),
+                source=source, sources=tuple(item[0] for item in sources), reason=reason,
+                is_priority=bool(row["is_priority"]), updated_at=updated_at,
+            ))
+        return CustomerServiceReminderPage(
+            items=tuple(items), total=total, page=query.page, page_size=query.page_size,
+            summary=CustomerServiceReminderSummary(int(summary.get("waiting") or 0), int(summary.get("handling") or 0)),
+        )
+
     def update(self, ticket_id, current_version, status, note, admin_user_id) -> CustomerServiceTicket:
         resolved = "UTC_TIMESTAMP()" if status is CustomerServiceStatus.RESOLVED else "NULL"
         sql = _UPDATE_TICKET_SQL.format(resolved_at=resolved)
@@ -317,6 +400,31 @@ def _list_filters(
         parameters.extend((pattern, pattern))
     return clauses, tuple(parameters)
 
+
+# Only canonical event namespaces and linked escalation facts classify a source.
+# Message text, ticket category and continuation/agent events are never source evidence.
+_REMINDER_SOURCE_CASE = """CASE
+WHEN e.event_type<>'customer_message' THEN NULL
+WHEN SUBSTR(e.event_key,1,LENGTH('line-complaint:'))='line-complaint:' THEN 'complaint'
+WHEN SUBSTR(e.event_key,1,LENGTH('line-feedback-ticket:'))='line-feedback-ticket:' THEN 'feedback'
+WHEN SUBSTR(e.event_key,1,LENGTH('line-order-change:'))='line-order-change:'
+    OR SUBSTR(e.event_key,1,LENGTH('line-service-help:order-update:'))='line-service-help:order-update:' THEN 'order'
+WHEN SUBSTR(e.event_key,1,LENGTH('binding-failure:'))='binding-failure:' THEN 'binding'
+WHEN EXISTS (SELECT 1 FROM customer_service_escalations sx WHERE sx.ticket_id=e.ticket_id
+    AND sx.source_event_identity=e.event_key AND sx.trigger_code IN ('explicit_human_request','explicit_wrong_answer')) THEN 'handoff'
+WHEN SUBSTR(e.event_key,1,LENGTH('line-service-help:profile_update:'))='line-service-help:profile_update:'
+    OR SUBSTR(e.event_key,1,LENGTH('line-service-help:contact_union:'))='line-service-help:contact_union:'
+    OR SUBSTR(e.event_key,1,LENGTH('line-service-help:other:'))='line-service-help:other:' THEN 'service'
+ELSE NULL END"""
+_REMINDER_REASONS = {
+    CustomerServiceReminderSource.HANDOFF: "explicit_human_request",
+    CustomerServiceReminderSource.COMPLAINT: "complaint",
+    CustomerServiceReminderSource.FEEDBACK: "unresolved_feedback",
+    CustomerServiceReminderSource.ORDER: "order_change_requested",
+    CustomerServiceReminderSource.SERVICE: "service_referral",
+    CustomerServiceReminderSource.BINDING: "binding_failure",
+    CustomerServiceReminderSource.UNKNOWN: "unknown",
+}
 
 _TICKET_SELECT = "SELECT t.*,c.name AS client_name,c.phone AS client_phone FROM customer_service_tickets t LEFT JOIN clients c ON c.id=t.client_id"
 _ACTIVE_TICKET_SQL = _TICKET_SELECT + " WHERE t.line_user_id=%s AND t.category=%s AND t.status IN ('waiting','handling') FOR UPDATE"

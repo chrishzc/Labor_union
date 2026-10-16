@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlencode
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.configuration import LineConfigurationKind
 from domains.line.delivery import (
     LineDeliveryRequest,
     LineMessageKind,
@@ -25,6 +26,7 @@ from domains.line.identities import LineUserId
 from domains.scheduling.staff_leave_intake import StaffLeaveRequestStatus
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.message_configuration import notification_description
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.scheduling.staff_leave_intake_workflow import (
     RecordStaffLeaveCustomerDecision,
@@ -77,6 +79,7 @@ class StaffLeaveCustomerCoordinationApplication:
         leave_start_date = _date_text(context["leave_start_date"])
         leave_end_date = _date_text(context["leave_end_date"])
         targets = tuple(context["targets"])
+        description = None
 
         for target in targets:
             case_no = str(target["case_no"])
@@ -87,6 +90,11 @@ class StaffLeaveCustomerCoordinationApplication:
             if not isinstance(recipient_value, str) or not recipient_value.strip():
                 continue
             recipient_value = recipient_value.strip()
+            if description is None:
+                description = notification_description(
+                    unit_of_work.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES),
+                    "LU96-M1-LEAVE-EXTENSION-CARD-V1",
+                )
             identity = _interaction_identity(request_id, version, case_no)
             unit_of_work.delivery_tasks.enqueue(
                 LineDeliveryRequest(
@@ -99,6 +107,7 @@ class StaffLeaveCustomerCoordinationApplication:
                             case_no,
                             leave_start_date,
                             leave_end_date,
+                            description=description,
                         )
                     ),
                     self._now(),
@@ -242,6 +251,8 @@ def _inquiry_payload(
     case_no: str,
     leave_start_date: str,
     leave_end_date: str,
+    *,
+    description: str = "月嫂提出請假，請選擇是否同意將受影響服務順延；若不同意順延，工會將接手安排代班。",
 ) -> dict[str, object]:
     period = (
         leave_start_date
@@ -278,7 +289,7 @@ def _inquiry_payload(
                     },
                     {
                         "type": "text",
-                        "text": "月嫂提出請假，請選擇是否同意將受影響服務順延；若不同意順延，工會將接手安排代班。",
+                        "text": description,
                         "size": "sm",
                         "wrap": True,
                     },

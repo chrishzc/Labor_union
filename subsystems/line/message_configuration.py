@@ -43,6 +43,21 @@ def configuration_definition(snapshot: LineConfigurationSnapshot) -> dict[str, o
     return value
 
 
+def notification_description(snapshot: LineConfigurationSnapshot, template_id: str) -> str:
+    """Read editable copy when composing a new notification, never on task retry."""
+    if snapshot.revision.value == 0 and snapshot.definition_json == "{}":
+        from subsystems.line.configuration_store import read_raw_config
+
+        definition = read_raw_config("message_templates")
+    else:
+        definition = configuration_definition(snapshot)
+    rendered = render_message_template(definition, template_id)
+    payload = json.loads(rendered.payload_json)
+    if rendered.message_kind is not LineMessageKind.TEXT or not isinstance(payload.get("text"), str):
+        raise LineMessageConfigurationError("notification description must be text")
+    return payload["text"]
+
+
 def validate_message_templates(definition: Mapping[str, object]) -> None:
     templates = _object_list(definition, "templates")
     identifiers: set[str] = set()

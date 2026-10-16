@@ -14,13 +14,10 @@ import {
   GitCompareArrows,
   Headphones,
   Info,
-  KeyRound,
   MapPin,
   Menu,
   PackageSearch,
   RefreshCw,
-  Rocket,
-  Search,
   Settings,
   ShieldCheck,
   Smartphone,
@@ -30,33 +27,10 @@ import {
   Users,
   WalletCards,
 } from 'lucide-react';
+
 import {
-  adaptCustomerServiceDetail,
-  adaptCustomerServicePage,
-  adaptCustomerServiceResolvePreview,
-  adaptCustomerServiceSummary,
-  CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE,
-  type CustomerServiceDetailModel,
-  type CustomerServicePageModel,
-  type CustomerServiceResolvePreviewModel,
-  type CustomerServiceSummaryModel,
-} from '../adapters/customer_service/customer_service_adapter';
-import {
-  adaptLineIdentityBinding,
-  adaptLineIdentityBindingPage,
-  adaptLineIdentityRevocationAccepted,
-  adaptLineIdentityRevocationPreview,
-  type LineIdentityBindingRowViewModel,
-  type LineIdentityRevocationAcceptedViewModel,
-  type LineIdentityRevocationPreviewViewModel,
-} from '../adapters/line_identity/line_identity_adapter';
-import {
-  adaptLineNotificationRulesCatalog,
   adaptLineRichMenuPublication,
   adaptLineRichMenuPublicationPage,
-  ruleName,
-  type LineNotificationRuleModel,
-  type LineNotificationRulesCatalogModel,
   type LineRichMenuConfigurationModel,
   type LineRichMenuPublicationModel,
   type LineRichMenuPublicationPageModel,
@@ -65,6 +39,7 @@ import {
 import {
   customerServiceClient,
   type CustomerServiceClient,
+  type CustomerServiceReminderClient,
 } from '../api/customer_service/customer_service_client';
 import { CustomerServiceClientError } from '../api/customer_service/customer_service_errors';
 import {
@@ -76,28 +51,16 @@ import {
   lineConfigurationQueryClient,
   type LineConfigurationQueryClient,
 } from '../api/line_configuration/line_configuration_query_client';
-import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
 import { LineConfigurationQueryError } from '../api/line_configuration/line_configuration_query_errors';
 import { adaptLineRichMenuDraft } from '../adapters/line_rich_menu_draft/line_rich_menu_draft_adapter';
 import {
   lineRichMenuDraftClient,
   type LineRichMenuDraftClient,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
-import {
-  adaptLineDeliveryDetail,
-  adaptLineDeliverySummary,
-} from '../adapters/line_delivery/line_delivery_query_adapter';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import { LineDeliveryQueryError } from '../api/line_delivery/line_delivery_query_errors';
-import { LineDeliveryTaskWorkbench } from '../components/LineDeliveryTaskWorkbench';
-import {
-  adaptLineOrderGroupEvent,
-  adaptLineOrderGroupRecord,
-  type LineOrderGroupEventView,
-  type LineOrderGroupRecordView,
-} from '../adapters/line_order_groups/line_order_group_query_adapter';
-import { lineOrderGroupQueryClient } from '../api/line_order_groups/line_order_group_query_client';
-import { LineOrderGroupQueryError } from '../api/line_order_groups/line_order_group_query_errors';
+import { LineOrderGroupWorkbench } from '../components/LineOrderGroupWorkbench';
+import type { LineOrderGroupStatus } from '../api/line_order_groups/line_order_group_query_schemas';
 import {
   adaptLineSafeConfig,
   type LineSafeConfigModel,
@@ -137,18 +100,10 @@ import type {
   CustomerServiceEscalationResolveRequest,
 } from '../api/customer_service_escalations/customer_service_escalation_schemas';
 import { Drawer } from '../components/Drawer';
-import { LineCustomerServiceActions } from '../components/LineCustomerServiceActions';
-import { LineIdentityMaintenanceActions } from '../components/LineIdentityMaintenanceActions';
-import {
-  LineIdentityReviewWorkbench,
-  type LineIdentityReviewClient,
-} from '../components/LineIdentityReviewWorkbench';
-import {
-  LineUnboundPairingWorkbench,
-  type LineUnboundPairingClient,
-} from '../components/LineUnboundPairingWorkbench';
-import { LineNotificationRulesMutationPanel } from '../components/LineNotificationRulesMutationPanel';
-import { LineOnboardingEditor } from '../components/LineOnboardingEditor';
+import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
+import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
+import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
+import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 import {
@@ -166,7 +121,6 @@ import type {
 import './LineManagementPage.css';
 
 type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'order_groups' | 'runtime';
-type NotificationWorkspaceTab = 'rules' | 'onboarding' | 'delivery';
 type RichMenuWorkspaceTab = 'overview' | 'appearance' | 'actions' | 'publish' | 'history';
 
 function currentHashParams(): URLSearchParams {
@@ -183,21 +137,8 @@ function hashPage(params: URLSearchParams, key: string): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 1;
 }
 
-type CustomerServicePageClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'> &
-  Partial<Pick<CustomerServiceClient, 'previewResolve' | 'applyResolve'>>;
-type LineIdentityPageClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding'> &
-  Partial<Pick<
-    LineIdentityClient,
-    | 'previewRevocation'
-    | 'applyRevocation'
-    | 'listReviews'
-    | 'getReviewSummary'
-    | 'getReview'
-    | 'previewReviewDecision'
-    | 'applyReviewDecision'
-    | 'listUnboundCandidates'
-    | 'pairProvisionalRegistration'
-  >>;
+type CustomerServicePageClient = Partial<CustomerServiceClient & CustomerServiceReminderClient>;
+type LineIdentityPageClient = Partial<LineIdentityClient>;
 
 interface LineManagementPageProps {
   customerService?: CustomerServicePageClient;
@@ -211,30 +152,13 @@ interface LineManagementPageProps {
   delivery?: typeof lineDeliveryQueryClient;
   safeReviewLink?: SafeReviewLinkClient;
   onboardingClient?: LineOnboardingClient;
+  notificationTemplateClient?: LineNotificationTemplateClient;
   /** Render only the safety and human-escalation workspace inside the canonical Group & Security page. */
   runtimeOnly?: boolean;
 }
 
 type QueryStatus = 'idle' | 'loading' | 'loaded' | 'error';
 type MutationStatus = 'idle' | 'loading' | 'success' | 'error';
-type LineDeliverySummaryView = ReturnType<typeof adaptLineDeliverySummary>;
-type LineDeliveryDetailView = ReturnType<typeof adaptLineDeliveryDetail>;
-type LineOrderGroupPageView = {
-  items: LineOrderGroupRecordView[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-};
-type LineOrderGroupDetailView = {
-  record: LineOrderGroupRecordView;
-  events: LineOrderGroupEventView[];
-  eventPage: number;
-  eventPageSize: number;
-  eventTotal: number;
-  eventTotalPages: number;
-};
-
 interface QueryState<T> {
   status: QueryStatus;
   value: T | null;
@@ -278,7 +202,6 @@ function displayQueryError(error: unknown, fallback: string): string {
   if (error instanceof LineIdentityClientError) return `${error.code}：${error.message}`;
   if (error instanceof LineConfigurationQueryError) return `${error.code}：${error.message}`;
   if (error instanceof LineDeliveryQueryError) return `${error.code}：${error.message}`;
-  if (error instanceof LineOrderGroupQueryError) return `${error.code}：${error.message}`;
   if (error instanceof LineSafeConfigError) return `${error.code}：${error.message}`;
   if (error instanceof LineRuntimeTargetError) return `${error.code}：${error.message}`;
   if (error instanceof CustomerServiceEscalationError) {
@@ -289,7 +212,7 @@ function displayQueryError(error: unknown, fallback: string): string {
 }
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
-  ['tickets', '客服與案件', 'line.tab.tickets'],
+  ['tickets', '客服案件', 'line.tab.tickets'],
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
@@ -323,28 +246,6 @@ function LoadingOrError({ state, loadingText }: { state: QueryState<unknown>; lo
   return null;
 }
 
-function asReviewClient(client: LineIdentityPageClient): LineIdentityReviewClient | null {
-  if (
-    client.listReviews
-    && client.getReviewSummary
-    && client.getReview
-    && client.previewReviewDecision
-    && client.applyReviewDecision
-  ) {
-    return client as LineIdentityReviewClient;
-  }
-  return null;
-}
-
-function asUnboundPairingClient(client: LineIdentityPageClient): LineUnboundPairingClient | null {
-  if (
-    typeof client.listUnboundCandidates === 'function' &&
-    typeof client.pairProvisionalRegistration === 'function'
-  ) {
-    return client as LineUnboundPairingClient;
-  }
-  return null;
-}
 
 function getTypedButtonAction(btn: RichMenuButtonModel) {
   const action = btn.action;
@@ -443,83 +344,20 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   richMenuPublicationPollIntervalMs = 1500,
   runtimeTarget = lineRuntimeTargetClient,
   escalation = customerServiceEscalationClient,
-  delivery = lineDeliveryQueryClient,
   safeReviewLink = safeReviewLinkClient,
   onboardingClient,
+  notificationTemplateClient,
   runtimeOnly = false,
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
   const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'order_groups'], 'tickets'));
-  const [notificationWorkspaceTab, setNotificationWorkspaceTab] = useState<NotificationWorkspaceTab>(hashChoice<NotificationWorkspaceTab>(initialHashParams, 'notice', ['rules', 'onboarding', 'delivery'], 'rules'));
   const [richMenuWorkspaceTab, setRichMenuWorkspaceTab] = useState<RichMenuWorkspaceTab>(hashChoice<RichMenuWorkspaceTab>(initialHashParams, 'rich', ['overview', 'appearance', 'actions', 'publish', 'history'], 'overview'));
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
-  const [notificationRuleEvent, setNotificationRuleEvent] = useState(initialHashParams.get('rule_event') ?? 'all');
-  const [notificationRuleRecipient, setNotificationRuleRecipient] = useState(initialHashParams.get('rule_recipient') ?? 'all');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
-  const [notificationRulePage, setNotificationRulePage] = useState(hashPage(initialHashParams, 'rule_page'));
-  const [ticketSummary, setTicketSummary] = useState<QueryState<CustomerServiceSummaryModel>>(idleState);
-  const [ticketPage, setTicketPage] = useState<QueryState<CustomerServicePageModel>>(idleState);
-  const [ticketReload, setTicketReload] = useState(0);
-  const [ticketPageNumber, setTicketPageNumber] = useState(hashPage(initialHashParams, 'ticket_page'));
-  const ticketPageSize = 25;
-  const [ticketSearchQuery, setTicketSearchQuery] = useState(initialHashParams.get('ticket_q') ?? '');
-  const [ticketStatusFilter, setTicketStatusFilter] = useState<'all' | 'waiting' | 'handling' | 'resolved'>(hashChoice<'all' | 'waiting' | 'handling' | 'resolved'>(initialHashParams, 'ticket_state', ['all', 'waiting', 'handling', 'resolved'], 'all'));
-  const [ticketCategoryFilter, setTicketCategoryFilter] = useState<string>(initialHashParams.get('ticket_category') ?? 'all');
-  const [ticketScopeBlocker, setTicketScopeBlocker] = useState<string | null>(null);
-  const [ticketDetail, setTicketDetail] = useState<QueryState<CustomerServiceDetailModel>>(idleState);
-  const ticketDetailController = useRef<AbortController | null>(null);
-  const ticketDetailGeneration = useRef(0);
-  const ticketDetailId = useRef<number | null>(null);
-  const ticketResolveController = useRef<AbortController | null>(null);
-  const [ticketResolveNote, setTicketResolveNote] = useState('');
-  const [ticketResolvePreview, setTicketResolvePreview] = useState<QueryState<CustomerServiceResolvePreviewModel>>(idleState);
-  const [ticketResolveConfirmed, setTicketResolveConfirmed] = useState(false);
-  const [ticketResolveStatus, setTicketResolveStatus] = useState<MutationStatus>('idle');
-  const [ticketResolveError, setTicketResolveError] = useState<string | null>(null);
-  const ticketResolveCorrelationId = useRef<string | null>(null);
-  const ticketResolveIdempotencyKey = useRef<string | null>(null);
 
-  const [bindingPage, setBindingPage] = useState<QueryState<{ items: LineIdentityBindingRowViewModel[]; total: number; page: number; pageSize: number }>>(idleState);
-  const [bindingSources, setBindingSources] = useState<readonly string[]>([]);
-  const [bindingReload, setBindingReload] = useState(0);
-  const [bindingPageNumber, setBindingPageNumber] = useState(hashPage(initialHashParams, 'binding_page'));
-  const bindingPageSize = 25;
-  const [bindingSearchQuery, setBindingSearchQuery] = useState(initialHashParams.get('binding_q') ?? '');
-  const [bindingRoleFilter, setBindingRoleFilter] = useState<'active' | 'all' | 'customer' | 'staff' | 'admin'>(hashChoice<'active' | 'all' | 'customer' | 'staff' | 'admin'>(initialHashParams, 'binding_role', ['active', 'all', 'customer', 'staff', 'admin'], 'active'));
-  const [bindingDetail, setBindingDetail] = useState<QueryState<LineIdentityBindingRowViewModel>>(idleState);
-  const bindingDetailController = useRef<AbortController | null>(null);
-  const bindingDetailGeneration = useRef(0);
-  const bindingDetailId = useRef<string | null>(null);
-  const bindingRevocationController = useRef<AbortController | null>(null);
-  const [bindingRevocationReason, setBindingRevocationReason] = useState('');
-  const [bindingRevocationPreview, setBindingRevocationPreview] = useState<QueryState<LineIdentityRevocationPreviewViewModel>>(idleState);
-  const [bindingRevocationAccepted, setBindingRevocationAccepted] = useState<LineIdentityRevocationAcceptedViewModel | null>(null);
-  const [bindingRevocationConfirmed, setBindingRevocationConfirmed] = useState(false);
-  const [bindingRevocationStatus, setBindingRevocationStatus] = useState<MutationStatus>('idle');
-  const [bindingRevocationError, setBindingRevocationError] = useState<string | null>(null);
-  const bindingRevocationCorrelationId = useRef<string | null>(null);
-  const bindingRevocationIdempotencyKey = useRef<string | null>(null);
-
-  const [rules, setRules] = useState<QueryState<LineNotificationRulesCatalogModel>>(idleState);
-  const [rawRules, setRawRules] = useState<LineNotificationRulesCatalog | null>(null);
-  const [rulesReload, setRulesReload] = useState(0);
-  const [selectedRule, setSelectedRule] = useState<LineNotificationRuleModel | null>(null);
-  const [notificationRuleEditorOpen, setNotificationRuleEditorOpen] = useState(false);
-  const [notificationRuleEditorId, setNotificationRuleEditorId] = useState<string | null>(null);
-  const notificationRuleEditorRef = useRef<HTMLElement | null>(null);
-  const [deliverySummary, setDeliverySummary] = useState<QueryState<LineDeliverySummaryView>>(idleState);
-  const [deliveryDetail, setDeliveryDetail] = useState<QueryState<LineDeliveryDetailView>>(idleState);
-  const deliveryDetailController = useRef<AbortController | null>(null);
-  const deliveryDetailGeneration = useRef(0);
-
-  const [orderGroups, setOrderGroups] = useState<QueryState<LineOrderGroupPageView>>(idleState);
-  const [orderGroupDetail, setOrderGroupDetail] = useState<QueryState<LineOrderGroupDetailView>>(idleState);
   const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(hashPage(initialHashParams, 'group_page'));
-  const orderGroupPageSize = 25;
-  const [orderGroupReload, setOrderGroupReload] = useState(0);
-  const orderGroupListGeneration = useRef(0);
-  const orderGroupDetailController = useRef<AbortController | null>(null);
-  const orderGroupDetailGeneration = useRef(0);
+  const [orderGroupSearch, setOrderGroupSearch] = useState((initialHashParams.get('group_q') ?? '').slice(0, 50));
+  const [orderGroupStatus, setOrderGroupStatus] = useState<LineOrderGroupStatus | 'all'>(hashChoice<LineOrderGroupStatus | 'all'>(initialHashParams, 'group_state', ['all', 'unbound', 'bound', 'inviting', 'active', 'attention', 'replaced', 'released'], 'all'));
 
   const [safeConfigurations, setSafeConfigurations] = useState<QueryState<LineSafeConfigModel[]>>(idleState);
   const [runtimeTargets, setRuntimeTargets] = useState<QueryState<LineRuntimeTargetModel[]>>(idleState);
@@ -598,22 +436,14 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       else params.set(key, String(value));
     };
     setParam('tab', activeTab, 'tickets');
-    setParam('notice', notificationWorkspaceTab, 'rules');
     setParam('rich', richMenuWorkspaceTab, 'overview');
-    setParam('ticket_q', ticketSearchQuery, '');
-    setParam('ticket_state', ticketStatusFilter, 'all');
-    setParam('ticket_category', ticketCategoryFilter, 'all');
-    setParam('ticket_page', ticketPageNumber, 1);
-    setParam('binding_q', bindingSearchQuery, '');
-    setParam('binding_role', bindingRoleFilter, 'active');
-    setParam('binding_page', bindingPageNumber, 1);
     setParam('rule_q', notificationRuleSearch, '');
-    setParam('rule_event', notificationRuleEvent, 'all');
-    setParam('rule_recipient', notificationRuleRecipient, 'all');
     setParam('rule_state', notificationRuleEnabled, 'all');
-    setParam('rule_page', notificationRulePage, 1);
+    if (activeTab === 'push_queue') ['notice', 'rule_event', 'rule_recipient', 'rule_page'].forEach(key => params.delete(key));
     setParam('rich_page', richMenuPublicationPageNumber, 1);
     setParam('group_page', orderGroupPageNumber, 1);
+    setParam('group_q', orderGroupSearch, '');
+    setParam('group_state', orderGroupStatus, 'all');
     const query = params.toString();
     const nextHash = `#${route}${query ? `?${query}` : ''}`;
     if (window.location.hash !== nextHash) {
@@ -621,109 +451,17 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   }, [
     activeTab,
-    bindingPageNumber,
-    bindingRoleFilter,
-    bindingSearchQuery,
     notificationRuleEnabled,
-    notificationRuleEvent,
-    notificationRulePage,
-    notificationRuleRecipient,
     notificationRuleSearch,
-    notificationWorkspaceTab,
     orderGroupPageNumber,
+    orderGroupSearch,
+    orderGroupStatus,
     richMenuPublicationPageNumber,
     richMenuWorkspaceTab,
     runtimeOnly,
-    ticketCategoryFilter,
-    ticketPageNumber,
-    ticketSearchQuery,
-    ticketStatusFilter,
   ]);
 
-  useEffect(() => {
-    if (activeTab !== 'tickets') return;
-    const controller = new AbortController();
-    let cancelled = false;
-    setTicketSummary(loadingState());
-    setTicketPage(loadingState());
-    setTicketScopeBlocker(null);
-    const timer = window.setTimeout(() => {
-      const pageQuery = {
-        status: ticketStatusFilter === 'all' ? undefined : ticketStatusFilter,
-        category: ticketCategoryFilter === 'all' ? undefined : (ticketCategoryFilter as any),
-        search: ticketSearchQuery.trim() || undefined,
-        page: ticketPageNumber,
-        page_size: ticketPageSize,
-      };
-      const pageRequest = customerService.listTickets(pageQuery, { signal: controller.signal });
-      void Promise.allSettled([
-        customerService.getSummary({ signal: controller.signal }),
-        pageRequest,
-      ]).then(([summaryResult, pageResult]) => {
-        if (cancelled) return;
-        if (summaryResult.status === 'fulfilled') setTicketSummary(loadedState(adaptCustomerServiceSummary(summaryResult.value)));
-        else setTicketSummary(errorState(displayQueryError(summaryResult.reason, '客服摘要載入失敗')));
-        if (pageResult.status === 'fulfilled' && pageResult.value) {
-          setTicketPage(loadedState(adaptCustomerServicePage(pageResult.value)));
-        } else if (pageResult.status === 'rejected') {
-          setTicketPage(errorState(displayQueryError(pageResult.reason, '客服工單清單載入失敗')));
-        }
-      });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, customerService, ticketCategoryFilter, ticketPageNumber, ticketReload, ticketSearchQuery, ticketStatusFilter]);
 
-  useEffect(() => {
-    if (activeTab !== 'binding') return;
-    const controller = new AbortController();
-    let cancelled = false;
-    setBindingPage(loadingState());
-    const timer = window.setTimeout(() => {
-      void lineIdentity.listBindings({
-        page: bindingPageNumber,
-        page_size: bindingPageSize,
-        status: bindingRoleFilter === 'all' ? undefined : 'bound',
-        subject_type: bindingRoleFilter === 'active' || bindingRoleFilter === 'all'
-          ? undefined
-          : bindingRoleFilter,
-        search: bindingSearchQuery.trim() || undefined,
-      }, { signal: controller.signal })
-        .then((page) => {
-          if (cancelled) return;
-          setBindingSources(page.items.map((item) => item.line_user_id));
-          setBindingPage(loadedState({ items: adaptLineIdentityBindingPage(page).items, total: page.total, page: page.page, pageSize: page.page_size }));
-        })
-        .catch((error: unknown) => { if (!cancelled) setBindingPage(errorState(displayQueryError(error, 'LINE 身分清單載入失敗'))); });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, bindingPageNumber, bindingReload, bindingRoleFilter, bindingSearchQuery, lineIdentity]);
-
-  useEffect(() => {
-    if (activeTab !== 'push_queue') return;
-    const controller = new AbortController();
-    let cancelled = false;
-    setRules(loadingState());
-    setRawRules(null);
-    setDeliverySummary(loadingState());
-    const timer = window.setTimeout(() => {
-      void Promise.allSettled([
-        lineConfiguration.getNotificationRules({ signal: controller.signal }),
-        delivery.summary({ signal: controller.signal }),
-      ]).then(([rulesResult, summaryResult]) => {
-        if (cancelled) return;
-        if (rulesResult.status === 'fulfilled') {
-          setRawRules(rulesResult.value);
-          setRules(loadedState(adaptLineNotificationRulesCatalog(rulesResult.value)));
-        } else {
-          setRawRules(null);
-          setRules(errorState(displayQueryError(rulesResult.reason, '通知規則目錄載入失敗')));
-        }
-        if (summaryResult.status === 'fulfilled') setDeliverySummary(loadedState(adaptLineDeliverySummary(summaryResult.value)));
-        else setDeliverySummary(errorState(displayQueryError(summaryResult.reason, '發送任務摘要載入失敗')));
-      });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, delivery, lineConfiguration, rulesReload]);
 
   useEffect(() => {
     if (activeTab !== 'richmenu') return;
@@ -806,30 +544,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     trackedRichMenuPublication,
   ]);
 
-  useEffect(() => {
-    if (activeTab !== 'order_groups') return;
-    const controller = new AbortController();
-    const generation = orderGroupListGeneration.current + 1;
-    orderGroupListGeneration.current = generation;
-    let cancelled = false;
-    setOrderGroups(loadingState());
-    const timer = window.setTimeout(() => {
-      void lineOrderGroupQueryClient.list({ page: orderGroupPageNumber, pageSize: orderGroupPageSize }, { signal: controller.signal })
-        .then((page) => {
-          if (!cancelled && generation === orderGroupListGeneration.current) setOrderGroups(loadedState({
-            items: page.items.map(adaptLineOrderGroupRecord),
-            page: page.page,
-            pageSize: page.page_size,
-            total: page.total,
-            totalPages: page.total_pages,
-          }));
-        })
-        .catch((error: unknown) => {
-          if (!cancelled && generation === orderGroupListGeneration.current) setOrderGroups(errorState(displayQueryError(error, '三方服務群組載入失敗')));
-        });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, orderGroupPageNumber, orderGroupReload]);
+
 
   useEffect(() => {
     if (activeTab !== 'runtime') return;
@@ -858,49 +573,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   }, [activeTab, runtimeReload, runtimeTarget]);
 
   useEffect(() => {
-    if (activeTab !== 'tickets') {
-      ticketDetailController.current?.abort();
-      ticketResolveController.current?.abort();
-      ticketDetailController.current = null;
-      ticketResolveController.current = null;
-      ticketDetailGeneration.current += 1;
-      ticketDetailId.current = null;
-      setTicketDetail(idleState());
-      setTicketResolvePreview(idleState());
-      setTicketResolveStatus('idle');
-      setTicketResolveError(null);
-    }
-    if (activeTab !== 'binding') {
-      bindingDetailController.current?.abort();
-      bindingRevocationController.current?.abort();
-      bindingDetailController.current = null;
-      bindingRevocationController.current = null;
-      bindingDetailGeneration.current += 1;
-      bindingDetailId.current = null;
-      setBindingDetail(idleState());
-      setBindingRevocationPreview(idleState());
-      setBindingRevocationAccepted(null);
-      setBindingRevocationStatus('idle');
-      setBindingRevocationError(null);
-    }
+
     if (activeTab !== 'richmenu') {
       publicationController.current?.abort();
       publicationController.current = null;
       publicationGeneration.current += 1;
       publicationDetailId.current = null;
       setSelectedPublication(idleState());
-    }
-    if (activeTab !== 'push_queue') {
-      deliveryDetailController.current?.abort();
-      deliveryDetailController.current = null;
-      deliveryDetailGeneration.current += 1;
-      setDeliveryDetail(idleState());
-    }
-    if (activeTab !== 'order_groups') {
-      orderGroupDetailController.current?.abort();
-      orderGroupDetailController.current = null;
-      orderGroupDetailGeneration.current += 1;
-      setOrderGroupDetail(idleState());
     }
     if (activeTab !== 'runtime') {
       runtimePreviewController.current?.abort();
@@ -917,262 +596,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   }, [activeTab]);
 
   useEffect(() => () => {
-    ticketDetailController.current?.abort();
-    ticketResolveController.current?.abort();
-    bindingDetailController.current?.abort();
-    bindingRevocationController.current?.abort();
     publicationController.current?.abort();
-    deliveryDetailController.current?.abort();
-    orderGroupDetailController.current?.abort();
     runtimePreviewController.current?.abort();
     escalationPreviewController.current?.abort();
-    ticketDetailGeneration.current += 1;
-    bindingDetailGeneration.current += 1;
     publicationGeneration.current += 1;
-    deliveryDetailGeneration.current += 1;
-    orderGroupDetailGeneration.current += 1;
     runtimePreviewGeneration.current += 1;
     escalationPreviewGeneration.current += 1;
   }, []);
-
-  const resetTicketResolve = () => {
-    ticketResolveController.current?.abort();
-    ticketResolveController.current = null;
-    ticketResolveCorrelationId.current = null;
-    ticketResolveIdempotencyKey.current = null;
-    setTicketResolveNote('');
-    setTicketResolvePreview(idleState());
-    setTicketResolveConfirmed(false);
-    setTicketResolveStatus('idle');
-    setTicketResolveError(null);
-  };
-
-  const resetBindingRevocation = () => {
-    bindingRevocationController.current?.abort();
-    bindingRevocationController.current = null;
-    bindingRevocationCorrelationId.current = null;
-    bindingRevocationIdempotencyKey.current = null;
-    setBindingRevocationReason('');
-    setBindingRevocationPreview(idleState());
-    setBindingRevocationAccepted(null);
-    setBindingRevocationConfirmed(false);
-    setBindingRevocationStatus('idle');
-    setBindingRevocationError(null);
-  };
-
-  const openTicket = (ticketId: number) => {
-    resetTicketResolve();
-    ticketDetailController.current?.abort();
-    const controller = new AbortController();
-    ticketDetailController.current = controller;
-    ticketDetailId.current = ticketId;
-    const generation = ticketDetailGeneration.current + 1;
-    ticketDetailGeneration.current = generation;
-    setTicketDetail(loadingState());
-    void customerService.getTicketDetail(ticketId, { signal: controller.signal })
-      .then((detail) => { if (!controller.signal.aborted && generation === ticketDetailGeneration.current) setTicketDetail(loadedState(adaptCustomerServiceDetail(detail))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && generation === ticketDetailGeneration.current) setTicketDetail(errorState(displayQueryError(error, '客服工單明細載入失敗'))); });
-  };
-
-  const closeTicket = () => {
-    resetTicketResolve();
-    ticketDetailController.current?.abort();
-    ticketDetailController.current = null;
-    ticketDetailGeneration.current += 1;
-    ticketDetailId.current = null;
-    setTicketDetail(idleState());
-  };
-
-  const openBinding = (lineUserId: string) => {
-    resetBindingRevocation();
-    bindingDetailController.current?.abort();
-    const controller = new AbortController();
-    bindingDetailController.current = controller;
-    bindingDetailId.current = lineUserId;
-    const generation = bindingDetailGeneration.current + 1;
-    bindingDetailGeneration.current = generation;
-    setBindingDetail(loadingState());
-    void lineIdentity.getBinding(lineUserId, { signal: controller.signal })
-      .then((binding) => { if (!controller.signal.aborted && generation === bindingDetailGeneration.current) setBindingDetail(loadedState(adaptLineIdentityBinding(binding))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && generation === bindingDetailGeneration.current) setBindingDetail(errorState(displayQueryError(error, 'LINE 身分明細載入失敗'))); });
-  };
-
-  const closeBinding = () => {
-    resetBindingRevocation();
-    bindingDetailController.current?.abort();
-    bindingDetailController.current = null;
-    bindingDetailGeneration.current += 1;
-    bindingDetailId.current = null;
-    setBindingDetail(idleState());
-  };
-
-  const previewTicketResolve = async () => {
-    const detail = ticketDetail.value;
-    if (!detail || detail.ticket.status === 'resolved' || !customerService.previewResolve) return;
-    ticketResolveController.current?.abort();
-    const controller = new AbortController();
-    ticketResolveController.current = controller;
-    const correlationId = operationIdentity('line-ticket-resolve');
-    ticketResolveCorrelationId.current = correlationId;
-    ticketResolveIdempotencyKey.current = operationIdentity('line-ticket-resolve-apply');
-    setTicketResolvePreview(loadingState());
-    setTicketResolveConfirmed(false);
-    setTicketResolveStatus('idle');
-    setTicketResolveError(null);
-    try {
-      const preview = await customerService.previewResolve(
-        detail.ticket.ticketId,
-        {
-          status: 'resolved',
-          internal_note: ticketResolveNote.trim() || null,
-          expected_version: detail.ticket.version,
-        },
-        { correlationId, signal: controller.signal }
-      );
-      if (!controller.signal.aborted) setTicketResolvePreview(loadedState(adaptCustomerServiceResolvePreview(preview)));
-    } catch (error: unknown) {
-      if (!controller.signal.aborted) setTicketResolvePreview(errorState(displayQueryError(error, '結案預覽失敗')));
-    }
-  };
-
-  const applyTicketResolve = async () => {
-    const detail = ticketDetail.value;
-    const preview = ticketResolvePreview.value;
-    const correlationId = ticketResolveCorrelationId.current;
-    const idempotencyKey = ticketResolveIdempotencyKey.current;
-    if (!detail || !preview?.applyReady || preview.blockers.length > 0 || !ticketResolveConfirmed || !correlationId || !idempotencyKey || !customerService.applyResolve) return;
-    ticketResolveController.current?.abort();
-    const controller = new AbortController();
-    ticketResolveController.current = controller;
-    setTicketResolveStatus('loading');
-    setTicketResolveError(null);
-    try {
-      await customerService.applyResolve(
-        detail.ticket.ticketId,
-        {
-          status: 'resolved',
-          internal_note: ticketResolveNote.trim() || null,
-          expected_version: preview.expectedVersion,
-          preview_fingerprint: preview.previewFingerprint,
-        },
-        { correlationId, idempotencyKey, signal: controller.signal }
-      );
-      if (controller.signal.aborted) return;
-      setTicketResolveStatus('success');
-      setTicketReload((value) => value + 1);
-    } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        setTicketResolveStatus('error');
-        setTicketResolveError(displayQueryError(error, '結案提交失敗'));
-      }
-    }
-  };
-
-  const previewBindingRevocation = async () => {
-    const lineUserId = bindingDetailId.current;
-    if (!lineUserId || !bindingDetail.value || !lineIdentity.previewRevocation) return;
-    bindingRevocationController.current?.abort();
-    const controller = new AbortController();
-    bindingRevocationController.current = controller;
-    bindingRevocationCorrelationId.current = operationIdentity('line-identity-revoke');
-    bindingRevocationIdempotencyKey.current = operationIdentity('line-identity-revoke-apply');
-    setBindingRevocationPreview(loadingState());
-    setBindingRevocationAccepted(null);
-    setBindingRevocationConfirmed(false);
-    setBindingRevocationStatus('idle');
-    setBindingRevocationError(null);
-    try {
-      const preview = await lineIdentity.previewRevocation(lineUserId, { signal: controller.signal });
-      if (!controller.signal.aborted) setBindingRevocationPreview(loadedState(adaptLineIdentityRevocationPreview(preview)));
-    } catch (error: unknown) {
-      if (!controller.signal.aborted) setBindingRevocationPreview(errorState(displayQueryError(error, '解除預覽失敗')));
-    }
-  };
-
-  const applyBindingRevocation = async () => {
-    const lineUserId = bindingDetailId.current;
-    const detail = bindingDetail.value;
-    const preview = bindingRevocationPreview.value;
-    const correlationId = bindingRevocationCorrelationId.current;
-    const idempotencyKey = bindingRevocationIdempotencyKey.current;
-    if (!lineUserId || !detail || !preview || preview.hasBlockers || !bindingRevocationConfirmed || !bindingRevocationReason.trim() || !correlationId || !idempotencyKey || !lineIdentity.applyRevocation) return;
-    bindingRevocationController.current?.abort();
-    const controller = new AbortController();
-    bindingRevocationController.current = controller;
-    setBindingRevocationStatus('loading');
-    setBindingRevocationError(null);
-    try {
-      const accepted = await lineIdentity.applyRevocation(
-        lineUserId,
-        {
-          expected_version: detail.version,
-          reason: bindingRevocationReason.trim(),
-          idempotency_key: idempotencyKey,
-          correlation_id: correlationId,
-        },
-        { signal: controller.signal }
-      );
-      if (controller.signal.aborted) return;
-      setBindingRevocationAccepted(adaptLineIdentityRevocationAccepted(accepted));
-      setBindingRevocationStatus('success');
-      setBindingReload((value) => value + 1);
-    } catch (error: unknown) {
-      if (!controller.signal.aborted) {
-        setBindingRevocationStatus('error');
-        setBindingRevocationError(displayQueryError(error, '解除提交失敗'));
-      }
-    }
-  };
-
-  const openDeliveryTask = (taskId: number) => {
-    deliveryDetailController.current?.abort();
-    const controller = new AbortController();
-    const generation = deliveryDetailGeneration.current + 1;
-    deliveryDetailGeneration.current = generation;
-    deliveryDetailController.current = controller;
-    setDeliveryDetail(loadingState());
-    void delivery.detail(taskId, { signal: controller.signal })
-      .then((detail) => { if (!controller.signal.aborted && generation === deliveryDetailGeneration.current) setDeliveryDetail(loadedState(adaptLineDeliveryDetail(detail))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && generation === deliveryDetailGeneration.current) setDeliveryDetail(errorState(displayQueryError(error, '發送任務明細載入失敗'))); });
-  };
-
-  const closeDeliveryTask = () => {
-    deliveryDetailController.current?.abort();
-    deliveryDetailGeneration.current += 1;
-    deliveryDetailController.current = null;
-    setDeliveryDetail(idleState());
-  };
-
-  const openOrderGroup = (caseNo: string, eventPage = 1) => {
-    orderGroupDetailController.current?.abort();
-    const controller = new AbortController();
-    const generation = orderGroupDetailGeneration.current + 1;
-    orderGroupDetailGeneration.current = generation;
-    orderGroupDetailController.current = controller;
-    setOrderGroupDetail(loadingState());
-    void Promise.all([
-      lineOrderGroupQueryClient.detail(caseNo, { signal: controller.signal }),
-      lineOrderGroupQueryClient.events(caseNo, { page: eventPage, pageSize: 25 }, { signal: controller.signal }),
-    ]).then(([record, eventsPage]) => {
-      if (!controller.signal.aborted && generation === orderGroupDetailGeneration.current) setOrderGroupDetail(loadedState({
-        record: adaptLineOrderGroupRecord(record),
-        events: eventsPage.items.map(adaptLineOrderGroupEvent),
-        eventPage: eventsPage.page,
-        eventPageSize: eventsPage.page_size,
-        eventTotal: eventsPage.total,
-        eventTotalPages: eventsPage.total_pages,
-      }));
-    }).catch((error: unknown) => {
-      if (!controller.signal.aborted && generation === orderGroupDetailGeneration.current) setOrderGroupDetail(errorState(displayQueryError(error, '三方服務群組明細載入失敗')));
-    });
-  };
-
-  const closeOrderGroup = () => {
-    orderGroupDetailController.current?.abort();
-    orderGroupDetailGeneration.current += 1;
-    orderGroupDetailController.current = null;
-    setOrderGroupDetail(idleState());
-  };
 
   const refreshRuntime = () => setRuntimeReload((value) => value + 1);
 
@@ -1439,217 +869,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>)}
       </nav>}
 
-      {activeTab === 'tickets' && (() => {
-        const rawList = ticketPage.value?.items ?? [];
-
-        const filteredList = rawList.filter((ticket) => {
-          const q = ticketSearchQuery.trim().toLowerCase();
-          const matchesQuery = !q ||
-            ticket.ticketIdText.toLowerCase().includes(q) ||
-            ticket.lineUserId.toLowerCase().includes(q) ||
-            (ticket.caseNo && ticket.caseNo.toLowerCase().includes(q));
-
-          const matchesStatus = ticketStatusFilter === 'all' || ticket.status === ticketStatusFilter;
-          const matchesCategory = ticketCategoryFilter === 'all' || ticket.category === ticketCategoryFilter;
-
-          return matchesQuery && matchesStatus && matchesCategory;
-        });
-
-        const ticketTotal = ticketPage.value?.total ?? 0;
-        const ticketPageCount = Math.max(1, Math.ceil(ticketTotal / ticketPageSize));
-        const ticketCurrentPage = ticketPage.value?.page ?? ticketPageNumber;
-        const ticketRangeStart = ticketTotal === 0 ? 0 : ((ticketCurrentPage - 1) * ticketPageSize) + 1;
-        const ticketRangeEnd = ticketTotal === 0 ? 0 : Math.min(ticketCurrentPage * ticketPageSize, ticketTotal);
-
-        return (
-          <section className="line-table-container">
-            <div className="line-section-heading">
-              <div>
-                <h2>客服工單與案件追蹤</h2>
-                <p>追蹤來自 LINE 官方帳號之真人諮詢、異動申請、補助計算與客訴工單，提供即時指派、回覆與結案工作流。</p>
-              </div>
-              <div className="line-inline-actions">
-                <button type="button" className="line-secondary-btn" onClick={() => { setTicketPageNumber(1); setTicketReload((value) => value + 1); }}>
-                  <RefreshCw aria-hidden="true" />重新整理
-                </button>
-              </div>
-            </div>
-
-            {/* 頂部 3 大 KPI 卡片只呈現 server 已確認的摘要，避免把未知狀態偽裝成零。 */}
-            {ticketSummary.status === 'loaded' && ticketSummary.value && (
-              <div className="line-kpi-grid">
-                <div data-control-id="line.ticket.summary.waiting">
-                  <span>待處理工單</span>
-                  <strong>{ticketSummary.value.waiting}</strong>
-                </div>
-                <div data-control-id="line.ticket.summary.handling">
-                  <span>處理中工單</span>
-                  <strong>{ticketSummary.value.handling}</strong>
-                </div>
-                <div data-control-id="line.ticket.summary.resolved_today">
-                  <span>今日已結案</span>
-                  <strong>{ticketSummary.value.resolvedToday}</strong>
-                </div>
-              </div>
-            )}
-
-            {/* 搜尋與進階篩選工具列 */}
-            <div className="line-search-filter-toolbar">
-              <div className="line-search-input-wrapper">
-                <span className="line-search-icon"><Search aria-hidden="true" /></span>
-                <input
-                  type="text"
-                  className="line-search-input"
-                  aria-label="搜尋客服工單"
-                  placeholder="搜尋工單編號、案件編號 (ORD-*)、客戶或問題..."
-                  value={ticketSearchQuery}
-                  onChange={(e) => { setTicketPageNumber(1); setTicketSearchQuery(e.target.value); }}
-                />
-                {ticketSearchQuery && (
-                    <button type="button" className="line-search-clear-btn" aria-label="清除客服工單搜尋" onClick={() => { setTicketPageNumber(1); setTicketSearchQuery(''); }}>
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              <div className="line-filter-selects">
-                <select
-                  aria-label="篩選客服工單處理狀態"
-                  value={ticketStatusFilter}
-                   onChange={(e) => { setTicketPageNumber(1); setTicketStatusFilter(e.target.value as 'all' | 'waiting' | 'handling' | 'resolved'); }}
-                  className="line-filter-select"
-                >
-                  <option value="all">處理狀態 (全部)</option>
-                  <option value="waiting">待處理</option>
-                  <option value="handling">處理中</option>
-                  <option value="resolved">已結案</option>
-                </select>
-
-                <select
-                  aria-label="篩選客服工單問題分類"
-                  value={ticketCategoryFilter}
-                   onChange={(e) => { setTicketPageNumber(1); setTicketCategoryFilter(e.target.value); }}
-                  className="line-filter-select"
-                >
-                  <option value="all">問題分類 (全部)</option>
-                  <option value="service_flow">服務流程諮詢</option>
-                  <option value="payment_subsidy">收費與補助</option>
-                  <option value="service_progress">服務進度</option>
-                  <option value="profile_update">異動申請</option>
-                  <option value="contact_union">聯絡工會</option>
-                  <option value="other">其他問題</option>
-                </select>
-              </div>
-              {(ticketSearchQuery || ticketStatusFilter !== 'all' || ticketCategoryFilter !== 'all') && (
-                <button
-                  type="button"
-                  className="line-secondary-btn line-clear-filters-btn"
-                  onClick={() => {
-                    setTicketPageNumber(1);
-                    setTicketSearchQuery('');
-                    setTicketStatusFilter('all');
-                    setTicketCategoryFilter('all');
-                  }}
-                >
-                  清除條件
-                </button>
-              )}
-            </div>
-
-            {ticketSummary.status === 'loading' && <div className="line-loading">正在載入客服摘要…</div>}
-            {ticketSummary.status === 'error' && <LineErrorMessage error={ticketSummary.error} />}
-            {ticketPage.status === 'loading' && <div className="line-loading">正在載入客服工單…</div>}
-            {ticketPage.status === 'error' && <LineErrorMessage error={ticketPage.error} />}
-            {ticketScopeBlocker && <div className="line-scope-note" role="status">{ticketScopeBlocker}</div>}
-
-            {ticketPage.status !== 'loaded' || ticketScopeBlocker ? null : filteredList.length === 0 ? (
-              <div className="line-empty-state">
-                <h4>目前沒有符合篩選條件的客服工單</h4>
-                <p>可調整搜尋關鍵字、切換分類或由 LINE 客服入口建立新工單。</p>
-              </div>
-            ) : (
-              <>
-                <div className="line-scope-note">
-                   第 {ticketCurrentPage} 頁，顯示本頁 {filteredList.length} 筆，共 {ticketTotal} 筆工單。
-                </div>
-                <div className="line-table-scroll">
-                  <table className="line-data-table" data-control-id="line.ticket.table">
-                    <caption className="sr-only">LINE 客服工單與案件清單</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">工單編號</th>
-                        <th scope="col">提問對象</th>
-                        <th scope="col">關聯案件</th>
-                        <th scope="col">分類</th>
-                        <th scope="col">問題摘要與最新對話</th>
-                        <th scope="col">時間</th>
-                        <th scope="col">狀態</th>
-                        <th scope="col" className="line-table-action-cell">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredList.map((ticket) => (
-                        <tr key={ticket.ticketId}>
-                          <td><strong className="line-ticket-id">#{ticket.ticketIdText}</strong></td>
-                          <td>{ticket.lineUserId}</td>
-                          <td>
-                            {ticket.caseNo ? (
-                              <span className="line-ticket-case-link">
-                                {ticket.caseNo}
-                              </span>
-                            ) : (
-                              <span className="line-muted-placeholder">無關聯</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={`line-category-badge category-${ticket.category}`}>
-                              {ticket.categoryLabel}
-                            </span>
-                          </td>
-                          <td className="line-truncate-cell">
-                            {ticket.issueSummary ?? CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE}
-                          </td>
-                          <td className="line-table-date">
-                            {ticket.createdAt ?? '—'}
-                          </td>
-                          <td>
-                            <span className={`line-status line-status-${ticket.status}`}>
-                              {ticket.statusLabel}
-                            </span>
-                          </td>
-                          <td className="line-table-action-cell">
-                            <button
-                              type="button"
-                              className="line-action-link-btn"
-                              data-control-id="line.ticket.detail"
-                              aria-label="查看明細"
-                              onClick={() => openTicket(ticket.ticketId)}
-                            >
-                              查看明細
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 分頁控制列 */}
-                <div className="line-pagination-bar">
-                  <span className="line-card-meta">
-                     顯示第 {ticketRangeStart} 至 {ticketRangeEnd} 筆，共 {ticketTotal} 筆工單
-                   </span>
-                   <div className="line-pagination-controls">
-                     <button type="button" aria-label="上一頁客服工單" disabled={ticketCurrentPage <= 1} className="line-page-btn" onClick={() => setTicketPageNumber((value) => Math.max(1, value - 1))}>‹</button>
-                     <button type="button" aria-label={`客服工單第 ${ticketCurrentPage} 頁`} className="line-page-btn active">{ticketCurrentPage}</button>
-                     <button type="button" aria-label="下一頁客服工單" disabled={ticketCurrentPage >= ticketPageCount} className="line-page-btn" onClick={() => setTicketPageNumber((value) => Math.min(ticketPageCount, value + 1))}>›</button>
-                   </div>
-                </div>
-              </>
-            )}
-          </section>
-        );
-      })()}
+      {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
 
       {activeTab === 'richmenu' && (() => {
         const menus = localRichMenuConfiguration?.menus ?? [];
@@ -2301,537 +1521,26 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         );
       })()}
 
-      {activeTab === 'binding' && (() => {
-        const items = bindingPage.value?.items ?? [];
-        const total = bindingPage.value?.total ?? 0;
-        const page = bindingPage.value?.page ?? 1;
-        const reviewClient = asReviewClient(lineIdentity);
-        const unboundPairingClient = asUnboundPairingClient(lineIdentity) ?? lineIdentityClient;
+      {activeTab === 'binding' && <LineIdentityWorkbench client={lineIdentity} />}
 
-        const activeItems = items.filter((item) => item.status === 'bound');
-        const customerCount = activeItems.filter((i) => i.subjectType === 'customer').length;
-        const staffCount = activeItems.filter((i) => i.subjectType === 'staff').length;
-        const adminCount = activeItems.filter((i) => i.subjectType === 'admin').length;
+      {activeTab === 'push_queue' && <LineNotificationWorkbench
+        configuration={lineConfiguration}
+        onboarding={onboardingClient}
+        templates={notificationTemplateClient}
+        search={notificationRuleSearch}
+        enabled={notificationRuleEnabled}
+        onSearchChange={setNotificationRuleSearch}
+        onEnabledChange={setNotificationRuleEnabled}
+      />}
 
-        const filteredBindings = items.map((record, index) => ({
-          record,
-          lineUserId: bindingSources[index] ?? null,
-        })).filter(({ record: item }) => {
-          if (
-            bindingRoleFilter !== 'active'
-            && bindingRoleFilter !== 'all'
-            && item.subjectType !== bindingRoleFilter
-          ) return false;
-          if (bindingSearchQuery.trim()) {
-            const q = bindingSearchQuery.toLowerCase();
-            const matchName = item.subjectName.toLowerCase().includes(q);
-            const matchUser = item.lineUserId.toLowerCase().includes(q);
-            if (!matchName && !matchUser) return false;
-          }
-          return true;
-        });
-
-        return (
-          <>
-          <section className="line-table-container" data-control-id="line.identity.section">
-            <div className="line-section-heading">
-              <div>
-                <h2>LINE 身分與授權</h2>
-                <p>管理產婦客戶、線上月嫂與工會幹部的 LINE 帳號綁定狀態、去敏識別與解除審查。</p>
-              </div>
-              <button
-                type="button"
-                className="line-secondary-btn"
-                onClick={() => { setBindingPageNumber(1); setBindingReload((value) => value + 1); }}
-              >
-                <RefreshCw aria-hidden="true" />重新整理
-              </button>
-            </div>
-
-            <LoadingOrError state={bindingPage} loadingText="正在載入身分綁定…" />
-
-            <div className="line-scope-note" data-control-id="line.identity.authority-note">
-              <strong>身分驗證：</strong>請從 LINE 登入並完成資料連結。網址參數或手動輸入的 LINE 帳號資訊不能用來驗證身分；完成登記也不會自動變更客戶、月嫂或管理員角色。
-            </div>
-
-            {bindingPage.status === 'loaded' && bindingPage.value && (
-              <>
-                {/* 4 大身分統計 KPI */}
-                <div className="line-kpi-grid">
-                  <div>
-                    <span>身分紀錄總數</span>
-                    <strong>{total}</strong>
-                  </div>
-                  <div>
-                    <span>產婦客戶</span>
-                    <strong>{customerCount}</strong>
-                  </div>
-                  <div>
-                    <span>線上月嫂</span>
-                    <strong>{staffCount}</strong>
-                  </div>
-                  <div>
-                    <span>工會幹部</span>
-                    <strong>{adminCount}</strong>
-                  </div>
-                </div>
-
-                {/* 搜尋與角色過濾工具列 */}
-                <div className="line-search-filter-toolbar">
-                  <div className="line-search-input-wrapper">
-                    <span className="line-search-icon"><Search aria-hidden="true" /></span>
-                    <input
-                      type="text"
-                      className="line-search-input"
-                      aria-label="搜尋身分綁定"
-                      placeholder="搜尋實名姓名或 LINE ID…"
-                      value={bindingSearchQuery}
-                      onChange={(e) => { setBindingPageNumber(1); setBindingSearchQuery(e.target.value); }}
-                    />
-                    {bindingSearchQuery && (
-                      <button
-                        type="button"
-                        className="line-search-clear-btn"
-                        aria-label="清除身分綁定搜尋"
-                        onClick={() => { setBindingPageNumber(1); setBindingSearchQuery(''); }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="line-filter-selects">
-                    <select
-                      className="line-filter-select"
-                      aria-label="篩選身分角色"
-                      value={bindingRoleFilter}
-                       onChange={(e) => { setBindingPageNumber(1); setBindingRoleFilter(e.target.value as 'active' | 'all' | 'customer' | 'staff' | 'admin'); }}
-                    >
-                      <option value="active">目前有效身分</option>
-                      <option value="all">全部身分角色（含解除歷史）</option>
-                      <option value="customer">產婦客戶</option>
-                      <option value="staff">線上月嫂</option>
-                      <option value="admin">工會管理員</option>
-                    </select>
-                  </div>
-                  {(bindingSearchQuery || bindingRoleFilter !== 'active') && (
-                    <button
-                      type="button"
-                      className="line-secondary-btn line-clear-filters-btn"
-                      onClick={() => {
-                        setBindingPageNumber(1);
-                        setBindingSearchQuery('');
-                        setBindingRoleFilter('active');
-                      }}
-                    >
-                      清除條件
-                    </button>
-                  )}
-                </div>
-
-                {filteredBindings.length === 0 ? (
-                  <div className="line-empty-state">
-                    <div><KeyRound aria-hidden="true" /></div>
-                    <h4>找不到符合條件的身分綁定</h4>
-                    <p>請嘗試清除搜尋關鍵字或變更身分篩選條件。</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="line-table-scroll">
-                      <table className="line-data-table" data-control-id="line.identity.table">
-                        <caption className="sr-only">LINE 身分綁定清單</caption>
-                        <thead>
-                          <tr>
-                            <th scope="col">LINE User ID</th>
-                            <th scope="col">實名姓名</th>
-                            <th scope="col">身分角色</th>
-                            <th scope="col">最後更新時間</th>
-                            <th scope="col">綁定狀態</th>
-                            <th scope="col">解除狀態</th>
-                            <th scope="col" className="line-align-end">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredBindings.map(({ record, lineUserId }, index) => (
-                            <tr key={`${record.lineUserId}-${record.version}-${index}`}>
-                              <td><code>{record.lineUserId}</code></td>
-                              <td><strong>{record.subjectName}</strong></td>
-                              <td>
-                                <span className={`line-category-badge category-${record.subjectType === 'staff' ? 'service_progress' : record.subjectType === 'admin' ? 'contact_union' : 'service_flow'}`}>
-                                  {record.subjectTypeLabel}
-                                </span>
-                              </td>
-                              <td className="line-table-secondary">{record.updatedAt ?? '—'}</td>
-                              <td>
-                                <span className={`line-status line-status-${record.status}`}>
-                                  {record.statusLabel}
-                                </span>
-                              </td>
-                              <td>
-                                <span className={`identity-revocation-state ${record.status === 'revoked' ? 'is-complete' : !record.revocationStatus ? 'is-empty' : 'is-pending'}`}>
-                                  {record.revocationStatusLabel}
-                                </span>
-                              </td>
-                              <td className="line-align-end">
-                                <button
-                                  type="button"
-                                  className="line-action-link-btn"
-                                  data-control-id="line.identity.detail"
-                                  aria-label="查看明細"
-                                  disabled={lineUserId === null}
-                                  onClick={() => { if (lineUserId !== null) openBinding(lineUserId); }}
-                                >
-                                  查看明細
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="line-pagination-bar">
-                      <span className="line-pagination-summary">
-                        第 {page} 頁，顯示 {filteredBindings.length} 筆，全域總數 {total} 筆
-                      </span>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </section>
-          {reviewClient ? (
-            <LineIdentityReviewWorkbench client={reviewClient} />
-          ) : (
-            <section className="line-table-container" data-control-id="line.identity.review-unavailable">
-              <div className="line-error" role="alert">
-                LINE 身分審核服務目前無法安全使用，審核操作已停止；請稍後重新整理或聯絡系統管理人員。
-              </div>
-            </section>
-          )}
-          <LineUnboundPairingWorkbench
-            client={unboundPairingClient}
-            onPairSuccess={() => {
-              setBindingReload((v) => v + 1);
-            }}
-          />
-          </>
-        );
-      })()}
-
-      {activeTab === 'push_queue' && (() => {
-        const ruleList = rules.value?.rules ?? [];
-        const isRulesEmpty = rules.value?.isEmpty ?? false;
-        const normalizedRuleSearch = notificationRuleSearch.trim().toLowerCase();
-        const ruleEvents = Array.from(new Set(ruleList.map((rule) => rule.eventLabel))).sort();
-        const ruleRecipients = Array.from(new Set(ruleList.map((rule) => rule.recipientLabel))).sort();
-        const filteredRuleList = ruleList.filter((rule) => (
-          (!normalizedRuleSearch
-            || ruleName(rule.id).toLowerCase().includes(normalizedRuleSearch)
-            || rule.id.toLowerCase().includes(normalizedRuleSearch)
-            || rule.eventLabel.toLowerCase().includes(normalizedRuleSearch))
-          && (notificationRuleEvent === 'all' || rule.eventLabel === notificationRuleEvent)
-          && (notificationRuleRecipient === 'all' || rule.recipientLabel === notificationRuleRecipient)
-          && (notificationRuleEnabled === 'all'
-            || (notificationRuleEnabled === 'enabled' ? rule.enabled : !rule.enabled))
-        ));
-        const notificationRulePageSize = 12;
-        const notificationRulePageCount = Math.max(1, Math.ceil(filteredRuleList.length / notificationRulePageSize));
-        const safeNotificationRulePage = Math.min(notificationRulePage, notificationRulePageCount);
-        const visibleRuleList = filteredRuleList.slice(
-          (safeNotificationRulePage - 1) * notificationRulePageSize,
-          safeNotificationRulePage * notificationRulePageSize,
-        );
-
-        return (
-          <section className="line-table-container" data-control-id="line.push_queue.section">
-            <div className="line-section-heading">
-              <div>
-                <h2>LINE 通知與發送</h2>
-                <p>即時監控排班媒合、合約繳費、月嫂請假等事件觸發之 LINE 推播規則、排程頻率與發送佇列。</p>
-              </div>
-              <button
-                type="button"
-                className="line-secondary-btn"
-                data-control-id="line.notification-rules.refresh"
-                onClick={() => setRulesReload((value) => value + 1)}
-              >
-                <RefreshCw aria-hidden="true" />重新整理
-              </button>
-            </div>
-
-            <nav className="line-hub-section-tabs line-notification-tabs" aria-label="通知與發送功能">
-              <button type="button" className={notificationWorkspaceTab === 'rules' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'rules' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('rules')}>規則目錄與編輯</button>
-              <button type="button" className={notificationWorkspaceTab === 'onboarding' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'onboarding' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('onboarding')}>Onboarding 訊息</button>
-              <button type="button" className={notificationWorkspaceTab === 'delivery' ? 'active' : ''} aria-current={notificationWorkspaceTab === 'delivery' ? 'page' : undefined} onClick={() => setNotificationWorkspaceTab('delivery')}>發送佇列與歷程</button>
-            </nav>
-
-            {/* 0. 新好友加入即時歡迎詞與迎新引導 (手動編輯工作台) */}
-            {notificationWorkspaceTab === 'onboarding' && (
-              <LineOnboardingEditor client={onboardingClient} />
-            )}
-
-            {/* 1. 通知規則目錄卡片清單 */}
-            {notificationWorkspaceTab === 'rules' && <div className="richmenu-card notification-rules-card">
-              <div className="richmenu-card-header">
-                <div>
-                  <h3 className="line-card-title">系統推播規則目錄</h3>
-                  <p className="line-card-description">
-                    共有 {ruleList.length} 項排程與即時通知規則
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="line-primary-btn line-compact-button"
-                  disabled={!rawRules}
-                  aria-expanded={notificationRuleEditorOpen}
-                  onClick={() => {
-                    setNotificationRuleEditorId(null);
-                    setNotificationRuleEditorOpen(true);
-                    window.requestAnimationFrame(() => notificationRuleEditorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
-                  }}
-                >
-                  <FilePenLine aria-hidden="true" />新增／編輯通知規則
-                </button>
-              </div>
-
-              <LoadingOrError state={rules} loadingText="正在載入通知規則目錄…" />
-
-              {rawRules && notificationRuleEditorOpen && (
-                <section ref={notificationRuleEditorRef} className="line-rules-editor-workspace" aria-label="通知規則編輯區">
-                  <div className="line-rules-editor-workspace-header">
-                    <div>
-                      <h4>通知規則編輯區</h4>
-                      <p>可新增、修改或停用規則；儲存前會先顯示影響並要求確認。</p>
-                    </div>
-                    <button type="button" className="line-secondary-btn" onClick={() => setNotificationRuleEditorOpen(false)}>關閉編輯區</button>
-                  </div>
-                  <LineNotificationRulesMutationPanel catalog={rawRules} selectedRuleId={notificationRuleEditorId} onCommitted={() => setRulesReload((value) => value + 1)} />
-                </section>
-              )}
-
-              {rules.status === 'loaded' && !isRulesEmpty && <div className="line-search-filter-toolbar notification-rule-toolbar">
-                <label className="line-search-field">
-                  <span className="sr-only">搜尋通知規則</span>
-                  <input
-                    type="search"
-                    className="line-search-input"
-                    value={notificationRuleSearch}
-                    placeholder="搜尋規則名稱、代碼或事件"
-                    onChange={(event) => { setNotificationRuleSearch(event.target.value); setNotificationRulePage(1); }}
-                  />
-                </label>
-                <div className="line-filter-selects">
-                  <select aria-label="依事件篩選通知規則" className="line-filter-select" value={notificationRuleEvent} onChange={(event) => { setNotificationRuleEvent(event.target.value); setNotificationRulePage(1); }}>
-                    <option value="all">全部事件</option>
-                    {ruleEvents.map((eventLabel) => <option key={eventLabel} value={eventLabel}>{eventLabel}</option>)}
-                  </select>
-                  <select aria-label="依接收者篩選通知規則" className="line-filter-select" value={notificationRuleRecipient} onChange={(event) => { setNotificationRuleRecipient(event.target.value); setNotificationRulePage(1); }}>
-                    <option value="all">全部接收者</option>
-                    {ruleRecipients.map((recipientLabel) => <option key={recipientLabel} value={recipientLabel}>{recipientLabel}</option>)}
-                  </select>
-                  <select aria-label="依啟用狀態篩選通知規則" className="line-filter-select" value={notificationRuleEnabled} onChange={(event) => { setNotificationRuleEnabled(event.target.value as typeof notificationRuleEnabled); setNotificationRulePage(1); }}>
-                    <option value="all">全部狀態</option>
-                    <option value="enabled">已啟用</option>
-                    <option value="disabled">已停用</option>
-                  </select>
-                  {(notificationRuleSearch || notificationRuleEvent !== 'all' || notificationRuleRecipient !== 'all' || notificationRuleEnabled !== 'all') && (
-                    <button type="button" className="line-secondary-btn line-clear-filters-btn" onClick={() => { setNotificationRuleSearch(''); setNotificationRuleEvent('all'); setNotificationRuleRecipient('all'); setNotificationRuleEnabled('all'); setNotificationRulePage(1); }}>清除條件</button>
-                  )}
-                </div>
-              </div>}
-
-              {rules.status === 'loaded' && isRulesEmpty && (
-                <div className="line-empty-state line-block-spacing" data-control-id="line.notification-rules.empty">
-                  <h4>目前尚未設定通知規則</h4>
-                  <p>可新增通知規則，儲存前會先檢查影響。</p>
-                </div>
-              )}
-
-              {rules.status === 'loaded' && !isRulesEmpty && (
-                <>
-                <div className="line-pagination-summary">顯示 {filteredRuleList.length} 項符合條件的通知規則</div>
-                {visibleRuleList.length === 0 ? (
-                  <div className="line-empty-state compact"><strong>找不到符合條件的通知規則</strong><span>可調整條件或清除篩選。</span></div>
-                ) : <div className="line-rule-grid line-block-spacing" data-control-id="line.notification-rules.list">
-                  {visibleRuleList.map((rule) => (
-                    <button
-                      key={rule.id}
-                      type="button"
-                      className="line-rule-card"
-                      onClick={() => setSelectedRule(rule)}
-                    >
-                      <div className="line-rule-card-header">
-                        <span className="line-category-badge category-service_flow">
-                          {rule.eventLabel}
-                        </span>
-                        <span className="line-category-badge category-payment_subsidy">
-                          {rule.recipientLabel}
-                        </span>
-                      </div>
-                      <strong className="notification-rule-name">
-                        {ruleName(rule.id)}
-                      </strong>
-                      <span className="notification-rule-code">
-                        代碼：{rule.id}
-                      </span>
-                      <small className="notification-rule-schedule">
-                        {rule.scheduleLabel} ｜ 頻率：{rule.frequencyLabel}
-                      </small>
-                      <div className="notification-rule-footer">
-                        <span className={`line-status ${rule.enabled ? 'line-status-bound' : 'line-status-revoked'}`}>
-                          {rule.enabled ? '● 已啟用' : '○ 停用中'}
-                        </span>
-                        <span className="notification-rule-detail-link">
-                          查看與編輯
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>}
-                {notificationRulePageCount > 1 && <div className="line-pagination-actions">
-                  <button type="button" className="line-secondary-btn" disabled={safeNotificationRulePage <= 1} onClick={() => setNotificationRulePage((page) => Math.max(1, page - 1))}>上一頁</button>
-                  <span>第 {safeNotificationRulePage}／{notificationRulePageCount} 頁</span>
-                  <button type="button" className="line-secondary-btn" disabled={safeNotificationRulePage >= notificationRulePageCount} onClick={() => setNotificationRulePage((page) => Math.min(notificationRulePageCount, page + 1))}>下一頁</button>
-                </div>}
-                </>
-              )}
-            </div>}
-
-            {/* 2. 發送佇列 KPI 與任務清冊 */}
-            {notificationWorkspaceTab === 'delivery' && <div className="richmenu-card">
-              <div className="richmenu-card-header">
-                <div>
-                  <h3 className="line-card-title richmenu-heading-with-icon">
-                    <Rocket aria-hidden="true" />LINE 推播發送進度
-                  </h3>
-                  <p className="line-card-description">
-                    查看各類通知的排程、處理進度、失敗與重試狀況。
-                  </p>
-                </div>
-              </div>
-
-              <LoadingOrError state={deliverySummary} loadingText="正在載入發送任務摘要…" />
-
-              {deliverySummary.value && (
-                <div className="line-kpi-grid line-block-spacing">
-                  <div>
-                    <span>全部任務</span>
-                    <strong>{deliverySummary.value.total}</strong>
-                  </div>
-                  <div>
-                    <span>待執行</span>
-                    <strong>{deliverySummary.value.pending}</strong>
-                  </div>
-                  <div>
-                    <span>處理中</span>
-                    <strong>{deliverySummary.value.processing}</strong>
-                  </div>
-                  <div>
-                    <span>已送出</span>
-                    <strong className="line-kpi-success-value">{deliverySummary.value.sent}</strong>
-                  </div>
-                  <div>
-                    <span>失敗／待重試</span>
-                    <strong className="line-kpi-danger-value">{deliverySummary.value.failed + deliverySummary.value.retryable_failed}</strong>
-                  </div>
-                  <div>
-                    <span>發送服務</span>
-                    <strong className="line-kpi-compact-value">{deliverySummary.value.workerLabel}</strong>
-                  </div>
-                </div>
-              )}
-
-              <div className="line-scope-note">
-                「已送出」表示 LINE 已接受發送，不代表收件人已讀。
-              </div>
-
-              <LineDeliveryTaskWorkbench
-                client={delivery}
-                reloadToken={rulesReload}
-                onOpenTask={openDeliveryTask}
-              />
-            </div>}
-          </section>
-        );
-      })()}
-
-      {activeTab === 'order_groups' && (
-        <section className="line-table-container">
-          <div className="line-section-heading">
-            <div>
-              <h2>三方服務群組</h2>
-              <p>依案件查詢產婦客戶、月嫂與工會幹部的三方 LINE 群組狀態與事件紀錄。</p>
-            </div>
-            <button
-              type="button"
-              className="line-secondary-btn"
-              onClick={() => { setOrderGroupPageNumber(1); setOrderGroupReload((value) => value + 1); }}
-            >
-              <RefreshCw aria-hidden="true" />重新整理
-            </button>
-          </div>
-
-          <LoadingOrError state={orderGroups} loadingText="正在載入三方服務群組…" />
-
-          {orderGroups.status === 'loaded' && orderGroups.value && (
-            (orderGroups.value.items?.length ?? 0) === 0 ? (
-              <div className="line-empty-state">
-                <h4>目前沒有三方服務群組</h4>
-                <p>訂單完成簽約並建立 LINE 群組後會顯示在這裡。</p>
-              </div>
-            ) : (
-              <>
-              <div className="line-table-scroll">
-                <table className="line-data-table" data-control-id="line.order-groups.table">
-                  <caption className="sr-only">三方服務群組清單</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">案件編號</th>
-                      <th scope="col">群組狀態</th>
-                      <th scope="col" className="line-align-end">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(orderGroups.value.items ?? []).map((record) => (
-                      <tr key={record.caseNo}>
-                        <td><strong>#{record.caseNo}</strong></td>
-                        <td>
-                          <span className={`line-status line-status-${record.status}`}>
-                            {record.statusLabel}
-                          </span>
-                        </td>
-                        <td className="line-align-end">
-                          <button
-                            type="button"
-                            className="line-action-link-btn"
-                            onClick={() => openOrderGroup(record.caseNo)}
-                          >
-                            查看明細
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="line-pagination-bar">
-                <span>
-                  顯示第 {(orderGroups.value.page - 1) * orderGroups.value.pageSize + 1} 至{' '}
-                  {Math.min(orderGroups.value.page * orderGroups.value.pageSize, orderGroups.value.total)} 筆，
-                  共 {orderGroups.value.total} 筆群組
-                </span>
-                <div className="line-pagination-controls">
-                  <button type="button" aria-label="上一頁三方服務群組" disabled={orderGroups.value.page <= 1} className="line-page-btn" onClick={() => setOrderGroupPageNumber((value) => Math.max(1, value - 1))}>‹</button>
-                  <span>第 {orderGroups.value.page} / {Math.max(1, orderGroups.value.totalPages)} 頁</span>
-                  <button type="button" aria-label="下一頁三方服務群組" disabled={orderGroups.value.page >= orderGroups.value.totalPages} className="line-page-btn" onClick={() => setOrderGroupPageNumber((value) => Math.min(orderGroups.value!.totalPages, value + 1))}>›</button>
-                </div>
-              </div>
-              </>
-            )
-          )}
-        </section>
-      )}
+      {activeTab === 'order_groups' && <LineOrderGroupWorkbench
+        page={orderGroupPageNumber}
+        search={orderGroupSearch}
+        status={orderGroupStatus}
+        onPageChange={setOrderGroupPageNumber}
+        onSearchChange={setOrderGroupSearch}
+        onStatusChange={setOrderGroupStatus}
+      />}
 
       {activeTab === 'runtime' && (
         <div className="line-runtime-workspace">
@@ -3262,215 +1971,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
 
 
-      <Drawer isOpen={ticketDetail.status !== 'idle'} onClose={closeTicket} title="客服工單明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeTicket}>關閉</button>{ticketDetail.status === 'error' && ticketDetailId.current !== null && <button type="button" onClick={() => openTicket(ticketDetailId.current!)}>重試查詢</button>}{ticketDetail.status === 'loaded' && ticketDetail.value?.ticket.status !== 'resolved' && customerService.previewResolve && <button type="button" data-control-id="line.ticket.resolve.preview" disabled={ticketResolvePreview.status === 'loading' || ticketResolveStatus === 'loading'} onClick={() => void previewTicketResolve()}>檢查結案影響</button>}{ticketResolvePreview.value?.applyReady && ticketResolvePreview.value.blockers.length === 0 && customerService.applyResolve && <button type="button" data-control-id="line.ticket.resolve.apply" disabled={!ticketResolveConfirmed || ticketResolveStatus === 'loading'} onClick={() => void applyTicketResolve()}>確認結案</button>}</div>}><div data-control-id="line.ticket.detail" className="line-drawer-content"><LoadingOrError state={ticketDetail} loadingText="正在載入工單明細…" />{ticketDetail.status === 'loaded' && ticketDetail.value && <><div className="line-detail-grid"><div><span>客戶</span><strong>{ticketDetail.value.ticket.lineUserId}</strong></div><div><span>案件</span><strong>{ticketDetail.value.ticket.caseNo ?? '無關聯'}</strong></div><div><span>狀態</span><strong>{ticketDetail.value.ticket.statusLabel}</strong></div></div>{ticketDetail.value.ticket.status !== 'resolved' && customerService.previewResolve && <div className="line-action-panel"><label htmlFor="ticket-resolve-note">結案說明</label><textarea id="ticket-resolve-note" value={ticketResolveNote} onChange={(event) => { setTicketResolveNote(event.target.value); setTicketResolvePreview(idleState()); setTicketResolveConfirmed(false); setTicketResolveStatus('idle'); }} rows={3} maxLength={4000} />{ticketResolvePreview.status === 'loading' && <p>正在驗證結案內容…</p>}{ticketResolvePreview.status === 'error' && <div className="line-error" role="alert">{ticketResolvePreview.error}</div>}{ticketResolvePreview.value && <div className="line-preview-result"><strong>{ticketResolvePreview.value.beforeStatusLabel} → {ticketResolvePreview.value.afterStatusLabel}</strong>{ticketResolvePreview.value.blockers.length > 0 ? <ul>{ticketResolvePreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul> : <label><input type="checkbox" checked={ticketResolveConfirmed} onChange={(event) => setTicketResolveConfirmed(event.target.checked)} />我已確認結案內容與目前工單狀態</label>}</div>}{ticketResolveStatus === 'success' && <div className="line-success" role="status">結案已完成</div>}{ticketResolveStatus === 'error' && <div className="line-error" role="alert">{ticketResolveError}</div>}</div>}<LineCustomerServiceActions detail={ticketDetail.value} onCommitted={(nextDetail) => { setTicketDetail(loadedState(nextDetail)); setTicketReload((value) => value + 1); }} /><div className="line-events"><h4>事件紀錄</h4>{ticketDetail.value.events.length === 0 ? <p>尚無事件紀錄</p> : ticketDetail.value.events.map((event) => <article key={event.id}><strong>{event.eventType}</strong><span>{event.createdAt}</span><p>{event.messageText ?? '無訊息內容'}</p></article>)}</div></>}</div></Drawer>
 
-      <Drawer
-        isOpen={bindingDetail.status !== 'idle'}
-        onClose={closeBinding}
-        title="LINE 身分綁定明細"
-        size="wide"
-        footer={(
-          <div className="line-drawer-footer">
-            <button type="button" onClick={closeBinding}>關閉</button>
-            {bindingDetail.status === 'error' && bindingDetailId.current !== null && (
-              <button type="button" onClick={() => openBinding(bindingDetailId.current!)}>重試查詢</button>
-            )}
-            {bindingDetail.status === 'loaded'
-              && bindingDetail.value?.status === 'bound'
-              && !bindingRevocationAccepted
-              && lineIdentity.previewRevocation && (
-                <button
-                  type="button"
-                  data-control-id="line.identity.revocation.preview"
-                  disabled={bindingRevocationPreview.status === 'loading' || bindingRevocationStatus === 'loading'}
-                  onClick={() => void previewBindingRevocation()}
-                >
-                  檢查解除影響
-                </button>
-              )}
-            {bindingRevocationPreview.value
-              && !bindingRevocationPreview.value.hasBlockers
-              && !bindingRevocationAccepted
-              && lineIdentity.applyRevocation && (
-                <button
-                  type="button"
-                  data-control-id="line.identity.revocation.apply"
-                  disabled={!bindingRevocationConfirmed || !bindingRevocationReason.trim() || bindingRevocationStatus === 'loading'}
-                  onClick={() => void applyBindingRevocation()}
-                >
-                  解除身分並回復訪客選單
-                </button>
-              )}
-            {bindingRevocationAccepted && bindingDetailId.current !== null && (
-              <button type="button" onClick={() => openBinding(bindingDetailId.current!)}>
-                重新查詢綁定狀態
-              </button>
-            )}
-          </div>
-        )}
-      >
-        <div data-control-id="line.identity.detail" className="line-drawer-content">
-          <LoadingOrError state={bindingDetail} loadingText="正在載入身分綁定明細…" />
-          {bindingDetail.status === 'loaded' && bindingDetail.value && (
-            <>
-              <div className="line-detail-grid">
-                <div><span>LINE User ID</span><strong>{bindingDetail.value.lineUserId}</strong></div>
-                <div><span>實名姓名</span><strong>{bindingDetail.value.subjectName}</strong></div>
-                <div><span>角色</span><strong>{bindingDetail.value.subjectTypeLabel}</strong></div>
-                <div><span>狀態</span><strong>{bindingDetail.value.statusLabel}</strong></div>
-                <div><span>更新時間</span><strong>{bindingDetail.value.updatedAt ?? '—'}</strong></div>
-                <div><span>解除狀態</span><strong>{bindingDetail.value.revocationStatusLabel}</strong></div>
-              </div>
-
-              {bindingDetail.value.status === 'pending_review' && (
-                <div className="line-scope-note" role="status">
-                  此紀錄尚未構成有效授權；必須由具 LINE 身分審核權限的真人管理員明確核准、拒絕或取消，系統不會依等待時間自動決定。
-                </div>
-              )}
-
-              {bindingDetail.value.status === 'bound' && lineIdentity.previewRevocation && (
-                <div className="line-action-panel">
-                  {bindingRevocationPreview.status === 'loading' && <p>正在驗證解除條件…</p>}
-                  {bindingRevocationPreview.status === 'error' && (
-                    <LineErrorMessage error={bindingRevocationPreview.error} />
-                  )}
-                  {bindingRevocationPreview.value && (
-                    <>
-                      <div className="line-preview-result">
-                        <p>已核對目前綁定狀態與解除影響。</p>
-                        <p>Default 圖文選單：{bindingRevocationPreview.value.defaultMenuPublished ? '已發布' : '未發布'}</p>
-                      </div>
-                      {bindingRevocationPreview.value.hasBlockers ? (
-                        <ul>{bindingRevocationPreview.value.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-                      ) : (
-                        <>
-                          <strong>可解除身分</strong>
-                          <p>提交後會立即停止此身分的系統授權，並由背景服務自動將 LINE 圖文選單回復成訪客模式。</p>
-                          <label htmlFor="binding-revocation-reason">解除原因</label>
-                          <textarea
-                            id="binding-revocation-reason"
-                            value={bindingRevocationReason}
-                            onChange={(event) => {
-                              setBindingRevocationReason(event.target.value);
-                              setBindingRevocationConfirmed(false);
-                              setBindingRevocationStatus('idle');
-                            }}
-                            rows={3}
-                            maxLength={1000}
-                          />
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={bindingRevocationConfirmed}
-                              onChange={(event) => setBindingRevocationConfirmed(event.target.checked)}
-                            />
-                            我已確認解除對象與影響範圍
-                          </label>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {bindingRevocationStatus === 'loading' && <p>正在提交解除申請…</p>}
-                  {bindingRevocationStatus === 'error' && (
-                    <LineErrorMessage error={bindingRevocationError} />
-                  )}
-                  {bindingRevocationAccepted && (
-                    <div className="line-success" role="status">
-                      <strong>解除申請已受理</strong>
-                      <p>{bindingRevocationAccepted.statusLabel}｜正在等待解除結果回讀</p>
-                      <p>{bindingRevocationAccepted.notice}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <LineIdentityMaintenanceActions
-                lineUserId={bindingDetailId.current ?? ''}
-                binding={{
-                  status: bindingRevocationAccepted ? 'revocation_pending' : bindingDetail.value.status,
-                  revocation_request_id: bindingRevocationAccepted?.requestId ?? bindingDetail.value.revocationRequestId,
-                  revocation_status: bindingRevocationAccepted?.status ?? bindingDetail.value.revocationStatus,
-                }}
-                onBindingChanged={(nextBinding) => {
-                  setBindingDetail(loadedState(adaptLineIdentityBinding(nextBinding)));
-                  setBindingReload((value) => value + 1);
-                }}
-                onRevocationChanged={() => {
-                  const lineUserId = bindingDetailId.current;
-                  if (lineUserId) openBinding(lineUserId);
-                  setBindingReload((value) => value + 1);
-                }}
-              />
-            </>
-          )}
-        </div>
-      </Drawer>
-
-      <Drawer isOpen={deliveryDetail.status !== 'idle'} onClose={closeDeliveryTask} title="LINE 發送明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeDeliveryTask}>關閉</button></div>}><div className="line-drawer-content"><LoadingOrError state={deliveryDetail} loadingText="正在載入發送明細…" />{deliveryDetail.value && <><div className="line-detail-grid"><div><span>通知用途</span><strong>{deliveryDetail.value.task.sourceLabel}</strong></div><div><span>狀態</span><strong>{deliveryDetail.value.task.statusLabel}</strong></div><div><span>排程時間</span><strong>{deliveryDetail.value.task.scheduledAt}</strong></div><div><span>處理進度</span><strong>{deliveryDetail.value.task.attempts}</strong></div></div><div className="line-events"><h4>處理紀錄</h4>{deliveryDetail.value.attempts.length === 0 ? <p>尚無處理紀錄</p> : deliveryDetail.value.attempts.map((attempt) => <article key={attempt.number}><strong>第 {attempt.number} 次：{attempt.outcome}</strong><span>{attempt.startedAt}</span><p>完成時間：{attempt.completedAt ?? '進行中'}{attempt.retryAfterSeconds === null ? '' : `；預計 ${attempt.retryAfterSeconds} 秒後重試`}</p></article>)}</div></>}</div></Drawer>
-
-      <Drawer isOpen={orderGroupDetail.status !== 'idle'} onClose={closeOrderGroup} title="三方服務群組明細" size="wide" footer={<div className="line-drawer-footer"><button type="button" onClick={closeOrderGroup}>關閉</button></div>}>
-        <div className="line-drawer-content">
-          <LoadingOrError state={orderGroupDetail} loadingText="正在載入三方服務群組明細…" />
-          {orderGroupDetail.value && <>
-            <div className="line-detail-grid">
-              <div><span>案件</span><strong>{orderGroupDetail.value.record.caseNo}</strong></div>
-              <div><span>狀態</span><strong>{orderGroupDetail.value.record.statusLabel}</strong></div>
-            </div>
-            <div className="line-events">
-              <h4>事件紀錄</h4>
-              {orderGroupDetail.value.events.length === 0
-                ? <p>尚無事件紀錄</p>
-                : orderGroupDetail.value.events.map((event) => <article key={event.eventId}><strong>{event.eventType}</strong><span>{event.occurredAt}</span></article>)}
-            </div>
-            {orderGroupDetail.value.eventTotal > 0 && (
-              <div className="line-pagination-bar">
-                <span>共 {orderGroupDetail.value.eventTotal} 筆事件</span>
-                <div className="line-pagination-controls">
-                  <button type="button" aria-label="上一頁群組事件" disabled={orderGroupDetail.value.eventPage <= 1} className="line-page-btn" onClick={() => openOrderGroup(orderGroupDetail.value!.record.caseNo, orderGroupDetail.value!.eventPage - 1)}>‹</button>
-                  <span>第 {orderGroupDetail.value.eventPage} / {Math.max(1, orderGroupDetail.value.eventTotalPages)} 頁</span>
-                  <button type="button" aria-label="下一頁群組事件" disabled={orderGroupDetail.value.eventPage >= orderGroupDetail.value.eventTotalPages} className="line-page-btn" onClick={() => openOrderGroup(orderGroupDetail.value!.record.caseNo, orderGroupDetail.value!.eventPage + 1)}>›</button>
-                </div>
-              </div>
-            )}
-          </>}
-        </div>
-      </Drawer>
-
-      <Drawer
-        isOpen={selectedRule !== null}
-        onClose={() => setSelectedRule(null)}
-        title={selectedRule ? ruleName(selectedRule.id) : '通知規則明細'}
-        footer={<div className="line-drawer-footer">
-          {selectedRule && <button
-            type="button"
-            className="line-primary-btn"
-            onClick={() => {
-              setNotificationRuleEditorId(selectedRule.id);
-              setNotificationRuleEditorOpen(true);
-              setSelectedRule(null);
-              window.requestAnimationFrame(() => notificationRuleEditorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }));
-            }}
-          ><FilePenLine aria-hidden="true" />編輯此規則</button>}
-          <button type="button" onClick={() => setSelectedRule(null)}>關閉</button>
-        </div>}
-      >
-        {selectedRule && (
-          <div className="line-drawer-content" data-control-id="line.notification-rule.detail">
-            <div className="line-detail-grid">
-              <div><span>觸發事件</span><strong>{selectedRule.eventLabel}</strong></div>
-              <div><span>接收對象</span><strong>{selectedRule.recipientLabel}</strong></div>
-              <div><span>範本代碼</span><strong>{selectedRule.templateId}</strong></div>
-              <div><span>啟用狀態</span><strong>{selectedRule.enabled ? '已啟用' : '未啟用'}</strong></div>
-            </div>
-            <div className="notification-rule-detail-panel">
-              <p><strong>發送排程：</strong>{selectedRule.scheduleLabel}</p>
-              <p><strong>發送頻率：</strong>{selectedRule.frequencyLabel}</p>
-              {selectedRule.predicateLabels.length > 0 && <p><strong>觸發條件：</strong>{selectedRule.predicateLabels.join('、')}</p>}
-              <p className="notification-rule-detail-id">系統唯一規則識別碼：{selectedRule.id}</p>
-            </div>
-          </div>
-        )}
-      </Drawer>
 
       <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="圖文選單 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
     </div>

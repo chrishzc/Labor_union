@@ -37,6 +37,8 @@ export interface LineNotificationRulesMutationPanelProps {
   selectedRuleId?: string | null;
   client?: LineNotificationRulesMutationClient;
   templateClient?: LineNotificationTemplateClient;
+  settingsOnly?: boolean;
+  onEditingStateChange?: (dirty: boolean, busy: boolean) => void;
   onCommitted?: (receipt: LineNotificationRulesMutationReceiptModel) => void;
 }
 
@@ -184,6 +186,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
   selectedRuleId = null,
   client = lineNotificationRulesMutationClient,
   templateClient,
+  settingsOnly = false,
+  onEditingStateChange,
   onCommitted,
 }) => {
   const initial = useMemo(() => adaptLineNotificationRulesDraft(catalog), [catalog]);
@@ -227,6 +231,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
   const baselineHasActiveRule = baseline.rules.some((rule) => rule.id === activeRuleId);
   const draftChanged = JSON.stringify(draft) !== JSON.stringify(baseline);
   const busy = state === 'loading';
+
+  useEffect(() => { onEditingStateChange?.(draftChanged, busy); }, [draftChanged, busy, onEditingStateChange]);
 
   const invalidatePreview = (): void => {
     controllerRef.current?.abort();
@@ -344,7 +350,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
         </div>
       </div>
 
-      {draft.rules.length > 0 ? (
+      {!settingsOnly && draft.rules.length > 0 ? (
         <div className="line-search-filter-toolbar notification-rule-selector-row">
           <label htmlFor="line-notification-rule-selector" className="notification-rule-selector-label">
             通知規則：
@@ -364,7 +370,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
             ))}
           </select>
         </div>
-      ) : <p className="line-scope-note line-block-spacing-12">目前沒有可維護的通知規則。</p>}
+      ) : draft.rules.length === 0 ? <p className="line-scope-note line-block-spacing-12">目前沒有可維護的通知規則。</p> : null}
 
       {activeRule && (
         <div className="richmenu-drawer-panel notification-rule-editor-panel">
@@ -547,7 +553,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
         </div>
       )}
 
-      {ownerManagedNotification ? (
+      {!settingsOnly && (ownerManagedNotification ? (
         <OwnerManagedNotificationPanel notification={ownerManagedNotification} />
       ) : activeRule && committedActiveRule && activeRule.template_id === committedActiveRule.template_id ? (
         <LineNotificationTemplateEditor ruleId={committedActiveRule.id} client={templateClient} />
@@ -555,7 +561,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
         <p className="line-scope-note notification-rule-dirty-note">
           <TriangleAlert aria-hidden="true" />請先儲存通知規則變更，再編輯實際發送的訊息內容。
         </p>
-      ) : null}
+      ) : null)}
 
       {ownerManagedNotification && (
         <p className="line-scope-note notification-rule-dirty-note">

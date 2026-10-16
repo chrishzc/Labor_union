@@ -8,6 +8,11 @@
 持久化同一套 role-scoped canonical LINE identity binding、event、readback 與 application contract；customer／staff 可並存，admin 維持排他。同類客戶案件替換只更新 customer role，保留 staff role，並由LINE Identity正常流程完成；不追加LINE-004 anomaly recheck。此 Module 只擁有一個 nullable selected-role 狀態與一個 bounded binding-failure streak，第二次失敗以既有 Customer Service typed application 冪等建立客服單。
 
 ## Implementation
+- query transport: `api/routes/line_identity_management.py` — role-scoped detail／Preview／Apply 與 bounded replacement-candidates reader。
+- schema: `api/schemas/line_identity_management.py`
+- contract: `subsystems/line/identity_management_contracts.py`
+- review query contract: `subsystems/line/review_contracts.py` — bounded numbered review search，審核 state machine 不變。
+- review transport projection: `api/schemas/line_identity.py` — 審核對象姓名、案件及 canonical 綁定的唯讀展示欄位。
 - primary:
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`

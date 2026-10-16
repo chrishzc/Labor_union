@@ -81,6 +81,16 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 
 ## 8. 驗收
 
+### 2026-10-15 React 身分與授權精簡介面人工裁決
+
+- 管理工作區以「身分綁定／待審核／待配對」分頁呈現，一次只掛載目前任務。移除角色 KPI、常駐驗證說明、重複解除欄位與預先展開的操作表單；主要清單以姓名、角色、狀態及時間呈現，LINE User ID 只在明細遮罩顯示。
+- 身分明細、更正 Preview／Apply、解除 Preview／Apply 可明確傳入既有 `subject_type`；React 一律使用使用者點選列的角色。未傳角色的既有呼叫仍沿用原契約，不切換選定角色、不合併角色權限。解除請求 readback 必須同時對應 LINE User ID 與角色；同一 idempotency key 不得跨角色重用。
+- 新增 `GET /api/v1/line/identity-bindings/replacement-candidates`，以既有 reader capability 查詢相同角色候選，支援 bounded search／page／page_size。候選排除 owner projection 已綁定或 canonical 同角色尚未解除的對象；回傳姓名、角色、owner reference 與可用的案件展示編號。Query 零寫入，Apply 仍由原 writer fresh-read／version／typed conflict 裁決。
+- 既有身分清單與 numbered 審核清單的姓名、案件搜尋由 server 執行；分頁與筆數使用 server 結果，不對遮罩展示資料二次搜尋。審核展示可讀取同角色 subject name、案件展示編號及唯一有效 canonical LINE 綁定；資料不唯一時不猜測舊帳號。這些都是唯讀投影，不新增 root facts。
+- 審核不預選核准，保留原 Preview／明確確認／Apply／receipt／fresh readback；更正、解除與修復表單在選定動作後才展開。申請受理、身分停用與 provider 選單回復完成分開表達；操作結果不明時先重新查詢，不盲目重送。
+- 待配對先選 LINE 登記，再選既有候選訂單，核對差異、原因與確認後才呼叫原配對 writer。既有候選讀取上限與配對業務規則不變；未配對訂單總量不投影為待辦人數。
+- 本裁決授權上述身分管理查詢／角色參數及 presentation 修改；不改資料表、角色／權限規則、transaction owner、provider effect 或其他 LINE 工作區。
+
 1. 所有 bound User ID 可依 user、subject type、subject name/status 查詢。
 2. 解除建立後專屬 API 立即拒絕該身分。
 3. default menu 成功套用前，owner projection User ID 不清除。

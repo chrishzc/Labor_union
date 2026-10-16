@@ -78,8 +78,20 @@ class HumanEscalationDeliveryApplication:
         del worker_identity
 
     def consume(self, item: HumanEscalationOutboxItem) -> HumanEscalationDeliveryReceipt:
-        request, target = _request(item, self._now())
         with self._unit_of_work_factory() as uow:
+            from domains.line.configuration import LineConfigurationKind
+            from subsystems.line.message_configuration import LineMessageConfigurationError, notification_description
+
+            template_id = {
+                "runtime_critical": "LU96-M4-SAFE-ALERT-CARD-V1",
+                "complaint": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
+            }.get(item.payload.get("trigger_code"))
+            try:
+                description = (notification_description(uow.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES), template_id)
+                               if template_id else "")
+            except LineMessageConfigurationError as error:
+                raise HumanEscalationDeliveryError("human_escalation_notification_content_invalid") from error
+            request, target = _request(item, self._now(), description=description)
             result = uow.delivery_tasks.enqueue(request)
             task = uow.delivery_tasks.get(result.task_id)
             if task is None:
@@ -155,7 +167,7 @@ class HumanEscalationDeliveryWorker:
             uow.commit()
 
 
-def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDeliveryRequest, dict[str, Any]]:
+def _request(item: HumanEscalationOutboxItem, now: datetime, *, description: str = "") -> tuple[LineDeliveryRequest, dict[str, Any]]:
     payload = item.payload
     if payload.get("urgency") != "high" or payload.get("hold_state") != "active":
         raise HumanEscalationDeliveryError("human_escalation_bounded_intent_invalid")
@@ -195,6 +207,7 @@ def _request(item: HumanEscalationOutboxItem, now: datetime) -> tuple[LineDelive
     message = canonical_line_payload_json({
         "type": "text",
         "text": (
+            (description + "\n\n" if description else "") +
             f"客服人工升級（{category}）：{safe_summary}\n"
             f"請開啟工會客服系統處理：\n{base_url}{entry.public_route}"
         ),

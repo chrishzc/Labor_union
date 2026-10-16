@@ -23,6 +23,7 @@ class LineIdentityBindingView(_StrictModel):
     subject_type: LineBindingSubjectType
     subject_reference: str
     subject_name: str
+    subject_display_reference: str | None = None
     updated_at: datetime | None = None
     revocation_request_id: int | None = None
     revocation_status: LineIdentityRevocationStatus | None = None
@@ -88,6 +89,21 @@ class LineIdentityRevocationRequestView(_StrictModel):
     @classmethod
     def unwrap_value_object(cls, value):
         return getattr(value, "value", value)
+
+
+class LineIdentityCandidateView(_StrictModel):
+    subject_type: LineBindingSubjectType
+    subject_reference: str
+    subject_name: str
+    subject_display_reference: str | None = None
+    current_line_user_id: str | None = None
+
+
+class LineIdentityCandidatePageView(_StrictModel):
+    items: list[LineIdentityCandidateView]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
 
 
 class LineIdentityRevocationApplyRequest(_StrictModel):

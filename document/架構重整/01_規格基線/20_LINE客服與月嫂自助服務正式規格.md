@@ -168,6 +168,16 @@ receipt 與 authenticated download。不得另建 direct upload、公開 URL 或
 
 ## 6. UI 與人工入口
 
+### React 客服案件提醒清單（2026-10-15 人工裁決）
+
+React「客服與營運」的客服案件頁只提醒與追蹤未結案客服，不在此提供明細操作、接手、內部備註、LINE 回覆或結案。保留「需要處理／待接手／處理中」、工單／案件編號搜尋、來源篩選及重新整理；不呈現已結案入口、總覽橫幅、說明入口、預覽情境或個人／優先篩選。列表顯示對象與案件 reference、來源及閉合原因說明、狀態／處理人、單一更新時間；server metadata 超過單頁才呈現必要分頁。其他 LINE 工作面、手機客服與既有 command／API 不因本頁移除操作而退役。
+
+新增 reader-protected `GET /api/v1/customer-service/tickets/reminders`，只接受 `status=open|waiting|handling`、closed `source`、bounded `search`、positive `page` 與 `page_size=1..100`。`open` 固定是 `waiting|handling`，由 repository COUNT 與 LIMIT/OFFSET 合併分頁；不得下載各狀態固定上限後在瀏覽器假分頁。回傳全域 waiting／handling 摘要、篩選後 total 及 bounded items；一張 ticket 只算一件，即使有多個來源也不重複計數。依有效 HIGH escalation 優先，再以更新時間及 ticket ID 倒序排列。讀取固定零 commit／receipt／enqueue／worker wakeup／provider call。
+
+`source` 固定 `handoff|complaint|feedback|order|service|binding|unknown`。來源只取既有 customer-message event 的 canonical namespace 與同 ticket、同 event identity 的 typed escalation：`line-complaint:` 是明確客訴，`line-feedback-ticket:` 是未解決回饋，`line-order-change:`／`line-service-help:order-update:` 是訂單異動，`binding-failure:` 是綁定協助；同事件的明確人工／回答錯誤 escalation 是轉真人，既有 `line-service-help:profile_update|contact_union|other:` 是服務轉介。保留全部已辨識來源以供篩選，顯示最新已辨識來源；後續補訊、agent reply 或管理 event 不改寫來源。缺證據顯示 `unknown`，不得從 category、訊息文字、情緒、前端輸入或已結案歷史推定來源／優先。
+
+提醒 DTO 只回傳 ticket ID、client name、case reference、waiting／handling、處理人顯示名稱、closed source／reason、有效升級優先旗標及 UTC 更新時間；不回傳 LINE identity、電話、原始訊息、內部備註、event key、fingerprint 或 provider 細節。無姓名以未具名呈現，無來源仍保留待辦；載入與失敗不可冒充零筆。來源篩選及搜尋變更回第 1 頁，晚到／已取消查詢不得覆蓋新結果。
+
 - merge 的 Rich Menu 圖面、按鈕標籤與 LIFF 卡片樣式可移植。
 - 「客服與選單」的 Rich Menu 編輯器必須提供背景圖與按鈕顯示名稱的 draft 編輯入口；畫面預覽、
   Preview receipt 與 Apply 必須鎖定同一 revision。編輯草稿不等於發布，provider publication 仍依 `17`
@@ -351,6 +361,16 @@ passed；Chrome fresh reload 後實點派案通知、服務日順延確認、重
 error／warn；僅觀察到第三方 Chrome 擴充套件自身 listener warning。此完成事實不包含真實
 projection composition、postback、delivery、provider 或 26 的 deferred-after-96（僅歷史 provenance，
 現由 2026-09-01 Task96 direct-flow acceptance 取代排除效果）缺口。
+
+### 6.6 通知內容統一維護（2026-10-15 人工裁決）
+
+「通知與發送」只保留統一通知內容清單，歡迎訊息列入其中；一般操作頁移除獨立歡迎及發送紀錄分頁。案件通知歷程仍由待辦看板既有案件紀錄查詢；非案件通知不因此被宣稱具有案件歷程。Delivery Query API、worker 與仍有效的 standalone 元件不隨此 UI 入口精簡退役。
+
+清單呈現通知名稱、對象、內容摘要與編輯入口，搜尋涵蓋名稱／內容。文字儲存沿用既有 manager 權限及 MESSAGE_TEMPLATES revision；任何內容儲存後重新 Query 全部內容以取得共用的新版本，stale／查詢或儲存失敗不得假裝成功或盲目重試。歡迎訊息仍由原加好友流程發送，不增加延後引導。
+
+人工已一併授權將請假、媒合與告警的說明文字接通至實際通知組裝。新請假確認卡片與 M3 協調卡片只以已保存的文字設定取代原說明欄；原案件資訊、日期、recipient、互動憑證、按鈕及流程判定不變。M4 客訴／runtime critical 告警在原去敏摘要與管理入口之前加入對應設定說明，維持原發送格式；一般轉真人通知不套用這兩則說明。本文不授權把既有文字告警改成新的 Flex／安全連結流程。
+
+設定更新只影響之後新組裝的通知；已提交的 intent／outbox／delivery payload 沿用 immutable snapshot，不能在 retry 時套用新文案或因儲存而重新送出。規則欄位收在次要發送設定，仍沿用既有 Preview／Confirm／Apply、取消待發工作的 owner 及效果上限；流程管理通知不得把 shadow rule 的停用狀態冒充實際流程關閉。
 
 ## 7. 第一版驗收
 

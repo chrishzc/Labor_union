@@ -5,7 +5,7 @@ Description: 提供具管理員授權的 LINE 訂單群組 compatibility 與 num
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from api.dependencies.admin_auth import (
     admin_actor_context,
@@ -18,6 +18,9 @@ from api.schemas.line_order_groups import (
     LineOrderGroupNumberedPageResponse,
     LineOrderGroupPageResponse,
     LineOrderGroupRecord,
+    LineOrderGroupWorkspacePageResponse,
+    LineOrderGroupWorkspaceRecordResponse,
+    LineOrderGroupWorkspaceEventPageResponse,
 )
 from domains.line.order_group import LineOrderGroupBindingStatus
 from subsystems.access.authentication_session import AdminPrincipal
@@ -61,6 +64,47 @@ def list_order_groups_numbered(
         total=result.total,
         total_pages=result.total_pages,
     )
+
+
+@router.get("/workspace/numbered", response_model=LineOrderGroupWorkspacePageResponse)
+def list_order_group_workspace(
+    search: str | None = Query(default=None, max_length=50),
+    status: LineOrderGroupBindingStatus | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=200),
+    principal: AdminPrincipal = Depends(require_line_order_group_reader),
+):
+    result = get_line_order_group_query_application().workspace_list(
+        admin_actor_context(principal), search=search.strip() or None if search else None,
+        status=status.value if status else None, page=page, page_size=page_size,
+    )
+    return LineOrderGroupWorkspacePageResponse.model_validate(result)
+
+
+@router.get("/workspace/{case_no}", response_model=LineOrderGroupWorkspaceRecordResponse)
+def get_order_group_workspace(
+    case_no: str = Path(min_length=1, max_length=50, pattern=r"^\S(?:.*\S)?$"),
+    principal: AdminPrincipal = Depends(require_line_order_group_reader),
+):
+    result = get_line_order_group_query_application().workspace_get(admin_actor_context(principal), case_no)
+    if result is None:
+        raise HTTPException(status_code=404, detail="找不到案件的服務群組")
+    return LineOrderGroupWorkspaceRecordResponse.model_validate(result)
+
+
+@router.get("/workspace/{case_no}/events/numbered", response_model=LineOrderGroupWorkspaceEventPageResponse)
+def get_order_group_workspace_events(
+    case_no: str = Path(min_length=1, max_length=50, pattern=r"^\S(?:.*\S)?$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=200),
+    principal: AdminPrincipal = Depends(require_line_order_group_reader),
+):
+    result = get_line_order_group_query_application().workspace_events(
+        admin_actor_context(principal), case_no, page=page, page_size=page_size,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="找不到案件的服務群組")
+    return LineOrderGroupWorkspaceEventPageResponse.model_validate(result)
 
 
 @router.get("/{case_no}", response_model=LineOrderGroupRecord)

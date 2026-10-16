@@ -3,7 +3,12 @@
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import pytest
 from unittest.mock import patch
+from types import SimpleNamespace
+from domains.line.configuration import LineConfigurationSnapshot
+from domains.line.identities import LineConfigurationRevision
+from domains.line.canonical_payload import canonical_line_payload_json
 
 from domains.line.delivery import (
     LineAttemptPlan,
@@ -132,6 +137,7 @@ class _Escalations:
 class _Uow:
     def __init__(self, outbox, delivery, escalations):
         self.outbox, self.delivery_tasks, self.escalations = outbox, delivery, escalations
+        self.configurations = SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(0), '{}'))
 
     def __enter__(self):
         return self
@@ -218,6 +224,44 @@ def test_masked_alert_is_projected_then_canonical_delivery_records_provider_outc
         "line-delivery-attempt:91:1",
     )
     assert escalations.status == "sent"
+
+
+@patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
+@pytest.mark.parametrize('trigger,template_id', [
+    ('complaint', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'),
+    ('runtime_critical', 'LU96-M4-SAFE-ALERT-CARD-V1'),
+])
+def test_configured_alert_copy_preserves_masked_facts_recipient_and_management_entry(trigger, template_id):
+    payload = json.loads(_work_item().payload_json)
+    payload['trigger_code'] = trigger
+    outbox, delivery, escalations = _Outbox(_work_item(payload=payload)), _Delivery(), _Escalations()
+    uow = _Uow(outbox, delivery, escalations)
+    uow.configurations = SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(
+        kind, LineConfigurationRevision(4), canonical_line_payload_json({'templates': [{
+            'id': template_id, 'message_type': 'text',
+            'content': '請由工會專員接手確認本次客訴。', 'variables': [],
+        }]}),
+    ))
+    assert HumanEscalationDeliveryWorker(lambda: uow, 'copy-check', lambda: NOW).run_once() == 1
+    text = json.loads(delivery.task.request.payload_json)['text']
+    assert text.startswith('請由工會專員接手確認本次客訴。\n\n')
+    assert 'complaint_explicit' in text
+    assert 'https://example.test/line-mobile-admin?target=customer_service' in text
+    assert delivery.task.request.recipient.identity.value == 'Ctask96M4Alert0901'
+    assert delivery.task.status is LineDeliveryStatus.PENDING
+
+
+@patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
+def test_general_human_request_does_not_read_or_use_complaint_copy():
+    payload = json.loads(_work_item().payload_json)
+    payload['trigger_code'] = 'explicit_human_request'
+    outbox, delivery, escalations = _Outbox(_work_item(payload=payload)), _Delivery(), _Escalations()
+    uow = _Uow(outbox, delivery, escalations)
+    def unexpected_read(_kind):
+        raise AssertionError('ordinary handoff must not consume complaint templates')
+    uow.configurations = SimpleNamespace(get=unexpected_read)
+    assert HumanEscalationDeliveryWorker(lambda: uow, 'handoff-check', lambda: NOW).run_once() == 1
+    assert json.loads(delivery.task.request.payload_json)['text'].startswith('客服人工升級（other）：')
 
 
 def test_missing_target_is_a_durable_manual_fallback():

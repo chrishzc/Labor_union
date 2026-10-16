@@ -12,7 +12,11 @@ from datetime import datetime, timedelta, timezone
 import inspect
 import json
 import sqlite3
+import re
+from domains.line.canonical_payload import canonical_line_payload_json
 from types import SimpleNamespace
+from domains.line.configuration import LineConfigurationSnapshot
+from domains.line.identities import LineConfigurationRevision
 
 import pytest
 from fastapi import HTTPException
@@ -38,6 +42,8 @@ class Cursor:
         self.raw.close()
 
     def execute(self, sql, parameters=()):
+        sql = re.sub(r'CAST\(([^)]+) AS CHAR CHARACTER SET utf8mb4\)', r'CAST(\1 AS TEXT)', sql)
+        sql = sql.replace(' COLLATE utf8mb4_unicode_ci', '')
         self.raw.execute(sql.replace("%s", "?").replace(" FOR UPDATE", ""), parameters)
 
     def fetchone(self):
@@ -108,6 +114,12 @@ class LineUow(MySqlUnitOfWork):
     def __init__(self, state):
         super().__init__(Connection(state))
         self.delivery_tasks = Delivery(self._connection)
+        self.configurations = SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(
+            kind, LineConfigurationRevision(1 if getattr(state, 'description', None) else 0),
+            canonical_line_payload_json({'templates': [{'id': 'LU96-M1-LEAVE-EXTENSION-CARD-V1', 'message_type': 'text',
+                                      'content': state.description, 'variables': []}]})
+            if getattr(state, 'description', None) else '{}',
+        ))
 
     def __exit__(self, *args):
         try:
@@ -297,6 +309,22 @@ def test_missing_recipient_stays_visible_without_inventing_delivery(inquiry):
     assert rows(inquiry, "test_delivery") == []
     assert inquiry.connections == 1
     assert inquiry.commits == 1
+
+
+def test_configured_copy_is_in_new_cards_and_editing_does_not_rewrite_existing_tasks(inquiry):
+    inquiry.description = '請核對這次請假安排，再選擇是否順延。'
+    review()
+    before = rows(inquiry, 'test_delivery')
+    for task in before:
+        payload = json.loads(task[2])
+        body = payload['contents']['body']['contents']
+        assert body[-1]['text'] == inquiry.description
+        assert '案件：CASE-' in body[1]['text']
+        assert '請假期間：' in body[2]['text']
+        assert len(payload['contents']['footer']['contents']) == 2
+    inquiry.description = '下一次新通知才使用的新說明。'
+    review()
+    assert rows(inquiry, 'test_delivery') == before
 
 
 def test_no_official_work_days_does_not_create_inquiries(inquiry):

@@ -12,6 +12,40 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
+from subsystems.customer_service.contracts import CustomerServiceReminderSource
+
+
+class CustomerServiceReminderView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    ticket_id: int = Field(gt=0)
+    client_name: str | None
+    case_no: str | None
+    status: Literal["waiting", "handling"]
+    assigned_admin_name: str | None
+    source: CustomerServiceReminderSource
+    sources: list[CustomerServiceReminderSource] = Field(min_length=1)
+    reason: Literal[
+        "explicit_human_request", "explicit_wrong_answer", "complaint",
+        "unresolved_feedback", "order_change_requested", "service_referral",
+        "binding_failure", "unknown",
+    ]
+    is_priority: bool
+    updated_at: datetime | None
+
+
+class CustomerServiceReminderSummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    waiting: int = Field(ge=0)
+    handling: int = Field(ge=0)
+
+
+class CustomerServiceReminderPageView(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    items: list[CustomerServiceReminderView]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    summary: CustomerServiceReminderSummaryView
 
 
 class CustomerServiceTicketView(BaseModel):

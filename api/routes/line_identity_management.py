@@ -16,6 +16,7 @@ from api.dependencies.line_runtime import publish_line_wakeup_best_effort
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity_management import (
     LineIdentityBindingPageView,
+    LineIdentityCandidatePageView,
     LineIdentityBindingView,
     LineIdentityCurrentFactReadbackView,
     LineIdentityRevocationActionRequest,
@@ -36,6 +37,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.identity_management_application import LineIdentityManagementApplication
 from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
+    LineIdentityCandidateQuery,
     PairProvisionalRegistrationCommand,
     RequestLineIdentityRevocationCommand,
     ReplaceLineIdentitySubjectCommand,
@@ -66,6 +68,16 @@ def list_bindings(
 ):
     query = LineIdentityBindingListQuery(status, subject_type, search, page, page_size)
     return BaseResponse(data=_application().list(query))
+
+
+@router.get("/replacement-candidates", response_model=BaseResponse[LineIdentityCandidatePageView])
+def replacement_candidates(
+    subject_type: LineBindingSubjectType,
+    search: str = Query("", max_length=191),
+    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
+    _: AdminPrincipal = Depends(require_line_identity_binding_reader),
+):
+    return BaseResponse(data=_call(_application().replacement_candidates, LineIdentityCandidateQuery(subject_type, search, page, page_size)))
 
 
 @router.get(
@@ -108,9 +120,10 @@ def pair_provisional_registration(
 @router.get("/{line_user_id}", response_model=BaseResponse[LineIdentityBindingView])
 def binding_detail(
     line_user_id: str,
+    subject_type: LineBindingSubjectType | None = None,
     _: AdminPrincipal = Depends(require_line_identity_binding_reader),
 ):
-    return BaseResponse(data=_call(_application().detail, LineUserId(line_user_id)))
+    return BaseResponse(data=_call(_application().detail, LineUserId(line_user_id), **({"subject_type": subject_type} if subject_type is not None else {})))
 
 
 @router.get(
@@ -131,12 +144,14 @@ def current_fact(
 def preview_replacement(
     line_user_id: str,
     target_subject_reference: str,
+    subject_type: LineBindingSubjectType | None = None,
     _: AdminPrincipal = Depends(require_line_identity_binding_manager),
 ):
     result = _call(
         _application().preview_replacement,
         LineUserId(line_user_id),
         target_subject_reference,
+        **({"subject_type": subject_type} if subject_type is not None else {}),
     )
     return BaseResponse(data=result)
 
@@ -149,6 +164,7 @@ def apply_replacement(
     line_user_id: str,
     payload: LineIdentityReplacementRequest,
     request: Request,
+    subject_type: LineBindingSubjectType | None = None,
     principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
 ):
     command = ReplaceLineIdentitySubjectCommand(
@@ -159,6 +175,7 @@ def apply_replacement(
         payload.reason.strip(),
         IdempotencyKey(payload.idempotency_key),
         CorrelationId(payload.correlation_id),
+        subject_type=subject_type,
     )
     result = _call(_application().replace_subject, command)
     _audit_request(request, "replace", line_user_id)
@@ -171,9 +188,10 @@ def apply_replacement(
 )
 def preview_revocation(
     line_user_id: str,
+    subject_type: LineBindingSubjectType | None = None,
     _: AdminPrincipal = Depends(require_line_identity_binding_manager),
 ):
-    result = _call(_application().preview_revocation, LineUserId(line_user_id))
+    result = _call(_application().preview_revocation, LineUserId(line_user_id), **({"subject_type": subject_type} if subject_type is not None else {}))
     return BaseResponse(data=result)
 
 
@@ -185,6 +203,7 @@ def apply_revocation(
     line_user_id: str,
     payload: LineIdentityRevocationApplyRequest,
     request: Request,
+    subject_type: LineBindingSubjectType | None = None,
     principal: AdminPrincipal = Depends(require_line_identity_binding_manager),
 ):
     command = RequestLineIdentityRevocationCommand(
@@ -194,6 +213,7 @@ def apply_revocation(
         payload.reason.strip(),
         IdempotencyKey(payload.idempotency_key),
         CorrelationId(payload.correlation_id),
+        subject_type=subject_type,
     )
     result = _call(_application().request_revocation, command)
     _audit_request(request, "request", line_user_id)

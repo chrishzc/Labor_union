@@ -12,6 +12,7 @@ Success bilateral envelopes are informational-only; a bounded worker records typ
 - primary: `subsystems/line/matching_coordination_delivery.py`
 - source adapter: `infrastructure/mysql/line_matching_coordination_delivery_source.py`
 - projection adapter: `infrastructure/mysql/line_matching_coordination_delivery_projection.py`
+- projection 由既有 LINE Configuration repository 讀取目前 MESSAGE_TEMPLATES snapshot，使用其媒合協調說明文字；recipient、interaction token、案件欄位與 immutable outbox envelope 不改由 UI 決定。
 - worker: `subsystems/line/matching_coordination_delivery_worker.py`
 - customer-service handoff source: `infrastructure/mysql/matching_coordination_customer_service_source.py`
 - customer-service handoff worker: `subsystems/customer_service/matching_coordination_worker.py`

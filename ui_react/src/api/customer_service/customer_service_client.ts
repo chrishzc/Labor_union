@@ -3,6 +3,12 @@
  * Description: 以即時 Session 呼叫客服查詢、狀態更新、LINE durable 回覆 Preview／Apply 與結案端點。
  */
 import { z } from 'zod';
+import {
+  CustomerServiceReminderParamsSchema,
+  CustomerServiceReminderResponseSchema,
+  type CustomerServiceReminderPage,
+  type CustomerServiceReminderParams,
+} from './customer_service_schemas';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
@@ -101,6 +107,23 @@ export interface CustomerServiceActionsClient {
     payload: CustomerServiceReplyApplyRequest,
     options: CustomerServiceMutationOptions
   ): Promise<CustomerServiceReplyApply>;
+}
+
+export interface CustomerServiceReminderClient {
+  listReminders(params?: CustomerServiceReminderParams, options?: CustomerServiceRequestOptions): Promise<CustomerServiceReminderPage>;
+}
+
+export async function listCustomerServiceReminders(
+  params?: CustomerServiceReminderParams,
+  options?: CustomerServiceRequestOptions
+): Promise<CustomerServiceReminderPage> {
+  return callCustomerService(async () => {
+    const query = parseRequest(CustomerServiceReminderParamsSchema, params ?? {});
+    const raw = await transport.get('/api/v1/customer-service/tickets/reminders', {
+      ...currentRequestOptions(options), params: query,
+    });
+    return decodeSuccessfulEnvelope(CustomerServiceReminderResponseSchema, raw);
+  });
 }
 
 function validateTicketId(ticketId: number): number {
@@ -343,6 +366,9 @@ export async function applyCustomerServiceResolve(
 class DefaultCustomerServiceClient
   implements CustomerServiceClient, CustomerServiceActionsClient
 {
+  public listReminders(params?: CustomerServiceReminderParams, options?: CustomerServiceRequestOptions): Promise<CustomerServiceReminderPage> {
+    return listCustomerServiceReminders(params, options);
+  }
   public getSummary(
     options?: CustomerServiceRequestOptions
   ): Promise<CustomerServiceSummary> {
@@ -412,9 +438,9 @@ class DefaultCustomerServiceClient
   }
 }
 
-export function createCustomerServiceClient(): CustomerServiceClient & CustomerServiceActionsClient {
+export function createCustomerServiceClient(): CustomerServiceClient & CustomerServiceActionsClient & CustomerServiceReminderClient {
   return new DefaultCustomerServiceClient();
 }
 
-export const customerServiceClient: CustomerServiceClient & CustomerServiceActionsClient =
+export const customerServiceClient: CustomerServiceClient & CustomerServiceActionsClient & CustomerServiceReminderClient =
   createCustomerServiceClient();

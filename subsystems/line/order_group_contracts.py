@@ -8,12 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from domains.line.identities import LineGroupId, LineUserId
 from domains.line.order_group import (
     LineGroupInvitationRelay,
     LineOrderGroupBindingCandidate,
     LineOrderGroupBindingSnapshot,
+    LineOrderGroupBindingStatus,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -136,6 +138,52 @@ class LineOrderGroupEventPage:
     total_pages: int
 
 
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupParticipant:
+    role: Literal["customer", "staff"]
+    name: str | None
+    membership_status: Literal["joined", "left", "pending", "unknown"]
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupWorkspaceEvent:
+    event_key: str
+    case_no: str
+    event_type: str
+    occurred_at: datetime
+    participant_role: Literal["customer", "staff"] | None = None
+    participant_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupWorkspaceRecord:
+    case_no: str
+    status: LineOrderGroupBindingStatus
+    customer_name: str | None
+    bound_at: datetime | None
+    last_invitation_at: datetime | None
+    members: tuple[LineOrderGroupParticipant, ...]
+    latest_event: LineOrderGroupWorkspaceEvent | None
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupWorkspacePage:
+    items: tuple[LineOrderGroupWorkspaceRecord, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupWorkspaceEventPage:
+    items: tuple[LineOrderGroupWorkspaceEvent, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 __all__ = [
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
@@ -146,6 +194,11 @@ __all__ = [
     "LineOrderGroupNumberedPage",
     "LineOrderGroupPage",
     "LineOrderGroupQueryResult",
+    "LineOrderGroupParticipant",
+    "LineOrderGroupWorkspaceEvent",
+    "LineOrderGroupWorkspaceRecord",
+    "LineOrderGroupWorkspacePage",
+    "LineOrderGroupWorkspaceEventPage",
     "LinkedLineAdmin",
     "OrderLineAudience",
     "RelayLineGroupInvitationCommand",

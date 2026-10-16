@@ -30,7 +30,13 @@ from subsystems.line.capabilities import (
     line_capabilities_for_role,
     require_line_capability,
 )
-from subsystems.line.order_group_contracts import BindLineOrderGroupCommand
+from subsystems.line.order_group_contracts import (
+    BindLineOrderGroupCommand,
+    GetLineOrderGroupQuery,
+    LineOrderGroupWorkspacePage,
+    LineOrderGroupWorkspaceRecord,
+    LineOrderGroupWorkspaceEventPage,
+)
 from subsystems.line.ports import LineAuditIntent
 
 _BIND_COMMAND = re.compile(r"^綁定訂單\s+([A-Za-z0-9_-]{1,50})$")
@@ -212,6 +218,32 @@ class LineOrderGroupApplication:
 class LineOrderGroupQueryApplication:
     def __init__(self, unit_of_work_factory) -> None:
         self._unit_of_work_factory = unit_of_work_factory
+
+    def workspace_list(
+        self, actor: ActorContext, *, search: str | None, status: str | None,
+        page: int, page_size: int,
+    ) -> LineOrderGroupWorkspacePage:
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.order_groups.workspace_list(
+                search=search, status=status, page=page, page_size=page_size,
+            )
+
+    def workspace_get(self, actor: ActorContext, case_no: str) -> LineOrderGroupWorkspaceRecord | None:
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        GetLineOrderGroupQuery(case_no)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.order_groups.workspace_get(case_no)
+
+    def workspace_events(
+        self, actor: ActorContext, case_no: str, *, page: int, page_size: int,
+    ) -> LineOrderGroupWorkspaceEventPage | None:
+        require_line_capability(actor, LineCapability.ORDER_GROUP_READ)
+        GetLineOrderGroupQuery(case_no)
+        with self._unit_of_work_factory() as unit_of_work:
+            if unit_of_work.order_groups.get(case_no) is None:
+                return None
+            return unit_of_work.order_groups.workspace_events(case_no, page=page, page_size=page_size)
 
     def list(self, actor: ActorContext, *, status: str | None, limit: int):
         require_line_capability(actor, LineCapability.ORDER_GROUP_READ)

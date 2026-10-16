@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from domains.line.order_group import LineOrderGroupBindingStatus
 
 
 class LineOrderGroupRecord(BaseModel):
@@ -42,6 +45,52 @@ class LineOrderGroupEventResponse(BaseModel):
 
 class LineOrderGroupEventPageResponse(BaseModel):
     items: list[LineOrderGroupEventResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class LineOrderGroupParticipantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    role: Literal["customer", "staff"]
+    name: str | None
+    membership_status: Literal["joined", "left", "pending", "unknown"]
+
+
+class LineOrderGroupWorkspaceEventResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    event_key: str
+    case_no: str
+    event_type: str
+    occurred_at: datetime
+    participant_role: Literal["customer", "staff"] | None
+    participant_name: str | None
+
+
+class LineOrderGroupWorkspaceRecordResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    case_no: str
+    status: LineOrderGroupBindingStatus
+    customer_name: str | None
+    bound_at: datetime | None
+    last_invitation_at: datetime | None
+    members: list[LineOrderGroupParticipantResponse]
+    latest_event: LineOrderGroupWorkspaceEventResponse | None
+
+
+class LineOrderGroupWorkspacePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    items: list[LineOrderGroupWorkspaceRecordResponse]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class LineOrderGroupWorkspaceEventPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    items: list[LineOrderGroupWorkspaceEventResponse]
     page: int
     page_size: int
     total: int
