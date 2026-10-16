@@ -9,6 +9,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from api.schemas.historical_order_adoption import HistoricalOrderWorkbookReceiptView
 
 from domains.orders.historical_adoption import HistoricalOrderOutcome, HistoricalOrderSourceStatus
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -160,6 +161,42 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
     with pytest.raises(module.HistoricalOrderWorkbookConflict):
         service.apply("different.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
     assert workflow.apply_calls == 1
+
+
+def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
+    workbook = _workbook_with_statuses()
+    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+
+    class Workflow(_Workflow):
+        def apply(self, request):
+            self.apply_calls += 1
+            outcome, replayed = {
+                2: (HistoricalOrderOutcome.ADOPTED, False),
+                3: (HistoricalOrderOutcome.ADOPTED, True),
+                4: (HistoricalOrderOutcome.REVIEW_REQUIRED, True),
+                5: (HistoricalOrderOutcome.REVIEW_REQUIRED, False),
+            }[request.row.source_row]
+            return SimpleNamespace(outcome=outcome, replayed=replayed, assignment_count=0, review_identity="review" if outcome is HistoricalOrderOutcome.REVIEW_REQUIRED else None)
+
+    workflow = Workflow()
+    service = module.HistoricalOrderWorkbookImportService(_Repository(), workflow, _UnitOfWork)
+    preview = service.preview("mixed.xlsx")
+    receipt = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
+    assert receipt.adopted_count == 2
+    assert receipt.review_required_count == 2
+    assert receipt.replayed_rows == 2
+    assert receipt.import_counts.as_dict() == {"imported_count": 1, "duplicate_skipped_count": 2, "not_imported_count": 1}
+    assert sum(receipt.import_counts.as_dict().values()) == receipt.source_row_count
+    view = HistoricalOrderWorkbookReceiptView.model_validate(receipt.as_dict())
+    assert view.import_counts.duplicate_skipped_count == 2
+    with pytest.raises(ValueError, match="historical_order_import_counts_not_conserved"):
+        HistoricalOrderWorkbookReceiptView.model_validate({
+            **receipt.as_dict(),
+            "import_counts": {"imported_count": 2, "duplicate_skipped_count": 2, "not_imported_count": 1},
+        })
+    replay = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
+    assert replay.import_counts == receipt.import_counts
+    assert workflow.apply_calls == 4
 
 
 def test_terminal_replay_does_not_revalidate_current_rows(monkeypatch):

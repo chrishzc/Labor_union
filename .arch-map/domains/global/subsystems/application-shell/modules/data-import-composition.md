@@ -9,14 +9,17 @@
 
 ## Implementation
 - primary: `ui_react/src/pages/DataImportPage.tsx`
+- `ui_react/src/pages/DataImportPage.css` — four-metric import presentation。
+- `ui_react/src/adapters/workbook_import_result_adapter.ts` — project typed owner receipts into source／imported／duplicate／not-imported counts without counting review overlays twice。
 
 ## Dependencies
 - outbound: `orders/orders/module:historical-adoption-presentation` — Historical Orders typed preview／receipt。
-- outbound: `orders/orders/module:historical-review-remediation-presentation` — needs-review receipt 的 review reference 直接開啟既有單列更正工作台。
+- 匯入頁只顯示來源筆數、成功匯入、重複略過、未匯入；不再組合 review 明細或單列更正工作台。
 - outbound: `case-import` owners — HCM／Client BeClass typed workbook clients。
 - inbound: authenticated React application navigation。
 
 ## Contracts
+- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §5.2 — four exclusive counters and no issue details in the import page。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption presentation boundary。
 
 ## Verification

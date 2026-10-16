@@ -25,17 +25,17 @@ it('previews and reports email-only fills as a completed update without new case
   });
   vi.spyOn(hcmWorkbookPreviewClient, 'apply').mockResolvedValue(receipt);
   render(<DataImportPage />);
-  expect(screen.getByText(/既有案件只補入空白 HCM Email/)).toBeInTheDocument();
+  expect(screen.queryByText(/既有案件只補入空白 HCM Email/)).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('選擇 HCM Current Workbook'), {
     target: { files: [new File(['synthetic'], 'hcm.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })] },
   });
   fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]')!);
-  await screen.findByText('可補入既有案件 email');
+  await screen.findByText('預覽結果');
   fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
   fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]')!);
-  await waitFor(() => expect(screen.getByText('匯入完成')).toBeInTheDocument());
-  expect(screen.getByText(/新增 0 筆、補入既有案件 email 1 筆/)).toBeInTheDocument();
-  expect(screen.queryByText('匯入完成，未新增資料')).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('匯入結果')).toBeInTheDocument());
+  expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['1', '1', '0', '0']);
+  expect(screen.queryByText(/補入既有案件 email|含警示|需檢查/)).not.toBeInTheDocument();
 });
 
 it('decodes and conserves email fills in both Apply and historical results', () => {

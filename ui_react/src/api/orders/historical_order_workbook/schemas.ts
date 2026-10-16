@@ -89,6 +89,11 @@ export const HistoricalOrderWorkbookReceiptSchema = z
     status_counts: HistoricalOrderStatusCountsSchema,
     result_counts: HistoricalOrderResultCountsSchema,
     review_references: z.array(z.string().trim().min(1).max(191)).max(100),
+    import_counts: z.strictObject({
+      imported_count: z.number().int().min(0),
+      duplicate_skipped_count: z.number().int().min(0),
+      not_imported_count: z.number().int().min(0),
+    }).nullable().optional(),
   })
   .strict()
   .superRefine(validateStatusCountConservation);

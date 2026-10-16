@@ -74,6 +74,14 @@ class HistoricalOrderWorkbookPreviewView(BaseModel):
         return self
 
 
+class HistoricalOrderWorkbookImportCountsView(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    imported_count: int = Field(ge=0)
+    duplicate_skipped_count: int = Field(ge=0)
+    not_imported_count: int = Field(ge=0)
+
+
 class HistoricalOrderWorkbookReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -90,6 +98,7 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
     status_counts: HistoricalOrderStatusCountsView
     result_counts: HistoricalOrderResultCountsView
     review_references: list[str] = Field(default_factory=list, max_length=100)
+    import_counts: HistoricalOrderWorkbookImportCountsView | None = None
 
     @model_validator(mode="after")
     def validate_status_count_conservation(self):
@@ -97,4 +106,6 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
             raise ValueError("historical_order_status_counts_not_conserved")
         if self.result_counts.total != self.source_row_count:
             raise ValueError("historical_order_result_counts_not_conserved")
+        if self.import_counts is not None and sum(self.import_counts.model_dump().values()) != self.source_row_count:
+            raise ValueError("historical_order_import_counts_not_conserved")
         return self

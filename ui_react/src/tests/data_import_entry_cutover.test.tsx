@@ -59,7 +59,7 @@ describe('Data Import entry', () => {
     });
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByText('📥 批次資料匯入中心')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('批次資料匯入')).toBeInTheDocument());
 
     expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新整理結果' })).not.toBeInTheDocument();
@@ -72,7 +72,7 @@ describe('Data Import entry', () => {
 
     expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
     for (const [index, controlId] of ACTIVE_PREVIEW_CONTROL_IDS.entries()) {
-      fireEvent.click(screen.getByRole('button', { name: ['HCM', '客戶', '月嫂', '歷史訂單'][index] }));
+      fireEvent.click(screen.getByRole('button', { name: ['HCM 案件', '客戶 BeClass', '月嫂歷史資料', '歷史訂單'][index] }));
       const control = document.querySelector(`[data-control-id="${controlId}"]`);
       expect(control, controlId).toBeInTheDocument();
       expect(control, controlId).toBeDisabled();

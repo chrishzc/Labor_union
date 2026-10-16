@@ -674,6 +674,15 @@ Unit of Work 建立。
 
 ### 5.2 State machine
 
+2026-10-16 管理端匯入頁顯示裁決：HCM、Client BeClass、Staff Historical、Historical Orders
+統一只顯示「來源筆數／成功匯入／重複略過／未匯入」。完成結果三類互斥且合計等於來源筆數；
+已成功採納但有欄位警示的列仍只計入成功匯入，review／警示 overlay 不額外增加筆數。
+匯入頁移除警示、問題明細、問題導覽及頁內更正工作台；問題與更正由既有其他頁面承接，
+不藉此改變 owner validation、待補件判定、writer 或歷史來源／收據。
+Preview 尚無可靠執行結果時只顯示來源筆數，其餘以「—」呈現；完成後原位替換為唯一一組實際結果。
+同一操作結果重查顯示原收據筆數並標明已處理，不將重查誤算為另一次成功寫入。
+逾時／連線中斷維持結果待確認及既有同 key 查詢，不當成所有列未匯入。
+
 ```text
 received → normalized → ready → applied
                      ├→ review_required → applied | rejected

@@ -20,7 +20,7 @@ describe('DataImport HCM Preview retirement compatibility', () => {
     vi.spyOn(hcmWorkbookPreviewClient, 'preview').mockResolvedValue(HCM_WORKBOOK_PREVIEW_FIXTURE);
     vi.spyOn(hcmWorkbookPreviewClient, 'apply').mockResolvedValue({
       source_content_digest: HCM_WORKBOOK_PREVIEW_FIXTURE.source_content_digest,
-      source_row_count: HCM_WORKBOOK_PREVIEW_FIXTURE.source_row_count,
+      source_row_count: 1,
       inserted_count: 1,
       inserted_with_warning_count: 0,
       exact_replay_count: 0,
@@ -49,7 +49,7 @@ describe('DataImport HCM Preview retirement compatibility', () => {
     expect(applyButton).toBeEnabled();
     fireEvent.click(applyButton);
     await waitFor(() => expect(hcmWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('匯入完成')).toBeInTheDocument();
+    expect(screen.getByText('匯入結果')).toBeInTheDocument();
   });
 
   it('整份HCM工作簿replay先標示未新增，原receipt統計僅供追溯', async () => {
@@ -73,8 +73,8 @@ describe('DataImport HCM Preview retirement compatibility', () => {
     await waitFor(() => expect(screen.getByText('預覽結果')).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
     fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement);
-    await waitFor(() => expect(screen.getByText('這份工作簿已處理過，未重複匯入')).toBeInTheDocument());
-    expect(screen.getByText(/以下為上次處理結果：新增 1 筆/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('已處理過，以下為原處理結果')).toBeInTheDocument());
+    expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['1', '1', '0', '0']);
   });
 
   it('reuses the workbook digest idempotency key while refreshing correlation identity', async () => {
@@ -83,16 +83,15 @@ describe('DataImport HCM Preview retirement compatibility', () => {
       .mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
     render(<DataImportPage />);
     const input = screen.getByLabelText('選擇 HCM Current Workbook');
-    const previewButton = document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement;
 
     for (const callCount of [1, 2]) {
       fireEvent.change(input, { target: { files: [hcmWorkbook('same-workbook')] } });
-      fireEvent.click(previewButton);
+      fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement);
       await waitFor(() => expect(screen.getByText('預覽結果')).toBeInTheDocument());
       fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
       fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement);
       await waitFor(() => expect(hcmWorkbookPreviewClient.apply).toHaveBeenCalledTimes(callCount));
-      await waitFor(() => expect(screen.getByText('匯入完成')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText('匯入結果')).toBeInTheDocument());
     }
 
     const calls = vi.mocked(hcmWorkbookPreviewClient.apply).mock.calls;

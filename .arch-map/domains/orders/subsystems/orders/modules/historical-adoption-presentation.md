@@ -17,6 +17,7 @@
 - outbound: `global/application-shell/module:data-import-composition` — 提供 Data Import page 可組成的 typed client／adapter 與 review reference。
 
 ## Contracts
+- Optional receipt `import_counts` projects the owner-produced imported／duplicate-skipped／not-imported partition; legacy mixed-replay receipts retain unavailable counters rather than guessing overlaps。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption。
 
 ## Verification

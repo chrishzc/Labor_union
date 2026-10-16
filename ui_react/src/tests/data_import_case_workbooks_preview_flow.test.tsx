@@ -1,7 +1,4 @@
-/**
- * File: data_import_case_workbooks_preview_flow.test.tsx
- * Description: 驗證三個Case Workbook安全Apply鎖、冪等重試、負向receipt與控制狀態說明。
- */
+/** Four import families show only conserved receipt counts and preserve safe confirmation/recovery. */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
@@ -9,43 +6,32 @@ import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_becla
 import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
 import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
-import type { HistoricalReviewContext } from '../api/orders/historical_review_remediation/schemas';
 import { DataImportPage } from '../pages/DataImportPage';
-
 const digest = 'a'.repeat(64);
 const identity = 'b'.repeat(64);
 const fingerprint = 'c'.repeat(64);
 const historicalResultCounts = { not_adopted: 1, matching_pending_deposit: 1, historical_unserved: 1, historical_in_service: 1, historical_service_completed: 0 };
-const historicalResultCountsOne = { not_adopted: 0, matching_pending_deposit: 0, historical_unserved: 1, historical_in_service: 0, historical_service_completed: 0 };
-
-function workbook(contents: string, name = 'import.xlsx'): File {
-  return new File([contents], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+function workbook(contents: string): File { return new File([contents], 'import.xlsx'); }
+const cases = [
+  ['客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass', [4, 1, 1, 2]],
+  ['月嫂歷史資料', '選擇月嫂歷史 Workbook', 'staff-historical', [4, 2, 0, 2]],
+  ['歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders', [4, 2, 0, 2]],
+] as const;
+function metrics(card: HTMLElement): string[] { return Array.from(card.querySelectorAll('dd > span')).map(node => node.textContent ?? ''); }
+async function preview(kind: string, label: string, id: string) {
+  fireEvent.click(screen.getByRole('button', { name: kind }));
+  fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(id)] } });
+  fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.preview"]`) as HTMLButtonElement);
+  const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
+  await within(card).findByText('預覽結果');
+  return card;
 }
-
-function selectImportKind(name: 'HCM' | '客戶' | '月嫂' | '歷史訂單'): void {
-  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${name}$`) }));
+async function apply(card: HTMLElement) {
+  fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+  fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+  await within(card).findByText('匯入結果');
 }
-
-const historicalReviewContext: HistoricalReviewContext = {
-  review_identity: 'historical-order-review:one',
-  case_identity: 'CA****01',
-  issues: [],
-  review_version: 0,
-  remediation_version: 0,
-  workbook_contract: {
-    contract_key: 'orders.historical-review-correction',
-    contract_version: 1,
-    required_columns: ['case_no', 'client_name', 'status'],
-    single_row_only: true as const,
-    file_extension: 'xlsx',
-  },
-  reason_required: true,
-  evidence_required: true,
-  completion_condition: '更正來源合法採納。',
-  prior_alert_active: true,
-};
-
-describe('Data Import case workbook Preview flows', () => {
+describe('Data Import simple result flows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint, row_issues: [{ source_row: 7, query_no: 'CLIENT-007', fields: ['行動電話'], issue_codes: ['client_field_invalid:行動電話'] }] });
@@ -56,206 +42,104 @@ describe('Data Import case workbook Preview flows', () => {
     vi.spyOn(historicalOrderWorkbookPreviewClient, 'apply').mockResolvedValue({ source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 1, deposit_paid_1: 1, discussion_2: 1, invalid_or_blank: 1 }, result_counts: historicalResultCounts, review_references: [] });
   });
 
-  it('三張卡可獨立完成Preview、確認與Apply', async () => {
+
+  it.each(cases)('%s shows only four final counters and replaces the preview', async (kind, label, id, expected) => {
     render(<DataImportPage />);
-
-    const cases = [
-      ['客戶', '選擇客戶 BeClass Workbook', 'imports.client-beclass.preview', 'imports.client-beclass.preview-result'],
-      ['月嫂', '選擇月嫂歷史 Workbook', 'imports.staff-historical.preview', 'imports.staff-historical.preview-result'],
-      ['歷史訂單', '選擇歷史訂單 Workbook', 'imports.historic-orders.preview', 'imports.historic-orders.preview-result'],
-    ] as const;
-    for (const [kind, label, controlId, surfaceId] of cases) {
-      selectImportKind(kind);
-      fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
-      fireEvent.click(document.querySelector(`[data-control-id="${controlId}"]`) as HTMLButtonElement);
-      await waitFor(() => expect(document.querySelector(`[data-surface-id="${surfaceId}"]`)).toBeInTheDocument());
-      expect(within(document.querySelector(`[data-surface-id="${surfaceId}"]`) as HTMLElement).queryByText(fingerprint)).not.toBeInTheDocument();
-      const card = document.querySelector(`[data-surface-id="imports.${controlId.split('.')[1]}.workbench"]`) as HTMLElement;
-      const applyButton = document.querySelector(`[data-control-id="imports.${controlId.split('.')[1]}.apply"]`) as HTMLButtonElement;
-      expect(applyButton).toBeDisabled();
-      expect(within(card).getByText('請先勾選已核對檔案名稱與預覽筆數。')).toBeInTheDocument();
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      expect(applyButton).toBeEnabled();
-      expect(within(card).getByText('可以開始匯入；完成後會顯示結果。')).toBeInTheDocument();
-      fireEvent.click(applyButton);
-      await waitFor(() => expect(within(card).getByText('匯入完成，有資料需要檢查')).toBeInTheDocument());
-    }
-
-    expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1);
-    expect(staffHistoricalWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1);
-    expect(historicalOrderWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(staffHistoricalWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    selectImportKind('月嫂');
-    expect(screen.getByText(/身分阻擋 1 筆、身分衝突 1 筆、需檢查 1 筆/)).toBeInTheDocument();
-    selectImportKind('歷史訂單');
-    expect(screen.getByText(/不採用 1 筆、配對中未付訂金 1 筆、已付訂金未服務 1 筆、歷史服務中 1 筆、歷史服務完成 0 筆/)).toBeInTheDocument();
-    const historicalCard = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
-    for (const label of ['不採用', '配對中未付訂金', '已付訂金未服務', '歷史服務中', '歷史服務完成']) {
-      expect(within(historicalCard).getByText(label)).toBeInTheDocument();
-    }
-    expect(document.querySelector('[data-control-id="imports.historic-orders.apply"]')).toBeDisabled();
-    expect(within(historicalCard).getByText('匯入已完成，結果顯示於下方。')).toBeInTheDocument();
+    const card = await preview(kind, label, id);
+    expect(metrics(card)).toEqual(['4', '—', '—', '—']);
+    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
+    expect(Array.from(card.querySelectorAll('dt')).map(node => node.textContent)).toEqual(['來源筆數', '成功匯入', '重複略過', '未匯入']);
+    expect(within(card).queryByText(/CLIENT-007|CASE-012|原始資料問題|需人工檢查|既有衝突|身分阻擋/)).not.toBeInTheDocument();
+    await apply(card);
+    expect(metrics(card)).toEqual(expected.map(String));
+    expect(within(card).queryByText('預覽結果')).not.toBeInTheDocument();
+    expect(card.querySelectorAll('dl')).toHaveLength(1);
+    expect(within(card).getByRole('button', { name: '匯入下一份檔案' })).toBeEnabled();
+    expect(within(card).queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
+    expect(within(card).queryByText(/需檢查|問題列|第.*列/)).not.toBeInTheDocument();
   });
 
-  it('客戶與歷史狀態Preview直接顯示原始工作簿列與問題欄位', async () => {
+  it('keeps one operation identity and navigation lock while an Apply result is unknown', async () => {
+    let rejectApply!: (reason: unknown) => void;
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<DataImportPage />);
-
-    selectImportKind('客戶');
-    fireEvent.change(screen.getByLabelText('選擇客戶 BeClass Workbook'), { target: { files: [workbook('client')] } });
-    fireEvent.click(document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement);
-    expect(await screen.findByText('查詢序號 CLIENT-007')).toBeInTheDocument();
-    expect(screen.getByText('工作簿第 7 列')).toBeInTheDocument();
-    expect(screen.getByText('需修改或核對欄位：行動電話（格式或內容不符合規則）。')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /前往異常審核/ })).not.toBeInTheDocument();
-
-    selectImportKind('歷史訂單');
-    fireEvent.change(screen.getByLabelText('選擇歷史訂單 Workbook'), { target: { files: [workbook('historical')] } });
-    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.preview"]') as HTMLButtonElement);
-    expect(await screen.findByText('案件 CASE-012')).toBeInTheDocument();
-    expect(screen.getByText('工作簿第 12 列')).toBeInTheDocument();
-    expect(screen.getByText('需修改欄位：訂單狀態（只接受 0、1、2）。')).toBeInTheDocument();
-  });
-
-  it('Apply待定時鎖定換檔與頁內導覽，並以同一冪等識別安全重試', async () => {
-    let rejectFirstApply: ((reason: unknown) => void) | undefined;
-    vi.mocked(clientBeClassWorkbookPreviewClient.apply)
-      .mockReturnValueOnce(new Promise((_, reject) => { rejectFirstApply = reject; }))
-      .mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: false });
-    render(<DataImportPage />);
-    selectImportKind('客戶');
-    const input = screen.getByLabelText('選擇客戶 BeClass Workbook');
-    const previewButton = document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement;
-    fireEvent.change(input, { target: { files: [workbook('pending')] } });
-    fireEvent.click(previewButton);
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
-    const applyButton = document.querySelector('[data-control-id="imports.client-beclass.apply"]') as HTMLButtonElement;
-    fireEvent.click(applyButton);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-
-    expect(input).toBeDisabled();
-    expect(previewButton).toBeDisabled();
-    expect(screen.getByText(/目前已鎖定換檔、預覽、站內導覽與重新整理/)).toBeInTheDocument();
+    expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '月嫂歷史資料' })).toBeDisabled();
+    expect(within(card).queryByText('匯入結果')).not.toBeInTheDocument();
     const navigation = document.createElement('button');
     navigation.className = 'sidebar-nav-item';
-    const navigate = vi.fn();
-    navigation.addEventListener('click', navigate);
-    document.body.appendChild(navigation);
-    fireEvent.click(navigation);
-    expect(navigate).not.toHaveBeenCalled();
-    navigation.remove();
-    const unloadEvent = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(unloadEvent);
-    expect(unloadEvent.defaultPrevented).toBe(true);
-
-    rejectFirstApply?.(new ClientBeClassWorkbookApplyError('client_beclass_apply_timeout', '套用逾時，請重試。', true));
-    await waitFor(() => expect(screen.getByText(/匯入結果尚未確認/)).toBeInTheDocument());
-    expect(input).toBeDisabled();
-    expect(previewButton).toBeDisabled();
-    expect(applyButton).toBeEnabled();
-    expect(applyButton).toHaveTextContent('查詢這次匯入結果');
-    fireEvent.click(applyButton);
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByText('匯入完成')).toBeInTheDocument());
-
-    const firstOptions = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls[0]?.[2];
-    const secondOptions = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls[1]?.[2];
-    expect(firstOptions?.idempotencyKey).toBe(secondOptions?.idempotencyKey);
-    expect(firstOptions?.signal).toBeUndefined();
-    expect(secondOptions?.signal).toBeUndefined();
+    const navigate = vi.fn(); navigation.addEventListener('click', navigate); document.body.appendChild(navigation);
+    fireEvent.click(navigation); expect(navigate).not.toHaveBeenCalled(); navigation.remove();
+    const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(true);
+    rejectApply(new ClientBeClassWorkbookApplyError('timeout', '等待回應逾時，結果尚未確認。', true));
+    const query = await within(card).findByRole('button', { name: '查詢這次匯入結果' });
+    expect(query).toBeEnabled();
+    expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
+    fireEvent.click(query);
+    await within(card).findByText('匯入結果');
+    const calls = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls;
+    expect(calls[0]?.[2].idempotencyKey).toBe(calls[1]?.[2].idempotencyKey);
+    expect(calls[0]?.[2].signal).toBeUndefined();
   });
 
-  it('三類整份工作簿replay先標示未新增，原receipt統計僅供追溯', async () => {
-    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: true });
-    vi.mocked(staffHistoricalWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, created_count: 1, adopted_existing_count: 0, blocked_identity_count: 0, identity_conflict_count: 0, review_required_count: 0, preview_fingerprint: fingerprint, exact_replay_count: 0, replayed_workbook: true });
-    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: true, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, result_counts: historicalResultCountsOne, review_references: [] });
+  it.each(cases)('%s result lookup labels original counts and does not double the totals', async (kind, label, id, expected) => {
+    const client = id === 'client-beclass' ? clientBeClassWorkbookPreviewClient : id === 'staff-historical' ? staffHistoricalWorkbookPreviewClient : historicalOrderWorkbookPreviewClient;
+    const receipt = await client.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
+    vi.spyOn(client, 'apply').mockResolvedValue({ ...receipt, replayed_workbook: true } as never);
     render(<DataImportPage />);
+    const card = await preview(kind, label, id);
+    await apply(card);
+    expect(within(card).getByText('已處理過，以下為原處理結果')).toBeInTheDocument();
+    expect(metrics(card)).toEqual(expected.map(String));
+  });
 
-    const cases = [
-      ['客戶', '選擇客戶 BeClass Workbook', 'client-beclass'],
-      ['月嫂', '選擇月嫂歷史 Workbook', 'staff-historical'],
-      ['歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'],
-    ] as const;
-    for (const [kind, label, id] of cases) {
-      selectImportKind(kind);
-      const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
-      fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(label)] } });
-      fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.preview"]`) as HTMLButtonElement);
-      await waitFor(() => expect(within(card).getByText('預覽結果')).toBeInTheDocument());
-      expect(within(card).queryByText(fingerprint)).not.toBeInTheDocument();
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.apply"]`) as HTMLButtonElement);
-      await waitFor(() => expect(within(card).getByText('這份工作簿已處理過，未重複匯入')).toBeInTheDocument());
-      expect(within(card).getByText(/以下為上次處理結果/)).toBeInTheDocument();
+  it('does not open or query historical review remediation from an import receipt', async () => {
+    const query = vi.spyOn(historicalReviewRemediationClient, 'query');
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 1, current_conflict_count: 0, assignments_created: 0, replayed_rows: 0, replayed_workbook: false, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, result_counts: { not_adopted: 0, matching_pending_deposit: 0, historical_unserved: 1, historical_in_service: 0, historical_service_completed: 0 }, review_references: ['historical-order-review:one'] });
+    render(<DataImportPage />);
+    const card = await preview('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'); await apply(card);
+    expect(metrics(card)).toEqual(['1', '1', '0', '0']);
+    expect(query).not.toHaveBeenCalled();
+    expect(screen.queryByText(/處理歷史訂單待確認|歷史訂單欄位衝突更正/)).not.toBeInTheDocument();
+  });
+
+  it('explains the first action for each import family', () => {
+    render(<DataImportPage />);
+    for (const name of ['HCM 案件', '客戶 BeClass', '月嫂歷史資料', '歷史訂單']) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(screen.getByRole('button', { name: '預覽檔案' })).toBeDisabled();
+      expect(screen.getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
+      expect(screen.getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
     }
   });
 
-  it('四類工作簿在尚未選檔時都說明Preview與Apply的下一步', async () => {
+  it('allows a fresh preview of the same file after a definite Apply conflict', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('stale', '請重新預覽。', false, 409));
     render(<DataImportPage />);
-
-    const cases = [
-      ['HCM', 'hcm-current'],
-      ['客戶', 'client-beclass'],
-      ['月嫂', 'staff-historical'],
-      ['歷史訂單', 'historic-orders'],
-    ] as const;
-    for (const [kind, id] of cases) {
-      selectImportKind(kind);
-      const workbench = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
-      expect(within(workbench).getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
-      expect(within(workbench).getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
-    }
-  });
-
-  it('歷史訂單 receipt 直接開啟既有單列 review 更正，不導向異常中心', async () => {
-    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({
-      source_content_digest: digest,
-      source_row_count: 1,
-      adopted_count: 1,
-      unmatched_case_count: 0,
-      review_required_count: 1,
-      current_conflict_count: 0,
-      assignments_created: 0,
-      replayed_rows: 0,
-      replayed_workbook: false,
-      absent_order_cancellation_count: 0,
-      status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 },
-      result_counts: historicalResultCountsOne,
-      review_references: ['historical-order-review:one'],
-    });
-    vi.spyOn(historicalReviewRemediationClient, 'query').mockResolvedValue(historicalReviewContext);
-    render(<DataImportPage />);
-    selectImportKind('歷史訂單');
-    const card = document.querySelector('[data-surface-id="imports.historic-orders.workbench"]') as HTMLElement;
-    fireEvent.change(screen.getByLabelText('選擇歷史訂單 Workbook'), { target: { files: [workbook('historical')] } });
-    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.preview"]') as HTMLButtonElement);
-    await waitFor(() => expect(within(card).getByText('預覽結果')).toBeInTheDocument());
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(document.querySelector('[data-control-id="imports.historic-orders.apply"]') as HTMLButtonElement);
-    const remediation = await screen.findByRole('button', { name: '🛠️ 處理歷史訂單待確認 1' });
-    fireEvent.click(remediation);
-
-    await waitFor(() => expect(historicalReviewRemediationClient.query).toHaveBeenCalledWith('historical-order-review:one'));
-    expect(await screen.findByText('歷史訂單欄位衝突更正')).toBeInTheDocument();
-    expect(window.location.hash).not.toBe('#anomalies');
+    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    const retry = await within(card).findByRole('button', { name: '重新預覽' });
+    fireEvent.click(retry);
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(2));
+    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('同檔名不同bytes會清除舊Preview並產生不同snapshot digest', async () => {
+  it('selecting another file clears previous results and confirmation', async () => {
     render(<DataImportPage />);
-    selectImportKind('客戶');
-    const input = screen.getByLabelText('選擇客戶 BeClass Workbook');
-    const button = document.querySelector('[data-control-id="imports.client-beclass.preview"]') as HTMLButtonElement;
-    fireEvent.change(input, { target: { files: [workbook('first')] } });
-    fireEvent.click(button);
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(1));
-    fireEvent.change(input, { target: { files: [workbook('second')] } });
-    expect(document.querySelector('[data-surface-id="imports.client-beclass.preview-result"]')).not.toBeInTheDocument();
-    fireEvent.click(button);
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(2));
-    const first = vi.mocked(clientBeClassWorkbookPreviewClient.preview).mock.calls[0]?.[0];
-    const second = vi.mocked(clientBeClassWorkbookPreviewClient.preview).mock.calls[1]?.[0];
-    expect(first?.sha256).not.toBe(second?.sha256);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass'); await apply(card);
+    fireEvent.change(screen.getByLabelText('選擇客戶 BeClass Workbook'), { target: { files: [workbook('another')] } });
+    expect(within(card).queryByText('匯入結果')).not.toBeInTheDocument();
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '預覽檔案' }));
+    await within(card).findByText('預覽結果');
+    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
+    const calls = vi.mocked(clientBeClassWorkbookPreviewClient.preview).mock.calls;
+    expect(calls[0]?.[0].sha256).not.toBe(calls[1]?.[0].sha256);
   });
 });

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { adaptClientBeClassWorkbookPreview } from '../adapters/case_import/client_beclass_workbook_adapter';
 import { adaptStaffHistoricalWorkbookPreview } from '../adapters/case_import/staff_historical_workbook_adapter';
 import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
+import { adaptClientBeClassImportResult, adaptHcmImportResult, adaptHistoricalOrderImportResult, adaptStaffHistoricalImportResult } from '../adapters/workbook_import_result_adapter';
 
 const digest = 'a'.repeat(64);
 const identity = 'b'.repeat(64);
@@ -41,5 +42,35 @@ describe('Case workbook Preview adapters', () => {
 
   it('拒絕0、1、2與空白狀態計數不守恆', () => {
     expect(() => adaptHistoricalOrderWorkbookPreview({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 1, assignment_candidate_count: 1, evidence_only_pairing_count: 1, absent_order_cancellation_count: 0, status_counts: { ...statusCounts, invalid_or_blank: 0 }, result_counts: resultCounts, preview_fingerprint: fingerprint, row_issues: [] })).toThrow(/狀態判定計數不守恆/);
+  });
+});
+
+describe('Four mutually exclusive import result counters', () => {
+  it('HCM counts imported warnings and email fills once, and includes both duplicate outcomes', () => {
+    const receipt = { source_content_digest: digest, source_row_count: 10, inserted_count: 2, inserted_with_warning_count: 2, email_filled_count: 1, exact_replay_count: 1, skipped_existing_count: 2, review_required_count: 1, failed_count: 1, replayed_workbook: false, row_outcomes_available: false, legacy_summary_only: true, row_outcomes: [] };
+    expect(adaptHcmImportResult(receipt)).toMatchObject({ sourceCount: 10, importedCount: 5, duplicateCount: 3, notImportedCount: 2 });
+    expect(() => adaptHcmImportResult({ ...receipt, source_row_count: 11 })).toThrow('筆數不一致');
+  });
+
+  it('BeClass keeps validation and binding failures separate from duplicate skips', () => {
+    expect(adaptClientBeClassImportResult({ source_content_digest: digest, source_row_count: 10, created_count: 4, exact_replay_count: 1, existing_source_count: 2, review_required_count: 1, existing_conflict_count: 2, replayed_workbook: false })).toMatchObject({ sourceCount: 10, importedCount: 4, duplicateCount: 3, notImportedCount: 3 });
+  });
+
+  it('Staff review overlays never add another row to the result', () => {
+    expect(adaptStaffHistoricalImportResult({ source_content_digest: digest, source_row_count: 10, created_count: 3, adopted_existing_count: 3, exact_replay_count: 2, blocked_identity_count: 1, identity_conflict_count: 1, review_required_count: 8, preview_fingerprint: fingerprint, replayed_workbook: false })).toMatchObject({ sourceCount: 10, importedCount: 6, duplicateCount: 2, notImportedCount: 2 });
+  });
+
+  const historical = { source_content_digest: digest, source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 2, current_conflict_count: 0, assignments_created: 0, replayed_rows: 2, replayed_workbook: false, absent_order_cancellation_count: 100, status_counts: statusCounts, result_counts: resultCounts, review_references: [] };
+  it('Historical Orders use owner counts when duplicate receipts include a non-adopted row', () => {
+    expect(adaptHistoricalOrderImportResult({ ...historical, import_counts: { imported_count: 1, duplicate_skipped_count: 2, not_imported_count: 1 } })).toMatchObject({ sourceCount: 4, importedCount: 1, duplicateCount: 2, notImportedCount: 1 });
+  });
+
+  it('Old mixed-replay receipts show unavailable counts instead of guessing the overlap', () => {
+    expect(adaptHistoricalOrderImportResult(historical)).toMatchObject({ sourceCount: 4, importedCount: null, duplicateCount: null, notImportedCount: null });
+    expect(adaptHistoricalOrderImportResult({ ...historical, replayed_rows: 0 })).toMatchObject({ sourceCount: 4, importedCount: 2, duplicateCount: 0, notImportedCount: 2 });
+  });
+
+  it('Result lookup keeps the immutable original counts and identifies the replay', () => {
+    expect(adaptHistoricalOrderImportResult({ ...historical, replayed_workbook: true, import_counts: { imported_count: 1, duplicate_skipped_count: 2, not_imported_count: 1 } })).toMatchObject({ importedCount: 1, duplicateCount: 2, notImportedCount: 1, replayedWorkbook: true });
   });
 });

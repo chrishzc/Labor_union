@@ -545,6 +545,13 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.7 Historical Order Adoption
 
+2026-10-16 匯入頁統計補充：terminal receipt 的 additive `import_counts` 由原 workbook
+outer UoW 依每列實際 receipt 計數；replayed row 只計入 `duplicate_skipped_count`，
+其餘 adopted row 計入 `imported_count`，其他 row 計入 `not_imported_count`，三項合計等於來源列數。
+review overlay、assignment 數量與來源檔外的取消訂單均不增加來源列統計。
+整份 workbook 結果重查保留原 terminal counters。歷史 immutable receipt 沒有此欄且有混合
+row replay 時，不猜測重疊分布，管理端以「—」標示缺少的統計，不改寫歷史收據。
+
 restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
 `case_no`；非空的 `client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號或姓名空白、
 案號找不到或不唯一固定為 `unmatched_case`，零 Domain mutation且不建立警示。

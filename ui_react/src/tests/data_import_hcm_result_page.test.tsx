@@ -67,7 +67,7 @@ describe('DataImport HCM receipt review', () => {
     });
   });
 
-  it('keeps receipt details without in-page correction or anomaly navigation', async () => {
+  it('counts imported warning rows once and hides all problem details', async () => {
     render(<DataImportPage />);
     expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '目前 HCM 欄位待修正資料' })).not.toBeInTheDocument();
@@ -80,19 +80,11 @@ describe('DataImport HCM receipt review', () => {
     fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
     fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement);
 
-    expect(await screen.findByText('案件 115000002')).toBeInTheDocument();
-    expect(screen.getByText('需修改欄位：行動電話（格式或內容不符合規則）。')).toBeInTheDocument();
-    expect(screen.getByText('案件已依查詢序號(案件編號)匯入；姓名或 IP 位址與既有資料相同，不會合併或阻擋新案件。')).toBeInTheDocument();
-    expect(screen.getByText('這可能是同一人再次申請或不同人共用網路；請由承辦人員視需要複核。')).toBeInTheDocument();
-    expect(screen.getByText('這是舊版付款規則留下的結果；目前急件會把訂金期限提前到預計服務日期，不再阻擋建案。')).toBeInTheDocument();
-    expect(screen.getByText(/常見原因是薪資費率未生效或既有初始化資料不一致/)).toBeInTheDocument();
-    expect(screen.queryByText(/case_import|hcm_identity/)).not.toBeInTheDocument();
-    expect(screen.getByText(/既有案件跳過 0 筆（不覆寫既有案件與訂單資料）/)).toBeInTheDocument();
-    expect(screen.queryByText(/前往異常審核/)).not.toBeInTheDocument();
-    expect(screen.getByText('工作簿來源第 2 筆')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /在本頁提交修正/ })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('選擇 HCM 修正版')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-surface-id="imports.hcm-correction.workbench"]')).not.toBeInTheDocument();
+    expect(await screen.findByText('匯入結果')).toBeInTheDocument();
+    expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['4', '2', '0', '2']);
+    expect(screen.queryByText(/115000002|115000003|行動電話|需修改欄位|常見原因|含警示/)).not.toBeInTheDocument();
+    expect(screen.queryByText('預覽結果')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /前往異常審核|處理.*待確認|在本頁提交修正/ })).not.toBeInTheDocument();
     expect(hcmResubmissionClient.query).not.toHaveBeenCalled();
     expect(hcmResubmissionClient.current).not.toHaveBeenCalled();
   });
@@ -117,7 +109,7 @@ describe('DataImport HCM receipt review', () => {
   it('does not restore the current HCM review section when switching import types', () => {
     vi.spyOn(hcmResubmissionClient, 'current').mockResolvedValue({ items: [], next_cursor: null });
     render(<DataImportPage />);
-    for (const name of ['客戶', '月嫂', '歷史訂單', 'HCM']) {
+    for (const name of ['客戶 BeClass', '月嫂歷史資料', '歷史訂單', 'HCM 案件']) {
       fireEvent.click(screen.getByRole('button', { name }));
       expect(screen.queryByText('目前 HCM 欄位待修正資料')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '讀取目前問題' })).not.toBeInTheDocument();

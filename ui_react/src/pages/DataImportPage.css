@@ -113,3 +113,59 @@
 [data-surface-id="finance.historical-service-accounting.page"] button:disabled { cursor: not-allowed; color: var(--md-sys-color-on-surface-variant); }
 [data-surface-id="finance.historical-service-accounting.page"] label { display: block; margin: 12px 0 6px; }
 [data-surface-id="finance.historical-service-accounting.page"] :is(input, select, button):focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
+
+.import-simple-page { max-width: 1040px; margin-inline: auto; width: 100%; gap: 20px; }
+.import-simple-page-heading { margin-bottom: 6px; }
+.import-simple-page-heading h1 { font-size: 27px; font-weight: 750; letter-spacing: -.5px; }
+.import-simple-page-heading p { margin-top: 7px; color: #795d43; font-size: 14px; }
+.import-simple-page .import-kind-selector { padding: 10px; margin: 0; }
+.import-simple-page .import-kind-selector > div { flex: 1; gap: 6px; padding: 0; }
+.import-simple-page .import-kind-selector button { flex: 1; min-height: 44px; border-color: transparent; background: transparent; font-size: 14px; }
+.import-simple-page .import-kind-selector button.active { background: #d85d32; }
+.import-simple-page .import-workbench-card { padding: 28px; gap: 24px; box-shadow: var(--shadow-sm); }
+.import-simple-page .import-workbench-card:hover { border-color: #f2e2dc; box-shadow: var(--shadow-sm); }
+.import-simple-page .import-card-header h2 { margin: 0; font-size: 19px; font-weight: 700; }
+.import-simple-file-section { display: flex; align-items: center; gap: 14px; padding: 18px; background: #fffaf7; border: 1px dashed #dec0b6; border-radius: 10px; flex-wrap: wrap; }
+.import-simple-file-text { min-width: 0; flex: 1; }
+.import-simple-file-text > span { display: block; color: #795d43; font-size: 12px; }
+.import-simple-file-text > strong { display: block; margin-top: 3px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.import-simple-secondary { min-height: 42px; padding: 9px 16px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #57423b; font-size: 13px; font-weight: 600; cursor: pointer; }
+.import-simple-secondary:hover:not(:disabled) { background: #fff0eb; border-color: #d85d32; }
+.import-simple-secondary:disabled { opacity: .55; cursor: not-allowed; }
+.import-simple-clear { border: 0; background: transparent; color: #795d43; text-decoration: underline; font-size: 12px; cursor: pointer; min-height: 36px; }
+.import-simple-result-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.import-simple-result-heading h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.import-simple-result-heading > span { color: #795d43; font-size: 12px; }
+.import-simple-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 0; }
+.import-simple-metrics > div { padding: 20px 18px; border: 1px solid #f2e2dc; border-radius: 10px; background: #fffdfc; }
+.import-simple-metrics dt { color: #74593f; font-size: 14px; font-weight: 500; }
+.import-simple-metrics dd { margin: 10px 0 0; color: #1e1b19; font-size: 38px; font-weight: 750; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.import-simple-metrics dd small { margin-left: 5px; color: #8c736a; font-size: 13px; font-weight: 400; }
+.import-simple-metrics .success { border-color: #cde7d2; background: #f5fbf6; }
+.import-simple-metrics .success :is(dt, dd) { color: #166534; }
+.import-simple-metrics .skipped dd { color: #795d43; }
+.import-simple-metrics .not-imported dd { color: #9a3412; }
+.import-simple-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 20px; border-top: 1px solid #f2e2dc; }
+.import-simple-actions label { display: flex; align-items: center; gap: 9px; font-size: 13px; color: #57423b; }
+.import-simple-actions input { width: 17px; height: 17px; accent-color: #c2410c; }
+.import-simple-actions > p { margin: 0; color: #795d43; font-size: 13px; }
+.import-simple-actions .import-control-guidance { margin-top: 6px; }
+.import-simple-page .import-apply-btn { min-height: 44px; background: #c2410c; padding: 10px 24px; font-size: 14px; }
+.import-simple-page .import-apply-btn:hover:not(:disabled) { background: #9a3412; }
+.import-simple-busy { padding: 38px 20px; text-align: center; color: #74593f; font-size: 14px; }
+@media (max-width: 650px) {
+  .import-simple-page-heading h1 { font-size: 23px; }
+  .import-simple-page .import-kind-selector > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .import-simple-page .import-kind-selector button { font-size: 13px; padding: 8px 6px; }
+  .import-simple-page .import-workbench-card { padding: 20px 16px; gap: 20px; }
+  .import-simple-page .import-card-header h2 { font-size: 17px; }
+  .import-simple-file-section { padding: 14px; gap: 10px; }
+  .import-simple-file-text { flex-basis: 60%; }
+  .import-simple-secondary { padding: 8px 10px; font-size: 12px; }
+  .import-simple-metrics { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .import-simple-metrics > div { padding: 16px; }
+  .import-simple-metrics dd { font-size: 32px; }
+  .import-simple-actions { align-items: stretch; flex-direction: column; gap: 16px; }
+  .import-simple-actions label { font-size: 12px; }
+  .import-simple-actions .import-apply-btn { width: 100%; }
+}

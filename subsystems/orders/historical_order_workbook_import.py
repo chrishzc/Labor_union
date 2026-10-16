@@ -188,6 +188,20 @@ class HistoricalOrderWorkbookPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalOrderWorkbookImportCounts:
+    imported_count: int
+    duplicate_skipped_count: int
+    not_imported_count: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "imported_count": self.imported_count,
+            "duplicate_skipped_count": self.duplicate_skipped_count,
+            "not_imported_count": self.not_imported_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalOrderWorkbookReceipt:
     source_content_digest: str
     source_row_count: int
@@ -202,11 +216,16 @@ class HistoricalOrderWorkbookReceipt:
     result_counts: HistoricalOrderResultCounts
     review_references: tuple[str, ...] = ()
     absent_order_cancellation_count: int = 0
+    import_counts: HistoricalOrderWorkbookImportCounts | None = None
 
     def __post_init__(self) -> None:
         value = self.absent_order_cancellation_count
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError("historical_order_absence_cancellation_count_invalid")
+        if self.import_counts is not None:
+            counts = self.import_counts.as_dict().values()
+            if any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in counts) or sum(counts) != self.source_row_count:
+                raise ValueError("historical_order_import_counts_not_conserved")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -223,6 +242,7 @@ class HistoricalOrderWorkbookReceipt:
             "status_counts": self.status_counts.as_dict(),
             "result_counts": self.result_counts.as_dict(),
             "review_references": list(self.review_references),
+            "import_counts": None if self.import_counts is None else self.import_counts.as_dict(),
         }
 
 
@@ -386,6 +406,7 @@ class HistoricalOrderWorkbookImportService:
         replayed_rows = 0
         review_rows = 0
         review_references: list[str] = []
+        import_counts: Counter[str] = Counter()
         for row in workbook.rows:
             locked_preview = self._workflow.preview_in_current_unit_of_work(
                 row, for_update=True
@@ -403,6 +424,12 @@ class HistoricalOrderWorkbookImportService:
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
+            if receipt.replayed:
+                import_counts["duplicate_skipped_count"] += 1
+            elif receipt.outcome.value == "adopted":
+                import_counts["imported_count"] += 1
+            else:
+                import_counts["not_imported_count"] += 1
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
             review_identity = getattr(receipt, "review_identity", None)
             if review_identity is not None and review_identity not in review_references:
@@ -433,6 +460,11 @@ class HistoricalOrderWorkbookImportService:
             result_counts=_result_counts(tuple(locked_previews)),
             review_references=tuple(review_references),
             absent_order_cancellation_count=absent_order_cancellation_count,
+            import_counts=HistoricalOrderWorkbookImportCounts(
+                import_counts["imported_count"],
+                import_counts["duplicate_skipped_count"],
+                import_counts["not_imported_count"],
+            ),
         )
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
@@ -470,6 +502,8 @@ class HistoricalOrderWorkbookImportService:
                 if callable(find_open_reviews)
                 else ()
             )
+        if isinstance(snapshot.get("import_counts"), dict):
+            snapshot["import_counts"] = HistoricalOrderWorkbookImportCounts(**snapshot["import_counts"])
         return HistoricalOrderWorkbookReceipt(**snapshot)
 
 
