@@ -133,6 +133,21 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     }));
   });
 
+  it('displays union number plus name and sorts candidates naturally without changing staff identity', async () => {
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [
+      { ...eligible, staff_union_no: 'A10' },
+      { ...eligible, staff_id: 8893, staff_name: '第二位月嫂', staff_union_no: 'A2' },
+      { ...eligible, staff_id: 8894, staff_name: '未編號月嫂', staff_union_no: null },
+    ] }));
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} />);
+    fireEvent.click(screen.getByRole('button', { name: '查詢符合條件月嫂' }));
+    await screen.findByText('A2 第二位月嫂');
+    const names = Array.from(document.querySelectorAll('[aria-label="正式符合條件候選"] strong')).map(node => node.textContent);
+    expect(names).toEqual(['A2 第二位月嫂', 'A10 正式合格月嫂', '未設定 未編號月嫂']);
+    fireEvent.click(screen.getByRole('checkbox', { name: '選擇正式候選 第二位月嫂' }));
+    expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
   it('初次進入明確顯示尚未查詢，四項既有媒合條件預設全開', () => {
     render(<OrderCandidateQueryPanel caseNo="CASE-CANDIDATE" />);
 
@@ -183,11 +198,11 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
       allFilters,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
-    expect(await screen.findByText('正式合格月嫂')).toBeInTheDocument();
-    expect(screen.getByText(/月嫂 #8892/)).toBeInTheDocument();
-    expect(screen.getByText('部分可用月嫂')).toBeInTheDocument();
-    expect(screen.getByText(/月嫂 #8892 · 空閒 5\/5 天/)).toBeInTheDocument();
-    expect(screen.getByText(/月嫂 #8893 · 空閒 0\/5 天/)).toBeInTheDocument();
+    expect(await screen.findByText('未設定 正式合格月嫂')).toBeInTheDocument();
+    expect(screen.getByText('未設定 正式合格月嫂')).toBeInTheDocument();
+    expect(screen.getByText('未設定 部分可用月嫂')).toBeInTheDocument();
+    expect(screen.getByText(/空閒 5\/5 天/)).toBeInTheDocument();
+    expect(screen.getByText(/空閒 0\/5 天/)).toBeInTheDocument();
     expect(screen.getByText(/有檔期衝突，待公會協調/)).toBeInTheDocument();
     expect(screen.getByText(/七天緩衝期重疊，僅提醒/)).toBeInTheDocument();
     expect(screen.getByText('服務期間：2026-09-01 ～ 2026-09-05')).toBeInTheDocument();
@@ -242,7 +257,7 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     await waitFor(() => expect(mocks.queryPool).toHaveBeenCalledWith('115000204'));
     await waitFor(() => expect(onPoolReadback).toHaveBeenCalledTimes(1));
     expect(mocks.sendInformation).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Pool #9 · 已回讀 1 位本次寫入候選：正式合格月嫂 \(#8892\)。/)).toBeInTheDocument();
+    expect(await screen.findByText(/Pool #9 · 已回讀 1 位本次寫入候選：未設定 正式合格月嫂。/)).toBeInTheDocument();
   });
 
   it('回讀 receipt candidate id 對應到不同人員時 fail closed，不刷新待辦投影', async () => {

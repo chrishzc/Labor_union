@@ -794,6 +794,7 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
         "weekly_service_rows": [
             {
                 "serial_number": item.serial_number,
+                "staff_id": item.staff_id,
                 "staff_name": item.staff_name,
                 "week_start_date": item.week_start_date,
                 "week_end_date": item.week_end_date,
@@ -825,6 +826,7 @@ def _segment_state_data(segment) -> dict[str, Any]:
         "segment_order": segment.segment_order,
         "staff_id": segment.staff_id,
         "staff_name": segment.staff_name,
+        "staff_union_no": segment.staff_union_no,
         "assigned_start_date": segment.assigned_start_date,
         "assigned_end_date": segment.assigned_end_date,
         "willingness": segment.willingness.value,

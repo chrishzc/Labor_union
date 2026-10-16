@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: ContractExternalSigningActions.tsx
  * Description: 呈現外部簽約 successor closed states、完成回報與最終 PDF 確認、Apply、receipt/readback。
@@ -40,7 +41,7 @@ export interface ContractExternalSigningActionsProps {
 
 type WorkingOperation = 'query' | 'prepare_client' | 'prepare_staff' | 'download' | 'handoff' | 'final_preview' | 'final_apply' | 'receipt' | 'readback';
 
-interface ContractMetadata { name: string; period: string }
+interface ContractMetadata { name: string; period: string; staffId?: number }
 interface SignedReturnDraft { file: File | null; staged: SignedDocumentPreview | null; checked: boolean }
 const signedTargetKey = (target: Pick<SignedDocumentTarget, 'scope' | 'matching_segment_id'>) => target.scope === 'client' ? 'client' : `staff:${target.matching_segment_id}`;
 const uploadInput = (row: SignedDocumentUpload): SignedDocumentUpload => ({ scope: row.scope, matching_segment_id: row.matching_segment_id, document_version_id: row.document_version_id, staging_id: row.staging_id, expected_staging_version: row.expected_staging_version });
@@ -199,6 +200,7 @@ function unsignedPreparationReadbackMatches(
 }
 
 export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitted, onOpenFinance, onOpenServiceDates, onOpenRecommendation }: ContractExternalSigningActionsProps) {
+  const staffIdentity = useStaffIdentityLabels();
   const observedRevision = useRef(revision);
   const identities = useRef(new Map<string, ExternalSigningCommandIdentity>());
   const requestGeneration = useRef(0);
@@ -261,7 +263,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       const field = (key: string) => { const value = fields[key]; return typeof value === 'string' || typeof value === 'number' ? String(value) : Array.isArray(value) ? value.join('、') : ''; };
       const scope = index === 0 ? 'client' : 'staff';
       const start = field(scope === 'client' ? 'B24' : 'B7'), end = field(scope === 'client' ? 'D24' : 'D7'), days = field(scope === 'client' ? 'F24' : 'G7');
-      metadata[index === 0 ? 'client' : `staff:${segments[index - 1]}`] = { name: field(scope === 'client' ? 'B8' : 'C4'), period: start && end ? `${start} ～ ${end}${days ? ` · ${days} 日` : ''}` : '服務期間待核對' };
+      metadata[index === 0 ? 'client' : `staff:${segments[index - 1]}`] = { name: field(scope === 'client' ? 'B8' : 'C4'), staffId: index === 0 ? undefined : value.state === 'preparing' ? value.staff_segments[index - 1]?.staff_id : Number(value.staff_targets[index - 1]?.staff_subject_reference), period: start && end ? `${start} ～ ${end}${days ? ` · ${days} 日` : ''}` : '服務期間待核對' };
     });
     setContractMetadata(metadata);
     setMetadataError(metadataResults.some(result => result.status === 'rejected') ? '部分契約資料暫時無法取得，可開啟「核對資料」查看原因。' : null);
@@ -1000,6 +1002,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const signingBlocked = (query?.signing_blockers?.length ?? 0) > 0;
   const unsignedDocumentId = (scope: 'client' | 'staff', segmentId: number | null) => query ? query.unsigned_documents?.find(row => row.scope === scope && row.matching_segment_id === segmentId)?.document_version_id ?? (query.unsigned_document && query.unsigned_document.document_version_id === (scope === 'client' ? query.client_target.document_version_id : query.staff_targets.find(row => row.matching_segment_id === segmentId)?.document_version_id) ? query.unsigned_document.document_version_id : null) : scope === 'client' ? preparationClientDocument : preparationStaffDocuments[segmentId!] ?? null;
   const documentsReady = query !== null && unsignedDocumentId('client', null) !== null && query.staff_targets.every(row => unsignedDocumentId('staff', row.matching_segment_id) !== null);
+  const metadataLabel = (key: string) => { const meta = contractMetadata[key]; return key === 'client' ? meta?.name : staffIdentity.label(meta?.staffId ?? (Number(query?.staff_targets.find(target => `staff:${target.matching_segment_id}` === key)?.staff_subject_reference) || null), meta?.name); };
   const documentRows = [
     { key: 'client', scope: 'client' as const, segmentId: null, title: '客戶服務契約', documentId: unsignedDocumentId('client', null) },
     ...(query ? query.staff_targets.map(row => ({ key: `staff:${row.matching_segment_id}`, scope: 'staff' as const, segmentId: row.matching_segment_id, title: '月嫂委任契約', documentId: unsignedDocumentId('staff', row.matching_segment_id) }))
@@ -1014,15 +1017,16 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   const reminderManualTargets = reminderReceipt?.manual_notification_targets ?? (query?.handoff_included_reminders ? query.manual_notification_targets ?? [] : []);
   const reminderTargets = query ? [
     { scope: 'client' as const, subject: query.client_target.client_subject_reference, name: contractMetadata.client?.name || '客戶' },
-    ...query.staff_targets.map(target => ({ scope: 'staff' as const, subject: target.staff_subject_reference, name: contractMetadata[`staff:${target.matching_segment_id}`]?.name || '月嫂' })),
+    ...query.staff_targets.map(target => ({ scope: 'staff' as const, subject: target.staff_subject_reference, name: metadataLabel(`staff:${target.matching_segment_id}`) || '月嫂' })),
   ] : [];
   const allReminderTargetsManual = reminderTargets.length > 0 && reminderTargets.every(target => reminderManualTargets.some(manual => manual.scope === target.scope && manual.subject_reference === target.subject));
   const renderReturn = (target: SignedDocumentTarget) => {
     const key = signedTargetKey(target), draft = fileReturns[key], meta = contractMetadata[key];
+    const name = metadataLabel(key);
     const title = target.scope === 'client' ? '客戶服務契約' : '月嫂委任契約';
-    return <article className="contract-return-row" key={key} aria-label={`${title}簽回${meta?.name ? ` ${meta.name}` : ''}`}>
-      <header><div><strong>{meta?.name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${draft?.checked ? 'complete' : ''}`}>{draft?.checked ? '檢查通過' : draft?.file || draft?.staged ? '待檢查' : '待回收'}</span></header>
-      <label className="contract-return-file">{target.scope === 'client' ? '客戶服務契約 PDF' : `${meta?.name || '月嫂'} 委任契約 PDF`}
+    return <article className="contract-return-row" key={key} aria-label={`${title}簽回${name ? ` ${name}` : ''}`}>
+      <header><div><strong>{name || title}</strong><p>{meta?.period || '服務期間待核對'}</p></div><span className={`contract-document-status ${draft?.checked ? 'complete' : ''}`}>{draft?.checked ? '檢查通過' : draft?.file || draft?.staged ? '待檢查' : '待回收'}</span></header>
+      <label className="contract-return-file">{target.scope === 'client' ? '客戶服務契約 PDF' : `${name || '月嫂'} 委任契約 PDF`}
         {!draft?.file && !draft?.staged && <input type="file" accept="application/pdf,.pdf" disabled={busy || finalProtected || !!returnReadError} onChange={event => {
           const file = event.target.files?.item(0) ?? null;
           setFileReturns(previous => ({ ...previous, [key]: { file, staged: null, checked: false } }));
@@ -1044,11 +1048,11 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
         {metadataError && <p role="alert">{metadataError}</p>}
         {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚未選定可下載契約的月嫂，請先建立推薦方案。</p>}
         <div className="contract-documents-list">{documentRows.map(row => <article className="contract-document-row" key={row.key}>
-          <div><strong>{row.title}{contractMetadata[row.key]?.name ? ` · ${contractMetadata[row.key]!.name}` : ''}</strong><p>{contractMetadata[row.key]?.period || '服務期間待核對'}</p></div>
+          <div><strong>{row.title}{metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}</strong><p>{contractMetadata[row.key]?.period || '服務期間待核對'}</p></div>
           {row.documentId !== null && <span className="contract-document-status complete">已備妥</span>}
           <div className="contract-document-actions"><button type="button" disabled={busy || finalProtected} onClick={() => setReviewTarget({ scope: row.scope, segmentId: row.segmentId })}>核對資料</button>
             {row.scope === 'client' && row.documentId !== null && <button type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || !!fileReturns.client?.file || !!fileReturns.client?.staged} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
-            <button type="button" aria-label={`下載 PDF · ${row.title}${contractMetadata[row.key]?.name ? ` · ${contractMetadata[row.key]!.name}` : ''}`} disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && preparationSegments.length === 0)} onClick={() => {
+            <button type="button" aria-label={`下載 PDF · ${row.title}${metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}`} disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && preparationSegments.length === 0)} onClick={() => {
               if (row.documentId !== null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂');
               else void prepareUnsigned(row.scope, row.segmentId, true);
             }}>下載 PDF</button></div>
@@ -1072,7 +1076,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </section>
       {handoffConfirmationOpen && <CandidateInquiryDialog title="確認已送交簽署平台" busy={busy} onClose={() => setHandoffConfirmationOpen(false)}><div className="contract-signing-confirm-body"><p>請確認已將客戶及所有月嫂的契約送交外部簽署平台。</p><small>此操作只記錄交接，不會發送 LINE 簽署提醒。</small></div><footer className="contract-signing-confirm-footer"><button type="button" disabled={busy} onClick={() => setHandoffConfirmationOpen(false)}>返回</button><button className="btn-primary-action" type="button" disabled={busy} onClick={() => { setHandoffConfirmationOpen(false); void recordHandoff(); }}>確認已送交</button></footer></CandidateInquiryDialog>}
       {reminderConfirmationOpen && <CandidateInquiryDialog title="確認發送簽署提醒" busy={busy} onClose={() => setReminderConfirmationOpen(false)}><div className="contract-signing-confirm-body"><p>將一次通知本案客戶與所有月嫂：</p><ul>{reminderTargets.map((target, index) => <li key={`${target.scope}:${index}`}>{target.name} · {target.scope === 'client' ? '客戶' : '月嫂'}</li>)}</ul><small>未綁定 LINE 的對象會列出人工通知提示。</small></div><footer className="contract-signing-confirm-footer"><button type="button" disabled={busy} onClick={() => setReminderConfirmationOpen(false)}>取消</button><button className="btn-primary-action" type="button" disabled={busy || !query?.handoff_recorded || query.state === 'completed' || query.state === 'superseded' || reminderFlow?.status === 'outcome_unknown'} onClick={() => void sendReminders()}>確認發送提醒</button></footer></CandidateInquiryDialog>}
-      {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文請核對下載的 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => { const row = documentRows.find(row => row.scope === reviewTarget.scope && row.segmentId === reviewTarget.segmentId); if (row?.documentId != null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂'); else void prepareUnsigned(reviewTarget.scope, reviewTarget.segmentId, true); }}>下載 PDF</button></footer></CandidateInquiryDialog>}
+      {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文請核對下載的 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => { const row = documentRows.find(row => row.scope === reviewTarget.scope && row.segmentId === reviewTarget.segmentId); if (row?.documentId != null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂'); else void prepareUnsigned(reviewTarget.scope, reviewTarget.segmentId, true); }}>下載 PDF</button></footer></CandidateInquiryDialog>}
 
       {query?.handoff_recorded && query.state !== 'completed' && query.state !== 'superseded' && <section className="contract-return-card" aria-label="回收簽署文件">
         <header className="contract-documents-heading"><h3>回收簽署文件</h3><span className="contract-document-status">{checkedCount}／{requiredReturnTargets.length} 份已檢查</span></header>

@@ -346,7 +346,7 @@ class MySqlMatchingNotificationRepository:
         information = MySqlOrderInformationRepository(self._connection)
         info_1 = information.preview_matching_plan_information(case_no, plan_id, 1, for_update=True)
         info_2 = information.preview_matching_plan_information(case_no, plan_id, 2, for_update=True)
-        weekly = _proposed_weekly_rows(segments)
+        weekly = _proposed_weekly_rows(segments, include_staff_identity=True)
         return {
             "profiles": profiles,
             "order_information_1": info_1,
@@ -631,6 +631,7 @@ def _segment_contact(row, responses, deliveries):
         )),
         deliveries.get((segment_id, "caregiver_info_1")),
         deliveries.get((segment_id, "caregiver_info_2")),
+        staff_union_no=row.get("staff_union_no"),
     )
 
 
@@ -744,7 +745,7 @@ def _resume_previews(segments, rows):
     return tuple(result), tuple(blockers)
 
 
-def _proposed_weekly_rows(segments):
+def _proposed_weekly_rows(segments, *, include_staff_identity=False):
     special_dates = _json_dates(segments[0].get("custom_rest_dates"))
     projection = project_proposed_weekly_service(
         ProposedServiceSegment(
@@ -758,6 +759,7 @@ def _proposed_weekly_rows(segments):
     )
     source = {int(item["segment_id"]): item for item in segments}
     return tuple({
+        **({"staff_id": int(source[row.segment_id]["staff_id"])} if include_staff_identity else {}),
         "week_number": f"{row.week_start_date.month}-{((row.week_start_date.day - 1) // 7) + 1}",
         "serial_number": index,
         "case_no": str(source[row.segment_id]["case_no"]),
@@ -821,7 +823,7 @@ AND customer_binding.binding_status='bound'
 AND customer_binding.line_user_id=c.line_user_id
 WHERE p.id=%s AND p.case_no=%s"""
 _SEGMENTS_SQL = """SELECT s.id AS segment_id,s.segment_order,s.staff_id,
-s.assigned_start_date,s.assigned_end_date,st.name AS staff_name,
+s.assigned_start_date,s.assigned_end_date,st.name AS staff_name,st.union_no AS staff_union_no,
 staff_binding.line_user_id AS staff_line_user_id,
 (SELECT JSON_UNQUOTE(JSON_EXTRACT(event.payload,'$.willingness'))
  FROM caregiver_matching_plan_events event WHERE event.plan_id=s.plan_id

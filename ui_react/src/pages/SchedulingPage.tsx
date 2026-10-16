@@ -4,10 +4,10 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './SchedulingPage.css';
-import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
-import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
+import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
@@ -757,11 +757,11 @@ function LeaveSubstitutionWorkspace({
           request_status: receipt.status,
           aggregate_version: receipt.version,
         };
-        setInboxReceipt(`已受理 ${item.staff_name} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
+        setInboxReceipt(`已受理 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
         await loadInbox();
       }
       setSelectedInboxItem(selectedItem);
-      setReason(`依 LINE 請假待辦（${item.staff_name} ${item.leave_start_date}～${item.leave_end_date}）安排代班`);
+      setReason(`依 LINE 請假待辦（${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} ${item.leave_start_date}～${item.leave_end_date}）安排代班`);
       // 若當前案件指派中有該月嫂，自動選中該 assignment
       const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
       if (matchedAssignment) {
@@ -785,7 +785,7 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     try {
       await staffLeaveInboxClient.review(item, 'reject', rejectReason);
-      setInboxReceipt(`已退回 ${item.staff_name} 的請假待辦；待辦狀態已更新。`);
+      setInboxReceipt(`已退回 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；待辦狀態已更新。`);
       if (selectedInboxItem?.id === item.id) {
         setSelectedInboxItem(null);
       }
@@ -807,7 +807,7 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     try {
       await staffLeaveInboxClient.review(item, 'cancel', cancelReason);
-      setInboxReceipt(`已取消 ${item.staff_name} 的請假待辦；待辦狀態已更新。`);
+      setInboxReceipt(`已取消 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；待辦狀態已更新。`);
       if (selectedInboxItem?.id === item.id) {
         setSelectedInboxItem(null);
       }
@@ -1130,7 +1130,7 @@ function LeaveSubstitutionWorkspace({
                 <div style={{ display: 'grid', gap: '4px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <strong style={{ fontSize: '0.98rem', color: '#1e1b19' }}>
-                      👩‍🍼 {item.staff_name} ｜ 服務人員 #{item.staff_id}
+                      👩‍🍼 {staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)}
                     </strong>
                     <span className={`contract-status-pill ${item.request_status === 'pending' ? 'waiting' : item.request_status === 'accepted_for_processing' ? 'active' : 'signed'}`} style={{ fontSize: '0.78rem' }}>
                       {leaveInboxStatusLabel(item.request_status)}
@@ -1211,7 +1211,7 @@ function LeaveSubstitutionWorkspace({
       {selectedInboxItem && (
         <div style={{ padding: '12px 18px', background: '#ffedd5', border: '1.5px solid #fdba74', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <span style={{ fontSize: '0.9rem', color: '#9a3412', fontWeight: 700 }}>
-            🚨 目前已連動 LINE 請假待辦（{selectedInboxItem.staff_name} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
+            🚨 目前已連動 LINE 請假待辦（{staffDisplayLabel(staffList.find(staff => staff.id === selectedInboxItem.staff_id)?.unionNo, selectedInboxItem.staff_name)} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
           </span>
           <button
             type="button"
@@ -1338,7 +1338,7 @@ function LeaveSubstitutionWorkspace({
             >
               {assignments.map((assignment) => (
                 <option key={assignment.assignment_id} value={assignment.assignment_id}>
-                  #{assignment.assignment_id} ｜ 人員 #{assignment.staff_id} ({staffList.find((s) => s.id === assignment.staff_id)?.displayName ?? '服務月嫂'}) ｜ {assignment.assigned_start_date}～{assignment.assigned_end_date}
+                  #{assignment.assignment_id} ｜ {staffDisplayLabel(staffList.find((s) => s.id === assignment.staff_id)?.unionNo, staffList.find((s) => s.id === assignment.staff_id)?.displayName ?? '姓名未設定')} ｜ {assignment.assigned_start_date}～{assignment.assigned_end_date}
                 </option>
               ))}
             </select>
@@ -1411,7 +1411,7 @@ function LeaveSubstitutionWorkspace({
             >
               <option value="">請選擇代班服務人員</option>
               {staffList.filter((staff) => staff.id !== selectedAssignment?.staff_id).map((staff) => (
-                <option key={staff.id} value={staff.id}>{staff.displayName} ｜ #{staff.id}</option>
+                <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>
               ))}
             </select>
           </label>
@@ -1533,7 +1533,8 @@ function LeaveSubstitutionWorkspace({
           {payablesReadback && payablesReadback.items.map((item) => {
             const evidence = item.payables_evidence;
             const staffId = evidence?.staff_id ?? item.resulting_staff_id;
-            const staffName = staffList.find((staff) => staff.id === staffId)?.displayName ?? `服務人員 ${staffId}`;
+            const person = staffList.find((staff) => staff.id === staffId);
+            const staffName = staffDisplayLabel(person?.unionNo, person?.displayName ?? '姓名未設定');
             const payoutStatus = evidence?.projection_status === 'payable'
               ? '待付款'
               : evidence?.projection_status === 'completed'
@@ -2078,16 +2079,18 @@ export const SchedulingPage: React.FC = () => {
 
     try {
       const page = adaptStaffDirectoryPage(
-        await staffDirectoryClient.queryPage(
+        await loadAllStaffDirectoryPages(
+          staffDirectoryClient.queryPage.bind(staffDirectoryClient),
           { pageSize: STAFF_PAGE_SIZE },
           { signal: controller.signal }
         )
       );
       if (!mountedRef.current || controller.signal.aborted) return;
-      setStaffList(page.items);
+      const sortedStaff = [...page.items].sort(compareStaffUnionNumbers);
+      setStaffList(sortedStaff);
       setDirectoryNextCursor(page.nextCursor);
       if (page.items.length > 0) {
-        setSelectedStaffId(page.items[0].id);
+        setSelectedStaffId(sortedStaff[0].id);
       }
     } catch (error) {
       if (!mountedRef.current || controller.signal.aborted) return;
@@ -2119,7 +2122,7 @@ export const SchedulingPage: React.FC = () => {
       setStaffList((current) => {
         const byId = new Map(current.map((staff) => [staff.id, staff]));
         page.items.forEach((staff) => byId.set(staff.id, staff));
-        return [...byId.values()];
+        return [...byId.values()].sort(compareStaffUnionNumbers);
       });
       setDirectoryNextCursor(page.nextCursor);
     } catch (error) {
@@ -2425,7 +2428,7 @@ export const SchedulingPage: React.FC = () => {
       const matchKeyword =
         !searchKeyword ||
         staff.displayName.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-        `stf-${String(staff.id).padStart(3, '0')}`.includes(searchKeyword.toLowerCase());
+        (staff.unionNo ?? '').toLowerCase().includes(searchKeyword.toLowerCase());
 
       if (!matchKeyword) return false;
 
@@ -2505,7 +2508,7 @@ export const SchedulingPage: React.FC = () => {
         },
       ]);
       const staffObj = staffList.find((s) => s.id === selectedStaffId);
-      setCandidatePoolSuccess(`🎉 已成功將 ${staffObj?.displayName ?? `#${selectedStaffId}`} 加入案件 #${caseNo} 的候選人聯繫名冊！`);
+      setCandidatePoolSuccess(`🎉 已成功將 ${staffDisplayLabel(staffObj?.unionNo, staffObj?.displayName ?? '姓名未設定')} 加入案件 #${caseNo} 的候選人聯繫名冊！`);
     } catch (caught) {
       setCandidatePoolError(
         caught instanceof ApiHttpError
@@ -2886,7 +2889,6 @@ export const SchedulingPage: React.FC = () => {
                       }
                     : null;
                   const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
-                  const staffCode = `STF-${String(staff.id).padStart(3, '0')}`;
                   const spans = buildGanttSpans(row ?? undefined, daysList.length, ghostConfig, historicalOverlaysByStaff[staff.id]);
                   const historicalOverlayError = historicalOverlayErrors[staff.id];
 
@@ -2911,8 +2913,7 @@ export const SchedulingPage: React.FC = () => {
                       <div className="gantt-staff-info-cell">
                         <div className="staff-name-line">
                           <span className="staff-avatar">👤</span>
-                          <strong>{staff.displayName}</strong>
-                          <span className="staff-code-badge">{staffCode}</span>
+                          <strong>{staffDisplayLabel(staff.unionNo, staff.displayName)}</strong>
                         </div>
                         {historicalOverlayError && <small className="historical-overlay-error" role="status">歷史指派區間未載入：{historicalOverlayError}</small>}
                         <div
@@ -3016,7 +3017,7 @@ export const SchedulingPage: React.FC = () => {
       <Drawer
         isOpen={collisionDrawerOpen}
         onClose={() => setCollisionDrawerOpen(false)}
-        title={`🔮 案件 #${eligibilityCaseNo || selectedCaseNo || '---'} ✕ 月嫂 #${staffList.find((s) => s.id === selectedStaffId)?.displayName ?? selectedStaffId ?? '---'} 需求與檔期排查`}
+        title={`🔮 案件 #${eligibilityCaseNo || selectedCaseNo || '---'} ✕ 月嫂 ${staffDisplayLabel(staffList.find((s) => s.id === selectedStaffId)?.unionNo, staffList.find((s) => s.id === selectedStaffId)?.displayName ?? '姓名未設定')} 需求與檔期排查`}
         size="wide"
       >
         <div className="collision-drawer-content">
@@ -3027,7 +3028,7 @@ export const SchedulingPage: React.FC = () => {
                 👥 媒合候選人推薦工作池
               </strong>
               <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#7c2d12' }}>
-                將 <strong>{staffList.find((s) => s.id === selectedStaffId)?.displayName ?? `服務人員 #${selectedStaffId}`}</strong> 推薦加入案件 <strong>#{eligibilityCaseNo || selectedCaseNo}</strong> 的候選人聯繫名單。
+                將 <strong>{staffDisplayLabel(staffList.find((s) => s.id === selectedStaffId)?.unionNo, staffList.find((s) => s.id === selectedStaffId)?.displayName ?? '姓名未設定')}</strong> 推薦加入案件 <strong>#{eligibilityCaseNo || selectedCaseNo}</strong> 的候選人聯繫名單。
               </p>
             </div>
             <button
@@ -3107,7 +3108,7 @@ export const SchedulingPage: React.FC = () => {
                 <option value="">請選擇服務人員</option>
                 {staffList.map((staff) => (
                   <option key={staff.id} value={staff.id}>
-                    {staff.displayName} ｜ #{staff.id}
+                    {staffDisplayLabel(staff.unionNo, staff.displayName)}
                   </option>
                 ))}
               </select>

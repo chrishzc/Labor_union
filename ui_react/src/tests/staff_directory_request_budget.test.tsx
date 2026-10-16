@@ -26,12 +26,10 @@ describe('StaffPage request budget', () => {
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
   });
 
-  it('uses one initial GET in StrictMode and one GET per manual cursor', async () => {
+  it('loads each bounded page once in StrictMode to display the complete sorted roster', async () => {
     render(<React.StrictMode><StaffPage /></React.StrictMode>);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
+    expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
     expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
@@ -40,33 +38,30 @@ describe('StaffPage request budget', () => {
     );
   });
 
-  it('retries the same cursor only after an explicit next-page failure', async () => {
+  it('shows no partial roster and retries the complete query after a page failure', async () => {
     vi.mocked(staffDirectoryClient.queryPage).mockReset()
       .mockResolvedValueOnce(STAFF_PAGE_ONE)
       .mockRejectedValueOnce(new Error('下一頁暫時失敗'))
+      .mockResolvedValueOnce(STAFF_PAGE_ONE)
       .mockResolvedValueOnce(STAFF_PAGE_TWO);
     render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '重試載入下一頁' })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '重試載入下一頁' }));
-
+    const retry = await screen.findByRole('button', { name: '重試名冊查詢' });
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(retry);
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
-      3,
+      4,
       { pageSize: 200, afterId: 12, includeProfile:true },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
-  it('tab switches and Drawer interaction add zero directory requests', async () => {
+  it('Drawer interactions add zero directory requests after the full roster loads', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
-    fireEvent.click(screen.getByRole('tab', { name: /接案偏好設定/ }));
-    fireEvent.click(screen.getByRole('tab', { name: /接案狀態管理/ }));
-    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });
 
   it('aborts the active request after a real unmount', async () => {

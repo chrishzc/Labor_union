@@ -9,6 +9,21 @@ import type {
 } from '../../api/staff_directory/staff_directory_schemas';
 import type { StaffProfile } from '../../api/staff_profile/staff_profile_schemas';
 
+const unionNumberCollator = new Intl.Collator('zh-Hant', { numeric: true });
+
+export function compareStaffUnionNumbers(
+  left: { id: number; unionNo?: string | null },
+  right: { id: number; unionNo?: string | null },
+): number {
+  if (!left.unionNo || !right.unionNo) {
+    return Number(!left.unionNo) - Number(!right.unionNo) || left.id - right.id;
+  }
+  return unionNumberCollator.compare(left.unionNo, right.unionNo) || left.id - right.id;
+}
+
+export const staffDisplayLabel = (unionNo: string | null | undefined, name: string): string =>
+  `${unionNo || '未設定'} ${name}`;
+
 export interface StaffDirectoryCardViewModel {
   id: number;
   unionNo: string | null;

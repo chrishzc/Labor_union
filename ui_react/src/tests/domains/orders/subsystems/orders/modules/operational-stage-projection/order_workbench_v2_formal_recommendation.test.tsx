@@ -72,13 +72,12 @@ async function openCandidatePicker() {
 }
 async function loadCandidates() {
   await openCandidatePicker();
-  await screen.findByText('月嫂甲');
+  await screen.findByText('未設定 月嫂甲');
 }
 async function openSending() {
-  if (screen.queryByRole('button', { name: '確認寄送' })) return;
   const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
   await waitFor(() => expect(send).toBeEnabled());
-  fireEvent.click(send);
+  if (!screen.queryByRole('button', { name: '確認寄送' })) fireEvent.click(send);
 }
 async function openManual() {
   if (!screen.queryByLabelText('方案 51 客戶決策依據')) fireEvent.click(await screen.findByRole('button', { name: '手動記錄客戶決定' }));

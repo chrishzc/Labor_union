@@ -55,6 +55,7 @@ export type LineOrderGroupEventPage = z.infer<typeof LineOrderGroupEventPageSche
 export const LineOrderGroupParticipantSchema = z.strictObject({
   role: z.enum(['customer', 'staff']),
   name: z.string().nullable(),
+  staff_union_no: z.string().max(50).nullable().optional(),
   membership_status: z.enum(['joined', 'left', 'pending', 'unknown']),
 });
 export const LineOrderGroupWorkspaceEventSchema = z.strictObject({
@@ -64,6 +65,7 @@ export const LineOrderGroupWorkspaceEventSchema = z.strictObject({
   occurred_at: z.string().datetime({ offset: true }),
   participant_role: z.enum(['customer', 'staff']).nullable(),
   participant_name: z.string().nullable(),
+  participant_union_no: z.string().nullable().optional(),
 });
 export const LineOrderGroupWorkspaceRecordSchema = z.strictObject({
   case_no: z.string().min(1),

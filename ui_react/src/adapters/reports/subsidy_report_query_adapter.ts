@@ -1,3 +1,4 @@
+import { staffDisplayLabel } from '../staff/staff_directory_adapter';
 /**
  * File: subsidy_report_query_adapter.ts
  * Description: 將季度、年度與週報共用的補助分區映射為唯讀 view，不重算公式或 aggregates。
@@ -18,7 +19,7 @@ export function adaptSubsidyRow(row: SubsidyReportPartition['rows'][number]) {
     amount: `NT$ ${row.subsidy_amount_ntd.toLocaleString()}`,
     unitPrice: `NT$ ${row.unit_price_ntd.toLocaleString()}`,
     employer: row.employer_name,
-    staff: row.staff_name,
+    staff: row.staff_name ? staffDisplayLabel(row.staff_union_no, row.staff_name) : '未登錄',
     identity: row.identity_card,
     address: row.address,
   };

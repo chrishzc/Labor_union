@@ -7,6 +7,7 @@ import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import { StaffDirectoryResponseSchema, StaffRosterResponseSchema, type StaffDirectoryPage } from './staff_directory_schemas';
 import {
+  StaffDirectoryAbortedError,
   StaffDirectoryUnauthenticatedError,
   StaffDirectoryValidationError,
   mapStaffDirectoryError,
@@ -41,6 +42,7 @@ export async function loadAllStaffDirectoryPages(
   let afterId: number | undefined;
 
   while (true) {
+    if (options?.signal?.aborted) throw new StaffDirectoryAbortedError();
     const page = await query({ ...params, ...(afterId === undefined ? {} : { afterId }) }, options);
     items.push(...page.items);
     if (page.next_cursor === null) return { items, next_cursor: null };

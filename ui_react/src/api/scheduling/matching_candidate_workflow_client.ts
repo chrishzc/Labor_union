@@ -33,6 +33,7 @@ const CandidateOptionSchema = z.strictObject({
   segment_index: z.number().int().nonnegative(),
   staff_id: z.number().int().positive(),
   staff_name: z.string().min(1),
+  staff_union_no: z.string().max(50).nullable().optional(),
   // Partial availability can legitimately contain a candidate with zero
   // usable service days; the UI must render its conflicts rather than reject
   // the complete server response.

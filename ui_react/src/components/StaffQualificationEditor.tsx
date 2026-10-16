@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { staffQualificationEditingClient, type QualificationFacts, type QualificationSnapshot } from '../api/staff/qualification_editing_client';
 
 const labels: Record<keyof QualificationFacts, string> = { special_skills: '專業技能', has_massage_cert: '按摩證書', certifications: '一般證照', care_babies: '最多照顧寶寶數', transportation: '交通方式' };
@@ -6,6 +6,7 @@ const listKeys = ['special_skills', 'certifications', 'transportation'] as const
 const display = (value: QualificationFacts[keyof QualificationFacts]) => Array.isArray(value) ? value.join('、') || '尚未登錄' : value === null ? '尚未登錄' : typeof value === 'boolean' ? value ? '有' : '無' : String(value);
 
 export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: number; onUpdated: () => void | Promise<void> }) {
+  const saveGuidanceId = useId();
   const [snapshot, setSnapshot] = useState<QualificationSnapshot | null>(null);
   const [lists, setLists] = useState({ special_skills: '', certifications: '', transportation: '' });
   const [massage, setMassage] = useState('');
@@ -52,7 +53,8 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
       <label className="staff-op-field">最多照顧寶寶數<input type="number" min={1} step={1} max={2147483647} disabled={busy} value={care} onChange={event => { setCare(event.target.value); invalidate(); }} /></label>
     </div><label className="staff-op-field">專業資格異動原因<input maxLength={500} disabled={busy} value={reason} onChange={event => setReason(event.target.value)} /></label>
     {preview && <div aria-label="專業資格變更預覽">{(Object.keys(labels) as Array<keyof QualificationFacts>).filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>)}</div>}
-    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doPreview()}>預覽變更</button><button type="button" className="staff-primary-btn" disabled={busy || !preview || !reason.trim()} onClick={() => void doApply()}>確認儲存</button></div></>}
+    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : !preview ? '尚未預覽：請先按「預覽變更」。' : !reason.trim() ? '預覽完成：請填寫「專業資格異動原因」後確認儲存。' : '預覽與異動原因已完成，可以按「確認儲存」。'}</p>
+    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doPreview()}>預覽變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy || !preview || !reason.trim()} onClick={() => void doApply()}>確認儲存</button></div></>}
     {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取專業資格</button>}
     {message && <p role="status">{message}</p>}
   </section>;

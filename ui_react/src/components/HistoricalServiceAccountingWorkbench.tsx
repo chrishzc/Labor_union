@@ -1,9 +1,11 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import React, { useEffect, useState } from 'react';
 import { historicalServiceAccountingClient, type HistoricalCaregiverDays, type HistoricalServiceAccountingPreview, type HistoricalServiceAccountingQuery } from '../api/orders/historical_service_accounting_client';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import type { OrderSummaryItem } from '../api/orders/order_query_schemas';
 
 export const HistoricalServiceAccountingWorkbench: React.FC = () => {
+  const staffIdentity = useStaffIdentityLabels();
   const [caseNo, setCaseNo] = useState('');
   const [orderSummaries, setOrderSummaries] = useState<OrderSummaryItem[]>([]);
   const [orderListState, setOrderListState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -52,13 +54,13 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
     </div>
     {facts && <div>
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>
-      {facts.assignments.map((item) => <label key={item.assignment_identity} style={{ display: 'block', marginBottom: 8 }}>{item.staff_name}（月嫂 ID {item.staff_id}）實際服務天數 <input type="number" min="1" step="1" value={days[item.assignment_identity] ?? ''} onChange={(event) => { setDays((current) => ({ ...current, [item.assignment_identity]: event.target.value })); setPreview(null); }} /></label>)}
+      {facts.assignments.map((item) => <label key={item.assignment_identity} style={{ display: 'block', marginBottom: 8 }}>{staffIdentity.label(item.staff_id, item.staff_name)}實際服務天數 <input type="number" min="1" step="1" value={days[item.assignment_identity] ?? ''} onChange={(event) => { setDays((current) => ({ ...current, [item.assignment_identity]: event.target.value })); setPreview(null); }} /></label>)}
       <button type="button" disabled={busy || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(async () => setPreview(await historicalServiceAccountingClient.preview(facts.case_no, inputs())))}>預覽應收應付</button>
     </div>}
     {preview && <div className="import-result-state" role="status">
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
       <p>客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
-      {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>月嫂 ID {item.staff_id}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
+      {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>{staffIdentity.label(item.staff_id, facts?.assignments.find(person => person.staff_id === item.staff_id)?.staff_name)}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
       <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。'); setPreview(null); })}>確認更新帳務</button>
     </div>}
     {message && <p role="alert">{message}</p>}

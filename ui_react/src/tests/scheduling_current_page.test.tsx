@@ -2,7 +2,7 @@
  * File: scheduling_current_page.test.tsx
  * Description: 驗證 Scheduling 投影、typed controls 與 bounded deep-link 行為。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
@@ -29,7 +29,6 @@ vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
 }));
 
 describe('SchedulingPage query-only presentation', () => {
-  let intersectNextPage: () => void;
   let observeNextPage: ReturnType<typeof vi.fn>;
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
@@ -39,9 +38,6 @@ describe('SchedulingPage query-only presentation', () => {
     coreStageProjectionMocks.loadAll.mockReset();
     observeNextPage = vi.fn();
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(callback: IntersectionObserverCallback) {
-        intersectNextPage = () => callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
-      }
       observe = observeNextPage;
       disconnect = vi.fn();
     });
@@ -182,7 +178,7 @@ describe('SchedulingPage query-only presentation', () => {
 
     expect(screen.getByText(/正在載入服務人員摘要/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
-    expect(screen.getAllByText('去敏人員甲').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/去敏人員甲/).length).toBeGreaterThan(0);
     expect(screen.getByText('正式服務履約')).toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
     expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(2);
@@ -284,14 +280,14 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('option', { name: /115000003.*排查客戶乙/ })).toBeInTheDocument();
   });
 
-  it('uses page_size 20, continues the staff cursor and keeps a complete month axis', async () => {
+  it('loads all bounded staff pages and sorts union labels before rendering the complete month axis', async () => {
     vi.mocked(staffDirectoryClient.queryPage)
       .mockResolvedValueOnce({
-        items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }],
+        items: [{ id: 11, union_no: 'A10', name: '去敏人員甲', phone: null, education: null }],
         next_cursor: 11,
       })
       .mockResolvedValueOnce({
-        items: [{ id: 12, name: '去敏人員乙', phone: null, education: null }],
+        items: [{ id: 12, union_no: 'A2', name: '去敏人員乙', phone: null, education: null }],
         next_cursor: null,
       });
 
@@ -306,10 +302,8 @@ describe('SchedulingPage query-only presentation', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
-    expect(observeNextPage).toHaveBeenCalledWith(document.querySelector('[data-control-id="scheduling.staff.next-page"]'));
-    expect(screen.queryByRole('button', { name: '載入更多服務人員' })).not.toBeInTheDocument();
-    act(() => { intersectNextPage(); intersectNextPage(); });
-    await waitFor(() => expect(screen.getAllByText('去敏人員乙').length).toBeGreaterThan(0));
+    expect(Array.from(document.querySelectorAll('.gantt-staff-matrix-row strong')).map(node => node.textContent)).toEqual(['A2 去敏人員乙', 'A10 去敏人員甲']);
+    expect(screen.queryByText('STF-011')).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       2,
       { pageSize: 20, afterId: 11 },
@@ -320,21 +314,19 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.querySelector('[data-control-id="scheduling.staff.next-page"]')).not.toBeInTheDocument();
   });
 
-  it('pauses automatic loading after a failure and retries without losing existing rows', async () => {
+  it('does not show a partial staff list if a later page fails and retries the complete list', async () => {
+    const first = { items: [{ id: 11, union_no: 'A10', name: '去敏人員甲', phone: null, education: null }], next_cursor: 11 };
+    const second = { items: [{ id: 12, union_no: 'A2', name: '去敏人員乙', phone: null, education: null }], next_cursor: null };
     vi.mocked(staffDirectoryClient.queryPage)
-      .mockResolvedValueOnce({ items: [{ id: 11, name: '去敏人員甲', phone: null, education: null }], next_cursor: 11 })
-      .mockRejectedValueOnce(new Error('transport unavailable'))
-      .mockResolvedValueOnce({ items: [{ id: 12, name: '去敏人員乙', phone: null, education: null }], next_cursor: null });
+      .mockResolvedValueOnce(first).mockRejectedValueOnce(new Error('transport unavailable'))
+      .mockResolvedValueOnce(first).mockResolvedValueOnce(second);
     render(<SchedulingPage />);
-    await waitFor(() => expect(observeNextPage).toHaveBeenCalled());
-    act(() => intersectNextPage());
-    const retry = await screen.findByRole('button', { name: '重試載入月嫂' });
-    expect(screen.getAllByText('去敏人員甲').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/transport unavailable/)).not.toBeInTheDocument();
+    const retry = await screen.findByRole('button', { name: '重試摘要查詢' });
+    expect(document.querySelectorAll('.gantt-staff-matrix-row')).toHaveLength(0);
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
     fireEvent.click(retry);
-    await waitFor(() => expect(screen.getAllByText('去敏人員乙').length).toBeGreaterThan(0));
-    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(3);
+    await screen.findByText('A2 去敏人員乙');
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(4);
   });
 
   it('renders explicit empty and error states without fake occupancy spans', async () => {

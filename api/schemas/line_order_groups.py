@@ -56,6 +56,7 @@ class LineOrderGroupParticipantResponse(BaseModel):
     role: Literal["customer", "staff"]
     name: str | None
     membership_status: Literal["joined", "left", "pending", "unknown"]
+    staff_union_no: str | None = None
 
 
 class LineOrderGroupWorkspaceEventResponse(BaseModel):
@@ -66,6 +67,7 @@ class LineOrderGroupWorkspaceEventResponse(BaseModel):
     occurred_at: datetime
     participant_role: Literal["customer", "staff"] | None
     participant_name: str | None
+    participant_union_no: str | None = None
 
 
 class LineOrderGroupWorkspaceRecordResponse(BaseModel):

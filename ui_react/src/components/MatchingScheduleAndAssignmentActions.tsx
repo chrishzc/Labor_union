@@ -13,6 +13,7 @@ import {
   type MatchingScheduleState,
 } from '../api/scheduling/matching_schedule_confirmation_client';
 import { sessionClient } from '../api/auth/session_client';
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { serviceArrangementStatusClient, serviceArrangementBlockerLabel, type AutomaticArrangementStatus } from '../api/scheduling/service_arrangement_status_client';
 
@@ -55,6 +56,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
   staffNames = {},
   onEditStateChange,
 }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [schedule, setSchedule] = useState<MatchingScheduleState | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState<string | null>(null);
@@ -336,7 +338,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
         const key = keyOf(party);
         const recipient = schedule.recipients.find(value => (value.audience_type === 'customer' ? 'customer' : `caregiver:${value.segment_id}`) === key);
         const segment = planSegments.find(value => value.segmentId === party.segment_id);
-        const label = party.audience_type === 'customer' ? '客戶' : `${segment ? staffNames[segment.staffId] ?? `月嫂 #${segment.staffId}` : '月嫂'}${planSegments.length > 1 && segment ? `・第 ${segment.sequence} 段` : ''}`;
+        const label = party.audience_type === 'customer' ? '客戶' : `${segment ? staffNames[segment.staffId] ?? staffIdentity.label(segment.staffId) : '月嫂'}${planSegments.length > 1 && segment ? `・第 ${segment.sequence} 段` : ''}`;
         const confirmed = recipient && ['confirmed', 'manually_confirmed'].includes(recipient.confirmation_status);
         const dates = party.weeks.flatMap(week => week.service_dates);
         return <article className="service-arrangement-party" key={key}>

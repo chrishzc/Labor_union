@@ -1,3 +1,4 @@
+import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { candidateContactPoolClient, createCandidateInformationSendCommand, type CandidateContactPool,
   type CandidateInformationKind, type CandidateInformationSendCommand, type CaseInformationPreview,
@@ -107,7 +108,7 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, kind, re
   };
   return <section className="candidate-information-send" aria-label="寄送前確認">
     <h4 ref={heading} tabIndex={-1}>寄送{CANDIDATE_INFORMATION_LABELS[kind]}</h4>
-    <p>收件月嫂：{candidate.staff_name}；案件：{caseNo}。本次只寄送這一份資訊。</p>
+    <p>收件月嫂：{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}；案件：{caseNo}。本次只寄送這一份資訊。</p>
     {busy && <p role="status">正在處理寄送資訊…</p>}
     {needsDates && <p role="status">請先在「查看這份內容」完成並保存預計日期，才能寄送每週服務說明。</p>}
     {error && <p role="alert">{error}</p>}{sendError && <p role="alert">{sendError}</p>}

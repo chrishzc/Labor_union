@@ -159,6 +159,7 @@ class CaregiverCandidateOption(BaseModel):
     segment_index: int
     staff_id: int
     staff_name: str
+    staff_union_no: str | None = Field(default=None, max_length=50)
     # A filtered candidate may remain useful diagnostic evidence even when every
     # required service day is blocked.  Zero is therefore a valid partial-search
     # result, not a response-contract violation.

@@ -65,6 +65,7 @@ export const WeeklyOperationsServiceRowSchema = z.strictObject({
   case_no: z.string().min(1),
   client_name: z.string().min(1),
   staff_name: z.string().min(1),
+  staff_union_no: z.string().max(50).nullable().optional(),
   service_start_date: DateSchema.nullable(),
   service_end_date: DateSchema.nullable(),
   period_start_date: DateSchema,

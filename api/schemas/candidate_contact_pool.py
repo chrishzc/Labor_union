@@ -174,6 +174,7 @@ class CandidateContactView(BaseModel):
     status: Literal["active", "selected", "withdrawn"]
     created_at: datetime
     staff_name: str = Field(min_length=1, max_length=100)
+    staff_union_no: str | None = Field(default=None, max_length=50)
     willingness: Literal["pending", "willing", "unwilling"]
     reason: str | None = Field(default=None, max_length=500)
     latest_willingness_event_id: int | None = Field(default=None, gt=0)

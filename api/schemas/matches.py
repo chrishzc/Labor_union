@@ -117,6 +117,7 @@ class ContactMatchingSegmentView(_ClosedModel):
     segment_order: int = Field(ge=1, le=4)
     staff_id: int = Field(gt=0)
     staff_name: str
+    staff_union_no: str | None = Field(default=None, max_length=50)
     assigned_start_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     assigned_end_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     willingness: Literal["pending", "willing", "unwilling"]
@@ -159,6 +160,7 @@ class CustomerConfirmationInformationPreviewView(_ClosedModel):
 
 
 class CustomerConfirmationWeeklyServicePreviewView(_ClosedModel):
+    staff_id: PositiveInt | None = None
     serial_number: PositiveInt
     staff_name: str = Field(min_length=1, max_length=100)
     week_start_date: date

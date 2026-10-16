@@ -33,6 +33,7 @@ const FormalPlanContactStateSchema = z.strictObject({
   segments: z.array(z.object({
     segment_id: z.number().int().positive(),
     staff_name: z.string().optional(),
+    staff_union_no: z.string().max(50).nullable().optional(),
     staff_id: z.number().int().positive().optional(),
     willingness: z.enum(['pending', 'willing', 'unwilling']),
   }).passthrough()).min(1),
@@ -93,6 +94,7 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
     staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),
   })),
   weekly_service_rows: z.array(z.strictObject({
+    staff_id: z.number().int().positive().nullable().optional(),
     serial_number: z.number().int().positive(), staff_name: z.string().min(1).max(100),
     week_start_date: IsoDateSchema, week_end_date: IsoDateSchema,
     service_hours_per_day: z.number().positive().max(24).multipleOf(0.5),

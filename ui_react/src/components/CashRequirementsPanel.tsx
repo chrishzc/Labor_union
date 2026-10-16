@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /** Cash planning presentation; does not create, settle, or export payment instructions. */
 import { useEffect, useState } from 'react';
 import { cashRequirementsQueryClient, type CashRequirementRow } from '../api/accounts_payable/cash_requirements_query_client';
@@ -8,6 +9,7 @@ const money = (amount: number | null) => amount === null ? '待確認' : `NT$ ${
 type State = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; rows: CashRequirementRow[] };
 
 export function CashRequirementsPanel({ revision = 0 }: { revision?: number }) {
+  const staffIdentity = useStaffIdentityLabels();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [queryRevision, setQueryRevision] = useState(0);
   const [month, setMonth] = useState('');
@@ -27,7 +29,7 @@ export function CashRequirementsPanel({ revision = 0 }: { revision?: number }) {
   const renderRows = (items: CashRequirementRow[]) => <div className="finance-table-container" tabIndex={0}><table className="finance-table cash-requirements-table">
     <thead><tr><th>案件</th><th>受款人</th><th>款項類型</th><th>金額性質</th><th>來源金額</th><th>未付款金額</th><th>付款日期</th><th>資料來源</th><th>待確認原因</th></tr></thead>
     <tbody>{items.map(row => <tr key={row.row_id}>
-      <td>{row.case_no}</td><td>{row.recipient_name ?? '待確認'}</td><td>{TYPES[row.payment_type]}</td>
+      <td>{row.case_no}</td><td>{row.payment_type === 'staff_payable' ? staffIdentity.label(row.staff_id, row.recipient_name) : row.recipient_name ?? '待確認受款人'}</td><td>{TYPES[row.payment_type]}</td>
       <td>{row.certainty === 'estimated' ? '預估' : '已確定'}</td>
       <td>{money(row.source_amount_ntd)}</td><td>{money(row.unpaid_amount_ntd)}</td>
       <td>{row.payment_date === null ? '待確認' : `${row.date_is_estimate ? '預估付款日' : '已確定付款日'} ${row.payment_date}`}</td>

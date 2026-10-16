@@ -57,6 +57,7 @@
 - `db/templates/contracts/contract_staff_service.json`
 
 ## Contracts
+- 管理端文件清單、核對摘要、回收與提醒確認以 current target 的 canonical Staff id 借用公會編號及姓名；選擇月嫂的選單按編號自然排序，保留 segment identity。已保存 PDF 與寄送 payload 保留原內容。
 - `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md`
 

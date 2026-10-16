@@ -151,7 +151,7 @@ describe('OrderContractPreview', () => {
     await waitFor(() => expect(previewContractFields).toHaveBeenCalledWith(
       'CASE-001', 'staff', 98, expect.any(AbortSignal),
     ));
-    expect(await screen.findByText('第二位服務人員')).toBeInTheDocument();
+    expect(await screen.findByText('未設定 第二位服務人員')).toBeInTheDocument();
   });
 
   it('resolves the new case target instead of reusing the previous case segment', async () => {
@@ -183,10 +183,10 @@ describe('OrderContractPreview', () => {
     }));
     const { rerender } = render(<OrderContractPreview caseNo="CASE-001" revision={0} />);
     fireEvent.click(screen.getByRole('button', { name: /服務人員委任契約/ }));
-    await screen.findByText('原推薦月嫂');
+    await screen.findByText('未設定 原推薦月嫂');
     rerender(<OrderContractPreview caseNo="CASE-001" revision={1} />);
-    expect(await screen.findByText('新推薦月嫂')).toBeInTheDocument();
-    expect(screen.queryByText('原推薦月嫂')).not.toBeInTheDocument();
+    expect(await screen.findByText('未設定 新推薦月嫂')).toBeInTheDocument();
+    expect(screen.queryByText('未設定 原推薦月嫂')).not.toBeInTheDocument();
     expect(vi.mocked(previewContractFields).mock.calls.filter(call => call[1] === 'staff').at(-1)?.[2]).toBe(98);
   });
 });

@@ -338,6 +338,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
         for row in staff_rows
         if row and row.get("id") is not None
     }
+    staff_union_numbers = {int(row['id']): row.get('union_no') for row in staff_rows if row and row.get('id') is not None}
     options = {}
     for candidate in candidate_rows:
         key = (int(candidate["segment_index"]), int(candidate["staff_id"]))
@@ -347,6 +348,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
                 "segment_index": key[0],
                 "staff_id": key[1],
                 "staff_name": staff_names.get(key[1], ""),
+                "staff_union_no": staff_union_numbers.get(key[1]),
                 "coverage_day_count": 0,
                 "available_ranges": [],
                 "filter_results": filter_results.get(key[1], {}),
@@ -364,6 +366,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
                 continue
             options.setdefault((0, staff_id), {
                 "segment_index": 0, "staff_id": staff_id, "staff_name": staff_name,
+                "staff_union_no": staff_union_numbers.get(staff_id),
                 "coverage_day_count": 0, "available_ranges": [],
                 "filter_results": filter_results.get(staff_id, {}),
             })

@@ -21,6 +21,7 @@ const candidate = {
   status: 'active',
   created_at: '2026-08-23T10:00:00',
   staff_name: '測試月嫂',
+  staff_union_no: '0007',
   willingness: 'willing',
   reason: null,
   latest_willingness_event_id: 21,

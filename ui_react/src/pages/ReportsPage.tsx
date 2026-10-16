@@ -1,3 +1,4 @@
+import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 /**
  * File: ReportsPage.tsx
  * Description: 顯示自選期間營運報表三分頁及季度／年度補助報表，支援重載、完整 XLSX 與 stale request 防護。
@@ -222,7 +223,7 @@ const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => {
       <thead><tr><th>週數</th><th>序號</th><th>市府案號</th><th>雇主</th><th>服務人員</th><th>每週起始日</th><th>每週結束日</th><th>服務時數</th><th>每週工作日數</th><th>每週工時</th><th>結案</th></tr></thead>
       <tbody>{rows.map((row, idx) => <tr key={`${row.assignment_id}-${row.period_start_date}`}>
         {idx === 0 && <td rowSpan={rows.length} className="reports-service-week">{serviceWeekNumber(row.period_start_date)}</td>}
-        <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td><td>{row.staff_name}</td>
+        <td>{idx + 1}</td><td>{row.case_no}</td><td>{row.client_name}</td><td>{staffDisplayLabel(row.staff_union_no, row.staff_name)}</td>
         <td>{serviceDate(row.period_start_date)}</td><td>{serviceDate(row.period_end_date)}</td>
         <td>{row.service_hours_per_day ?? ''}</td><td>{row.weekly_work_days}</td><td>{row.weekly_hours ?? ''}</td>
         <td>{row.completed ? '結案' : ''}</td>

@@ -12,6 +12,7 @@
 - schedule-rule: `domains/government_subsidy/claim_schedule.py`
 - primary:
   - `subsystems/government_subsidy/reconciliation_register_query.py`
+  - `api/schemas/government_subsidy_report.py`
   - `api/routes/finance_reports.py`
   - `api/routes/finance_reports.py::_subsidy_report_row`
   - `api/routes/finance_reports.py::_subsidy_report_view`
@@ -24,6 +25,7 @@
 - outbound: 季／年度與營運年度統計均使用 Orders lifecycle、Client 補助身分、訂單服務 facts、歷史實際服務時數 projection 與案件 Payroll 凍結費率，並納入同等已付訂金語意的歷史 Orders 狀態；歷史實際時數已確認時優先使用，未確認時依身分採 40／120 小時預設。未形成 claim item 時以 Payroll 快照為一般單價；Case Import 正式雙胞胎事實固定投影 450，缺少非雙胞胎快照即 fail closed；不依賴 claim batch 或 Scheduling generation。
 
 ## Contracts
+- 報表沿同一 Staff join 額外輸出 nullable 公會編號（API `staff_union_no`），僅供管理畫面標籤；既有姓名、金額計算、年季歸屬及 XLSX 欄位保持原契約。
 - Government Subsidy reconciliation formula — `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md`
 - 營運報表專用年度補助統計契約 — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
 

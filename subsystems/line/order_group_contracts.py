@@ -143,6 +143,7 @@ class LineOrderGroupParticipant:
     role: Literal["customer", "staff"]
     name: str | None
     membership_status: Literal["joined", "left", "pending", "unknown"]
+    staff_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +154,7 @@ class LineOrderGroupWorkspaceEvent:
     occurred_at: datetime
     participant_role: Literal["customer", "staff"] | None = None
     participant_name: str | None = None
+    participant_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

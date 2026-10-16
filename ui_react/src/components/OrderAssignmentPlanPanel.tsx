@@ -6,6 +6,7 @@ import { waitingDepositLockClient, type ActiveWaitingDepositPlan } from '../api/
 import { MatchingScheduleAndAssignmentActions } from './MatchingScheduleAndAssignmentActions';
 import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActions';
 import { createStaffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 interface OrderAssignmentPlanPanelProps {
   caseNo: string;
@@ -41,8 +42,8 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
     const controller = new AbortController();
     const ids = [...new Set([...state.data.assignment.assignments.map(item => item.staff_id), ...(state.data.matchingPlan?.segments ?? []).map(item => item.staffId)])];
     void Promise.all(ids.map(async staffId => {
-      try { const page = await createStaffDirectoryClient().queryPage({ staffId }, { signal: controller.signal }); return [staffId, page.items.find(item => item.id === staffId)?.name ?? `月嫂 #${staffId}`] as const; }
-      catch { return [staffId, `月嫂 #${staffId}`] as const; }
+      try { const page = await createStaffDirectoryClient().queryPage({ staffId }, { signal: controller.signal }); const person = page.items.find(item => item.id === staffId); return [staffId, person ? staffDisplayLabel(person.union_no, person.name ?? '姓名未設定') : '月嫂資料待確認'] as const; }
+      catch { return [staffId, '月嫂資料待確認'] as const; }
     })).then(entries => { if (!controller.signal.aborted) setNames(Object.fromEntries(entries)); });
     return () => controller.abort();
   }, [state]);
@@ -143,7 +144,7 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
                 key={segment.assignment_id ?? segment.candidate_key ?? `${segment.staff_id}-${segment.sequence}`}
                 aria-label={`第 ${segment.sequence} 段正式指派`}
               >
-                <div><dt>月嫂</dt><dd>{names[segment.staff_id] ?? `月嫂 #${segment.staff_id}`}</dd></div>
+                <div><dt>月嫂</dt><dd>{names[segment.staff_id] ?? '月嫂資料待確認'}</dd></div>
                 <div><dt>指派期間</dt><dd>{segment.assigned_start_date} ~ {segment.assigned_end_date}</dd></div>
                 <div><dt>服務日</dt><dd>{segment.official_service_dates.length > 0 ? `${segment.official_service_dates.length} 天` : '尚未回傳'}</dd></div>
               </dl>

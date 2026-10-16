@@ -17,6 +17,9 @@ describe('Staff professional qualification editing', () => {
     const onUpdated = vi.fn();
     render(<StaffQualificationEditor staffId={11} onUpdated={onUpdated} />);
     const skills = await screen.findByLabelText('專業技能');
+    const save = screen.getByRole('button', { name: '確認儲存' });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription('尚未預覽：請先按「預覽變更」。');
     expect(screen.queryByRole('button', { name: '重試讀取專業資格' })).not.toBeInTheDocument();
     fireEvent.change(skills, { target: { value: '照護\n哺乳協助' } });
     fireEvent.change(screen.getByLabelText('一般證照'), { target: { value: '急救證書' } });
@@ -27,7 +30,10 @@ describe('Staff professional qualification editing', () => {
     await screen.findByText('預覽完成，請核對變更後確認儲存。');
     expect(staffQualificationEditingClient.apply).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(save).toHaveAccessibleDescription('預覽完成：請填寫「專業資格異動原因」後確認儲存。');
     fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '核對證明' } });
+    expect(save).toBeEnabled();
+    expect(save).toHaveAccessibleDescription('預覽與異動原因已完成，可以按「確認儲存」。');
     const after = { special_skills: ['照護', '哺乳協助'], certifications: ['急救證書'], transportation: ['汽車'], has_massage_cert: true, care_babies: 2 };
     vi.mocked(staffQualificationEditingClient.query).mockResolvedValue({ ...snapshot, before: after, after });
     fireEvent.click(screen.getByRole('button', { name: '確認儲存' }));
@@ -46,6 +52,7 @@ describe('Staff professional qualification editing', () => {
     fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '測試' } });
     fireEvent.change(screen.getByLabelText('按摩證書'), { target: { value: 'false' } });
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '確認儲存' })).toHaveAccessibleDescription('尚未預覽：請先按「預覽變更」。');
     fireEvent.click(screen.getByRole('button', { name: '取消變更' }));
     expect(screen.getByLabelText('專業技能')).toHaveValue('照護');
     expect(screen.getByLabelText('按摩證書')).toHaveValue('');

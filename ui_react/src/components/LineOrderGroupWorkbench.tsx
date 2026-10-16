@@ -1,3 +1,4 @@
+import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 /**
  * File: LineOrderGroupWorkbench.tsx
  * Description: 三方服務群組唯讀工作區，以案件清單、加入狀況及可展開歷程呈現正式查詢。
@@ -125,7 +126,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
       {record && <>
         <section className="order-group-current" aria-label="目前群組狀況"><Status value={record.status} /><p className={record.status === 'attention' ? 'order-group-attention' : ''}>{lineOrderGroupReason(record)}。</p></section>
         <dl className="order-group-facts"><div><dt>客戶</dt><dd>{record.customer_name || '資料待確認'}</dd></div><div><dt>最近動態</dt><dd>{time(record.latest_event?.occurred_at)}</dd></div><div><dt>群組綁定時間</dt><dd>{time(record.bound_at, true)}</dd></div><div><dt>最近邀請時間</dt><dd>{record.last_invitation_at ? time(record.last_invitation_at, true) : '尚無本次邀請紀錄'}</dd></div></dl>
-        <section className="order-group-members"><h3>客戶與月嫂</h3><p>依本次綁定後收到的群組加入／離開紀錄顯示。</p>{record.members.length === 0 ? <p>目前無法確認本案成員資料。</p> : <ul>{record.members.map((member, index) => <li key={`${member.role}-${index}`}><div><strong>{member.name || (member.role === 'customer' ? '客戶資料待確認' : '月嫂資料待確認')}</strong><span>{member.role === 'customer' ? '客戶' : '月嫂'}</span></div><span className={`order-group-member-${member.membership_status}`}>{memberLabels[member.membership_status]}</span></li>)}</ul>}<p className="order-group-note">工會人員於 LINE 群組內管理；此處不代表完整群組成員名單。邀請排入發送不代表已送達或已加入。</p></section>
+        <section className="order-group-members"><h3>客戶與月嫂</h3><p>依本次綁定後收到的群組加入／離開紀錄顯示。</p>{record.members.length === 0 ? <p>目前無法確認本案成員資料。</p> : <ul>{record.members.map((member, index) => <li key={`${member.role}-${index}`}><div><strong>{member.role === 'staff' ? staffDisplayLabel(member.staff_union_no, member.name || '姓名未設定') : member.name || '客戶資料待確認'}</strong><span>{member.role === 'customer' ? '客戶' : '月嫂'}</span></div><span className={`order-group-member-${member.membership_status}`}>{memberLabels[member.membership_status]}</span></li>)}</ul>}<p className="order-group-note">工會人員於 LINE 群組內管理；此處不代表完整群組成員名單。邀請排入發送不代表已送達或已加入。</p></section>
         <details className="order-group-history" open={historyOpen} onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>群組歷程</summary>{historyOpen && <>
           {events.loading && <p role="status">正在載入群組歷程…</p>}
           {events.error && <div role="alert"><p>{events.error}</p><button className="order-group-button" type="button" onClick={() => setEventReload(value => value + 1)}>重試歷程</button></div>}

@@ -15,6 +15,7 @@ class OrderSummaryItemView(BaseModel):
     client_name: str
     order_status: str
     staff_name: str | None
+    staff_display_label: str | None = None
     identity_status: str | None
     start_date: date | None
     end_date: date | None

@@ -15,6 +15,7 @@ import {
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
+import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 interface OrderCandidateQueryPanelProps {
   caseNo: string;
@@ -79,7 +80,10 @@ function queryFailure(error: unknown): CandidateQueryState {
 function formalCandidates(data: MatchingAvailability): MatchingCandidateOption[] {
   return data.candidate_options.filter(
     (candidate) => candidate.segment_index === 0,
-  );
+  ).sort((left, right) => compareStaffUnionNumbers(
+    { id: left.staff_id, unionNo: left.staff_union_no },
+    { id: right.staff_id, unionNo: right.staff_union_no },
+  ));
 }
 
 function sameStaffIds(expected: readonly number[], actual: readonly number[]): boolean {
@@ -174,7 +178,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     }
     const readbackStaff = readbackCandidates.map((candidate) => ({
       staffId: candidate.staff_id,
-      staffName: candidate.staff_name,
+      staffName: staffDisplayLabel(candidate.staff_union_no, candidate.staff_name),
     }));
     orderMutationFlowStore.setCandidatePoolAdd(command.caseNo, {
       status: 'observed', command, receipt: data, readbackStaff, error: null,
@@ -359,7 +363,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
               </div>
               <div className="order-v2-business-summary" aria-label="正式符合條件候選">
                 {candidates.map((candidate) => presentation === 'workbench' ? <div key={candidate.staff_id} className="candidate-add-row">
-                  <div><strong>{candidate.staff_name}</strong><br />空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
+                  <div><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><br />空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                     {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
                     {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id && value.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
                     {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id) && <details><summary>查看衝突日期與原因</summary><ul>
@@ -384,8 +388,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                       disabled={busy}
                     />
                     <span>
-                      <strong>{candidate.staff_name}</strong><br />
-                      月嫂 #{candidate.staff_id} · 空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
+                      <strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><br />
+                      空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                       {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
                       {queryState.data.conflicts.some((conflict) => conflict.staff_id === candidate.staff_id && conflict.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
                     </span>
@@ -416,7 +420,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
           <strong>候選池回讀完成</strong>
           <span>
             Pool #{completedAdd.data.pool_id} · 已回讀 {completedAdd.readbackStaff.length} 位本次寫入候選：
-            {completedAdd.readbackStaff.map((candidate) => `${candidate.staffName} (#${candidate.staffId})`).join('、')}。
+            {completedAdd.readbackStaff.map((candidate) => candidate.staffName).join('、')}。
           </span>
         </div>
       )}

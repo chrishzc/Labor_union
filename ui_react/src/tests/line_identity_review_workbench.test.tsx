@@ -75,7 +75,7 @@ describe('LINE 身分人工審核工作台', () => {
     const client = reviewClient();
     render(<LineIdentityReviewWorkbench client={client} />);
 
-    await screen.findByText('待審月嫂甲');
+    await screen.findByText('未設定 待審月嫂甲');
     expect(screen.getByText('只有具審核權限的真人管理員可核准或拒絕；等待時間不會自動做出決定。')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(PENDING_REVIEW.line_user_id);
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
@@ -117,7 +117,7 @@ describe('LINE 身分人工審核工作台', () => {
   it('修改 reason 後廢止既有 Preview，不可使用 stale fingerprint Apply', async () => {
     const client = reviewClient();
     render(<LineIdentityReviewWorkbench client={client} />);
-    await screen.findByText('待審月嫂甲');
+    await screen.findByText('未設定 待審月嫂甲');
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: /審核 #71/ });
     const reason = screen.getByRole('textbox', { name: '審核原因' });
@@ -169,7 +169,7 @@ describe('LINE 身分人工審核工作台', () => {
     ));
     render(<LineIdentityReviewWorkbench client={client} />);
 
-    await screen.findByText('待審月嫂甲');
+    await screen.findByText('未設定 待審月嫂甲');
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: /審核 #71/ });
     fireEvent.change(screen.getByRole('textbox', { name: '審核原因' }), {

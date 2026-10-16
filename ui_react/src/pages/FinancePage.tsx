@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
  * Description: 呈現Finance查詢與受控銀行交易明細 Upload、Preview、durable Apply、terminal receipt 工作區。
@@ -8,7 +9,7 @@ import './FinancePage.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptOrderSummaryPage } from '../adapters/orders/order_summary_adapter';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { adaptStaffDirectoryPage } from '../adapters/staff/staff_directory_adapter';
+import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_query_adapter';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
@@ -86,6 +87,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 }
 
 export const FinancePage: React.FC = () => {
+  const staffIdentity = useStaffIdentityLabels();
   const [entry] = useState(() => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
@@ -216,7 +218,7 @@ export const FinancePage: React.FC = () => {
       )
       .then((page) => {
         if (!current('staff', request.sequence, request.controller)) return;
-        const adapted = adaptStaffDirectoryPage(page).items.map((item) => ({ id: item.id, label: item.displayName }));
+        const adapted = adaptStaffDirectoryPage(page).items.sort(compareStaffUnionNumbers).map((item) => ({ id: item.id, label: staffDisplayLabel(item.unionNo, item.displayName) }));
         setStaff(adapted);
         setSelectedStaff((value) => value !== null && adapted.some((item) => item.id === value) ? value : adapted[0]?.id ?? null);
         if (adapted.length === 0) setPayables({ kind: 'empty' });
@@ -433,7 +435,7 @@ export const FinancePage: React.FC = () => {
                       <thead><tr><th>月嫂</th><th>應付</th><th>待付</th><th>應付日期</th></tr></thead>
                       <tbody>{caseStaffPayables.data.map((item, index) => {
                         return <tr key={item.obligation_identity ?? `${item.case_no}:${item.staff_id ?? 'unknown'}:${index}`}>
-                          <td>{item.recipient_name ?? (item.staff_id === null ? '月嫂尚未確認' : `Staff #${item.staff_id}`)}</td>
+                          <td>{staffIdentity.label(item.staff_id, item.recipient_name)}</td>
                           <td>{item.amount_due_ntd === null ? '未確認' : `NT$ ${item.amount_due_ntd.toLocaleString()}`}</td>
                           <td>{item.balance_ntd === null ? '未確認' : `NT$ ${item.balance_ntd.toLocaleString()}`}</td>
                           <td>{item.effective_due_date ?? item.order_due_date ?? '未確認'}</td>

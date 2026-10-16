@@ -48,7 +48,8 @@ class CanonicalStore:
             assert "c.service_type" in sql
             self.rows = [deepcopy(self.order)]
         elif "FROM staff s" in sql:
-            self.rows = [{"id": 3, "name": "測試月嫂"}]
+            assert "s.union_no" in sql
+            self.rows = [{"id": 3, "name": "測試月嫂", "union_no": "A003"}]
         elif "FROM staff_matching_preference_values" in sql:
             assert "d.preference_key NOT IN ('preferred_service_days','daily_service_hours')" in sql
             # An upstream port retaining conflicting legacy facts cannot override
@@ -102,6 +103,7 @@ def test_roster_save_changes_the_next_query_without_numeric_preference_sync(nume
     store.numeric_preferences = numeric_preferences
     before = deepcopy(store.tables)
     assert [item["staff_id"] for item in inquiry(store)] == [3]
+    assert inquiry(store)[0]["staff_union_no"] == "A003"
     assert store.tables == before  # Query remains read-only.
 
     writer = MySqlStaffCasePreferenceManualRepository(store)

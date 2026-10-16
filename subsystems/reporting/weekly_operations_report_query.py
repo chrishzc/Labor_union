@@ -73,6 +73,7 @@ class WeeklyServiceFact:
     order_status: str
     assignment_status: str
     weekly_rest_days: list[int] | None = None
+    staff_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,7 @@ class SubsidyFact:
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
+    staff_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +204,7 @@ class WeeklySubsidyRow:
     claim_period_label: str = ""
     reconciliation_status: str = "結案"
     notes: str = ""
+    staff_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +235,7 @@ class WeeklyServiceRow:
     rest_days_count: int = 0
     special_rest: str = ""
     is_closed: str = ""
+    staff_union_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,6 +581,7 @@ class WeeklyOperationsReportQuery:
             case_no=fact.case_no,
             client_name=_canonical_name(fact.client_name),
             staff_name=_canonical_name(fact.staff_name),
+            staff_union_no=fact.staff_union_no,
             service_start_date=fact.service_start_date,
             service_end_date=fact.service_end_date,
             period_start_date=fact.week_start_date,
@@ -617,6 +622,7 @@ class WeeklyOperationsReportQuery:
                     unit_price_ntd=fact.unit_price_ntd,
                     employer_name=_canonical_name(fact.employer_name),
                     staff_name=_canonical_name(fact.staff_name),
+            staff_union_no=fact.staff_union_no,
                     identity_card=_canonical_identity_card(fact.identity_card),
                     address=str(fact.address or "").strip() or "—",
                     application_roc_year=fact.application_roc_year,

@@ -7,6 +7,7 @@ import { ServiceBeforeReplacementActions } from './ServiceBeforeReplacementActio
 import type { ServiceBeforeReplacementScenario } from '../api/orders/service_before_replacement_client';
 import { ClientRegistryReplacementCandidates } from './ClientRegistryReplacementCandidates';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
+import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 interface Props {
   caseNo: string;
@@ -73,7 +74,7 @@ export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommi
     {plan && (plan.assignments.length === 0 ? <p>尚未建立正式指派。</p> : <div className="registry-staff-segments">{plan.assignments.map((segment) => {
       const person = people[segment.staff_id];
       return <dl className="registry-information-fields" key={segment.assignment_id ?? `${segment.sequence}-${segment.staff_id}`} aria-label={`第 ${segment.sequence} 段服務月嫂`}>
-        <div><dt>月嫂姓名</dt><dd>{person?.name ?? `月嫂 #${segment.staff_id}`}</dd></div>
+        <div><dt>月嫂姓名</dt><dd>{person ? staffDisplayLabel(person.union_no, person.name ?? '姓名未設定') : '月嫂資料待確認'}</dd></div>
         <div><dt>公會編號</dt><dd>{person?.union_no ?? '未登錄'}</dd></div>
         <div><dt>服務期間</dt><dd>{segment.assigned_start_date} ～ {segment.assigned_end_date}</dd></div>
         <div><dt>正式服務天數</dt><dd>{segment.official_service_dates.length} 天</dd></div>
@@ -84,7 +85,7 @@ export function ClientRegistryServiceStaff({ caseNo, revision, disabled, onCommi
     <section className="registry-start-correction" aria-label="實際開始日更正">
       {!correctingStart && <button type="button" disabled={disabled || replacementState.busy || candidateState.busy || loading} onClick={() => setCorrectingStart(true)}>更正實際開始日</button>}
       {correctingStart && <><fieldset className="registry-terms-fieldset" disabled={disabled || replacementState.busy || candidateState.busy}>
-        <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad staffNames={Object.fromEntries(Object.entries(people).map(([id, person]) => [id, person.name ?? `月嫂 #${id}`]))} onEditStateChange={setStartState} onObserved={operation => {
+        <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad staffNames={Object.fromEntries(Object.entries(people).map(([id, person]) => [id, staffDisplayLabel(person.union_no, person.name ?? '姓名未設定')]))} onEditStateChange={setStartState} onObserved={operation => {
           setRecalculateDates(operation === 'date_only');
           setStartNotice(operation === 'reschedule' ? '實際開始日與各段排班已一併更新，請前往服務安排核對調整結果。' : '實際開始日已儲存，請前往服務安排重新確認日期表。');
           setRetry(value => value + 1); void onCommitted();

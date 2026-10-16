@@ -21,6 +21,7 @@
 - display adapter: `ui_react/src/adapters/line_order_groups/line_order_group_query_adapter.ts`
 
 ## Contracts
+- 管理端成員與可唯一辨識的成員事件，沿同一 current Staff join 額外投影 nullable 公會編號；只格式化月嫂姓名，客戶、未辨識對象及群組／事件順序保持原契約。
 - additive `/api/v1/line/order-groups/workspace/numbered`, `/workspace/{case_no}`, `/workspace/{case_no}/events/numbered`；舊 Query 不改義。
 - Query 固定 0 commit／receipt／outbox／provider call，不輸出群組 ID、LINE user ID、actor ID、邀請網址或指紋。
 - 成員為 Orders 目前客戶與指派月嫂；canonical role binding 與 owner projection 不一致時標未知。加入狀況只使用目前群組綁定版本之後的 membership 事件，不沿用舊群組的 joined 投影。

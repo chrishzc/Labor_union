@@ -1,3 +1,5 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
+import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { sessionClient } from '../api/auth/session_client';
@@ -20,7 +22,7 @@ type QueryState =
 
 type StaffChoicesState =
   | { status: 'idle' | 'loading' }
-  | { status: 'ready'; caseNo: string; filterKey: string; periodStart: string; periodEnd: string; staff: readonly { id: number; name: string }[] }
+  | { status: 'ready'; caseNo: string; filterKey: string; periodStart: string; periodEnd: string; staff: readonly { id: number; name: string; unionNo?: string | null }[] }
   | { status: 'error'; message: string };
 
 const subscribeFormalPlanCreation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
@@ -60,6 +62,7 @@ function choicesErrorMessage(error: unknown): string {
 
 /** Present only complete combinations returned by the existing Scheduling owner. */
 export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObserved, onBusyChange }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [segmentCount, setSegmentCount] = useState<2 | 3 | 4>(2);
   const [selectedStaffIds, setSelectedStaffIds] = useState<number[]>([0, 0]);
   const [staffChoices, setStaffChoices] = useState<StaffChoicesState>({ status: 'idle' });
@@ -94,8 +97,8 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
         if (data.case_no !== caseNo) throw new Error('可選月嫂查詢案件識別不一致。');
         const staff = data.candidate_options
           .filter((candidate) => candidate.segment_index === 0)
-          .map((candidate) => ({ id: candidate.staff_id, name: candidate.staff_name }))
-          .sort((left, right) => left.id - right.id);
+          .map((candidate) => ({ id: candidate.staff_id, name: staffDisplayLabel(candidate.staff_union_no, candidate.staff_name), unionNo: candidate.staff_union_no }))
+          .sort(compareStaffUnionNumbers);
         setStaffChoices({ status: 'ready', caseNo, filterKey, periodStart: data.planned_start_date, periodEnd: data.planned_end_date, staff });
       })
       .catch((caught) => {
@@ -360,7 +363,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
                 <option value={0}>請選擇月嫂</option>
                 {staffChoices.status === 'ready' && staffChoices.staff.map((candidate) => (
                   <option key={candidate.id} value={candidate.id} disabled={selectedStaffIds.some((id, position) => position !== index && id === candidate.id)}>
-                    {candidate.name}（#{candidate.id}）
+                    {candidate.name}
                   </option>
                 ))}
               </select>
@@ -387,7 +390,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       {query.status === 'ready' && combinations.length === 0 && (
         <div role="status">
           <p>這 {segmentCount} 位月嫂目前沒有可完整銜接的方案，請調整人選、順序或媒合條件後再查詢。</p>
-          {query.data.conflicts.map((conflict, index) => <p key={index}>{conflict.work_date} · 月嫂 #{conflict.staff_id ?? '未指定'} · {conflict.reason_code}</p>)}
+          {query.data.conflicts.map((conflict, index) => <p key={index}>{conflict.work_date} · {conflict.staff_id == null ? '月嫂未指定' : staffChoices.status === 'ready' ? staffChoices.staff.find(staff => staff.id === conflict.staff_id)?.name ?? staffIdentity.label(conflict.staff_id) : staffIdentity.label(conflict.staff_id)} · {conflict.reason_code}</p>)}
         </div>
       )}
       {combinations.length > 0 && (
@@ -404,7 +407,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
                   {combination.map((segment) => (
                     <li key={segment.segment_index}>
                       <small>第 {segment.segment_index + 1} 段</small>
-                      <strong>{staffName(segment.staff_id)}（#{segment.staff_id}）</strong>
+                      <strong>{staffName(segment.staff_id)}</strong>
                       <span>{segment.start_date} ～ {segment.end_date}</span>
                     </li>
                   ))}

@@ -2,7 +2,7 @@
  * File: StaffPage.tsx
  * Description: 管理月嫂名冊、資格、接案偏好、不可服務期間與任職狀態。
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
 import { StaffRegistryEditor } from '../components/StaffRegistryEditor';
@@ -43,6 +43,8 @@ import { staffProfileClient } from '../api/staff_profile/staff_profile_client';
 import { StaffQualificationMasterError } from '../api/staff/qualification_master_errors';
 import {
   adaptStaffDirectoryPage,
+  compareStaffUnionNumbers,
+  staffDisplayLabel,
   type StaffDirectoryCardViewModel,
 } from '../adapters/staff/staff_directory_adapter';
 import {
@@ -191,6 +193,7 @@ export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCa
 }
 
 export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean }) {
+  const saveGuidanceId = useId();
   const [snapshot, setSnapshot] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [draft, setDraft] = useState<StaffCasePreferenceRelations>(() => EMPTY_MANUAL_RELATIONS);
   const [preview, setPreview] = useState<StaffCasePreferenceManualSnapshot | null>(null);
@@ -330,10 +333,11 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       </div>)}
     </div>}
     {editing && <label className="staff-op-field">變更原因<input aria-label="六大接案能力變更原因" disabled={locked} value={reason} onChange={(event) => setReason(event.target.value)} /></label>}
+    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : phase !== 'preview_ready' || !preview?.preview_fingerprint ? '尚未預覽：請先按「預覽變更」。' : !reason.trim() ? '預覽完成：請填寫「變更原因」後確認儲存。' : '預覽與異動原因已完成，可以按「確認儲存」。'}</p>}
     <div className="staff-op-actions">
       {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
       {editing && <button type="button" className="staff-primary-btn" disabled={locked} onClick={() => void doPreview()}>預覽變更</button>}
-      {editing && <button type="button" className="staff-primary-btn" disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
+      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
       {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
     </div>
     {preview && <StaffCasePreferenceManualPreview preview={preview} />}
@@ -499,7 +503,8 @@ export const StaffPage: React.FC = () => {
     activeControllerRef.current = controller;
     setDirectory({ status: 'loading', items: [] });
     try {
-      const response = await staffDirectoryClient.queryPage(
+      const response = await loadAllStaffDirectoryPages(
+        staffDirectoryClient.queryPage.bind(staffDirectoryClient),
         { pageSize: 200, includeProfile: true },
         { signal: controller.signal }
       );
@@ -932,7 +937,7 @@ export const StaffPage: React.FC = () => {
     }
   };
 
-  const staffItems = directory.items;
+  const staffItems = useMemo(() => [...directory.items].sort(compareStaffUnionNumbers), [directory.items]);
   const eligibleEndPauseBlocks = availability.status === 'ready'
     ? availability.data.filter((block) => isEligibleEndPauseBlock(block, selectedStaffId))
     : [];
@@ -988,7 +993,7 @@ export const StaffPage: React.FC = () => {
         if (!matchId && !matchName && !matchPhone) return false;
       }
       return true;
-    });
+    }).sort(compareStaffUnionNumbers);
   }, [directorySearch, staffItems, searchQuery]);
 
   const renderAvailabilityWorkbench = () => (
@@ -1016,12 +1021,14 @@ export const StaffPage: React.FC = () => {
               <span role="columnheader">月嫂姓名</span><span role="columnheader">類別</span><span role="columnheader">不可服務區間</span><span role="columnheader">狀態／操作</span>
             </div>
             {availability.status === 'ready' && availability.data.length === 0 && <div className="staff-unavailability-row" role="row"><span role="cell">此範圍沒有不可服務紀錄。是否可派工仍需依案件日期、既有排班與資格條件查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">無可取消紀錄</span></div>}
-            {availability.status === 'ready' && availability.data.map((block) => (
+            {availability.status === 'ready' && availability.data.map((block) => {
+              const person = staffItems.find(staff => staff.id === block.staffId);
+              return (
               <div className="staff-unavailability-row" role="row" key={block.blockId}>
-                <span role="cell">#{block.staffId}</span><span role="cell">{block.kindLabel}</span><span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
+                <span role="cell">{person ? staffDisplayLabel(person.unionNo, person.displayName) : '月嫂資料待確認'}</span><span role="cell">{block.kindLabel}</span><span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
                 <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>預覽取消</button>{block.status === 'cancelled' && <small>此紀錄已取消，不可再次取消。</small>}</span>
               </div>
-            ))}
+            );})}
             {availability.status === 'idle' && <div className="staff-unavailability-row" role="row"><span role="cell">請先設定日期範圍並查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">查詢後顯示可用操作</span></div>}
             {availability.status === 'loading' && <div className="staff-unavailability-row" role="row"><span role="cell">正在查詢不可服務期間…</span><span role="cell">—</span><span role="cell">—</span><span role="cell">請稍候</span></div>}
           </div>
@@ -1170,7 +1177,7 @@ export const StaffPage: React.FC = () => {
               onChange={(event) => changeSelectedStaff(event.target.value)}
             >
               <option value="">請選擇服務人員</option>
-              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（公會編號：{staff.unionNo ?? '未設定'}）</option>)}
+              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>)}
             </select>
           </div>
           </details>
@@ -1329,7 +1336,7 @@ export const StaffPage: React.FC = () => {
       <Drawer
         isOpen={selectedStaff !== null}
         onClose={() => { if (!interactionLocked) setSelectedStaff(null); }}
-        title={`月嫂詳情 — ${selectedStaff?.displayName ?? ''}`}
+        title={`月嫂詳情 — ${selectedStaff ? staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName) : ''}`}
         size="wide"
         footer={
           <div className="staff-drawer-footer">
@@ -1350,7 +1357,7 @@ export const StaffPage: React.FC = () => {
                       <div className="staff-avatar" style={{ width: '44px', height: '44px', fontSize: '1.3rem', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffe4d6', borderRadius: '50%' }}>👩‍🍼</div>
                       <div>
                         <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#4a2818' }}>
-                          {selectedStaff.displayName} <span className="staff-id-badge">公會編號：{selectedStaff.unionNo ?? '未設定'}</span>
+                          <span className="staff-id-badge">公會編號：{selectedStaff.unionNo ?? '未設定'}</span> {selectedStaff.displayName}
                         </div>
                         <div style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '2px' }}>聯絡電話：{selectedStaff.displayPhone}</div>
                       </div>
@@ -1483,7 +1490,7 @@ export const StaffPage: React.FC = () => {
                       <li className="staff-holiday-item">
                         <div className="staff-item-left">
                           <span className="staff-item-date-badge">📅 {lifecycle.data.displayEffectiveAt} 起生效</span>
-                          <span className="staff-item-title">{selectedStaff.displayName}（#{selectedStaff.id}）目前任職狀態</span>
+                          <span className="staff-item-title">{staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName)}目前任職狀態</span>
                           <span className={`staff-item-tag ${lifecycle.data.state === 'retired' ? 'retired' : ''}`}>
                             {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役（暫停派工）' : '🟢 正常在職中'}
                           </span>

@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState } from 'react';
 import type {
   HistoricalArrangementPreviewView,
@@ -36,6 +37,7 @@ function explicitSegments(
 }
 
 export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, onBusyChange }: Props) {
+  const staffIdentity = useStaffIdentityLabels();
   const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<HistoricalArrangementPreviewView | null>(null);
   const [reason, setReason] = useState('依已確認服務日期建立歷史案件正式安排');
@@ -116,7 +118,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
     <h3>建立正式安排</h3>
     <p>服務日期已確認，但排班與費率快照尚未建立。請核對每位既定月嫂的連續服務日，再單獨建立正式安排。</p>
     <dl className="order-v2-business-summary" aria-label="待建立正式安排摘要">
-      <div><dt>既定月嫂</dt><dd>{dates.bound_staff.map((staff) => staff.staff_name).join('、')}</dd></div>
+      <div><dt>既定月嫂</dt><dd>{dates.bound_staff.map((staff) => staffIdentity.label(staff.staff_id, staff.staff_name)).join('、')}</dd></div>
       <div><dt>已確認服務期間</dt><dd>{dates.current_dates[0]} 至 {dates.current_dates.at(-1)}（{dates.current_dates.length} 天）</dd></div>
     </dl>
     {dates.bound_staff.length > 1 && <div role="group" aria-label="逐日指定月嫂">
@@ -131,7 +133,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
           }}
         >
           <option value="">請指定</option>
-          {dates.bound_staff.map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staff.staff_name}</option>)}
+          {[...dates.bound_staff].sort((a, b) => staffIdentity.compare(a.staff_id, b.staff_id)).map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staffIdentity.label(staff.staff_id, staff.staff_name)}</option>)}
         </select>
       </label>)}
     </div>}
@@ -139,7 +141,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
     {preview && <div>
       <p>預覽結果：</p>
       <ul>{preview.segments.map((segment) => <li key={segment.staff_id}>
-        {dates.bound_staff.find((staff) => staff.staff_id === segment.staff_id)?.staff_name ?? segment.staff_id}
+        {staffIdentity.label(segment.staff_id, dates.bound_staff.find((staff) => staff.staff_id === segment.staff_id)?.staff_name)}
         ：{segment.assigned_start_date} 至 {segment.assigned_end_date}，{segment.service_dates.length} 個服務日
       </li>)}</ul>
       <label>建立原因

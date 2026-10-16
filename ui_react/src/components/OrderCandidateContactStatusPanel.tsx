@@ -11,6 +11,7 @@ import {
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
+import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
@@ -33,8 +34,8 @@ type ContactStatusState =
 
 type CandidateContact = CandidateContactPool['candidates'][number];
 
-function CandidateInformationSend({ caseNo, candidateId, kind, onClose, onSubmit }: {
-  caseNo: string; candidateId: number; kind: 1 | 2; onClose: () => void;
+function CandidateInformationSend({ caseNo, candidateId, kind, recipientLabel, onClose, onSubmit }: {
+  caseNo: string; candidateId: number; kind: 1 | 2; recipientLabel: string; onClose: () => void;
   onSubmit: (command: CandidateInformationSendCommand) => void;
 }) {
   const [preview, setPreview] = useState<CandidateInformationPreview | null>(null);
@@ -62,7 +63,7 @@ function CandidateInformationSend({ caseNo, candidateId, kind, onClose, onSubmit
   return <section className="order-case-review-note" aria-label="寄送前確認">
     <h4>寄送訂單資訊－{kind}</h4>
     {status === 'loading' && <p role="status">正在讀取寄送內容…</p>}
-    {preview && <><p>收件月嫂：{preview.staff_name}；案件：{preview.case_no}</p><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{preview.text}</pre></>}
+    {preview && <><p>收件月嫂：{recipientLabel}；案件：{preview.case_no}</p><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{preview.text}</pre></>}
     {message && <p role={status === 'error' ? 'alert' : 'status'}>{message}</p>}
     <button type="button" disabled={status !== 'ready'} onClick={() => void send()}>確認寄送</button>
     <button type="button" onClick={onClose}>關閉</button>
@@ -477,7 +478,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
       {candidateInformationFlows.map((information) => {
         const { command } = information;
         const candidateName = state.status === 'ready'
-          ? state.data.candidates.find((candidate) => candidate.id === command.candidateId)?.staff_name
+          ? (() => { const candidate = state.data.candidates.find(value => value.id === command.candidateId); return candidate ? staffDisplayLabel(candidate.staff_union_no, candidate.staff_name) : undefined; })()
           : undefined;
         const deliveryLabel = `${candidateName ? `${candidateName}的` : ''}寄送資訊－${command.infoType}`;
         if (information.status === 'outcome_unknown') return <div key={command.eventKey} className="order-v2-notice blocked" role="alert">
@@ -509,7 +510,10 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
             <span>共 {state.data.candidates.length} 位人選</span>
           </div>
           <div className="order-candidate-cards" aria-label="候選聯絡正式狀態">
-            {state.data.candidates.map((candidate) => {
+            {[...state.data.candidates].sort((left, right) => compareStaffUnionNumbers(
+              { id: left.staff_id, unionNo: left.staff_union_no },
+              { id: right.staff_id, unionNo: right.staff_union_no },
+            )).map((candidate) => {
               const willingnessFlow = orderMutationFlowStore.getCandidateWillingness(caseNo, candidate.id);
               const willingnessProtected = willingnessFlow?.status === 'applying'
                 || willingnessFlow?.status === 'outcome_unknown'
@@ -518,7 +522,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
               const informationOne = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 1);
               const informationTwo = orderMutationFlowStore.getCandidateInformation(caseNo, candidate.id, 2);
               if (presentation === 'workbench') return <article className="order-candidate-card compact" key={candidate.id} id={`candidate-inquiry-${caseNo}-${candidate.id}`} tabIndex={-1}>
-                <div className="candidate-card-identity"><h4>{candidate.staff_name}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
+                <div className="candidate-card-identity"><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
                   <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
                 </div>
                 <dl className="order-candidate-delivery">{([1, 2, 3] as const).map(value => <div key={value}>
@@ -535,7 +539,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   <button type="button" aria-label={`手動記錄接案意願（${candidate.staff_name}）`} aria-expanded={responseTarget?.id === candidate.id}
                     aria-controls={`candidate-willingness-${caseNo}-${candidate.id}`} disabled={candidate.status !== 'active' || protectedOperation} onClick={() => {
                     if (responseTarget?.id === candidate.id) { setResponseTarget(null); return; }
-                    setResponseTarget({ id: candidate.id, name: candidate.staff_name });
+                    setResponseTarget({ id: candidate.id, name: staffDisplayLabel(candidate.staff_union_no, candidate.staff_name) });
                     setResponseChoice(candidate.willingness === 'pending' ? '' : candidate.willingness);
                     setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: drafts[candidate.id] ?? candidate.reason ?? '' }));
                     setMutationError(null);
@@ -568,7 +572,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
               </article>;
               return (
                 <article className="order-candidate-card" key={candidate.id}>
-                  <header><h4>{candidate.staff_name}</h4><span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : ({ pending: '待回覆', willing: '願意承接', unwilling: '不願承接' })[candidate.willingness]}</span></header>
+                  <header><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : ({ pending: '待回覆', willing: '願意承接', unwilling: '不願承接' })[candidate.willingness]}</span></header>
                   <p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
                   {candidate.reason && <p>回覆說明：{candidate.reason}</p>}
                   <dl className="order-candidate-delivery"><div><dt>訂單資訊－1</dt><dd>{deliveryStatus(candidate.information['1'])}</dd></div><div><dt>訂單資訊－2</dt><dd>{deliveryStatus(candidate.information['2'])}</dd></div></dl>
@@ -577,12 +581,12 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                     <button type="button" className="order-v2-open-drawer" disabled={candidate.status !== 'active' || sendPreview !== null || informationTwo !== undefined} onClick={() => setSendPreview({ candidateId: candidate.id, kind: 2 })}>寄送訂單資訊－2</button>
                   </div>
                   {sendPreview?.candidateId === candidate.id && <CandidateInformationSend
-                    key={`${caseNo}:${candidate.id}:${sendPreview.kind}`} caseNo={caseNo} candidateId={candidate.id} kind={sendPreview.kind}
+                    key={`${caseNo}:${candidate.id}:${sendPreview.kind}`} caseNo={caseNo} candidateId={candidate.id} kind={sendPreview.kind} recipientLabel={staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}
                     onClose={() => setSendPreview(null)} onSubmit={(command) => { void submitInformation(command); }} />}
                   <details open={focusWillingness || willingnessProtected || willingnessNotices[candidate.id] !== undefined}>
                     <summary>記錄電話或現場詢問結果</summary>
                     <label htmlFor={`candidate-${candidate.id}-willingness-reason`}>
-                      詢問結果備註（{candidate.staff_name}）
+                      詢問結果備註（{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}）
                     </label>
                     <input
                       id={`candidate-${candidate.id}-willingness-reason`}

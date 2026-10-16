@@ -66,6 +66,17 @@ function pool(
 }
 
 describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
+  it('uses canonical union numbers for candidate card labels and ordering', async () => {
+    const data = pool();
+    data.candidates[0].staff_union_no = 'A10';
+    data.candidates[1].staff_union_no = 'A2';
+    mocks.query.mockResolvedValue(data);
+    render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
+    await screen.findByText('A2 月嫂乙');
+    expect(Array.from(document.querySelectorAll('.order-candidate-card h4')).map(node => node.textContent))
+      .toEqual(['A2 月嫂乙', 'A10 月嫂甲']);
+    expect(mocks.recordWillingness).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.createCandidateWillingnessCommand.mockImplementation((caseNo, candidateId, willingness, reason) => ({
@@ -93,11 +104,11 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     // 候選清單在掛載後自動查詢。
 
     await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('CASE-CONTACT', { signal: expect.any(AbortSignal) }));
-    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
+    expect(await screen.findByText('未設定 月嫂甲')).toBeInTheDocument();
     expect(screen.getByText('願意承接')).toBeInTheDocument();
     expect(screen.getByText('已發送 · 2026-09-03T00:05:00Z')).toBeInTheDocument();
     expect(screen.getByText('發送未完成 · 2026-09-03T00:06:00Z')).toBeInTheDocument();
-    expect(screen.getByText('月嫂乙')).toBeInTheDocument();
+    expect(screen.getByText('未設定 月嫂乙')).toBeInTheDocument();
     expect(screen.getByText('已選定')).toBeInTheDocument();
     expect(screen.getByText('回覆說明：日期不合')).toBeInTheDocument();
     expect(screen.getAllByText('尚無紀錄')).toHaveLength(2);
@@ -113,10 +124,10 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
     // 候選清單在掛載後自動查詢。
-    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
+    expect(await screen.findByText('未設定 月嫂甲')).toBeInTheDocument();
     fireEvent.click(screen.getAllByText('記錄電話或現場詢問結果')[0]!);
 
-    fireEvent.change(screen.getByLabelText('詢問結果備註（月嫂甲）'), {
+    fireEvent.change(screen.getByLabelText('詢問結果備註（未設定 月嫂甲）'), {
       target: { value: '已電話確認但日期不合' },
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));
@@ -147,8 +158,8 @@ describe('待辦看板 Beta 第 3～4 階候選聯絡狀態', () => {
     render(<OrderCandidateContactStatusPanel caseNo="CASE-CONTACT" />);
 
     // 候選清單在掛載後自動查詢。
-    expect(await screen.findByText('月嫂甲')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('詢問結果備註（月嫂甲）'), {
+    expect(await screen.findByText('未設定 月嫂甲')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('詢問結果備註（未設定 月嫂甲）'), {
       target: { value: '日期不合' },
     });
     fireEvent.click(screen.getByRole('button', { name: '記錄 月嫂甲 無意願' }));

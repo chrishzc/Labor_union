@@ -9,6 +9,10 @@
 
 ## Implementation
 - primary:
+  - `subsystems/orders/summary_query.py`
+  - `infrastructure/mysql/order_summary_query_repository.py`
+  - `api/schemas/order_summary.py`
+  - `ui_react/src/adapters/orders/order_summary_adapter.ts`
   - `ui_react/src/adapters/orders/order_card_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/OrdersIntakeRepairCard.tsx`
@@ -27,6 +31,7 @@
 - outbound: `clients/client-profile/profile-change` — 案件處理組合 Client Profile 欄位修正面板，提供電話及服務方式等 current review 欄位的直接修正，保存後重讀 review；Orders 補件命令保持既有 writer。
 
 ## Contracts
+- 案件摘要保留純姓名 `staff_name`，另投影 `staff_display_label` 為 current Staff 公會編號及姓名；沿既有正式指派優先、歷史配對備援與分段順序，不以姓名查找人員；標籤改變參與 ETag。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — Orders root facts。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 管理端資訊層級與技術詳情邊界。
 

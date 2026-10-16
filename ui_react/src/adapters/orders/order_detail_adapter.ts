@@ -2,6 +2,7 @@
  * File: order_detail_adapter.ts
  * Description: 組合 Orders 四個 Drawer 的 typed facts，並呈現既有精算與取消預覽結果。
  */
+import { staffDisplayLabel } from '../staff/staff_directory_adapter';
 import type {
   ActualStart,
   AssignmentPlan,
@@ -228,7 +229,7 @@ export function adaptMatchingWorkbenchDrawer(params: {
     candidatePool: (candidateContactPool?.candidates ?? []).map((candidate) => ({
       candidateId: candidate.id,
       staffId: candidate.staff_id,
-      staffName: candidate.staff_name,
+      staffName: staffDisplayLabel(candidate.staff_union_no, candidate.staff_name),
       serviceStartDate: candidate.service_start_date,
       serviceEndDate: candidate.service_end_date,
       serviceRange: `${candidate.service_start_date} ~ ${candidate.service_end_date}`,

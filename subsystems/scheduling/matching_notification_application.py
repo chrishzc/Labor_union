@@ -179,6 +179,7 @@ class MatchingNotificationApplication:
             weekly_service_rows=tuple(
                 CustomerConfirmationWeeklyServicePreview(
                     serial_number=int(item["serial_number"]),
+                    staff_id=int(item["staff_id"]) if item.get("staff_id") is not None else None,
                     staff_name=str(item["staff_name"]),
                     week_start_date=str(item["week_start_date"]),
                     week_end_date=str(item["week_end_date"]),

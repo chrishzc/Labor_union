@@ -161,3 +161,13 @@ def test_request_rejects_invalid_page_size(page_size: int) -> None:
 def test_request_rejects_blank_search_text() -> None:
     with pytest.raises(ValueError):
         OrderSummaryQueryRequest(50, None, "   ")
+
+
+def test_staff_display_label_is_separate_from_name_and_participates_in_etag() -> None:
+    row = {**_row(), "staff_name": "同名月嫂", "staff_display_label": "A002 同名月嫂"}
+    request = OrderSummaryQueryRequest(page_size=10, after_case_no=None)
+    first = _service((row,)).query(request)
+    changed = _service(({**row, "staff_display_label": "A010 同名月嫂"},)).query(request)
+    assert first.items[0].staff_name == "同名月嫂"
+    assert first.items[0].staff_display_label == "A002 同名月嫂"
+    assert first.etag != changed.etag

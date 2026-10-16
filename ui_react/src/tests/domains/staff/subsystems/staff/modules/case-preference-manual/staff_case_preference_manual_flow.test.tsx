@@ -59,6 +59,7 @@ describe('manual preference editor contract', () => {
     expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
 
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '確認儲存' })).toHaveAccessibleDescription('尚未預覽：請先按「預覽變更」。');
     fireEvent.click(screen.getByRole('button', { name: '確認儲存' }));
     expect(apply).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
@@ -71,9 +72,11 @@ describe('manual preference editor contract', () => {
     await waitFor(() => expect(screen.getByText('預覽已完成，尚未寫入。')).toBeInTheDocument());
     const applyButton = screen.getByRole('button', { name: '確認儲存' });
     expect(applyButton).toBeDisabled();
+    expect(applyButton).toHaveAccessibleDescription('預覽完成：請填寫「變更原因」後確認儲存。');
 
     fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工修正' } });
     expect(applyButton).toBeEnabled();
+    expect(applyButton).toHaveAccessibleDescription('預覽與異動原因已完成，可以按「確認儲存」。');
     fireEvent.click(applyButton);
     await waitFor(() => expect(apply).toHaveBeenCalledWith(531, expect.objectContaining({
       expected_snapshot_fingerprint: snapshot.snapshot_fingerprint,

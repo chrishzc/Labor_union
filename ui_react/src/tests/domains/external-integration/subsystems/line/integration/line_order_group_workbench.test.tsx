@@ -36,7 +36,7 @@ describe('三方服務群組精簡工作區', () => {
     expect(screen.queryByRole('button', { name: /發送|綁定|解除/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
     const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText('測試月嫂');
+    await within(dialog).findByText('未設定 測試月嫂');
     expect(within(dialog).getByText('已離開')).toBeInTheDocument();
     expect(api.workspaceEvents).not.toHaveBeenCalled();
     expandHistory(); await waitFor(() => expect(api.workspaceEvents).toHaveBeenCalledTimes(1));
@@ -93,7 +93,7 @@ describe('三方服務群組精簡工作區', () => {
   it('preserves detail when the history fails and keeps separate history pagination', async () => {
     const api = client(); vi.mocked(api.workspaceEvents).mockRejectedValueOnce(new Error('provider raw detail')).mockResolvedValue({ items: [event], page: 1, page_size: 25, total: 26, total_pages: 2 });
     mount(api); await screen.findByText('CASE-1'); fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
-    await within(await screen.findByRole('dialog')).findByText('測試月嫂'); expandHistory();
+    await within(await screen.findByRole('dialog')).findByText('未設定 測試月嫂'); expandHistory();
     await screen.findByRole('button', { name: '重試歷程' });
     expect(screen.getByText('已離開')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試歷程' })); await screen.findByRole('button', { name: '下一頁群組事件' });

@@ -37,7 +37,7 @@ describe('StaffPage directory presentation', () => {
     expect(screen.getByRole('cell', { name: '09********' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: '大學' })).toBeInTheDocument();
     expect(screen.getByText('服務人員摘要 #12')).toBeInTheDocument();
-    expect(screen.getByText('目前已載入 2 位服務人員')).toBeInTheDocument();
+    expect(screen.getByText('目前已載入 3 位服務人員')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '🟢 在職中' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '🏖️ 請長假' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '⏸️ 暫停接案' })).not.toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('StaffPage directory presentation', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getAllByRole('button', { name: /查看 .* 的詳情/ })[0]);
 
-    const drawer = screen.getByText(/月嫂詳情 — 去敏人員甲/).closest('.drawer-container');
+    const drawer = screen.getByText(/月嫂詳情 — A001 去敏人員甲/).closest('.drawer-container');
     expect(drawer).not.toBeNull();
     expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
     expect(drawer).toHaveTextContent('聯絡電話：09********');
@@ -96,7 +96,7 @@ describe('StaffPage directory presentation', () => {
     fireEvent.change(selector, { target: { value: '12' } });
     expect(selector).toHaveValue('11');
     expect(within(drawer as HTMLElement).getByText('公會編號：A001')).toBeInTheDocument();
-    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });
 
   it('shows a clearable empty state when the loaded directory has no search match', async () => {
@@ -131,14 +131,14 @@ describe('StaffPage directory presentation', () => {
     await screen.findByRole('cell', { name: 'B002' });
     const row = screen.getByRole('row', { name: '開啟 去敏人員乙 的詳情' });
     fireEvent.keyDown(row, { key: 'Enter' });
-    expect(screen.getByText('月嫂詳情 — 去敏人員乙')).toBeInTheDocument();
+    expect(screen.getByText('月嫂詳情 — B002 去敏人員乙')).toBeInTheDocument();
     expect(screen.getByText('公會編號：B002')).toBeInTheDocument();
   });
 
   it('較舊搜尋回應不會覆蓋較新的查詢結果', async () => {
     let resolveStale: ((value: typeof STAFF_PAGE_TWO) => void) | undefined;
     vi.mocked(staffDirectoryClient.queryPage).mockReset()
-      .mockResolvedValueOnce(STAFF_PAGE_ONE)
+      .mockResolvedValueOnce({ ...STAFF_PAGE_ONE, next_cursor: null })
       .mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve; }))
       .mockResolvedValueOnce(STAFF_PAGE_ONE)
       .mockResolvedValueOnce(STAFF_PAGE_TWO);

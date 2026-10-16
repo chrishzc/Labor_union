@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import type { ActualStart } from '../api/orders/order_query_schemas';
 import { orderActualStartClient, type ActualStartPreview } from '../api/orders/order_actual_start_client';
 import { OrderMutationError } from '../api/orders/order_mutation_errors';
@@ -30,6 +31,7 @@ const actualStartErrorMessage = (caught: unknown, fallback: string) => {
 };
 
 export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates, autoLoad = false, staffNames = {}, onEditStateChange }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
@@ -300,7 +302,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
               <ol className="service-arrangement-correction-segments">
                 {preview.scheduling.assignments.map((assignment) => (
                   <li key={assignment.candidate_key}>
-                    {staffNames[assignment.staff_id] ?? `月嫂 #${assignment.staff_id}`}：服務期間 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
+                    {staffNames[assignment.staff_id] ?? staffIdentity.label(assignment.staff_id)}：服務期間 {assignment.assigned_start_date} 至 {assignment.assigned_end_date}；
                     服務日 {assignment.service_dates.join('、')}
                   </li>
                 ))}

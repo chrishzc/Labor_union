@@ -36,6 +36,7 @@ const CandidateContactSchema = z.strictObject({
   status: z.enum(['active', 'selected', 'withdrawn']),
   created_at: IsoDateTimeSchema,
   staff_name: z.string().min(1).max(100),
+  staff_union_no: z.string().max(50).nullable().optional(),
   willingness: z.enum(['pending', 'willing', 'unwilling']),
   reason: z.string().max(500).nullable(),
   latest_willingness_event_id: z.number().int().positive().nullable(),

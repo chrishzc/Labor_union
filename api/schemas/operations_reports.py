@@ -112,6 +112,7 @@ class WeeklyReportServiceRowView(_StrictModel):
     case_no: str
     client_name: str
     staff_name: str
+    staff_union_no: str | None = None
     service_start_date: date | None
     service_end_date: date | None
     period_start_date: date

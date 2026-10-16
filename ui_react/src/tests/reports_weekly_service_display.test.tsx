@@ -21,7 +21,7 @@ describe('ReportsPage service-hours display', () => {
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('王**')).toBeInTheDocument();
-    expect(screen.getByText('陳**')).toBeInTheDocument();
+    expect(screen.getByText('未設定 陳**')).toBeInTheDocument();
     expect(screen.getByText('40')).toBeInTheDocument();
     expect(screen.getByText('8-3')).toBeInTheDocument();
     expect(screen.getByText('2026/8/17')).toBeInTheDocument();
@@ -50,7 +50,7 @@ describe('ReportsPage service-hours display', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('已保留可得明細');
     expect(screen.getByText('5')).toBeInTheDocument();
-    expect(screen.getByText('陳**')).toBeInTheDocument();
+    expect(screen.getByText('未設定 陳**')).toBeInTheDocument();
   });
 
   it('營運報表有其他資料但沒有服務工時時明確顯示無資料', async () => {
@@ -129,8 +129,8 @@ describe('ReportsPage service-hours display', () => {
     expect(screen.getByText('8-4')).toHaveAttribute('rowspan', '1');
     const tables = screen.getByRole('region', { name: '服務工時資料，可左右捲動' }).querySelectorAll('table');
     expect(tables).toHaveLength(2);
-    expect(within(tables[0]).getByText('原月嫂')).toBeInTheDocument();
-    expect(within(tables[1]).getByText('代班月嫂')).toBeInTheDocument();
+    expect(within(tables[0]).getByText('未設定 原月嫂')).toBeInTheDocument();
+    expect(within(tables[1]).getByText('未設定 代班月嫂')).toBeInTheDocument();
     expect(within(tables[0]).getAllByRole('cell').at(-3)).toHaveTextContent('1');
     expect(within(tables[0]).getAllByRole('cell').at(-2)).toHaveTextContent('8');
     expect(within(tables[1]).getAllByRole('cell').at(-3)).toHaveTextContent('1');

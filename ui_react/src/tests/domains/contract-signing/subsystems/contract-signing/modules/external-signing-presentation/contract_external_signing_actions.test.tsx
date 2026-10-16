@@ -403,14 +403,14 @@ describe('ContractExternalSigningActions', () => {
 
   it('aborts a late unsigned-PDF download when the case is remounted', async () => {
     await assertLateUnsignedPdfAbortOnRemount(
-      '下載 PDF · 月嫂委任契約 · 月嫂41',
+      '下載 PDF · 月嫂委任契約 · 未設定 月嫂41',
       '115000291-unsigned.pdf',
     );
   });
 
   it('keeps the new case download when the prior case completes late', async () => {
     await assertNewUnsignedPdfSurvivesCaseSwitch(
-      '下載 PDF · 月嫂委任契約 · 月嫂41',
+      '下載 PDF · 月嫂委任契約 · 未設定 月嫂41',
       '115000291-unsigned.pdf',
       '115000292-unsigned.pdf',
     );
@@ -458,9 +458,9 @@ describe('ContractExternalSigningActions', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 31, expect.any(AbortSignal)));
-    fireEvent.click(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂42' }));
+    fireEvent.click(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂42' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 33, expect.any(AbortSignal)));
     fireEvent.click(screen.getByRole('button', { name: '下載 PDF · 客戶服務契約 · 測試客戶' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 32, expect.any(AbortSignal)));
@@ -500,7 +500,7 @@ describe('ContractExternalSigningActions', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
 
     await waitFor(() => expect(contractExternalSigningClient.prepareStaffUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001',
@@ -526,7 +526,7 @@ describe('ContractExternalSigningActions', () => {
       .mockResolvedValueOnce(query);
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
 
     await waitFor(() => expect(contractExternalSigningClient.prepareStaffUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001',
@@ -543,7 +543,7 @@ describe('ContractExternalSigningActions', () => {
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     expect(await screen.findByRole('button', { name: '下載 PDF · 客戶服務契約 · 測試客戶' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
 
     await waitFor(() => expect(contractExternalSigningClient.prepareStaffUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001',
@@ -577,10 +577,10 @@ describe('ContractExternalSigningActions', () => {
       });
 
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
 
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith('CASE-001', 31, expect.any(AbortSignal)));
-    expect(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂42' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂42' })).toBeEnabled();
   });
 
   it('regenerates an unsigned client PDF and keeps subsequent downloads on the new version', async () => {
@@ -684,12 +684,12 @@ describe('ContractExternalSigningActions', () => {
     const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     vi.stubGlobal('URL', { createObjectURL: vi.fn().mockReturnValue('blob:staff'), revokeObjectURL: vi.fn() });
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
     await waitFor(() => expect(contractExternalSigningClient.downloadUnsignedPdf).toHaveBeenCalledWith(
       'CASE-001', 31, expect.any(AbortSignal),
     ));
     expect(download).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂42' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂42' })).toBeEnabled();
     expect(contractExternalSigningClient.recordHandoff).not.toHaveBeenCalled();
   });
 
@@ -723,10 +723,10 @@ describe('ContractExternalSigningActions', () => {
       .mockResolvedValueOnce(preparing)
       .mockResolvedValueOnce({ ...preparing, staff_segments: [{ segment_id: 42, staff_id: 10 }] });
     const { rerender } = render(<ContractExternalSigningActions caseNo="CASE-001" revision={0} />);
-    await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' });
+    await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' });
     rerender(<ContractExternalSigningActions caseNo="CASE-001" revision={1} />);
-    expect(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂42' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂42' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' })).not.toBeInTheDocument();
     expect(contractExternalSigningClient.prepareStaffUnsignedPdf).not.toHaveBeenCalled();
   });
 
@@ -734,7 +734,7 @@ describe('ContractExternalSigningActions', () => {
     vi.mocked(contractExternalSigningClient.query).mockResolvedValue(preparing);
     vi.mocked(contractExternalSigningClient.prepareStaffUnsignedPdf).mockRejectedValueOnce(new ApiTimeoutError(10000));
     const { rerender } = render(<ContractExternalSigningActions caseNo="CASE-001" revision={0} />);
-    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 月嫂41' }));
+    fireEvent.click(await screen.findByRole('button', { name: '下載 PDF · 月嫂委任契約 · 未設定 月嫂41' }));
     await waitFor(() => expect(orderMutationFlowStore.getExternalSigningUnsignedPreparation('CASE-001')?.status).toBe('outcome_unknown'));
     const original = orderMutationFlowStore.getExternalSigningUnsignedPreparation('CASE-001')!.command;
     rerender(<ContractExternalSigningActions caseNo="CASE-001" revision={1} />);
@@ -955,7 +955,7 @@ describe('ContractExternalSigningActions', () => {
     fireEvent.click(within(client).getByRole('button', { name: '重新選擇檔案' }));
     expect(screen.getByRole('button', { name: '確認完成簽署' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeDisabled();
-    expect(screen.getByRole('article', { name: '月嫂委任契約簽回 月嫂41' })).toHaveTextContent('檢查通過');
+    expect(screen.getByRole('article', { name: '月嫂委任契約簽回 未設定 月嫂41' })).toHaveTextContent('檢查通過');
   });
 
   it('reconciles an outcome-unknown Apply by receipt identity without resubmitting', async () => {

@@ -12,6 +12,7 @@ import {
   type PageType,
 } from './components/MasterLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { StaffIdentityProvider } from './components/StaffIdentityProvider';
 import { LoginPage } from './pages/LoginPage';
 import { sessionClient } from './api/auth/session_client';
 import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
@@ -140,6 +141,7 @@ export const App: React.FC = () => {
         onSelectPage={handleSelectPage}
         onLogout={handleLogout}
       >
+        <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'historical-service-accounting', 'line-management'].includes(currentPage)}>
         {/* Operations Section */}
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page homeNavigationRequest={workbenchHomeRequest} />}
         {currentPage === 'scheduling' && <SchedulingPage />}
@@ -162,6 +164,7 @@ export const App: React.FC = () => {
         {/* Audit & System Section */}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'storage-management' && <StorageManagementPage />}
+        </StaffIdentityProvider>
       </MasterLayout>
     </ErrorBoundary>
   );

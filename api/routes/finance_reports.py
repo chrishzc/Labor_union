@@ -347,6 +347,7 @@ def _subsidy_report_row(row: dict[str, object]) -> GovernmentSubsidyReportRowVie
         unit_price_ntd=int(Decimal(row["單價"])),
         employer_name=_canonical_name(row.get("雇主")),
         staff_name=_canonical_name(row.get("服務人員")),
+        staff_union_no=row.get("公會編號"),
         identity_card=_canonical_identity_card(row.get("身分證字號")),
         address=_canonical_address(row.get("地址")),
     )

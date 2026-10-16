@@ -134,6 +134,7 @@ class CustomerConfirmationWeeklyServicePreview:
     service_hours_per_day: float | int
     weekly_work_days: int
     weekly_hours: float | int
+    staff_id: int | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.serial_number, "weekly service serial number")
@@ -277,12 +278,15 @@ class MatchingSegmentContact:
     willingness: CaregiverWillingness
     information_1_status: LineDeliveryStatus | None = None
     information_2_status: LineDeliveryStatus | None = None
+    staff_union_no: str | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.segment_id, "matching segment ID")
         require_positive_integer(self.segment_order, "matching segment order")
         require_positive_integer(self.staff_id, "matching staff ID")
         require_canonical_text(self.staff_name, "matching staff name", 100)
+        if self.staff_union_no is not None:
+            require_canonical_text(self.staff_union_no, "matching staff union number", 50)
 
 
 @dataclass(frozen=True, slots=True)

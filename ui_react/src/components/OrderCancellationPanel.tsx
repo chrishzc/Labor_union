@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
   type ServiceDay } from '../api/orders/order_cancellation_client';
@@ -12,6 +13,7 @@ const drafts = (days: ServiceDay[]): DayDraft[] => days.map((day) => ({ service_
 const subscribeCancellation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
 
 export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
   const [reason, setReason] = useState('');
@@ -285,7 +287,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
                     setDays((current) => current.map((item, row) => row === index ? { ...item, staff_id: event.target.value } : item)); invalidate();
                   }}>
                     <option value="">請選擇正式月嫂</option>
-                    {query.caregiver_options.map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staff.display_name}</option>)}
+                    {[...query.caregiver_options].sort((a, b) => staffIdentity.compare(a.staff_id, b.staff_id)).map((staff) => <option key={staff.staff_id} value={staff.staff_id}>{staffIdentity.label(staff.staff_id, staff.display_name)}</option>)}
                   </select>
                   <input aria-label={`取消實際服務日原因 ${index + 1}`} value={day.reason} maxLength={500} onChange={(event) => {
                     setDays((current) => current.map((item, row) => row === index ? { ...item, reason: event.target.value } : item)); invalidate();
@@ -308,7 +310,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
             {preview.client_finance_impact === null && <p>沒有客戶帳務需要調整。</p>}
             {preview.payroll_impact === null && <p>沒有月嫂薪資需要調整。</p>}
             {preview.client_finance_impact?.actions.map((action, index) => <p key={`client-${index}`}>客戶 {action.payment_stage}：{action.direction} NT$ {action.direction_amount_ntd}</p>)}
-            {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>月嫂 #{action.staff_id}：{action.direction} NT$ {action.amount.amount}</p>)}
+            {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{action.direction} NT$ {action.amount.amount}</p>)}
             {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
           <p>請核對以上服務日與帳務影響。確認後將{historicalRepair ? '保存實際服務事實' : '取消訂單'}。</p>

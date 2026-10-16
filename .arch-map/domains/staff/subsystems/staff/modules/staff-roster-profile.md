@@ -14,6 +14,7 @@
   - `api/schemas/staff_summary.py`
   - `ui_react/src/api/staff_directory/`
   - `ui_react/src/adapters/staff/staff_directory_adapter.ts`
+  - `ui_react/src/components/StaffIdentityProvider.tsx`
   - `subsystems/staff/profile_query.py`
   - `domains/staff/profile.py`
   - `subsystems/staff/profile_workflow.py`
@@ -39,6 +40,8 @@
 - entrypoint: `POST /api/v1/staff/{staff_id}/bank-accounts/{preview|apply}`
 
 ## Contracts
+- 名冊先循既有 bounded Staff id cursor 讀取全部頁面，再以公會編號自然升冪呈現；未設定排最後、相同比較以 id 穩定排序。`staff_directory_adapter.ts` 共用排序與「公會編號 姓名」顯示，排班與候選呈現借用此規則，不改 Staff identity 或 writer。
+- `StaffIdentityProvider` 在 authenticated 管理頁共用 bounded 摘要全頁讀取，只保留 id／姓名／公會編號，以 canonical id 提供標籤與選單排序；離頁中止讀取，錯誤可重讀，不以姓名比對或保存跨 session 快取。案件、財務、歷史帳務與 LINE 管理借用此唯讀 presentation，不改人員或段落命令。
 - 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
 - `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md`

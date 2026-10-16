@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { candidateContactPoolClient, type CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
 import { matchingCandidateWorkflowClient, defaultMatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
@@ -9,6 +10,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { CandidateInquiryDialog } from './CandidateInquiryDialog';
 import { OrderRecommendationReplacementPanel } from './OrderRecommendationReplacementPanel';
+import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import {
   orderMutationFlowStore,
   type FormalPlanCreationFlowState,
@@ -110,6 +112,7 @@ async function readCurrentPlan(caseNo: string, expectedPlanId?: number): Promise
 }
 
 export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelProps> = ({ caseNo, onObserved, onOpenServiceDates, revision = 0, onEditStateChange, initialCandidateId, includeMultiCaregiver = false, onOpenCandidates, openReplacementRequest = 0, assignmentExists = false }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [candidates, setCandidates] = useState<ReadState<CandidateContactPool>>({ status: 'idle' });
   const [active, setActive] = useState<ReadState<CurrentPlan | null>>({ status: 'loading' });
   const [busy, setBusy] = useState(false);
@@ -629,9 +632,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
         : profileStatusLabel(confirmationDeliveryStatus);
 
   const informationLabels = ['服務條件與費用', '照護與飲食需求', '每週服務說明'] as const;
-  const segmentName = (segmentId: number, staffId: number) => current?.contact.segments.find(segment => segment.segment_id === segmentId)?.staff_name
-    ?? (candidates.status === 'ready' ? candidates.data.candidates.find(candidate => candidate.staff_id === staffId)?.staff_name : undefined)
-    ?? `月嫂 #${staffId}`;
+  const segmentName = (segmentId: number, staffId: number) => {
+    const candidate = candidates.status === 'ready' ? candidates.data.candidates.find(value => value.staff_id === staffId) : undefined;
+    const segment = current?.contact.segments.find(value => value.segment_id === segmentId);
+    return staffDisplayLabel(segment?.staff_union_no ?? candidate?.staff_union_no, segment?.staff_name ?? candidate?.staff_name ?? '姓名未設定');
+  };
   const informationReady = confirmationPreview.status === 'ready' ? [confirmationPreview.data.order_information_1_ready, confirmationPreview.data.order_information_2_ready, confirmationPreview.data.weekly_service_ready] : [false, false, false];
 
   return (
@@ -642,8 +647,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
         <header className="formal-recommendation-summary"><div><h3>選定推薦月嫂</h3><p>只列出已願意承接的人選；選定後即可準備客戶確認資訊。</p></div><button type="button" disabled={protectedOperation || candidates.status === 'loading'} onClick={() => void loadCandidates()}>更新人選</button></header>
         {candidates.status === 'loading' && <p role="status">讀取候選人中…</p>}
         {candidates.status === 'error' && <div role="alert">{candidates.message}</div>}
-        {candidates.status === 'ready' && candidates.data.candidates.filter(candidate => candidate.status === 'active' && candidate.willingness === 'willing').map(candidate => <article className={`formal-recommendation-candidate${candidate.id === initialCandidateId ? ' highlighted' : ''}`} key={candidate.id}>
-          <div><strong>{candidate.staff_name}</strong>{candidate.id === initialCandidateId && <small>從詢問清單帶入的人選</small>}<span>{candidate.service_start_date} ～ {candidate.service_end_date}</span><span>已願意承接</span></div>
+        {candidates.status === 'ready' && candidates.data.candidates.filter(candidate => candidate.status === 'active' && candidate.willingness === 'willing').sort((left, right) => compareStaffUnionNumbers({ id: left.staff_id, unionNo: left.staff_union_no }, { id: right.staff_id, unionNo: right.staff_union_no })).map(candidate => <article className={`formal-recommendation-candidate${candidate.id === initialCandidateId ? ' highlighted' : ''}`} key={candidate.id}>
+          <div><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong>{candidate.id === initialCandidateId && <small>從詢問清單帶入的人選</small>}<span>{candidate.service_start_date} ～ {candidate.service_end_date}</span><span>已願意承接</span></div>
           <button className="formal-recommendation-primary" type="button" aria-label={`以 ${candidate.staff_name} 建立正式媒合方案`} disabled={protectedOperation || !canCreate} onClick={() => void createPlan(candidate)}>選定為推薦月嫂</button>
         </article>)}
         {candidates.status === 'ready' && !candidates.data.candidates.some(candidate => candidate.status === 'active' && candidate.willingness === 'willing') && <p>目前沒有已願意承接的候選月嫂，請先回到「尋找月嫂與詢問意願」完成詢問。</p>}
@@ -681,7 +686,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
             {confirmationPreview.status === 'loading' && <p role="status">正在檢查確認資訊…</p>}
             {confirmationPreview.status === 'error' && <div role="alert"><p>目前無法檢查確認資訊：{confirmationPreview.message}</p><button type="button" disabled={protectedOperation} onClick={() => setConfirmationPreviewGeneration(value => value + 1)}>重新檢查</button></div>}
             <div className="formal-recommendation-sheets">{informationLabels.map((label, index) => <article key={label}><strong>{label}</strong><small>{confirmationPreview.status === 'loading' ? '正在檢查' : informationReady[index] ? index === 2 && confirmationPreview.status === 'ready' ? `${confirmationPreview.data.weekly_service_row_count} 週已就緒` : '已就緒' : '尚未就緒'}</small><button type="button" aria-label={`查看${label}`} disabled={confirmationPreview.status !== 'ready'} onClick={() => setInformationTab(index as 0 | 1 | 2)}>查看</button></article>)}</div>
-            {confirmationPreview.status === 'ready' && confirmationPreview.data.caregiver_resumes.some(resume => !resume.ready) && <p className="formal-recommendation-hint">{confirmationPreview.data.caregiver_resumes.filter(resume => !resume.ready).map(resume => resume.staff_name).join('、')}履歷 PDF 未附；可先寄送確認資訊，履歷由工會另行提供。</p>}
+            {confirmationPreview.status === 'ready' && confirmationPreview.data.caregiver_resumes.some(resume => !resume.ready) && <p className="formal-recommendation-hint">{confirmationPreview.data.caregiver_resumes.filter(resume => !resume.ready).map(resume => staffIdentity.label(resume.staff_id, resume.staff_name)).join('、')}履歷 PDF 未附；可先寄送確認資訊，履歷由工會另行提供。</p>}
             {confirmationPreview.status === 'ready' && confirmationDeliveryStatus === null && confirmationPreview.data.blockers.length > 0 && <div className="formal-recommendation-blockers" role="alert"><strong>尚不能寄送</strong><ul>{confirmationPreview.data.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}
             {canCommunicate && current.contact.all_willing && current.contact.customer_profiles_status === null && <><button className="formal-recommendation-primary" type="button" disabled={protectedOperation || confirmationPreview.status !== 'ready' || !confirmationPreview.data.send_allowed} onClick={() => setSendConfirmationOpen(true)}>寄送確認資訊給客戶</button>{sendConfirmationOpen && <section className="formal-recommendation-inline-form" aria-label="確認寄送"><h4>確認寄送本次推薦資訊給客戶</h4><p>包含推薦人員、服務條件、照護需求與每週服務說明。</p><details><summary>調整寄送訊息</summary><label>確認資訊備註<textarea aria-label={`方案 ${current.plan.planId} 確認資訊備註`} value={resumeNote} maxLength={1000} disabled={protectedOperation} onChange={event => setResumeNote(event.target.value)} /></label></details><div className="formal-recommendation-actions"><button className="formal-recommendation-primary" type="button" disabled={protectedOperation || !resumeNote.trim()} onClick={() => void sendProfiles()}>確認寄送</button><button type="button" disabled={protectedOperation} onClick={() => setSendConfirmationOpen(false)}>取消寄送</button></div></section>}</>}
             {confirmationDeliveryStatus !== null && <p className="formal-recommendation-hint">{['pending', 'processing'].includes(confirmationDeliveryStatus) ? '已建立寄送工作，等待系統送出；尚不代表 LINE 已送達。' : `確認資訊狀態：${profileStatusLabel(confirmationDeliveryStatus)}。`}</p>}
@@ -691,7 +696,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           <footer className="formal-recommendation-footer"><small>本案推薦、寄送及客戶回覆狀態</small><button className="formal-recommendation-text-action" type="button" aria-label={`重新讀取方案 ${current.plan.planId} 確認資訊送達狀態`} disabled={protectedOperation} onClick={() => void reload()}>更新狀態</button></footer>
         </>}
       </div>}
-      {informationTab !== null && confirmationPreview.status === 'ready' && <CandidateInquiryDialog title="客戶確認資訊" wide onClose={() => setInformationTab(null)}><div className="formal-confirmation-dialog-body"><nav className="order-case-subnav" aria-label="確認資訊種類">{informationLabels.map((label, index) => <button type="button" aria-pressed={informationTab === index} key={label} onClick={() => setInformationTab(index as 0 | 1 | 2)}>{label}</button>)}</nav><h3>{informationLabels[informationTab]}</h3>{informationTab < 2 ? (informationTab === 0 ? confirmationPreview.data.order_information_1 : confirmationPreview.data.order_information_2).map(item => <article key={item.segment_id}><h4>{item.staff_name}</h4><pre>{item.text}</pre></article>) : <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>月嫂</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>{confirmationPreview.data.weekly_service_rows.map(item => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date} ～ {item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}</tbody></table></div>}</div></CandidateInquiryDialog>}
+      {informationTab !== null && confirmationPreview.status === 'ready' && <CandidateInquiryDialog title="客戶確認資訊" wide onClose={() => setInformationTab(null)}><div className="formal-confirmation-dialog-body"><nav className="order-case-subnav" aria-label="確認資訊種類">{informationLabels.map((label, index) => <button type="button" aria-pressed={informationTab === index} key={label} onClick={() => setInformationTab(index as 0 | 1 | 2)}>{label}</button>)}</nav><h3>{informationLabels[informationTab]}</h3>{informationTab < 2 ? (informationTab === 0 ? confirmationPreview.data.order_information_1 : confirmationPreview.data.order_information_2).map(item => <article key={item.segment_id}><h4>{staffIdentity.label(item.staff_id, item.staff_name)}</h4><pre>{item.text}</pre></article>) : <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>月嫂</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>{confirmationPreview.data.weekly_service_rows.map(item => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{staffIdentity.label(item.staff_id, item.staff_name)}</td><td>{item.week_start_date} ～ {item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}</tbody></table></div>}</div></CandidateInquiryDialog>}
 
       {includeMultiCaregiver && active.status === 'ready' && current === null && <details className="order-case-secondary-actions"><summary>多月嫂接續方案</summary>
         <p>指定接續人選並核對分段日期；這會建立正式推薦方案。</p><OrderMultiCaregiverPlanPanel caseNo={caseNo} filters={defaultMatchingFilterPolicy}

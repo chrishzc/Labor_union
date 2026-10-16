@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: OrderTermsMutationPanel.tsx
  * Description: 訂單條款預覽與套用面板，支援常用班次快捷與30分鐘時段下拉並自動計算時數。
@@ -177,6 +178,7 @@ function conflictMessage(error: unknown): string | null {
 }
 
 export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ caseNo, query, onObserved, onEditStateChange }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [draft, setDraft] = useState<OrderTermsDraft>(() => draftFromQuery(query));
   const [preview, setPreview] = useState<OrderTermsPreview | null>(null);
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
@@ -613,7 +615,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         </select></label>
         <button type="button" disabled={!serviceMode || !draftReady} onClick={() => void calculateReplacement()}>精算替代日期</button>
         {replacementDates && <p>替代服務日期（{replacementDates.length} 天）：{replacementDates.join('、')}</p>}
-        {(currentQuery.assignments ?? []).map((assignment) => <label key={assignment.assignment_id}>人員 {assignment.staff_id}（原 {assignment.service_days} 天）的新服務天數
+        {(currentQuery.assignments ?? []).map((assignment) => <label key={assignment.assignment_id}>{staffIdentity.label(assignment.staff_id)}（原 {assignment.service_days} 天）的新服務天數
           <input aria-label={`指派 ${assignment.assignment_id} 新服務天數`} type="number" min="1" value={allocations[assignment.assignment_id] ?? ''} onChange={(event) => { setAllocations((current) => ({ ...current, [assignment.assignment_id]: event.target.value })); setPreview(null); }} />
         </label>)}
         <p>依原指派順序分配上述日期，合計須等於新合約天數；不會自動分配。日期與條款將同時保存。</p>

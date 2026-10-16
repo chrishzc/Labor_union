@@ -71,7 +71,7 @@ describe('ReportsPage query-only presentation', () => {
       '序號', '市府訂單號碼', '補助資格', '服務開始', '服務結束', '補助時數', '補助天數',
       '服務天數', '補助款金額', '單價', '雇主', '服務人員', '身分證字號', '地址', '簽領',
     ]);
-    expect(within(quarterlyTable).getByText('陳**')).toBeInTheDocument();
+    expect(within(quarterlyTable).getByText('未設定 陳**')).toBeInTheDocument();
     expect(within(quarterlyTable).getByText('A*********')).toBeInTheDocument();
     const quarterlyExport = document.querySelector('[data-control-id="reports.export.quarterly-xlsx"]') as HTMLButtonElement;
     fireEvent.click(quarterlyExport);
@@ -85,7 +85,7 @@ describe('ReportsPage query-only presentation', () => {
       '服務天數', '補助款金額', '單價', '雇主', '服務人員',
     ]);
     expect(within(annualTable).queryByRole('columnheader', { name: '身分證字號' })).not.toBeInTheDocument();
-    expect(within(annualTable).getByText('陳**')).toBeInTheDocument();
+    expect(within(annualTable).getByText('未設定 陳**')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="reports.export.annual-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
   });

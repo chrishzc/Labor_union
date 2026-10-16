@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import type {
   ServiceDateConfirmationQueryView,
@@ -98,6 +99,7 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = (props) =
   : <OrderPreCompletionServiceDatesPanel {...props} />;
 
 const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
@@ -732,7 +734,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
           {queryView.bound_staff.length > 0 && (
             <div role="status" className="order-v2-inline-notice">
               <strong>既定服務人員：</strong>
-              {queryView.bound_staff.map((staff) => staff.staff_name).join('、')}
+              {queryView.bound_staff.map((staff) => staffIdentity.label(staff.staff_id, staff.staff_name)).join('、')}
               <span>。此歷史綁定已保留，不需重新挑選候選或再次推薦。</span>
             </div>
           )}

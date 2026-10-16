@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
@@ -62,6 +63,7 @@ export interface ClientRosterPageProps {
 }
 
 export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange, onReturnToCase, onOpenServiceArrangement }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
@@ -258,7 +260,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
         <td>{item.staff_payment_due_date === undefined ? '未載入' : item.staff_payment_due_date ?? '無值'}</td>
         <td>{item.staff_obligation_dates === undefined ? '未載入' : item.staff_obligation_dates.length ? item.staff_obligation_dates.map((entry) => (
           <div key={entry.obligation_identity} title={entry.obligation_identity}>
-            {entry.staff_name ?? `月嫂 #${entry.staff_id}`}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
+            {staffIdentity.label(entry.staff_id, entry.staff_name)}／{staffObligationLabels[entry.obligation_kind] ?? entry.obligation_kind}：{entry.due_date ?? '無值'}
           </div>
         )) : '無值'}</td>
         <td>{clientDueDates(item, 'subsidy_return')}</td>

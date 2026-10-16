@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import type { OrderWorkbenchScope } from '../api/orders/order_core_stage_projection_client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
@@ -139,6 +140,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   onObserved,
 }) => {
   const requestSequence = useRef(0);
+  const staffIdentity = useStaffIdentityLabels();
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [serviceDatesCalculationRevision, setServiceDatesCalculationRevision] = useState(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('recalculate') === '1' ? 1 : 0);
   const [factsRefreshing, setFactsRefreshing] = useState(true);
@@ -382,8 +384,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     : currentSummary ? currentSummary.serviceDays === null ? '待補服務天數' : `${currentSummary.serviceDays} 日` : summaryReadError;
   const assignedStaff = assignmentPlan.status === 'ready'
     ? assignmentPlan.data.assignments.length === 0 ? '尚未正式指派'
-      : detail.status === 'ready' && detail.data.staff_name ? detail.data.staff_name
-        : currentSummary?.assignedDoulaDisplay ?? `${assignmentPlan.data.assignments.length} 段正式指派`
+      : assignmentPlan.data.assignments.map(segment => staffIdentity.label(segment.staff_id, detail.status === 'ready' && (detail.data.staff_id === segment.staff_id || assignmentPlan.data.assignments.length === 1) ? detail.data.staff_name : undefined)).join('、')
     : assignmentPlan.status === 'loading' ? '讀取服務指派中…' : '正式指派暫時無法取得';
 
   const serviceDateWorkspace = <>
@@ -606,8 +607,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           {historicalEvidence.status === 'error' && <p role="alert">歷史服務資料暫時無法取得：{historicalEvidence.message}</p>}
           {historicalAccounting.status === 'error' && <p role="alert">歷史帳務資料暫時無法取得：{historicalAccounting.message}</p>}
           {historicalEvidence.status === 'ready' && <p>歷史服務期間：{evidencePeriod(historicalEvidence.data)}</p>}
-          {historicalEvidence.status === 'ready' && <p>歷史記載月嫂：{historicalEvidence.data.paired_staff.map((staff) => staff.staff_name).join('、') || '未登錄'}</p>}
-          {historicalAccounting.status === 'ready' && <p>歷史約定天數：{historicalAccounting.data.contracted_service_days} 日；月嫂：{historicalAccounting.data.assignments.map((item) => item.staff_name).join('、') || '未登錄'}</p>}
+          {historicalEvidence.status === 'ready' && <p>歷史記載月嫂：{historicalEvidence.data.paired_staff.map((staff) => staffIdentity.label(staff.staff_id, staff.staff_name)).join('、') || '未登錄'}</p>}
+          {historicalAccounting.status === 'ready' && <p>歷史約定天數：{historicalAccounting.data.contracted_service_days} 日；月嫂：{historicalAccounting.data.assignments.map((item) => staffIdentity.label(item.staff_id, item.staff_name)).join('、') || '未登錄'}</p>}
         </section>}
             {!completedService && <section className="order-v2-drawer-section service-arrangement-related-actions" aria-label="服務安排相關操作">
               {!terminalStatus && currentBranch !== 'cancelled' && (currentBranch === 'historical' || (assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0)) && <p>開始日有變動時，請先核對各段排班的調整結果。</p>}

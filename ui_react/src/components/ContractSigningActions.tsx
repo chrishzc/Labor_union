@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: ContractSigningActions.tsx
  * Description: 顯示契約寄送、簽回及人工簽約操作，保留已提交 receipt 並區分後續 readback 失敗。
@@ -69,6 +70,7 @@ function sentDocumentVersion(signing: ContractSigningStatus, scope: string, targ
 
 export function ContractSigningActions({ caseNo, signing, onCommitted }: ContractSigningActionsProps) {
   const intents = useRef(new Map<string, Intent>());
+  const staffIdentity = useStaffIdentityLabels();
   const [downloadUrl, setDownloadUrl] = useState('');
   const [staffFiles, setStaffFiles] = useState<Record<number, File | null>>({});
   const [clientFile, setClientFile] = useState<File | null>(null);
@@ -226,7 +228,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
             return (
               <article key={segment.segment_id} className="contract-signing-action-row">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong>分段 #{segment.segment_id}／月嫂 #{segment.staff_id}</strong>
+                  <strong>{staffIdentity.label(segment.staff_id)}／分段 #{segment.segment_id}</strong>
                   <span className={`contract-status-pill ${segment.signed_received ? 'success' : segment.sent ? 'pending' : 'pending'}`}>
                     {segment.signed_received ? '🟢 已簽回' : segment.sent ? '🟡 等待簽回' : '⚪ 尚未寄送'}
                   </span>
@@ -281,7 +283,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                   </div>
                 )}
                 {!segment.sent && !segment.signed_received && (
-                  <section className="contract-signing-manual-panel" aria-label={`月嫂 #${segment.staff_id} 人工簽約證據`}>
+                  <section className="contract-signing-manual-panel" aria-label={`${staffIdentity.label(segment.staff_id)} 人工簽約證據`}>
                     <h5>📝 人工簽約證據（不建立 LINE 寄送任務）</h5>
                     <p style={{ margin: 0, fontSize: '0.8rem', color: '#8b7169' }}>
                       僅在已取得實際簽約證據並由工會人工確認時使用；這不是任意修改狀態。

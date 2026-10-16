@@ -146,6 +146,7 @@ class CandidateContactEntryState:
     reason: str | None
     information: CandidateInformationState
     latest_willingness_event_id: int | None = None
+    staff_union_no: str | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.id, "candidate_id")
@@ -161,6 +162,8 @@ class CandidateContactEntryState:
         if not isinstance(self.created_at, datetime):
             raise TypeError("created_at_invalid")
         _required_text(self.staff_name, "staff_name", 100)
+        if self.staff_union_no is not None:
+            _required_text(self.staff_union_no, "staff_union_no", 50)
         if self.willingness not in {"pending", "willing", "unwilling"}:
             raise ValueError("willingness_invalid")
         if self.reason is not None:
@@ -397,7 +400,7 @@ def query_pool(
         if not isinstance(pool, Mapping):
             return CandidateContactPoolState(pool_id=None, case_no=case_no, candidates=())
         pool_id = _positive_int(pool["id"], "pool_id")
-        cursor.execute("SELECT e.id, e.staff_id, e.service_start_date, e.service_end_date, e.status, e.created_at, s.name AS staff_name FROM caregiver_candidate_contact_entries e JOIN staff s ON s.id=e.staff_id WHERE e.pool_id=%s AND e.active_marker=1 ORDER BY e.id" + lock_clause, (pool_id,))
+        cursor.execute("SELECT e.id, e.staff_id, e.service_start_date, e.service_end_date, e.status, e.created_at, s.name AS staff_name, s.union_no AS staff_union_no FROM caregiver_candidate_contact_entries e JOIN staff s ON s.id=e.staff_id WHERE e.pool_id=%s AND e.active_marker=1 ORDER BY e.id" + lock_clause, (pool_id,))
         entries = [dict(row) for row in cursor.fetchall() or []]
         cursor.execute(
             "SELECT event.id,event.candidate_id,event.event_type,event.event_key,event.actor,event.payload,event.occurred_at,"
@@ -455,6 +458,7 @@ def query_pool(
                     status=entry["status"],
                     created_at=created_at,
                     staff_name=entry["staff_name"],
+                    staff_union_no=entry.get("staff_union_no"),
                     willingness=willingness,
                     reason=reason,
                     information=information,

@@ -26,6 +26,7 @@ class GovernmentSubsidyReportRowView(_StrictModel):
     unit_price_ntd: int = Field(ge=0)
     employer_name: str
     staff_name: str
+    staff_union_no: str | None = None
     identity_card: str
     address: str
 

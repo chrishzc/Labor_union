@@ -172,15 +172,16 @@ describe('FinancePage query and guarded import presentation', () => {
       .mockResolvedValueOnce({ items: [orderItem], next_cursor: orderItem.case_no, etag: 'a'.repeat(64) })
       .mockResolvedValueOnce({ items: [{ ...orderItem, case_no: 'CASE-FIN-002', client_name: '第二頁客戶' }], next_cursor: null, etag: 'b'.repeat(64) });
     vi.mocked(staffDirectoryClient.queryPage)
-      .mockResolvedValueOnce({ items: [{ id: 11, name: '第一頁人員', phone: null, education: null }], next_cursor: 11 })
-      .mockResolvedValueOnce({ items: [{ id: 12, name: '第二頁人員', phone: null, education: null }], next_cursor: null });
+      .mockResolvedValueOnce({ items: [{ id: 11, union_no: 'A10', name: '第一頁人員', phone: null, education: null }], next_cursor: 11 })
+      .mockResolvedValueOnce({ items: [{ id: 12, union_no: 'A2', name: '第二頁人員', phone: null, education: null }], next_cursor: null });
 
     render(<FinancePage />);
     expect(await screen.findByRole('option', { name: /CASE-FIN-002｜第二頁客戶/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '付款' }));
     fireEvent.click(screen.getByRole('button', { name: '人員與歷史付款' }));
-    expect(await screen.findByRole('option', { name: '第二頁人員' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'A2 第二頁人員' })).toBeInTheDocument();
+    expect(Array.from((screen.getByRole('option', { name: 'A2 第二頁人員' }).parentElement as HTMLSelectElement).options).filter(option => option.value).map(option => option.textContent)).toEqual(['A2 第二頁人員', 'A10 第一頁人員']);
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
   });
 });

@@ -770,3 +770,19 @@ def test_weekly_metric_storage_preserves_null_zero_and_rejects_non_monday_key():
     else:
         raise AssertionError("non-Monday week start must be rejected")
     assert connection.commits == 1
+
+
+def test_weekly_staff_union_number_survives_typed_service_and_subsidy_views():
+    class NumberedFacts(_Facts):
+        def list_service_facts(self, start_date, end_date):
+            return [replace(row, staff_union_no="A002") for row in super().list_service_facts(start_date, end_date)]
+
+        def list_subsidy_facts(self, start_date, end_date):
+            facts = super().list_subsidy_facts(start_date, end_date)
+            return replace(facts, general=tuple(replace(row, staff_union_no="A010") for row in facts.general), subsidized=tuple(replace(row, staff_union_no="A010") for row in facts.subsidized))
+
+    report = WeeklyOperationsReportQuery(NumberedFacts(), lambda: datetime(2026, 8, 26, 12, tzinfo=TAIPEI_TIME_ZONE)).query(date(2026, 8, 20), date(2026, 8, 26))
+    view = operations_reports._weekly_report_view(report)
+    assert view.service_rows[0].staff_union_no == "A002"
+    assert view.subsidy_partitions[0].rows[0].staff_union_no == "A010"
+    assert view.service_rows[0].staff_name == "陳月嫂"

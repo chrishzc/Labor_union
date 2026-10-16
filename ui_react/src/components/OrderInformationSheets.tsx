@@ -1,3 +1,5 @@
+import { compareStaffUnionNumbers } from '../adapters/staff/staff_directory_adapter';
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useState } from 'react';
 import { queryOrderInformation, type OrderInformation } from '../api/orders/order_information_client';
 import type { AssignmentPlan } from '../api/orders/order_query_schemas';
@@ -123,6 +125,7 @@ export function CandidateInformationDocument({ kind, sections }: {
 export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, onOpenCandidates }: {
   caseNo: string; assignments: AssignmentPlan['assignments']; initialKind?: 1 | 2; onOpenCandidates?: () => void;
 }) {
+  const staffIdentity = useStaffIdentityLabels();
   const [kind, setKind] = useState<1 | 2 | 'weekly'>(initialKind);
   const [assignmentId, setAssignmentId] = useState<number | null>(null);
   const [result, setResult] = useState<OrderInformation | null>(null);
@@ -185,18 +188,18 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
     {targets.length > 1 && <label>預覽哪一段服務
       <select value={selectedId ?? ''} onChange={(event) => setAssignmentId(event.target.value ? Number(event.target.value) : null)}>
         <option value="">請選擇服務人員與區段</option>
-        {targets.map((item) => <option key={item.assignment_id} value={item.assignment_id!}>第 {item.sequence} 段 · 月嫂 {item.staff_id} · {item.assigned_start_date}～{item.assigned_end_date}</option>)}
+        {[...targets].sort((a, b) => staffIdentity.compare(a.staff_id, b.staff_id)).map((item) => <option key={item.assignment_id} value={item.assignment_id!}>第 {item.sequence} 段 · {staffIdentity.label(item.staff_id)} · {item.assigned_start_date}～{item.assigned_end_date}</option>)}
       </select>
     </label>}
     <p className="order-case-review-note">三份內容都可在寄送前預覽。訂單資訊－1使用契約約定的預計服務與付款日期。</p>
-    {!targets.length && candidates.length > 0 && <label>預覽收件月嫂<select value={selectedCandidateId ?? ''} onChange={(event) => setCandidateId(event.target.value ? Number(event.target.value) : null)}><option value="">請選擇月嫂</option>{candidates.map((item) => <option key={item.id} value={item.id}>{item.staff_name} · {item.service_start_date}～{item.service_end_date}</option>)}</select></label>}
+    {!targets.length && candidates.length > 0 && <label>預覽收件月嫂<select value={selectedCandidateId ?? ''} onChange={(event) => setCandidateId(event.target.value ? Number(event.target.value) : null)}><option value="">請選擇月嫂</option>{[...candidates].sort((a, b) => compareStaffUnionNumbers({ id: a.staff_id, unionNo: a.staff_union_no }, { id: b.staff_id, unionNo: b.staff_union_no })).map((item) => <option key={item.id} value={item.id}>{staffIdentity.label(item.staff_id, item.staff_name, item.staff_union_no)} · {item.service_start_date}～{item.service_end_date}</option>)}</select></label>}
     {selectedId === null && !candidatePreview && !weeklyPreview && !loading && <p role="status">{targets.length > 1 ? '請選擇服務區段以查閱本案資料。' : candidates.length ? '請選擇月嫂，查閱本次詢問內容。' : '請先在候選月嫂清單加入要詢問的人選，即可預覽完整資訊。'}</p>}
     {loading && <p role="status">正在讀取本案資訊…</p>}
     {error && <p role="alert">本案資訊暫時無法讀取；下方僅顯示欄位，不代表資料已完整。</p>}
     {result && result.warnings.length > 0 && <p role="status">部分資料尚未提供，已在欄位中標示；不影響目前資料的預覽。</p>}
     {result && !result.can_render && <p role="alert">模板或資料投影發生技術錯誤，目前無法完成預覽。</p>}
     {candidatePreview && kind !== 'weekly' && <article className="order-information-paper">
-      <header><small>給 {candidatePreview.staff_name}</small><h3>訂單資訊－{kind}</h3><p>{kind === 1 ? '依契約重點欄位排列' : '照護需求已依主題分組'}</p></header>
+      <header><small>給 {staffIdentity.label(candidates.find(item => item.id === selectedCandidateId)?.staff_id, candidatePreview.staff_name, candidates.find(item => item.id === selectedCandidateId)?.staff_union_no)}</small><h3>訂單資訊－{kind}</h3><p>{kind === 1 ? '依契約重點欄位排列' : '照護需求已依主題分組'}</p></header>
       {kind === 1 ? <ContractScreenshot sections={candidateSections(candidatePreview)} /> : <><InformationSections sections={candidateSections(candidatePreview)} /><IngredientsReference /></>}
     </article>}
     {targets.length > 0 && kind !== 'weekly' && <article className="order-information-paper">
@@ -211,7 +214,7 @@ export function OrderInformationSheets({ caseNo, assignments, initialKind = 1, o
       <p>約定服務 {weeklyPreview.required_service_days ?? '待確認'} 天；目前日期可提供 {weeklyPreview.projected_service_days} 天。</p>
       {weeklyPreview.warnings.map((warning) => <p role="status" key={warning}>{warning}</p>)}
       <div className="formal-recommendation-weekly-preview"><table><thead><tr><th>週次</th><th>服務人員</th><th>期間</th><th>工作日</th><th>時數</th></tr></thead><tbody>
-        {weeklyPreview.rows.map((item) => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{item.staff_name}</td><td>{item.week_start_date}～{item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}
+        {weeklyPreview.rows.map((item) => <tr key={item.serial_number}><td>第 {item.serial_number} 週</td><td>{staffIdentity.label(candidates.find(person => person.id === selectedCandidateId)?.staff_id, item.staff_name, candidates.find(person => person.id === selectedCandidateId)?.staff_union_no)}</td><td>{item.week_start_date}～{item.week_end_date}</td><td>{item.weekly_work_days} 日</td><td>{item.weekly_hours} 小時</td></tr>)}
       </tbody></table></div>
     </article>}
     <div className="order-case-action-row">{onOpenCandidates && kind !== 'weekly' && <button type="button" onClick={onOpenCandidates}>到候選月嫂清單寄送資訊－{kind}</button>}<span>從個別月嫂的寄送入口確認收件人與內容後，才會建立寄送任務。</span></div>

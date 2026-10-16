@@ -123,7 +123,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
         return cursor.fetchall() or []
 
     def _load_active_staff(self, cursor: Any) -> list[dict[str, Any]]:
-        cursor.execute("SELECT s.id,s.name FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.id")
+        cursor.execute("SELECT s.id,s.name,s.union_no FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.id")
         staff_rows = cursor.fetchall() or []
         by_id = {int(row["id"]): row for row in staff_rows}
         _attach_region_rows(cursor, by_id)

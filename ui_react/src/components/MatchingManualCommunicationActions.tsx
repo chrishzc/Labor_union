@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: MatchingManualCommunicationActions.tsx
  * Description: 以 Preview、確認與 Apply 留存媒合資訊及客戶履歷的人工送達證據。
@@ -35,6 +36,7 @@ export const CandidateManualInformationActions: React.FC<CandidateManualInformat
   disabledReason,
   onCommitted,
 }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [method, setMethod] = useState<ManualMatchingConfirmationMethod>('phone');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<ManualCandidateInformationPreview | null>(null);
@@ -113,7 +115,7 @@ export const CandidateManualInformationActions: React.FC<CandidateManualInformat
       </button>
       {preview && (
         <div style={{ display: 'grid', gap: '6px', fontSize: '0.78rem', color: '#57423b' }}>
-          <span>候選 Staff #{preview.staff_id}／目前聯繫狀態已核對</span>
+          <span>候選 {staffIdentity.label(preview.staff_id)}／目前聯繫狀態已核對</span>
           <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已核對候選人、資訊類型與實際確認依據</label>
           <button
             type="button"

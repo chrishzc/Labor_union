@@ -162,10 +162,10 @@ class MySqlLineOrderGroupBindingRepository:
         )
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT o.case_no,'customer' AS role,c.name,identity_binding.line_user_id "
+                "SELECT o.case_no,'customer' AS role,c.name,NULL AS staff_union_no,identity_binding.line_user_id "
                 "FROM orders o LEFT JOIN clients c ON c.id=o.client_id " + identity_customer +
                 f"WHERE o.case_no IN ({slots}) UNION ALL "
-                "SELECT assigned.case_no,'staff' AS role,s.name,identity_binding.line_user_id "
+                "SELECT assigned.case_no,'staff' AS role,s.name,s.union_no AS staff_union_no,identity_binding.line_user_id "
                 "FROM (SELECT a.case_no,a.staff_id FROM case_staff_assignments a "
                 f"WHERE a.case_no IN ({slots}) AND a.status IN ('planned','active') "
                 f"UNION SELECT o.case_no,o.staff_id FROM orders o WHERE o.case_no IN ({slots}) "
@@ -215,7 +215,7 @@ class MySqlLineOrderGroupBindingRepository:
                 state = "unknown" if not identity or row["bound_at_utc"] is None else {
                     "member_joined": "joined", "member_left": "left",
                 }.get(event, "pending")
-                members.append(LineOrderGroupParticipant(person["role"], person["name"], state))
+                members.append(LineOrderGroupParticipant(person["role"], person["name"], state, person.get("staff_union_no")))
             bound_at = _workspace_time(row["bound_at_utc"])
             invited_at = _workspace_time(row["last_invitation_at_utc"])
             if bound_at is None or invited_at is not None and invited_at < bound_at:
@@ -581,6 +581,7 @@ def _workspace_event(row, people) -> LineOrderGroupWorkspaceEvent:
     return LineOrderGroupWorkspaceEvent(
         str(row["event_key"]), str(row["case_no"]), str(row["event_type"]),
         aware_utc(row["occurred_at_utc"]), person["role"] if person else None, person["name"] if person else None,
+        person.get("staff_union_no") if person else None,
     )
 
 

@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
   officialServiceDateCorrectionClient,
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, onObserved, onBusyChange, view, onOpenArrangement, onOpenDates }) => {
+  const staffIdentity = useStaffIdentityLabels();
   const [facts, setFacts] = useState<OfficialDateQuery | null>(null);
   const [selections, setSelections] = useState<OfficialDateSelection[]>([]);
   const [preview, setPreview] = useState<OfficialDatePreview | null>(null);
@@ -137,7 +139,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
         setActiveAssignmentId(assignmentId);
         setMonth(selections.find(item => item.assignment_id === assignmentId)?.service_dates[0]?.slice(0, 7)
           ?? facts.assignments.find(item => item.assignment_id === assignmentId)!.service_dates[0].slice(0, 7));
-      }}>{facts.assignments.map((item, index) => <option key={item.assignment_id} value={item.assignment_id}>{item.staff_name || `月嫂 ${item.staff_id}`}（第 {index + 1} 段）</option>)}</select></label>}
+      }}>{facts.assignments.map((item, index) => ({ item, index })).sort((a, b) => staffIdentity.compare(a.item.staff_id, b.item.staff_id)).map(({ item, index }) => <option key={item.assignment_id} value={item.assignment_id}>{staffIdentity.label(item.staff_id, item.staff_name)}（第 {index + 1} 段）</option>)}</select></label>}
       <dl className="service-date-summary-strip" aria-label="此次選定服務日期摘要" aria-live="polite">
         <div><dt>服務開始</dt><dd>{activeDates[0] ?? '尚未選取'}</dd></div>
         <div><dt>最後服務日</dt><dd>{activeDates.at(-1) ?? '尚未選取'}</dd></div>
@@ -145,7 +147,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       </dl>
       {month && <OrderServiceDateCalendar month={month} onMonthChange={setMonth} selectedDates={activeDates}
         isDateDisabled={() => busy || blocked} onToggle={changeDate}
-        hint={`${activeAssignment?.staff_name ?? ''}：點選日期可取消或補選，需保留原本 ${activeAssignment?.service_dates.length ?? 0} 天。`} />}
+        hint={`${activeAssignment ? staffIdentity.label(activeAssignment.staff_id, activeAssignment.staff_name) : ''}：點選日期可取消或補選，需保留原本 ${activeAssignment?.service_dates.length ?? 0} 天。`} />}
       <div className="service-date-footer"><small>{countsValid ? '原紀錄會保留；預覽通過後仍需填寫更正原因並確認儲存。' : '每段服務天數必須與原紀錄相同，請在月曆取消或補選日期。'}</small>
         <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy || blocked || !countsValid} onClick={() => void createPreview()}>預覽更正</button>
       </div>
@@ -154,7 +156,7 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       <button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); }}>返回設定服務日期</button>
     </div>}
     {preview && !datesView && <>
-      {preview.proposed_assignments.map(item => <p key={item.assignment_id}>{facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_name}：{item.service_dates.join('、')}</p>)}
+      {preview.proposed_assignments.map(item => <p key={item.assignment_id}>{staffIdentity.label(facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_id, facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_name)}：{item.service_dates.join('、')}</p>)}
       <p>客戶與月嫂金額義務：維持原狀。</p>
       <label>更正原因<input value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>
       <div className="service-date-footer">

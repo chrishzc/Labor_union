@@ -16,6 +16,7 @@
 - primary: `ui_react/vite.config.ts`
 
 ## Contracts
+- 已登入的案件、客戶、財務、歷史服務帳務與 LINE 管理頁掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。
 - `document/架構重整/01_規格基線/25_Access_Control正式規格.md` — session/auth boundary。
 

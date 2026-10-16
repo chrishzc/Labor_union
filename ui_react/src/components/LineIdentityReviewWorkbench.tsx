@@ -1,3 +1,4 @@
+import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: LineIdentityReviewWorkbench.tsx
  * Description: 呈現 LINE 身分審核 typed Query／Preview／Apply／receipt／readback 工作台。
@@ -160,6 +161,7 @@ interface ReviewQueuePanelProps {
 }
 
 function ReviewQueuePanel(props: ReviewQueuePanelProps) {
+  const staffIdentity = useStaffIdentityLabels();
   const { summary, page, reviewType } = props;
   const totalPages = page.value ? Math.max(1, Math.ceil(page.value.total / page.value.pageSize)) : 1;
   const first = page.value && page.value.total > 0 ? ((page.value.page - 1) * page.value.pageSize) + 1 : 0;
@@ -201,7 +203,7 @@ function ReviewQueuePanel(props: ReviewQueuePanelProps) {
             <tbody>{page.value.items.map((item) => (
               <tr key={item.requestId}>
                 <td>#{item.requestId}</td><td>{item.reviewTypeLabel}</td>
-                <td>{item.displayName}<br /><small>{item.subjectTypeLabel}｜{item.subjectReference ?? '尚未連結'}</small></td>
+                <td>{item.subjectTypeLabel === '月嫂' && item.subjectReference ? staffIdentity.label(Number(item.subjectReference), item.displayName) : item.displayName}<br /><small>{item.subjectTypeLabel}｜{item.subjectReference ?? '尚未連結'}</small></td>
                 <td><code>{item.lineUserId}</code></td><td>{item.statusLabel}</td>
                 <td><button type="button" aria-label={`查看審核 #${item.requestId}`} onClick={() => props.onOpenDetail(item.requestId)}>查看審核明細</button></td>
               </tr>
@@ -238,6 +240,7 @@ interface ReviewDetailPanelProps {
 }
 
 function ReviewDetailPanel(props: ReviewDetailPanelProps) {
+  const staffIdentity = useStaffIdentityLabels();
   const { detail, preview, receipt } = props;
   if (detail.status === 'loading') return <div className="line-loading">正在載入審核明細…</div>;
   if (detail.status === 'error') return <div className="line-error" role="alert">{detail.error}</div>;
@@ -245,7 +248,7 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
   return (
     <div className="line-action-panel" aria-label="LINE 身分審核明細">
       <h4>審核 #{detail.value.requestId}｜{detail.value.reviewTypeLabel}</h4>
-      <p>{detail.value.displayName}｜{detail.value.subjectTypeLabel}｜<code>{detail.value.lineUserId}</code></p>
+      <p>{detail.value.subjectTypeLabel === '月嫂' && detail.value.subjectReference ? staffIdentity.label(Number(detail.value.subjectReference), detail.value.displayName) : detail.value.displayName}｜{detail.value.subjectTypeLabel}｜<code>{detail.value.lineUserId}</code></p>
       <p>目前狀態：<strong>{detail.value.statusLabel}</strong></p>
       {detail.value.status !== 'pending' ? (
         <div className="line-scope-note" role="status">此審核已是 {detail.value.statusLabel}，不可再提交決定；可保留明細作為最新審核結果。</div>

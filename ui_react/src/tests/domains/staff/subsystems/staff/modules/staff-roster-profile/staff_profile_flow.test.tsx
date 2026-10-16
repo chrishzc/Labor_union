@@ -16,7 +16,7 @@ import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/sta
 
 describe('Staff roster profile flow', () => {
   beforeEach(() => {
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffProfileClient, 'query').mockResolvedValue(STAFF_PROFILE);
@@ -70,6 +70,46 @@ describe('Staff roster profile flow', () => {
     expect(document.querySelector('.staff-directory-count')?.textContent).toBe(initialCount);
     expect(screen.getByText('去敏人員甲')).toBeInTheDocument();
     expect(staffProfileClient.query).not.toHaveBeenCalled();
+  });
+
+  it('loads the complete roster before sorting union numbers, selectors and search', async () => {
+    const entry = (id: number, union_no: string | null) => ({ id, union_no, name: `排序測試${id}`, phone: null, education: null });
+    const firstPage = { items: [entry(11, 'A10'), entry(12, null), entry(13, 'A02'), entry(14, 'A2'), entry(15, 'A1')], next_cursor: 15 };
+    const secondPage = { items: [entry(16, '0003'), entry(17, 'A3'), entry(18, null)], next_cursor: null };
+    vi.mocked(staffDirectoryClient.queryPage).mockImplementation(async params => params?.afterId === 15 ? secondPage : firstPage);
+    render(<StaffPage />);
+    await screen.findByText('排序測試11');
+    const numbers = () => within(screen.getByRole('table', { name: '月嫂名冊清單' })).getAllByRole('row').slice(1)
+      .map(row => within(row).getAllByRole('cell')[0].textContent);
+    expect(numbers()).toEqual(['0003', 'A1', 'A02', 'A2', 'A3', 'A10', '未設定', '未設定']);
+    expect(Array.from((screen.getByLabelText('查詢服務人員') as HTMLSelectElement).options).slice(1).map(option => option.value))
+      .toEqual(['16', '15', '13', '14', '17', '11', '12', '18']);
+    expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
+    expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
+      { pageSize: 200, afterId: 15, includeProfile: true }, expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '排序測試' } });
+    await screen.findByText('搜尋結果 8 位服務人員');
+    expect(numbers()).toEqual(['0003', 'A1', 'A02', 'A2', 'A3', 'A10', '未設定', '未設定']);
+    expect(firstPage.items.map(item => item.id)).toEqual([11, 12, 13, 14, 15]);
+  });
+
+  it('reorders the roster after a profile readback changes the union number', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ items: [
+      { ...STAFF_PAGE_ONE.items[0], union_no: 'A10' },
+      { ...STAFF_PAGE_ONE.items[1], name: '另一位人員', union_no: 'A2' },
+    ], next_cursor: null });
+    vi.mocked(staffProfileClient.query).mockResolvedValue({ ...STAFF_PROFILE, union_no: 'A1' });
+    render(<StaffPage />);
+    await screen.findByText('去敏人員甲');
+    const rowIds = () => within(screen.getByRole('table', { name: '月嫂名冊清單' })).getAllByRole('row').slice(1)
+      .map(row => row.getAttribute('data-control-id'));
+    expect(rowIds()).toEqual(['staff.row.12', 'staff.row.11']);
+    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+    await screen.findByTestId('staff-profile-detail');
+    expect(rowIds()).toEqual(['staff.row.11', 'staff.row.12']);
+    expect(screen.getByRole('dialog')).toHaveTextContent('月嫂詳情');
+    expect(staffProfileClient.query).toHaveBeenCalledWith(11, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('shows complete identity, contact facts, bank accounts, and canonical certifications', async () => {

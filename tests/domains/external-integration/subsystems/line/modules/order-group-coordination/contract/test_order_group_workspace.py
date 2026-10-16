@@ -29,7 +29,7 @@ class Connection:
         self.db.executescript('''
           CREATE TABLE orders (case_no TEXT PRIMARY KEY, client_id INT, staff_id INT);
           CREATE TABLE clients (id INT PRIMARY KEY, name TEXT, line_user_id TEXT);
-          CREATE TABLE staff (id INT PRIMARY KEY, name TEXT, line_user_id TEXT);
+          CREATE TABLE staff (id INT PRIMARY KEY, name TEXT, line_user_id TEXT, union_no TEXT);
           CREATE TABLE case_staff_assignments (case_no TEXT, staff_id INT, status TEXT);
           CREATE TABLE line_identity_role_bindings (subject_type TEXT, subject_reference TEXT, binding_status TEXT, line_user_id TEXT);
           CREATE TABLE line_order_group_bindings (case_no TEXT PRIMARY KEY, group_id TEXT, binding_status TEXT, aggregate_version INT, updated_at_utc TEXT, last_invitation_at_utc TEXT);
@@ -65,7 +65,8 @@ def seed(connection, index=1, *, status='bound'):
     case = f'CASE-{index:03d}'
     db = connection.db
     db.execute('INSERT INTO clients VALUES (?,?,?)', (index, f'客戶{index}', f'U-c{index}'))
-    db.execute('INSERT INTO staff VALUES (?,?,?)', (index, f'月嫂{index}', f'U-s{index}'))
+    db.execute('INSERT INTO staff (id,name,line_user_id) VALUES (?,?,?)', (index, f'月嫂{index}', f'U-s{index}'))
+    db.execute('UPDATE staff SET union_no=? WHERE id=?', (f'A{index:03d}', index))
     db.execute('INSERT INTO orders VALUES (?,?,?)', (case,index,index))
     db.executemany('INSERT INTO line_identity_role_bindings VALUES (?,?,?,?)', [('customer',str(index),'bound',f'U-c{index}'),('staff',str(index),'bound',f'U-s{index}')])
     db.execute('INSERT INTO line_order_group_bindings VALUES (?,?,?,?,?,?)', (case,f'C-group-{index}',status,1,'2026-10-15 01:00:00',None))
@@ -91,6 +92,7 @@ def test_server_paging_search_and_attention_priority(store):
     second=repository.workspace_list(search=None,status=None,page=2,page_size=25)
     assert (first.total,first.total_pages,len(first.items),len(second.items))==(41,2,25,16)
     assert first.items[0].case_no=='CASE-041'
+    assert next(member for member in first.items[0].members if member.role == 'staff').staff_union_no == 'A041'
     assert {item.case_no for item in first.items}.isdisjoint(item.case_no for item in second.items)
     filtered=repository.workspace_list(search='041',status='attention',page=1,page_size=25)
     assert filtered.total==1 and filtered.items[0].customer_name=='客戶41'
@@ -106,6 +108,7 @@ def test_current_canonical_audience_and_membership_are_read_without_mutation(sto
     record=repository.workspace_get(case)
     assert [(member.role,member.name,member.membership_status) for member in record.members]==[('customer','客戶1','joined'),('staff','月嫂1','left')]
     assert record.latest_event.event_type=='member_left' and record.latest_event.participant_name=='月嫂1'
+    assert record.latest_event.participant_union_no == 'A001'
     assert record.last_invitation_at is None
     connection.db.execute("UPDATE clients SET line_user_id='U-spoof' WHERE id=1")
     assert repository.workspace_get(case).members[0].membership_status=='unknown'
@@ -126,7 +129,7 @@ def test_rebinding_never_reuses_old_group_membership_or_invitation(store):
 
 def test_current_assignments_include_multiple_staff_and_exclude_ended_assignment(store):
     connection,repository=store;case=seed(connection)
-    connection.db.executemany('INSERT INTO staff VALUES (?,?,?)',[(2,'支援月嫂','U-s2'),(3,'已結束月嫂','U-s3')])
+    connection.db.executemany('INSERT INTO staff (id,name,line_user_id) VALUES (?,?,?)',[(2,'支援月嫂','U-s2'),(3,'已結束月嫂','U-s3')])
     connection.db.executemany('INSERT INTO case_staff_assignments VALUES (?,?,?)',[(case,2,'planned'),(case,1,'active'),(case,3,'ended')])
     connection.db.execute("INSERT INTO line_identity_role_bindings VALUES ('staff','2','bound','U-s2')")
     members=repository.workspace_get(case).members

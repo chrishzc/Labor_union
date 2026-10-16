@@ -78,6 +78,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 case_no=str(row["case_no"]),
                 client_name=_optional_text(row.get("client_name")),
                 staff_name=_optional_text(row.get("staff_name")),
+                staff_union_no=_optional_text(row.get("staff_union_no")),
                 service_start_date=_optional_date(row.get("service_start_date")),
                 service_end_date=_optional_date(row.get("service_end_date")),
                 service_hours_per_day=_optional_half_hour(row.get("service_hours_per_day")),
@@ -121,6 +122,7 @@ def _subsidy_fact(row: dict[str, object]) -> SubsidyFact:
         unit_price_ntd=int(Decimal(row["單價"])),
         employer_name=_optional_text(row.get("雇主")),
         staff_name=_optional_text(row.get("服務人員")),
+        staff_union_no=_optional_text(row.get("公會編號")),
         identity_card=_optional_text(row.get("身分證字號")),
         address=_optional_text(row.get("地址")),
         application_roc_year=_case_application_roc_year(case_no),
@@ -233,7 +235,7 @@ ORDER BY c.created_at,c.id
 """
 
 _SERVICE_FACTS_SQL = """
-SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_name,
+SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_name,s.union_no AS staff_union_no,
        a.assigned_start_date AS service_start_date,
        a.assigned_end_date AS service_end_date,o.service_hours_per_day,
        COUNT(DISTINCT ss.work_date) AS weekly_work_days,
