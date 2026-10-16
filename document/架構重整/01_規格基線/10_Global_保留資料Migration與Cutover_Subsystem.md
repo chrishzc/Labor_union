@@ -449,6 +449,14 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   compact 結構與 system seed 通過 final gate、neighbor schema/rows 保留、失敗 journal、安全錯誤及實際 Windows
   `.bat` 互動。NAS 真正清空由 operator 在視窗確認執行；Agent 不以本次開發要求直接清空 NAS。
 
+2026-10-16 reset_database errno 2013 修正：重建連線的 read budget 改為 600 秒，避免沿用一般初始化
+30 秒而提早中斷慢速 NAS DDL；connect 仍 5 秒、write 仍 30 秒，readonly metadata/current adapter 不變。
+確認後、DROP 前只在該 session 設定 `lock_wait_timeout=15`；這是每次 metadata lock attempt 的等待上限，
+不是整條 DDL 的總耗時保證。不修改 global setting，不 retry 或強制中止其他連線。
+DROP／CREATE／USE 執行前後立即 flush operation／等待上限／耗時；失敗與 journal 保留目前 operation
+及最後確認完成項。2006／2013 代表目前 DDL 結果未知，不能宣稱沒刪除、已成功或自動接續；1205 顯示
+鎖等待原因及先停止 writer／結束交易再確認現況。驗收涵蓋本機真 metadata lock、慢回應 query 與既有完整 reset。
+
 ### 9.3 NAS 新庫結構精簡與退役清單（2026-10-15）
 
 最新人工 Authority：先釐清 18 張用途不明與 15 張舊異常機制表，再整理退役清單、精簡新庫 schema；

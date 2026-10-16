@@ -36,6 +36,7 @@
 - 預設非空或 partial 重跑停止；journal 不保存 SQL、credential 或 provider exception。
 - 非空時內建 readonly current 診斷；互動模式可選 R，完成含整庫 CREATE/DROP 權限的預檢後，顯示 host/port/database/server 並要求完整 RESET union_db 確認。
 - reset 在同一 connection/session lock 中確認及重新預檢，拒絕可見的跨庫 incoming FK；確認才 journal DROP/CREATE/USE，保留 charset/collation 後共用 compact executor。取消零寫入，失敗保留現場，不自動 retry。
+- reset connection read budget 600 秒（一般初始化 30 秒、connect 5 秒）；確認後只設 session lock_wait_timeout=15，逐操作 flush 進度與耗時。失敗列目前 operation／最後確認完成項；斷線不推定 DDL 成敗，不重試。
 - SQL 已執行完但 object/current 驗證失敗仍 blocked；安全錯誤列 phase、完成數與 MySQL errno，保留 journal，不自動重跑。
 - lock 僅協調本入口；不啟動服務，不轉換既有資料，不改 local reset／preserve-data policy。
 

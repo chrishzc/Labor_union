@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+from time import monotonic
 from uuid import uuid4
 
 from dotenv import dotenv_values
@@ -24,6 +25,8 @@ from scripts.verify_validation_schema_manifest import (
 
 ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_ROOT = ROOT / "scratch" / "nas_schema_initialization"
+RESET_READ_TIMEOUT = 600
+RESET_LOCK_WAIT_TIMEOUT = 15
 DATABASE_CONTROL = re.compile(r"^(?:USE\b|(?:CREATE|DROP|ALTER)\s+(?:DATABASE|SCHEMA)\b)", re.I)
 BASE_CONTROLS = {
     "DROP DATABASE IF EXISTS union_db",
@@ -49,6 +52,7 @@ def _mysql_reason(error):
         1050: "資料表已存在，初始化已停止，不會覆蓋",
         1064: "MySQL 無法解析這條指令，請確認伺服器版本相容性",
         1142: "帳號缺少執行這項操作的資料庫權限",
+        1205: "等待其他連線釋放鎖逾時；請停止使用此資料庫的服務並結束交易，再確認資料庫現況",
         1227: "帳號缺少 MySQL 要求的管理或物件權限",
         1290: "MySQL 伺服器設定禁止這項操作，請確認唯讀等限制",
         1419: "binary log 設定與帳號權限不允許建立觸發器",
@@ -316,7 +320,7 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
         raise InitializationBlocked("清空資料庫必須經互動確認，不接受直接重設")
     settings = dict(config)
     settings.update(autocommit=True, cursorclass=pymysql.cursors.DictCursor,
-                    connect_timeout=5, read_timeout=30, write_timeout=30)
+                    connect_timeout=5, read_timeout=RESET_READ_TIMEOUT if reset else 30, write_timeout=30)
     if not apply:
         settings["init_command"] = "SET SESSION TRANSACTION READ ONLY"
     try:
@@ -326,6 +330,8 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
     journal_path = None
     completed = 0
     phase = "preflight"
+    reset_operation = None
+    reset_completed = []
     try:
         with connection.cursor() as cursor:
             if apply:
@@ -369,17 +375,25 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
             _journal(journal_path, {"event": "started", **result})
             if reset:
                 phase = "reset_database"
+                # Bound metadata-lock waiting without cutting off slow NAS DDL.
+                cursor.execute(f"SET SESSION lock_wait_timeout={RESET_LOCK_WAIT_TIMEOUT}")
                 target = "`" + config["database"].replace("`", "``") + "`"
                 for operation, sql in (
                     ("drop_database", f"DROP DATABASE {target}"),
                     ("create_database", f"CREATE DATABASE {target} CHARACTER SET {defaults['charset']} COLLATE {defaults['collation']}"),
                     ("select_database", f"USE {target}"),
                 ):
+                    reset_operation = operation
                     evidence = {"operation": operation, "statement_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest()}
                     _journal(journal_path, {"event": "reset_prepared", **evidence})
+                    print(f"[Info] Reset operation: {operation}; waiting for MySQL response (up to {RESET_READ_TIMEOUT}s; each metadata lock wait up to {RESET_LOCK_WAIT_TIMEOUT}s). Do not close or rerun.", flush=True)
+                    started = monotonic()
                     cursor.execute(sql)
+                    reset_completed.append(operation)
                     _journal(journal_path, {"event": "reset_applied", **evidence})
+                    print(f"[Done] Reset operation: {operation}; elapsed: {monotonic() - started:.1f}s.", flush=True)
                 _require_empty(cursor, config["database"])
+                print(f"[Info] Database recreated. Applying {len(plan['steps'])} schema statements...", flush=True)
             phase = "statements"
             for step in plan["steps"]:
                 evidence = {
@@ -415,7 +429,17 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
             errno = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args and isinstance(error.args[0], int) else None
             _journal(journal_path, {"event": "failed_partial", "phase": phase,
                                    "completed_statements": completed, "mysql_errno": errno,
-                                   "error_type": type(error).__name__})
+                                   "error_type": type(error).__name__,
+                                   "reset_operation": reset_operation if phase == "reset_database" else None,
+                                   "reset_completed": reset_completed})
+            reset_detail = ""
+            if phase == "reset_database":
+                reset_detail = (
+                    f"Reset operation: {reset_operation or 'configure_lock_wait'}; "
+                    f"last confirmed: {reset_completed[-1] if reset_completed else 'none'}. "
+                )
+                if errno in {2006, 2013}:
+                    reset_detail += "連線已中斷，目前操作是否完成未知，MySQL 可能仍在執行；先確認 NAS 資料庫現況，勿立即重跑清空。 "
             summary = (
                 "All schema statements completed, but verification failed"
                 if completed == len(plan["steps"])
@@ -425,6 +449,7 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
                 f"{summary}; DDL may be committed. "
                 f"Phase: {phase}; completed: {completed}/{len(plan['steps'])}; "
                 f"MySQL errno: {errno if errno is not None else 'unavailable'}. "
+                f"{reset_detail}"
                 f"Reason: {_mysql_reason(error)}. "
                 f"No automatic cleanup or retry. Journal: {journal_path}"
             ) from None

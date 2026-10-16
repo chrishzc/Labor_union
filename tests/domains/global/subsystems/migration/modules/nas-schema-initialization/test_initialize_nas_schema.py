@@ -430,3 +430,48 @@ def test_reset_requires_full_database_confirmation(monkeypatch, capsys, answer, 
     monkeypatch.setattr("builtins.input", lambda _: answer)
     assert nas._confirm_reset({"host": "nas.test", "port": 3307, "server": "synthetic", "database": "union_db"}) is confirmed
     assert "nas.test:3307 / union_db" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("reset,expected_timeout", [(False, 30), (True, 600)])
+def test_slow_reset_connection_has_separate_read_budget(execution, monkeypatch, reset, expected_timeout):
+    connection = Connection()
+    connect = Mock(return_value=connection)
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    nas.initialize(*execution[:2], apply=True, reset=reset, confirm_reset=lambda _: True, receipt_root=execution[2])
+    assert connect.call_args.kwargs["read_timeout"] == expected_timeout
+    assert connect.call_args.kwargs["connect_timeout"] == 5
+    lock_settings = [sql for sql in connection.statements if sql.startswith("SET SESSION lock_wait_timeout")]
+    assert lock_settings == (["SET SESSION lock_wait_timeout=15"] if reset else [])
+
+
+@pytest.mark.parametrize("failed_operation,errno,previous", [
+    ("DROP DATABASE", 2013, "none"),
+    ("CREATE DATABASE", 2013, "drop_database"),
+    ("DROP DATABASE", 1205, "none"),
+])
+def test_reset_failure_identifies_operation_and_never_retries(execution, monkeypatch, capsys, failed_operation, errno, previous):
+    connection = Connection(occupied="tables")
+    original = connection.execute
+    attempts = []
+    def fail(sql, params=None):
+        attempts.append(sql)
+        if sql.startswith(failed_operation):
+            raise nas.pymysql.err.OperationalError(errno, "synthetic-private-detail")
+        original(sql, params)
+    monkeypatch.setattr(connection, "execute", fail)
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    with pytest.raises(nas.InitializationBlocked) as failure:
+        nas.initialize(*execution[:2], apply=True, reset=True, confirm_reset=lambda _: True, receipt_root=execution[2])
+    operation = "drop_database" if failed_operation == "DROP DATABASE" else "create_database"
+    message = str(failure.value)
+    assert f"Reset operation: {operation}" in message
+    assert f"last confirmed: {previous}" in message
+    assert ("是否完成未知" in message) is (errno == 2013)
+    assert "synthetic-private-detail" not in message
+    assert sum(sql.startswith(failed_operation) for sql in attempts) == 1
+    assert not any(sql.startswith("CREATE TABLE") for sql in attempts)
+    output = capsys.readouterr().out
+    assert f"[Info] Reset operation: {operation}" in output
+    assert f"[Done] Reset operation: {operation}" not in output
+    events = [json.loads(line) for line in next(execution[2].glob("*/journal.jsonl")).read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["reset_operation"] == operation
