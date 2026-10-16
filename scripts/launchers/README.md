@@ -9,7 +9,7 @@
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
-| `initialize_nas_schema.bat`／`.sh` | 初始化 NAS 空白 `union_db`；Windows 雙擊可確認初始化，或明確確認後清空測試庫重建。`--apply` 僅限空庫。 |
+| `initialize_nas_schema.bat`／`.sh` | 初始化 NAS 空白 `union_db`；Windows 雙擊可確認初始化、清空重建或建立缺少的測試庫。`--apply` 僅限既有空庫。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -87,7 +87,7 @@ macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，無�
 `--dry-run` 只驗設定與正式 schema 雜湊、不連線；明確指定 `--apply` 會再檢查空庫後初始化。
 Windows 指定參數執行時不詢問 Y/N，也不等待按鍵，保留原本的命令列用法。
 設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
-目標不是 `union_db`、指向 localhost 或資料庫不存在都停止。已有物件時預設停止，互動模式提供下述清空選項。
+目標不是 `union_db` 或指向 localhost 都停止。資料庫不存在或已有物件時預設停止，互動模式提供下述確認選項。
 初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
 NAS 新庫直接使用 `db/fresh_schema/labor_union_fresh_current.sql` 的最終結構，
 目前為 371 張表、1 個 view、377 個 trigger、758 條指令，不再重播 1,946 條歷史升級指令。
@@ -125,6 +125,12 @@ phase、完成數及安全原因；保留現場，不清空、不重跑，兩層
 失敗會列出目前操作與最後確認完成項。1205 表示鎖等待逾時；2013／2006 表示連線中斷，不能判定目前 DDL 是否完成，
 MySQL 可能仍在執行，先確認 NAS 現況，不要立即重跑清空。初始化指令完成數不包含這三個重建操作。
 命令列 `--apply` 仍只接受空庫；需要相同互動時可明確指定 `--interactive`。
+
+若上次刪庫已完成，但連線中斷而未建回資料庫，雙擊同一個 `.bat` 會先顯示「目標資料庫不存在」，
+接著在同一視窗完成伺服器與權限預檢，顯示目標，要求輸入完整 `CREATE union_db` 並 Enter。
+確認後會建立 utf8mb4／utf8mb4_unicode_ci 的 `union_db`，再建立精簡結構與必要系統資料；不用另外手動建庫。
+取消或輸入錯誤不寫入。若確認期間其他程序已建立該資料庫，會停止，不會覆蓋或接著初始化它。
+此分支沒有 DROP、不會自動重試；命令列 `--apply` 遇到缺庫仍停止，其他連線錯誤也不會進入建庫流程。
 
 Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
 不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。

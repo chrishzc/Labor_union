@@ -1,4 +1,4 @@
-"""Initialize NAS union_db, optionally confirming a destructive test database reset."""
+"""Initialize NAS union_db with explicit confirmation for creation or test resets."""
 
 from __future__ import annotations
 
@@ -43,12 +43,17 @@ class _NonEmptyDatabase(InitializationBlocked):
     """Reject initialization, then explain existing schema through read-only checks."""
 
 
+class _MissingDatabase(InitializationBlocked):
+    """Offer explicit creation only from the interactive entry point."""
+
+
 def _mysql_reason(error):
     number = error.args[0] if isinstance(error, pymysql.MySQLError) and error.args and isinstance(error.args[0], int) else None
     reasons = {
         1044: "帳號沒有目標資料庫的存取權限",
         1045: "MySQL 拒絕登入，請確認帳號、密碼及允許連線的來源",
         1049: "目標資料庫不存在，請先在 NAS 建立 union_db",
+        1007: "目標資料庫已被其他程序建立，已停止，不會覆蓋或繼續初始化",
         1050: "資料表已存在，初始化已停止，不會覆蓋",
         1064: "MySQL 無法解析這條指令，請確認伺服器版本相容性",
         1142: "帳號缺少執行這項操作的資料庫權限",
@@ -178,13 +183,23 @@ def _require_server_ready(cursor, database, plan, *, reset=False):
     return ".".join(version.groups())
 
 
-def _preflight_metadata(config):
+def _preflight_metadata(config, *, missing=False):
     from scripts.check_runtime_database import ReadOnlyRuntimeConfig, updater
     try:
         updater.migration._local_ordered_upgrade_entries()
     except Exception:
         raise InitializationBlocked("本機版本驗證檔案缺漏或不一致，請更新完整專案；尚未寫入資料庫") from None
-    updater.migration._schema_snapshot(ReadOnlyRuntimeConfig(config), config["database"])
+    readonly = ReadOnlyRuntimeConfig(config)
+    if missing:
+        # The canonical queries filter information_schema by target name. Use
+        # the same query oracle without selecting a database that is absent.
+        class ServerMetadataConfig:
+            def connect(self, database=None, *, timeout_seconds=None):
+                return readonly.connect(timeout_seconds=timeout_seconds)
+        readonly_config = ServerMetadataConfig()
+    else:
+        readonly_config = readonly
+    updater.migration._schema_snapshot(readonly_config, config["database"])
 
 
 def load_configuration(path: Path = ROOT / ".env") -> dict:
@@ -301,6 +316,14 @@ def _require_empty(cursor, database):
     return identity
 
 
+def _require_missing(cursor, database):
+    identity = _database_identity(cursor, None)
+    cursor.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name=%s", (database,))
+    if cursor.fetchone():
+        raise InitializationBlocked("目標資料庫已存在，建庫流程停止，不會覆蓋或初始化；請重新進入唯讀預檢")
+    return identity
+
+
 def _journal(path, event):
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -314,18 +337,25 @@ def _verify_current(config):
     updater.require_current_database(preview)
 
 
-def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, receipt_root=RECEIPT_ROOT):
+def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None,
+               create_missing=False, confirm_create=None, receipt_root=RECEIPT_ROOT):
     """The CLI validates NAS union_db; engine tests inject an owned lu_test_* target."""
     if reset and (not apply or confirm_reset is None):
         raise InitializationBlocked("清空資料庫必須經互動確認，不接受直接重設")
+    if create_missing and (reset or not apply or confirm_create is None):
+        raise InitializationBlocked("建立缺少的資料庫必須獨立經互動確認")
     settings = dict(config)
     settings.update(autocommit=True, cursorclass=pymysql.cursors.DictCursor,
-                    connect_timeout=5, read_timeout=RESET_READ_TIMEOUT if reset else 30, write_timeout=30)
+                    connect_timeout=5, read_timeout=RESET_READ_TIMEOUT if reset or create_missing else 30, write_timeout=30)
+    if create_missing:
+        settings.pop("database", None)
     if not apply:
         settings["init_command"] = "SET SESSION TRANSACTION READ ONLY"
     try:
         connection = pymysql.connect(**settings)
     except pymysql.MySQLError as error:
+        if error.args and error.args[0] == 1049:
+            raise _MissingDatabase("目標資料庫不存在 (MySQL errno: 1049)；互動模式可確認建立並初始化 union_db，尚未寫入資料庫") from None
         raise InitializationBlocked("連線預檢失敗：" + _mysql_reason(error)) from None
     journal_path = None
     completed = 0
@@ -338,10 +368,11 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
                 cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", ("nas_schema_init:" + config["database"],))
                 if cursor.fetchone().get("acquired") != 1:
                     raise InitializationBlocked("Another schema initializer holds the database lock")
-            check_target = _database_identity if reset else _require_empty
+            check_target = _require_missing if create_missing else (_database_identity if reset else _require_empty)
+            metadata_options = {"missing": True} if create_missing else {}
             identity = check_target(cursor, config["database"])
             version = _require_server_ready(cursor, config["database"], plan, reset=reset)
-            _preflight_metadata(config)
+            _preflight_metadata(config, **metadata_options)
             # Metadata checks can take time. Re-read the target immediately
             # before admitting writes, including after the Windows confirmation.
             identity = check_target(cursor, config["database"])
@@ -361,39 +392,50 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
                 defaults = cursor.fetchone()
                 if not defaults or any(not re.fullmatch(r"[a-zA-Z0-9_]+", str(defaults[key])) for key in ("charset", "collation")):
                     raise InitializationBlocked("無法確認目標資料庫的字元集與定序，尚未清空")
-                if not confirm_reset({**result, "host": config["host"], "port": config.get("port", 3306)}):
+            if reset or create_missing:
+                if create_missing:
+                    defaults = {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"}
+                confirm = confirm_create if create_missing else confirm_reset
+                if not confirm({**result, "host": config["host"], "port": config.get("port", 3306)}):
                     return {"status": "cancelled", "database": config["database"], "writes": "not_run"}
                 # Keep the same connection and initialization lock across confirmation.
-                # Recheck permissions/settings before the first destructive statement.
-                _require_server_ready(cursor, config["database"], plan, reset=True)
-                _preflight_metadata(config)
-                if _database_identity(cursor, config["database"]) != identity:
+                # Recheck permissions/settings before the first database DDL.
+                _require_server_ready(cursor, config["database"], plan, reset=reset)
+                _preflight_metadata(config, **metadata_options)
+                if check_target(cursor, config["database"]) != identity:
                     raise InitializationBlocked("確認後連線目標已改變，尚未清空")
             directory = Path(receipt_root) / uuid4().hex
             directory.mkdir(parents=True, exist_ok=False)
             journal_path = directory / "journal.jsonl"
             _journal(journal_path, {"event": "started", **result})
-            if reset:
-                phase = "reset_database"
+            if reset or create_missing:
+                phase = "reset_database" if reset else "create_database"
                 # Bound metadata-lock waiting without cutting off slow NAS DDL.
                 cursor.execute(f"SET SESSION lock_wait_timeout={RESET_LOCK_WAIT_TIMEOUT}")
                 target = "`" + config["database"].replace("`", "``") + "`"
-                for operation, sql in (
-                    ("drop_database", f"DROP DATABASE {target}"),
+                control_steps = [("drop_database", f"DROP DATABASE {target}")] if reset else []
+                control_steps.extend([
                     ("create_database", f"CREATE DATABASE {target} CHARACTER SET {defaults['charset']} COLLATE {defaults['collation']}"),
                     ("select_database", f"USE {target}"),
-                ):
+                ])
+                label = "Reset" if reset else "Create"
+                event_prefix = "reset" if reset else "create"
+                for operation, sql in control_steps:
                     reset_operation = operation
                     evidence = {"operation": operation, "statement_sha256": hashlib.sha256(sql.encode("utf-8")).hexdigest()}
-                    _journal(journal_path, {"event": "reset_prepared", **evidence})
-                    print(f"[Info] Reset operation: {operation}; waiting for MySQL response (up to {RESET_READ_TIMEOUT}s; each metadata lock wait up to {RESET_LOCK_WAIT_TIMEOUT}s). Do not close or rerun.", flush=True)
+                    _journal(journal_path, {"event": f"{event_prefix}_prepared", **evidence})
+                    print(f"[Info] {label} operation: {operation}; waiting for MySQL response (up to {RESET_READ_TIMEOUT}s; each metadata lock wait up to {RESET_LOCK_WAIT_TIMEOUT}s). Do not close or rerun.", flush=True)
                     started = monotonic()
                     cursor.execute(sql)
                     reset_completed.append(operation)
-                    _journal(journal_path, {"event": "reset_applied", **evidence})
-                    print(f"[Done] Reset operation: {operation}; elapsed: {monotonic() - started:.1f}s.", flush=True)
+                    _journal(journal_path, {"event": f"{event_prefix}_applied", **evidence})
+                    print(f"[Done] {label} operation: {operation}; elapsed: {monotonic() - started:.1f}s.", flush=True)
                 _require_empty(cursor, config["database"])
-                print(f"[Info] Database recreated. Applying {len(plan['steps'])} schema statements...", flush=True)
+                if create_missing:
+                    phase = "created_database_preflight"
+                    _preflight_metadata(config)
+                    _require_empty(cursor, config["database"])
+                print(f"[Info] Database ready. Applying {len(plan['steps'])} schema statements...", flush=True)
             phase = "statements"
             for step in plan["steps"]:
                 evidence = {
@@ -430,16 +472,16 @@ def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, re
             _journal(journal_path, {"event": "failed_partial", "phase": phase,
                                    "completed_statements": completed, "mysql_errno": errno,
                                    "error_type": type(error).__name__,
-                                   "reset_operation": reset_operation if phase == "reset_database" else None,
+                                   "reset_operation": reset_operation if phase in {"reset_database", "create_database"} else None,
                                    "reset_completed": reset_completed})
             reset_detail = ""
-            if phase == "reset_database":
+            if phase in {"reset_database", "create_database"}:
                 reset_detail = (
-                    f"Reset operation: {reset_operation or 'configure_lock_wait'}; "
+                    f"{'Reset' if reset else 'Create'} operation: {reset_operation or 'configure_lock_wait'}; "
                     f"last confirmed: {reset_completed[-1] if reset_completed else 'none'}. "
                 )
                 if errno in {2006, 2013}:
-                    reset_detail += "連線已中斷，目前操作是否完成未知，MySQL 可能仍在執行；先確認 NAS 資料庫現況，勿立即重跑清空。 "
+                    reset_detail += "連線已中斷，目前操作是否完成未知，MySQL 可能仍在執行；先確認 NAS 資料庫現況，勿立即重跑操作。 "
             summary = (
                 "All schema statements completed, but verification failed"
                 if completed == len(plan["steps"])
@@ -476,9 +518,19 @@ def _confirm_reset(target):
     return _answer(f"Type {expected} exactly to clear and reinitialize, or press Enter to cancel: ") == expected
 
 
+def _confirm_create(target):
+    print(f"\n[Info] Target: {target['host']}:{target['port']} / {target['database']} (server: {target['server']})")
+    print("The database is missing. This will CREATE it and initialize the complete schema and required system data.")
+    expected = "CREATE " + target["database"]
+    return _answer(f"Type {expected} exactly to create and initialize, or press Enter to cancel: ") == expected
+
+
 def _interactive_initialize(config, plan):
     try:
         preview = initialize(config, plan)
+    except _MissingDatabase as error:
+        print(str(error))
+        return initialize(config, plan, apply=True, create_missing=True, confirm_create=_confirm_create)
     except _NonEmptyDatabase as error:
         print(str(error))
         answer = _answer("Press R then Enter to reset this test database, or N then Enter to cancel: ")
@@ -497,7 +549,7 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="initialize the existing empty union_db")
     mode.add_argument("--dry-run", action="store_true", help="validate config and canonical SQL without connecting")
-    mode.add_argument("--interactive", action="store_true", help="confirm initialization or destructive test database reset")
+    mode.add_argument("--interactive", action="store_true", help="confirm initialization, missing database creation or test database reset")
     args = parser.parse_args(argv)
     try:
         config = load_configuration()

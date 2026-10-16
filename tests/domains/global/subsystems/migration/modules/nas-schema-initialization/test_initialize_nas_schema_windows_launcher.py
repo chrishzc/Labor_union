@@ -38,13 +38,15 @@ def launcher(tmp_path):
         '    with open(os.environ["NAS_LAUNCHER_CALLS"], "a", encoding="utf-8") as f:\n'
         '        f.write(json.dumps(value) + "\\n")\n'
         'record(sys.argv[1:])\n'
-        'def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None):\n'
-        '    if apply: record(["reset" if reset else "apply"])\n'
+        'def initialize(config, plan, *, apply=False, reset=False, confirm_reset=None, create_missing=False, confirm_create=None):\n'
+        '    if apply: record(["create" if create_missing else ("reset" if reset else "apply")])\n'
         '    code = int(os.environ["NAS_APPLY_EXIT" if apply else "NAS_PREFLIGHT_EXIT"])\n'
         '    if not apply and code == 2: raise nas._NonEmptyDatabase("Existing test database")\n'
+        '    if not apply and code == 3: raise nas._MissingDatabase("Missing test database")\n'
         '    if code: raise nas.InitializationBlocked("synthetic failure")\n'
         '    target = {"host": "nas.test", "port": 3307, "database": "union_db", "server": "synthetic"}\n'
         '    if reset and not confirm_reset(target): return {"status": "cancelled"}\n'
+        '    if create_missing and not confirm_create(target): return {"status": "cancelled"}\n'
         '    return {"status": "passed" if apply else "ready"}\n'
         'nas.initialize = initialize\n'
         'nas.load_configuration = lambda: {}\n'
@@ -65,6 +67,9 @@ def launcher(tmp_path):
     ("R\nY\n\n", 2, 0, [["--interactive"], ["reset"]], 0),
     ("R\n", 2, 0, [["--interactive"], ["reset"]], 0),
     ("N\n\n", 2, 0, [["--interactive"]], 0),
+    ("CREATE union_db\n\n", 3, 0, [["--interactive"], ["create"]], 0),
+    ("N\n\n", 3, 0, [["--interactive"], ["create"]], 0),
+    ("", 3, 0, [["--interactive"], ["create"]], 0),
 ])
 def test_double_click_flow(launcher, answer, preflight_exit, apply_exit, expected_calls, expected_exit):
     entry, calls = launcher
@@ -88,6 +93,9 @@ def test_double_click_flow(launcher, answer, preflight_exit, apply_exit, expecte
         assert "nas.test:3307 / union_db" in result.stdout
         assert "ALL tables" in result.stdout
         assert ("[Done]" in result.stdout) == ("RESET union_db" in answer)
+    if preflight_exit == 3:
+        assert "nas.test:3307 / union_db" in result.stdout
+        assert ("[Done]" in result.stdout) == ("CREATE union_db" in answer)
 
 
 @pytest.mark.parametrize("argument", ["--dry-run", "--apply", "--help"])

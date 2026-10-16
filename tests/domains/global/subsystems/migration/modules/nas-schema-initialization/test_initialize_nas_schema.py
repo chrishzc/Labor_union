@@ -101,13 +101,15 @@ def test_stale_compact_asset_is_rejected_before_connection(tmp_path, monkeypatch
 
 class Connection:
     def __init__(self, *, occupied=None, lock=1, fail_insert=False,
-                 version="8.0.46", read_only=0, engine="DEFAULT", grants=None):
+                 version="8.0.46", read_only=0, engine="DEFAULT", grants=None,
+                 selected_database="union_db", database_exists=True):
         self.occupied, self.lock, self.fail_insert = occupied, lock, fail_insert
         self.version, self.read_only, self.engine = version, read_only, engine
         self.grants = grants if grants is not None else ["GRANT ALL PRIVILEGES ON *.* TO `synthetic`@`%`"]
         self.statements = []
         self.row = None
         self.rows = []
+        self.selected_database, self.database_exists = selected_database, database_exists
         self.closed = False
 
     def cursor(self, *args):
@@ -126,7 +128,7 @@ class Connection:
         if "GET_LOCK" in sql:
             self.row = {"acquired": self.lock}
         elif "SELECT DATABASE()" in sql:
-            self.row = {"database_name": "union_db", "server": "synthetic-nas"}
+            self.row = {"database_name": self.selected_database, "server": "synthetic-nas"}
         elif "SELECT VERSION()" in sql:
             self.row = {"mysql_version": self.version, "version_comment": "MySQL Community Server"}
         elif "@@read_only" in sql:
@@ -138,8 +140,16 @@ class Connection:
             self.rows = [{"grant": grant} for grant in self.grants]
         elif "default_character_set_name" in sql:
             self.row = {"charset": "utf8mb4", "collation": "utf8mb4_unicode_ci"}
+        elif sql.startswith("SELECT 1 FROM information_schema.schemata"):
+            self.row = {"1": 1} if self.database_exists else None
         elif sql.startswith("DROP DATABASE"):
             self.occupied = None
+            self.database_exists = False
+            self.selected_database = None
+        elif sql.startswith("CREATE DATABASE"):
+            self.database_exists = True
+        elif sql.startswith("USE "):
+            self.selected_database = "union_db"
         elif self.occupied and "information_schema." + self.occupied in sql:
             self.row = {"1": 1}
         elif self.fail_insert and sql.startswith("INSERT"):
@@ -167,7 +177,7 @@ def execution(monkeypatch, tmp_path):
     }
     monkeypatch.setattr(nas, "verify_database_objects", lambda *_: [])
     monkeypatch.setattr(nas, "_verify_current", lambda _: None)
-    monkeypatch.setattr(nas, "_preflight_metadata", lambda _: None)
+    monkeypatch.setattr(nas, "_preflight_metadata", lambda _, **kwargs: None)
     return config, plan, tmp_path
 
 
@@ -475,3 +485,73 @@ def test_reset_failure_identifies_operation_and_never_retries(execution, monkeyp
     assert f"[Done] Reset operation: {operation}" not in output
     events = [json.loads(line) for line in next(execution[2].glob("*/journal.jsonl")).read_text(encoding="utf-8").splitlines()]
     assert events[-1]["reset_operation"] == operation
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_missing_database_does_not_automatically_reconnect_or_create(execution, monkeypatch, apply):
+    connect = Mock(side_effect=nas.pymysql.err.OperationalError(1049, "synthetic-private-detail"))
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    with pytest.raises(nas._MissingDatabase) as error:
+        nas.initialize(*execution[:2], apply=apply, receipt_root=execution[2])
+    assert "synthetic-private-detail" not in str(error.value)
+    assert connect.call_count == 1 and not list(execution[2].iterdir())
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_create_missing_database_requires_confirmation_and_never_drops(execution, monkeypatch, approved):
+    connection = Connection(selected_database=None, database_exists=False)
+    connect = Mock(return_value=connection)
+    monkeypatch.setattr(nas.pymysql, "connect", connect)
+    result = nas.initialize(*execution[:2], apply=True, create_missing=True, confirm_create=lambda _: approved, receipt_root=execution[2])
+    assert "database" not in connect.call_args.kwargs
+    assert not any(sql.startswith("DROP ") for sql in connection.statements)
+    if approved:
+        assert result["status"] == "passed"
+        assert connection.database_exists
+        assert connection.statements.index("CREATE DATABASE `union_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci") < connection.statements.index("CREATE TABLE sentinel(id INT)")
+        events = [json.loads(line) for line in next(execution[2].glob("*/journal.jsonl")).read_text(encoding="utf-8").splitlines()]
+        assert [event["operation"] for event in events if event["event"] == "create_applied"] == ["create_database", "select_database"]
+    else:
+        assert result["status"] == "cancelled" and not connection.database_exists
+        assert not any(sql.startswith(("CREATE ", "INSERT ", "USE ")) for sql in connection.statements)
+        assert not list(execution[2].iterdir())
+
+
+@pytest.mark.parametrize("already_exists", [True, False])
+def test_create_missing_refuses_existing_or_concurrently_created_database(execution, monkeypatch, already_exists):
+    connection = Connection(selected_database=None, database_exists=already_exists)
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    def confirm(_):
+        connection.database_exists = True
+        return True
+    with pytest.raises(nas.InitializationBlocked, match="目標資料庫已存在"):
+        nas.initialize(*execution[:2], apply=True, create_missing=True, confirm_create=confirm, receipt_root=execution[2])
+    assert not any(sql.startswith(("CREATE ", "DROP ", "INSERT ")) for sql in connection.statements)
+    assert not list(execution[2].iterdir())
+
+
+def test_create_missing_preflight_failure_has_no_write_or_confirmation(execution, monkeypatch):
+    connection = Connection(selected_database=None, database_exists=False, grants=["GRANT SELECT ON `union_db`.* TO `synthetic`@`%`"])
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    confirm = Mock(return_value=True)
+    with pytest.raises(nas.InitializationBlocked, match="缺少資料庫權限"):
+        nas.initialize(*execution[:2], apply=True, create_missing=True, confirm_create=confirm, receipt_root=execution[2])
+    confirm.assert_not_called()
+    assert not any(sql.startswith(("CREATE ", "DROP ", "INSERT ")) for sql in connection.statements)
+
+
+@pytest.mark.parametrize("answer,confirmed", [("CREATE union_db", True), ("Y", False), ("RESET union_db", False), ("CREATE other_db", False), ("", False)])
+def test_create_requires_full_target_confirmation(monkeypatch, answer, confirmed):
+    monkeypatch.setattr("builtins.input", lambda _: answer)
+    assert nas._confirm_create({"host": "nas.test", "port": 3307, "server": "synthetic", "database": "union_db"}) is confirmed
+
+
+def test_metadata_failure_after_creation_preserves_empty_database_and_stops(execution, monkeypatch):
+    connection = Connection(selected_database=None, database_exists=False)
+    monkeypatch.setattr(nas.pymysql, "connect", lambda **_: connection)
+    monkeypatch.setattr(nas, "_preflight_metadata", Mock(side_effect=[None, None, nas.pymysql.err.OperationalError(2013, "synthetic-private-detail")]))
+    with pytest.raises(nas.InitializationBlocked, match="Phase: created_database_preflight") as failure:
+        nas.initialize(*execution[:2], apply=True, create_missing=True, confirm_create=lambda _: True, receipt_root=execution[2])
+    assert connection.database_exists
+    assert not any(sql.startswith(("CREATE TABLE", "DROP ", "INSERT ")) for sql in connection.statements)
+    assert "synthetic-private-detail" not in str(failure.value)

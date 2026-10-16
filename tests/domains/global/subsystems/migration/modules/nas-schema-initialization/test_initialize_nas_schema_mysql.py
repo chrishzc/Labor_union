@@ -232,6 +232,66 @@ def test_reset_reports_metadata_lock_timeout_without_retry_or_data_loss(tmp_path
         server.close()
 
 
+def test_missing_database_can_be_confirmed_and_created_without_overwriting_concurrent_data(tmp_path):
+    config = {
+        "host": os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        "port": int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        "user": os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        "password": os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        "database": os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"] + "_missing", "charset": "utf8mb4",
+    }
+    assert config["host"] in {"127.0.0.1", "localhost"}
+    target = config["database"]
+    neighbor = target + "_neighbor"
+    assert re.fullmatch(r"lu_test_[a-z0-9_]+", target)
+    server = pymysql.connect(**{key: value for key, value in config.items() if key != "database"}, autocommit=True)
+    owned_target = owned_neighbor = False
+    try:
+        with server.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM information_schema.schemata WHERE schema_name=%s", (target,))
+            assert cursor.fetchone() is None
+            owned_target = True
+            cursor.execute(f"CREATE DATABASE `{neighbor}`")
+            owned_neighbor = True
+            cursor.execute(f"CREATE TABLE `{neighbor}`.kept(id INT PRIMARY KEY)")
+            cursor.execute(f"INSERT INTO `{neighbor}`.kept VALUES (89)")
+        plan = nas.schema_plan()
+        with pytest.raises(nas._MissingDatabase):
+            nas.initialize(config, plan, apply=True, receipt_root=tmp_path)
+        cancelled = nas.initialize(config, plan, apply=True, create_missing=True, confirm_create=lambda _: False, receipt_root=tmp_path)
+        assert cancelled["status"] == "cancelled" and not list(tmp_path.iterdir())
+        def concurrent_creator(_):
+            with server.cursor() as cursor:
+                cursor.execute(f"CREATE DATABASE `{target}`")
+                cursor.execute(f"CREATE TABLE `{target}`.concurrent_data(id INT PRIMARY KEY)")
+                cursor.execute(f"INSERT INTO `{target}`.concurrent_data VALUES (73)")
+            return True
+        with pytest.raises(nas.InitializationBlocked, match="目標資料庫已存在"):
+            nas.initialize(config, plan, apply=True, create_missing=True, confirm_create=concurrent_creator, receipt_root=tmp_path)
+        with server.cursor() as cursor:
+            cursor.execute(f"SELECT id FROM `{target}`.concurrent_data")
+            assert cursor.fetchone() == (73,)
+            cursor.execute(f"DROP DATABASE `{target}`")
+        result = nas.initialize(config, plan, apply=True, create_missing=True, confirm_create=lambda _: True, receipt_root=tmp_path)
+        assert result["status"] == "passed" and result["schema"] == "current"
+        with server.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM `{target}`.payroll_rate_policies")
+            assert cursor.fetchone()[0] > 0
+            cursor.execute(f"SELECT id FROM `{neighbor}`.kept")
+            assert cursor.fetchone() == (89,)
+        events = [json.loads(line) for line in open(result["journal"], encoding="utf-8")]
+        assert [event["operation"] for event in events if event["event"] == "create_applied"] == ["create_database", "select_database"]
+        assert not any(event.get("operation") == "drop_database" for event in events)
+        assert events[-1]["event"] == "passed"
+    finally:
+        with server.cursor() as cursor:
+            if owned_target:
+                cursor.execute(f"DROP DATABASE IF EXISTS `{target}`")
+            if owned_neighbor:
+                cursor.execute(f"DROP DATABASE `{neighbor}`")
+        server.close()
+
+
 def _metadata_and_seeds(server, database):
     """Independent engine oracle: full final DDL plus effective seeded values."""
     metadata, seeds = {}, {}

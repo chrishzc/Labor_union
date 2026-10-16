@@ -457,6 +457,27 @@ DROP／CREATE／USE 執行前後立即 flush operation／等待上限／耗時�
 及最後確認完成項。2006／2013 代表目前 DDL 結果未知，不能宣稱沒刪除、已成功或自動接續；1205 顯示
 鎖等待原因及先停止 writer／結束交易再確認現況。驗收涵蓋本機真 metadata lock、慢回應 query 與既有完整 reset。
 
+2026-10-16 刪庫後缺庫的同入口修正：人工回報上次 DROP DATABASE 逾時後，新一輪提示目標不存在。
+在既有明確確認重建的範圍內，補上互動模式的「確認建立缺少 union_db」；不修改 preserve-data upgrade 或 local reset。
+
+- 只有初次連線錯誤 1049 被識別為缺庫；一般無參數／--apply 仍 blocked，不會自動重新連線建庫。
+  Windows --interactive 才進入獨立 server connection（不選 database）、取得同名 session lock，唯讀回讀
+  server identity 與 information_schema 的目標不存在條件；驗版本、server 可寫、InnoDB、目前帳號／角色
+  的 canonical 建庫建表／view／trigger／seed 權限、binary log policy 與 current release files。
+  canonical metadata snapshot 仍使用同一組唯讀查詢，僅透過 server-only connection 查目標 schema，避免先選不存在的庫。
+- 顯示 host/port/database/server 後，只有完整 `CREATE union_db` 確認才繼續；取消、EOF、錯字零 DDL/DML。
+  同一 session/lock 中再次預檢並回讀目標仍不存在；確認期間已由其他程序建立則停止，不接管其資料。
+- 建立 durable journal 後執行 CREATE DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci、USE，
+  不使用 IF NOT EXISTS，無 DROP。最後一刻撞名由 MySQL 1007 fail closed，不能初始化其他 writer 建立的庫。
+  每條控制指令保存 create_prepared/create_applied、operation/hash，沿用 600 秒 reset read budget、15 秒
+  session metadata lock wait 與逐步進度；建庫失敗為 phase=create_database，建後查核失敗為
+  created_database_preflight；均保留現況，不 retry 或宣稱 rollback。
+  建庫後重驗空庫與 canonical metadata，再共用 compact schema/system-seed executor 及 object/current gate。
+- Data effect 是新的測試庫、canonical schema/system seed；不轉換業務資料、不改既有 DB 或 provider。
+  write set 沿用 initializer、三份 Module tests、README、本節與 Module map；沒有新 SQL/release。
+  本機 lu_test_* 驗收缺庫不自動建庫、取消保留 absent、競爭建立保留 sentinel、完整 CREATE/current/seed、
+  neighbor rows 保留及真正 Windows 雙擊確認；NAS 真正建庫仍由 operator 在同一視窗明確確認。
+
 ### 9.3 NAS 新庫結構精簡與退役清單（2026-10-15）
 
 最新人工 Authority：先釐清 18 張用途不明與 15 張舊異常機制表，再整理退役清單、精簡新庫 schema；
