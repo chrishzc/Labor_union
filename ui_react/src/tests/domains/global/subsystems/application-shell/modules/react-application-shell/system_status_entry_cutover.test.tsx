@@ -94,7 +94,7 @@ describe('System Status entry cutover contract', () => {
     render(
       <MasterLayout
         currentSection="audit"
-        currentPage="anomalies"
+        currentPage="account-management"
         onSelectSection={() => undefined}
         onSelectPage={() => undefined}
         onLogout={() => undefined}

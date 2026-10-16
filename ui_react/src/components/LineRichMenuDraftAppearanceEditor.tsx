@@ -1,68 +1,37 @@
 /**
  * File: LineRichMenuDraftAppearanceEditor.tsx
- * Description: 在瀏覽器記憶體編輯 Rich Menu 顯示欄位，並以專用草稿 Preview、確認、Apply 保存。
+ * Description: 編輯共用草稿的選單名稱、底色與受控背景圖；儲存由工作區統一處理。
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { Eye, Grid2X2, Palette, Save, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Palette } from 'lucide-react';
 import {
   lineRichMenuMediaClient,
   type LineRichMenuMediaClient,
 } from '../api/line_rich_menu_media/line_rich_menu_media_client';
 import type { RichMenuMediaAsset } from '../api/line_rich_menu_media/line_rich_menu_media_schemas';
-import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type {
   RichMenuDraft,
   RichMenuDraftDefinition,
-  RichMenuDraftPreview,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 
 interface Props {
   draft: RichMenuDraft;
   menuId: string | null;
-  client: LineRichMenuDraftClient;
+  definition: RichMenuDraftDefinition;
+  onDefinitionChange: (definition: RichMenuDraftDefinition) => void;
   mediaClient?: LineRichMenuMediaClient;
-  onApplied: (draft: RichMenuDraft) => void;
-  onLocalDefinitionChange?: (definition: RichMenuDraftDefinition | null) => void;
-  previewDefinition?: RichMenuDraftDefinition;
-}
-
-type Status = 'idle' | 'previewing' | 'previewed' | 'applying' | 'applied' | 'error';
-
-function copyDefinition(value: RichMenuDraftDefinition): RichMenuDraftDefinition {
-  return structuredClone(value);
 }
 
 export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
   draft,
   menuId,
-  client,
+  definition,
+  onDefinitionChange,
   mediaClient = lineRichMenuMediaClient,
-  onApplied,
-  onLocalDefinitionChange,
-  previewDefinition,
 }) => {
-  const [definition, setDefinition] = useState(() => copyDefinition(draft.definition));
-  const [preview, setPreview] = useState<RichMenuDraftPreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [reason, setReason] = useState('工會人員調整 Rich Menu 顯示內容');
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
   const [mediaAssets, setMediaAssets] = useState<RichMenuMediaAsset[]>([]);
   const [mediaState, setMediaState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [mediaMessage, setMediaMessage] = useState<string | null>(null);
-  const appliedRevision = useRef<number | null>(null);
-
-  useEffect(() => {
-    const preserveApplyReadback = appliedRevision.current === draft.revision;
-    setDefinition(copyDefinition(draft.definition));
-    setPreview(null);
-    setConfirmed(false);
-    if (!preserveApplyReadback) {
-      setStatus('idle');
-      setMessage(null);
-    }
-    appliedRevision.current = null;
-  }, [draft]);
 
   const menu = definition.menus.find((item) => item.id === menuId) ?? definition.menus[0];
   const publicationLock = draft.publication_locks.find(
@@ -100,22 +69,13 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
     };
   }, [canCreateNextDraft, draft.revision, mediaClient, mediaMenuId]);
 
-  const invalidatePreview = () => {
-    setPreview(null);
-    setConfirmed(false);
-    setStatus('idle');
-    setMessage(null);
-  };
-
   const updateMenu = (change: (current: NonNullable<typeof menu>) => NonNullable<typeof menu>) => {
     if (!menu) return;
     const nextDefinition: RichMenuDraftDefinition = {
       ...definition,
       menus: definition.menus.map((item) => item.id === menu.id ? change(item) : item),
     };
-    setDefinition(nextDefinition);
-    onLocalDefinitionChange?.(copyDefinition(nextDefinition));
-    invalidatePreview();
+    onDefinitionChange(nextDefinition);
   };
 
   const updateBackground = (backgroundColor: string) => {
@@ -151,60 +111,6 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
     }));
   };
 
-  const requestPreview = async () => {
-    setStatus('previewing');
-    setMessage(null);
-    setConfirmed(false);
-    try {
-      const result = await client.preview({
-        expected_revision: draft.revision,
-        definition: previewDefinition ?? definition,
-      });
-      setPreview(result);
-      setStatus('previewed');
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿預覽失敗');
-    }
-  };
-
-  const apply = async () => {
-    if (!preview || !confirmed || !reason.trim()) return;
-    setStatus('applying');
-    setMessage(null);
-    try {
-      const identity = crypto.randomUUID();
-      const result = await client.apply({
-        expected_revision: draft.revision,
-        definition: preview.normalized_definition,
-        preview_fingerprint: preview.preview_fingerprint,
-        reason: reason.trim(),
-        idempotency_key: `rich-menu-appearance-${identity}`,
-        correlation_id: `rich-menu-appearance-${identity}`,
-      });
-      setStatus('applied');
-      setMessage('草稿已保存並完成回讀；尚未發布至 LINE。');
-      appliedRevision.current = result.readback.revision;
-      onLocalDefinitionChange?.(null);
-      onApplied(result.readback);
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿套用失敗');
-    }
-  };
-
-  const isDirty = JSON.stringify(definition) !== JSON.stringify(draft.definition);
-
-  useEffect(() => {
-    if (!isDirty) return undefined;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [isDirty]);
-
   if (!menu) {
     return <div className="line-scope-note">目前沒有可編輯的 Rich Menu 草稿。</div>;
   }
@@ -232,29 +138,8 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
     );
   }
 
-  const invalid = !menu.name.trim()
-    || !menu.chat_bar_text.trim()
-    || menu.buttons.some((button) => !button.label.trim());
   return (
     <section className="richmenu-card" data-control-id="line.richmenu.draft.appearance-editor">
-      <div className="richmenu-card-header">
-        <div>
-          <h4 className="richmenu-editor-title">
-            <Palette aria-hidden="true" />修改選單外觀與名稱
-          </h4>
-          <p className="richmenu-editor-description">
-            修改先保留在本機；保存草稿不會發布或發送 LINE。
-          </p>
-        </div>
-        <span className="line-category-badge category-service_flow">編輯草稿</span>
-      </div>
-
-      {isDirty && (
-        <div className="line-warning richmenu-dirty-state" role="status">
-          尚有未儲存的外觀變更；離開頁面前請先預覽並套用，或取消修改。
-        </div>
-      )}
-
       <div className="richmenu-form-grid">
         <label className="richmenu-form-field">
           <span>選單名稱</span>
@@ -267,7 +152,7 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
           />
         </label>
         <label className="richmenu-form-field">
-          <span>聊天室標題</span>
+          <span>聊天室選單列文字</span>
           <input
             className="richmenu-form-input"
             maxLength={14}
@@ -276,19 +161,29 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
             onChange={(event) => updateMenu((current) => ({ ...current, chat_bar_text: event.target.value }))}
           />
         </label>
-        <label className="richmenu-form-field">
-          <span>背景色彩</span>
-          <input
-            className="richmenu-form-input"
-            placeholder="#F5C842"
-            value={menu.appearance?.background_color ?? ''}
-            onChange={(event) => updateBackground(event.target.value)}
-          />
-        </label>
+        <div className="richmenu-form-field richmenu-form-field-full">
+          <span>選單底色</span>
+          <div className="richmenu-color-options" role="group" aria-label="選單底色">
+            {['#FFF1DF', '#FFF0EC', '#EAF2ED', '#EAF0F8', '#F2EDF6', '#FFFFFF'].map((color) => (
+              <button key={color} type="button" className="richmenu-color-swatch"
+                style={{ backgroundColor: color }} aria-label={`底色 ${color}`}
+                aria-pressed={menu.appearance?.background_color?.toUpperCase() === color}
+                disabled={menu.appearance?.image_mode === 'uploaded'}
+                onClick={() => updateBackground(color)} />
+            ))}
+            <label className="richmenu-custom-color">自訂
+              <input type="color" aria-label="自訂選單底色" value={/^#[0-9a-f]{6}$/i.test(menu.appearance?.background_color ?? '') ? menu.appearance!.background_color : '#FFFFFF'}
+                disabled={menu.appearance?.image_mode === 'uploaded'} onChange={(event) => updateBackground(event.target.value)} />
+            </label>
+          </div>
+          <small>調整卡片之間的底色，卡片本身維持白色。使用背景圖片時不會替圖片換色。</small>
+        </div>
       </div>
 
-      <fieldset className="richmenu-form-field richmenu-form-field-full richmenu-form-section-spacing">
-        <legend>背景圖片</legend>
+      <details className="richmenu-advanced-details richmenu-background-details">
+        <summary>背景圖片</summary>
+        <fieldset className="richmenu-form-field richmenu-form-field-full richmenu-form-section-spacing">
+        <legend className="sr-only">選擇背景來源</legend>
         <label className="richmenu-confirm-checkbox-label">
           <input
             type="radio"
@@ -327,99 +222,9 @@ export const LineRichMenuDraftAppearanceEditor: React.FC<Props> = ({
             </span>
           </label>
         ))}
-      </fieldset>
+        </fieldset>
+      </details>
 
-      <div className="richmenu-buttons-grid-fields">
-        <div className="richmenu-buttons-grid-fields-title">
-          <Grid2X2 aria-hidden="true" />各按鈕顯示名稱配置（共 {menu.buttons.length} 個熱區）
-        </div>
-        {menu.buttons.map((button, index) => (
-          <label key={button.id} className="richmenu-form-field">
-            <span>按鈕 {index + 1} 名稱</span>
-            <input
-              className="richmenu-form-input"
-              maxLength={30}
-              required
-              value={button.label}
-              onChange={(event) => updateMenu((current) => ({
-                ...current,
-                buttons: current.buttons.map((item) => item.id === button.id
-                  ? { ...item, label: event.target.value }
-                  : item),
-              }))}
-            />
-          </label>
-        ))}
-      </div>
-
-      <label className="richmenu-form-field richmenu-form-field-full richmenu-form-section-spacing">
-        <span>變更原因</span>
-        <input
-          className="richmenu-form-input"
-          value={reason}
-          placeholder="例如：工會人員調整 Rich Menu 顯示內容"
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </label>
-
-      <div className="richmenu-editor-actions">
-        <button
-          type="button"
-          className="richmenu-btn-primary"
-          onClick={() => void requestPreview()}
-          disabled={invalid || status === 'previewing' || status === 'applying'}
-        >
-          <Eye aria-hidden="true" />{status === 'previewing' ? '預覽中…' : '預覽草稿變更'}
-        </button>
-        <button
-          type="button"
-          className="richmenu-btn-secondary"
-          onClick={() => {
-            setDefinition(copyDefinition(draft.definition));
-            setPreview(null);
-            setConfirmed(false);
-            setStatus('idle');
-            setMessage('已取消本機修改。');
-            onLocalDefinitionChange?.(null);
-          }}
-        >
-          <X aria-hidden="true" />取消修改
-        </button>
-      </div>
-
-      {preview && (
-        <div className="richmenu-preview-callout">
-          <p className="richmenu-preview-summary">
-            預覽完成：已核對目前內容與保存後結果。
-          </p>
-          <label className="richmenu-confirm-checkbox-label">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
-            我確認保存此草稿；這不會發布或發送 LINE。
-          </label>
-          <div>
-            <button
-              type="button"
-              className="richmenu-btn-apply"
-              onClick={() => void apply()}
-              disabled={!confirmed || !reason.trim() || status === 'applying'}
-            >
-              <Save aria-hidden="true" />套用並回讀
-            </button>
-          </div>
-        </div>
-      )}
-      {message && (
-        <div
-          className={`${status === 'error' ? 'line-error' : 'line-scope-note'} line-block-spacing-12`}
-          role={status === 'error' ? 'alert' : 'status'}
-        >
-          {message}
-        </div>
-      )}
     </section>
   );
 };

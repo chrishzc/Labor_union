@@ -28,7 +28,6 @@
 - `line-security`
 - `finance`
 - `historical-service-accounting`
-- `anomalies`
 - `account-management`
 - `storage-management`
 
@@ -64,7 +63,7 @@ API endpoint 與 operator CLI 需依 current objective 個別判定：
 
 2026-10-13 人工裁決退役 HCM 修正版工作簿各頁面入口與 `/api/v1/case-import/hcm/resubmissions/{preview|apply}`。
 保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake、已提交 correction outbox 與全部歷史證據。
-異常審核頁目前仍是 HCM／import／LINE 警示逐筆略過及 LINE 人工重送的入口；未授權本次移除整頁或搬移這些功能。
+2026-10-16 最新人工裁決直接移除異常審核頁、側欄及專用鈴鐺入口，不新增替代清單，也不搬移 HCM／import／LINE 逐筆略過或 LINE 人工重送操作。此裁決 supersede 前述管理端入口保留要求；既有後端 API、Query／Preview／Apply、audit／receipt、worker 與資料不在移除範圍。舊 `#anomalies` 沿用 App 既有未知 hash 規則顯示待辦看板。
 
 Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 的 authenticated、bounded archive Query。舊 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 不屬此保留範圍；其路由已移除，不提供原始 rows、欄位或舊 editable metadata，也不新增相容 writer。Smoke 工具使用現行 OpenAPI 與明確 fixture，不自動展開原始資料表。
 

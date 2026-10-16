@@ -28,7 +28,6 @@ import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
 import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
-import { CurrentAnomaliesPage } from './pages/CurrentAnomaliesPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { StorageManagementPage } from './pages/StorageManagementPage';
 import './pages/LineManagementPage.css';
@@ -161,7 +160,6 @@ export const App: React.FC = () => {
         {currentPage === 'historical-service-accounting' && <HistoricalServiceAccountingPage />}
 
         {/* Audit & System Section */}
-        {currentPage === 'anomalies' && <CurrentAnomaliesPage />}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'storage-management' && <StorageManagementPage />}
       </MasterLayout>

@@ -10,7 +10,6 @@ modules:
     test_root: tests/domains/anomalies/subsystems/anomalies/modules/anomaly-registry/
   current-issue-presentation:
     layout_status: custom_current
-    test_root: ui_react/src/tests/current_anomalies_page.test.tsx
   line-notification-current-issue:
     layout_status: canonical
     test_root: tests/domains/anomalies/subsystems/anomalies/modules/line-notification-current-issue/

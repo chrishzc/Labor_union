@@ -349,22 +349,9 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('圖文選單 發布紀錄使用 server page metadata 翻頁，末頁不再提供下一頁', async () => {
+  it('圖文選單直接進入編輯，移除發布紀錄入口並停止清單查詢', async () => {
     const { customer, identity } = clients();
-    const publications = Array.from({ length: 26 }, (_, index) => ({
-      ...LINE_RICH_MENU_PUBLICATION_FIXTURE,
-      id: index + 1,
-    }));
-    const listRichMenuPublications = vi.fn(async (options?: { page?: number; pageSize?: number }) => {
-      const page = options?.page ?? 1;
-      return {
-        items: page === 2 ? publications.slice(25) : publications.slice(0, 25),
-        page,
-        page_size: options?.pageSize ?? 25,
-        total: 26,
-        total_pages: 2,
-      };
-    });
+    const listRichMenuPublications = vi.fn();
     const lineConfiguration: LineConfigurationQueryClient = {
       getNotificationRules: vi.fn(async () => LINE_NOTIFICATION_RULES_CATALOG_FIXTURE),
       getRichMenuConfiguration: vi.fn(async () => LINE_RICH_MENU_CONFIGURATION_FIXTURE),
@@ -396,16 +383,11 @@ describe('LINE 管理頁真實資料呈現', () => {
       />
     );
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
-    fireEvent.click(await screen.findByRole('button', { name: '發布歷程' }));
-    expect(await screen.findByText(/第 1／2 頁，\s*顯示第 1–25 筆，\s*共 26 筆/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '上一頁' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '下一頁' }));
-
-    expect(await screen.findByText(/第 2／2 頁，\s*顯示第 26–26 筆，\s*共 26 筆/)).toBeInTheDocument();
-    expect(listRichMenuPublications).toHaveBeenLastCalledWith(
-      expect.objectContaining({ page: 2, pageSize: 25, signal: expect.any(AbortSignal) }),
-    );
-    expect(screen.getByRole('button', { name: '下一頁' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '上一頁' })).toBeEnabled();
+    await screen.findByRole('button', { name: '外觀與名稱' });
+    expect(screen.queryByRole('button', { name: '發布紀錄' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '編輯選單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '圖文選單工作頁' })).not.toBeInTheDocument();
+    expect(listRichMenuPublications).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '發布' })).toBeEnabled();
   });
 });

@@ -7,7 +7,6 @@ import { sessionClient } from '../api/auth/session_client';
 import { SYSTEM_STATUS_ENDPOINT } from '../api/system/system_status_client';
 import { DataImportPage } from '../pages/DataImportPage';
 
-vi.mock('../pages/CurrentAnomaliesPage', () => ({ CurrentAnomaliesPage: () => null }));
 
 function authenticate(): void {
   sessionClient.setSession('data-import-entry-token', {

@@ -131,7 +131,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   };
 
   const queuePublication = async (): Promise<void> => {
-    if (!selectedMenu || !publishConfirmed) return;
+    if (!selectedMenu || !publishConfirmed || !preview) return;
     const effectiveReason = publishReason.trim() || '工會人員更新圖文選單設定';
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -139,45 +139,16 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
     setReceipt(null);
     setErrorMessage(null);
     try {
-      let activePreview = preview;
-      if (!activePreview) {
-        const previewResult = await client.preview(selectedMenu.id, { signal: controller.signal });
-        activePreview = adaptLineRichMenuPublishPreview(previewResult);
-        setPreview(activePreview);
-      }
-
-      let result;
-      try {
-        result = await client.publish(
-          selectedMenu.id,
-          {
-            preview_id: activePreview.previewId,
-            reason: effectiveReason,
-            idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
-            correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
-          },
-          { signal: controller.signal }
-        );
-      } catch (publishErr) {
-        if (publishErr instanceof LineRichMenuPublicationError && publishErr.code === 'rich_menu_preview_stale') {
-          // 自動重新獲取最新預覽並重試發布
-          const freshPreviewResult = await client.preview(selectedMenu.id, { signal: controller.signal });
-          activePreview = adaptLineRichMenuPublishPreview(freshPreviewResult);
-          setPreview(activePreview);
-          result = await client.publish(
-            selectedMenu.id,
-            {
-              preview_id: activePreview.previewId,
-              reason: effectiveReason,
-              idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
-              correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
-            },
-            { signal: controller.signal }
-          );
-        } else {
-          throw publishErr;
-        }
-      }
+      const result = await client.publish(
+        selectedMenu.id,
+        {
+          preview_id: preview.previewId,
+          reason: effectiveReason,
+          idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
+          correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
+        },
+        { signal: controller.signal }
+      );
 
       if (controller.signal.aborted) return;
       const nextReceipt = adaptLineRichMenuPublicationReceipt(result);
@@ -187,6 +158,10 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
       onQueued?.(nextReceipt);
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (error instanceof LineRichMenuPublicationError && error.code === 'rich_menu_preview_stale') {
+        setPreview(null);
+        setPublishConfirmed(false);
+      }
       setPublishState('error');
       setErrorMessage(displayError(error));
     }
@@ -233,10 +208,10 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
       <div className="richmenu-publish-header">
         <div>
           <h4 className="richmenu-editor-title">
-            <Rocket aria-hidden="true" />Rich Menu 發布操作
+            <Rocket aria-hidden="true" />{selectedMenu ? '發布選單' : '重新發布'}
           </h4>
           <p className="richmenu-editor-description">
-             {selectedMenu ? `目前選單：${selectedMenu.name}` : '請先由上方選擇要發布的 Rich Menu'}
+             {selectedMenu ? `目前選單：${selectedMenu.name}` : '確認此筆失敗紀錄後重新排入發布。'}
           </p>
         </div>
         {selectedMenu && (
@@ -293,7 +268,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
             disabled={busy || Boolean(publicationAccess) || !publishConfirmed || publishReason.trim().length === 0}
             onClick={() => void queuePublication()}
           >
-            <Rocket aria-hidden="true" />確認排入異步發布
+            <Rocket aria-hidden="true" />確認發布至 LINE
           </button>
         </div>
       )}

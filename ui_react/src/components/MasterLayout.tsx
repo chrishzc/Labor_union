@@ -4,7 +4,6 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bell,
   Bot,
   CalendarDays,
   CircleDollarSign,
@@ -20,7 +19,6 @@ import {
   Menu,
   MessageCircle,
   PanelTop,
-  ShieldAlert,
   ShieldCheck,
   UserRound,
   UsersRound,
@@ -49,7 +47,6 @@ export type PageType =
   | 'line-security'
   | 'finance'
   | 'historical-service-accounting'
-  | 'anomalies'
   | 'account-management'
   | 'storage-management';
 
@@ -70,7 +67,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'finance': 'finance',
   'historical-service-accounting': 'finance',
 
-  'anomalies': 'audit',
   'account-management': 'audit',
   'storage-management': 'audit',
 };
@@ -103,7 +99,6 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'historical-service-accounting', icon: History, label: '歷史服務天數', section: 'finance' },
 
   // Audit & System Section
-  { id: 'anomalies', icon: ShieldAlert, label: '異常審核', section: 'audit' },
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
   { id: 'storage-management', icon: HardDrive, label: '儲存空間管理', section: 'audit' },
 ];
@@ -281,17 +276,6 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             <span className="system-status-label">{systemOnline === null ? '查詢中' : systemOnline ? '系統在線' : '系統離線'}</span>
             <span className="sr-only">{systemOnline ? `，目前延遲 ${latencyText}` : ''}</span>
           </div>
-
-          <button
-            className="notification-btn"
-            aria-label="查看待處理異常"
-            onClick={() => {
-              onSelectSection('audit');
-              onSelectPage('anomalies');
-            }}
-          >
-            <Bell aria-hidden="true" />
-          </button>
 
           <details className="user-profile-menu">
             <summary className="user-profile-capsule">

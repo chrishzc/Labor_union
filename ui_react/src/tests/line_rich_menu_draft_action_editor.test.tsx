@@ -1,14 +1,9 @@
-/**
- * File: line_rich_menu_draft_action_editor.test.tsx
- * Description: 驗證 Rich Menu typed action 編輯、禁止 switch，以及 Preview、確認、Apply 流程。
- */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
+/** Verify the single button-name owner and typed action fields in a shared draft. */
+import { useState } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import type { RichMenuDraft } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineRichMenuDraftActionEditor } from '../components/LineRichMenuDraftActionEditor';
-
-const FINGERPRINT = 'c'.repeat(64);
 const DRAFT: RichMenuDraft = {
   kind: 'rich_menus', revision: 3,
   publication_locks: [{
@@ -25,161 +20,50 @@ const DRAFT: RichMenuDraft = {
   }] },
 };
 
-function client(): LineRichMenuDraftClient {
-  const query = vi.fn<LineRichMenuDraftClient['query']>();
-  const preview: LineRichMenuDraftClient['preview'] = async (request) => ({
-    before_revision: 3, resulting_revision: 4,
-    normalized_definition: request.definition, preview_fingerprint: FINGERPRINT,
-  });
-  const apply: LineRichMenuDraftClient['apply'] = async (request) => ({
-    receipt: { outcome: 'created', committed_revision: 4, receipt_reference: 'rich-menu-action-4' },
-    readback: {
-      kind: 'rich_menus', revision: 4, definition: request.definition,
-      publication_locks: [{
-        menu_definition_id: 'customer_menu', configuration_revision: 4,
-        state: 'editable', readonly_reason: null,
-      }],
-    },
-  });
-  return {
-    query,
-    preview: vi.fn(preview),
-    apply: vi.fn(apply),
-  };
+
+function Harness({ initial = DRAFT }: { initial?: RichMenuDraft }) {
+  const [definition, setDefinition] = useState(initial.definition);
+  return <LineRichMenuDraftActionEditor draft={initial} menuId={definition.menus[0]?.id ?? null} definition={definition} onDefinitionChange={setDefinition} />;
 }
-
-afterEach(() => vi.unstubAllGlobals());
-
 describe('LineRichMenuDraftActionEditor', () => {
-  it('kind 切換只保留新 kind 欄位，取消不寫入', () => {
-    const draftClient = client();
-    const onLocalDefinitionChange = vi.fn();
-    render(<LineRichMenuDraftActionEditor draft={DRAFT} menuId="customer_menu" client={draftClient} onApplied={vi.fn()} onLocalDefinitionChange={onLocalDefinitionChange} />);
-    fireEvent.change(screen.getByLabelText('動作類型'), { target: { value: 'postback' } });
-    fireEvent.change(screen.getByLabelText('Postback data'), { target: { value: 'case_status' } });
-    expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      menus: [expect.objectContaining({
-        buttons: [expect.objectContaining({ action: { type: 'postback', data: 'case_status' } })],
-      })],
-    }));
-    fireEvent.click(screen.getByRole('button', { name: '取消修改' }));
-    expect(screen.getByLabelText('動作類型')).toHaveValue('message');
+  it('editing the button name does not change the actual message, and switching action kind clears incompatible fields', () => {
+    render(<Harness />);
+    fireEvent.change(screen.getByLabelText('按鈕顯示名稱'), { target: { value: '專人諮詢' } });
     expect(screen.getByLabelText('送出訊息')).toHaveValue('我要聯絡客服');
-    expect(draftClient.preview).not.toHaveBeenCalled();
-    expect(draftClient.apply).not.toHaveBeenCalled();
-    expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(null);
+    fireEvent.change(screen.getByLabelText('點擊後的動作'), { target: { value: 'postback' } });
+    fireEvent.change(screen.getByLabelText('系統動作資料'), { target: { value: 'case_status' } });
+    fireEvent.change(screen.getByLabelText('點擊後的動作'), { target: { value: 'message' } });
+    expect(screen.getByLabelText('送出訊息')).toHaveValue('');
+    expect(screen.queryByLabelText('系統動作資料')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('按鈕顯示名稱')).toHaveValue('專人諮詢');
   });
-
-  it('編輯器不提供 Rich Menu switch，仍可 Preview 與確認後 Apply 支援的 URI action', async () => {
-    vi.stubGlobal('crypto', { randomUUID: () => 'action-editor-1' });
-    const draftClient = client();
-    const onApplied = vi.fn();
-    render(<LineRichMenuDraftActionEditor draft={DRAFT} menuId="customer_menu" client={draftClient} onApplied={onApplied} />);
-
-    const actionType = screen.getByLabelText('動作類型');
+  it('offers supported canonical LIFF choices and no switch or retired anomaly entry', () => {
+    render(<Harness />); fireEvent.change(screen.getByLabelText('點擊後的動作'), { target: { value: 'uri' } });
     expect(screen.queryByRole('option', { name: /切換 Rich Menu/ })).not.toBeInTheDocument();
-    fireEvent.change(actionType, { target: { value: 'uri' } });
-    expect(screen.getByRole('option', { name: '?target=order_tracking（狀態追蹤）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '?target=staff_verification（月嫂身分綁定）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '?target=order_update（修改訂單資訊）' })).toBeInTheDocument();
+    for (const name of ['狀態追蹤', '月嫂身分綁定', '修改訂單資訊']) expect(screen.getByRole('option', { name })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /anomalies_center|異常中心/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('LIFF target／網址'), { target: { value: '?target=profile_update' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
-
-    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledTimes(1));
-    const request = vi.mocked(draftClient.preview).mock.calls[0][0];
-    expect(request.definition.menus[0].buttons[0].action).toEqual({
-      type: 'uri', uri: '?target=profile_update', uri_source: 'liff',
-    });
-    const applyButton = screen.getByRole('button', { name: '套用並回讀' });
-    expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: /我確認保存此草稿/ }));
-    fireEvent.click(applyButton);
-    await waitFor(() => expect(draftClient.apply).toHaveBeenCalledTimes(1));
-    expect(draftClient.apply).toHaveBeenCalledWith(expect.objectContaining({
-      expected_revision: 3, preview_fingerprint: FINGERPRINT,
-      idempotency_key: 'rich-menu-draft-action-editor-1',
-      correlation_id: 'rich-menu-draft-action-editor-1',
-    }));
-    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ revision: 4 }));
+    expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=profile_update');
   });
-
-  it('processing 版本只顯示業務原因且不掛載 mutation controls', () => {
-    const draftClient = client();
-    render(<LineRichMenuDraftActionEditor
-      draft={{
-        ...DRAFT,
-        publication_locks: [{
-          menu_definition_id: 'customer_menu', configuration_revision: 3,
-          state: 'processing', readonly_reason: '此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。',
-        }],
-      }}
-      menuId="customer_menu"
-      client={draftClient}
-      onApplied={vi.fn()}
-    />);
-
-    expect(screen.getByText('此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '預覽草稿變更' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('動作類型')).not.toBeInTheDocument();
-    expect(draftClient.preview).not.toHaveBeenCalled();
-    expect(draftClient.apply).not.toHaveBeenCalled();
+  it('processing versions expose the business reason without editable controls', () => {
+    const initial = structuredClone(DRAFT); initial.publication_locks[0] = { ...initial.publication_locks[0], state: 'processing', readonly_reason: '此版本正在發布處理中' };
+    render(<Harness initial={initial} />);
+    expect(screen.getByText('此版本正在發布處理中')).toBeInTheDocument(); expect(screen.queryByLabelText('按鈕顯示名稱')).not.toBeInTheDocument();
   });
-
-  it('published 工會人員選單可由既有內容建立下一版 action 草稿', async () => {
-    const draftClient = client();
-    render(<LineRichMenuDraftActionEditor
-      draft={{
-        ...DRAFT,
-        definition: {
-          ...DRAFT.definition,
-          menus: [{ ...DRAFT.definition.menus[0], id: 'union_staff_menu', audience_role: 'union_staff' }],
-        },
-        publication_locks: [{
-          menu_definition_id: 'union_staff_menu', configuration_revision: 3,
-          state: 'published', readonly_reason: '此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。',
-        }],
-      }}
-      menuId="union_staff_menu"
-      client={draftClient}
-      onApplied={vi.fn()}
-    />);
-
-    fireEvent.change(screen.getByLabelText('送出訊息'), { target: { value: '開啟工會客服' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
-    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledWith(expect.objectContaining({
-      expected_revision: 3,
-      definition: expect.objectContaining({ menus: [expect.objectContaining({
-        id: 'union_staff_menu',
-        buttons: [expect.objectContaining({ action: { type: 'message', text: '開啟工會客服' } })],
-      })] }),
-    })));
+  it('published union staff content can be edited into the shared next draft', () => {
+    const initial = structuredClone(DRAFT); initial.definition.menus[0].id = 'union_staff_menu'; initial.definition.menus[0].audience_role = 'union_staff';
+    initial.publication_locks[0] = { menu_definition_id: 'union_staff_menu', configuration_revision: 3, state: 'published', readonly_reason: '已發布' };
+    render(<Harness initial={initial} />); fireEvent.change(screen.getByLabelText('送出訊息'), { target: { value: '開啟工會客服' } });
+    expect(screen.getByLabelText('送出訊息')).toHaveValue('開啟工會客服'); expect(screen.getByLabelText('按鈕顯示名稱')).toHaveValue('聯絡客服');
   });
-
-  it('未收錄的自訂 LIFF 參數會動態加入 option，不退回預設 gateway', () => {
-    const draftClient = client();
-    render(<LineRichMenuDraftActionEditor
-      draft={{
-        ...DRAFT,
-        definition: {
-          ...DRAFT.definition,
-          menus: [{
-            ...DRAFT.definition.menus[0],
-            buttons: [{
-              id: 'custom_btn',
-              label: '自訂按鈕',
-              bounds: { x: 0, y: 0, width: 2500, height: 843 },
-              action: { type: 'uri', uri: '?target=custom_preview_flow', uri_source: 'liff' },
-            }],
-          }],
-        },
-      }}
-      menuId="customer_menu"
-      client={draftClient}
-      onApplied={vi.fn()}
-    />);
-
+  it('unlisted current LIFF values remain selected and are never silently replaced', () => {
+    const initial = structuredClone(DRAFT); initial.definition.menus[0].buttons[0].action = { type: 'uri', uri: '?target=custom_preview_flow', uri_source: 'liff' };
+    render(<Harness initial={initial} />); expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=custom_preview_flow');
     expect(screen.getByRole('option', { name: '?target=custom_preview_flow（自訂／未收錄入口）' })).toBeInTheDocument();
-    expect(screen.getByLabelText('LIFF target／網址')).toHaveValue('?target=custom_preview_flow');
+  });
+  it('an unknown publication lock fails closed', () => {
+    const initial = structuredClone(DRAFT); initial.publication_locks = [];
+    render(<LineRichMenuDraftActionEditor draft={initial} menuId="customer_menu" definition={initial.definition} onDefinitionChange={vi.fn()} />);
+    expect(screen.getByText(/無法確認這個選單版本是否可編輯/)).toBeInTheDocument(); expect(screen.queryByLabelText('按鈕顯示名稱')).not.toBeInTheDocument();
   });
 });

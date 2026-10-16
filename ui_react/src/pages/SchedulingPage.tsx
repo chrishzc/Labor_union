@@ -2811,7 +2811,7 @@ export const SchedulingPage: React.FC = () => {
           )}
           {selectedStaffId && selectedStaffRow?.kind === 'terms_incomplete' && !calendarLoading && !calendarError && (
             <div className="scheduling-status error" role="alert" style={{ background: '#fffbeb', borderColor: '#f59e0b', color: '#b45309' }}>
-              ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至訂單或異常審核中心補齊資料。
+              ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至本案客戶與訂單資料補齊。
             </div>
           )}
           {calendarError && (

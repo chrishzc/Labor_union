@@ -132,7 +132,8 @@ Operational／readback failure 需由 durable-job／runtime health 處理；若 
 
 - `GET /api/v1/anomalies` 只回 `LINE-006` current rows。
 - `GET /api/v1/anomalies/{issue_key}` 只回 current details、owner evidence、blocking effect與合法 owner action descriptor。
-- `#anomalies` 只顯示 `LINE-006`；13 個 correctness／invariant codes與 `BECLASS-001` 均不進 current projection。
+- 2026-10-16 最新人工裁決直接移除管理端「異常審核」頁與導覽，不建立替代清單、不搬移逐筆略過或 LINE 人工重送操作。舊 `#anomalies` 沿用 App 的未知 hash 規則顯示待辦看板。
+- 本次只退役管理端 presentation；既有 API、current projection、owner Q/P/A、audit／receipt 與資料保留。13 個 correctness／invariant codes與 `BECLASS-001` 均不進 current projection。
 - owner work item、normal review、retry／job狀態留在 owning page。
 - 不提供 generic resolve、claim、tracking close、raw mutation payload或直接 SQL action。
 

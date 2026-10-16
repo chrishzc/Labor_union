@@ -1,15 +1,13 @@
-/**
- * File: line_rich_menu_draft_appearance_editor.test.tsx
- * Description: 驗證 Rich Menu 外觀草稿只改顯示欄位，並經 Preview、確認、Apply 完成回讀。
- */
+/** Verify shared-draft appearance fields and confirmed save/readback without publication. */
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LineRichMenuMediaClient } from '../api/line_rich_menu_media/line_rich_menu_media_client';
 import type { RichMenuMediaAsset } from '../api/line_rich_menu_media/line_rich_menu_media_schemas';
 import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type { RichMenuDraft } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 import { LineRichMenuDraftAppearanceEditor } from '../components/LineRichMenuDraftAppearanceEditor';
-
+import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSaveActions';
 const FINGERPRINT = 'b'.repeat(64);
 const ASSET: RichMenuMediaAsset = {
   asset_id: 41,
@@ -46,177 +44,95 @@ const DRAFT: RichMenuDraft = {
   }] },
 };
 
-function client(): LineRichMenuDraftClient {
+
+function client(initial = DRAFT): LineRichMenuDraftClient {
+  let stored = structuredClone(initial);
   return {
-    query: vi.fn(),
-    preview: vi.fn(async (request) => ({
-      before_revision: 8, resulting_revision: 9,
-      normalized_definition: request.definition, preview_fingerprint: FINGERPRINT,
-    })),
-    apply: vi.fn(async (request) => ({
-      receipt: { outcome: 'created' as const, committed_revision: 9, receipt_reference: 'rich-menu-appearance-9' },
-      readback: {
-        kind: 'rich_menus' as const, revision: 9, definition: request.definition,
-        publication_locks: [{
-          menu_definition_id: 'customer_menu', configuration_revision: 9,
-          state: 'editable' as const, readonly_reason: null,
-        }],
-      },
-    })),
+    query: vi.fn(async () => structuredClone(stored)),
+    preview: vi.fn(async request => ({ before_revision: stored.revision, resulting_revision: stored.revision + 1, normalized_definition: request.definition, preview_fingerprint: FINGERPRINT })),
+    apply: vi.fn(async request => {
+      stored = { ...stored, revision: stored.revision + 1, definition: request.definition, publication_locks: stored.publication_locks.map(lock => ({ ...lock, configuration_revision: stored.revision + 1, state: 'editable' as const, readonly_reason: null })) };
+      return { receipt: { outcome: 'created' as const, committed_revision: stored.revision, receipt_reference: 'rich-menu-save' }, readback: structuredClone(stored) };
+    }),
   };
 }
-
 function media(items: RichMenuMediaAsset[] = [ASSET]): LineRichMenuMediaClient {
-  return {
-    list: vi.fn(async () => ({ items, page: 1, page_size: 100, total: items.length, total_pages: 1 })),
-  };
+  return { list: vi.fn(async () => ({ items, page: 1, page_size: 100, total: items.length, total_pages: 1 })) };
 }
-
-afterEach(() => vi.unstubAllGlobals());
-
-describe('LineRichMenuDraftAppearanceEditor', () => {
-  it('本機編輯與取消皆零寫入，且不顯示 fingerprint 或 provider 欄位', async () => {
-    const draftClient = client();
-    const onLocalDefinitionChange = vi.fn();
-    render(<LineRichMenuDraftAppearanceEditor draft={DRAFT} menuId="customer_menu" client={draftClient} mediaClient={media()} onApplied={vi.fn()} onLocalDefinitionChange={onLocalDefinitionChange} />);
+function Harness({ initial = DRAFT, draftClient = client(initial), mediaClient = media() }: { initial?: RichMenuDraft; draftClient?: LineRichMenuDraftClient; mediaClient?: LineRichMenuMediaClient }) {
+  const [draft, setDraft] = useState(initial);
+  const [definition, setDefinition] = useState(initial.definition);
+  return <><LineRichMenuDraftAppearanceEditor draft={draft} menuId={definition.menus[0]?.id ?? null} definition={definition} onDefinitionChange={setDefinition} mediaClient={mediaClient} />
+    <LineRichMenuDraftSaveActions draft={draft} definition={definition} client={draftClient} onBusyChange={() => {}} onReloadRequired={() => {}} publicationAction={null} onCancel={() => setDefinition(draft.definition)} onApplied={next => { setDraft(next); setDefinition(next.definition); }} /></>;
+}
+const generated = (): RichMenuDraft => ({ ...structuredClone(DRAFT), definition: { ...DRAFT.definition, menus: [{ ...DRAFT.definition.menus[0], appearance: { background_color: '#F5C842', image_mode: 'generated' } }] } });
+async function confirmSave() {
+  fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
+  await screen.findByRole('dialog');
+  fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '驗證共用草稿' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
+  fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
+}
+describe('Rich Menu appearance and shared save', () => {
+  it('local editing and confirmed discard never call mutation APIs, and button names have one owner', async () => {
+    const draftClient = client(); render(<Harness draftClient={draftClient} />);
     expect(await screen.findByText(/customer-menu\.png/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/按鈕.*名稱/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '新的客戶選單' } });
-    fireEvent.change(screen.getByLabelText('按鈕 1 名稱'), { target: { value: '真人客服' } });
-    expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      menus: [expect.objectContaining({
-        name: '新的客戶選單',
-        buttons: [expect.objectContaining({ label: '真人客服' })],
-      })],
-    }));
-    expect(draftClient.query).not.toHaveBeenCalled();
-    expect(draftClient.preview).not.toHaveBeenCalled();
-    expect(draftClient.apply).not.toHaveBeenCalled();
-    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
-    expect(screen.queryByText(/provider/i)).not.toBeInTheDocument();
+    expect(draftClient.preview).not.toHaveBeenCalled(); expect(draftClient.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '取消修改' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認取消修改' }));
     expect(screen.getByLabelText('選單名稱')).toHaveValue('客戶服務選單');
-    expect(screen.getByLabelText('按鈕 1 名稱')).toHaveValue('聯絡客服');
-    expect(draftClient.preview).not.toHaveBeenCalled();
-    expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(null);
+    expect(draftClient.apply).not.toHaveBeenCalled(); expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
+    await screen.findByText(/customer-menu\.png/);
   });
-
-  it('只從 owner-scoped 清單選擇 exact asset，已刪除圖片顯示原因且不可選', async () => {
-    const deleted = {
-      ...ASSET,
-      asset_id: 42,
-      original_filename: 'retired.png',
-      deleted_at: '2026-08-27T00:00:00Z',
-      selectable: false,
-      business_reason: '此背景圖已刪除，只保留歷史查詢，不能再選用。',
-      asset_version: 'd'.repeat(64),
-    } satisfies RichMenuMediaAsset;
-    const mediaClient = media([ASSET, deleted]);
-    const onLocalDefinitionChange = vi.fn();
-    render(<LineRichMenuDraftAppearanceEditor
-      draft={{
-        ...DRAFT,
-        definition: {
-          ...DRAFT.definition,
-          menus: [{
-            ...DRAFT.definition.menus[0],
-            appearance: { background_color: '#F5C842', image_mode: 'generated' },
-          }],
-        },
-      }}
-      menuId="customer_menu"
-      client={client()}
-      mediaClient={mediaClient}
-      onApplied={vi.fn()}
-      onLocalDefinitionChange={onLocalDefinitionChange}
-    />);
-
-    expect(await screen.findByText(/customer-menu\.png/)).toBeInTheDocument();
-    const deletedChoice = screen.getByRole('radio', { name: /retired\.png/ });
-    expect(deletedChoice).toBeDisabled();
-    expect(screen.getByText(/此背景圖已刪除/)).toBeInTheDocument();
+  it('controlled media metadata is preserved, unavailable assets disabled and uploaded images cannot be recolored', async () => {
+    const deleted = { ...ASSET, asset_id: 42, original_filename: 'retired.png', selectable: false, business_reason: '此背景圖已刪除', deleted_at: '2026-08-27T00:00:00Z' };
+    render(<Harness mediaClient={media([ASSET, deleted])} />);
+    fireEvent.click(screen.getByText('背景圖片', { selector: 'summary' }));
+    expect(await screen.findByRole('radio', { name: /retired\.png/ })).toBeDisabled();
+    expect(screen.getByLabelText('自訂選單底色')).toBeDisabled();
+    fireEvent.click(screen.getByRole('radio', { name: '使用系統色彩背景' }));
+    expect(screen.getByLabelText('自訂選單底色')).toBeEnabled();
     fireEvent.click(screen.getByRole('radio', { name: /customer-menu\.png/ }));
-    expect(onLocalDefinitionChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      menus: [expect.objectContaining({
-        appearance: {
-          background_color: '#F5C842',
-          image_mode: 'uploaded',
-          image_asset_id: 41,
-          image_asset_sha256: 'a'.repeat(64),
-          image_asset_version: 'c'.repeat(64),
-        },
-      })],
-    }));
+    expect(screen.getByLabelText('自訂選單底色')).toBeDisabled();
     expect(screen.queryByText(/^[0-9a-f]{64}$/)).not.toBeInTheDocument();
   });
-
-  it('Preview 保留 action 與影像 metadata，明確確認後才以 normalized definition Apply', async () => {
-    vi.stubGlobal('crypto', { randomUUID: () => 'appearance-editor-1' });
-    const draftClient = client();
-    const onApplied = vi.fn();
-    render(<LineRichMenuDraftAppearanceEditor draft={DRAFT} menuId="customer_menu" client={draftClient} mediaClient={media()} onApplied={onApplied} />);
+  it('saves a changed background only after server preview and confirmation, then reloads and preserves action and bounds', async () => {
+    const initial = generated(), draftClient = client(initial); render(<Harness initial={initial} draftClient={draftClient} />);
     fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '照護服務' } });
-    fireEvent.change(screen.getByLabelText('聊天室標題'), { target: { value: '照護選單' } });
-    fireEvent.change(screen.getByLabelText('背景色彩'), { target: { value: '#123456' } });
-    fireEvent.change(screen.getByLabelText('按鈕 1 名稱'), { target: { value: '聯絡工會' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
-    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledTimes(1));
-    const previewRequest = vi.mocked(draftClient.preview).mock.calls[0][0];
-    const menu = previewRequest.definition.menus[0];
-    expect(menu).toMatchObject({
-      name: '照護服務', chat_bar_text: '照護選單',
-      appearance: {
-        background_color: '#123456', image_mode: 'uploaded', image_asset_id: 41,
-        image_asset_sha256: 'a'.repeat(64), image_asset_version: 'c'.repeat(64),
-      },
-    });
-    expect(menu.buttons[0]).toMatchObject({
-      label: '聯絡工會', bounds: DRAFT.definition.menus[0].buttons[0].bounds,
-      action: { type: 'message', text: '我要聯絡客服' },
-    });
-    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
-    const applyButton = screen.getByRole('button', { name: '套用並回讀' });
-    expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: /我確認保存此草稿/ }));
-    fireEvent.click(applyButton);
-    await waitFor(() => expect(draftClient.apply).toHaveBeenCalledTimes(1));
-    expect(draftClient.apply).toHaveBeenCalledWith(expect.objectContaining({
-      expected_revision: 8, definition: previewRequest.definition, preview_fingerprint: FINGERPRINT,
-      idempotency_key: 'rich-menu-appearance-appearance-editor-1',
-      correlation_id: 'rich-menu-appearance-appearance-editor-1',
-    }));
-    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ revision: 9 }));
-    expect(await screen.findByText(/草稿已保存並完成回讀/)).toBeInTheDocument();
-    expect(draftClient.query).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('聊天室選單列文字'), { target: { value: '照護選單' } });
+    fireEvent.change(screen.getByLabelText('自訂選單底色'), { target: { value: '#123456' } });
+    fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
+    expect(await screen.findByRole('button', { name: '確認儲存草稿' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '驗證背景色保存' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
+    fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
+    await waitFor(() => expect(draftClient.query).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('草稿已儲存並重新載入；尚未發布至 LINE。')).toBeInTheDocument();
+    const saved = await draftClient.query();
+    expect(saved.definition.menus[0]).toMatchObject({ name: '照護服務', chat_bar_text: '照護選單', appearance: { background_color: '#123456' }, buttons: [{ label: '聯絡客服', action: DRAFT.definition.menus[0].buttons[0].action, bounds: DRAFT.definition.menus[0].buttons[0].bounds }] });
+    expect(screen.getByLabelText('自訂選單底色')).toHaveValue('#123456');
+    expect(draftClient.apply).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 8, preview_fingerprint: FINGERPRINT, reason: '驗證背景色保存' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(screen.getByRole('button', { name: '檢查並儲存草稿' })).toBeDisabled();
   });
-
-  it('published 月嫂選單可由既有快照內容建立下一版外觀草稿', async () => {
-    const draftClient = client();
-    const publishedStaffDraft: RichMenuDraft = {
-      ...DRAFT,
-      definition: {
-        ...DRAFT.definition,
-        menus: [{ ...DRAFT.definition.menus[0], id: 'staff_menu', audience_role: 'staff' }],
-      },
-      publication_locks: [{
-        menu_definition_id: 'staff_menu', configuration_revision: 8,
-        state: 'published', readonly_reason: '此版本已正式發布；可由目前內容建立下一個草稿版本，既有發布快照不會被覆寫。',
-      }],
-    };
-    render(<LineRichMenuDraftAppearanceEditor
-      draft={publishedStaffDraft}
-      menuId="staff_menu"
-      client={draftClient}
-      mediaClient={media([])}
-      onApplied={vi.fn()}
-    />);
-
-    expect(screen.getByLabelText('選單名稱')).toHaveValue('客戶服務選單');
-    fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '月嫂新版選單' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽草稿變更' }));
-    await waitFor(() => expect(draftClient.preview).toHaveBeenCalledWith(expect.objectContaining({
-      expected_revision: 8,
-      definition: expect.objectContaining({ menus: [expect.objectContaining({ id: 'staff_menu', name: '月嫂新版選單' })] }),
-    })));
-    expect(draftClient.apply).not.toHaveBeenCalled();
+  it('published snapshots can start a new draft and uploaded asset metadata survives the shared save', async () => {
+    const initial = structuredClone(DRAFT); initial.publication_locks[0] = { ...initial.publication_locks[0], state: 'published', readonly_reason: '已發布，可建立新版' };
+    const draftClient = client(initial); render(<Harness initial={initial} draftClient={draftClient} />);
+    fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '新版選單' } }); await confirmSave();
+    await waitFor(() => expect(draftClient.query).toHaveBeenCalledTimes(1));
+    const saved = await draftClient.query(); expect(saved.definition.menus[0].appearance).toEqual(DRAFT.definition.menus[0].appearance);
+  });
+  it('processing appearance is read-only', () => {
+    const initial = structuredClone(DRAFT); initial.publication_locks[0] = { ...initial.publication_locks[0], state: 'processing', readonly_reason: '正在發布，暫時唯讀' };
+    render(<LineRichMenuDraftAppearanceEditor draft={initial} definition={initial.definition} menuId="customer_menu" onDefinitionChange={vi.fn()} />);
+    expect(screen.getByText('正在發布，暫時唯讀')).toBeInTheDocument(); expect(screen.queryByLabelText('選單名稱')).not.toBeInTheDocument();
+  });
+  it('mismatched fresh readback keeps edits and prevents a success claim', async () => {
+    const initial = generated(), draftClient = client(initial); vi.mocked(draftClient.query).mockResolvedValue(initial);
+    render(<Harness initial={initial} draftClient={draftClient} />);
+    fireEvent.change(screen.getByLabelText('自訂選單底色'), { target: { value: '#123456' } }); await confirmSave();
+    expect((await screen.findAllByRole('alert')).some(el => el.textContent?.includes('重新載入的內容與確認結果不同'))).toBe(true);
+    expect(screen.queryByText('草稿已儲存並重新載入；尚未發布至 LINE。')).not.toBeInTheDocument();
   });
 });

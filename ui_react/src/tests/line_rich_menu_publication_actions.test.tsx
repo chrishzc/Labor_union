@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import type { LineRichMenuPublicationClient } from '../api/line_rich_menu_publication/line_rich_menu_publication_client';
+import { LineRichMenuPublicationError } from '../api/line_rich_menu_publication/line_rich_menu_publication_errors';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
 
 const FINGERPRINT = '0123456789abcdef'.repeat(4);
@@ -35,7 +36,7 @@ describe('Rich Menu publication actions', () => {
     await screen.findByText(/發布影響已確認/);
     expect(preview).toHaveBeenCalledTimes(1);
     expect(publish).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /確認排入異步發布/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /確認發布至 LINE/ })).toBeDisabled();
   });
 
   it('先顯示去敏 Preview，經原因與人工確認後只建立 durable queue receipt', async () => {
@@ -79,13 +80,13 @@ describe('Rich Menu publication actions', () => {
     expect(screen.queryByText('版本：7')).not.toBeInTheDocument();
     expect(screen.queryByText(/指紋摘要/)).not.toBeInTheDocument();
     expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /確認排入異步發布/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /確認發布至 LINE/ })).toBeDisabled();
 
     fireEvent.change(screen.getByRole('textbox', { name: /發布原因/ }), {
       target: { value: '核准月嫂角色選單更新' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: '我已確認選單內容與影響範圍，同意排入發布序列' }));
-    fireEvent.click(screen.getByRole('button', { name: /確認排入異步發布/ }));
+    fireEvent.click(screen.getByRole('button', { name: /確認發布至 LINE/ }));
 
     await screen.findByText('選單發布：已排入');
     expect(screen.getByText(/尚未代表 LINE 平台已完成發布/)).toBeInTheDocument();
@@ -139,7 +140,7 @@ describe('Rich Menu publication actions', () => {
       target: { value: '核准月嫂角色選單更新' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: '我已確認選單內容與影響範圍，同意排入發布序列' }));
-    expect(screen.getByRole('button', { name: /確認排入異步發布/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /確認發布至 LINE/ })).toBeDisabled();
     expect(publish).not.toHaveBeenCalled();
   });
 
@@ -208,4 +209,20 @@ describe('Rich Menu publication actions', () => {
     expect(payload.correlation_id).toMatch(/^line-rich-menu-retry-corr-/);
     expect(payload.idempotency_key).not.toBe(payload.correlation_id);
   });
+  it('stale publication preview requires a new human confirmation and never blindly republishes', async () => {
+    sessionClient.setSession('enabled-test-session', { id: 9, username: 'enabled-test', display_name: '管理員', role: 'system_admin', capabilities: ['line.menu.publish'], is_root: false, access_control_version: 1 });
+    const preview = vi.fn().mockResolvedValue({ preview_id: 42, config_revision: '8', config_fingerprint: FINGERPRINT });
+    const publish = vi.fn().mockRejectedValue(new LineRichMenuPublicationError('conflict', 'rich_menu_preview_stale', 'stale', 409));
+    render(<LineRichMenuPublicationActions selectedMenu={{ id: 'customer_menu', name: '客戶選單' }} client={{ preview, publish, retry: vi.fn() }} />);
+    fireEvent.click(screen.getByRole('button', { name: /檢查發布影響/ })); await screen.findByText(/發布影響已確認/);
+    fireEvent.change(screen.getByLabelText('發布原因'), { target: { value: '更新選單' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /同意排入發布序列/ }));
+    fireEvent.click(screen.getByRole('button', { name: '確認發布至 LINE' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('請重新檢查發布影響');
+    expect(preview).toHaveBeenCalledTimes(1); expect(publish).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '確認發布至 LINE' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /檢查發布影響/ })); await screen.findByText(/發布影響已確認/);
+    expect(screen.getByRole('checkbox', { name: /同意排入發布序列/ })).not.toBeChecked();
+  });
+
 });

@@ -639,7 +639,7 @@ export function OrderIntakeRepairPanel({
           />}
           {sourceReview?.fields.some((field) => !canRepairHcmProfileField(field)
             && !['預計服務日期', '希望服務天數'].includes(field)) && (
-            <p>服務時間請使用本案的訂單條件修正；其他沒有編輯入口的來源欄位，可至異常審核核對並逐筆確認略過。</p>
+            <p>服務時間請使用本案的訂單條件修正；其他沒有編輯入口的來源欄位，請核對原始匯入資料。</p>
           )}
           {sourceReviewError && <div role="status">原始進件欄位問題讀取失敗，請重新讀取案件。</div>}
           <div style={{ fontSize: '0.84rem', color: '#57423b' }}>

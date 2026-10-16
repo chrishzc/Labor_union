@@ -380,7 +380,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>
                       <span>{intakeReviews.get(item.id)!.fields.join('、')}</span>
-                      <small>可至客戶名冊修正資料；不需處理的欄位問題可至異常審核逐筆確認略過。</small>
+                      <small>可至客戶名冊修正資料。</small>
                     </div>
                   )}
                   {intakeReviewsError && item.lifecycleStatus === '待補件' && (

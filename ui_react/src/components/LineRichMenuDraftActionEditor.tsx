@@ -1,32 +1,23 @@
 /**
  * File: LineRichMenuDraftActionEditor.tsx
- * Description: 編輯 Rich Menu closed typed action，並執行草稿 Preview、確認、Apply 與 readback。
+ * Description: 統一編輯共用草稿的按鈕名稱與 typed action；不執行儲存或發布。
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Save, X, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Zap } from 'lucide-react';
 import type { RichMenuAction } from '../api/line_configuration/line_configuration_query_schemas';
-import type { LineRichMenuDraftClient } from '../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type {
   RichMenuDraft,
   RichMenuDraftDefinition,
-  RichMenuDraftPreview,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
 
 interface Props {
   draft: RichMenuDraft;
   menuId: string | null;
-  client: LineRichMenuDraftClient;
-  onApplied: (draft: RichMenuDraft) => void;
-  onLocalDefinitionChange?: (definition: RichMenuDraftDefinition | null) => void;
-  previewDefinition?: RichMenuDraftDefinition;
+  definition: RichMenuDraftDefinition;
+  onDefinitionChange: (definition: RichMenuDraftDefinition) => void;
 }
 
-type Status = 'idle' | 'previewing' | 'previewed' | 'applying' | 'applied' | 'error';
 type EditableActionType = 'message' | 'uri' | 'postback';
-
-function copyDefinition(value: RichMenuDraftDefinition): RichMenuDraftDefinition {
-  return structuredClone(value);
-}
 
 function initialAction(kind: EditableActionType): RichMenuAction {
   switch (kind) {
@@ -60,119 +51,19 @@ const CANONICAL_LIFF_TARGETS = [
 export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
   draft,
   menuId,
-  client,
-  onApplied,
-  onLocalDefinitionChange,
-  previewDefinition,
+  definition,
+  onDefinitionChange,
 }) => {
-  const [definition, setDefinition] = useState(() => copyDefinition(draft.definition));
   const [buttonId, setButtonId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<RichMenuDraftPreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [reason, setReason] = useState('工會人員調整 Rich Menu 按鈕動作');
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
-  const appliedRevision = useRef<number | null>(null);
-
-  useEffect(() => {
-    const preserveApplyReadback = appliedRevision.current === draft.revision;
-    setDefinition(copyDefinition(draft.definition));
-    setButtonId(null);
-    setPreview(null);
-    setConfirmed(false);
-    if (!preserveApplyReadback) {
-      setStatus('idle');
-      setMessage(null);
-    }
-    appliedRevision.current = null;
-  }, [draft]);
-
-  const menu = 'menus' in definition
-    ? definition.menus.find((item) => item.id === menuId) ?? definition.menus[0]
-    : undefined;
-  const button = useMemo(
-    () => menu?.buttons.find((item) => item.id === buttonId) ?? menu?.buttons[0],
-    [buttonId, menu],
-  );
-
-  const updateAction = (action: RichMenuAction) => {
-    if (!menu || !button || !('menus' in definition)) return;
-    const nextDefinition: RichMenuDraftDefinition = {
-      ...definition,
-      menus: definition.menus.map((item) => item.id !== menu.id ? item : {
-        ...item,
-        buttons: item.buttons.map((candidate) => candidate.id === button.id
-          ? { ...candidate, action }
-          : candidate),
-      }),
-    };
-    setDefinition(nextDefinition);
-    onLocalDefinitionChange?.(copyDefinition(nextDefinition));
-    setPreview(null);
-    setConfirmed(false);
-    setStatus('idle');
-    setMessage(null);
+  const menu = definition.menus.find((item) => item.id === menuId) ?? definition.menus[0];
+  const button = menu?.buttons.find((item) => item.id === buttonId) ?? menu?.buttons[0];
+  const updateButton = (change: Partial<NonNullable<typeof button>>) => {
+    if (!menu || !button) return;
+    onDefinitionChange({ ...definition, menus: definition.menus.map((item) => item.id !== menu.id ? item : {
+      ...item, buttons: item.buttons.map((candidate) => candidate.id === button.id ? { ...candidate, ...change } : candidate),
+    }) });
   };
-
-  const requestPreview = async (): Promise<RichMenuDraftPreview | null> => {
-    setStatus('previewing');
-    setMessage(null);
-    setConfirmed(false);
-    try {
-      const result = await client.preview({
-        expected_revision: draft.revision,
-        definition: previewDefinition ?? definition,
-      });
-      setPreview(result);
-      setStatus('previewed');
-      return result;
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿預覽失敗');
-      return null;
-    }
-  };
-
-  const applyPreview = async (candidate: RichMenuDraftPreview) => {
-    setStatus('applying');
-    setMessage(null);
-    try {
-      const identity = crypto.randomUUID();
-      const result = await client.apply({
-        expected_revision: draft.revision,
-        definition: candidate.normalized_definition,
-        preview_fingerprint: candidate.preview_fingerprint,
-        reason,
-        idempotency_key: `rich-menu-draft-${identity}`,
-        correlation_id: `rich-menu-draft-${identity}`,
-      });
-      setStatus('applied');
-      setMessage('草稿已保存並完成回讀；尚未發布至 LINE。');
-      appliedRevision.current = result.readback.revision;
-      onLocalDefinitionChange?.(null);
-      onApplied(result.readback);
-    } catch (error) {
-      setStatus('error');
-      setMessage(error instanceof Error ? error.message : 'Rich Menu 草稿套用失敗');
-    }
-  };
-
-  const apply = async () => {
-    if (!preview || !confirmed) return;
-    await applyPreview(preview);
-  };
-
-  const isDirty = JSON.stringify(definition) !== JSON.stringify(draft.definition);
-
-  useEffect(() => {
-    if (!isDirty) return undefined;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [isDirty]);
+  const updateAction = (action: RichMenuAction) => updateButton({ action });
 
   if (!menu || !button) {
     return <div className="line-scope-note">目前沒有可編輯的 Rich Menu 草稿按鈕。</div>;
@@ -208,46 +99,25 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
 
   return (
     <section className="richmenu-card" data-control-id="line.richmenu.draft.action-editor">
-      <div className="richmenu-card-header">
-        <div>
-          <h4 className="richmenu-editor-title"><Zap aria-hidden="true" />修改按鈕動作</h4>
-          <p className="richmenu-editor-description">只修改草稿版本；預覽確認後才能套用，且不會直接發布或發送 LINE。</p>
-        </div>
-        <span className="line-category-badge category-navigation">編輯草稿</span>
-      </div>
-
       {legacySwitchBlocked && (
         <div className="line-warning" role="alert">
           此按鈕仍是舊版 Rich Menu switch 動作。使用者端選單切換已停用，請改成訊息、LIFF／網址或 Postback 後再保存。
         </div>
       )}
 
-      {isDirty && (
-        <div className="line-warning richmenu-dirty-state" role="status">
-          尚有未儲存的按鈕動作變更；離開頁面前請先預覽並套用，或取消修改。
-        </div>
-      )}
-
       <div className="richmenu-form-grid">
-        <label className="richmenu-form-field">
-          <span>按鈕</span>
-          <select
-            className="richmenu-form-select"
-            value={button.id}
-            onChange={(event) => {
-              setButtonId(event.target.value);
-              setPreview(null);
-              setConfirmed(false);
-              setStatus('idle');
-              setMessage(null);
-            }}
-          >
-            {menu.buttons.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
-          </select>
+        <div className="richmenu-button-choices richmenu-form-field-full" role="group" aria-label="選擇編輯按鈕">
+          {menu.buttons.map((candidate, index) => <button key={candidate.id} type="button"
+            className={button.id === candidate.id ? 'active' : ''} aria-pressed={button.id === candidate.id}
+            onClick={() => setButtonId(candidate.id)}><small>按鈕 {index + 1}</small>{candidate.label}</button>)}
+        </div>
+        <label className="richmenu-form-field richmenu-form-field-full">
+          <span>按鈕顯示名稱</span>
+          <input className="richmenu-form-input" maxLength={30} required value={button.label}
+            onChange={(event) => updateButton({ label: event.target.value })} />
         </label>
-
         <label className="richmenu-form-field">
-          <span>動作類型</span>
+          <span>點擊後的動作</span>
           <select
             className="richmenu-form-select"
             value={legacySwitchBlocked ? '' : action.type}
@@ -256,7 +126,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
             {legacySwitchBlocked && <option value="">請改用支援的動作</option>}
             <option value="message">發送訊息</option>
             <option value="uri">開啟 LIFF／網址</option>
-            <option value="postback">Postback 資料</option>
+            <option value="postback">觸發系統操作（進階）</option>
           </select>
         </label>
 
@@ -308,7 +178,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
                       </option>
                     )}
                     {CANONICAL_LIFF_TARGETS.map((target) => (
-                      <option key={target.value} value={target.value}>{target.label}</option>
+                      <option key={target.value} value={target.value}>{target.label.replace(/^.*?（/, '').replace(/）$/, '')}</option>
                     ))}
                   </select>
                 );
@@ -328,7 +198,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
 
         {action.type === 'postback' && (
           <label className="richmenu-form-field richmenu-form-field-full">
-            <span>Postback data</span>
+            <span>系統動作資料</span>
             <textarea
               className="richmenu-form-textarea"
               maxLength={300}
@@ -340,67 +210,7 @@ export const LineRichMenuDraftActionEditor: React.FC<Props> = ({
           </label>
         )}
 
-        <label className="richmenu-form-field richmenu-form-field-full">
-          <span>變更原因</span>
-          <input
-            className="richmenu-form-input"
-            value={reason}
-            placeholder="例如：工會人員調整 Rich Menu 按鈕動作"
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </label>
       </div>
-
-      <div className="richmenu-editor-actions richmenu-editor-action-row">
-        <button
-          type="button"
-          className="richmenu-btn-secondary"
-          onClick={() => void requestPreview()}
-          disabled={legacySwitchBlocked || status === 'previewing' || status === 'applying'}
-        >
-          <Eye aria-hidden="true" />{status === 'previewing' ? '預覽中…' : '預覽草稿變更'}
-        </button>
-        <button
-          type="button"
-          className="richmenu-btn-secondary"
-          onClick={() => {
-            setDefinition(copyDefinition(draft.definition));
-            setPreview(null);
-            setConfirmed(false);
-            setStatus('idle');
-            setMessage('已取消本機修改。');
-            onLocalDefinitionChange?.(null);
-          }}
-        >
-          <X aria-hidden="true" />取消修改
-        </button>
-      </div>
-
-      {preview && (
-        <div className="richmenu-preview-callout">
-          <p className="richmenu-preview-summary">
-            預覽完成：已核對目前內容與保存後結果。
-          </p>
-          <label className="richmenu-confirm-checkbox-label">
-            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-            我確認保存此草稿；這不會發布或發送 LINE。
-          </label>
-          <div>
-            <button type="button" className="richmenu-btn-apply" onClick={() => void apply()} disabled={!confirmed || status === 'applying'}>
-              <Save aria-hidden="true" />套用並回讀
-            </button>
-          </div>
-        </div>
-      )}
-
-      {message && (
-        <div
-          className={`${status === 'error' ? 'line-error' : 'line-scope-note'} line-block-spacing-12`}
-          role={status === 'error' ? 'alert' : 'status'}
-        >
-          {message}
-        </div>
-      )}
     </section>
   );
 };

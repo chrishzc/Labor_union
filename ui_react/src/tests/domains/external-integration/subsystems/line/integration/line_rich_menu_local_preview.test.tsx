@@ -1,6 +1,6 @@
 /**
  * File: line_rich_menu_local_preview.test.tsx
- * Description: 驗證 Rich Menu browser-memory edits、typed geometry 與安全 Diff blocker，且不觸發任何 mutation。
+ * Description: 驗證 Rich Menu browser-memory edits、typed geometry 與缺少比對資料時不顯示入口，且不觸發任何 mutation。
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -65,7 +65,7 @@ describe('Rich Menu 本機互動預覽', () => {
         richMenuDraft={richMenuDraft}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Rich Menu' }));
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
     await waitFor(() => expect(richMenuDraft.query).toHaveBeenCalledTimes(1));
 
     let phoneMenu = container.querySelector('[data-control-id="line.richmenu.local-preview"]');
@@ -82,23 +82,24 @@ describe('Rich Menu 本機互動預覽', () => {
     expect(screen.queryByText(/熱區路由合格/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '發布' }));
-    fireEvent.click(screen.getByRole('button', { name: /開啟版本變更比對/ }));
-    expect(screen.getByRole('status')).toHaveTextContent('尚缺線上生效版本資料');
+    expect(screen.queryByRole('button', { name: /版本.*比對/ })).not.toBeInTheDocument();
+    expect(screen.getByText('檢查正常')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '關閉發布確認' }));
     expect(screen.queryByText(/服務登記 \(2500x843 半版\)/)).not.toBeInTheDocument();
     expect(screen.queryByText(/升級 4 宮格熱區/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '外觀編輯' }));
+    fireEvent.click(screen.getByRole('button', { name: '外觀與名稱' }));
     const appearance = container.querySelector('[data-control-id="line.richmenu.draft.appearance-editor"]');
     phoneMenu = container.querySelector('[data-control-id="line.richmenu.local-preview"]');
     expect(appearance).not.toBeNull();
     expect(phoneMenu).not.toBeNull();
-    fireEvent.change(within(appearance as HTMLElement).getByLabelText('背景色彩'), { target: { value: '#123456' } });
-    fireEvent.change(within(appearance as HTMLElement).getByLabelText('按鈕 1 名稱'), { target: { value: '本機案件按鈕' } });
+    fireEvent.change(within(appearance as HTMLElement).getByLabelText('自訂選單底色'), { target: { value: '#123456' } });
 
-    fireEvent.click(screen.getByRole('button', { name: '按鈕動作' }));
+    fireEvent.click(screen.getByRole('button', { name: '按鈕設定' }));
     const action = container.querySelector('[data-control-id="line.richmenu.draft.action-editor"]');
     expect(action).not.toBeNull();
-    fireEvent.change(within(action as HTMLElement).getByLabelText('動作類型'), { target: { value: 'message' } });
+    fireEvent.change(within(action as HTMLElement).getByLabelText('按鈕顯示名稱'), { target: { value: '本機案件按鈕' } });
+    fireEvent.change(within(action as HTMLElement).getByLabelText('點擊後的動作'), { target: { value: 'message' } });
     fireEvent.change(within(action as HTMLElement).getByLabelText('送出訊息'), { target: { value: '尚未保存的本機訊息' } });
     expect(phoneMenu).toHaveStyle({ backgroundColor: '#123456' });
     expect(within(phoneMenu as HTMLElement).getByText('本機案件按鈕')).toBeInTheDocument();
@@ -107,15 +108,17 @@ describe('Rich Menu 本機互動預覽', () => {
     expect(phoneChat).not.toBeNull();
     expect(within(phoneChat as HTMLElement).getByText('尚未保存的本機訊息')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '外觀編輯' }));
-    const reopenedAppearance = container.querySelector('[data-control-id="line.richmenu.draft.appearance-editor"]');
-    fireEvent.click(within(reopenedAppearance as HTMLElement).getByRole('button', { name: '取消修改' }));
+    fireEvent.click(screen.getByRole('button', { name: '外觀與名稱' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消修改' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認取消修改' }));
     expect(within(phoneMenu as HTMLElement).getByText('案件進度')).toBeInTheDocument();
     fireEvent.click(within(phoneMenu as HTMLElement).getByRole('button', { name: /案件進度/ }));
-    expect(within(phoneChat as HTMLElement).getByText('尚未保存的本機訊息')).toBeInTheDocument();
+    expect(screen.queryByText('尚未保存的本機訊息')).not.toBeInTheDocument();
+    expect(screen.getByText('case_progress')).toBeInTheDocument();
 
     expect(richMenuDraft.preview).not.toHaveBeenCalled();
     expect(richMenuDraft.apply).not.toHaveBeenCalled();
+    await waitFor(() => expect(container.querySelector('.richmenu-background-details [role="alert"]')).not.toBeNull());
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

@@ -11,16 +11,14 @@ import {
   Eraser,
   FilePenLine,
   FileText,
-  GitCompareArrows,
   Headphones,
   Info,
   MapPin,
   Menu,
   PackageSearch,
   RefreshCw,
-  Settings,
+  Send,
   ShieldCheck,
-  Smartphone,
   Sparkles,
   Star,
   TriangleAlert,
@@ -30,10 +28,8 @@ import {
 
 import {
   adaptLineRichMenuPublication,
-  adaptLineRichMenuPublicationPage,
   type LineRichMenuConfigurationModel,
   type LineRichMenuPublicationModel,
-  type LineRichMenuPublicationPageModel,
   type RichMenuButtonModel,
 } from '../adapters/line_configuration/line_configuration_query_adapter';
 import {
@@ -118,10 +114,11 @@ import type {
   RichMenuDraft,
   RichMenuDraftDefinition,
 } from '../api/line_rich_menu_draft/line_rich_menu_draft_schemas';
+import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSaveActions';
 import './LineManagementPage.css';
+import './line_management/LineRichMenuWorkspace.css';
 
 type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'order_groups' | 'runtime';
-type RichMenuWorkspaceTab = 'overview' | 'appearance' | 'actions' | 'publish' | 'history';
 
 function currentHashParams(): URLSearchParams {
   return new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '');
@@ -292,49 +289,6 @@ export function resolveRichMenuUri(uri: string | null): string | null {
   }
 }
 
-function mergeRichMenuAppearance(
-  base: RichMenuDraftDefinition,
-  source: RichMenuDraftDefinition,
-): RichMenuDraftDefinition {
-  return {
-    ...base,
-    menus: base.menus.map((menu) => {
-      const sourceMenu = source.menus.find((candidate) => candidate.id === menu.id);
-      if (!sourceMenu) return menu;
-      return {
-        ...menu,
-        name: sourceMenu.name,
-        chat_bar_text: sourceMenu.chat_bar_text,
-        appearance: sourceMenu.appearance,
-        buttons: menu.buttons.map((button) => {
-          const sourceButton = sourceMenu.buttons.find((candidate) => candidate.id === button.id);
-          return sourceButton ? { ...button, label: sourceButton.label } : button;
-        }),
-      };
-    }),
-  };
-}
-
-function mergeRichMenuActions(
-  base: RichMenuDraftDefinition,
-  source: RichMenuDraftDefinition,
-): RichMenuDraftDefinition {
-  return {
-    ...base,
-    menus: base.menus.map((menu) => {
-      const sourceMenu = source.menus.find((candidate) => candidate.id === menu.id);
-      if (!sourceMenu) return menu;
-      return {
-        ...menu,
-        buttons: menu.buttons.map((button) => {
-          const sourceButton = sourceMenu.buttons.find((candidate) => candidate.id === button.id);
-          return sourceButton ? { ...button, action: sourceButton.action } : button;
-        }),
-      };
-    }),
-  };
-}
-
 export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   customerService = customerServiceClient,
   lineIdentity = lineIdentityClient,
@@ -351,7 +305,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
   const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'order_groups'], 'tickets'));
-  const [richMenuWorkspaceTab, setRichMenuWorkspaceTab] = useState<RichMenuWorkspaceTab>(hashChoice<RichMenuWorkspaceTab>(initialHashParams, 'rich', ['overview', 'appearance', 'actions', 'publish', 'history'], 'overview'));
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
 
@@ -394,16 +347,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [richMenuConfiguration, setRichMenuConfiguration] = useState<QueryState<LineRichMenuConfigurationModel>>(idleState);
   const [richMenuDraftSnapshot, setRichMenuDraftSnapshot] = useState<RichMenuDraft | null>(null);
   const [richMenuLocalDefinition, setRichMenuLocalDefinition] = useState<RichMenuDraftDefinition | null>(null);
-  const [richMenuPublications, setRichMenuPublications] = useState<QueryState<LineRichMenuPublicationPageModel>>(idleState);
-  const [richMenuPublicationPageNumber, setRichMenuPublicationPageNumber] = useState(hashPage(initialHashParams, 'rich_page'));
-  const richMenuPublicationPageSize = 25;
   const [richMenuReload, setRichMenuReload] = useState(0);
   const richMenuListGeneration = useRef(0);
   const [selectedMenuId, setSelectedMenuId] = useState<string | null>(null);
-  const [selectedPublication, setSelectedPublication] = useState<QueryState<LineRichMenuPublicationModel>>(idleState);
-  const publicationController = useRef<AbortController | null>(null);
-  const publicationGeneration = useRef(0);
-  const publicationDetailId = useRef<number | null>(null);
   const [trackedRichMenuPublication, setTrackedRichMenuPublication] = useState<{
     id: number;
     menuDefinitionId: string;
@@ -424,7 +370,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [simChatMessages, setSimChatMessages] = useState<
     Array<{ id: string; sender: 'user' | 'bot'; text: string; time: string }>
   >([]);
-  const [isDiffMode, setIsDiffMode] = useState(false);
+  const [richMenuEditorTab, setRichMenuEditorTab] = useState<'appearance' | 'actions'>('appearance');
+  const [richMenuBusy, setRichMenuBusy] = useState(false);
+  const [richMenuPublishOpen, setRichMenuPublishOpen] = useState(false);
+  const [richMenuReloadRequired, setRichMenuReloadRequired] = useState(false);
 
   useEffect(() => {
     if (runtimeOnly) return;
@@ -436,11 +385,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       else params.set(key, String(value));
     };
     setParam('tab', activeTab, 'tickets');
-    setParam('rich', richMenuWorkspaceTab, 'overview');
+    params.delete('rich');
+    params.delete('rich_page');
     setParam('rule_q', notificationRuleSearch, '');
     setParam('rule_state', notificationRuleEnabled, 'all');
     if (activeTab === 'push_queue') ['notice', 'rule_event', 'rule_recipient', 'rule_page'].forEach(key => params.delete(key));
-    setParam('rich_page', richMenuPublicationPageNumber, 1);
     setParam('group_page', orderGroupPageNumber, 1);
     setParam('group_q', orderGroupSearch, '');
     setParam('group_state', orderGroupStatus, 'all');
@@ -456,8 +405,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     orderGroupPageNumber,
     orderGroupSearch,
     orderGroupStatus,
-    richMenuPublicationPageNumber,
-    richMenuWorkspaceTab,
     runtimeOnly,
   ]);
 
@@ -467,32 +414,21 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     if (activeTab !== 'richmenu') return;
     const controller = new AbortController();
     const generation = ++richMenuListGeneration.current;
-    let cancelled = false;
     setRichMenuLocalDefinition(null);
+    setRichMenuDraftSnapshot(null);
     setRichMenuConfiguration(loadingState());
-    setRichMenuPublications(loadingState());
-    const timer = window.setTimeout(() => {
-      void Promise.allSettled([
-        richMenuDraft.query({ signal: controller.signal }),
-        lineConfiguration.listRichMenuPublications({
-          page: richMenuPublicationPageNumber,
-          pageSize: richMenuPublicationPageSize,
-          signal: controller.signal,
-        }),
-      ]).then(([configurationResult, publicationResult]) => {
-        if (cancelled || generation !== richMenuListGeneration.current) return;
-        if (configurationResult.status === 'fulfilled') {
-          const nextConfiguration = adaptLineRichMenuDraft(configurationResult.value);
-          setRichMenuDraftSnapshot(configurationResult.value);
-          setRichMenuConfiguration(loadedState(nextConfiguration));
-          setSelectedMenuId((current) => current ?? nextConfiguration.menus[0]?.id ?? null);
-        } else setRichMenuConfiguration(errorState(displayQueryError(configurationResult.reason, '圖文選單 設定載入失敗')));
-        if (publicationResult.status === 'fulfilled') setRichMenuPublications(loadedState(adaptLineRichMenuPublicationPage(publicationResult.value)));
-        else setRichMenuPublications(errorState(displayQueryError(publicationResult.reason, '圖文選單 發布紀錄載入失敗')));
-      });
-    }, 0);
-    return () => { cancelled = true; window.clearTimeout(timer); controller.abort(); };
-  }, [activeTab, lineConfiguration, richMenuDraft, richMenuPublicationPageNumber, richMenuReload]);
+    void richMenuDraft.query({ signal: controller.signal }).then((draft) => {
+      if (controller.signal.aborted || generation !== richMenuListGeneration.current) return;
+      const configuration = adaptLineRichMenuDraft(draft);
+      setRichMenuDraftSnapshot(draft);
+      setRichMenuReloadRequired(false);
+      setRichMenuConfiguration(loadedState(configuration));
+      setSelectedMenuId((current) => current ?? configuration.menus[0]?.id ?? null);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setRichMenuConfiguration(errorState(displayQueryError(error, '圖文選單設定載入失敗')));
+    });
+    return () => controller.abort();
+  }, [activeTab, richMenuDraft, richMenuReload]);
 
   useEffect(() => {
     const tracked = trackedRichMenuPublication;
@@ -522,7 +458,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               }
             : existing);
           if (!['queued', 'publishing'].includes(current.status)) {
-            setRichMenuPublicationPageNumber(1);
             setRichMenuReload((value) => value + 1);
           }
         })
@@ -574,13 +509,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
   useEffect(() => {
 
-    if (activeTab !== 'richmenu') {
-      publicationController.current?.abort();
-      publicationController.current = null;
-      publicationGeneration.current += 1;
-      publicationDetailId.current = null;
-      setSelectedPublication(idleState());
-    }
     if (activeTab !== 'runtime') {
       runtimePreviewController.current?.abort();
       escalationPreviewController.current?.abort();
@@ -596,10 +524,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   }, [activeTab]);
 
   useEffect(() => () => {
-    publicationController.current?.abort();
     runtimePreviewController.current?.abort();
     escalationPreviewController.current?.abort();
-    publicationGeneration.current += 1;
     runtimePreviewGeneration.current += 1;
     escalationPreviewGeneration.current += 1;
   }, []);
@@ -812,48 +738,21 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   };
 
-  const openPublication = (publicationId: number) => {
-    publicationController.current?.abort();
-    const controller = new AbortController();
-    publicationController.current = controller;
-    publicationDetailId.current = publicationId;
-    const generation = publicationGeneration.current + 1;
-    publicationGeneration.current = generation;
-    setSelectedPublication(loadingState());
-    void lineConfiguration.getRichMenuPublication(publicationId, { signal: controller.signal })
-      .then((publication) => { if (!controller.signal.aborted && generation === publicationGeneration.current) setSelectedPublication(loadedState(adaptLineRichMenuPublication(publication))); })
-      .catch((error: unknown) => { if (!controller.signal.aborted && generation === publicationGeneration.current) setSelectedPublication(errorState(displayQueryError(error, '圖文選單 發布明細載入失敗'))); });
-  };
-
-  const closePublication = () => {
-    publicationController.current?.abort();
-    publicationController.current = null;
-    publicationGeneration.current += 1;
-    publicationDetailId.current = null;
-    setSelectedPublication(idleState());
-  };
-
   const localRichMenuConfiguration = richMenuDraftSnapshot && richMenuLocalDefinition
     ? adaptLineRichMenuDraft({ ...richMenuDraftSnapshot, definition: richMenuLocalDefinition })
     : richMenuConfiguration.value;
   const selectedMenu = localRichMenuConfiguration?.menus.find((menu) => menu.id === selectedMenuId) ?? null;
-  const updateLocalRichMenuAppearance = (candidate: RichMenuDraftDefinition | null) => {
-    if (!richMenuDraftSnapshot) return;
-    setRichMenuLocalDefinition((current) => mergeRichMenuAppearance(
-      current ?? richMenuDraftSnapshot.definition,
-      candidate ?? richMenuDraftSnapshot.definition,
-    ));
-  };
-  const updateLocalRichMenuActions = (candidate: RichMenuDraftDefinition | null) => {
-    if (!richMenuDraftSnapshot) return;
-    setRichMenuLocalDefinition((current) => mergeRichMenuActions(
-      current ?? richMenuDraftSnapshot.definition,
-      candidate ?? richMenuDraftSnapshot.definition,
-    ));
-  };
+  const richMenuDirty = Boolean(richMenuDraftSnapshot && richMenuLocalDefinition
+    && JSON.stringify(richMenuLocalDefinition) !== JSON.stringify(richMenuDraftSnapshot.definition));
+  useEffect(() => {
+    if (!richMenuDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [richMenuDirty]);
 
   return (
-    <div className={`line-page-wrapper${runtimeOnly ? ' line-runtime-embedded' : ''}`} data-control-id="line.page">
+    <div className={`line-page-wrapper${runtimeOnly ? ' line-runtime-embedded' : ''}${activeTab === 'richmenu' ? ' line-richmenu-active' : ''}`} data-control-id="line.page">
       {!runtimeOnly && <header className="page-header-banner line-page-header">
         <div>
           <p className="line-hub-eyebrow">LINE 專區</p>
@@ -865,7 +764,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">
         {(['日常作業', '選單設定'] as const).map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
           <span className="line-nav-group-label">{group}</span>
-          {TABS.filter(([tab]) => group === '選單設定' ? tab === 'richmenu' : tab !== 'richmenu').map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => setActiveTab(tab)}>{label}</button>)}
+          {TABS.filter(([tab]) => group === '選單設定' ? tab === 'richmenu' : tab !== 'richmenu').map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab === 'richmenu' && richMenuDirty && tab !== 'richmenu' && !window.confirm('還有未儲存的選單修改，確定離開並放棄修改？')) return; setActiveTab(tab); }}>{label}</button>)}
         </div>)}
       </nav>}
 
@@ -889,41 +788,24 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           : null;
 
         return (
-          <section className="line-table-container" data-control-id="line.richmenu.configuration">
+          <section className="line-table-container richmenu-clean-workspace" data-control-id="line.richmenu.configuration">
             <div className="line-section-heading">
               <div>
-                <h2>各角色的圖文選單</h2>
-            <p>可編輯草稿的背景、名稱與按鈕動作；草稿保存不會發布，正式發布另須檢查影響並由人員確認。</p>
+                <h2>圖文選單</h2>
+            <p>選擇角色，編輯選單，再確認發布。儲存草稿不會發布至 LINE。</p>
               </div>
               <button
                 type="button"
                 className="line-secondary-btn"
                 data-control-id="line.richmenu.refresh"
+                aria-label="重新整理"
+                title={richMenuDirty ? '請先儲存或取消修改，再重新整理' : '重新整理草稿'}
+                disabled={richMenuDirty || richMenuBusy}
                 onClick={() => setRichMenuReload((value) => value + 1)}
               >
-                <RefreshCw aria-hidden="true" />重新整理
+                <RefreshCw aria-hidden="true" /><span className="richmenu-refresh-label">重新整理</span>
               </button>
             </div>
-
-            <nav className="line-hub-section-tabs richmenu-workspace-tabs" aria-label="圖文選單 工作區">
-              {([
-                ['overview', '選單概覽'],
-                ['appearance', '外觀編輯'],
-                ['actions', '按鈕動作'],
-                ['publish', '發布'],
-                ['history', '發布歷程'],
-              ] as const).map(([tab, label]) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className={richMenuWorkspaceTab === tab ? 'active' : ''}
-                  aria-current={richMenuWorkspaceTab === tab ? 'page' : undefined}
-                  onClick={() => setRichMenuWorkspaceTab(tab)}
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
 
             <LoadingOrError state={richMenuConfiguration} loadingText="正在載入 圖文選單 設定…" />
             {richMenuConfiguration.status === 'loaded' && richMenuConfiguration.value?.isEmpty && (
@@ -942,115 +824,35 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     key={menu.id}
                     type="button"
                     className={`richmenu-role-tab ${activeMenu?.id === menu.id ? 'active' : ''}`}
+                    aria-pressed={activeMenu?.id === menu.id}
+                    disabled={richMenuBusy}
                     onClick={() => {
                       setSelectedMenuId(menu.id);
                       setActiveSimLiff(null);
+                      setSimChatMessages([]);
                     }}
                   >
-                    {menu.audienceRoleLabel}｜{menu.name}
+                    {menu.audienceRoleLabel}
                   </button>
                 ))}
               </div>
 
-              {/* Diff Mode 與模擬控制 */}
-              <div className="richmenu-toolbar-actions">
-                <button
-                  type="button"
-                  className={`line-secondary-btn richmenu-diff-toggle ${isDiffMode ? 'active' : ''}`}
-                  onClick={() => setIsDiffMode(!isDiffMode)}
-                >
-                  <GitCompareArrows aria-hidden="true" />
-                  {isDiffMode ? '關閉版本比對' : '開啟版本變更比對'}
-                </button>
-                {simChatMessages.length > 0 && (
-                  <button
-                    type="button"
-                  className="line-secondary-btn richmenu-compact-action"
-                    onClick={() => setSimChatMessages([])}
-                  >
-                    <Eraser aria-hidden="true" />
-                    清除模擬對話
-                  </button>
-                )}
-              </div>
+              {(simChatMessages.length > 0 || activeSimLiff) && <button type="button" className="line-secondary-btn" onClick={() => { setSimChatMessages([]); setActiveSimLiff(null); }}><Eraser aria-hidden="true" />清除預覽</button>}
             </div>
 
-            {/* 本機幾何初檢；正式路由與發布資格只由 server Preview 裁決。 */}
-            {activeMenu && (richMenuWorkspaceTab === 'overview' || richMenuWorkspaceTab === 'publish') && (() => {
-              const targetW = activeMenu.width;
-              const targetH = activeMenu.height;
-              let totalArea = 0;
-              let hasOverlap = false;
-              let hasInvalidDimensions = false;
-              let hasOutOfBounds = false;
-              const buttons = activeMenu.buttons;
-
-              for (let i = 0; i < buttons.length; i++) {
-                const b1 = buttons[i].bounds;
-                totalArea += b1.width * b1.height;
-                hasInvalidDimensions ||= b1.width <= 0 || b1.height <= 0;
-                hasOutOfBounds ||=
-                  b1.x < 0 ||
-                  b1.y < 0 ||
-                  b1.x + b1.width > targetW ||
-                  b1.y + b1.height > targetH;
-                for (let j = i + 1; j < buttons.length; j++) {
-                  const b2 = buttons[j].bounds;
-                  if (
-                    b1.x < b2.x + b2.width &&
-                    b1.x + b1.width > b2.x &&
-                    b1.y < b2.y + b2.height &&
-                    b1.y + b1.height > b2.y
-                  ) {
-                    hasOverlap = true;
-                  }
-                }
-              }
-              const isFullCoverage = totalArea === targetW * targetH;
-              const localGeometryPassed =
-                !hasInvalidDimensions && !hasOutOfBounds && isFullCoverage && !hasOverlap;
-              const geometryIssues = [
-                hasInvalidDimensions ? '熱區尺寸必須為正值' : null,
-                hasOutOfBounds ? '熱區超出畫布範圍' : null,
-                !isFullCoverage ? '熱區未完整覆蓋版面' : null,
-                hasOverlap ? '熱區存在重疊' : null,
-              ].filter((issue): issue is string => issue !== null);
-
-              return (
-                <div
-                  className={`richmenu-safety-banner ${localGeometryPassed ? 'is-safe' : 'has-warning'}`}
-                >
-                  <div className="richmenu-safety-copy">
-                    <span className="richmenu-safety-icon">{localGeometryPassed ? <ShieldCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}</span>
-                    <div>
-                      <strong>本機幾何初檢：</strong>
-                      <span className="richmenu-safety-description">
-                        {localGeometryPassed
-                          ? `熱區位於 ${targetW}×${targetH} 畫布內、無重疊並完整覆蓋。`
-                          : `需修正：${geometryIssues.join('、')}。`}
-                        {' '}正式路由與發布資格仍須由系統檢查。
-                      </span>
-                    </div>
-                  </div>
-                  <span className="richmenu-safety-status">
-                    {localGeometryPassed ? '本機初檢通過' : '需修正幾何'}
-                  </span>
-                </div>
-              );
-            })()}
 
             {/* 左右分割工作台 */}
-            {activeMenu && richMenuWorkspaceTab !== 'history' && (
-            <div className={`richmenu-studio-grid richmenu-studio-grid-${richMenuWorkspaceTab}`}>
+            {activeMenu && (
+            <div className="richmenu-studio-grid richmenu-studio-grid-edit">
               {/* 左側：3D 手機即時模擬器 */}
-              {richMenuWorkspaceTab !== 'publish' && <div className="richmenu-phone-card">
+              <div className="richmenu-phone-card">
                 <div className="richmenu-phone-card-header">
                   <span className="richmenu-phone-heading">
-                    手機擬真互動沙盒（點擊下方按鈕測試）
+                    手機預覽
                   </span>
                   {activeSimLiff && (
                     <span className="richmenu-preview-badge">
-                      正在預覽 LIFF 表單
+                      點擊動作預覽
                     </span>
                   )}
                 </div>
@@ -1153,7 +955,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   <div
                     className="richmenu-buttons-grid"
                     data-control-id="line.richmenu.local-preview"
-                    style={{ backgroundColor: activeMenuDefinition?.appearance?.background_color }}
+                    style={{ backgroundColor: activeMenuDefinition?.appearance?.background_color, aspectRatio: `${activeMenu.width} / ${activeMenu.height}` }}
                   >
                     {activeMenu.buttons.map((btn) => {
                       const label = btn.label;
@@ -1239,158 +1041,103 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     })}
                   </div>
                 </div>
-              </div>}
+              </div>
 
               {/* 右側：選單定義與發布面板 */}
               <div className="richmenu-inspector-column">
-                {/* Card A: 選單定義與動作熱區綁定 */}
-                {(richMenuWorkspaceTab === 'overview' || richMenuWorkspaceTab === 'actions') && <div className="richmenu-card">
-                  <div className="richmenu-card-header">
-                    <div>
-                      <h3 className="line-card-title richmenu-heading-with-icon">
-                        <Settings aria-hidden="true" />選單內容與按鈕設定
-                      </h3>
-                      <p className="line-card-description">
-                        {activeMenu.audienceRoleLabel}｜{activeMenu.name}
-                      </p>
+                {richMenuDraftSnapshot && localDefinition && <>
+                  <div className="richmenu-editor-heading"><h3>選單設定</h3><span>{activeMenu.name}</span></div>
+                  <fieldset className="richmenu-editor-fields" disabled={richMenuBusy}>
+                    <legend className="sr-only">編輯選單設定</legend>
+                    <div className="richmenu-editor-switch" role="group" aria-label="編輯項目">
+                      <button type="button" className={richMenuEditorTab === 'appearance' ? 'active' : ''} aria-pressed={richMenuEditorTab === 'appearance'} onClick={() => setRichMenuEditorTab('appearance')}>外觀與名稱</button>
+                      <button type="button" className={richMenuEditorTab === 'actions' ? 'active' : ''} aria-pressed={richMenuEditorTab === 'actions'} onClick={() => setRichMenuEditorTab('actions')}>按鈕設定</button>
                     </div>
-                    <span className="line-category-badge category-service_flow">
-                      {activeMenu.buttons.length} 個按鈕
-                    </span>
-                  </div>
+                    {richMenuEditorTab === 'appearance' ? <LineRichMenuDraftAppearanceEditor draft={richMenuDraftSnapshot} menuId={activeMenu.id}
+                      definition={localDefinition} onDefinitionChange={setRichMenuLocalDefinition} />
+                      : <LineRichMenuDraftActionEditor draft={richMenuDraftSnapshot} menuId={activeMenu.id}
+                        definition={localDefinition} onDefinitionChange={setRichMenuLocalDefinition} />}
+                  </fieldset>
+                  <p className="richmenu-edit-help">修改會即時顯示在手機預覽。確認儲存後，點選下方「發布」。</p>
+                </>}
+              </div>
+            </div>
+            )}
 
-                  <div className="line-table-scroll richmenu-table-spacing">
-                    <table className="line-data-table">
-                      <caption className="sr-only">圖文選單 按鈕動作與熱區</caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">熱區</th>
-                          <th scope="col">按鈕標題</th>
-                          <th scope="col">動作與進階資訊</th>
-                          <th scope="col" className="line-align-end">沙盒測試</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeMenu.buttons.map((btn, idx) => {
-                          const act = getTypedButtonAction(btn);
-                          const resolvedUri = act.type === 'URI' ? resolveRichMenuUri(act.uri) : null;
-                          return (
-                            <tr key={btn.id}>
-                              <td>
-                                <span className="richmenu-hotspot-index">
-                                  {idx + 1}
-                                </span>
-                              </td>
-                              <td><strong>{btn.label}</strong></td>
-                              <td>
-                                <span className={`richmenu-action-kind ${act.type === 'URI' ? 'is-uri' : 'is-local'}`}>
-                                  {act.type}
-                                </span>
-                                <details className="richmenu-advanced-details">
-                                  <summary>進階資訊</summary>
-                                  <div>
-                                    <strong>目標參數／路由</strong>
-                                    <code>
-                                      {act.type === 'URI'
-                                        ? (act.uri || '未設定')
-                                        : act.type === 'MESSAGE'
-                                          ? (act.text || '未設定')
-                                          : act.type === 'RICHMENU_SWITCH'
-                                            ? `${act.alias || '未設定 alias'} / ${act.data || '未設定 data'}`
-                                            : (act.data || '未設定')}
-                                    </code>
-                                    {act.type === 'URI' && resolvedUri && <small>實際開啟：{resolvedUri}</small>}
-                                    <strong>熱區座標</strong>
-                                    <code>x:{btn.bounds.x} y:{btn.bounds.y} w:{btn.bounds.width} h:{btn.bounds.height}</code>
-                                  </div>
-                                </details>
-                              </td>
-                              <td className="line-align-end">
-                                <button
-                                  type="button"
-                                  className="line-action-link-btn"
-                                  onClick={() => {
-                                    const syntheticBtn = document.querySelectorAll('.richmenu-grid-btn')[idx] as HTMLButtonElement | undefined;
-                                    if (syntheticBtn) syntheticBtn.click();
-                                  }}
-                                >
-                                  <Smartphone aria-hidden="true" />模擬點擊
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+            <Drawer isOpen={richMenuPublishOpen} onClose={() => setRichMenuPublishOpen(false)} title="發布圖文選單" closeLabel="關閉發布確認" className="richmenu-publish-drawer">
+            {/* 本機幾何初檢；正式路由與發布資格只由 server Preview 裁決。 */}
+            {activeMenu && richMenuPublishOpen && (() => {
+              const targetW = activeMenu.width;
+              const targetH = activeMenu.height;
+              let totalArea = 0;
+              let hasOverlap = false;
+              let hasInvalidDimensions = false;
+              let hasOutOfBounds = false;
+              const buttons = activeMenu.buttons;
 
-                  <div className="line-scope-note line-block-spacing">
-                    <strong>本機操作預覽</strong>：只顯示草稿中的按鈕動作或實際訊息文字；不猜測動作、不開啟網址、不送出 LINE 訊息。
-                  </div>
-                </div>}
+              for (let i = 0; i < buttons.length; i++) {
+                const b1 = buttons[i].bounds;
+                totalArea += b1.width * b1.height;
+                hasInvalidDimensions ||= b1.width <= 0 || b1.height <= 0;
+                hasOutOfBounds ||=
+                  b1.x < 0 ||
+                  b1.y < 0 ||
+                  b1.x + b1.width > targetW ||
+                  b1.y + b1.height > targetH;
+                for (let j = i + 1; j < buttons.length; j++) {
+                  const b2 = buttons[j].bounds;
+                  if (
+                    b1.x < b2.x + b2.width &&
+                    b1.x + b1.width > b2.x &&
+                    b1.y < b2.y + b2.height &&
+                    b1.y + b1.height > b2.y
+                  ) {
+                    hasOverlap = true;
+                  }
+                }
+              }
+              const isFullCoverage = totalArea === targetW * targetH;
+              const localGeometryPassed =
+                !hasInvalidDimensions && !hasOutOfBounds && isFullCoverage && !hasOverlap;
+              const geometryIssues = [
+                hasInvalidDimensions ? '熱區尺寸必須為正值' : null,
+                hasOutOfBounds ? '熱區超出畫布範圍' : null,
+                !isFullCoverage ? '熱區未完整覆蓋版面' : null,
+                hasOverlap ? '熱區存在重疊' : null,
+              ].filter((issue): issue is string => issue !== null);
 
-                {richMenuDraftSnapshot && richMenuWorkspaceTab === 'appearance' && (
-                  <LineRichMenuDraftAppearanceEditor
-                    draft={richMenuDraftSnapshot}
-                    menuId={activeMenu.id}
-                    client={richMenuDraft}
-                    previewDefinition={localDefinition}
-                    onApplied={(readback) => {
-                      setRichMenuLocalDefinition(null);
-                      setRichMenuDraftSnapshot(readback);
-                      setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
-                    }}
-                    onLocalDefinitionChange={updateLocalRichMenuAppearance}
-                  />
-                )}
-
-                {richMenuDraftSnapshot && richMenuWorkspaceTab === 'actions' && (
-                  <>
-                    <LineRichMenuDraftActionEditor
-                      draft={richMenuDraftSnapshot}
-                      menuId={activeMenu.id}
-                      client={richMenuDraft}
-                      previewDefinition={localDefinition}
-                      onApplied={(readback) => {
-                        setRichMenuLocalDefinition(null);
-                        setRichMenuDraftSnapshot(readback);
-                        setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
-                      }}
-                      onLocalDefinitionChange={updateLocalRichMenuActions}
-                    />
-                  </>
-                )}
-
-                {/* 缺少 active snapshot typed Query 時，Diff 必須 fail closed。 */}
-                {richMenuWorkspaceTab === 'publish' && isDiffMode && (
-                  <div className="richmenu-card richmenu-diff-card">
-                    <div className="richmenu-card-header">
-                      <div>
-                        <h3 className="line-card-title richmenu-heading-with-icon richmenu-diff-title">
-                          <Sparkles aria-hidden="true" />版本變更比對
-                        </h3>
-                        <p className="line-card-description compact">
-                          線上生效版本與目前草稿配置
-                        </p>
-                      </div>
-                      <span className="richmenu-diff-badge">
-                        比對模式已開啟
+              return (
+                <div
+                  className={`richmenu-safety-banner ${localGeometryPassed ? 'is-safe' : 'has-warning'}`}
+                >
+                  <div className="richmenu-safety-copy">
+                    <span className="richmenu-safety-icon">{localGeometryPassed ? <ShieldCheck aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}</span>
+                    <div>
+                      <strong>按鈕區域檢查：</strong>
+                      <span className="richmenu-safety-description">
+                        {localGeometryPassed
+                          ? '範圍完整、無重疊。'
+                          : `需修正：${geometryIssues.join('、')}。`}
+                        {' '}正式路由與發布資格仍須由系統檢查。
                       </span>
                     </div>
-
-                    <div className="line-scope-note line-block-spacing-compact" role="status">
-                      尚缺線上生效版本資料，暫不能進行正式版本差異比對；系統不會以按鈕順序或固定文案猜測原本內容。
-                    </div>
                   </div>
-                )}
+                  <span className="richmenu-safety-status">
+                    {localGeometryPassed ? '檢查正常' : '需修正範圍'}
+                  </span>
+                </div>
+              );
+            })()}
 
+                {richMenuPublishOpen && (richMenuDirty || richMenuReloadRequired) && <div className="line-scope-note" role="status">{richMenuReloadRequired ? '尚未確認儲存後的最新內容；請返回編輯，取消本機修改並重新整理後再發布。' : '還有未儲存的修改，請先返回編輯並儲存草稿。'}<button type="button" className="line-secondary-btn" onClick={() => setRichMenuPublishOpen(false)}>返回編輯</button></div>}
                 {/* Card C: 發布操作 */}
-                {richMenuWorkspaceTab === 'publish'
+                {richMenuPublishOpen
+                  && !richMenuDirty && !richMenuReloadRequired
                   && !activePublicationTracking
                   && activePublicationLock?.state === 'editable' && (
                   <LineRichMenuPublicationActions
                     selectedMenu={activeMenu}
-                    selectedPublication={selectedPublication.value}
+                    selectedPublication={null}
                     client={richMenuPublication}
                     onQueued={(queued) => {
                       setTrackedRichMenuPublication({
@@ -1401,12 +1148,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         attempts: 0,
                         timedOut: false,
                       });
-                      setRichMenuPublicationPageNumber(1);
                       setRichMenuReload((value) => value + 1);
                     }}
                   />
                 )}
-                {richMenuWorkspaceTab === 'publish'
+                {richMenuPublishOpen
                   && (activePublicationTracking || activePublicationLock?.state !== 'editable') && (
                   <section className="richmenu-publish-card" aria-label="圖文選單 發布狀態">
                     {activePublicationTracking ? (
@@ -1419,7 +1165,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               : '發布未完成'}
                         </h4>
                         {activePublicationTracking.status === 'published' ? (
-                          <p>LINE 平台已完成發布。如需再次發布，請先到「外觀編輯」或「按鈕動作」保存變更，建立下一版草稿。</p>
+                          <p>LINE 平台已完成發布。如需再次發布，請先關閉此視窗並儲存變更，建立下一版草稿。</p>
                         ) : ['queued', 'publishing'].includes(activePublicationTracking.status) ? (
                           <p role="status">
                             {activePublicationTracking.timedOut
@@ -1427,7 +1173,15 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               : '工作已排入，系統正在自動追蹤 LINE 發布結果。'}
                           </p>
                         ) : (
-                          <p>發布工作未成功完成，請到「發布歷程」查看失敗狀態與可用的重試操作。</p>
+                          <>
+                            <p>發布工作未成功完成。</p>
+                            {activePublicationTracking.status === 'publish_retryable_failed' && <LineRichMenuPublicationActions
+                              selectedMenu={null} selectedPublication={{ id: activePublicationTracking.id, menuDefinitionId: activePublicationTracking.menuDefinitionId, status: activePublicationTracking.status, statusLabel: '發布可重試失敗' }}
+                              client={richMenuPublication} onQueued={(queued) => {
+                                setTrackedRichMenuPublication({ id: queued.publicationId, menuDefinitionId: queued.menuDefinitionId, configurationRevision: queued.configurationRevision, status: queued.status, attempts: 0, timedOut: false });
+                                setRichMenuReload((value) => value + 1);
+                              }} />}
+                          </>
                         )}
                       </>
                     ) : activePublicationLock ? (
@@ -1448,75 +1202,24 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     )}
                   </section>
                 )}
-              </div>
-            </div>
-            )}
+            </Drawer>
 
-            {/* 發布紀錄歷程 */}
-            {richMenuWorkspaceTab === 'history' && <div className="richmenu-history-section" data-control-id="line.richmenu.publications">
-              <div className="line-section-heading richmenu-history-heading">
-                <div>
-                  <h3 className="line-card-title">圖文選單 發布歷程紀錄</h3>
-                  <p className="line-card-description">
-                    顯示每次發布的排程、處理狀態與結果，方便追蹤未完成或失敗項目。
-                  </p>
-                </div>
-              </div>
+            {activeMenu && richMenuDraftSnapshot && localDefinition
+              && (activePublicationLock?.state === 'editable' || activePublicationLock?.state === 'published') && <LineRichMenuDraftSaveActions
+                publicationAction={<button type="button" className="line-primary-btn" data-control-id="line.richmenu.publish"
+                  disabled={richMenuDirty || richMenuBusy || richMenuReloadRequired}
+                  title={richMenuReloadRequired ? '請先重新載入並確認最新草稿' : richMenuDirty ? '請先儲存草稿再發布' : '檢查並確認發布'}
+                  onClick={() => setRichMenuPublishOpen(true)}><Send aria-hidden="true" />發布</button>}
+                draft={richMenuDraftSnapshot} definition={localDefinition} client={richMenuDraft} onBusyChange={setRichMenuBusy} onReloadRequired={() => setRichMenuReloadRequired(true)}
+                onCancel={() => { setRichMenuLocalDefinition(null); setActiveSimLiff(null); setSimChatMessages([]); }} onApplied={(readback) => {
+                  setRichMenuLocalDefinition(null); setRichMenuReloadRequired(false); setRichMenuDraftSnapshot(readback); setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
+                }} />}
 
-              {richMenuPublications.status === 'loading' && <div className="line-loading">正在載入 圖文選單 發布紀錄…</div>}
-              {richMenuPublications.status === 'error' && <LineErrorMessage error={richMenuPublications.error} />}
-              {richMenuPublications.status === 'loaded' && richMenuPublications.value && (
-                richMenuPublications.value.items.length === 0 ? (
-                  <div className="line-empty-state">
-                    <h4>目前尚無發布紀錄</h4>
-                    <p>由上方發布面板建立預覽並確認排入後，將會在此顯示發布狀態與結果。</p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="line-pagination-summary">
-                      第 {richMenuPublications.value.page}／{Math.max(1, richMenuPublications.value.totalPages)} 頁，
-                      顯示第 {(richMenuPublications.value.page - 1) * richMenuPublications.value.pageSize + 1}–
-                      {Math.min(richMenuPublications.value.page * richMenuPublications.value.pageSize, richMenuPublications.value.total)} 筆，
-                      共 {richMenuPublications.value.total} 筆
-                    </div>
-                    <div className="line-table-scroll">
-                    <table className="line-data-table">
-                      <caption className="sr-only">圖文選單 發布歷程</caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">選單</th>
-                          <th scope="col">狀態</th>
-                          <th scope="col">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {richMenuPublications.value.items.map((publication) => (
-                          <tr key={publication.id}>
-                            <td><strong>{menus.find((menu) => menu.id === publication.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></td>
-                            <td><span className={`line-status line-status-${publication.status}`}>{publication.statusLabel}</span></td>
-                            <td>
-                              <button
-                                type="button"
-                                className="line-action-link-btn"
-                                data-control-id="line.richmenu.publication-detail"
-                                onClick={() => openPublication(publication.id)}
-                              >
-                                查看紀錄
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    </div>
-                    <div className="line-pagination-actions">
-                      <button type="button" className="line-secondary-btn" disabled={richMenuPublications.value.page <= 1} onClick={() => setRichMenuPublicationPageNumber((value) => Math.max(1, value - 1))}>上一頁</button>
-                      <button type="button" className="line-secondary-btn" disabled={richMenuPublications.value.page >= Math.max(1, richMenuPublications.value.totalPages)} onClick={() => setRichMenuPublicationPageNumber((value) => Math.min(Math.max(1, richMenuPublications.value!.totalPages), value + 1))}>下一頁</button>
-                    </div>
-                  </div>
-                )
-              )}
+            {activeMenu && activePublicationLock?.state === 'processing' && <div className="richmenu-save-footer">
+              <span className="richmenu-save-state">發布處理中，選單暫時唯讀</span>
+              <button type="button" className="line-secondary-btn" onClick={() => setRichMenuPublishOpen(true)}>查看發布狀態</button>
             </div>}
+
           </section>
         );
       })()}
@@ -1973,7 +1676,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
 
 
-      <Drawer isOpen={selectedPublication.status !== 'idle'} onClose={closePublication} title="圖文選單 發布紀錄" footer={<div className="line-drawer-footer"><button type="button" onClick={closePublication}>關閉</button>{selectedPublication.status === 'error' && publicationDetailId.current !== null && <button type="button" onClick={() => openPublication(publicationDetailId.current!)}>重試查詢</button>}</div>}><div className="line-drawer-content"><LoadingOrError state={selectedPublication} loadingText="正在載入發布紀錄明細…" />{selectedPublication.status === 'loaded' && selectedPublication.value && <div className="line-detail-grid"><div><span>選單</span><strong>{richMenuConfiguration.value?.menus.find((menu) => menu.id === selectedPublication.value?.menuDefinitionId)?.name ?? '已發布圖文選單'}</strong></div><div><span>目前狀態</span><strong>{selectedPublication.value.statusLabel}</strong></div></div>}</div></Drawer>
+
     </div>
   );
 };

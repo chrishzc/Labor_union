@@ -5,10 +5,11 @@
 - subsystem: `anomalies`
 
 ## Responsibility
-呈現 `LINE-006` 與 import warning 的 current-only清單、typed detail與closed owner action descriptor。一般畫面只顯示問題代碼、負責流程、影響、去敏判斷資料、業務操作與移除條件；owner domain/version及Preview／Apply／completion predicate不在一般操作畫面顯示。LINE 通知人工重送先以 detail 綁定的案件與來源版本核對 owner timeline，再呼叫 owner Preview。2026-10-01 人工裁決允許全部目前警示逐筆確認略過，HCM 欄位、import occurrence 與 LINE 失敗各走既有 owner Q/P/A、audit 與 receipt；不由 UI 假移除或改寫 root。不提供批次略過。
+2026-10-16 最新人工裁決直接退役管理端「異常審核」頁、導覽與專用鈴鐺入口，不新增替代清單，也不搬移逐筆略過或 LINE 人工重送操作。既有 anomaly／import warning Query、owner mutation client、後端 Q/P/A、audit、receipt 與資料保留；頁面退役不代表業務問題已解除。舊 `#anomalies` 依 App 既有未知 hash 規則顯示待辦看板。
 
 ## Implementation
-- primary: `ui_react/src/pages/CurrentAnomaliesPage.tsx`
+- primary: `ui_react/src/App.tsx` — 不再掛載異常審核。
+- `ui_react/src/components/MasterLayout.tsx` — 不再宣告頁面、導覽或專用鈴鐺入口。
 - `ui_react/src/adapters/anomalies/anomaly_query_adapter.ts`
 - `ui_react/src/api/line/notification_manual_replay_client.ts`
 - `ui_react/src/api/anomalies/import_warning_skip_client.ts`
@@ -30,7 +31,6 @@
 
 ## Verification
 - layout_status: `custom_current`
-- test_root: `ui_react/src/tests/current_anomalies_page.test.tsx`
 - test_root: `ui_react/src/tests/line_notification_manual_replay_client.test.ts`
 - test_root: `ui_react/src/tests/import_warning_skip_client.test.ts`
 - test_root: `ui_react/src/tests/current_anomaly_query_client.test.ts`
@@ -43,4 +43,4 @@
 - routing: `.arch-map/tests/domains/anomalies/subsystems/anomalies/modules/current-issue-presentation.md`
 
 ## Change triggers
-Reconcile when current-only list/detail presentation、owner action descriptor、recheck removal copy或focused test location changes。
+Reconcile when retired management entry、retained API client contract或focused verification paths change。

@@ -16,6 +16,8 @@
   - `api/routes/line_rich_menus.py`
   - `ui_react/src/components/LineRichMenuDraftAppearanceEditor.tsx`
   - `ui_react/src/components/LineRichMenuDraftActionEditor.tsx`
+  - `ui_react/src/components/LineRichMenuDraftSaveActions.tsx` — shared draft Preview/Confirm/Apply with fresh Query readback.
+  - `ui_react/src/pages/line_management/LineRichMenuWorkspace.css`
   - `ui_react/src/components/LineRichMenuPublicationActions.tsx`
   - `ui_react/src/pages/LineManagementPage.tsx`
   - `ui_react/src/pages/line_management/LiffCardStudio.tsx`
@@ -37,7 +39,10 @@
 - test_root: `ui_react/src/tests/line_rich_menu_query_flow.test.tsx`
 - test_root: `ui_react/src/tests/line_flex_design_preview.test.tsx`
 - integration_root: `ui_react/src/tests/line_management_page_real_data.test.tsx`
+- test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rich_menu_local_preview.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/rich-menu-management.md`
 
 ## Change triggers
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.
+
+Management presentation opens the editor directly, with 發布 beside the common draft save action and explicit confirmation in a Drawer; publication history has no UI entry or list query. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.
