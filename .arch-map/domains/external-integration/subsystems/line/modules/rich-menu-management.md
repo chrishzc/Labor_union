@@ -19,6 +19,8 @@
   - `ui_react/src/components/LineRichMenuPublicationActions.tsx`
   - `ui_react/src/pages/LineManagementPage.tsx`
   - `ui_react/src/pages/line_management/LiffCardStudio.tsx`
+  - `ui_react/src/pages/line_management/LiffCardStudio.css` — 用途分組與兩欄預覽，保留既有正式／安全展示入口及案件專屬連結限制。
+  - `ui_react/src/components/LineFlexDesignPreview.tsx` — 本頁採用精簡狀態呈現；通知設定頁保留完整狀態摘要。
   - `config/line_menu.json` — bootstrap definition only; published/current drafts remain versioned persistence.
 
 ## Contracts

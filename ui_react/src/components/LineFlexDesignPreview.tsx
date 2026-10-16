@@ -11,6 +11,7 @@ import {
 
 export interface LineFlexDesignPreviewProps {
   source: unknown;
+  compact?: boolean;
 }
 
 function actionClassName(tone: LineFlexDesignActionTone): string {
@@ -20,7 +21,7 @@ function actionClassName(tone: LineFlexDesignActionTone): string {
   return 'flex-action-btn';
 }
 
-export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ source }) => {
+export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ source, compact = false }) => {
   let preview;
   try {
     preview = adaptLineFlexDesignPreview(source);
@@ -34,6 +35,11 @@ export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ so
 
   return (
     <div className="mock-flex-content">
+      {compact && (
+        <div className="liff-studio-card-status" role="status" aria-label="正式資料狀態">
+          {preview.ownerFactStatus === 'connected' ? '正式資料已接通' : '正式資料尚未載入'}
+        </div>
+      )}
       <div className="mock-flex-bubble">
         <div className={`flex-card-inner${preview.alertStyle ? ' alert-style' : ''}`}>
           <div className={`flex-header${preview.alertStyle ? ' alert-header' : ''}`}>{preview.header}</div>
@@ -55,7 +61,7 @@ export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ so
           </div>
         </div>
       </div>
-      <div className={`${preview.ownerFactStatus === 'connected' ? 'line-success' : 'line-warning'} line-flex-owner-note`} role="status" aria-label="正式資料狀態">
+      {!compact && <div className={`${preview.ownerFactStatus === 'connected' ? 'line-success' : 'line-warning'} line-flex-owner-note`} role="status" aria-label="正式資料狀態">
         <strong><Pin aria-hidden="true" />LINE Flex Message 業務定位與排程說明</strong>
         <p>
           {preview.ownerFactStatus === 'connected' ? '正式資料已接通：' : '正式資料尚未載入：'}{preview.ownerFactNote}
@@ -63,7 +69,7 @@ export const LineFlexDesignPreview: React.FC<LineFlexDesignPreviewProps> = ({ so
         <small>
           {preview.lifecycleNote}
         </small>
-      </div>
+      </div>}
     </div>
   );
 };
