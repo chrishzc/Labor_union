@@ -67,7 +67,8 @@ def launcher(tmp_path):
     ("R\nY\n\n", 2, 0, [["--interactive"], ["reset"]], 0),
     ("R\n", 2, 0, [["--interactive"], ["reset"]], 0),
     ("N\n\n", 2, 0, [["--interactive"]], 0),
-    ("CREATE union_db\n\n", 3, 0, [["--interactive"], ["create"]], 0),
+    ("Y\n\n", 3, 0, [["--interactive"], ["create"]], 0),
+    ("y\n\n", 3, 0, [["--interactive"], ["create"]], 0),
     ("N\n\n", 3, 0, [["--interactive"], ["create"]], 0),
     ("", 3, 0, [["--interactive"], ["create"]], 0),
 ])
@@ -82,7 +83,7 @@ def test_double_click_flow(launcher, answer, preflight_exit, apply_exit, expecte
     assert result.returncode == expected_exit, result.stdout + result.stderr
     assert [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()] == expected_calls
     assert "pause" not in result.stderr.lower()
-    if preflight_exit not in (0, 2):
+    if preflight_exit not in (0, 2, 3):
         assert "Press Y" not in result.stdout
         assert "Press R" not in result.stdout
     if answer.startswith("Y") and not preflight_exit and not apply_exit:
@@ -95,7 +96,8 @@ def test_double_click_flow(launcher, answer, preflight_exit, apply_exit, expecte
         assert ("[Done]" in result.stdout) == ("RESET union_db" in answer)
     if preflight_exit == 3:
         assert "nas.test:3307 / union_db" in result.stdout
-        assert ("[Done]" in result.stdout) == ("CREATE union_db" in answer)
+        assert "Press Y then Enter to create and initialize" in result.stdout
+        assert ("[Done]" in result.stdout) == (answer.strip().upper() == "Y")
 
 
 @pytest.mark.parametrize("argument", ["--dry-run", "--apply", "--help"])

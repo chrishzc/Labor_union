@@ -465,7 +465,8 @@ DROP／CREATE／USE 執行前後立即 flush operation／等待上限／耗時�
   server identity 與 information_schema 的目標不存在條件；驗版本、server 可寫、InnoDB、目前帳號／角色
   的 canonical 建庫建表／view／trigger／seed 權限、binary log policy 與 current release files。
   canonical metadata snapshot 仍使用同一組唯讀查詢，僅透過 server-only connection 查目標 schema，避免先選不存在的庫。
-- 顯示 host/port/database/server 後，只有完整 `CREATE union_db` 確認才繼續；取消、EOF、錯字零 DDL/DML。
+- 依後續人工簡化確認要求，顯示 host/port/database/server 後，輸入 `Y` 或 `y` 並 Enter 才確認建庫；
+  N、空白、其他輸入或 EOF 取消且零 DDL/DML。這只調整缺庫建庫確認，不改清空重建的完整確認文字。
   同一 session/lock 中再次預檢並回讀目標仍不存在；確認期間已由其他程序建立則停止，不接管其資料。
 - 建立 durable journal 後執行 CREATE DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci、USE，
   不使用 IF NOT EXISTS，無 DROP。最後一刻撞名由 MySQL 1007 fail closed，不能初始化其他 writer 建立的庫。

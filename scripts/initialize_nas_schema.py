@@ -521,8 +521,7 @@ def _confirm_reset(target):
 def _confirm_create(target):
     print(f"\n[Info] Target: {target['host']}:{target['port']} / {target['database']} (server: {target['server']})")
     print("The database is missing. This will CREATE it and initialize the complete schema and required system data.")
-    expected = "CREATE " + target["database"]
-    return _answer(f"Type {expected} exactly to create and initialize, or press Enter to cancel: ") == expected
+    return _answer("Press Y then Enter to create and initialize, or N then Enter to cancel: ").upper() == "Y"
 
 
 def _interactive_initialize(config, plan):

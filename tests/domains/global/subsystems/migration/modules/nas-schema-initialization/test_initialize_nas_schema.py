@@ -540,8 +540,8 @@ def test_create_missing_preflight_failure_has_no_write_or_confirmation(execution
     assert not any(sql.startswith(("CREATE ", "DROP ", "INSERT ")) for sql in connection.statements)
 
 
-@pytest.mark.parametrize("answer,confirmed", [("CREATE union_db", True), ("Y", False), ("RESET union_db", False), ("CREATE other_db", False), ("", False)])
-def test_create_requires_full_target_confirmation(monkeypatch, answer, confirmed):
+@pytest.mark.parametrize("answer,confirmed", [("Y", True), ("y", True), ("N", False), ("CREATE union_db", False), ("", False)])
+def test_create_requires_y_confirmation(monkeypatch, answer, confirmed):
     monkeypatch.setattr("builtins.input", lambda _: answer)
     assert nas._confirm_create({"host": "nas.test", "port": 3307, "server": "synthetic", "database": "union_db"}) is confirmed
 
