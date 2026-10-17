@@ -71,7 +71,6 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
   ];
   const missingFields = completion?.missing_fields ?? localMissing;
   const termsMissing = missingFields.includes('start_date') || missingFields.includes('service_days');
-  const hasReason = reason.trim().length > 0;
   const validTermsDraft = /^\d{4}-\d{2}-\d{2}$/.test(startDate)
     && Number.isInteger(Number(serviceDays))
     && Number(serviceDays) > 0;
@@ -83,7 +82,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       await orderIntakeCompletionClient.applyCompletion(
         item.case_no,
         fresh,
-        reason,
+        reason.trim(),
         operationKey(item.case_no, 'complete'),
       );
       setNotice(`${successMessage}；已重新判定完整並恢復為洽談中。`);
@@ -109,7 +108,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
   };
 
   const applyClientName = async () => {
-    if (!clientPreview || !clientPreview.apply_allowed || !hasReason) return;
+    if (!clientPreview || !clientPreview.apply_allowed) return;
     setBusy('client-apply');
     setError(null);
     setNotice(null);
@@ -117,7 +116,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       await orderIntakeCompletionClient.applyClientName(
         item.case_no,
         clientPreview,
-        reason,
+        reason.trim(),
         operationKey(item.case_no, 'client-name'),
       );
       setClientPreview(null);
@@ -150,7 +149,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
   };
 
   const applyTerms = async () => {
-    if (!termsPreview || !termsPreview.apply_allowed || !hasReason) return;
+    if (!termsPreview || !termsPreview.apply_allowed) return;
     setBusy('terms-apply');
     setError(null);
     setNotice(null);
@@ -158,7 +157,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       await orderIntakeCompletionClient.applyTerms(
         item.case_no,
         termsPreview,
-        reason,
+        reason.trim(),
         operationKey(item.case_no, 'terms'),
       );
       setTermsPreview(null);
@@ -172,7 +171,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
   };
 
   const finalizeExistingCompleteIntake = async () => {
-    if (!completion?.apply_allowed || !hasReason) return;
+    if (!completion?.apply_allowed) return;
     setBusy('completion-apply');
     setError(null);
     setNotice(null);
@@ -180,7 +179,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       await orderIntakeCompletionClient.applyCompletion(
         item.case_no,
         completion,
-        reason,
+        reason.trim(),
         operationKey(item.case_no, 'complete'),
       );
       setNotice('缺件已重新判定完成，訂單已恢復為洽談中。');
@@ -225,15 +224,15 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       )}
 
       <label style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
-        補件原因（稽核必填）
+        備註（選填）
         <textarea
-          aria-label={`${item.case_no} 補件原因`}
+          aria-label={`${item.case_no} 備註（選填）`}
           rows={2}
           maxLength={500}
           value={reason}
           disabled={busy !== null}
           onChange={(event) => setReason(event.target.value)}
-          placeholder="請填寫人工補件原因"
+          placeholder="有需要補充的內容再填寫"
         />
       </label>
 
@@ -265,7 +264,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
                   {clientPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
                 </ul>
               )}
-              <button type="button" disabled={busy !== null || !clientPreview.apply_allowed || !hasReason} onClick={() => void applyClientName()}>
+              <button type="button" disabled={busy !== null || !clientPreview.apply_allowed} onClick={() => void applyClientName()}>
                 {busy === 'client-apply' ? '套用中…' : '確認補齊客戶姓名'}
               </button>
             </div>
@@ -326,7 +325,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
               )}
               <button
                 type="button"
-                disabled={busy !== null || !termsPreview.apply_allowed || !hasReason}
+                disabled={busy !== null || !termsPreview.apply_allowed}
                 onClick={() => void applyTerms()}
               >
                 {busy === 'terms-apply' ? '套用中…' : '確認補齊服務資料'}
@@ -339,7 +338,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
       {completion?.apply_allowed && missingFields.length === 0 && (
         <section aria-label="恢復訂單操作" style={{ display: 'grid', gap: 8 }}>
           <div>所有必填進件資料已齊全；確認後會以最新版本重新判定並恢復為「洽談中」。</div>
-          <button type="button" disabled={busy !== null || !hasReason} onClick={() => void finalizeExistingCompleteIntake()}>
+          <button type="button" disabled={busy !== null} onClick={() => void finalizeExistingCompleteIntake()}>
             {busy === 'completion-apply' ? '重新判定中…' : '恢復訂單操作'}
           </button>
         </section>

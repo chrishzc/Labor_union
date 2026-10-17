@@ -125,6 +125,8 @@ class ApplyLineConfigurationCommand:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
+        if self.candidate.kind is LineConfigurationKind.RICH_MENUS and self.reason == "":
+            return
         require_canonical_text(
             self.reason,
             "LINE configuration change reason",

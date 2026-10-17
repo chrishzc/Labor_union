@@ -87,7 +87,7 @@ export const ClientRegistryChangeHistoryItemSchema = z.strictObject({
   sequence: z.number().int().positive(),
   event_type: z.string().min(1),
   label: z.string().min(1),
-  reason: z.string().min(1),
+  reason: z.string().max(500),
   actor: z.string().min(1),
   occurred_at: z.string().datetime({ offset: true }),
 });

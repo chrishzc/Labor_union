@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineNotificationRulesMutationPanel.tsx
  * Description: 提供通知規則欄位編輯、零寫入 Preview、人工確認 Save 與安全 Delete 操作。
@@ -199,6 +201,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
   );
   const [previewIntent, setPreviewIntent] = useState<PreviewIntent | null>(null);
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [state, setState] = useState<OperationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -286,7 +290,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
   };
 
   const applyPreview = async (): Promise<void> => {
-    if (!previewIntent || !confirmed || reason.trim().length === 0) return;
+    if (!previewIntent || !confirmed || busy) return;
+    if (!saveValidation.validate([{ value: reason, label: '變更原因', ref: saveFieldRef }])) return;
     const controller = new AbortController();
     controllerRef.current = controller;
     setState('loading');
@@ -610,7 +615,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
 
           <div className="richmenu-drawer-field line-block-spacing-compact">
             <label htmlFor="line-notification-mutation-reason">操作原因</label>
-            <textarea
+            <textarea ref={saveFieldRef} aria-required="true"
               id="line-notification-mutation-reason"
               className="richmenu-drawer-input notification-rule-reason-input"
               value={reason}
@@ -626,7 +631,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
           </div>
 
           <div className="notification-rule-confirm-row">
-            <label className="notification-rule-check-label">
+            <><label className="notification-rule-check-label">
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -634,13 +639,13 @@ export const LineNotificationRulesMutationPanel: React.FC<
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
               我已確認通知規則與影響範圍
-            </label>
+            </label>{saveValidation.feedback}</>
           </div>
 
           <button
             type="button"
             className={previewIntent.kind === 'delete' ? 'line-danger-btn' : 'line-primary-btn'}
-            disabled={busy || !confirmed || reason.trim().length === 0}
+            disabled={busy || !confirmed}
             onClick={() => void applyPreview()}
           >
             {previewIntent.kind === 'save' ? <><Save aria-hidden="true" />確認儲存通知規則</> : <><Trash2 aria-hidden="true" />確認刪除通知規則</>}

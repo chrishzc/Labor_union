@@ -1,3 +1,4 @@
+import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
@@ -57,6 +58,9 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
     }
   };
 
+  const saveValidation = useSaveValidation();
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+
   const apply = async (retry: 'apply' | 'observation' | null = null) => {
     if (actionInFlight.current || inFlight) return;
     if (retry !== 'observation' && draft?.previewView?.case_no !== caseNo) {
@@ -64,6 +68,7 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
       return;
     }
     if (retry === null && status !== 'preview_ready') return;
+    if (retry === null && !saveValidation.validate([{ value: draft?.reason, label: '受控重開原因', ref: reasonRef }])) return;
     actionInFlight.current = true;
     setError(null);
     onBusyChange?.(true);
@@ -93,12 +98,12 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
         <>
           <p>{draft.previewView.before_status} → {draft.previewView.after_status}</p>
           <p>取消事件：#{draft.previewView.cancellation_event_id}</p>
-          <label>重開原因
-            <textarea aria-label="Beta 受控重開原因" maxLength={500} value={draft.reason} disabled={unresolved}
+          <><label>重開原因
+            <textarea ref={reasonRef} aria-required="true" aria-label="Beta 受控重開原因" maxLength={500} value={draft.reason} disabled={unresolved}
               onChange={(event) => updateReopenReason(caseNo, event.target.value)} />
-          </label>
+          </label>{saveValidation.feedback}</>
           {status === 'preview_ready' && (
-            <button type="button" disabled={!draft.reason.trim() || draft.previewView.case_no !== caseNo} onClick={() => void apply()}>確認受控重開</button>
+            <button type="button" disabled={draft.previewView.case_no !== caseNo} onClick={() => void apply()}>確認受控重開</button>
           )}
         </>
       )}

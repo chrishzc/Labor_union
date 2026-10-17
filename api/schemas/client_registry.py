@@ -65,7 +65,7 @@ class ClientRegistryChangeHistoryItemView(_StrictModel):
     sequence: int = Field(ge=1)
     event_type: str = Field(min_length=1, max_length=100)
     label: str = Field(min_length=1, max_length=100)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(max_length=500)
     actor: str = Field(min_length=1, max_length=191)
     occurred_at: datetime
 
@@ -234,7 +234,7 @@ class ClientProfileAdminPreviewRequest(_StrictModel):
 
 class ClientProfileAdminApplyRequest(ClientProfileAdminPreviewRequest):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class BeClassCorrectionPreviewRequest(_StrictModel):

@@ -422,7 +422,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
             {timeline.status === 'ready' && currentBranch === 'cancelled'
               ? <button ref={headerActionRef} className="order-case-reopen" type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('reopen')}>重開訂單</button>
-              : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
+              : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
           </div>
         </div>
         <p className="order-case-purpose">依目前進度接續工作；需要的訂單與服務資料會顯示在各辦理事項中。</p>

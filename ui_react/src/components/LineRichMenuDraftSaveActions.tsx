@@ -92,7 +92,7 @@ export const LineRichMenuDraftSaveActions: React.FC<Props> = ({ draft, definitio
     } finally { finish(controller); }
   };
   const apply = async () => {
-    if (!preview || !confirmed || !reason.trim() || busy) return;
+    if (!preview || !confirmed || busy) return;
     const controller = start();
     onReloadRequired();
     try {
@@ -135,14 +135,14 @@ export const LineRichMenuDraftSaveActions: React.FC<Props> = ({ draft, definitio
         {discarding ? <p>將還原所有角色尚未儲存的修改，已儲存的草稿仍會保留。</p> : <>
           <p>已完成草稿檢查，請核對以下變更。儲存不會發布至 LINE。</p>
           <ul className="richmenu-save-changes">{preview && changedFields(draft.definition, preview.normalized_definition).map((text, index) => <li key={index}>{text}</li>)}</ul>
-          <label className="richmenu-form-field"><span>變更原因</span><input className="richmenu-form-input" maxLength={500} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} placeholder="請說明本次修改原因" /></label>
+          <><label className="richmenu-form-field"><span>備註（選填）</span><input  className="richmenu-form-input" maxLength={500} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} placeholder="有需要補充的內容再填寫" /></label></>
           <label className="richmenu-confirm-checkbox-label"><input type="checkbox" checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />我確認儲存此草稿；這不會發布或發送 LINE。</label>
           {failed && message && <p className="line-error" role="alert">{message}</p>}
         </>}
       </div>
       <div className="richmenu-save-dialog-footer"><button type="button" className="line-secondary-btn" disabled={busy} onClick={() => { setPreview(null); setDiscarding(false); }}>繼續編輯</button>
         {discarding ? <button type="button" className="line-primary-btn" onClick={() => { onCancel(); setMessage(null); setDiscarding(false); }}>確認取消修改</button>
-          : <button type="button" className="line-primary-btn" disabled={!confirmed || !reason.trim() || busy} onClick={() => void apply()}><Save aria-hidden="true" />{busy ? '儲存並重新載入中…' : '確認儲存草稿'}</button>}
+          : <button type="button" className="line-primary-btn" disabled={!confirmed || busy} onClick={() => void apply()}><Save aria-hidden="true" />{busy ? '儲存並重新載入中…' : '確認儲存草稿'}</button>}
       </div>
     </dialog>
   </>;

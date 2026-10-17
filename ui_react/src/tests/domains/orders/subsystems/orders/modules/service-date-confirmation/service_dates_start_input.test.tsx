@@ -321,11 +321,17 @@ describe('#335 direct start input and existing writer integration', () => {
     expect(screen.getByLabelText('服務日期計算基準')).toHaveTextContent('正式實際開始日');
   });
 
-  it('保存前修改人工選日後，未滿約定天數不能儲存', async () => {
+  it('未滿約定天數仍可按儲存，警告並定位日期且不送出', async () => {
     render(<OrderServiceDatesPanel caseNo={CASE} />); await input('2026-09-28');
     expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-09-30' }));
-    expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeDisabled();
+    window.alert = vi.fn();
+    const save = screen.getByRole('button', { name: '儲存服務日期' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(window.alert).toHaveBeenCalledWith('請選滿 3 天服務日期後再儲存。');
+    expect(screen.getByLabelText('服務日期選擇')).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('請選滿 3 天');
     expect(screen.queryByLabelText('服務日期確認內容')).not.toBeInTheDocument();
     expect(mocks.applyStart).not.toHaveBeenCalled();
   });

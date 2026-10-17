@@ -20,6 +20,7 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
 - Preview is zero-write and binds before/after plus snapshot fingerprint.
 - Apply locks the staff parent first, then relation tables in sorted table order; it fresh-reads and rejects stale snapshot or preview fingerprints.
 - Apply uses command family staff_case_preference_manual/v1 and existing admin_command_receipts; numeric matching-profile QPA remains a separate owner.
+- Apply 的 `reason` 為本次修改的選填備註，省略預設空字串；仍納入 command fingerprint 與 receipt，不開放 relation detail 編輯。
 - Staff-owned RELATION_OPTIONS backs authenticated `/options` and six dropdowns. The same Domain validates explicit 4/8/24-hour clock windows (eight-hour service includes a 30-minute break), encodes their canonical slot identity and projects typed clocks back. New notes are rejected; unchanged source details/rows remain preserved. UI adds conditions on demand and exposes custom clock fields.
 
 ## Verification

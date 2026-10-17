@@ -5,6 +5,10 @@ import { staffCasePreferenceManualClient } from '../api/staff_case_preferences/s
 import type { StaffCasePreferenceManualSnapshot, StaffCasePreferenceRelations } from '../api/staff_case_preferences/staff_case_preferences_schemas';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { StaffPage } from '../pages/StaffPage';
+import { staffProfileClient } from '../api/staff_profile/staff_profile_client';
+import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
+import { STAFF_PROFILE } from './domains/staff/subsystems/staff/modules/staff-roster-profile/fixtures/staff_profile_contract_fixtures';
+import { STAFF_QUALIFICATION_MASTER } from './fixtures/staff/staff_qualification_contract_fixtures';
 import { STAFF_PAGE_ONE } from './fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_MANUAL_OPTIONS } from './domains/staff/subsystems/staff/integration/fixtures/staff_manual_options';
 
@@ -38,7 +42,9 @@ const preferenceEditor = () => within(document.querySelector('[data-surface-id="
 describe('Staff current six-relation preference flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
+    vi.spyOn(staffProfileClient, 'query').mockResolvedValue(STAFF_PROFILE);
+    vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue(SNAPSHOT);
     vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
@@ -71,14 +77,14 @@ describe('Staff current six-relation preference flow', () => {
     fireEvent.click(preferenceEditor().getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     const confirm = await preferenceEditor().findByRole('button', { name: '確認儲存' });
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工維護月嫂偏好' } });
+    expect(confirm).toBeEnabled();
+    expect(screen.getByLabelText('接案條件備註（選填）')).toHaveValue('');
     fireEvent.click(confirm);
     await screen.findByText('已儲存並重新查詢六大接案能力。');
     expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(1);
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(
       11,
-      expect.objectContaining({ service_regions: [{ value: '東區', detail: null }], expected_snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: 'b'.repeat(64), reason: '人工維護月嫂偏好' }),
+      expect.objectContaining({ service_regions: [{ value: '東區', detail: null }], expected_snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: 'b'.repeat(64), reason: '' }),
       expect.objectContaining({ idempotencyKey: expect.any(String), signal: expect.any(AbortSignal) }),
     );
     expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(2);
@@ -86,7 +92,7 @@ describe('Staff current six-relation preference flow', () => {
 
   it('invalidates an existing Preview when an edited relation changes', async () => {
     await openPreferences();
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試失效' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試失效' } });
     fireEvent.click(preferenceEditor().getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     expect(await preferenceEditor().findByRole('button', { name: '確認儲存' })).toBeEnabled();
@@ -99,7 +105,7 @@ describe('Staff current six-relation preference flow', () => {
   it('fails closed on stale Apply and requires a fresh Query', async () => {
     vi.mocked(staffCasePreferenceManualClient.apply).mockRejectedValueOnce(new Error('stale_snapshot'));
     await openPreferences();
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試 stale' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試 stale' } });
     fireEvent.click(preferenceEditor().getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     fireEvent.click(await preferenceEditor().findByRole('button', { name: '確認儲存' }));

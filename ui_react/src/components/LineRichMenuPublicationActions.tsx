@@ -1,3 +1,4 @@
+import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineRichMenuPublicationActions.tsx
  * Description: 提供 Rich Menu 發布 Preview、人工確認 queue 與可重試失敗的 durable retry 操作。
@@ -75,6 +76,10 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   const [preview, setPreview] = useState<LineRichMenuPublishPreviewModel | null>(null);
   const [previewState, setPreviewState] = useState<OperationState>('idle');
   const [publishReason, setPublishReason] = useState('');
+  const publishValidation = useSaveValidation();
+  const retryValidation = useSaveValidation();
+  const publishReasonRef = useRef<HTMLInputElement>(null);
+  const retryReasonRef = useRef<HTMLTextAreaElement>(null);
   const [publishConfirmed, setPublishConfirmed] = useState(false);
   const [publishState, setPublishState] = useState<OperationState>('idle');
   const [retryReason, setRetryReason] = useState('');
@@ -131,7 +136,8 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   };
 
   const queuePublication = async (): Promise<void> => {
-    if (!selectedMenu || !publishConfirmed || !preview) return;
+    if (!selectedMenu || !publishConfirmed || !preview || busy || publicationAccess) return;
+    if (!publishValidation.validate([{ value: publishReason, label: '發布原因', ref: publishReasonRef }])) return;
     const effectiveReason = publishReason.trim() || '工會人員更新圖文選單設定';
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -171,8 +177,9 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
     if (
       selectedPublication?.status !== 'publish_retryable_failed'
       || !retryConfirmed
-      || !retryReason.trim()
+      || busy || publicationAccess
     ) return;
+    if (!retryValidation.validate([{ value: retryReason, label: '重試原因', ref: retryReasonRef }])) return;
     const controller = new AbortController();
     controllerRef.current = controller;
     setRetryState('loading');
@@ -244,7 +251,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           <input
             id="line-rich-menu-publish-reason"
             aria-label="發布原因"
-            value={publishReason}
+            ref={publishReasonRef} aria-required="true" value={publishReason}
             maxLength={500}
             disabled={busy}
             placeholder="例如：工會人員更新圖文選單設定"
@@ -252,7 +259,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
             onChange={(event) => {
               setPublishReason(event.target.value);
             }}
-          />
+          />{publishValidation.feedback}
           <label className="richmenu-confirm-checkbox-label richmenu-publish-confirm">
             <input
               type="checkbox"
@@ -265,7 +272,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           <button
             type="button"
             className="line-primary-btn richmenu-publish-submit"
-            disabled={busy || Boolean(publicationAccess) || !publishConfirmed || publishReason.trim().length === 0}
+            disabled={busy || Boolean(publicationAccess) || !publishConfirmed}
             onClick={() => void queuePublication()}
           >
             <Rocket aria-hidden="true" />確認發布至 LINE
@@ -288,7 +295,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           </label>
           <textarea
             id={`line-rich-menu-retry-reason-${selectedPublication.id}`}
-            value={retryReason}
+            ref={retryReasonRef} aria-required="true" value={retryReason}
             rows={2}
             maxLength={500}
             disabled={busy}
@@ -298,7 +305,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
               setRetryConfirmed(false);
               setRetryState('idle');
             }}
-          />
+          />{retryValidation.feedback}
           <label className="richmenu-confirm-checkbox-label richmenu-publish-confirm">
             <input
               type="checkbox"
@@ -311,7 +318,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           <button
             type="button"
             className="line-warning-btn richmenu-publish-submit"
-            disabled={busy || Boolean(publicationAccess) || !retryConfirmed || retryReason.trim().length === 0}
+            disabled={busy || Boolean(publicationAccess) || !retryConfirmed}
             onClick={() => void retryPublication()}
           >
             <RefreshCw aria-hidden="true" />確認重新排入發布

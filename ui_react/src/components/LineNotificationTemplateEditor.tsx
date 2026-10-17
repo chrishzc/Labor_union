@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineNotificationTemplateEditor.tsx
  * Description: 編輯通知規則實際發送的文字內容，並即時模擬手機顯示。
@@ -39,6 +41,8 @@ export const LineNotificationTemplateEditor: React.FC<
 > = ({ ruleId, client = lineNotificationTemplateClient }) => {
   const [template, setTemplate] = useState<LineNotificationTemplateData | null>(null);
   const [content, setContent] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,7 +77,8 @@ export const LineNotificationTemplateEditor: React.FC<
   );
 
   const save = async (): Promise<void> => {
-    if (!template || !content.trim() || !hasChanges) return;
+    if (!template || !hasChanges || saving) return;
+    if (!saveValidation.validate([{ value: content, label: '通知內容', ref: saveFieldRef }])) return;
     setSaving(true);
     setFeedback(null);
     try {
@@ -134,7 +139,7 @@ export const LineNotificationTemplateEditor: React.FC<
                 <RotateCcw aria-hidden="true" />放棄修改
               </button>
             </div>
-            <textarea
+            <textarea ref={saveFieldRef} aria-required="true"
               id={`line-notification-template-content-${ruleId}`}
               value={content}
               rows={14}
@@ -144,7 +149,7 @@ export const LineNotificationTemplateEditor: React.FC<
                 setContent(event.target.value);
                 if (feedback) setFeedback(null);
               }}
-            />
+            />{saveValidation.feedback}
             <div className="notification-template-meta">
               <span>{content.length} / 5000 字</span>
               {template.variables.length > 0 && (
@@ -156,7 +161,7 @@ export const LineNotificationTemplateEditor: React.FC<
             <button
               type="button"
               className="line-primary-btn notification-template-save"
-              disabled={saving || !hasChanges || !content.trim()}
+              disabled={saving || !hasChanges}
               onClick={() => void save()}
             >
               <Save aria-hidden="true" />{saving ? '儲存中…' : '儲存訊息內容'}

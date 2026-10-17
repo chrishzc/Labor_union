@@ -49,3 +49,14 @@ def test_service_window_transport_preserves_typed_clocks_without_extra_fields_on
     period=snapshot['after']['service_periods'][0]
     assert period['value']=='8小時(08:30-17:00)' and period['detail'] is None
     assert period['service_hours']==8 and period['start_time']=='08:30' and period['end_day_offset']==0
+
+
+
+def test_manual_apply_notes_are_optional_and_keep_length_limit():
+    import pytest
+    from pydantic import ValidationError
+    body = {**_payload(), "expected_snapshot_fingerprint": "a" * 64, "preview_fingerprint": "b" * 64}
+    assert ManualApplyBody.model_validate(body).reason == ""
+    assert ManualApplyBody.model_validate({**body, "reason": ""}).reason == ""
+    with pytest.raises(ValidationError):
+        ManualApplyBody.model_validate({**body, "reason": "x" * 501})

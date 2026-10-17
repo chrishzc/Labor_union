@@ -10,6 +10,7 @@ vi.mock('../api/client_finance/payment_destination_client', () => ({
 describe('PaymentDestinationConfigurationPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.alert = vi.fn();
     vi.mocked(paymentDestinationClient.query)
       .mockResolvedValueOnce({ configured: false, account_display: null, revision: 0 })
       .mockResolvedValueOnce({ configured: true, account_display: '822-123456789', revision: 1 });
@@ -27,6 +28,14 @@ describe('PaymentDestinationConfigurationPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '檢查設定影響' }));
     await screen.findByText('契約將顯示：822-123456789');
     expect(paymentDestinationClient.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
+    const save = screen.getByRole('button', { name: '確認更新帳戶' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByLabelText('更新原因')).toHaveFocus();
+    expect(paymentDestinationClient.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
     fireEvent.change(screen.getByLabelText('更新原因'), { target: { value: '建立正式代收付帳戶' } });
     fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
     fireEvent.click(screen.getByRole('button', { name: '確認更新帳戶' }));

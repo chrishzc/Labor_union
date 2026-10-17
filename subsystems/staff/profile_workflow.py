@@ -86,8 +86,6 @@ class StaffProfileMutationWorkflow:
         identity = _staff_id(staff_id)
         normalized = normalize_staff_profile_changes(changes)
         clean_reason = reason.strip()
-        if not clean_reason:
-            raise ValueError("staff_profile_reason_required")
         command_fingerprint = fingerprint_payload({
             "family": _COMMAND_FAMILY,
             "staff_id": identity,

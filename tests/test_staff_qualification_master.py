@@ -66,7 +66,7 @@ class _EditingRepository:
     def save_receipt(self, key, request_fingerprint, preview, actor, reason, result):
         if self.fail_receipt:
             raise RuntimeError("receipt failure")
-        self.receipts[key] = {"request_fingerprint": request_fingerprint, "result": result}
+        self.receipts[key] = {"request_fingerprint": request_fingerprint, "result": result, "actor": actor, "reason": reason}
 
 
 class _EditingUow:
@@ -470,3 +470,22 @@ def test_staff_qualification_repository_marks_missing_schedule_table_unavailable
     assert source.unavailability_source_available is False
     assert source.unavailability_source_reason == "staff_unavailability_schema_not_ready"
     assert source.unavailability_blocks == ()
+
+
+@pytest.mark.parametrize("note", ["", "   ", "補充資格說明"])
+def test_qualification_optional_notes_preserve_audit_and_replay(note):
+    from api.schemas.staff_qualification_editing import QualificationApplyBody
+    repo = _EditingRepository()
+    workflow = StaffQualificationEditingWorkflow(repo, lambda: _EditingUow(repo))
+    values = {**_editable_facts(), "care_babies": 2}
+    preview = workflow.preview(7, values)
+    body = QualificationApplyBody.model_validate({**values,
+        "expected_snapshot_fingerprint": preview["snapshot_fingerprint"],
+        "preview_fingerprint": preview["preview_fingerprint"]})
+    assert body.reason == ""
+    result = _edit_apply(workflow, values, preview, reason=note)
+    assert result["after"]["care_babies"] == 2
+    assert repo.receipts["edit-7"]["reason"] == note.strip()
+    assert repo.receipts["edit-7"]["actor"] == "admin-7"
+    assert _edit_apply(workflow, values, preview, reason=note)["replayed"]
+    assert repo.writes == 1

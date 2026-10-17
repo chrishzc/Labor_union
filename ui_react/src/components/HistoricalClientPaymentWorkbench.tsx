@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /** Client Finance owner workbench for bounded historical payment evidence. */
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -40,6 +42,8 @@ export const HistoricalClientPaymentWorkbench: React.FC<{ caseNo: string }> = ({
   const [sourceAvailability, setSourceAvailability] = useState<HistoricalClientPaymentIntent['source_availability']>('missing');
   const [evidenceReference, setEvidenceReference] = useState('');
   const [reason, setReason] = useState('已核對歷史案件與所選款項');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<HistoricalClientPaymentPreview | null>(null);
   const [readback, setReadback] = useState<HistoricalClientPaymentReadback | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -174,7 +178,7 @@ export const HistoricalClientPaymentWorkbench: React.FC<{ caseNo: string }> = ({
     }
   };
   const runApply = async () => {
-    if (busyRef.current || protectedFlow || !preview?.can_apply || preview.adoption_receipt_id === null || !confirmed || !reason.trim()) return;
+    if (busyRef.current || protectedFlow || !preview?.can_apply || preview.adoption_receipt_id === null || !confirmed) return; if (!saveValidation.validate([{ value: reason, label: '原因', ref: saveFieldRef }])) return;
     const actor = sessionClient.getUser()?.username.trim() ?? '';
     if (!actor) { setMessage('請先登入後再提交。'); return; }
     busyRef.current = true; setBusy(true); setMessage(null);
@@ -208,7 +212,7 @@ export const HistoricalClientPaymentWorkbench: React.FC<{ caseNo: string }> = ({
     {!busy && query && obligations.length === 0 ? <p>此方向目前沒有可處理的未結清款項。</p> : null}
     <div className="finance-filter-bar"><label>付款日期（不確定可留空）<input disabled={protectedFlow} type="date" value={paymentDate} onChange={(event) => { setPaymentDate(event.target.value); invalidate(); }} /></label>{!paymentDate && <label>日期未知原因<input disabled={protectedFlow} value={unknownReason} maxLength={500} onChange={(event) => { setUnknownReason(event.target.value); invalidate(); }} /></label>}<label>證據參考（選填）<input disabled={protectedFlow} value={evidenceReference} maxLength={191} onChange={(event) => { setEvidenceReference(event.target.value); invalidate(); }} /></label></div>
     <button className="finance-btn-secondary" type="button" disabled={busy || !query || protectedFlow} onClick={() => void runPreview()}>預覽歷史付款影響</button>
-    {preview && <div><p>本次確認項目：{preview.obligations.map((item) => item.obligation_identity).join('、')}</p><p>金額快照：NT$ {preview.amount_snapshot_ntd.toLocaleString('zh-TW')}</p>{preview.can_apply && <><label>原因<input disabled={protectedFlow} value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label><label><input disabled={protectedFlow} type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對方向、付款人／收款人、款項與金額</label><button className="finance-btn-primary" type="button" disabled={busy || protectedFlow || !confirmed || !reason.trim()} onClick={() => void runApply()}>確認並提交</button></>}</div>}
+    {preview && <div><p>本次確認項目：{preview.obligations.map((item) => item.obligation_identity).join('、')}</p><p>金額快照：NT$ {preview.amount_snapshot_ntd.toLocaleString('zh-TW')}</p>{preview.can_apply && <><><label>原因<input ref={saveFieldRef} aria-required="true" disabled={protectedFlow} value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>{saveValidation.feedback}</><label><input disabled={protectedFlow} type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對方向、付款人／收款人、款項與金額</label><button className="finance-btn-primary" type="button" disabled={busy || protectedFlow || !confirmed} onClick={() => void runApply()}>確認並提交</button></>}</div>}
     {readback && <p>已重新讀取付款結果：{readback.owner_terminal ? '客戶款項已結清' : '尚有款項未結清'}（版本 {readback.account_version}）</p>}
     {flow?.status === 'outcome_unknown' && <button className="finance-btn-secondary" data-control-id="historical-client-payment-reconcile-original" type="button" disabled={busy} onClick={() => void retryOriginal()}>確認提交結果</button>}
     {flow?.status === 'observation_failed' && <button className="finance-btn-secondary" data-control-id="historical-client-payment-readback-only" type="button" disabled={busy} onClick={() => void retryReadback()}>重新讀取付款結果</button>}

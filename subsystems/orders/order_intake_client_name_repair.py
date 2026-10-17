@@ -262,8 +262,6 @@ def _validate_command_fields(
         )
     if not actor.strip():
         raise OrderIntakeClientNameRepairError("order_intake_client_name_actor_required")
-    if not reason.strip():
-        raise OrderIntakeClientNameRepairError("order_intake_client_name_reason_required")
 
 
 def _receipt_payload(receipt: OrderIntakeClientNameReceipt) -> dict[str, object]:

@@ -196,6 +196,7 @@ class LineConfigurationApplication:
     ):
         """Append a preview-locked draft revision without publication side effects."""
         require_line_capability(actor, LineCapability.CONFIG_MANAGE)
+        reason = reason.strip()
         normalized = normalize_rich_menu_draft(definition)
         candidate = build_configuration_candidate(
             kind=LineConfigurationKind.RICH_MENUS,

@@ -51,7 +51,7 @@ class _Repo:
     def replace_relations(self, staff_id, relations, *, before):
         self.events.append("replace"); self.writes += 1; self.relations = relations
     def save_receipt(self, *, key, request_fingerprint, preview_fingerprint, actor, reason, result):
-        self.events.append("save_receipt"); self.receipts[key.value] = {"request_fingerprint": request_fingerprint.value, "result": result}
+        self.events.append("save_receipt"); self.receipts[key.value] = {"request_fingerprint": request_fingerprint.value, "result": result, "actor": actor, "reason": reason}
 
 
 def _workflow(repo): return StaffCasePreferenceManualWorkflow(repo, _Uow)
@@ -176,3 +176,19 @@ def test_new_window_cannot_duplicate_an_existing_legacy_window_identity():
     with pytest.raises(ValueError,match='relation_duplicate'):
         _workflow(repo).preview(531,proposed)
     assert repo.writes==0
+
+
+@pytest.mark.parametrize("note", ["", "   ", "補充接案說明"])
+def test_optional_notes_preserve_actor_and_exact_replay(note):
+    repo = _Repo()
+    workflow = _workflow(repo)
+    proposed = _relations()
+    preview = workflow.preview(531, proposed)
+    request = _request(preview, reason=note)
+    first = workflow.apply(531, proposed, request)
+    saved = repo.receipts[request.idempotency_key.value]
+    assert saved["reason"] == note.strip()
+    assert saved["actor"] == "admin:test"
+    assert first.relations == workflow.query(531).relations
+    assert workflow.apply(531, proposed, request).replayed
+    assert repo.writes == 1

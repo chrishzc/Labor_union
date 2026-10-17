@@ -14,6 +14,7 @@
   - `domains/line/rich_menu_draft.py`
   - `subsystems/line/rich_menu_publication_workflow.py`
   - `api/routes/line_rich_menus.py`
+  - `api/schemas/line_rich_menu_drafts.py` — 草稿專用 typed Q/P/A、選填備註與版本／receipt 公開契約。
   - `ui_react/src/components/LineRichMenuDraftAppearanceEditor.tsx`
   - `ui_react/src/components/LineRichMenuDraftActionEditor.tsx`
   - `ui_react/src/components/LineRichMenuDraftSaveActions.tsx` — shared draft Preview/Confirm/Apply with fresh Query readback.
@@ -41,6 +42,8 @@
 - integration_root: `ui_react/src/tests/line_management_page_real_data.test.tsx`
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rich_menu_local_preview.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/rich-menu-management.md`
+
+- Rich Menu 草稿 reason 為選填備註，空白可保存；確認、版本與 Preview／Apply／回讀 gate 保留。其他設定種類、發布及重試原因仍必填。
 
 ## Change triggers
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.

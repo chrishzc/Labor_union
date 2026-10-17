@@ -12,6 +12,7 @@ const deferred = () => { let resolve!: (value?: unknown) => void; const promise 
 
 beforeEach(() => {
   vi.resetAllMocks();
+  window.alert = vi.fn();
   mocks.query.mockResolvedValue(view);
   mocks.apply.mockResolvedValue(receipt);
 });
@@ -95,6 +96,16 @@ describe('名冊虛擬帳號設定', () => {
     mocks.query.mockResolvedValue({ ...view, imported_virtual_accounts: [], mapping_ids: [] });
     await mount();
     expect(screen.getByLabelText('匯入虛擬帳號')).toHaveValue('');
+    const button = screen.getByRole('button', { name: /^儲存虛擬帳號$/ });
+    expect(button).toBeEnabled();
+    save();
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByLabelText('匯入虛擬帳號')).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('匯入虛擬帳號');
+    expect(mocks.apply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('匯入虛擬帳號'), { target: { value: '   ' } });
+    save();
+    expect(mocks.apply).not.toHaveBeenCalled();
     edit(); save();
     await screen.findByText('虛擬帳號已儲存，名冊資料已更新。');
     expect(mocks.apply.mock.calls[0][0].expected_mapping_ids).toEqual([]);

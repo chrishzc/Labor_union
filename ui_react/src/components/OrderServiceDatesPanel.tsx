@@ -1,3 +1,4 @@
+import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import type {
@@ -126,6 +127,9 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const [arrangementBusy, setArrangementBusy] = useState(false);
   const actionInFlight = useRef(new Set<string>());
   const saveDatesIntent = useRef(true);
+  const saveValidation = useSaveValidation();
+  const startDateRef = useRef<HTMLInputElement>(null);
+  const dateSelectionRef = useRef<HTMLDivElement>(null);
   const readbackElement = useRef<HTMLDivElement | null>(null);
   const nextStepElement = useRef<HTMLDivElement | null>(null);
   const calculationSequence = useRef(0);
@@ -456,6 +460,10 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   const runApply = async (saveDates = saveDatesIntent.current) => {
     if (actionInFlight.current.has(caseNo) || isRecoveryActive || needsBasisUpdate || readController.current !== null) return;
+    if (!saveValidation.validate([
+      ...(actualStart && effectiveServiceDates === null ? [{ value: startDate, label: '實際開始日', ref: startDateRef, valid: /^\d{4}-\d{2}-\d{2}$/.test(startDate) && Number.isFinite(Date.parse(`${startDate}T00:00:00Z`)), message: '請填寫有效的實際開始日後再儲存。' }] : []),
+      ...(saveDates ? [{ value: selectedDates.length, label: '服務日期', ref: dateSelectionRef, valid: selectedDates.length > 0 && selectedDates.length === (queryView?.contracted_service_days ?? 0), message: `請選滿 ${queryView?.contracted_service_days ?? 0} 天服務日期後再儲存。` }] : []),
+    ])) return;
     saveDatesIntent.current = saveDates;
     actionInFlight.current.add(caseNo);
     const basisSequence = calculationSequence.current;
@@ -607,8 +615,6 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
   const requiredDateCount = queryView?.contracted_service_days ?? 0;
   const canSave = queryView !== null
-    && selectedDates.length === requiredDateCount
-    && selectedDates.length > 0
     && selectedDates.every((date) => queryView.selectable_dates.includes(date))
     && working === null
     && !isRecoveryActive
@@ -631,19 +637,20 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
       hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>
       <div hidden={view !== 'dates'}>
+      {saveValidation.feedback}
       <div className="service-date-heading"><p className="service-date-instruction">{effectiveServiceDates ? '查看現行班表；更正開始日會同步調整各段排班。' : '依開始日與休假選擇計算服務日期，確認後儲存。'}</p>
         {effectiveServiceDates && onOpenActualStart && <button type="button" disabled={saving || working !== null || isRecoveryActive || startUnresolved} onClick={onOpenActualStart}>更正實際開始日</button>}
       </div>
       {effectiveServiceDates === null && <div className="service-date-settings">
         <div className="service-date-start-field">
           <label>實際開始日
-            <input type="date" aria-label="實際開始日" value={startDate}
+            <input ref={startDateRef} aria-required="true" type="date" aria-label="實際開始日" value={startDate}
               disabled={saving || working === 'preview' || isRecoveryActive || startUnresolved || actualStart?.service_data_locked}
               onChange={(event) => changeStartDate(event.target.value)} />
           </label>
           {actualStart && <small>約定服務開始日 {actualStart.planned_start_date}</small>}
           {actualStart && !actualStart.has_formal_assignments && <button className="service-date-save-start" type="button"
-            disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !Number.isFinite(Date.parse(`${startDate}T00:00:00Z`))}
+            disabled={working !== null || saving || isRecoveryActive || needsBasisUpdate || startUnresolved || actualStart.service_data_locked}
             onClick={() => void runApply(false)}>儲存實際開始日</button>}
         </div>
         <div className="service-date-rest-settings">
@@ -759,6 +766,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             {displayedDates.length !== requiredDateCount && <div><dt>待調整</dt><dd>{displayedDates.length < requiredDateCount ? `尚差 ${requiredDateCount - displayedDates.length}` : `超出 ${displayedDates.length - requiredDateCount}`} 天</dd></div>}
           </dl>
 
+          <div ref={dateSelectionRef} tabIndex={-1} aria-label="服務日期選擇">
           <OrderServiceDateCalendar
             month={calendarMonth || startDate.slice(0, 7)} onMonthChange={setCalendarMonth} selectedDates={displayedDates}
             isDateDisabled={date => effectiveServiceDates !== null || !queryView.selectable_dates.includes(date) || working !== null || isRecoveryActive || needsBasisUpdate || inputInvalid || startUnresolved || Boolean(actualStart?.service_data_locked)}
@@ -770,6 +778,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
             }}
             hint={effectiveServiceDates ? '現行服務日期已保存；更正開始日會先核對各段調整結果。' : `選取國定假日即代表已確認該日安排服務；點選日期可調整，需選滿 ${requiredDateCount} 天。`}
           />
+
+          </div>
 
           <div className="service-date-footer">
             <small>{effectiveServiceDates ? '現行班表已保存。' : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>

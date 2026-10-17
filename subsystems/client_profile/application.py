@@ -145,8 +145,6 @@ class ClientProfileApplication:
         case_identity = _case_no(case_no)
         normalized = validate_changes(changes)
         clean_reason = reason.strip()
-        if not clean_reason:
-            raise ClientProfileValidationError("profile_reason_required")
         command_fingerprint = _command_fingerprint(
             "client_profile_admin_change/v1",
             case_identity,

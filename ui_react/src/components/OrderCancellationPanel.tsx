@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
@@ -17,6 +19,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState<OrderCancellationPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -173,8 +177,9 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
 
   const apply = async (retry = false) => {
     if (inFlight.current.has(caseNo)) return;
-    if (!retry && (!preview || !reason.trim() || busy
+    if (!retry && (!preview || busy
       || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0))) return;
+    if (!retry && !saveValidation.validate([{ value: reason, label: '取消原因', ref: saveFieldRef }])) return;
     const existing = orderMutationFlowStore.getCancellation(caseNo);
     if (retry && existing?.status !== 'outcome_unknown') return;
     if (existing?.status === 'applying' || existing?.status === 'observing' || existing?.receipt) return;
@@ -298,7 +303,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
               <button type="button" onClick={() => { setDays((current) => [...current, { service_date: '', staff_id: '', reason: '' }]); invalidate(); }}>新增實際服務日</button>
             </fieldset>
           )}
-          {!alreadyCancelled && <label>取消原因<textarea aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>}
+          {!alreadyCancelled && <><label>取消原因<textarea ref={saveFieldRef} aria-required="true" aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>{saveValidation.feedback}</>}
           {!alreadyCancelled && !preview && phase === 'idle' && error && <button type="button" onClick={() => void check()}>重新檢查取消影響</button>}
         </>
       )}
@@ -314,7 +319,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
             {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
           <p>請核對以上服務日與帳務影響。確認後將{historicalRepair ? '保存實際服務事實' : '取消訂單'}。</p>
-          <button type="button" disabled={busy || !reason.trim() || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0)} onClick={() => void apply()}>{historicalRepair ? '確認補登' : '確認取消訂單'}</button>
+          <button type="button" className="order-v2-danger" disabled={busy || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0)} onClick={() => void apply()}>{historicalRepair ? '確認補登' : '確認取消訂單'}</button>
         </>
       )}
       {phase === 'previewing' && <p role="status">檢查取消影響中…</p>}

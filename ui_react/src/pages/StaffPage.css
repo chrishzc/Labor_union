@@ -62,9 +62,9 @@
 }
 
 .staff-tab-btn.active {
-  background: #d85d32;
-  border-color: #d85d32;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   box-shadow: 0 4px 12px rgba(168, 63, 29, 0.2);
 }
 
@@ -132,13 +132,18 @@
 
 .staff-clear-btn {
   padding: 8px 14px;
-  background: #f5ece9;
-  border: 1px solid #dec0b6;
+  background: var(--md-sys-color-primary);
+  border: 1px solid var(--md-sys-color-primary);
   border-radius: 8px;
   font-size: 0.84rem;
-  color: #57423b;
+  color: var(--md-sys-color-on-primary);
   font-weight: 600;
   cursor: pointer;
+}
+
+.staff-clear-btn:hover:not(:disabled) {
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
 }
 
 .staff-filter-pills-row {
@@ -331,15 +336,13 @@
 .staff-view-btn,
 .staff-next-btn {
   border: 1px solid #d85d32;
-  background: #d85d32;
-  color: #ffffff;
-}
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
 
 .staff-view-btn:hover,
 .staff-next-btn:hover {
-  background: #a83f1d;
-  border-color: #a83f1d;
-}
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); }
 
 .staff-view-btn {
   flex: 1;
@@ -354,13 +357,11 @@
 
 .staff-close-btn {
   border: 1px solid #b49388;
-  background: #ffffff;
-  color: #57423b;
-}
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
 
 .staff-close-btn:hover {
-  background: #fff8f6;
-}
+  background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .staff-disabled-btn,
 .staff-primary-disabled {
@@ -399,24 +400,22 @@
 
 .staff-primary-btn {
   padding: 8px 18px;
-  background: #ea580c;
+  background: var(--md-sys-color-primary);
   border: 1px solid #ea580c;
   border-radius: 8px;
-  color: #ffffff;
+  color: var(--md-sys-color-on-primary);
   font-weight: 700;
   font-size: 0.88rem;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
+  gap: 6px; border-color: var(--md-sys-color-primary); }
 
 .staff-primary-btn:hover:not(:disabled) {
-  background: #c2410c;
-  border-color: #c2410c;
-  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.25);
-}
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.25); color: var(--md-sys-color-on-primary); }
 
 .staff-primary-btn:disabled {
   background: #fed7aa;
@@ -428,20 +427,19 @@
 
 .staff-secondary-btn {
   padding: 8px 18px;
-  background: #ffffff;
+  background: var(--md-sys-color-primary);
   border: 1.5px solid #ea580c;
   border-radius: 8px;
-  color: #ea580c;
+  color: var(--md-sys-color-on-primary);
   font-weight: 700;
   font-size: 0.88rem;
   cursor: pointer;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .staff-secondary-btn:hover:not(:disabled) {
-  background: #fff7ed;
-  border-color: #c2410c;
-  color: #c2410c;
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary);
 }
 
 .staff-secondary-btn:disabled {
@@ -575,20 +573,18 @@
 .staff-btn-item-edit {
   padding: 6px 14px;
   font-size: 0.84rem;
-  background: #ffedd5;
-  color: #9a3412;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border: 1px solid #fdba74;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 750;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
+  gap: 4px; border-color: var(--md-sys-color-primary); }
 
 .staff-btn-item-edit:hover:not(:disabled) {
-  background: #fed7aa;
-}
+  background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .staff-holiday-op-card {
   background: #fffaf8;
@@ -754,8 +750,8 @@
 }
 
 .staff-drawer-tab-btn.active {
-  color: #a43c12;
-  border-bottom-color: #ff7f50;
+  color: var(--md-sys-color-primary);
+  border-bottom-color: var(--md-sys-color-primary);
   font-weight: 800;
 }
 
@@ -1038,4 +1034,31 @@
   .staff-unavailability-row.header {
     display: none;
   }
+}
+.staff-view-btn:hover:not(:disabled),
+.staff-next-btn:hover:not(:disabled),
+.staff-close-btn:hover:not(:disabled),
+.staff-primary-btn:hover:not(:disabled),
+.staff-secondary-btn:hover:not(:disabled),
+.staff-btn-item-edit:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.staff-view-btn:disabled,
+.staff-next-btn:disabled,
+.staff-close-btn:disabled,
+.staff-primary-btn:disabled,
+.staff-secondary-btn:disabled,
+.staff-btn-item-edit:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.staff-tab-btn.active:hover { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+
+[data-surface-id="staff.resume"] input[type="file"]::file-selector-button { padding: 8px 12px; margin-right: 10px; border: 1px solid var(--md-sys-color-primary); border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; font-weight: 700; cursor: pointer; }
+[data-surface-id="staff.resume"] input[type="file"]:hover:not(:disabled)::file-selector-button { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
+[data-surface-id="staff.resume"] input[type="file"]:disabled::file-selector-button { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; }
+
+[data-control-id="staff.lifecycle.retirement.apply"]:not(:disabled) { background: var(--md-sys-color-error); border-color: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); }
+[data-control-id="staff.lifecycle.retirement.apply"]:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
+
+p.staff-op-hint,
+p.staff-op-error,
+p.staff-service-time-rule,
+.staff-drawer-section [role="alert"] {
+  color: var(--md-sys-color-error);
 }

@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useState } from 'react';
 import { paymentDestinationClient, type PaymentDestination, type PaymentDestinationPreview } from '../api/client_finance/payment_destination_client';
 
@@ -5,6 +7,8 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
   const [current, setCurrent] = useState<PaymentDestination | null>(null);
   const [account, setAccount] = useState('');
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PaymentDestinationPreview | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading');
@@ -27,7 +31,8 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
     catch { setStatus('error'); setMessage('無法完成預覽；資料可能已變更，請重新載入。'); }
   };
   const apply = async () => {
-    if (!preview || !confirmed || !reason.trim()) return;
+    if (!preview || !confirmed || status === 'saving') return;
+    if (!saveValidation.validate([{ value: reason, label: '更新原因', ref: saveFieldRef }])) return;
     setStatus('saving'); setMessage('');
     try {
       await paymentDestinationClient.apply(preview, reason.trim());
@@ -45,9 +50,9 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
       <label className="finance-field"><span>工會／代收付帳戶</span><input value={account} maxLength={255} autoComplete="off" onChange={(event) => { setAccount(event.target.value); setPreview(null); setConfirmed(false); }} placeholder="例如：銀行代碼－帳號" /></label>
       <button type="button" className="finance-btn-secondary" disabled={status === 'saving' || !account.trim()} onClick={() => void runPreview()}>檢查設定影響</button>
       {preview && <div className="finance-meta" data-control-id="finance.payment-destination.preview"><span>契約將顯示：{preview.candidate_account_display}</span>
-        <label className="finance-field"><span>更新原因</span><input value={reason} maxLength={255} onChange={(event) => setReason(event.target.value)} /></label>
+        <><label className="finance-field"><span>更新原因</span><input ref={saveFieldRef} aria-required="true" value={reason} maxLength={255} onChange={(event) => setReason(event.target.value)} /></label>{saveValidation.feedback}</>
         <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對帳戶內容，確認套用</label>
-        <button type="button" className="finance-btn-primary" disabled={!confirmed || !reason.trim() || status === 'saving'} onClick={() => void apply()}>確認更新帳戶</button>
+        <button type="button" className="finance-btn-primary" disabled={!confirmed || status === 'saving'} onClick={() => void apply()}>確認更新帳戶</button>
       </div>}
     </div>}
   </section>;

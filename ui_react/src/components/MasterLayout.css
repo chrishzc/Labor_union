@@ -157,21 +157,19 @@
   align-items: center;
   gap: 4px;
   background-color: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface-variant);
+  color: var(--md-sys-color-on-primary);
   border: 1px solid transparent;
   padding: 4px 10px;
   border-radius: var(--radius-full);
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 600;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); }
 
 .logout-action-btn:hover {
   background-color: #fee2e2;
-  color: #b91c1c;
-  border-color: #fca5a5;
-}
+  color: var(--md-sys-color-on-primary);
+  border-color: var(--md-sys-color-primary-hover); background: var(--md-sys-color-primary-hover); }
 
 /* Stitch Nurture Core Logout Modal */
 .logout-modal-backdrop {
@@ -241,16 +239,14 @@
   border-radius: 10px;
   border: 1px solid #dec0b6;
   background-color: #ffffff;
-  color: #57423b;
+  color: var(--md-sys-color-on-primary);
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); }
 
 .logout-btn-cancel:hover {
-  background-color: #f5ece9;
-}
+  background-color: #f5ece9; background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .logout-btn-confirm {
   flex: 1;
@@ -635,4 +631,16 @@
   .logout-modal-actions {
     flex-direction: column-reverse;
   }
+}
+.logout-action-btn:hover:not(:disabled),
+.logout-btn-cancel:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.logout-action-btn:disabled,
+.logout-btn-cancel:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.main-workspace [role="alert"] {
+  color: var(--md-sys-color-error) !important;
+}
+
+.main-workspace :is(input, textarea, select)[aria-invalid="true"] {
+  border-color: var(--md-sys-color-error);
+  outline-color: var(--md-sys-color-error);
 }

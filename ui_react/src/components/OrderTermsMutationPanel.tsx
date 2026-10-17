@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: OrderTermsMutationPanel.tsx
@@ -184,6 +186,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
   const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [ordinaryApplied, setOrdinaryApplied] = useState(false);
   const [replacementDates, setReplacementDates] = useState<string[] | null>(null);
   const [serviceMode, setServiceMode] = useState<SchedulePrecisionRequest['service_mode'] | ''>('');
@@ -424,7 +428,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   };
 
   const applyTerms = async () => {
-    if (!preview || (preview.requires_formal_apply && !reason.trim()) || currentQuery.service_data_locked) return;
+    if (!preview || currentQuery.service_data_locked) return;
+    if (preview.requires_formal_apply && !saveValidation.validate([{ value: reason, label: '條款變更原因', ref: saveFieldRef }])) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
@@ -553,14 +558,12 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
                   key={preset.label}
                   type="button"
                   disabled={locked}
-                  className="btn-secondary-action"
+                  className="btn-secondary-action order-shift-preset"
+                  aria-pressed={isPresetActive(preset)}
                   style={{
                     fontSize: '0.78rem',
                     padding: '3px 8px',
                     borderRadius: '4px',
-                    background: isPresetActive(preset) ? '#fed7aa' : '#ffffff',
-                    border: '1px solid #d4c5b9',
-                    color: '#431407',
                     fontWeight: isPresetActive(preset) ? 600 : 400,
                     cursor: locked ? 'not-allowed' : 'pointer',
                   }}
@@ -640,11 +643,11 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
           <details><summary>技術資訊</summary><p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p></details>
-          {preview.requires_formal_apply && <label>變更原因（正式影響必填）
-            <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
-          </label>}
+          {preview.requires_formal_apply && <><label>變更原因（正式影響必填）
+            <textarea ref={saveFieldRef} aria-required="true" aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
+          </label>{saveValidation.feedback}</>}
           <div className="order-v2-drawer-actions" style={{ marginTop: '8px' }}>
-            <button type="button" disabled={locked || (preview.requires_formal_apply && reason.trim().length === 0)} onClick={() => void applyTerms()}>
+            <button type="button" disabled={locked} onClick={() => void applyTerms()}>
               {status === 'applying' ? '正在儲存服務條件…' : '確認儲存服務條件'}
             </button>
           </div>

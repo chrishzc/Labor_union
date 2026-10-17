@@ -182,6 +182,7 @@ React「客服與營運」的客服案件頁只提醒與追蹤未結案客服，
 - 「客服與選單」的 Rich Menu 編輯器必須提供背景圖與按鈕顯示名稱的 draft 編輯入口；畫面預覽、
   Preview receipt 與 Apply 必須鎖定同一 revision。編輯草稿不等於發布，provider publication 仍依 `17`
   的 durable saga 執行；未啟用 provider 測試時只驗證到 committed definition／publication intent，不假造發送成功。
+- 2026-10-17 人工裁決：Rich Menu 草稿編輯的原因改為「備註（選填）」，省略／空白以既有 reason 空字串保存；仍要求相同 revision、Preview fingerprint、人工確認、操作人員、冪等鍵及正式回讀。只放寬草稿 metadata，其他設定種類、實際發布與發布重試仍維持必填原因，不增加 provider 副作用。
 - 背景圖選擇器只查目前 editable menu owner 的受控 metadata，並保存 exact asset ID／SHA-256／opaque
   version；已刪除項目保留歷史顯示但不得選取。畫面不得顯示 digest、version、storage locator 或 raw ID
   輸入框；合法空清單仍保留系統色彩背景。Preview 零寫入驗證 metadata，Apply 對新 command 於同一

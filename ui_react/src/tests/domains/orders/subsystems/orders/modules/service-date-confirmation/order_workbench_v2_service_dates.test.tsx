@@ -53,6 +53,7 @@ function changeFormalStart() {
     selectable_dates: ['2026-09-28', '2026-09-29', '2026-09-30'] };
 }
 async function ready() {
+  await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('3 / 3 天'));
   await waitFor(() => expect(screen.getByRole('button', { name: '儲存服務日期' })).toBeEnabled());
 }
 async function save() {

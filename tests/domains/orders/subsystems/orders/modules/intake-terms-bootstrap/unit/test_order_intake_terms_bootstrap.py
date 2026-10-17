@@ -23,7 +23,8 @@ _START = date(2026, 9, 10)
 _DAYS = 30
 
 
-def test_missing_service_time_preserves_dates_and_days_and_replays_original_receipt():
+@pytest.mark.parametrize("note", ["", "   ", "confirmed eight service hours"])
+def test_missing_service_time_preserves_dates_and_days_and_replays_original_receipt(note):
     repository = _Repository(start_date=_START, service_days=_DAYS)
     repository.case = replace(repository.case, status=OrderLifecycleStatus.DISCUSSION)
     units = _UnitOfWorkFactory()
@@ -35,7 +36,7 @@ def test_missing_service_time_preserves_dates_and_days_and_replays_original_rece
     assert preview.before_service_time.service_hours_per_day is None
     assert repository.update_calls == []
     arguments = (_CASE, _START, _DAYS, preview.lifecycle_version, preview.preview_fingerprint,
-                 'time-supplement', 'orders-operator', 'confirmed eight service hours')
+                 'time-supplement', 'orders-operator', note)
     receipt = application.apply(*arguments, proposed_service_time=proposed)
     assert receipt.service_time == proposed
     assert repository.case.service_hours_per_day == 8
@@ -649,3 +650,19 @@ class _UnitOfWork:
 
     def commit(self):
         self._owner.commits += 1
+
+
+@pytest.mark.parametrize('body_class,payload', [
+    ('OrderIntakeTermsBootstrapApplyBody', {'proposed_start_date': '2026-11-01', 'proposed_service_days': 26}),
+    ('OrderIntakeClientNameApplyBody', {'client_name': '合成測試'}),
+    ('OrderIntakeCompletionApplyBody', {}),
+])
+def test_intake_apply_http_metadata_note_can_be_omitted(body_class, payload):
+    from api.routes import order_intake_terms_bootstrap as routes
+    from pydantic import ValidationError
+    body = dict(payload, expected_lifecycle_version=0, preview_fingerprint='a' * 64)
+    model = getattr(routes, body_class)
+    assert model(**body).reason == ''
+    assert model(**body, reason='').reason == ''
+    with pytest.raises(ValidationError):
+        model(**body, reason='字' * 501)

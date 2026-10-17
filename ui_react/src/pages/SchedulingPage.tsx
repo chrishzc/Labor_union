@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from '../components/useSaveValidation';
 /**
  * File: SchedulingPage.tsx
  * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
@@ -289,6 +291,8 @@ function HolidayPolicyWorkspace() {
   const [holidayName, setHolidayName] = useState('');
   const [doublePay, setDoublePay] = useState(false);
   const [reason, setReason] = useState('依核准政策維護國定假日');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
   const [, setStoreRevision] = useState(0);
 
@@ -385,7 +389,8 @@ function HolidayPolicyWorkspace() {
   const apply = () => {
     const previewResult = draft?.preview;
     const previewRequest = draft?.previewRequest;
-    if (!previewResult || !previewRequest || !previewMatchesCurrentInputs || !calendarMatchesHorizon || !reason.trim() || busy) return;
+    if (!previewResult || !previewRequest || !previewMatchesCurrentInputs || !calendarMatchesHorizon || busy) return;
+    if (!saveValidation.validate([{ value: reason, label: '國定假日維護原因', ref: saveFieldRef }])) return;
     const request: HolidayApplyRequest = {
       ...previewRequest,
       expected_calendar_version: previewResult.command.expected_calendar_version,
@@ -412,7 +417,7 @@ function HolidayPolicyWorkspace() {
             className="btn-primary-action"
             onClick={handleOpenAddDrawer}
             disabled={busy}
-            style={{ padding: '9px 16px', fontSize: '0.88rem', borderRadius: '8px', background: '#ea580c', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}
+            style={{ padding: '9px 16px', fontSize: '0.88rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer' }}
           >
             ➕ 新增國定假日
           </button>
@@ -491,14 +496,13 @@ function HolidayPolicyWorkspace() {
                   <div>
                     <button
                       type="button"
+                      className="scheduling-action"
                       onClick={() => handleOpenEditDrawer(holiday)}
                       disabled={busy}
                       style={{
                         padding: '7px 16px',
                         fontSize: '0.86rem',
-                        background: '#ffedd5',
-                        color: '#9a3412',
-                        border: '1px solid #fdba74',
+                        border: '1px solid',
                         borderRadius: '8px',
                         cursor: 'pointer',
                         fontWeight: 750,
@@ -586,9 +590,9 @@ function HolidayPolicyWorkspace() {
               設為預設雙薪（200% 薪資計算）
             </label>
 
-            <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
+            <><label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記
-              <textarea
+              <textarea ref={saveFieldRef} aria-required="true"
                 aria-label="套用原因"
                 value={reason}
                 maxLength={500}
@@ -596,27 +600,29 @@ function HolidayPolicyWorkspace() {
                 onChange={(event) => setReason(event.target.value)}
                 style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.88rem', minHeight: '68px' }}
               />
-            </label>
+            </label>{saveValidation.feedback}</>
           </div>
 
           {/* 預覽與套用控制列 */}
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <button
               type="button"
+              className="scheduling-action"
               data-control-id="scheduling.holiday.preview"
               disabled={!calendarMatchesHorizon || !buildPreviewRequest() || busy}
               onClick={preview}
-              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', background: '#f5ece9', color: '#57423b', border: '1px solid #dec0b6', fontWeight: 700, cursor: 'pointer' }}
+              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', border: '1px solid', fontWeight: 700, cursor: 'pointer' }}
             >
               {machine.type === 'preview_loading' ? '⏳ 預覽中…' : '預覽國定假日變更'}
             </button>
             <button
               type="button"
+              className={action === 'delete' ? 'scheduling-danger' : 'scheduling-action'}
               data-control-id="scheduling.holiday.apply"
               aria-describedby={previewNeedsRefresh || !calendarMatchesHorizon ? 'scheduling-holiday-apply-guidance' : undefined}
-              disabled={!draft?.preview || !previewMatchesCurrentInputs || !calendarMatchesHorizon || !reason.trim() || busy}
+              disabled={!draft?.preview || !previewMatchesCurrentInputs || !calendarMatchesHorizon || busy}
               onClick={apply}
-              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', background: action === 'delete' ? '#dc2626' : '#ea580c', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)' }}
+              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)' }}
             >
               {machine.type === 'apply_pending' || machine.type === 'requery_loading' ? '⏳ 套用中…' : '套用國定假日變更'}
             </button>
@@ -655,8 +661,9 @@ function HolidayPolicyWorkspace() {
                 </h3>
                 <button
                   type="button"
+                  className="scheduling-action"
                   onClick={() => setHolidayDrawerOpen(false)}
-                  style={{ padding: '4px 10px', fontSize: '0.8rem', background: '#059669', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                  style={{ padding: '4px 10px', fontSize: '0.8rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                 >
                   關閉抽屜
                 </button>
@@ -703,6 +710,8 @@ function LeaveSubstitutionWorkspace({
   const [isDoublePay, setIsDoublePay] = useState(false);
   const [replacementWorkDate, setReplacementWorkDate] = useState('');
   const [reason, setReason] = useState('正式處理請假代班');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [, setStoreRevision] = useState(0);
 
@@ -1027,7 +1036,8 @@ function LeaveSubstitutionWorkspace({
   };
 
   const apply = () => {
-    if (!draft?.preview || !draft.previewRequest || !confirmed || !reason.trim() || busy) return;
+    if (!draft?.preview || !draft.previewRequest || !confirmed || busy) return;
+    if (!saveValidation.validate([{ value: reason, label: '請假代班處理原因', ref: saveFieldRef }])) return;
     const request: LeaveSubstitutionApplyRequest = {
       ...draft.previewRequest,
       expected_order_version: draft.preview.order_version,
@@ -1083,9 +1093,10 @@ function LeaveSubstitutionWorkspace({
             </label>
             <button
               type="button"
+              className="scheduling-action"
               onClick={() => void loadInbox()}
               disabled={inboxBusy}
-              style={{ padding: '6px 12px', fontSize: '0.82rem', background: '#f5ece9', color: '#57423b', border: '1px solid #dec0b6', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+              style={{ padding: '6px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
             >
               {inboxBusy ? '⏳ 載入中…' : '🔄 重新整理'}
             </button>
@@ -1156,18 +1167,20 @@ function LeaveSubstitutionWorkspace({
                       {item.request_status === 'pending' && (
                         <button
                           type="button"
+                          className="scheduling-danger"
                           onClick={() => void handleRejectInbox(item)}
                           disabled={inboxBusy}
-                          style={{ padding: '6px 10px', fontSize: '0.82rem', background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                          style={{ padding: '6px 10px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                         >
                           退回
                         </button>
                       )}
                       <button
                         type="button"
+                        className="scheduling-action"
                         onClick={() => void handleCancelInbox(item)}
                         disabled={inboxBusy}
-                        style={{ padding: '6px 10px', fontSize: '0.82rem', background: '#f5ece9', color: '#57423b', border: '1px solid #dec0b6', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                        style={{ padding: '6px 10px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                       >
                         取消待辦
                       </button>
@@ -1176,14 +1189,14 @@ function LeaveSubstitutionWorkspace({
                   {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') ? (
                     <button
                       type="button"
+                      className="scheduling-action"
+                      aria-pressed={selectedInboxItem?.id === item.id}
                       onClick={() => void handleAcceptAndDispatch(item)}
                       disabled={inboxBusy}
                       style={{
                         padding: '7px 14px',
                         fontSize: '0.86rem',
-                        background: selectedInboxItem?.id === item.id ? '#ea580c' : '#ffedd5',
-                        color: selectedInboxItem?.id === item.id ? '#ffffff' : '#9a3412',
-                        border: '1px solid #fdba74',
+                        border: '1px solid',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         fontWeight: 750,
@@ -1215,11 +1228,12 @@ function LeaveSubstitutionWorkspace({
           </span>
           <button
             type="button"
+            className="scheduling-action"
             onClick={() => {
               setSelectedInboxItem(null);
               setReason('正式處理請假代班');
             }}
-            style={{ padding: '5px 12px', fontSize: '0.82rem', background: '#ffffff', color: '#9a3412', border: '1px solid #fdba74', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+            style={{ padding: '5px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
           >
             ✖ 取消關聯 (改為手動／電話調度)
           </button>
@@ -1312,9 +1326,10 @@ function LeaveSubstitutionWorkspace({
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '10px' }}>
             <button
               type="button"
+              className="scheduling-action"
               onClick={() => void query()}
               disabled={busy}
-              style={{ padding: '6px 14px', fontSize: '0.82rem', background: '#d97706', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+              style={{ padding: '6px 14px', fontSize: '0.82rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
             >
               🔄 重新整理指派
             </button>
@@ -1469,16 +1484,16 @@ function LeaveSubstitutionWorkspace({
           {draft.preview.apply_readiness.blockers.length > 0 && (
             <p className="leave-substitution-notice error">{draft.preview.apply_readiness.blockers.join('、')}</p>
           )}
-          <label>
+          <><label>
             處理原因
-            <textarea
+            <textarea ref={saveFieldRef} aria-required="true"
               aria-label="請假代班處理原因"
               value={reason}
               maxLength={500}
               disabled={busy}
               onChange={(event) => setReason(event.target.value)}
             />
-          </label>
+          </label>{saveValidation.feedback}</>
           <label className="leave-substitution-check confirm">
             <input type="checkbox" checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />
             我已核對上述代班影響，確認執行此變更
@@ -1486,7 +1501,7 @@ function LeaveSubstitutionWorkspace({
           <button
             type="button"
             data-control-id="scheduling.leave.apply"
-            disabled={busy || !confirmed || !reason.trim() || draft.preview.apply_readiness.status !== 'ready'}
+            disabled={busy || !confirmed || draft.preview.apply_readiness.status !== 'ready'}
             onClick={apply}
           >
             {machine.type === 'apply_pending' || machine.type === 'requery_loading' ? '⏳ 套用並確認中…' : '🔒 確認套用代班變更'}
@@ -2739,7 +2754,7 @@ export const SchedulingPage: React.FC = () => {
                     type="button"
                     className="btn-secondary-action"
                     onClick={() => setMonth({ year: ghostYear, month: ghostMonth })}
-                    style={{ padding: '5px 12px', fontSize: '0.82rem', borderRadius: '8px', background: '#ffedd5', color: '#9a3412', border: '1px solid #fdba74', fontWeight: 700 }}
+                    style={{ padding: '5px 12px', fontSize: '0.82rem', borderRadius: '8px', border: '1px solid', fontWeight: 700 }}
                   >
                     👉 跳轉至 {ghostMonth} 月排查視圖
                   </button>
@@ -3047,6 +3062,7 @@ export const SchedulingPage: React.FC = () => {
                 <span>{candidatePoolSuccess}</span>
                 <button
                   type="button"
+                  className="scheduling-action"
                   onClick={() => {
                     setCollisionDrawerOpen(false);
                     const targetCase = eligibilityCaseNo.trim() || selectedCaseNo.trim();
@@ -3054,7 +3070,7 @@ export const SchedulingPage: React.FC = () => {
                       ? `#order-workbench-v2?case_no=${encodeURIComponent(targetCase)}`
                       : '#order-workbench-v2';
                   }}
-                  style={{ padding: '5px 12px', fontSize: '0.82rem', background: '#166534', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                  style={{ padding: '5px 12px', fontSize: '0.82rem', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
                 >
                   👉 前往「待辦看板」開啟媒合工作與 LINE 推播
                 </button>

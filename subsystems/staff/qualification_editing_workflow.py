@@ -37,8 +37,6 @@ class StaffQualificationEditingWorkflow:
     def apply(self, staff_id: int, values, *, expected_snapshot: str, preview: str,
               key: str, actor: str, reason: str, correlation: str):
         after = normalize_facts(values)
-        if not reason.strip():
-            raise QualificationEditingError("staff_qualification_reason_required")
         command = fingerprint_payload({"staff_id": staff_id, "facts": after.payload(), "actor": actor,
                                        "reason": reason.strip(), "expected_snapshot": expected_snapshot, "preview": preview}).value
         with self.unit_of_work_factory() as uow:

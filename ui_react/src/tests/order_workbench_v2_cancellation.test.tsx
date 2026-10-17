@@ -201,7 +201,12 @@ describe('Beta 取消與歷史取消服務補登', () => {
     render(<OrderCancellationPanel caseNo={CASE} />);
     await screen.findByText(/取消日期：2026-09-05/);
     const button = screen.getByRole('button', { name: '確認取消訂單' });
-    expect(button).toBeDisabled();
+    window.alert = vi.fn();
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByLabelText('取消原因')).toHaveFocus();
+    expect(mocks.apply).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '客戶取消' } });
     expect(button).toBeEnabled();
     expect(mocks.preview).toHaveBeenCalledTimes(1);

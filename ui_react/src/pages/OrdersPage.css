@@ -226,9 +226,9 @@
 .btn-secondary-action {
   flex: 1;
   padding: 9px;
-  background-color: #ffffff;
-  border: 1px solid var(--md-sys-color-outline);
-  color: var(--md-sys-color-on-surface);
+  background-color: var(--md-sys-color-primary);
+  border: 1px solid var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border-radius: var(--radius-md);
   font-size: 0.82rem;
   font-weight: 600;
@@ -236,9 +236,9 @@
   transition: all 0.2s ease;
 }
 
-.btn-secondary-action:hover {
-  border-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-primary);
+.btn-secondary-action:hover:not(:disabled) {
+  background-color: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
 }
 
 .btn-primary-action {
@@ -256,6 +256,13 @@
 
 .btn-primary-action:hover {
   background-color: var(--md-sys-color-primary-hover);
+}
+
+.btn-secondary-action:disabled {
+  background-color: var(--md-sys-color-disabled-container);
+  border-color: var(--md-sys-color-outline);
+  color: var(--md-sys-color-disabled);
+  cursor: not-allowed;
 }
 
 .btn-cancel-preview {
@@ -1752,9 +1759,9 @@ button.calendar-date-cell {
 
 .contract-btn-secondary {
   padding: 8px 18px;
-  background-color: #ffffff;
-  border: 1px solid #dec0b6;
-  color: #7c3f2c;
+  background-color: var(--md-sys-color-primary);
+  border: 1px solid var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border-radius: 8px;
   font-weight: 700;
   font-size: 0.84rem;
@@ -1767,9 +1774,8 @@ button.calendar-date-cell {
 }
 
 .contract-btn-secondary:hover:not(:disabled) {
-  background-color: #fff8f6;
-  border-color: #ff7f50;
-  color: #ff7f50;
+  background-color: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
 }
 
 .contract-btn-primary:disabled,
@@ -1816,3 +1822,5 @@ button.calendar-date-cell {
   color: #166534;
 }
 
+
+.order-shift-preset[aria-pressed="true"]:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); box-shadow: inset 0 0 0 2px var(--md-sys-color-on-primary); outline: 2px solid var(--md-sys-color-primary-hover); outline-offset: 1px; }

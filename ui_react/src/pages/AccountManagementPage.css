@@ -88,14 +88,14 @@
 
 .account-tab-btn:hover {
   background-color: #fff8f6;
-  border-color: #ff7f50;
-  color: #ff7f50;
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-primary);
 }
 
 .account-tab-btn.active {
-  background-color: #ff7f50;
-  border-color: #ff7f50;
-  color: #ffffff;
+  background-color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   box-shadow: 0 3px 10px rgba(255, 127, 80, 0.25);
 }
 
@@ -117,28 +117,25 @@
 
 .account-primary-btn {
   border: 1px solid #ff7f50;
-  background: #ff7f50;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.25);
-}
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.25); border-color: var(--md-sys-color-primary); }
 
 .account-primary-btn:hover:not(:disabled) {
-  background: #ff6833;
-  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.35);
-}
+  background: var(--md-sys-color-primary-hover);
+  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.35); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .account-secondary-btn {
   border: 1px solid #dec0b6;
-  background: #ffffff;
-  color: #7c3f2c;
-  white-space: nowrap;
-}
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  white-space: nowrap; border-color: var(--md-sys-color-primary); }
 
 .account-secondary-btn:hover:not(:disabled) {
-  background: #fff8f6;
-  border-color: #ff7f50;
-  color: #ff7f50;
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary);
 }
 
 .account-primary-btn:disabled,
@@ -369,14 +366,13 @@
 .account-card-actions button {
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #ffffff;
-  color: #795548;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-size: 0.8rem;
   font-weight: 700;
   padding: 7px 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .account-card-actions button:hover:not(:disabled) {
   background: #fff8f6;
@@ -486,12 +482,11 @@
 .account-pagination button {
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #ffffff;
-  color: #795548;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   padding: 7px 14px;
   font-weight: 700;
-  cursor: pointer;
-}
+  cursor: pointer; border-color: var(--md-sys-color-primary); }
 
 /* ==========================================================================
    7. TOTP 說明與背景工作觀察看板 (TOTP & Jobs)
@@ -584,3 +579,12 @@
     grid-template-columns: 1fr;
   }
 }
+.account-primary-btn:hover:not(:disabled),
+.account-secondary-btn:hover:not(:disabled),
+.account-card-actions button:hover:not(:disabled),
+.account-pagination button:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.account-primary-btn:disabled,
+.account-secondary-btn:disabled,
+.account-card-actions button:disabled,
+.account-pagination button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.account-tab-btn.active:hover { background-color: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); }

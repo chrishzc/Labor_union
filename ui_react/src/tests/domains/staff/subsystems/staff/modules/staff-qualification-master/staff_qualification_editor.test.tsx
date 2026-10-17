@@ -7,13 +7,14 @@ const snapshot: QualificationSnapshot = { staff_id: 11, before: { special_skills
 
 describe('Staff professional qualification editing', () => {
   beforeEach(() => {
+    vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     vi.spyOn(staffQualificationEditingClient, 'query').mockResolvedValue(snapshot);
     vi.spyOn(staffQualificationEditingClient, 'preview').mockImplementation(async (_id, facts) => ({ ...snapshot, after: facts, preview_fingerprint: 'b'.repeat(64) }));
     vi.spyOn(staffQualificationEditingClient, 'apply').mockImplementation(async (_id, facts, preview, _reason, key) => ({ ...preview, after: facts, idempotency_key: key, replayed: false, correlation_id: 'test' }));
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('edits all five facts, previews then saves and reads the persisted values', async () => {
+  it.each(['', '   ', '核對證明'])('saves and reads all five facts with optional notes %j', async (note) => {
     const onUpdated = vi.fn();
     render(<StaffQualificationEditor staffId={11} onUpdated={onUpdated} />);
     const skills = await screen.findByLabelText('專業技能');
@@ -29,17 +30,18 @@ describe('Staff professional qualification editing', () => {
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽完成，請核對變更後確認儲存。');
     expect(staffQualificationEditingClient.apply).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
-    expect(save).toHaveAccessibleDescription('預覽完成：請填寫「專業資格異動原因」後確認儲存。');
-    fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '核對證明' } });
-    expect(save).toBeEnabled();
-    expect(save).toHaveAccessibleDescription('預覽與異動原因已完成，可以按「確認儲存」。');
+    expect(screen.getByRole('button', { name: '確認儲存' })).toBeEnabled();
+    expect(save).toHaveAccessibleDescription('預覽完成，可直接確認儲存；備註可留白。');
+    const notes = screen.getByLabelText('專業資格備註（選填）');
+    expect(notes).not.toHaveAttribute('aria-required');
+    fireEvent.change(notes, { target: { value: note } });
     const after = { special_skills: ['照護', '哺乳協助'], certifications: ['急救證書'], transportation: ['汽車'], has_massage_cert: true, care_babies: 2 };
     vi.mocked(staffQualificationEditingClient.query).mockResolvedValue({ ...snapshot, before: after, after });
     fireEvent.click(screen.getByRole('button', { name: '確認儲存' }));
     await screen.findByText('專業資格與服務資料已儲存並重新查詢。');
-    expect(staffQualificationEditingClient.apply).toHaveBeenCalledWith(11, after, expect.objectContaining({ preview_fingerprint: 'b'.repeat(64) }), '核對證明', expect.any(String), expect.any(AbortSignal));
+    expect(staffQualificationEditingClient.apply).toHaveBeenCalledWith(11, after, expect.objectContaining({ preview_fingerprint: 'b'.repeat(64) }), note.trim(), expect.any(String), expect.any(AbortSignal));
     expect(screen.getByLabelText('一般證照')).toHaveValue('急救證書');
+    expect(window.alert).not.toHaveBeenCalled();
     expect(onUpdated).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: '重試讀取專業資格' })).not.toBeInTheDocument();
   });
@@ -49,7 +51,7 @@ describe('Staff professional qualification editing', () => {
     fireEvent.change(await screen.findByLabelText('專業技能'), { target: { value: '新技能' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽完成，請核對變更後確認儲存。');
-    fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '測試' } });
+    fireEvent.change(screen.getByLabelText('專業資格備註（選填）'), { target: { value: '測試' } });
     fireEvent.change(screen.getByLabelText('按摩證書'), { target: { value: 'false' } });
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '確認儲存' })).toHaveAccessibleDescription('尚未預覽：請先按「預覽變更」。');
@@ -65,7 +67,7 @@ describe('Staff professional qualification editing', () => {
     await screen.findByLabelText('一般證照');
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽完成，請核對變更後確認儲存。');
-    fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '核對' } });
+    fireEvent.change(screen.getByLabelText('專業資格備註（選填）'), { target: { value: '核對' } });
     fireEvent.click(screen.getByRole('button', { name: '確認儲存' }));
     await screen.findByText('儲存結果未確認');
     expect(screen.getByRole('button', { name: '重試讀取專業資格' })).toBeEnabled();
@@ -80,7 +82,7 @@ describe('Staff professional qualification editing', () => {
     await screen.findByLabelText('一般證照');
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽完成，請核對變更後確認儲存。');
-    fireEvent.change(screen.getByLabelText('專業資格異動原因'), { target: { value: '核對' } });
+    fireEvent.change(screen.getByLabelText('專業資格備註（選填）'), { target: { value: '核對' } });
     vi.mocked(staffQualificationEditingClient.query).mockRejectedValueOnce(new Error('查詢暫時失敗'));
     fireEvent.click(screen.getByRole('button', { name: '確認儲存' }));
     await screen.findByText('資料已儲存，但重新查詢失敗，請重試查詢。');

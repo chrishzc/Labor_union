@@ -711,8 +711,6 @@ def _validate_command_fields(
         raise OrderIntakeTermsBootstrapError(f"{prefix}_idempotency_key_required")
     if not actor.strip():
         raise OrderIntakeTermsBootstrapError(f"{prefix}_actor_required")
-    if not reason.strip():
-        raise OrderIntakeTermsBootstrapError(f"{prefix}_reason_required")
 
 
 def _receipt_payload(receipt: OrderIntakeTermsBootstrapReceipt) -> dict[str, object]:

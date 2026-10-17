@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import React, { useEffect, useRef, useState } from 'react';
 import { caseVirtualAccountClient, type CaseVirtualAccountCommand, type CaseVirtualAccountView } from '../api/client_finance/case_virtual_account_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -17,6 +19,8 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : '
 export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled, onRefresh, onStateChange }) => {
   const [view, setView] = useState<CaseVirtualAccountView | null>(null);
   const [account, setAccount] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [message, setMessage] = useState('');
@@ -49,6 +53,7 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
   };
   const apply = async () => {
     if (!view) return;
+    if (phase !== 'unknown' && !saveValidation.validate([{ value: account, label: '匯入虛擬帳號', ref: saveFieldRef }])) return;
     const submitted = phase === 'unknown' && submission ? submission : {
       command: { case_no: caseNo, virtual_account: account.trim(), expected_mapping_ids: view.mapping_ids },
       key: `case-va-${crypto.randomUUID()}`,
@@ -75,11 +80,11 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
     {view && <>
       <dl className="registry-information-fields"><div><dt>目前匯入虛擬帳號</dt><dd>{view.imported_virtual_accounts.join('、') || '未登錄，使用內建帳號'}</dd></div><div><dt>內建虛擬帳號</dt><dd>{view.built_in_virtual_account ?? '此案件無法產生內建帳號'}</dd></div></dl>
       <div className="registry-fields">
-        <label>匯入虛擬帳號<input inputMode="numeric" maxLength={14} value={account} disabled={locked} placeholder="99781699 開頭，共 14 碼" onChange={event => { setAccount(event.target.value); setSubmission(null); setMessage(''); }} /></label>
+        <><label>匯入虛擬帳號<input ref={saveFieldRef} aria-required="true" inputMode="numeric" maxLength={14} value={account} disabled={locked} placeholder="99781699 開頭，共 14 碼" onChange={event => { setAccount(event.target.value); setSubmission(null); setMessage(''); }} /></label>{saveValidation.feedback}</>
       </div>
       <div className="registry-actions">
         <button type="button" disabled={locked} onClick={() => { setAccount(initialAccount(view)); setSubmission(null); setMessage(''); }}>取消帳號變更</button>
-        <button type="button" disabled={locked || phase === 'stale' || !account.trim() || !dirty} onClick={() => void apply()}>儲存虛擬帳號</button>
+        <button type="button" disabled={locked || phase === 'stale' || (!dirty && !!account.trim())} onClick={() => void apply()}>儲存虛擬帳號</button>
       </div>
     </>}
     {message && <p role="status">{message}</p>}

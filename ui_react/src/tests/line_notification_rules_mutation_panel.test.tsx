@@ -115,6 +115,15 @@ describe('LINE notification rules mutation panel', () => {
     expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '確認儲存通知規則' })).toBeDisabled();
 
+    window.alert = vi.fn();
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認通知規則與影響範圍' }));
+    const saveButton = screen.getByRole('button', { name: '確認儲存通知規則' });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: '操作原因' })).toHaveFocus();
+    expect(save).not.toHaveBeenCalled();
+    // Editing the reason retains the preview but requires confirming its scope again.
     fireEvent.change(screen.getByRole('textbox', { name: '操作原因' }), {
       target: { value: '核准訂金通知事件更新' },
     });

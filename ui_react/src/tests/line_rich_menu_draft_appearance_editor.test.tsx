@@ -69,7 +69,7 @@ const generated = (): RichMenuDraft => ({ ...structuredClone(DRAFT), definition:
 async function confirmSave() {
   fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
   await screen.findByRole('dialog');
-  fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '驗證共用草稿' } });
+  fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '驗證共用草稿' } });
   fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
   fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
 }
@@ -98,14 +98,15 @@ describe('Rich Menu appearance and shared save', () => {
     expect(screen.getByLabelText('自訂選單底色')).toBeDisabled();
     expect(screen.queryByText(/^[0-9a-f]{64}$/)).not.toBeInTheDocument();
   });
-  it('saves a changed background only after server preview and confirmation, then reloads and preserves action and bounds', async () => {
+  it.each(['', '   ', '驗證背景色保存'])('saves only after preview and confirmation with optional note %j, preserving action and bounds', async (note) => {
     const initial = generated(), draftClient = client(initial); render(<Harness initial={initial} draftClient={draftClient} />);
     fireEvent.change(screen.getByLabelText('選單名稱'), { target: { value: '照護服務' } });
     fireEvent.change(screen.getByLabelText('聊天室選單列文字'), { target: { value: '照護選單' } });
     fireEvent.change(screen.getByLabelText('自訂選單底色'), { target: { value: '#123456' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
     expect(await screen.findByRole('button', { name: '確認儲存草稿' })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '驗證背景色保存' } });
+    expect(screen.getByLabelText('備註（選填）')).not.toHaveAttribute('aria-required');
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: note } });
     fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
     fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
     await waitFor(() => expect(draftClient.query).toHaveBeenCalledTimes(1));
@@ -113,7 +114,7 @@ describe('Rich Menu appearance and shared save', () => {
     const saved = await draftClient.query();
     expect(saved.definition.menus[0]).toMatchObject({ name: '照護服務', chat_bar_text: '照護選單', appearance: { background_color: '#123456' }, buttons: [{ label: '聯絡客服', action: DRAFT.definition.menus[0].buttons[0].action, bounds: DRAFT.definition.menus[0].buttons[0].bounds }] });
     expect(screen.getByLabelText('自訂選單底色')).toHaveValue('#123456');
-    expect(draftClient.apply).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 8, preview_fingerprint: FINGERPRINT, reason: '驗證背景色保存' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(draftClient.apply).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 8, preview_fingerprint: FINGERPRINT, reason: note.trim() }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(screen.getByRole('button', { name: '檢查並儲存草稿' })).toBeDisabled();
   });
   it('published snapshots can start a new draft and uploaded asset metadata survives the shared save', async () => {

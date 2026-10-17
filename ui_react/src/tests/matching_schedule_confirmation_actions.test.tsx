@@ -179,6 +179,7 @@ describe('M3 日期表 recipient 確認', () => {
       <MatchingScheduleAndAssignmentActions
         caseNo="CASE-M3-RECIPIENT-001"
         planId={12}
+        staffNames={{ 9: '月嫂 #9' }}
         planSegments={[{
           segmentId: 17,
           sequence: 1,
@@ -220,6 +221,14 @@ describe('M3 日期表 recipient 確認', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: '手動記錄確認' }))[0]!);
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    window.alert = vi.fn();
+    const save = screen.getByRole('button', { name: '儲存確認紀錄' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByLabelText('客戶確認紀錄')).toHaveFocus();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('客戶確認紀錄'), { target: { value: '電話確認日期表' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存確認紀錄' }));
     await waitFor(() => expect(screen.queryByLabelText('客戶確認紀錄')).not.toBeInTheDocument());

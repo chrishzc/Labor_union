@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from '../../components/useSaveValidation';
 /**
  * File: LlmConfigurationPage.tsx
  * Description: 系統管理員 write-only Google AI Studio API Key 設定頁；永不讀回或顯示既有 secret。
@@ -53,6 +55,8 @@ function connectionResultMessage(code: string | null): string {
 
 export const LlmConfigurationPage: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<LlmApiKeyStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -90,11 +94,7 @@ export const LlmConfigurationPage: React.FC = () => {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalized = apiKey.trim();
-    if (normalized.length < 8) {
-      setError('請輸入有效的 Google AI Studio API Key。');
-      setNotice(null);
-      return;
-    }
+    if (saving || !saveValidation.validate([{ value: normalized, label: 'Gemini API Key', ref: saveFieldRef, valid: normalized.length >= 8, message: '請輸入有效的 Google AI Studio API Key 後再儲存。' }])) return;
 
     setSaving(true);
     setError(null);
@@ -182,7 +182,7 @@ export const LlmConfigurationPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="llm-config-form">
           <label htmlFor="llm-api-key">Google AI Studio API Key</label>
           <div className="llm-config-secret-field">
-            <input
+            <input ref={saveFieldRef} aria-required="true"
               id="llm-api-key"
               name="llm-api-key"
               type={showApiKey ? 'text' : 'password'}
@@ -194,7 +194,7 @@ export const LlmConfigurationPage: React.FC = () => {
               placeholder="貼上新的 Gemini API Key"
               disabled={saving}
               aria-describedby="llm-api-key-help"
-            />
+            />{saveValidation.feedback}
             <button
               className="llm-config-secret-toggle"
               type="button"
@@ -213,7 +213,7 @@ export const LlmConfigurationPage: React.FC = () => {
           </p>
 
           <div className="llm-config-actions">
-            <button className="llm-config-primary-action" type="submit" disabled={saving || apiKey.trim().length < 8}>
+            <button className="llm-config-primary-action" type="submit" disabled={saving}>
               <Save aria-hidden="true" />
               {saving ? '儲存中…' : status?.configured ? '更換 API 金鑰' : '儲存 Gemini API Key'}
             </button>

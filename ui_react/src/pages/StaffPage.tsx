@@ -199,6 +199,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const [preview, setPreview] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState('');
+  const [statusError, setStatusError] = useState(false);
   const [options, setOptions] = useState<StaffCasePreferenceOptions | null>(null);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'editing' | 'previewing' | 'preview_ready' | 'applying' | 'error'>('loading');
   const loadEpoch = useRef(0);
@@ -209,6 +210,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setPhase('loading');
+    setStatusError(false);
     setSnapshot(null);
     setPreview(null);
     setReason('');
@@ -227,6 +229,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
+        setStatusError(true);
         setStatus(error instanceof Error ? error.message : '六大接案能力載入失敗。');
       }
       return false;
@@ -243,6 +246,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const doPreview = async () => {
     if (!snapshot || (phase !== 'editing' && phase !== 'preview_ready')) return;
     if (MANUAL_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) {
+      setStatusError(true);
       setStatus('請選擇新增條件，或移除尚未選擇的項目。');
       return;
     }
@@ -251,6 +255,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setPhase('previewing');
+    setStatusError(false);
     setPreview(null);
     setStatus('');
     try {
@@ -262,12 +267,14 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('editing');
+        setStatusError(true);
         setStatus(error instanceof Error ? error.message : '預覽失敗。');
       }
     }
   };
   const doApply = async () => {
-    if (!snapshot || !preview?.preview_fingerprint || !reason.trim() || phase !== 'preview_ready') return;
+    if (!snapshot || !preview?.preview_fingerprint || phase !== 'preview_ready') return;
+    setStatusError(false);
     const epoch = loadEpoch.current;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -284,6 +291,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
+        setStatusError(true);
         setStatus(error instanceof Error ? error.message : '儲存結果尚未確認，請重新查詢。');
       }
       return;
@@ -332,16 +340,16 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
         </>}
       </div>)}
     </div>}
-    {editing && <label className="staff-op-field">變更原因<input aria-label="六大接案能力變更原因" disabled={locked} value={reason} onChange={(event) => setReason(event.target.value)} /></label>}
-    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : phase !== 'preview_ready' || !preview?.preview_fingerprint ? '尚未預覽：請先按「預覽變更」。' : !reason.trim() ? '預覽完成：請填寫「變更原因」後確認儲存。' : '預覽與異動原因已完成，可以按「確認儲存」。'}</p>}
+    {editing && <label className="staff-op-field">備註（選填）<input aria-label="接案條件備註（選填）" placeholder="有需要補充的內容再填寫" disabled={locked} value={reason} onChange={(event) => { setReason(event.target.value); if (statusError) { setStatusError(false); setStatus(''); } }} /></label>}
+    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : phase !== 'preview_ready' || !preview?.preview_fingerprint ? '尚未預覽：請先按「預覽變更」。' : '預覽完成，可直接確認儲存；備註可留白。'}</p>}
     <div className="staff-op-actions">
-      {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
+      {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setStatusError(false); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
       {editing && <button type="button" className="staff-primary-btn" disabled={locked} onClick={() => void doPreview()}>預覽變更</button>}
-      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint || !reason.trim()} onClick={() => void doApply()}>確認儲存</button>}
+      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint} onClick={() => void doApply()}>確認儲存</button>}
       {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
     </div>
     {preview && <StaffCasePreferenceManualPreview preview={preview} />}
-    {status && <p role="status">{status}</p>}
+    {status && <p role={statusError ? "alert" : "status"} className={statusError ? "staff-op-error" : undefined}>{status}</p>}
   </section>;
 }
 
@@ -1571,7 +1579,7 @@ export const StaffPage: React.FC = () => {
                       </label>
                     </div>
 
-                    <p id="staff-lifecycle-guidance" style={{ fontSize: '0.8rem', color: '#74593f', margin: '2px 0 6px' }}>
+                    <p id="staff-lifecycle-guidance" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-error)', margin: '2px 0 6px' }}>
                       在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後，點擊「預覽影響」進行檢查，檢查通過後即可確認套用。
                     </p>
 

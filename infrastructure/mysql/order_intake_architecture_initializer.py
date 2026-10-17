@@ -40,7 +40,8 @@ class MySqlOrderIntakeArchitectureInitializer:
                 expected_order_version=ExpectedVersion(facts.lifecycle_version),
                 preview_fingerprint=preview.fingerprint,
                 idempotency_key=IdempotencyKey(identity),
-                actor=ActorContext(actor.strip()), reason=reason.strip(), correlation_id=correlation,
+                # The automatic step records its actual trigger; the Orders receipt retains the optional human note.
+                actor=ActorContext(actor.strip()), reason="系統依已完成進件資料初始化本案", correlation_id=correlation,
             ))
         except CaseArchitectureBootstrapWorkflowError as error:
             raise OrderIntakeTermsBootstrapError('order_intake_initialization_blocked',

@@ -66,6 +66,7 @@ class _ConfigurationRepository:
     def __init__(self, snapshot: LineConfigurationSnapshot) -> None:
         self.snapshot = snapshot
         self.apply_count = 0
+        self.commands = []
         self._results_by_key = {}
 
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot:
@@ -73,6 +74,7 @@ class _ConfigurationRepository:
         return self.snapshot
 
     def apply(self, command):
+        self.commands.append(command)
         key = command.idempotency_key.value
         existing = self._results_by_key.get(key)
         if existing is not None:
@@ -306,7 +308,8 @@ def test_generated_background_drops_legacy_path_and_asset_references() -> None:
     }
 
 
-def test_preview_is_zero_write_and_apply_requires_same_fingerprint() -> None:
+@pytest.mark.parametrize("note", ["", "   ", "更新 Rich Menu 訊息"])
+def test_preview_is_zero_write_and_apply_requires_same_fingerprint(note) -> None:
     initial = LineConfigurationSnapshot(
         LineConfigurationKind.RICH_MENUS,
         LineConfigurationRevision(7),
@@ -332,7 +335,7 @@ def test_preview_is_zero_write_and_apply_requires_same_fingerprint() -> None:
             definition=definition,
             preview_fingerprint=PreviewFingerprint("0" * 64),
             actor=_actor(),
-            reason="更新 Rich Menu 訊息",
+            reason=note,
             idempotency_key=IdempotencyKey("rich-menu-draft-7"),
             correlation_id=CorrelationId("rich-menu-draft-correlation-7"),
         )
@@ -344,13 +347,15 @@ def test_preview_is_zero_write_and_apply_requires_same_fingerprint() -> None:
         definition=definition,
         preview_fingerprint=preview.fingerprint,
         actor=_actor(),
-        reason="更新 Rich Menu 訊息",
+        reason=note,
         idempotency_key=IdempotencyKey("rich-menu-draft-7"),
         correlation_id=CorrelationId("rich-menu-draft-correlation-7"),
     )
 
     assert result.snapshot.revision == LineConfigurationRevision(8)
     assert repository.apply_count == 1
+    assert repository.commands[-1].reason == note.strip()
+    assert repository.commands[-1].actor == _actor()
     assert unit_of_work.commit_count == 1
     assert unit_of_work.audit.items[0].action == "line.rich_menu.draft.apply"
 
@@ -611,3 +616,19 @@ def test_draft_query_fails_closed_on_non_exact_publication_revision() -> None:
 
     with pytest.raises(RuntimeError, match="revision_mismatch"):
         LineConfigurationApplication(lambda: unit_of_work).get_rich_menu_draft_query(_actor())
+
+
+def test_draft_optional_note_does_not_relax_publication_reason_contract():
+    from api.schemas.line_rich_menu_drafts import RichMenuDraftApplyRequest
+    from api.schemas.line_rich_menus import RichMenuPublishRequest, RichMenuPublicationRetryRequest
+    from pydantic import ValidationError
+    body = dict(expected_revision=7, definition={}, preview_fingerprint='a' * 64,
+                idempotency_key='draft-note', correlation_id='draft-note')
+    assert RichMenuDraftApplyRequest(**body).reason == ''
+    assert RichMenuDraftApplyRequest(**body, reason='').reason == ''
+    with pytest.raises(ValidationError):
+        RichMenuDraftApplyRequest(**body, reason='字' * 1001)
+    for model in (RichMenuPublishRequest, RichMenuPublicationRetryRequest):
+        assert model.model_fields['reason'].is_required()
+        with pytest.raises(ValidationError):
+            model(preview_id=1, reason='', idempotency_key='publish', correlation_id='publish')

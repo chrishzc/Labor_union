@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -41,6 +43,8 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
   const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<HistoricalArrangementPreviewView | null>(null);
   const [reason, setReason] = useState('依已確認服務日期建立歷史案件正式安排');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -77,6 +81,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
 
   const applyArrangement = async () => {
     if (busy || preview === null) return;
+    if (operationKey.current === null && !saveValidation.validate([{ value: reason, label: '安排原因', ref: saveFieldRef }])) return;
     setBusy(true); setError(null); setStatus(null);
     try {
       const segments = explicitSegments(dates, allocation);
@@ -144,11 +149,11 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
         {staffIdentity.label(segment.staff_id, dates.bound_staff.find((staff) => staff.staff_id === segment.staff_id)?.staff_name)}
         ：{segment.assigned_start_date} 至 {segment.assigned_end_date}，{segment.service_dates.length} 個服務日
       </li>)}</ul>
-      <label>建立原因
-        <input value={reason} maxLength={500} disabled={busy || operationKey.current !== null}
+      <><label>建立原因
+        <input ref={saveFieldRef} aria-required="true" value={reason} maxLength={500} disabled={busy || operationKey.current !== null}
           onChange={(event) => setReason(event.target.value)} />
-      </label>
-      <button type="button" disabled={busy || !reason.trim()} onClick={() => void applyArrangement()}>
+      </label>{saveValidation.feedback}</>
+      <button type="button" disabled={busy} onClick={() => void applyArrangement()}>
         {operationKey.current ? '以原操作確認結果' : '建立正式安排'}
       </button>
     </div>}

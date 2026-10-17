@@ -44,14 +44,14 @@
 
 .scheduling-tab-btn:hover {
   background-color: #fff8f6;
-  border-color: #ff7f50;
-  color: #ff7f50;
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-primary);
 }
 
 .scheduling-tab-btn.active {
-  background-color: #ff7f50;
-  border-color: #ff7f50;
-  color: #ffffff;
+  background-color: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
 }
 
@@ -310,18 +310,16 @@
   padding: 7px 14px;
   border: 1.5px solid #ff7f50;
   border-radius: 8px;
-  background: #fff8f6;
-  color: #c2410c;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
-  transition: 0.15s;
-}
+  transition: 0.15s; border-color: var(--md-sys-color-primary); }
 
 .gantt-today-btn:hover {
-  background: #ff7f50;
-  color: #ffffff;
-}
+  background: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .gantt-case-projection-bar {
   display: flex;
@@ -371,20 +369,19 @@
 }
 
 .gantt-clear-case-btn {
-  background: #ffffff;
+  background: var(--md-sys-color-primary);
   border: 1px solid #dec0b6;
   border-radius: 6px;
   padding: 5px 10px;
   font-size: 0.8rem;
-  color: #74593f;
+  color: var(--md-sys-color-on-primary);
   cursor: pointer;
-  transition: all 0.15s;
-}
+  transition: all 0.15s; border-color: var(--md-sys-color-primary); }
 
 .gantt-clear-case-btn:hover {
-  background: #fee2e2;
-  border-color: #fca5a5;
-  color: #991b1b;
+  background: var(--md-sys-color-primary-hover);
+  border-color: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary);
 }
 
 .span-ghost-clickable {
@@ -476,8 +473,8 @@
 
 .gantt-pill:hover {
   background: #fff8f6;
-  border-color: #ff7f50;
-  color: #ff7f50;
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-primary);
 }
 
 .gantt-pill.active {
@@ -1086,11 +1083,10 @@
   padding: 10px 16px;
   border: 0;
   border-radius: 9px;
-  background: #9a3412;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-weight: 800;
-  cursor: pointer;
-}
+  cursor: pointer; border-color: var(--md-sys-color-primary); }
 
 .leave-substitution-workspace button:disabled {
   background: #d6d3d1;
@@ -1249,11 +1245,10 @@
   padding: 10px 16px;
   border: 0;
   border-radius: 9px;
-  background: #9a3412;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-weight: 800;
-  cursor: pointer;
-}
+  cursor: pointer; border-color: var(--md-sys-color-primary); }
 
 .holiday-policy-workspace button:disabled {
   background: #d6d3d1;
@@ -1270,7 +1265,7 @@
   border: 1px solid #fed7aa;
   border-radius: 10px;
   background: #fff7ed;
-  color: #7c2d12;
+  color: var(--md-sys-color-error);
 }
 
 .holiday-policy-meta {
@@ -1421,7 +1416,7 @@
   .month-pill-group { flex: 1; justify-content: space-between; padding: 2px; }
   .month-nav-arrow { padding: 8px 5px; font-size: .8rem; min-height: 40px; }
   .current-month-display { padding: 0 5px; font-size: .87rem; white-space: nowrap; }
-  .gantt-today-btn { min-height: 40px; }
+  .gantt-today-btn { min-height: 40px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
   .gantt-search-box { min-width: 0; width: 100%; }
   .gantt-search-box input { min-width: 0; }
   .gantt-status-pills { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 3px; }
@@ -1438,5 +1433,26 @@
   .gantt-staff-info-cell .staff-code-badge { grid-column: 2; justify-self: start; white-space: nowrap; }
 }
 
-.gantt-case-checks .btn-secondary-action { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #74593f; font: inherit; font-size: .82rem; cursor: pointer; }
+.gantt-case-checks .btn-secondary-action { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; font-size: .82rem; cursor: pointer; border-color: var(--md-sys-color-primary); }
 .gantt-case-checks :is(select, button):focus-visible { outline: 3px solid #a83f1d; outline-offset: 3px; }
+.gantt-today-btn:hover:not(:disabled),
+.gantt-clear-case-btn:hover:not(:disabled),
+.leave-substitution-workspace button:hover:not(:disabled),
+.holiday-policy-workspace button:hover:not(:disabled),
+.gantt-case-checks .btn-secondary-action:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.gantt-today-btn:disabled,
+.gantt-clear-case-btn:disabled,
+.leave-substitution-workspace button:disabled,
+.holiday-policy-workspace button:disabled,
+.gantt-case-checks .btn-secondary-action:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.scheduling-tab-btn.active:hover { background-color: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); }
+.scheduling-action { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
+:is(.holiday-policy-workspace, .leave-substitution-workspace) .scheduling-danger { background: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); }
+:is(.holiday-policy-workspace, .leave-substitution-workspace) .scheduling-danger:hover:not(:disabled) { background: #b91c1c; }
+.leave-substitution-workspace button:disabled, .holiday-policy-workspace button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); }
+
+.scheduling-action:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); }
+.scheduling-action[aria-pressed="true"] { background: var(--md-sys-color-primary-hover); box-shadow: inset 0 0 0 2px var(--md-sys-color-on-primary); outline: 2px solid var(--md-sys-color-primary); }
+.scheduling-action:disabled, .scheduling-danger:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); }
+
+.leave-substitution-notice[data-control-id="scheduling.leave.query-guidance"] { color: var(--md-sys-color-error); }

@@ -1,3 +1,4 @@
+import { useSaveValidation } from '../components/useSaveValidation';
 /**
  * File: AccountManagementPage.tsx
  * Description: 帳號中心三個唯讀查詢區塊與明確停用的安全操作槽位。
@@ -66,6 +67,12 @@ export const AccountManagementPage: React.FC = () => {
   const [commandState, setCommandState] = useState(initialCommandState);
   const [commandTarget, setCommandTarget] = useState<'create' | { user: AccountDirectoryRow; action: AccountAction } | null>(null);
   const [commandReason, setCommandReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const displayNameRef = useRef<HTMLInputElement>(null);
+  const createPasswordRef = useRef<HTMLInputElement>(null);
+  const commandPasswordRef = useRef<HTMLInputElement>(null);
+  const commandReasonRef = useRef<HTMLInputElement>(null);
   const [commandPassword, setCommandPassword] = useState('');
   const [createUsername, setCreateUsername] = useState('');
   const [createDisplayName, setCreateDisplayName] = useState('');
@@ -296,7 +303,7 @@ export const AccountManagementPage: React.FC = () => {
               <div className="account-field-item">
                 <label htmlFor="account-create-username">新帳號</label>
                 <input
-                  id="account-create-username"
+                  id="account-create-username" ref={usernameRef} aria-required="true"
                   value={createUsername}
                   onChange={(event) => setCreateUsername(event.target.value)}
                   maxLength={100}
@@ -306,7 +313,7 @@ export const AccountManagementPage: React.FC = () => {
               <div className="account-field-item">
                 <label htmlFor="account-create-display">顯示名稱</label>
                 <input
-                  id="account-create-display"
+                  id="account-create-display" ref={displayNameRef} aria-required="true"
                   value={createDisplayName}
                   onChange={(event) => setCreateDisplayName(event.target.value)}
                   maxLength={100}
@@ -316,7 +323,7 @@ export const AccountManagementPage: React.FC = () => {
               <div className="account-field-item">
                 <label htmlFor="account-create-password">新密碼</label>
                 <input
-                  id="account-create-password"
+                  id="account-create-password" ref={createPasswordRef} aria-required="true"
                   type="password"
                   value={createPassword}
                   onChange={(event) => setCreatePassword(event.target.value)}
@@ -329,7 +336,7 @@ export const AccountManagementPage: React.FC = () => {
               {commandTarget && commandTarget !== 'create' && commandTarget.action === 'password' && <div className="account-field-item">
                 <label htmlFor="account-command-password">重設密碼</label>
                 <input
-                  id="account-command-password"
+                  id="account-command-password" ref={commandPasswordRef} aria-required="true"
                   type="password"
                   value={commandPassword}
                   onChange={(event) => setCommandPassword(event.target.value)}
@@ -341,7 +348,7 @@ export const AccountManagementPage: React.FC = () => {
               <div className="account-field-item account-field-item-full">
                 <label htmlFor="account-command-reason">操作原因</label>
                 <input
-                  id="account-command-reason"
+                  id="account-command-reason" ref={commandReasonRef} aria-required="true"
                   value={commandReason}
                   onChange={(event) => setCommandReason(event.target.value)}
                   maxLength={500}
@@ -349,11 +356,22 @@ export const AccountManagementPage: React.FC = () => {
                 />
               </div>
             </fieldset>
-            <p id="account-command-disabled-reason" className="account-query-state">
+            <p id="account-command-disabled-reason" className="account-query-state" style={{ color: 'var(--md-sys-color-error)' }}>
               請填寫本次操作原因。建立或重設密碼至少需要 10 個字元；確認前請核對操作對象。
             </p>
+            {saveValidation.feedback}
             {commandState.status === 'error' && <div role="alert">{commandState.error}</div>}
-            <button type="button" className="account-primary-btn" disabled={commandState.status === 'loading' || !commandReason.trim() || (commandTarget === 'create' ? !createUsername.trim() || !createDisplayName.trim() || createPassword.length < 10 : commandTarget?.action === 'password' && commandPassword.length < 10)} onClick={() => { if (commandTarget === 'create') void createAccount(); else if (commandTarget) void mutateAccount(commandTarget.user, commandTarget.action); }}>確認執行</button>
+            <button type="button" className="account-primary-btn" disabled={commandState.status === 'loading'} onClick={() => {
+              if (!saveValidation.validate([
+                ...(commandTarget === 'create' ? [
+                  { value: createUsername, label: '新帳號', ref: usernameRef },
+                  { value: createDisplayName, label: '顯示名稱', ref: displayNameRef },
+                  { value: createPassword, label: '新密碼', ref: createPasswordRef, valid: createPassword.length >= 10, message: '請填寫至少 10 個字元的新密碼。' },
+                ] : commandTarget?.action === 'password' ? [{ value: commandPassword, label: '重設密碼', ref: commandPasswordRef, valid: commandPassword.length >= 10, message: '請填寫至少 10 個字元的重設密碼。' }] : []),
+                { value: commandReason, label: '操作原因', ref: commandReasonRef },
+              ])) return;
+              if (commandTarget === 'create') void createAccount(); else if (commandTarget) void mutateAccount(commandTarget.user, commandTarget.action);
+            }}>確認執行</button>
           </Drawer>
 
           {commandState.status === 'error' && commandTarget === null && (

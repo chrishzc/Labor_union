@@ -35,7 +35,7 @@ describe('Beta 沿用正式受控重開狀態機', () => {
   it('三版本／fingerprint／原因沿用既有 flow，讀取正式案件之後才通知父頁', async () => {
     const onObserved = vi.fn(); render(<OrderControlledReopenPanel caseNo={CASE} onObserved={onObserved} />);
     await check(); fireEvent.click(screen.getByRole('button', { name: '確認受控重開' }));
-    await screen.findByText('受控重開已完成正式回讀：訂單成立。請重新確認正式服務日期與排班。');
+    await screen.findByText('受控重開已完成正式回讀：訂單成立。請重新確認服務日期與排班。');
     expect(mocks.apply).toHaveBeenCalledWith(CASE, {
       expected_order_version: 3, expected_client_finance_version: 5, expected_payroll_version: 6,
       preview_fingerprint: fingerprint, reason: '客戶重新確認服務需求。',
@@ -48,7 +48,13 @@ describe('Beta 沿用正式受控重開狀態機', () => {
     render(<OrderControlledReopenPanel caseNo={CASE} />);
     fireEvent.click(screen.getByRole('button', { name: '檢查受控重開影響' }));
     await screen.findByText('訂單取消 → 訂單成立');
-    expect(screen.getByRole('button', { name: '確認受控重開' })).toBeDisabled();
+    window.alert = vi.fn();
+    const save = screen.getByRole('button', { name: '確認受控重開' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(window.alert).toHaveBeenCalled();
+    expect(screen.getByLabelText('Beta 受控重開原因')).toHaveFocus();
+    expect(mocks.apply).not.toHaveBeenCalled();
     mocks.preview.mockResolvedValue({ ...preview(), restored_assignment_ids: [17] });
     fireEvent.click(screen.getByRole('button', { name: '檢查受控重開影響' }));
     await screen.findByText('伺服器返回非空的 restored 列表，拒絕重開操作');

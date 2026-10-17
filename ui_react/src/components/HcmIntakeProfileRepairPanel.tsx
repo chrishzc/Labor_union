@@ -106,7 +106,7 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
   };
 
   const apply = async () => {
-    if (!approved || locked || !reason.trim()) return;
+    if (!approved || locked) return;
     setBusy(true); onBusyChange(true); setMessage(null);
     let submitted = false;
     try {
@@ -164,15 +164,15 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
           </div>;
         })}
       </div>
-      <label style={{ display: 'grid', gap: 4, minWidth: 0 }}>欄位修正原因
-        <input value={reason} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={500} disabled={locked} onChange={(event) => setReason(event.target.value)} />
-      </label>
+      <><label style={{ display: 'grid', gap: 4, minWidth: 0 }}>備註（選填）
+        <input  value={reason} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={500} disabled={locked} onChange={(event) => setReason(event.target.value)} />
+      </label></>
       <button type="button" className="btn-secondary-action" disabled={locked || !Object.keys(changes).length} onClick={() => void preview()}>預覽欄位修正</button>
       {approved && <div aria-label="欄位修正前後" style={{ display: 'grid', gap: 6 }}>
         {Object.entries(approved.preview.after).map(([field, value]) => <div key={field}>
           {profileFields.find((source) => PROFILE_FIELDS[source] === field)}：{approved.preview.before[field] || '未填寫'} → {value}
         </div>)}
-        <button type="button" className="btn-primary-action" disabled={locked || !reason.trim()} onClick={() => void apply()}>確認儲存缺件資料</button>
+        <button type="button" className="btn-primary-action" disabled={locked} onClick={() => void apply()}>確認儲存缺件資料</button>
       </div>}
     </>}
     {unconfirmed && <button type="button" disabled={busy} onClick={() => void readback()}>重新讀取修正結果</button>}

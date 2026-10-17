@@ -580,3 +580,17 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
     assert values["received_total_ntd"] == 70000
     assert values["customer_balance_ntd"] == 0
     assert values["virtual_account"] == "99781699114999"
+
+
+@pytest.mark.parametrize('note', ['', '   ', '補齊聯絡資料'])
+def test_change_history_preserves_optional_note_without_losing_actor_and_time(note):
+    class Repository(_Repository):
+        def load_change_history(self, case_no):
+            return ({'event_type': 'client_profile', 'label': '客戶資料更新', 'reason': note,
+                     'actor': 'admin-1', 'occurred_at': datetime(2026, 10, 17, 8)},)
+    response = get_client_registry_change_history(case_no='CASE-001',
+        principal=AdminPrincipal(9, 'registry-reader', 'Registry Reader', 'system_admin'),
+        application=ClientRegistryQueryApplication(Repository()))
+    assert response.data[0].reason == note.strip()
+    assert response.data[0].actor == 'admin-1'
+    assert response.data[0].occurred_at.isoformat() == '2026-10-17T08:00:00+00:00'

@@ -10,6 +10,7 @@
 ## Implementation
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
+- shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。
 - primary: `ui_react/src/components/MasterLayout.tsx`
 - composed page: `ui_react/src/pages/ClientRegistryPage.tsx`
 - composed page: `ui_react/src/pages/ClientRosterPage.tsx`

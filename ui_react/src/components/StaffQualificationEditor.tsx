@@ -7,6 +7,7 @@ const display = (value: QualificationFacts[keyof QualificationFacts]) => Array.i
 
 export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: number; onUpdated: () => void | Promise<void> }) {
   const saveGuidanceId = useId();
+  const [messageError, setMessageError] = useState(false);
   const [snapshot, setSnapshot] = useState<QualificationSnapshot | null>(null);
   const [lists, setLists] = useState({ special_skills: '', certifications: '', transportation: '' });
   const [massage, setMassage] = useState('');
@@ -20,13 +21,13 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
   const controller = useRef<AbortController | null>(null);
   const epoch = useRef(0);
   const reset = (value: QualificationSnapshot) => { setLists({ special_skills: value.after.special_skills.join('\n'), certifications: value.after.certifications.join('\n'), transportation: value.after.transportation.join('\n') }); setMassage(value.after.has_massage_cert === null ? '' : String(value.after.has_massage_cert)); setCare(value.after.care_babies === null ? '' : String(value.after.care_babies)); setReason(''); setPreview(null); setKey(null); };
-  const invalidate = () => { setPreview(null); setKey(null); setMessage(''); };
+  const invalidate = () => { setMessageError(false); setPreview(null); setKey(null); setMessage(''); };
   const load = async () => {
     const current = ++epoch.current;
     controller.current?.abort(); controller.current = new AbortController();
-    setBusy(true); setNeedsRequery(false); setSnapshot(null); setMessage('正在載入專業資格…');
+    setBusy(true); setMessageError(false); setNeedsRequery(false); setSnapshot(null); setMessage('正在載入專業資格…');
     try { const value = await staffQualificationEditingClient.query(staffId, controller.current.signal); if (current !== epoch.current) return false; setSnapshot(value); reset(value); setMessage(''); return true; }
-    catch (error) { if (current === epoch.current) { setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '資格載入失敗。'); } return false; }
+    catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '資格載入失敗。'); } return false; }
     finally { if (current === epoch.current) setBusy(false); }
   };
   useEffect(() => { void load(); return () => { ++epoch.current; controller.current?.abort(); }; }, [staffId]);
@@ -34,14 +35,15 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
   const doPreview = async () => {
     const current = epoch.current; setBusy(true); invalidate();
     try { const value = await staffQualificationEditingClient.preview(staffId, facts(), controller.current?.signal); if (current !== epoch.current) return; setPreview(value); setKey(`staff-qualification-${crypto.randomUUID()}`); setMessage('預覽完成，請核對變更後確認儲存。'); }
-    catch (error) { if (current === epoch.current) setMessage(error instanceof Error ? error.message : '預覽失敗。'); }
+    catch (error) { if (current === epoch.current) { setMessageError(true); setMessage(error instanceof Error ? error.message : '預覽失敗。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };
   const doApply = async () => {
-    if (!preview || !key || !reason.trim()) return;
+    if (busy || !preview || !key) return;
+    setMessageError(false);
     const current = epoch.current; setBusy(true);
     try { await staffQualificationEditingClient.apply(staffId, facts(), preview, reason.trim(), key, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存並重新查詢。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
-    catch (error) { if (current === epoch.current) { setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
+    catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };
   return <section className="staff-holiday-op-card" aria-label="專業資格與服務資料編輯">
@@ -51,11 +53,11 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
       {listKeys.map(field => <label className="staff-op-field" key={field}>{labels[field]}<textarea rows={3} disabled={busy} value={lists[field]} onChange={event => { setLists(value => ({ ...value, [field]: event.target.value })); invalidate(); }} /></label>)}
       <label className="staff-op-field">按摩證書<select disabled={busy} value={massage} onChange={event => { setMassage(event.target.value); invalidate(); }}><option value="">尚未登錄</option><option value="true">有</option><option value="false">無</option></select></label>
       <label className="staff-op-field">最多照顧寶寶數<input type="number" min={1} step={1} max={2147483647} disabled={busy} value={care} onChange={event => { setCare(event.target.value); invalidate(); }} /></label>
-    </div><label className="staff-op-field">專業資格異動原因<input maxLength={500} disabled={busy} value={reason} onChange={event => setReason(event.target.value)} /></label>
+    </div><label className="staff-op-field">備註（選填）<input aria-label="專業資格備註（選填）" placeholder="有需要補充的內容再填寫" maxLength={500} disabled={busy} value={reason} onChange={event => { setReason(event.target.value); if (messageError) { setMessageError(false); setMessage(''); } }} /></label>
     {preview && <div aria-label="專業資格變更預覽">{(Object.keys(labels) as Array<keyof QualificationFacts>).filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>)}</div>}
-    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : !preview ? '尚未預覽：請先按「預覽變更」。' : !reason.trim() ? '預覽完成：請填寫「專業資格異動原因」後確認儲存。' : '預覽與異動原因已完成，可以按「確認儲存」。'}</p>
-    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doPreview()}>預覽變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy || !preview || !reason.trim()} onClick={() => void doApply()}>確認儲存</button></div></>}
+    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : !preview ? '尚未預覽：請先按「預覽變更」。' : '預覽完成，可直接確認儲存；備註可留白。'}</p>
+    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessageError(false); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doPreview()}>預覽變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy || !preview} onClick={() => void doApply()}>確認儲存</button></div></>}
     {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取專業資格</button>}
-    {message && <p role="status">{message}</p>}
+    {message && <p role={messageError ? "alert" : "status"} className={messageError ? "staff-op-error" : undefined}>{message}</p>}
   </section>;
 }

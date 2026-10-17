@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -34,6 +36,8 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +106,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
 
   const confirm = async () => {
     if (!query || query.service_data_locked || busy) return;
+    if (!saveValidation.validate([{ value: date, label: '更正實際開始日期', ref: saveFieldRef }])) return;
     if (orderMutationFlowStore.getActualStart(caseNo)?.status === 'observed') {
       orderMutationFlowStore.clearActualStart(caseNo);
     }
@@ -283,11 +288,11 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
         <>
           <p>目前實際開始：{query.current_actual_start_date ?? '尚未確認'}；計畫開始：{query.planned_start_date}</p>
           {query.service_data_locked && <p role="status">服務資料已鎖定，不可修改實際開始日。</p>}
-          <label>實際開始日期
-            <input aria-label="更正實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
+          <><label>實際開始日期
+            <input ref={saveFieldRef} aria-required="true" aria-label="更正實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
               onChange={(event) => { sequence.current += 1; setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
-          </label>
-          <button type="button" disabled={busy || query.service_data_locked || !date} onClick={() => void confirm()}>
+          </label>{saveValidation.feedback}</>
+          <button type="button" disabled={busy || query.service_data_locked} onClick={() => void confirm()}>
             {query.has_formal_assignments ? '預覽日期與排班調整' : '儲存實際開始日'}
           </button>
         </>

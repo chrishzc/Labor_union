@@ -242,3 +242,22 @@ def test_completion_is_a_separate_versioned_status_write(connection):
     assert resulting_version == _VERSION + 1
     connection.commit.assert_not_called()
     connection.rollback.assert_not_called()
+
+
+@pytest.mark.parametrize('note', ['', '   ', '工會人員補充'])
+def test_automatic_initialization_records_system_trigger_separately_from_optional_note(note):
+    from types import SimpleNamespace
+    from infrastructure.mysql.order_intake_architecture_initializer import MySqlOrderIntakeArchitectureInitializer
+    from shared_kernel.fingerprints import PreviewFingerprint
+    initializer = object.__new__(MySqlOrderIntakeArchitectureInitializer)
+    initializer._status = Mock()
+    initializer._status.query.return_value = SimpleNamespace(ready=False, domain_blockers=(), recommendation=Mock())
+    initializer._workflow = Mock()
+    initializer._workflow.preview.return_value = SimpleNamespace(fingerprint=PreviewFingerprint('a' * 64))
+    facts = SimpleNamespace(case_no=_CASE, lifecycle_version=_VERSION)
+    initializer.ensure(facts, 'orders-operator', note, 'optional-intake')
+    command = initializer._workflow.ensure_in_unit_of_work.call_args.args[0]
+    assert command.reason == '系統依已完成進件資料初始化本案'
+    assert command.actor.actor_id == 'orders-operator'
+    assert command.expected_order_version.value == _VERSION
+    assert command.preview_fingerprint == PreviewFingerprint('a' * 64)

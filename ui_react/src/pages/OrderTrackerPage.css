@@ -64,7 +64,7 @@
 .tracker-search-clear-btn {
   position: absolute;
   right: 10px;
-  background: #f5ece9;
+  background: var(--md-sys-color-primary);
   border: none;
   border-radius: 50%;
   width: 22px;
@@ -73,15 +73,13 @@
   align-items: center;
   justify-content: center;
   font-size: 0.72rem;
-  color: #795d43;
+  color: var(--md-sys-color-on-primary);
   cursor: pointer;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .tracker-search-clear-btn:hover {
-  background: #fee2e2;
-  color: #dc2626;
-}
+  background: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .tracker-reload-button,
 .tracker-close-button {
@@ -89,16 +87,14 @@
   padding: 8px 16px;
   border: 1px solid #d85f3a;
   border-radius: 8px;
-  background: #fff;
-  color: #9a3412;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-weight: 700;
-  cursor: pointer;
-}
+  cursor: pointer; border-color: var(--md-sys-color-primary); }
 
 .tracker-reload-button:hover,
 .tracker-close-button:hover {
-  background: #fff7ed;
-}
+  background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .tracker-reload-button:focus-visible,
 .tracker-close-button:focus-visible,
@@ -568,8 +564,8 @@
 }
 
 .tracker-tab-btn.active {
-  border-bottom-color: #ff7f50;
-  color: #ff7f50;
+  border-bottom-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-primary);
 }
 
 .tracker-tab-content-sop {
@@ -1150,36 +1146,32 @@
   padding: 8px 24px;
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #ffffff;
-  color: #74593f;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-weight: 750;
   cursor: pointer;
-  transition: all 0.2s ease;
-}
+  transition: all 0.2s ease; border-color: var(--md-sys-color-primary); }
 
 .tracker-close-button:hover {
-  background: #fbf2ef;
-}
+  background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .tracker-action-primary-btn {
   padding: 8px 24px;
   border: none;
   border-radius: 8px;
-  background: #ff7f50;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   font-weight: 750;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
   box-shadow: 0px 4px 12px rgba(255, 127, 80, 0.2);
-  transition: all 0.2s ease;
-}
+  transition: all 0.2s ease; border-color: var(--md-sys-color-primary); }
 
 .tracker-action-primary-btn:hover {
-  background: #e66a3d;
-  box-shadow: 0px 6px 16px rgba(255, 127, 80, 0.3);
-}
+  background: var(--md-sys-color-primary-hover);
+  box-shadow: 0px 6px 16px rgba(255, 127, 80, 0.3); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .tracker-disabled-action {
   margin-top: 14px;
@@ -1309,3 +1301,11 @@
   color: #ff7f50;
   font-weight: 800;
 }
+.tracker-search-clear-btn:hover:not(:disabled),
+.tracker-reload-button:hover:not(:disabled),
+.tracker-close-button:hover:not(:disabled),
+.tracker-action-primary-btn:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.tracker-search-clear-btn:disabled,
+.tracker-reload-button:disabled,
+.tracker-close-button:disabled,
+.tracker-action-primary-btn:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }

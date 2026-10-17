@@ -9,7 +9,7 @@ import {
   type IntakeTermsPreview,
   type IntakeServiceTime,
 } from '../api/orders/order_intake_completion_client';
-import { ordersQueryClient } from '../api/orders/order_query_client';
+import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import { loadCurrentHcmReviewsForCases, type HcmCurrentReview } from '../api/case_import/hcm_resubmission_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { HcmIntakeProfileRepairPanel, canRepairHcmProfileField } from './HcmIntakeProfileRepairPanel';
@@ -57,8 +57,6 @@ type IntakeReadback = {
   detail: {
     case_no: string;
     client_name: string;
-    start_date: string | null;
-    service_days: number;
   } | null;
 };
 const subscribeIntakeRepair = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
@@ -187,17 +185,16 @@ export function OrderIntakeRepairPanel({
       setStartTime(currentCompletion.current_service_time?.start_time?.slice(0, 5) ?? '');
       setEndTime(currentCompletion.current_service_time?.end_time?.slice(0, 5) ?? '');
       setEndDayOffset(currentCompletion.current_service_time?.end_day_offset === 1 ? '1' : '0');
-      // Only editable missing fields consume detail to prefill the repair form.
-      // Blockers and completed intake are fully described by the owner preview.
+      // Client-owned name readback must remain available while Orders terms are incomplete.
       let detail: IntakeReadback['detail'] = null;
       if (currentCompletion.blockers.length === 0 && (requireDetail || currentCompletion.missing_fields.length > 0)) {
         const [detailResult] = await Promise.allSettled([
-          ordersQueryClient.getOrderDetail(caseNo, { signal }),
+          clientRegistryClient.query(caseNo),
         ]);
         if (signal?.aborted) return;
         if (detailResult.status === 'fulfilled') {
           if (detailResult.value.case_no !== caseNo) throw new Error('進件補件明細回讀案件識別不一致。');
-          detail = detailResult.value;
+          detail = { case_no: detailResult.value.case_no, client_name: detailResult.value.client.values.name ?? '' };
           setClientName(detail.client_name.startsWith('待補姓名') ? '' : detail.client_name);
         } else if (requireDetail) {
           throw detailResult.reason;
@@ -477,7 +474,7 @@ export function OrderIntakeRepairPanel({
   };
 
   const applyName = async () => {
-    if (!namePreview || !reason.trim()) return;
+    if (!namePreview) return;
     await runApply({
       operation: 'client_name', preview: namePreview, reason: reason.trim(),
       idempotencyKey: operationKey(caseNo, 'client-name'),
@@ -528,7 +525,7 @@ export function OrderIntakeRepairPanel({
   };
 
   const applyTerms = async () => {
-    if (!termsPreview || !reason.trim()) return;
+    if (!termsPreview) return;
     await runApply({
       operation: 'terms', preview: termsPreview, reason: reason.trim(),
       idempotencyKey: operationKey(caseNo, 'terms'),
@@ -536,7 +533,7 @@ export function OrderIntakeRepairPanel({
   };
 
   const applyCompletion = async () => {
-    if (!completion || !completion.apply_allowed || completion.missing_fields.length > 0 || !reason.trim()) return;
+    if (!completion || !completion.apply_allowed || completion.missing_fields.length > 0) return;
     await runApply({
       operation: 'completion', preview: completion, reason: reason.trim(),
       idempotencyKey: operationKey(caseNo, 'completion'),
@@ -666,15 +663,15 @@ export function OrderIntakeRepairPanel({
           )}
 
           {((repairAllowed && (missingName || completion.apply_allowed)) || termsRepairAllowed) && (
-            <label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', color: '#57423b' }}>
-              修改原因（儲存時必填）
+            <><label style={{ display: 'grid', gap: '4px', fontSize: '0.82rem', color: '#57423b' }}>
+              備註（選填）
               <input
                 value={reason}
                 maxLength={500}
                 disabled={controlsLocked}
                 onChange={(event) => setReason(event.target.value)}
               />
-            </label>
+            </label></>
           )}
 
           {repairAllowed && missingName && (
@@ -700,7 +697,7 @@ export function OrderIntakeRepairPanel({
                   <button
                     type="button"
                     className="btn-primary-action"
-                    disabled={controlsLocked || !namePreview.apply_allowed || !reason.trim()}
+                    disabled={controlsLocked || !namePreview.apply_allowed}
                     onClick={() => void applyName()}
                   >
                     {operation === 'name-apply' ? '正在儲存姓名…' : '確認儲存姓名'}
@@ -769,7 +766,7 @@ export function OrderIntakeRepairPanel({
                   <button
                     type="button"
                     className="btn-primary-action"
-                    disabled={controlsLocked || !termsPreview.apply_allowed || !reason.trim()}
+                    disabled={controlsLocked || !termsPreview.apply_allowed}
                     onClick={() => void applyTerms()}
                   >
                     {operation === 'terms-apply' ? '正在儲存服務資料…' : termsPreview.after_service_time ? '確認儲存服務資料' : '確認儲存日期與天數'}
@@ -783,7 +780,7 @@ export function OrderIntakeRepairPanel({
             <button
               type="button"
               className="btn-primary-action"
-              disabled={controlsLocked || !reason.trim()}
+              disabled={controlsLocked}
               onClick={() => void applyCompletion()}
             >
               {operation === 'completion-apply' ? '正在完成進件補齊…' : '確認完成進件補齊'}

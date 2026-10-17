@@ -210,8 +210,8 @@
 .llm-config-actions button svg { width: 18px; height: 18px; }
 .llm-config-primary-action { background: var(--line-ui-accent, #c2410c); color: #fff; }
 .llm-config-primary-action:hover:not(:disabled) { background: var(--line-ui-accent-hover, #9a3412); }
-.llm-config-secondary-action { border-color: var(--line-ui-border-strong, #d6d3d1) !important; background: #fff; color: var(--line-ui-text, #292524); }
-.llm-config-secondary-action:hover:not(:disabled) { border-color: var(--line-ui-accent, #c2410c) !important; color: var(--line-ui-accent, #c2410c); }
+.llm-config-secondary-action { border-color: var(--md-sys-color-primary); background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
+.llm-config-secondary-action:hover:not(:disabled) { border-color: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary-hover); }
 .llm-config-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .llm-config-meta { margin-top: 12px; }
@@ -241,3 +241,5 @@
   .llm-config-card { padding: 18px; }
   .llm-config-heading-icon { flex-basis: 42px; width: 42px; height: 42px; }
 }
+.llm-config-secondary-action:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.llm-config-secondary-action:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }

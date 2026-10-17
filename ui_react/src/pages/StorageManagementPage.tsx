@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import { useSaveValidation } from '../components/useSaveValidation';
 /** Audit & System storage-management Query, Preview and confirmed Apply surface. */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -54,6 +56,8 @@ export const StorageManagementPage: React.FC = () => {
   const [selected, setSelected] = useState<RetentionSource | null>(null);
   const [mode, setMode] = useState<RetentionMode>('expired');
   const [reason, setReason] = useState('清理到期技術與營運觀測紀錄');
+  const saveValidation = useSaveValidation();
+  const reasonRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<RetentionPreview | null>(null);
   const [receipt, setReceipt] = useState<RetentionReceipt | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -88,7 +92,8 @@ export const StorageManagementPage: React.FC = () => {
   };
 
   const createPreview = async () => {
-    if (!selected || !reason.trim()) return;
+    if (!selected || working) return;
+    if (!saveValidation.validate([{ value: reason, label: '清理原因', ref: reasonRef }])) return;
     setWorking(true);
     setError(null);
     setReceipt(null);
@@ -188,10 +193,11 @@ export const StorageManagementPage: React.FC = () => {
             </label>
             <label>
               操作原因
-              <input value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setPreview(null); }} />
+              <input ref={reasonRef} aria-required="true" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setPreview(null); }} />
             </label>
           </div>
-          <button type="button" onClick={() => void createPreview()} disabled={working || !reason.trim()}>
+          {saveValidation.feedback}
+          <button type="button" onClick={() => void createPreview()} disabled={working}>
             {working ? '正在檢查…' : '零寫入預覽'}
           </button>
 

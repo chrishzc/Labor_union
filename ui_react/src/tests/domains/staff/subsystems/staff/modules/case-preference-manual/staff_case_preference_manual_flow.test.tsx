@@ -26,7 +26,10 @@ const preview = {
 };
 
 afterEach(() => vi.restoreAllMocks());
-beforeEach(() => { vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS); });
+beforeEach(() => {
+  vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+  vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
+});
 
 describe('manual preference editor contract', () => {
   it('renders concrete before and after values/details', () => {
@@ -37,7 +40,7 @@ describe('manual preference editor contract', () => {
     expect(screen.getByText(/新說明/)).toBeTruthy();
   });
 
-  it('exposes only the six relation editors and gates Apply on preview plus reason', async () => {
+  it.each(['', '   ', '人工修正'])('gates Apply on preview and allows optional notes %j', async (note) => {
     const query = vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue(snapshot as never);
     const previewRequest = vi.spyOn(staffCasePreferenceManualClient, 'preview').mockResolvedValue(preview as never);
     const apply = vi.spyOn(staffCasePreferenceManualClient, 'apply').mockResolvedValue({
@@ -71,17 +74,17 @@ describe('manual preference editor contract', () => {
     ));
     await waitFor(() => expect(screen.getByText('預覽已完成，尚未寫入。')).toBeInTheDocument());
     const applyButton = screen.getByRole('button', { name: '確認儲存' });
-    expect(applyButton).toBeDisabled();
-    expect(applyButton).toHaveAccessibleDescription('預覽完成：請填寫「變更原因」後確認儲存。');
-
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工修正' } });
     expect(applyButton).toBeEnabled();
-    expect(applyButton).toHaveAccessibleDescription('預覽與異動原因已完成，可以按「確認儲存」。');
+    expect(applyButton).toHaveAccessibleDescription('預覽完成，可直接確認儲存；備註可留白。');
+    const notes = screen.getByLabelText('接案條件備註（選填）');
+    expect(notes).not.toHaveAttribute('aria-required');
+    fireEvent.change(notes, { target: { value: note } });
     fireEvent.click(applyButton);
+    expect(window.alert).not.toHaveBeenCalled();
     await waitFor(() => expect(apply).toHaveBeenCalledWith(531, expect.objectContaining({
       expected_snapshot_fingerprint: snapshot.snapshot_fingerprint,
       preview_fingerprint: preview.preview_fingerprint,
-      reason: '人工修正',
+      reason: note.trim(),
       service_regions: [{ value: '東區', detail: null }],
     }), expect.objectContaining({
       idempotencyKey: expect.stringContaining('staff-case-preference-'),
@@ -97,7 +100,7 @@ describe('manual preference editor contract', () => {
     render(<StaffCasePreferenceManualEditor staffId={531} />);
     await waitFor(() => expect(query).toHaveBeenCalledWith(531, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '人工修正' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '人工修正' } });
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
     expect(apply).not.toHaveBeenCalled();
 
@@ -124,10 +127,10 @@ describe('manual preference editor contract', () => {
     await screen.findByRole('combobox', { name: '可承接區域值1' });
     expect(screen.getAllByRole('combobox')).toHaveLength(7);
     fireEvent.change(screen.getByRole('combobox', { name: '可承接區域值1' }), { target: { value: '東區' } });
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試取消' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試取消' } });
     fireEvent.click(screen.getByRole('button', { name: '取消變更' }));
     expect(screen.getByRole('combobox', { name: '可承接區域值1' })).toHaveValue('北區');
-    expect(screen.getByLabelText('六大接案能力變更原因')).toHaveValue('');
+    expect(screen.getByLabelText('接案條件備註（選填）')).toHaveValue('');
     expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '預覽變更' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '編輯六項偏好' })).not.toBeInTheDocument();

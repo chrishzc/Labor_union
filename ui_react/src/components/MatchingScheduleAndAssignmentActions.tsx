@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /**
  * File: MatchingScheduleAndAssignmentActions.tsx
  * Description: 以人工日期表確認及排班 Preview／Apply 完成 waiting-lock conversion。
@@ -254,6 +256,8 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
   </>;
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [confirmationNote, setConfirmationNote] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [automatic, setAutomatic] = useState<AutomaticArrangementStatus | null>(null);
   const [automaticError, setAutomaticError] = useState('');
   const observedAutomatic = useRef(false);
@@ -301,6 +305,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
   const blockerCodes = automatic?.blockers ?? [];
   const keyOf = (party: typeof parties[number]) => party.audience_type === 'customer' ? 'customer' : `caregiver:${party.segment_id}`;
   const saveConfirmation = async (key: string) => {
+    if (protectedMutation || !saveValidation.validate([{ value: confirmationNote, label: '確認紀錄', ref: saveFieldRef }])) return;
     if (protectedMutation || !confirmationNote.trim() || !schedule) return;
     const reason = confirmationNote.trim();
     const generation = scheduleGeneration.current;
@@ -346,7 +351,7 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
           {recipient?.confirmation_reason && <details className="service-arrangement-confirmation-record"><summary>已確認目前日期表 · 查看確認紀錄</summary><p>確認紀錄：{recipient.confirmation_reason}</p></details>}
           {!confirmed && recipient?.delivery_status === 'blocked' && <p>尚未綁定 LINE，請聯絡對方後手動記錄確認。</p>}
           {recipient?.delivery_status === 'failed' && <p role="status">日期表寄送失敗，請重新寄送或手動記錄確認。</p>}
-          {editingKey === key && <section className="service-arrangement-inline-form" aria-label={`${label}手動記錄日期確認`}><label>確認紀錄（必填）<textarea aria-label={`${label}確認紀錄`} maxLength={500} disabled={protectedMutation} value={confirmationNote} onChange={event => setConfirmationNote(event.target.value)} placeholder="例如：已電話確認目前日期表，對方同意此服務安排。" /></label><div className="order-case-action-row"><button type="button" disabled={protectedMutation || !confirmationNote.trim()} onClick={() => void saveConfirmation(key)}>儲存確認紀錄</button><button type="button" disabled={protectedMutation} onClick={() => { setEditingKey(null); setConfirmationNote(''); }}>取消</button></div></section>}
+          {editingKey === key && <section className="service-arrangement-inline-form" aria-label={`${label}手動記錄日期確認`}><><label>確認紀錄（必填）<textarea ref={saveFieldRef} aria-required="true" aria-label={`${label}確認紀錄`} maxLength={500} disabled={protectedMutation} value={confirmationNote} onChange={event => setConfirmationNote(event.target.value)} placeholder="例如：已電話確認目前日期表，對方同意此服務安排。" /></label>{saveValidation.feedback}</><div className="order-case-action-row"><button type="button" disabled={protectedMutation} onClick={() => void saveConfirmation(key)}>儲存確認紀錄</button><button type="button" disabled={protectedMutation} onClick={() => { setEditingKey(null); setConfirmationNote(''); }}>取消</button></div></section>}
         </article>;
       })}
       <p className="service-arrangement-confirmation-count">{confirmedParties} / {parties.length} 位已確認目前日期表</p>

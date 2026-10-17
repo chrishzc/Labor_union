@@ -30,6 +30,7 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
   - `domains/orders/terms.py`
   - `subsystems/orders/terms_workflow.py`
   - `subsystems/orders/order_intake_terms_bootstrap.py`
+  - `subsystems/orders/order_intake_client_name_repair.py` — 既有 intake 姓名缺件 Preview／Apply，沿用版本、備註、冪等及 receipt。
   - `infrastructure/mysql/order_terms_read_model.py`
   - `infrastructure/mysql/order_terms_repository.py`
   - `infrastructure/mysql/order_lifecycle_impact_writer.py` — 將 typed lifecycle impact 寫入 Orders projection、事件、資料鎖與 outbox；沿用外層 transaction。
@@ -72,6 +73,8 @@ Issue #326：同一 Terms command 可承接完整替代日期與明確既有指�
 - Preassignment start-date、confirmed-service-date replacement projection and focused regression — `source_observed` — current workflow, MySQL adapter and test listed above.
 - Nullable service-time HTTP／UI preservation and disposable-MySQL round trip — `source_observed` — canonical module and subsystem integration roots listed above.
 - Intake terms bootstrap and intake completion owner-local unit regression — `source_observed` — current bootstrap workflow and canonical unit root.
+
+- Intake 姓名／服務條件補件與完成使用選填備註；原版本、Preview、冪等、receipt 與初始化交易不變。自動初始化記錄系統觸發說明，Orders 命令保存原人工備註；正式 Terms 原因要求不變。
 
 ## Change triggers
 Reconcile when Orders Terms public contract, cross-owner impact, transaction boundary, preassignment generation semantics, receipt, or focused test root changes.

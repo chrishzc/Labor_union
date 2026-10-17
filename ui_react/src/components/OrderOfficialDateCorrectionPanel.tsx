@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
@@ -24,6 +26,8 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
   const [selections, setSelections] = useState<OfficialDateSelection[]>([]);
   const [preview, setPreview] = useState<OfficialDatePreview | null>(null);
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -92,7 +96,8 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
   };
 
   const apply = async () => {
-    if (!preview || !key) return;
+    if (!preview || !key || busy) return;
+    if (!saveValidation.validate([{ value: reason, label: '更正原因', ref: saveFieldRef }])) return;
     setBusy(true);
     setMessage('');
     try {
@@ -158,10 +163,10 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
     {preview && !datesView && <>
       {preview.proposed_assignments.map(item => <p key={item.assignment_id}>{staffIdentity.label(facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_id, facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_name)}：{item.service_dates.join('、')}</p>)}
       <p>客戶與月嫂金額義務：維持原狀。</p>
-      <label>更正原因<input value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>
+      <><label>更正原因<input ref={saveFieldRef} aria-required="true" value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>{saveValidation.feedback}</>
       <div className="service-date-footer">
         <button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); }}>返回設定服務日期</button>
-        <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy || !reason.trim()} onClick={() => void apply()}>確認更正完工服務日期</button>
+        <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy} onClick={() => void apply()}>確認更正完工服務日期</button>
       </div>
     </>}
     {message && <div><p role="status">{message}</p><button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); setReload(value => value + 1); }}>重新讀取排班日期</button><p>重新讀取會還原尚未儲存的日期。</p></div>}

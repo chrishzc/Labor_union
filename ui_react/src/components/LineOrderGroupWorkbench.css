@@ -3,10 +3,10 @@
 .order-group-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:24px}
 .order-group-heading h2{margin:0;font-size:1.5rem;line-height:1.4}
 .order-group-heading p{margin:7px 0 0;font-size:.875rem;color:var(--line-color-text-muted)}
-.order-group-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:8px 14px;border:1px solid var(--line-color-border);border-radius:10px;background:white;color:var(--line-color-primary);font:600 .875rem var(--font-family-body);cursor:pointer;white-space:nowrap}
+.order-group-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:8px 14px;border:1px solid var(--line-color-border);border-radius:10px;background: var(--md-sys-color-primary);color: var(--md-sys-color-on-primary);font:600 .875rem var(--font-family-body);cursor:pointer;white-space:nowrap border-color: var(--md-sys-color-primary); }
 .order-group-button svg{width:18px;height:18px}
 .order-group-button:disabled{opacity:.5;cursor:not-allowed}
-.order-group-button:hover:not(:disabled){background:var(--line-color-page);border-color:var(--line-color-primary)}
+.order-group-button:hover:not(:disabled){background: var(--md-sys-color-primary-hover);border-color: var(--md-sys-color-primary-hover); }
 .order-group-card{border:1px solid var(--line-color-border);border-radius:16px;background:white;overflow:hidden;box-shadow:var(--shadow-sm)}
 .order-group-filters{display:flex;align-items:center;gap:12px;padding:20px 22px}
 .order-group-filters input,.order-group-filters select{min-height:44px;width:100%;border:1px solid var(--line-color-border);border-radius:10px;background:white;color:var(--line-color-text);padding:9px 12px;font:inherit;font-size:.875rem}

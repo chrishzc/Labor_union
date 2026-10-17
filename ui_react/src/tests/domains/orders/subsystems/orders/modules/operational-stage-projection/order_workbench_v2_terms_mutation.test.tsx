@@ -258,6 +258,14 @@ describe('名冊沿用訂單條款操作', () => {
     }, expect.objectContaining({ signal: expect.anything() })));
     expect(within(panel).getByText(/版本：Order 12 · Scheduling 13 · Client Finance 5 · Payroll 6/)).toBeInTheDocument();
 
+    window.alert = vi.fn();
+    const save = within(panel).getByRole('button', { name: '確認儲存服務條件' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(window.alert).toHaveBeenCalled();
+    expect(within(panel).getByLabelText('條款變更原因')).toHaveFocus();
+    expect(mocks.applyTerms).not.toHaveBeenCalled();
+
     fireEvent.change(within(panel).getByLabelText('條款變更原因'), { target: { value: '客戶確認延長一天' } });
     fireEvent.click(within(panel).getByRole('button', { name: '確認儲存服務條件' }));
 

@@ -45,6 +45,7 @@
 - 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
 - `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md`
+- Profile 修改的 `reason` 為選填備註：省略預設空字串、保留 actor／before／after／receipt／idempotency；Bank Account 仍依既有必填原因契約。
 
 ## Verification
 - layout_status: `custom_current`

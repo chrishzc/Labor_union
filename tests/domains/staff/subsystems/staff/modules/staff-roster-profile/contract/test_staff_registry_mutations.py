@@ -59,7 +59,7 @@ class _ProfileRepository:
         return snapshot.version + 1
 
     def save_receipt(self, *, key, command_fingerprint, result, **_):
-        self.receipts[key.value] = {"request_fingerprint": command_fingerprint.value, "result": dict(result)}
+        self.receipts[key.value] = {"request_fingerprint": command_fingerprint.value, "result": dict(result), "reason": _.get("reason"), "actor": _.get("actor")}
 
 
 class _BankRepository:
@@ -293,3 +293,35 @@ def test_staff_bank_persistence_never_rewrites_payment_or_ledger_tables():
         "staff_bank_account_events",
         "staff_bank_account_states",
     }
+
+
+@pytest.mark.parametrize("note", ["", "   ", "工會補充備註"])
+def test_profile_optional_notes_preserve_actor_and_replay(note):
+    repository = _ProfileRepository()
+    workflow = StaffProfileMutationWorkflow(repository, _Uow)
+    actor, correlation = _identity()
+    preview = workflow.preview(7, {"education": "大學"}, ExpectedVersion(0))
+    key = IdempotencyKey("profile-optional-notes")
+    args = (7, {"education": "大學"}, ExpectedVersion(0), preview.preview_fingerprint, key, actor, note, correlation)
+    first = workflow.apply(*args)
+    assert first.readback.values["education"] == "大學"
+    assert repository.receipts[key.value]["reason"] == note.strip()
+    assert repository.receipts[key.value]["actor"] == actor
+    assert workflow.apply(*args).replayed
+    assert repository.row["staff_profile_version"] == 1
+    with pytest.raises((StaffProfileMutationConflict, ValueError), match="idempotency_mismatch"):
+        workflow.apply(7, {"education": "大學"}, ExpectedVersion(0), preview.preview_fingerprint,
+                       key, actor, "不同備註", correlation)
+
+
+def test_profile_api_notes_can_be_omitted_without_weakening_bank_reason():
+    from api.schemas.staff_registry_mutation import StaffProfileMutationApplyRequest, StaffBankAccountApplyRequest
+    from pydantic import ValidationError
+    body = {"changes": {"education": "大學"}, "expected_version": 0, "preview_fingerprint": "a" * 64}
+    assert StaffProfileMutationApplyRequest.model_validate(body).reason == ""
+    assert StaffProfileMutationApplyRequest.model_validate({**body, "reason": ""}).reason == ""
+    with pytest.raises(ValidationError):
+        StaffProfileMutationApplyRequest.model_validate({**body, "reason": "x" * 501})
+    with pytest.raises(ValidationError):
+        StaffBankAccountApplyRequest.model_validate({"command": {"operation": "set_primary", "account_id": 3},
+                                                    "expected_version": 0, "preview_fingerprint": "a" * 64})

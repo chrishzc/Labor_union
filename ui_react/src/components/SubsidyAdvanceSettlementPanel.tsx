@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /** Government receipts recover an existing union advance; no customer payout. */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -40,6 +42,8 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
   const [result, setResult] = useState<Result>({ kind: 'loading' });
   const [preview, setPreview] = useState<AdvanceSettlementPreview | null>(null);
   const [reason, setReason] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState(false);
@@ -85,7 +89,8 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
     }
   };
   const apply = async () => {
-    if (!preview || !confirmed || !reason.trim() || busy || unknown) return;
+    if (!preview || !confirmed || busy || unknown) return;
+    if (!saveValidation.validate([{ value: reason, label: '核對說明', ref: saveFieldRef }])) return;
     const submitted = command.current ?? {
       advanceId: preview.row.advance_id, caseNo: preview.row.case_no, amount: preview.row.advance_amount_ntd,
       key: `advance-settlement:${crypto.randomUUID()}`,
@@ -162,9 +167,9 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
       <h3 ref={previewHeading} tabIndex={-1}>確認墊款回收</h3><p>{preview.row.client_name}｜{preview.row.case_no}</p>
       <p>原墊款：<strong>{money(preview.row.advance_amount_ntd)}</strong>｜政府入款分配：<strong>{money(preview.row.government_received_ntd)}</strong></p>
       <p>本次銷帳：<strong>{money(preview.row.advance_amount_ntd)}</strong>。完成後建立正式回收關聯，客戶退款紀錄維持原結果。</p>
-      <label className="advance-settlement-field">核對說明<textarea className="finance-input" disabled={locked || command.current !== null} maxLength={500} value={reason} onChange={event => { setReason(event.target.value); setConfirmed(false); }} /></label>
+      <><label className="advance-settlement-field">核對說明<textarea ref={saveFieldRef} aria-required="true" className="finance-input" disabled={locked || command.current !== null} maxLength={500} value={reason} onChange={event => { setReason(event.target.value); setConfirmed(false); }} /></label>{saveValidation.feedback}</>
       <label className="advance-settlement-confirm"><input type="checkbox" disabled={locked} checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />我已核對原墊款與政府入款，確認建立回收銷帳。</label>
-      <div className="subsidy-refund-period"><button type="button" className="finance-btn-primary" disabled={locked || !confirmed || !reason.trim()} onClick={() => void apply()}>{busy ? '處理中…' : '確認銷帳'}</button><button type="button" className="finance-reload-btn" disabled={locked} onClick={resetPreview}>取消</button></div>
+      <div className="subsidy-refund-period"><button type="button" className="finance-btn-primary" disabled={locked || !confirmed} onClick={() => void apply()}>{busy ? '處理中…' : '確認銷帳'}</button><button type="button" className="finance-reload-btn" disabled={locked} onClick={resetPreview}>取消</button></div>
     </section>}
   </section>;
 }

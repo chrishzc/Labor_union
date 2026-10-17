@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineNotificationWorkbench.tsx
  * Description: 統一歡迎訊息與通知內容維護，沿用版本化儲存及既有規則影響確認。
@@ -90,6 +92,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<NotificationEntry | null>(null);
   const [content, setContent] = useState('');
+  const saveValidation = useSaveValidation();
+  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -188,7 +192,8 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   };
 
   const save = async () => {
-    if (!selected?.data || !dirty || !content.trim() || saving) return;
+    if (!selected?.data || !dirty || saving) return;
+    if (!saveValidation.validate([{ value: content, label: '通知內容', ref: saveFieldRef }])) return;
     const target = selected;
     const controller = new AbortController();
     saveController.current = controller;
@@ -240,13 +245,13 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         </tr>)}</tbody></table>}
       </div>
       <Drawer isOpen={selected !== null} title={discardOpen ? '放棄尚未儲存的修改？' : selected?.name ?? '通知內容'} className="notification-content-drawer" closeLabel="關閉通知內容" closeDisabled={updating} onClose={discardOpen ? () => setDiscardOpen(false) : close}
-        footer={discardOpen ? <><button type="button" className="notification-button" onClick={() => setDiscardOpen(false)}>繼續編輯</button><button type="button" className="notification-button danger" onClick={() => { setDiscardOpen(false); setSettingsDirty(false); setSelected(null); }}>放棄修改</button></> : editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => { if (settingsDirty) setDiscardOpen(true); else setEditingSettings(false); }}>返回內容</button> : <><button type="button" className="notification-button" disabled={saving} onClick={close}>取消</button>{selected?.data && <button type="button" className="notification-button primary" disabled={saving || !contentDirty || !content.trim()} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button>}</>}>
+        footer={discardOpen ? <><button type="button" className="notification-button" onClick={() => setDiscardOpen(false)}>繼續編輯</button><button type="button" className="notification-button danger" onClick={() => { setDiscardOpen(false); setSettingsDirty(false); setSelected(null); }}>放棄修改</button></> : editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => { if (settingsDirty) setDiscardOpen(true); else setEditingSettings(false); }}>返回內容</button> : <><button type="button" className="notification-button" disabled={saving} onClick={close}>取消</button>{selected?.data && <button type="button" className="notification-button primary" disabled={saving || !contentDirty} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button>}</>}>
         {discardOpen && <p>離開後，這則通知尚未儲存的修改會被捨棄。</p>}
         <fieldset className="notification-editor-scope" disabled={discardOpen} hidden={discardOpen}>
         {selected && editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : selected && <>
           {selected.error && <p className="notification-feedback error" role="alert">{selected.error}</p>}
           {selected.data && <>
-            <label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea id="notification-message-content" rows={selected.kind === 'welcome' ? 12 : 7} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>
+            <><label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={selected.kind === 'welcome' ? 12 : 7} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>{saveValidation.feedback}</>
             {managed && <p className="notification-help">說明文字會用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
             {selected.data.variables.length > 0 && <p className="notification-help">動態資料於發送時帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p>}
             <div className="notification-preview"><p>訊息預覽</p><div className="notification-bubble">{previewText(content, selected.data.variables) || '尚未輸入內容'}</div></div>

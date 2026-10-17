@@ -210,6 +210,7 @@ class _Repository:
 
     def save_admin_receipt(self, **kwargs):
         self.admin_receipts[kwargs["idempotency_key"]] = {
+            "actor_id": kwargs["actor_id"], "reason": kwargs["reason"],
             "command_fingerprint": kwargs["command_fingerprint"],
             "preview_fingerprint": kwargs["preview_fingerprint"],
             "result": dict(kwargs["result"]),
@@ -427,7 +428,8 @@ def test_admin_can_save_due_date_and_reason_without_exposing_them_to_applicant()
     assert repository.profile['client_profile_version'] == 1
 
 
-def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay():
+@pytest.mark.parametrize("note", ["", "   ", "人工核對"])
+def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay(note):
     repository = _Repository()
     application = _application(repository)
     preview = application.preview_admin(
@@ -435,19 +437,33 @@ def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay():
     )
     actor = ActorContext("admin:9", ("data_browser.write",))
     receipt = application.apply_admin(
-        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, "人工核對",
+        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, note,
         preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-1"),
     )
     assert receipt.resulting_version == 1
     assert receipt.readback.values["name"] == "王小美"
     replay = application.apply_admin(
-        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, "人工核對",
+        "CASE-001", {"name": "王小美"}, ExpectedVersion(0), actor, note,
         preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-1"),
     )
     assert replay.replayed is True
+    assert repository.admin_receipts["admin-profile-1"]["reason"] == note.strip()
+    assert repository.admin_receipts["admin-profile-1"]["actor_id"] == actor.actor_id
     assert repository.profile["client_profile_version"] == 1
     with pytest.raises((ClientProfileRequestConflictError, ValueError)):
         application.apply_admin(
-            "CASE-001", {"name": "另一人"}, ExpectedVersion(0), actor, "人工核對",
+            "CASE-001", {"name": "另一人"}, ExpectedVersion(0), actor, note,
             preview.preview_fingerprint, IdempotencyKey("admin-profile-1"), CorrelationId("admin-profile-corr-2"),
         )
+
+
+def test_admin_optional_note_http_contract_does_not_relax_profile_review_decisions():
+    from pydantic import ValidationError
+    from api.schemas.client_registry import ClientProfileAdminApplyRequest
+    from api.schemas.client_profile import ClientProfileApprovalApplyRequest
+    body = dict(changes={'name': '王小美'}, expected_version=0, preview_fingerprint='a' * 64)
+    assert ClientProfileAdminApplyRequest(**body).reason == ''
+    assert ClientProfileAdminApplyRequest(**body, reason='').reason == ''
+    with pytest.raises(ValidationError):
+        ClientProfileAdminApplyRequest(**body, reason='字' * 501)
+    assert ClientProfileApprovalApplyRequest.model_fields['reason'].is_required()

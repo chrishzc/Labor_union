@@ -279,7 +279,7 @@ class ClientRegistryQueryApplication:
                 sequence=sequence,
                 event_type=_required_text(row.get("event_type"), 100, "client_registry_history_event_type_invalid"),
                 label=_required_text(row.get("label"), 100, "client_registry_history_label_invalid"),
-                reason=_required_text(row.get("reason"), 500, "client_registry_history_reason_invalid"),
+                reason=_history_note(row.get("reason")),
                 actor=_required_text(row.get("actor"), 191, "client_registry_history_actor_invalid"),
                 occurred_at=occurred_at,
             ))
@@ -326,6 +326,12 @@ def _optional_text(value: object, maximum: int) -> str | None:
     if len(text) > maximum:
         raise ValueError("client_registry_query_invalid")
     return text
+
+
+def _history_note(value: object) -> str:
+    if not isinstance(value, str) or len(value) > 500:
+        raise ClientRegistryContractError("client_registry_history_reason_invalid")
+    return value.strip()
 
 
 def _required_text(value: object, maximum: int, code: str) -> str:

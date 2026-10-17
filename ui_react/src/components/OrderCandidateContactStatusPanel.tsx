@@ -1,3 +1,4 @@
+import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
   candidateContactPoolClient,
@@ -97,6 +98,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
   const [informationRevision, setInformationRevision] = useState(0);
   const [responseTarget, setResponseTarget] = useState<{ id: number; name: string } | null>(null);
   const [responseChoice, setResponseChoice] = useState<'willing' | 'unwilling' | ''>('');
+  const saveValidation = useSaveValidation();
+  const responseChoiceRef = useRef<HTMLInputElement>(null);
+  const responseReasonRef = useRef<HTMLTextAreaElement>(null);
   const [, setFlowRevision] = useState(0);
   const mounted = useRef(false);
   const activeCaseNo = useRef(caseNo);
@@ -546,22 +550,27 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   }}>手動記錄接案意願</button>
                   {candidate.willingness === 'willing' && candidate.status === 'active' && <button type="button" className="candidate-confirmation-link" disabled={protectedOperation} onClick={() => onOpenCustomerConfirmation?.(candidate.id)}>前往客戶確認準備 →</button>}
                 </div>
-                {responseTarget?.id === candidate.id && <form className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
+                {responseTarget?.id === candidate.id && <form noValidate className="candidate-willingness-form" id={`candidate-willingness-${caseNo}-${candidate.id}`}
                   aria-label={`手動記錄接案意願（${candidate.staff_name}）`} onSubmit={event => {
-                    event.preventDefault(); if (!responseChoice) return;
+                    event.preventDefault();
+                    if (protectedOperation || !saveValidation.validate([
+                      { value: responseChoice, label: '初步接案意願', ref: responseChoiceRef },
+                      ...(responseChoice === 'unwilling' ? [{ value: reasonDrafts[candidate.id], label: '無意願原因', ref: responseReasonRef }] : []),
+                    ]) || !responseChoice) return;
                     void submitWillingness(candidate.id, responseChoice, reasonDrafts[candidate.id] ?? '').then(saved => { if (saved) setResponseTarget(null); });
                   }}>
                   <h4>手動記錄接案意願</h4>
                   <fieldset disabled={protectedOperation}><legend>初步接案意願</legend>
-                    <label><input type="radio" name="candidate-response" value="willing" required checked={responseChoice === 'willing'} onChange={() => setResponseChoice('willing')} />願意承接</label>
+                    <label><input ref={responseChoiceRef} type="radio" name="candidate-response" value="willing" required checked={responseChoice === 'willing'} onChange={() => setResponseChoice('willing')} />願意承接</label>
                     <label><input type="radio" name="candidate-response" value="unwilling" required checked={responseChoice === 'unwilling'} onChange={() => setResponseChoice('unwilling')} />無意願</label>
-                    <label className="candidate-willingness-note">詢問結果備註<textarea rows={3} maxLength={500} required={responseChoice === 'unwilling'} value={reasonDrafts[candidate.id] ?? ''}
+                    <label className="candidate-willingness-note">詢問結果備註<textarea ref={responseReasonRef} rows={3} maxLength={500} required={responseChoice === 'unwilling'} value={reasonDrafts[candidate.id] ?? ''}
                       onChange={event => setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: event.target.value }))} /></label>
                     <p>願意承接可留空；無意願需填寫原因。只記錄初步意願，尚未形成正式指派。</p>
                   </fieldset>
+                  {saveValidation.feedback}
                   {mutationError && <p role="alert">{mutationError}</p>}
                   <div className="order-case-action-row">
-                    <button type="submit" className="btn-primary-action" disabled={protectedOperation || !responseChoice}>儲存接案意願</button>
+                    <button type="submit" className="btn-primary-action" disabled={protectedOperation}>儲存接案意願</button>
                     <button type="button" disabled={protectedOperation} onClick={() => setResponseTarget(null)}>收起填寫</button>
                   </div>
                 </form>}

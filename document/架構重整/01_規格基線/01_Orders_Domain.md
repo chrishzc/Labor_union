@@ -643,6 +643,8 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 的下一代 Scheduling generation。此時「尚無正式排班」是允許修改的前提，不得反向成為 blocker，也
 不得為了修改進件資料先虛構 assignment 或逐日服務日期。
 
+2026-10-17 人工裁決：一般進件資料補件（姓名、日期／天數／時段及補件完成）的人工「修改原因」改為「備註（選填）」。既有 intake Apply 的 `reason` 省略或空白皆保存空字串，仍納入原 command fingerprint；actor、版本、Preview、冪等鍵、事件、receipt、回讀與同交易初始化契約不變。自動初始化步驟獨立記錄「系統依已完成進件資料初始化本案」作為實際系統觸發說明，不冒充人工備註；人工原文／空白仍保留在 Orders 命令紀錄。正式 Terms 影響、取消／重開、實際服務更正與財務操作的必填原因保持原契約。
+
 2026-10-13 人工裁決：進件補件畫面只顯示 owner Preview 的 `missing_fields` 中實際缺少的
 服務開始日／服務天數；已齊全的欄位不作為補件輸入顯示。補一項時沿用另一項已保存的值，
 仍走既有 Orders Preview／Apply。完整日期／天數的早期異動保留「修改服務日期／天數」明示入口，

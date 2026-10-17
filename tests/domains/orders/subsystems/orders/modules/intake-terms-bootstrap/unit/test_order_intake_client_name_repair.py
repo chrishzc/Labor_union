@@ -17,7 +17,8 @@ from subsystems.orders.order_intake_terms_bootstrap import OrderIntakeTermsBoots
 _CASE = "CASE-153"
 
 
-def test_missing_client_name_can_be_repaired_with_version_fingerprint_and_audit():
+@pytest.mark.parametrize("note", ["", "   ", "補齊缺失姓名"])
+def test_missing_client_name_can_be_repaired_with_version_fingerprint_and_audit(note):
     repository = _Repository(client_name=None)
     unit_of_work = _UnitOfWorkFactory()
     application = OrderIntakeClientNameRepairApplication(repository, unit_of_work)
@@ -37,7 +38,7 @@ def test_missing_client_name_can_be_repaired_with_version_fingerprint_and_audit(
         preview.preview_fingerprint,
         "issue-153:name",
         "orders-operator",
-        "補齊缺失姓名",
+        note,
     )
 
     assert receipt.lifecycle_version == 7
@@ -48,7 +49,7 @@ def test_missing_client_name_can_be_repaired_with_version_fingerprint_and_audit(
     assert unit_of_work.commits == 1
     stored = repository.receipts[("orders_intake_client_name_repair/v1", "issue-153:name")]
     assert stored["actor"] == "orders-operator"
-    assert stored["reason"] == "補齊缺失姓名"
+    assert stored["reason"] == note.strip()
     assert stored["preview_fingerprint"] == preview.preview_fingerprint
 
 

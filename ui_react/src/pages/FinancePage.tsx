@@ -1,3 +1,4 @@
+import { useSaveValidation } from '../components/useSaveValidation';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
@@ -116,6 +117,8 @@ export const FinancePage: React.FC = () => {
   const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
   const [applyReason, setApplyReason] = useState('已核對銀行交易明細預覽，確認匯入');
   const [applyConfirmed, setApplyConfirmed] = useState(false);
+  const saveValidation = useSaveValidation();
+  const applyReasonRef = useRef<HTMLInputElement>(null);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
@@ -302,6 +305,8 @@ export const FinancePage: React.FC = () => {
   };
   const applyImportedBatch = async () => {
     if (batchPreview.kind !== 'ready' || !applyConfirmed || !batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0) return;
+    if (applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
+    if (!saveValidation.validate([{ value: displayedApplyReason, label: '正式入帳原因', ref: applyReasonRef }])) return;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
       const previewFingerprint = batchPreview.data.preview_fingerprint;
@@ -756,11 +761,11 @@ export const FinancePage: React.FC = () => {
 
                 {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.84rem', fontWeight: 700 }}>
+                    <><label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.84rem', fontWeight: 700 }}>
                       正式入帳原因
                       <input
                         className="finance-input"
-                        value={displayedApplyReason}
+                        ref={applyReasonRef} aria-required="true" value={displayedApplyReason}
                         disabled={submittedFinanceCommand !== undefined}
                         maxLength={500}
                         onChange={(event) => {
@@ -768,7 +773,7 @@ export const FinancePage: React.FC = () => {
                           setApplyConfirmed(false);
                         }}
                       />
-                    </label>
+                    </label>{saveValidation.feedback}</>
                     <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem' }}>
                       <input
                         type="checkbox"
@@ -781,7 +786,7 @@ export const FinancePage: React.FC = () => {
                       className="finance-btn-primary"
                       style={{ alignSelf: 'flex-start' }}
                       data-control-id="finance.finance-import.apply"
-                      disabled={!applyConfirmed || !displayedApplyReason.trim() || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
+                      disabled={!applyConfirmed || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
                       onClick={() => void applyImportedBatch()}
                     >
                       {applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '正式匯入中…' : '確認匯入'}

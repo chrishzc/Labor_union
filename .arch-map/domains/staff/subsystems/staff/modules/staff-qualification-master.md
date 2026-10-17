@@ -31,6 +31,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1
 - `document/架構重整/01_規格基線/33_案件與月嫂整合名冊正式規格.md` §4 完整資格主檔直接編輯
+- Apply 的 `reason` 為選填備註，省略或留白不阻擋儲存；沿用 snapshot／Preview、actor、receipt 與同鍵命令辨識。
 
 ## Verification
 - layout_status: `custom_current`

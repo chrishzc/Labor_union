@@ -41,7 +41,7 @@
 .subsidy-refund-estimate { margin-left: 8px; font-size: .8rem; font-weight: 400; color: #74593f; }
 .subsidy-refund-period .subsidy-refund-month-toggle { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .subsidy-refund-month-toggle input { width: 18px; height: 18px; }
-.subsidy-refund-case-button { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: #fff; color: #a43c12; cursor: pointer; }
+.subsidy-refund-case-button { min-height: 40px; padding: 8px 12px; border: 1px solid #dec0b6; border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); cursor: pointer; border-color: var(--md-sys-color-primary); }
 .subsidy-refund-case-button:focus-visible { outline: 3px solid #ff7f50; outline-offset: 2px; }
 .subsidy-refund-note, .subsidy-refund-case-query > p { color: #74593f; font-size: .875rem; line-height: 1.6; }
 .subsidy-refund-case-query { border-top: 1px solid #dec0b6; padding-top: 20px; margin-top: 24px; scroll-margin-top: 180px; }
@@ -140,9 +140,9 @@
 }
 
 .finance-tab-bar button.active {
-  background: #ff7f50;
-  border-color: #ff7f50;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   box-shadow: 0 2px 8px rgba(255, 127, 80, 0.3);
 }
 
@@ -175,22 +175,20 @@
   padding: 7px 14px;
   border: 1px solid #dec0b6;
   border-radius: 8px;
-  background: #ffffff;
-  color: #1e1b19;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   cursor: pointer;
   font-weight: 700;
   font-size: 0.82rem;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .finance-toolbar button:hover,
 .finance-reload-btn:hover {
-  border-color: #ff7f50;
-  color: #a43c12;
-}
+  border-color: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary-hover); }
 
 /* ==========================================================================
    4. KPI 指標卡網格 (KPI Grid)
@@ -433,19 +431,17 @@
    ========================================================================== */
 .finance-btn-primary {
   padding: 8px 16px;
-  background: #ff7f50;
-  color: #ffffff;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border: none;
   border-radius: 8px;
   font-size: 0.84rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .finance-btn-primary:hover:not(:disabled) {
-  background: #ea580c;
-}
+  background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 
 .finance-btn-primary:disabled {
   opacity: 0.6;
@@ -454,20 +450,18 @@
 
 .finance-btn-secondary {
   padding: 8px 16px;
-  background: #ffffff;
-  color: #57423b;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
   border: 1px solid #dec0b6;
   border-radius: 8px;
   font-size: 0.84rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
-}
+  transition: all 0.15s ease; border-color: var(--md-sys-color-primary); }
 
 .finance-btn-secondary:hover:not(:disabled) {
-  border-color: #ff7f50;
-  color: #a43c12;
-}
+  border-color: var(--md-sys-color-primary-hover);
+  color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary-hover); }
 
 .finance-btn-disabled,
 .finance-table td button:disabled,
@@ -671,7 +665,7 @@
 .finance-inline-summary strong { font-size: 1.16rem; font-variant-numeric: tabular-nums; color: #1e1b19; margin-left: 6px; }
 .finance-secondary { display: block; margin-top: 4px; color: #74593f; font-size: .78rem; }
 .finance-row-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.finance-row-actions button, .finance-footer-note button { border: 0; background: transparent; padding: 5px 0; min-height: 36px; color: #a43c12; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; font: inherit; font-size: .83rem; }
+.finance-row-actions button, .finance-footer-note button { border: 0; background: var(--md-sys-color-primary); padding: 7px 10px; min-height: 36px; color: var(--md-sys-color-on-primary); text-decoration: none; text-underline-offset: 4px; cursor: pointer; font: inherit; font-size: .83rem; border-color: var(--md-sys-color-primary); border-radius: 8px; }
 .finance-row-actions button:focus-visible, .finance-footer-note button:focus-visible { outline: 3px solid #a43c12; outline-offset: 3px; }
 td.finance-row-actions { display: table-cell; white-space: nowrap; }
 td.finance-row-actions button + button { margin-left: 14px; }
@@ -715,3 +709,21 @@ td.finance-row-actions button + button { margin-left: 14px; }
   .finance-drawer-content { padding: 16px 18px 28px; }
   .finance-fact-grid { column-gap: 12px; }
 }
+.subsidy-refund-case-button:hover:not(:disabled),
+.finance-toolbar button:hover:not(:disabled),
+.finance-reload-btn:hover:not(:disabled),
+.finance-btn-primary:hover:not(:disabled),
+.finance-btn-secondary:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.subsidy-refund-case-button:disabled,
+.finance-toolbar button:disabled,
+.finance-reload-btn:disabled,
+.finance-btn-primary:disabled,
+.finance-btn-secondary:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+.finance-row-actions button:hover:not(:disabled),
+.finance-footer-note button:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.finance-row-actions button:disabled,
+.finance-footer-note button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
+
+[data-surface-id="finance.page"] input[type="file"]::file-selector-button { padding: 8px 12px; margin-right: 10px; border: 1px solid var(--md-sys-color-primary); border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; font-weight: 700; cursor: pointer; }
+[data-surface-id="finance.page"] input[type="file"]:hover:not(:disabled)::file-selector-button { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
+[data-surface-id="finance.page"] input[type="file"]:disabled::file-selector-button { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; }

@@ -1,3 +1,5 @@
+import { transport } from '../../../../../../../api/shared/transport';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
@@ -101,10 +103,11 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(start, { target: { value: '09:00' } });
     fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '17:00' } });
     expect(screen.getByLabelText('每日服務時數')).toHaveValue(8);
-    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), { target: { value: '核對服務時段' } });
+    expect(screen.getByLabelText('備註（選填）')).toHaveValue('');
+    expect(screen.getByLabelText('備註（選填）')).not.toHaveAttribute('aria-required');
     fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
     fireEvent.click(await screen.findByRole('button', { name: '確認儲存服務資料' }));
-    await waitFor(() => expect(completionApply).toHaveBeenCalledWith(caseNo, repaired, '核對服務時段', expect.stringContaining(`orders-intake-complete-${caseNo}-`)));
+    await waitFor(() => expect(completionApply).toHaveBeenCalledWith(caseNo, repaired, '', expect.stringContaining(`orders-intake-complete-${caseNo}-`)));
     if (failReadback) {
       await screen.findByRole('button', { name: '只重新讀取補件結果' });
       expect(stateChanged).toHaveBeenLastCalledWith(expect.objectContaining({ busy: true }));
@@ -171,7 +174,7 @@ describe('Orders intake repair entry', () => {
     fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
     await screen.findByRole('button', { name: '確認儲存服務資料' });
     expect(previewTerms).toHaveBeenCalledWith(caseNo, '2026-11-15', 21, expect.objectContaining({ proposedServiceTime: savedTime }));
-    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), { target: { value: '確認每日實際服務八小時' } });
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '確認每日實際服務八小時' } });
     query.mockResolvedValue({ ...completion, lifecycle_version: 8 });
     fireEvent.click(screen.getByRole('button', { name: '確認儲存服務資料' }));
     await screen.findByRole('button', { name: '只重新讀取補件結果' });
@@ -209,7 +212,7 @@ describe('Orders intake repair entry', () => {
     expect(screen.queryByLabelText('服務方式')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     fireEvent.change(phone, { target: { value: '0912345678' } });
-    fireEvent.change(screen.getByLabelText('欄位修正原因'), { target: { value: '核對並修正電話' } });
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '核對並修正電話' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
     await screen.findByLabelText('欄位修正前後');
     vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...profileDetail, client: {
@@ -225,6 +228,7 @@ describe('Orders intake repair entry', () => {
 
   afterEach(() => {
     cleanup();
+    orderMutationFlowStore.clearAll();
     vi.restoreAllMocks();
   });
 
@@ -267,6 +271,48 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(input, { target: { value: missing === 'start_date' ? '2026-10-15' : '30' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
     await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30, expect.any(Object)));
+  });
+
+  it.each([false, true])('姓名備註留白且日期仍缺件時，使用客戶主檔正式回讀，名稱不一致則保留保護（不一致=%s）', async (mismatched) => {
+    orderMutationFlowStore.clearAll();
+    let saved = false;
+    const generalDetail = vi.spyOn(ordersQueryClient, 'getOrderDetail').mockRejectedValue(new Error('incomplete order projection'));
+    vi.mocked(clientRegistryClient.query).mockImplementation(async () => ({ ...profileDetail,
+      client: { ...profileDetail.client, values: { ...profileDetail.client.values,
+        name: saved ? (mismatched ? '另一姓名' : '合成補件姓名') : null } } }));
+    vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockImplementation(async () => ({
+      case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
+      current_start_date: null, current_service_days: null,
+      missing_fields: saved ? ['start_date', 'service_days'] : ['client_name', 'start_date', 'service_days'],
+      blockers: [], apply_allowed: false, preview_fingerprint: FP1,
+    }));
+    vi.spyOn(orderIntakeCompletionClient, 'previewClientName').mockResolvedValue({
+      case_no: 'CASE-153', lifecycle_version: 7, before_client_name: null, after_client_name: '合成補件姓名',
+      blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+    });
+    const apply = vi.spyOn(orderIntakeCompletionClient, 'applyClientName').mockImplementation(async () => {
+      saved = true;
+      return { receipt_key: 'name-receipt', case_no: 'CASE-153', lifecycle_version: 7,
+        client_name: '合成補件姓名', preview_fingerprint: FP1, replayed: false };
+    });
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" registry />);
+    fireEvent.change(await screen.findByLabelText('客戶姓名'), { target: { value: '合成補件姓名' } });
+    expect(screen.getByLabelText('備註（選填）')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件影響' }));
+    fireEvent.click(await screen.findByRole('button', { name: '確認儲存姓名' }));
+    if (mismatched) {
+      await screen.findByRole('button', { name: '只重新讀取補件結果' });
+      expect(screen.getByLabelText('約定服務開始日')).toBeDisabled();
+      expect(screen.queryByText('客戶姓名已補齊並完成回讀。')).not.toBeInTheDocument();
+    } else {
+      await screen.findByText('客戶姓名已補齊並完成回讀。');
+      expect(screen.getByLabelText('約定服務開始日')).toBeEnabled();
+      expect(screen.getByLabelText('服務天數')).toBeEnabled();
+      expect(screen.queryByRole('button', { name: '只重新讀取補件結果' })).not.toBeInTheDocument();
+    }
+    expect(apply).toHaveBeenCalledWith('CASE-153', expect.any(Object), '', expect.any(String));
+    expect(apply).toHaveBeenCalledOnce();
+    expect(generalDetail).not.toHaveBeenCalled();
   });
 
   it('retains owner dates and days when a missing name causes general detail to return empty terms', async () => {
@@ -448,7 +494,7 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(screen.getByLabelText('CASE-153 服務天數'), {
       target: { value: '30' },
     });
-    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), {
+    fireEvent.change(screen.getByLabelText('CASE-153 備註（選填）'), {
       target: { value: '補齊原始進件缺漏' },
     });
     await waitFor(() => expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeEnabled());
@@ -496,8 +542,7 @@ describe('Orders intake repair entry', () => {
     expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
     expect(applyName).not.toHaveBeenCalled();
     const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
-    expect(applyButton).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('CASE-153 補件原因'), { target: { value: '合成姓名補件驗收' } });
+    expect(screen.getByLabelText('CASE-153 備註（選填）')).toHaveValue('');
     if (!allowed) {
       expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
       expect(applyButton).toBeDisabled();
@@ -510,7 +555,7 @@ describe('Orders intake repair entry', () => {
     fireEvent.click(applyButton);
     await waitFor(() => expect(applyName).toHaveBeenCalledWith(
       'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
-      '合成姓名補件驗收', expect.stringContaining('orders-intake-client-name-CASE-153-'),
+      '', expect.stringContaining('orders-intake-client-name-CASE-153-'),
     ));
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
   });
@@ -553,7 +598,7 @@ describe('Orders intake repair entry', () => {
     expect(screen.getByLabelText('服務天數')).toHaveValue(30);
     fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-09-12' } });
     fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '28' } });
-    fireEvent.change(screen.getByLabelText('修改原因（儲存時必填）'), {
+    fireEvent.change(screen.getByLabelText('備註（選填）'), {
       target: { value: '修正剛匯入的服務條件' },
     });
     fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
@@ -566,4 +611,32 @@ describe('Orders intake repair entry', () => {
     expect(await screen.findByText('約定服務開始日／天數已更新並完成回讀。')).toBeInTheDocument();
   });
 
+});
+
+
+describe('intake typed client optional-note serialization', () => {
+  it.each(['', '   ', ' 工會補充 '])('sends all three actual Apply requests with optional note %j', async (note) => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
+    const stoppedAtTransport = new Error('serialization verified; no HTTP writes');
+    const post = vi.spyOn(transport, 'post').mockRejectedValue(stoppedAtTransport);
+    const terms: Parameters<typeof orderIntakeCompletionClient.applyTerms>[1] = { case_no: 'CASE-NOTE', lifecycle_version: 0, before_start_date: null, before_service_days: null,
+      after_start_date: '2026-11-01', after_service_days: 26, changed_fields: ['start_date', 'service_days'],
+      blockers: [], apply_allowed: true, preview_fingerprint: FP1 };
+    const name = { case_no: 'CASE-NOTE', lifecycle_version: 0, before_client_name: null,
+      after_client_name: '合成測試', blockers: [], apply_allowed: true, preview_fingerprint: FP1 };
+    const completion = { case_no: 'CASE-NOTE', lifecycle_version: 0, current_status: '待補件', target_status: '洽談中',
+      missing_fields: [], blockers: [], apply_allowed: true, preview_fingerprint: FP1 };
+    const commands = [
+      () => orderIntakeCompletionClient.applyTerms('CASE-NOTE', terms, note, 'note-terms'),
+      () => orderIntakeCompletionClient.applyClientName('CASE-NOTE', name, note, 'note-name'),
+      () => orderIntakeCompletionClient.applyCompletion('CASE-NOTE', completion, note, 'note-complete'),
+    ];
+    for (const command of commands) {
+      await expect(command()).rejects.toBe(stoppedAtTransport);
+      expect(post).toHaveBeenLastCalledWith(expect.stringMatching(/\/apply$/),
+        expect.objectContaining({ reason: note.trim(), expected_lifecycle_version: 0, preview_fingerprint: FP1 }),
+        expect.objectContaining({ headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }) }));
+    }
+    expect(post).toHaveBeenCalledTimes(3);
+  });
 });

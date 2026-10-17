@@ -26,7 +26,7 @@
 .formal-recommendation-inline-form > p { font-size: 14px; }
 .formal-recommendation-person-status { display: inline-block; padding: 6px 10px; border-radius: 18px; background: #fff0d9; font-size: 13px; }
 .formal-recommendation-person-status.ready { color: #436849; background: #edf4eb; }
-.order-case-page .formal-recommendation-text-action { display: block; border: 0 !important; background: none !important; color: #b95125 !important; text-decoration: underline; text-underline-offset: 4px; padding: 7px 0 !important; }
+.order-case-page .formal-recommendation-text-action { display: block; border: 1px solid var(--md-sys-color-primary) !important; background: var(--md-sys-color-primary) !important; color: var(--md-sys-color-on-primary) !important; text-decoration: none; text-underline-offset: 4px; padding: 9px 15px !important; border-radius: 8px; }
 .formal-recommendation-customer-info { padding-top: 20px; margin-top: 20px; border-top: 1px solid #e9ded6; }
 .formal-recommendation-sheets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
 .formal-recommendation-sheets article { display: grid; align-content: start; justify-items: start; gap: 8px; padding: 14px; border-radius: 9px; background: #faf6f1; border: 1px solid #eee5dc; }
@@ -81,9 +81,11 @@
 .order-case-page label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 7px; font-size: .84rem; line-height: 1.5; }
 .order-case-page input:not([type=checkbox]):not([type=radio]), .order-case-page select, .order-case-page textarea { max-width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid #d9cbbf; border-radius: 8px; background: #fff; font: inherit; }
 .order-case-page input[type=checkbox] { accent-color: #b95125; width: 16px; height: 16px; }
-.order-case-page button:not(.order-case-back):not(.order-case-stepper button):not(.order-case-view-nav button) { min-height: 40px; padding: 9px 15px; border: 1px solid #d8c7b9; border-radius: 8px; background: #fffaf5; color: #794b2e; font: inherit; font-size: .84rem; cursor: pointer; }
-.order-case-page .order-v2-drawer-current-task > fieldset > section > button { background: #b95125 !important; color: #fff !important; border-color: #b95125 !important; margin-bottom: 18px; }
-.order-case-page button:disabled { opacity: .5; cursor: not-allowed !important; }
+.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)) { min-height: 40px; padding: 9px 15px; border: 1px solid #d8c7b9; border-radius: 8px; background: #fffaf5; color: #794b2e; font: inherit; font-size: .84rem; cursor: pointer; }
+.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-steps button, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)) { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
+.order-case-page button:not(:where(.order-case-back, .order-case-stepper button, .order-case-view-nav button)):not(:where(.order-case-subnav button, .order-information-choice button, .calendar-date-cell, .service-arrangement-steps button, .service-arrangement-related-actions > button, .formal-recommendation-text-action, .candidate-information-tabs button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }
+.order-case-page .order-v2-drawer-current-task > fieldset > section > button { margin-bottom: 18px; }
+.order-case-page button:disabled { opacity: 1; cursor: not-allowed !important; background: var(--md-sys-color-disabled-container) !important; color: var(--md-sys-color-disabled) !important; border-color: var(--md-sys-color-outline) !important; }
 .order-case-page button:focus-visible, .order-case-page a:focus-visible { outline: 3px solid #b95125; outline-offset: 3px; }
 .order-case-page .order-v2-drawer-section { border: 1px solid #eadfd6; border-radius: 14px; padding: 22px; background: #fff; margin: 0; }
 .order-case-page [role=alert] { border-radius: 9px; padding: 14px; margin: 14px 0; background: #fff3ed; color: #914421; }
@@ -102,7 +104,7 @@
 .order-multi-selectors select { width: 100%; }
 .order-multi-hint { margin: 12px 0 16px; color: #756358; font-size: .77rem; }
 .order-multi-setup > .order-v2-open-drawer { width: 100%; background: #b95125; border-color: #b95125; color: #fff; font-weight: 700; }
-.order-case-page .order-multi-setup > .order-v2-open-drawer { background: #b95125 !important; border-color: #b95125 !important; color: #fff !important; }
+.order-case-page .order-multi-setup > .order-v2-open-drawer { background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
 .order-multi-results { margin-top: 24px; }
 .order-multi-result-heading > span { flex-shrink: 0; padding: 5px 10px; border-radius: 20px; background: #fff1e7; color: #98431d; font-size: .76rem; font-weight: 700; }
 .order-multi-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
@@ -850,7 +852,7 @@
 .candidate-inquiry-dialog-heading h2 { margin: 0; font-size: 22px; }
 .candidate-inquiry-dialog button { cursor: pointer; border: 1px solid #dcbba7; border-radius: 7px; padding: 10px 14px; background: #fffdfb; color: #8b421d; }
 .candidate-inquiry-dialog button:disabled { opacity: .55; cursor: default; }
-.candidate-inquiry-dialog button.btn-primary-action { background: #bd430d; color: white; border-color: #bd430d; }
+.candidate-inquiry-dialog button.btn-primary-action { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
 .candidate-inquiry-dialog-content { padding: 24px; overflow-y: auto; min-height: 0; }
 .candidate-inquiry-intro { padding: 0 24px; color: #896b5a; }
 .candidate-information-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 24px 16px; border-bottom: 1px solid #edd8cc; }
@@ -1020,7 +1022,7 @@
 .service-date-calendar-hint { display: block; margin-top: 12px; font-size: 12px; color: #857163; }
 .service-date-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #eadbd0; }
 .service-date-footer small { font-size: 13px; color: #857163; }
-.order-case-page .service-date-footer .service-date-primary, .order-case-page .service-date-preview-actions .service-date-primary { width: auto; margin: 0; background: #ba4d20 !important; border-color: #ba4d20 !important; color: #fff !important; }
+.order-case-page .service-date-footer .service-date-primary, .order-case-page .service-date-preview-actions .service-date-primary { width: auto; margin: 0; background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }
 .service-date-preview { border: 1px solid #e8d2c2; border-radius: 10px; padding: 18px; margin: 16px 0; background: #fffaf6; }
 .service-date-preview h4 { margin: 0 0 8px; }
 .service-date-preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -1106,3 +1108,11 @@
   .contract-review-footer { padding: 14px; flex-wrap: wrap; }
   .contract-review-footer button { width: 100%; }
 }
+.candidate-information-tabs button[aria-pressed="true"] { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); box-shadow: inset 0 -3px var(--md-sys-color-primary-hover); }
+.order-case-page .service-arrangement-related-actions > button { color: var(--md-sys-color-primary); }
+
+.order-case-page .order-v2-danger { background: var(--md-sys-color-error); border-color: var(--md-sys-color-error); color: var(--md-sys-color-on-primary); }
+.order-case-page .order-v2-danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
+.order-case-page .formal-recommendation-text-action:hover:not(:disabled) { background: var(--md-sys-color-primary-hover) !important; border-color: var(--md-sys-color-primary-hover) !important; }
+.candidate-inquiry-dialog button:not(:where(.candidate-information-tabs button)) { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
+.candidate-inquiry-dialog button:not(:where(.candidate-information-tabs button)):hover:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); }

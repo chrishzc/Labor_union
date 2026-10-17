@@ -1,3 +1,5 @@
+import { useRef as useValidationRef } from 'react';
+import { useSaveValidation } from '../../components/useSaveValidation';
 /** Governed Knowledge workflow for LINE common questions and approved answers. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, CircleHelp, Download, Pencil, Plus, RefreshCw, Search, SearchCheck } from 'lucide-react';
@@ -229,12 +231,17 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     setInitialEditorOpened(true);
   }, [readStatus, items, initialQaId, initialQuestion, initialEditorOpened]);
 
+  const saveValidation = useSaveValidation();
+  const questionRef = useValidationRef<HTMLInputElement>(null);
+  const qaIdRef = useValidationRef<HTMLInputElement>(null);
+
   const save = async (event?: React.SyntheticEvent) => {
     event?.preventDefault();
     const qaId = formData.id.trim().toUpperCase();
-    if (!/^[A-Z0-9][A-Z0-9-]{1,79}$/.test(qaId) || !formData.question.trim()) {
-      setModalNotice('請輸入有效的題目編號與標準問題。'); return;
-    }
+    if (busy || !saveValidation.validate([
+      { value: formData.question, label: '標準問題', ref: questionRef },
+      { value: qaId, label: '題目編號', ref: qaIdRef, valid: /^[A-Z0-9][A-Z0-9-]{1,79}$/.test(qaId), message: '請填寫有效的題目編號（2～80 碼英文、數字或連字號）。' },
+    ])) return;
     if (isCreating && items.some((item) => item.qa.id === qaId)) {
       setModalNotice('此題目編號已存在，請從清單開啟原題目編輯。'); return;
     }
@@ -333,12 +340,13 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
       </div>}>
         <p className="studio-description">編輯後會先建立草稿，確認答案後再發布。</p>
         <form className="qa-editor-form" onSubmit={save} noValidate>
+          {saveValidation.feedback}
           {(modalNotice || (noticeKind === 'error' && notice)) && <div className="line-error" role="alert">{modalNotice || notice}</div>}
-          <label className="qa-editor-field"><span>標準問題 *</span><input required value={formData.question} onChange={(event) => setFormData({ ...formData, question: event.target.value })} /></label>
+          <label className="qa-editor-field"><span>標準問題 *</span><input ref={questionRef} required value={formData.question} onChange={(event) => setFormData({ ...formData, question: event.target.value })} /></label>
           <label className="qa-editor-field"><span>標準回答</span><textarea rows={7} value={formData.answer} placeholder="可先留空；補齊後才能發布。" onChange={(event) => setFormData({ ...formData, answer: event.target.value })} /></label>
           <label className="qa-editor-field"><span>常見問法／別名（每行一筆）</span><textarea rows={3} value={formData.aliases} onChange={(event) => setFormData({ ...formData, aliases: event.target.value })} /></label>
           <details className="studio-editor-secondary" open={isCreating || undefined}><summary>分類與其他資訊</summary>
-            <label className="qa-editor-field"><span>題目編號 *</span><input required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
+            <label className="qa-editor-field"><span>題目編號 *</span><input ref={qaIdRef} required disabled={!isCreating} value={formData.id} placeholder="例如 QA-030" onChange={(event) => setFormData({ ...formData, id: event.target.value })} /></label>
             <div className="qa-editor-columns"><label className="qa-editor-field"><span>業務分類</span><input value={formData.category} onChange={(event) => setFormData({ ...formData, category: event.target.value })} /></label><label className="qa-editor-field"><span>標籤</span><input value={formData.tag} onChange={(event) => setFormData({ ...formData, tag: event.target.value })} /></label></div>
             <label className="qa-editor-field"><span>內部備註</span><input value={formData.notes} onChange={(event) => setFormData({ ...formData, notes: event.target.value })} /></label>
           </details>
