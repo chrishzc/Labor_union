@@ -30,7 +30,9 @@ Schema：232 fresh／1051 preserve byte-equivalent ALTER，僅在 enum 尾端新
 
 ## 功能驗收
 
-`scratch/candidate-inquiry-implementation/browser/evidence.json`：Chrome 桌機 1440／手機 390，新增候選、無候選預覽、三份分開選人寄送與 exact owner 回條、單人重送、個別意願與備註、帶入客戶確認準備、saved／draft 日期限制與完成版抽屜畫面均 PASS。客戶確認使用正式 `/matching-plans/active` 檢查，不因導覽而自動建立方案。
+Chrome 桌機 1440／手機 390 的當次驗收：新增候選、無候選預覽、三份分開選人寄送與 exact owner 回條、單人重送、個別意願與備註、帶入客戶確認準備、saved／draft 日期限制與完成版抽屜畫面均 PASS。客戶確認使用正式 `/matching-plans/active` 檢查，不因導覽而自動建立方案。
+
+2026-10-16 暫存清理：依人工指示移除 16 張桌機／手機驗收截圖；本節保留當次驗收結論，不再依賴暫存圖片。`scratch/candidate-inquiry-implementation/browser/evidence.json` 保留為文字紀錄，資料庫升級的備份與必要收據仍保留。
 
 `delivery-readback.json`：隔離 MySQL 的正式 LINE worker＋不連網 mock provider，18 個任務處理後三份各人的最新狀態 sent、原 event／task ID 與意願事件保持；外部 sends=0。candidate Query 讀 canonical task state，並不改写原發送事件。
 

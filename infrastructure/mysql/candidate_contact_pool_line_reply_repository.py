@@ -36,6 +36,11 @@ class MySqlCandidateContactPoolLineReplyRepository:
             cursor.execute(
                 "SELECT source_event.id AS source_event_id, source_event.pool_id, "
                 "source_event.candidate_id, pool.case_no, entry.status AS candidate_status, "
+                "EXISTS(SELECT 1 FROM caregiver_candidate_contact_events refreshed "
+                "WHERE refreshed.candidate_id=entry.id AND refreshed.id>source_event.id "
+                "AND refreshed.event_type='willingness_changed' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.response_kind'))='candidate_period_refreshed' "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.willingness'))='pending') AS period_stale, "
                 "staff_binding.line_user_id, orders.status AS order_status, "
                 "COALESCE((SELECT MAX(answer_delivery.sent_at_utc) FROM line_delivery_tasks answer_delivery "
                 "WHERE answer_delivery.source_aggregate_type='candidate_contact_answer' "
@@ -94,6 +99,8 @@ class MySqlCandidateContactPoolLineReplyRepository:
                     return int(existing["id"])
                 raise ValueError("candidate contact reply idempotency conflict")
 
+            if binding.get("period_stale"):
+                raise ValueError("candidate contact period has changed")
             sent_at = binding.get("sent_at_utc")
             if not isinstance(sent_at, datetime):
                 raise ValueError("candidate contact information was not delivered")

@@ -44,6 +44,7 @@
   - `api/schemas/order_government_subsidy_projection.py`
 
 ## Dependencies
+- outbound: `government-subsidy/government-subsidy/module:reconciliation-register-query` — 政府補助清單的唯讀預估沿同 owner 時數／資格上限／凍結單價；服務確認讀既有 Orders service_completion 證據，未核准以 nullable 正式待收與預估分開傳送。
 - outbound: `global/reporting/weekly-operations-report` — 讀取固定十欄、年度總數與曆年期間的案件受理統計；不在 Orders presentation 重算正式分類。
 - outbound: `scheduling/scheduling` — 讀取有效等待訂金鎖、正式服務期間與 service-time terms；有效鎖是推薦確認已跨入契約準備的直接投影證據。
 - outbound: `client-finance/client-finance` — 讀取定金與客戶 obligation projection。

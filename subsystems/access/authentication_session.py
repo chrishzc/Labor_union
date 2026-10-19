@@ -357,11 +357,22 @@ def create_admin_user(
         conn.close()
 
 
+def has_root_admin(*, connection_factory: ConnectionFactory) -> bool:
+    """Read only the singleton designation, without exposing account details."""
+    conn = connection_factory()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM admin_root_account WHERE singleton_key=1) AS present")
+            return bool(cursor.fetchone()["present"])
+    finally:
+        conn.close()
+
+
 def bootstrap_root_admin(
     *, connection_factory: ConnectionFactory, username: str, password: str,
     display_name: str, linked_line_user_id: str | None = None
 ) -> int:
-    """Offline-only initial root bootstrap; it fails closed once a root fact exists."""
+    """Controlled initial root bootstrap; it fails closed once a root fact exists."""
     normalized_username = username.strip().lower()
     normalized_name = display_name.strip()
     if not normalized_username or not normalized_name:

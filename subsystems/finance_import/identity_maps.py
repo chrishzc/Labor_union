@@ -34,15 +34,17 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
     assert callable(getattr(cursor, "fetchall", None)), "cursor must provide fetchall()"
 
     cursor.execute(
-        """SELECT order_row.client_id, br.refund_account_no
+        """SELECT order_row.client_id, snapshot.bank_account AS refund_account_no
            FROM client_obligations obligation
            JOIN orders order_row ON order_row.case_no=obligation.case_no
-           JOIN beclass_records br ON br.query_no=obligation.case_no
+           JOIN client_refund_recipient_snapshots snapshot
+             ON snapshot.refund_obligation_identity=obligation.obligation_identity
+            AND snapshot.case_no=obligation.case_no
            WHERE obligation.direction='payable_to_client'
              AND obligation.obligation_type='subsidy_return'
              AND obligation.status='open'
              AND obligation.amount_due_ntd>0
-           ORDER BY order_row.client_id, br.id"""
+           ORDER BY order_row.client_id, obligation.obligation_identity"""
     )
     client_rows = cursor.fetchall()
     subsidy_return_candidates: dict[str, set[int]] = {}
@@ -56,15 +58,17 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         subsidy_return_candidates.setdefault(account, set()).add(client_id)
 
     cursor.execute(
-        """SELECT order_row.client_id, br.refund_account_no
+        """SELECT order_row.client_id, snapshot.bank_account AS refund_account_no
            FROM client_obligations obligation
            JOIN orders order_row ON order_row.case_no=obligation.case_no
-           JOIN beclass_records br ON br.query_no=obligation.case_no
+           JOIN client_refund_recipient_snapshots snapshot
+             ON snapshot.refund_obligation_identity=obligation.obligation_identity
+            AND snapshot.case_no=obligation.case_no
            WHERE obligation.direction='payable_to_client'
              AND obligation.status='open'
              AND obligation.amount_due_ntd>0
              AND obligation.obligation_type IN ('refund','adjustment')
-           ORDER BY order_row.client_id, br.id"""
+           ORDER BY order_row.client_id, obligation.obligation_identity"""
     )
     refund_rows = cursor.fetchall()
     refund_candidates: dict[str, set[int]] = {}

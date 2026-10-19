@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>首次設定｜工會管理系統</title>
+  <link rel="stylesheet" href="/setup/style.css">
+  <script src="/setup/setup.js" defer></script>
+</head>
+<body>
+  <main class="login-viewport">
+    <section class="login-card-container" aria-labelledby="title">
+      <div class="login-brand-badge" aria-hidden="true">✦</div>
+      <h1 class="login-main-title" id="title">建立最高管理員</h1>
+      <p class="login-desc-subtitle">歡迎使用工會管理系統。完成這次設定後，即可登入並綁定驗證器。</p>
+      <form id="setup-form">
+        <div class="login-input-group"><label class="login-field-label" for="username">登入帳號</label>
+          <input class="login-text-input" id="username" autocomplete="username" required maxlength="100" autofocus></div>
+        <div class="login-input-group"><label class="login-field-label" for="display-name">顯示名稱</label>
+          <input class="login-text-input" id="display-name" autocomplete="name" required maxlength="100"></div>
+        <div class="login-input-group"><label class="login-field-label" for="password">密碼</label>
+          <input class="login-text-input" id="password" type="password" autocomplete="new-password" required minlength="10" maxlength="256" aria-describedby="password-help">
+          <small id="password-help">至少 10 個字元。</small></div>
+        <div class="login-input-group"><label class="login-field-label" for="confirm-password">確認密碼</label>
+          <input class="login-text-input" id="confirm-password" type="password" autocomplete="new-password" required minlength="10" maxlength="256"></div>
+        <p id="message" role="status" aria-live="polite"></p>
+        <button class="login-submit-btn" id="submit" type="submit">建立最高管理員</button>
+      </form>
+      <p id="complete" hidden>設定完成。接著請登入，並依畫面指示綁定 MFA 驗證器。<a href="/admin/">前往登入</a></p>
+    </section>
+  </main>
+</body>
+</html>

@@ -29,6 +29,14 @@ def main() -> int:
     worker_id = arguments.worker_id or f"{socket.gethostname()}:{os.getpid()}"
     identity = runtime_identity("line-worker", worker_id)
     client = PrivateOperationsClient("line-worker")
+    if arguments.check:
+        try:
+            client.check()
+        except PrivateOperationError as error:
+            print(f"[LINE WORKER CHECK] {error}", flush=True)
+            return 2
+        print("LINE worker startup/authentication passed; no work cycle executed", flush=True)
+        return 0
     while True:
         try:
             processed = client.run_line_cycle(
@@ -52,6 +60,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--worker-id", default="")
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--check", action="store_true", help="Check startup and private API authentication without processing work")
     return parser.parse_args()
 
 

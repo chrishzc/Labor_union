@@ -70,6 +70,7 @@
 
 ## Dependencies
 - outbound: `staff/staff-roster-profile` — 候選 availability、候選池與正式推薦 contact-state Query 借用 current `staff.union_no`，透過 nullable `staff_union_no` typed projection 呈現；既有推薦從原 contact-state 取得編號，不額外重查候選池。React 人選清單與推薦選單共用公會編號自然排序及「編號 姓名」標籤，不改 mutation、意願或外部寄送內容。
+- 候選查詢可沿既有加入 writer 明示更新 active 人選的過期詢問期間；追加 pending 及前後日期事件，保留歷史並重新取得意願，不發送 LINE。
 
 - outbound: `scheduling/waiting-deposit-lock` — 人工或 LINE 的正式客戶接受回覆，在原 UoW 借用 canonical 自動保留；先取得人員占用 mutex，current 日期齊備才保存唯一等待訂金鎖，衝突與配對回覆一同 rollback。
 - outbound: `scheduling/service-before-replacement` — 已提交 R-04 收據綁定 current 零指派 generation 時，訂單成立案件可由原候選及客戶確認 writer 續辦；不回寫 Orders lifecycle，不復用舊推薦的客戶決定。

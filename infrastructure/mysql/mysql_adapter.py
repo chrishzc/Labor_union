@@ -44,14 +44,16 @@ def _database_config_from_environment() -> dict:
     ca_path = os.getenv("DB_SSL_CA", "").strip()
     cert_path = os.getenv("DB_SSL_CERT", "").strip()
     key_path = os.getenv("DB_SSL_KEY", "").strip()
-    if not all((ca_path, cert_path, key_path)):
-        raise RuntimeError("MySQL mTLS requires DB_SSL_CA, DB_SSL_CERT, and DB_SSL_KEY")
+    if not ca_path:
+        raise RuntimeError("MySQL TLS requires DB_SSL_CA")
+    if bool(cert_path) != bool(key_path):
+        raise RuntimeError("MySQL mTLS requires both DB_SSL_CERT and DB_SSL_KEY")
     config["ssl"] = {
         "ca": ca_path,
-        "cert": cert_path,
-        "key": key_path,
         "check_hostname": ssl_mode == "verify_identity",
     }
+    if cert_path:
+        config["ssl"].update(cert=cert_path, key=key_path)
     return config
 
 

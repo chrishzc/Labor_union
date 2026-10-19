@@ -394,23 +394,7 @@ def _resolve_client_refund(connection, candidate):
     targets = _unique_case_refund_targets(rows, candidate.amount.amount)
     if targets is None:
         return candidate
-    if not _has_exact_case_reference(connection, candidate.row_identity, rows):
-        return _blocked_candidate(candidate, "client_refund_case_reference_required")
     return _ready_candidate(candidate, targets, "unique-client-refund-obligation-balance")
-
-
-def _has_exact_case_reference(connection, row_identity, targets) -> bool:
-    cases = {str(row["case_no"]) for row in targets}
-    if len(cases) != 1:
-        return False
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT bank_references FROM finance_import_rows WHERE id=%s",
-            (_row_id(row_identity),),
-        )
-        row = cursor.fetchone()
-    references = _json_object(row.get("bank_references") if row else None)
-    return str(references.get("case_no", "")).strip() == cases.pop()
 
 
 def _json_object(value):

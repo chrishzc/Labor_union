@@ -102,6 +102,14 @@ def test_postback_adapter_passes_only_the_opaque_reference_and_event_identity():
     )
 
 
+def test_old_information_card_cannot_confirm_a_refreshed_period():
+    cursor = _Cursor([{**_binding(), "period_stale": True}, None])
+    repository = MySqlCandidateContactPoolLineReplyRepository(_Connection(cursor))
+    with pytest.raises(ValueError, match="period has changed"):
+        repository.record_willingness("a" * 64, "willing", LineUserId("U-caregiver"), IdempotencyKey("old-card-new-reply"))
+    assert cursor.writes == []
+
+
 def test_records_reply_only_for_the_line_user_bound_to_the_sent_information():
     cursor = _Cursor([_binding(), None])
     repository = MySqlCandidateContactPoolLineReplyRepository(

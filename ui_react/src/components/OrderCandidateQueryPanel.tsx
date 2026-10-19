@@ -114,6 +114,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [joinedStaffIds, setJoinedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [outdatedStaffIds, setOutdatedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [addState, setAddState] = useState<CandidateAddState>({ status: 'idle' });
   const [multiBusy, setMultiBusy] = useState(false);
   const flow = useSyncExternalStore(subscribeCandidatePoolAdd, () => orderMutationFlowStore.getCandidatePoolAdd(caseNo));
@@ -139,7 +140,12 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     ]).then(([data, pool]) => {
         if (!mounted.current || queryController.current !== controller) return;
         if (data.case_no !== caseNo || (pool && pool.case_no !== caseNo)) throw new Error('候選詢問案件識別不一致。');
-        if (pool) setJoinedStaffIds(new Set(pool.candidates.filter(value => value.status !== 'withdrawn').map(value => value.staff_id)));
+        if (pool) {
+          const active = pool.candidates.filter(value => value.status !== 'withdrawn');
+          const outdated = new Set(active.filter(value => value.service_start_date !== data.planned_start_date || value.service_end_date !== data.planned_end_date).map(value => value.staff_id));
+          setOutdatedStaffIds(outdated);
+          setJoinedStaffIds(new Set(active.filter(value => !outdated.has(value.staff_id)).map(value => value.staff_id)));
+        }
         setQueryState({ status: 'ready', data });
       })
       .catch((error) => {
@@ -184,7 +190,13 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       status: 'observed', command, receipt: data, readbackStaff, error: null,
     });
     if (!mounted.current || command.caseNo !== caseNo) return;
-    if (presentation === 'workbench') setJoinedStaffIds(new Set(pool.candidates.filter(value => value.status !== 'withdrawn').map(value => value.staff_id)));
+    if (presentation === 'workbench') {
+      const active = pool.candidates.filter(value => value.status !== 'withdrawn');
+      const period = command.candidates[0];
+      const outdated = new Set(active.filter(value => value.service_start_date !== period.start_date || value.service_end_date !== period.end_date).map(value => value.staff_id));
+      setJoinedStaffIds(new Set(active.filter(value => !outdated.has(value.staff_id)).map(value => value.staff_id)));
+      setOutdatedStaffIds(outdated);
+    }
     setSelectedStaffIds(new Set());
     setAddState({ status: 'success', data, readbackStaff });
     onPoolReadback?.(data.candidate_ids);
@@ -373,10 +385,11 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                       })}
                     </ul></details>}
                   </div>
-                  <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : '加入候選池'}（${candidate.staff_name}）`}
+                  {outdatedStaffIds.has(candidate.staff_id) && <p role="status">原詢問期間與本次不同；更新後須重新記錄接案意願。</p>}
+                  <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}（${candidate.staff_name}）`}
                     disabled={joinedStaffIds.has(candidate.staff_id) || busy || recoveryPending}
                     onClick={() => addSelectedCandidates(new Set([candidate.staff_id]))}>
-                    {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '加入中…' : '加入候選池'}
+                    {joinedStaffIds.has(candidate.staff_id) ? '已加入' : addState.status === 'saving' && flow?.command.candidates.some(value => value.staff_id === candidate.staff_id) ? '儲存中…' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}
                   </button>
                 </div> : (
                   <label key={candidate.staff_id}>

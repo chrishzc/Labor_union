@@ -329,10 +329,24 @@ def _add_candidates_in_transaction(
         created_ids = []
         new_candidate_created = False
         for candidate in validated:
-            cursor.execute("SELECT id FROM caregiver_candidate_contact_entries WHERE pool_id=%s AND staff_id=%s AND active_marker=1 FOR UPDATE", (pool_id, candidate["staff_id"]))
+            cursor.execute("SELECT id,status,service_start_date,service_end_date FROM caregiver_candidate_contact_entries WHERE pool_id=%s AND staff_id=%s AND active_marker=1 FOR UPDATE", (pool_id, candidate["staff_id"]))
             existing = cursor.fetchone()
             if isinstance(existing, Mapping):
                 created_ids.append(_positive_int(existing["id"], "candidate_id"))
+                before = (existing.get("service_start_date"), existing.get("service_end_date"))
+                after = (candidate["case_period_start"], candidate["case_period_end"])
+                if all(value is not None for value in before) and tuple(map(str, before)) != tuple(map(str, after)):
+                    if existing.get("status") != "active":
+                        raise ValueError("candidate_contact_period_not_editable")
+                    cursor.execute(
+                        "UPDATE caregiver_candidate_contact_entries SET service_start_date=%s,service_end_date=%s,coverage_fingerprint=%s WHERE id=%s",
+                        (*after, candidate["coverage_fingerprint"], existing["id"]),
+                    )
+                    cursor.execute(
+                        "INSERT INTO caregiver_candidate_contact_events (pool_id,candidate_id,event_type,event_key,actor,payload) VALUES (%s,%s,'willingness_changed',%s,%s,%s)",
+                        (pool_id, existing["id"], "candidate-period-" + hashlib.sha256(f"{event_key}:{existing['id']}".encode()).hexdigest(), actor,
+                         json.dumps({"response_kind": "candidate_period_refreshed", "willingness": "pending", "reason": "詢問期間已更新，請重新確認接案意願。", "before_start_date": str(before[0]), "before_end_date": str(before[1]), "after_start_date": str(after[0]), "after_end_date": str(after[1])}, ensure_ascii=False, sort_keys=True)),
+                    )
                 continue
             cursor.execute("INSERT INTO caregiver_candidate_contact_entries (pool_id, staff_id, service_start_date, service_end_date, coverage_fingerprint, active_marker) VALUES (%s,%s,%s,%s,%s,1)", (pool_id, candidate["staff_id"], candidate["case_period_start"], candidate["case_period_end"], candidate["coverage_fingerprint"]))
             created_ids.append(_positive_int(cursor.lastrowid, "candidate_id"))
@@ -1158,6 +1172,8 @@ def _candidate_projection(events: list[dict[str, Any]]):
             continue
         payload = _event_payload(event["payload"])
         if event_type == "willingness_changed":
+            if payload.get("response_kind") == "candidate_period_refreshed" and payload.get("willingness") == "pending":
+                information = {"1": None, "2": None, "3": None}
             if payload.get("willingness") in {"pending", "willing", "unwilling"}:
                 willingness, reason = payload["willingness"], payload.get("reason")
                 latest_willingness_event_id = _positive_int(

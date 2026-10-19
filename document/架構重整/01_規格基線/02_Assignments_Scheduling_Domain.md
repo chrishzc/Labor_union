@@ -540,6 +540,7 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
   清單依原 event key／task ID 綁定的 LINE-owned task 投影目前投遞狀態與送達時間；原發送事件不改寫，排入佇列不代表已送達。人工確認沒有 provider task 時仍採其原確認事件。
   工會工作台以候選清單、抽屜逐筆新增候選與卡片內手動意願表單續辦；「前往客戶確認準備」只帶入已願意的人選，不自動建立方案或客戶決策。「尋找月嫂與詢問意願」提供「候選月嫂／多月嫂分段」入口；分段沿用原查詢與正式分段 writer，查詢不建立方案，只有明確採用完整組合才建立正式推薦方案，收據及分段回讀成功後進入客戶確認準備。正式日期、完整 coverage、接受及鎖定規則維持既有契約。名冊換人入口保持既有流程。
 - 候選池 readback 必須以 nullable `latest_willingness_event_id` 回傳該候選人最新有效意願事件的既有 event ID。客戶端只有在此 ID 與自己收到的意願回條相同、且意願值相同時，才能確認該次回覆已儲存；較新的同值或異值事件只代表最新狀態，不得確認原操作。
+- 初步查詢發現既有 active 人選的詢問期間與 current 預計期間不同時，提供明示「更新詢問期間」入口，沿用候選加入 writer fresh-read coverage 與單一 outer transaction。更新同一 entry 的期間及 fingerprint，追加含前後日期的 pending 意願事件；舊意願及舊資訊紀錄保留歷史，但不滿足新期間，須重新人工確認或重新詢問。相同期間的重複加入不重設意願；不建立正式服務日期、指派或 LINE 投遞。
 - 客戶同意日期調整、且 Orders Terms 已修改未指派案件的 planned 起訖日後，一般候選資訊預覽與寄送前內容均讀 current Orders 期間。一般寄送或重新聯繫原候選人必須在同一 Scheduling transaction 以相同 current Orders 起訖日重驗 coverage；有衝突仍可繼續協調，期間有異動時更新 candidate contact period／coverage fingerprint、追加前後日期事件並排入新資訊卡，任一步失敗皆 rollback。Preview 零寫入，既有寄送 receipt 重播保留原內容／任務，不建立正式服務日或 assignment；正式 plan／assignment 的期間仍由各自 owner 擁有。
 - 未正式排班即可預覽每週服務時間。未有 confirmed service dates 時依候選期間、週休及特殊休假推算並核對 Orders 約定服務天數；不足或超出必須明示，不能靜默視為履約完整。已有 current confirmed dates 時使用精確服務日，包括人工協調的週末上班；同時顯示延長後的 actual conflict 與 buffer 提醒。協調後須重新確認服務日期；正式排班仍以 current owner dates 驗證服務量及實際占用。
 - 2026-10-13 人工裁決：前段每週說明顯示 Case Import 原始服務方式，人工週休僅用於當次 server 試算。
