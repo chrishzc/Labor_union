@@ -551,6 +551,9 @@ outer UoW 依每列實際 receipt 計數；replayed row 只計入 `duplicate_ski
 review overlay、assignment 數量與來源檔外的取消訂單均不增加來源列統計。
 整份 workbook 結果重查保留原 terminal counters。歷史 immutable receipt 沒有此欄且有混合
 row replay 時，不猜測重疊分布，管理端以「—」標示缺少的統計，不改寫歷史收據。
+2026-10-20 人工補充：同一 terminal receipt 的 additive `row_issues` 保存實際未匯入且非 replay
+的來源列號、案件編號、問題欄位與去敏原因碼，供匯入頁顯示；不包含成功列的 review overlay。
+整份重查沿用原明細；舊收據缺少明細時回傳不可用，不重算歷史結果。
 
 restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
 `case_no`；非空的 `client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號或姓名空白、

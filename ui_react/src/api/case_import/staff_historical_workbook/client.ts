@@ -68,7 +68,7 @@ export interface StaffHistoricalWorkbookPreviewOptions {
 function requestOptions(signal?: AbortSignal, operation: 'preview' | 'apply' = 'preview'): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new StaffHistoricalWorkbookUnauthenticatedError(operation);
-  return { token, signal, timeoutMs: 60_000 };
+  return { token, signal, timeoutMs: operation === 'apply' ? 180_000 : 60_000 };
 }
 
 function applyRequestOptions(previewFingerprint: string, idempotencyKey: string, correlationId: string, signal?: AbortSignal): RequestOptions {

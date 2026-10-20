@@ -20,6 +20,28 @@ from subsystems.case_import.staff_historical_workbook_adoption import (
 from subsystems.case_import import staff_historical_workbook_adoption as workflow
 
 
+def test_terminal_receipt_identifies_only_non_imported_source_rows_without_identity_values(monkeypatch):
+    from api.schemas.staff_historical_workbook import StaffHistoricalWorkbookReceiptView
+
+    service = StaffHistoricalWorkbookService(
+        object(), object(), lambda: None,
+        repository_factory=lambda _: SimpleNamespace(load_staff=lambda *args, **kwargs: [{"id": 1}, {"id": 2}]),
+    )
+    monkeypatch.setattr(service, "_record_terminal_review", lambda workbook, row, outcome, staff_id: (outcome, True))
+    workbook = SimpleNamespace(source_content_digest="a" * 64, rows=(
+        SimpleNamespace(source_row=4, record={"name": "", "identity_card": ""}, errors={"姓名": "不可空值"}),
+        SimpleNamespace(source_row=7, record={"name": "測試人員", "identity_card": "synthetic-identity"}, errors={}),
+    ))
+    receipt = service._apply_rows(workbook, "b" * 64)
+    payload = receipt.as_dict()
+    view = StaffHistoricalWorkbookReceiptView.model_validate(payload)
+    assert receipt.blocked_identity_count == receipt.identity_conflict_count == 1
+    assert [issue.source_row for issue in view.row_issues] == [4, 7]
+    assert view.row_issues[1].issue_codes == ["identity_conflict"]
+    assert "synthetic-identity" not in json.dumps(payload)
+    assert "測試人員" not in json.dumps(payload, ensure_ascii=False)
+
+
 class _ReviewRepository:
     def __init__(self) -> None:
         self.appended = []

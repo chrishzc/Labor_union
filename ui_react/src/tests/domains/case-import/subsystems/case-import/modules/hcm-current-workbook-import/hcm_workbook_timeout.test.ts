@@ -57,7 +57,7 @@ describe('HCM workbook slow responses', () => {
     })));
     const request = applyHcmWorkbook(snapshot, fingerprint, command);
     const result = expect(request).rejects.toMatchObject({ code: 'hcm_apply_timeout', retryable: true, message: expect.stringContaining('資料可能已寫入') });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(180_000);
     await result;
     await expect(request).rejects.toMatchObject({ message: expect.stringContaining('查詢這次匯入結果') });
     await expect(request).rejects.toMatchObject({ message: expect.not.stringContaining('Idempotency-Key') });

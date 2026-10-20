@@ -126,6 +126,31 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
   });
 
+  it('loads a slow calendar in bounded batches without timeout retries or missing staff', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ items: Array.from({ length: 12 }, (_, index) => ({ id: index + 1, name: `測試人員${index + 1}`, phone: null, education: null })), next_cursor: null });
+    let active = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockImplementation(async query => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>(resolve => { releases.push(resolve); });
+      active -= 1;
+      return { ...SCHEDULING_PROJECTION_EMPTY, staff_id: query.staffId, range_start: query.rangeStart, range_end: query.rangeEnd };
+    });
+    render(<SchedulingPage />);
+    await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(3));
+    for (let batch = 0; batch < 4; batch++) {
+      releases.splice(0).forEach(resolve => resolve());
+      if (batch < 3) await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes((batch + 2) * 3));
+      if (batch === 0) await waitFor(() => expect(screen.getAllByText(/本月無排班占用/)).toHaveLength(3));
+    }
+    await waitFor(() => expect(screen.getAllByText(/本月無排班占用/)).toHaveLength(12));
+    expect(peak).toBe(3);
+    expect(new Set(vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mock.calls.map(([query]) => query.staffId)).size).toBe(12);
+    expect(screen.queryByRole('button', { name: '重試月曆查詢' })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['malformed percent', '%E0%A4%A'],
     ['超過 50 字', 'A'.repeat(51)],

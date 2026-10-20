@@ -14,12 +14,12 @@
 
 ## Dependencies
 - outbound: `orders/orders/module:historical-adoption-presentation` — Historical Orders typed preview／receipt。
-- 匯入頁只顯示來源筆數、成功匯入、重複略過、未匯入；不再組合 review 明細或單列更正工作台。
+- 匯入頁顯示四種統計及 terminal receipt 的未匯入列明細；成功警示與單列更正工作台由其他 owner 頁承接。
 - outbound: `case-import` owners — HCM／Client BeClass typed workbook clients。
 - inbound: authenticated React application navigation。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §5.2 — four exclusive counters and no issue details in the import page。
+- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §5.2 — four exclusive counters、未匯入明細及 bounded same-key 結果確認。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption presentation boundary。
 
 ## Verification

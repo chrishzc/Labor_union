@@ -133,6 +133,8 @@ export function mapHcmWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HcmWorkbookUnauthenticatedError('apply');
+    if (error.code.endsWith('_lock_timeout')) return new HcmWorkbookApplyError(error.code, 'HCM 匯入等待處理鎖逾時，先前操作可能仍在處理；結果尚未確認，請保留本頁確認結果。', { retryable: true, status: error.status });
+    if (error.status === 502 || error.status === 504) return new HcmWorkbookApplyError(error.code, error.status === 504 ? '等待 HCM 匯入的閘道回應逾時（HTTP 504），結果尚未確認，請保留本頁確認結果。' : 'HCM 匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認，請保留本頁確認結果。', { retryable: error.retryable, status: error.status });
     const message = error.status === 403
       ? '目前 Session 沒有套用 HCM 檔案的權限。'
       : error.status === 409

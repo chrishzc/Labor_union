@@ -219,12 +219,23 @@ function moveMonth(selection: MonthSelection, offset: number): MonthSelection {
 function renderError(error: SchedulingCurrentError | Error): string {
   if (error instanceof SchedulingCurrentError) {
     const code = error.publicCode ?? error.code;
-    if (code === 'SCHEDULING_UNAVAILABLE') {
-      return '排班日曆服務暫時無法回應，請稍後重試。';
-    }
-    return error.message;
+    const message = error.status === 504 ? '排班查詢的閘道等待後端回應逾時。'
+      : error.status === 502 ? '排班查詢的閘道無法取得後端有效回應。' : error.message;
+    return `${message}（錯誤代碼：${code}${error.status ? `，HTTP ${error.status}` : ''}）`;
   }
   return error.message;
+}
+
+async function loadStaffQueries<T, R>(items: readonly T[], signal: AbortSignal, query: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, async () => {
+    while (!signal.aborted && nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await query(items[index]);
+    }
+  }));
+  return results;
 }
 
 function holidayPreviewRequestsMatch(
@@ -2195,7 +2206,7 @@ export const SchedulingPage: React.FC = () => {
             { workbench_scope: 'in_progress', page_size: 200 },
             { signal: controller.signal },
           ),
-          Promise.all(staffList.map(async (staff) => {
+          loadStaffQueries(staffList, controller.signal, async (staff) => {
             const cached = assignmentOptionsByStaffRef.current.get(staff.id);
             if (cached) return cached;
             const assignments = await staffAssignmentOptionsClient.getStaffAssignmentOptions(
@@ -2204,7 +2215,7 @@ export const SchedulingPage: React.FC = () => {
             );
             assignmentOptionsByStaffRef.current.set(staff.id, assignments);
             return assignments;
-          })),
+          }),
         ]);
         if (!mountedRef.current || controller.signal.aborted) return;
         const preDepositCaseNos = new Set(
@@ -2265,7 +2276,7 @@ export const SchedulingPage: React.FC = () => {
     ));
 
     const loadCaseEligibility = async () => {
-      const results = await Promise.all(staffList.map(async (staff) => {
+      const results = await loadStaffQueries(staffList, controller.signal, async (staff) => {
         try {
           const projection = await schedulingEligibilityCollisionClient.query(
             { caseNo, staffId: staff.id, asOf: todayIsoDate() },
@@ -2281,7 +2292,7 @@ export const SchedulingPage: React.FC = () => {
             state: { kind: 'error', message: eligibilityErrorMessage(error) } satisfies CaseEligibilityRowState,
           };
         }
-      }));
+      });
       if (!mountedRef.current || controller.signal.aborted) return;
       setCaseEligibilityRows(Object.fromEntries(results.map((result) => [result.staffId, result.state])));
     };
@@ -2327,27 +2338,30 @@ export const SchedulingPage: React.FC = () => {
     setCalendarError(null);
 
     const loadRows = async () => {
-      const results = await Promise.all(staffToLoad.map(async (staff) => {
-        const historicalPromise = staffMonthlyScheduleClient.query(
+      const loadStaffRow = async (staff: (typeof staffToLoad)[number]) => {
+        // Each row needs two independent projections. Limit active rows so queued
+        // browser requests do not consume their timeout before reaching the API.
+        const [historical, canonical] = await Promise.allSettled([staffMonthlyScheduleClient.query(
           staff.id, month.year, month.month, { signal: controller.signal },
-        );
-        const canonicalPromise = schedulingCurrentClient.queryCurrentCalendar(
+        ), schedulingCurrentClient.queryCurrentCalendar(
           {
             staffId: staff.id,
             rangeStart: range.rangeStart,
             rangeEnd: range.rangeEnd,
           },
           { signal: controller.signal },
-        );
+        )]);
         let overlays: HistoricalAssignmentOverlay[] = [];
         let historicalError: string | null = null;
         try {
-          overlays = adaptHistoricalAssignmentOverlays(await historicalPromise);
+          if (historical.status === 'rejected') throw historical.reason;
+          overlays = adaptHistoricalAssignmentOverlays(historical.value);
         } catch (caught) {
           historicalError = caught instanceof Error ? caught.message : '歷史指派月曆載入失敗。';
         }
         try {
-          const projection = await canonicalPromise;
+          if (canonical.status === 'rejected') throw canonical.reason;
+          const projection = canonical.value;
           const state: CalendarRowState = projection.days.length === 0
             ? { kind: 'empty' }
             : { kind: 'loaded', row: adaptSchedulingProjection(staff, projection) };
@@ -2360,30 +2374,24 @@ export const SchedulingPage: React.FC = () => {
             : { kind: 'error', message: renderError(error) };
           return { staffId: staff.id, state, overlays, historicalError, error: state.kind === 'error' ? error : null };
         }
-      }));
+      };
+      const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
+        const result = await loadStaffRow(staff);
+        if (mountedRef.current && !controller.signal.aborted && !cancelled) {
+          calendarLoadedKeyRef.current.set(result.staffId, rangeKey);
+          calendarRetryStaffIdsRef.current.delete(result.staffId);
+          setCalendarRows(current => ({ ...current, [result.staffId]: result.state }));
+          setHistoricalOverlaysByStaff(current => ({ ...current, [result.staffId]: result.overlays }));
+          setHistoricalOverlayErrors(current => {
+            const next = { ...current };
+            if (result.historicalError) next[result.staffId] = result.historicalError;
+            else delete next[result.staffId];
+            return next;
+          });
+        }
+        return result;
+      });
       if (!mountedRef.current || controller.signal.aborted || cancelled) return;
-      results.forEach((result) => calendarLoadedKeyRef.current.set(result.staffId, rangeKey));
-      results.forEach((result) => calendarRetryStaffIdsRef.current.delete(result.staffId));
-      setCalendarRows((current) => {
-        const next = { ...current };
-        results.forEach((result) => {
-          next[result.staffId] = result.state;
-        });
-        return next;
-      });
-      setHistoricalOverlaysByStaff((current) => {
-        const next = { ...current };
-        results.forEach((result) => { next[result.staffId] = result.overlays; });
-        return next;
-      });
-      setHistoricalOverlayErrors((current) => {
-        const next = { ...current };
-        results.forEach((result) => {
-          if (result.historicalError) next[result.staffId] = result.historicalError;
-          else delete next[result.staffId];
-        });
-        return next;
-      });
       const failed = results.filter((result) => result.error !== null);
       if (failed.length > 0) {
         setCalendarError(new Error(
@@ -2406,7 +2414,7 @@ export const SchedulingPage: React.FC = () => {
       cancelled = true;
       controller.abort();
     };
-  }, [range, retryGeneration, staffList]);
+  }, [range, retryGeneration, staffList, month.year, month.month]);
 
   const queryEligibility = useCallback(async (overrideCaseNo?: string, overrideStaffId?: number | null) => {
     const caseNo = (overrideCaseNo ?? eligibilityCaseNo ?? selectedCaseNo).trim();

@@ -99,6 +99,7 @@ class HistoricalOrderWorkbookReceiptView(BaseModel):
     result_counts: HistoricalOrderResultCountsView
     review_references: list[str] = Field(default_factory=list, max_length=100)
     import_counts: HistoricalOrderWorkbookImportCountsView | None = None
+    row_issues: list[HistoricalOrderWorkbookRowIssueView] | None = None
 
     @model_validator(mode="after")
     def validate_status_count_conservation(self):

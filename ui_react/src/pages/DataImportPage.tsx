@@ -1,5 +1,5 @@
 /** 四種工作簿匯入共用選檔、確認與互斥的結果筆數呈現。 */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptClientBeClassWorkbookPreview } from '../adapters/case_import/client_beclass_workbook_adapter';
 import { adaptHcmWorkbookPreview } from '../adapters/case_import/hcm_workbook_adapter';
 import { adaptStaffHistoricalWorkbookPreview } from '../adapters/case_import/staff_historical_workbook_adapter';
@@ -22,10 +22,22 @@ type ApplyState =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'ready'; result: WorkbookImportResult }
-  | { kind: 'error'; message: string; outcomeUnknown: boolean };
+  | { kind: 'error'; message: string; outcomeUnknown: boolean; autoConfirm: boolean };
 
 function isOutcomeUnknown(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
+}
+
+function canConfirmAutomatically(error: unknown): boolean {
+  if (!isOutcomeUnknown(error) || typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = String(error.code);
+  return code.endsWith('_lock_timeout') || code.endsWith('_apply_timeout') || code.endsWith('_apply_network_error')
+    || ('status' in error && (error.status === 502 || error.status === 504));
+}
+
+function workbookErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  return typeof error === 'object' && error !== null && 'code' in error ? `${message}（錯誤代碼：${String(error.code)}）` : message;
 }
 
 function previewControlGuidance(
@@ -83,6 +95,8 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   const snapshotRef = useRef<TSnapshot | null>(null);
   const commandRef = useRef<{ idempotencyKey: string; correlationId: string } | null>(null);
   const generationRef = useRef(0);
+  const confirmationAttemptsRef = useRef(0);
+  const applyInFlightRef = useRef(false);
   const previewAbortRef = useRef<AbortController | null>(null);
   const mutationLocked = applyState.kind === 'loading' || (applyState.kind === 'error' && applyState.outcomeUnknown);
 
@@ -101,6 +115,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
     setConfirmed(false);
     snapshotRef.current = null;
     commandRef.current = null;
+    confirmationAttemptsRef.current = 0;
   };
 
   const clearWorkbook = () => {
@@ -114,6 +129,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
     setConfirmed(false);
     snapshotRef.current = null;
     commandRef.current = null;
+    confirmationAttemptsRef.current = 0;
   };
 
   const previewWorkbook = async () => {
@@ -139,32 +155,49 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
       snapshotRef.current = snapshot;
       commandRef.current = commandIdentity(scope, adapted.sourceContentDigest);
       setApplyState({ kind: 'idle' });
+      confirmationAttemptsRef.current = 0;
       setConfirmed(false);
     } catch (error) {
       if (controller.signal.aborted || generation !== generationRef.current) return;
-      setPreviewState({ kind: 'error', message: error instanceof Error ? error.message : fallbackError });
+      setPreviewState({ kind: 'error', message: workbookErrorMessage(error, fallbackError) });
     } finally {
       if (previewAbortRef.current === controller) previewAbortRef.current = null;
     }
   };
 
-  const applyWorkbook = async () => {
+  const applyWorkbook = useCallback(async () => {
     const snapshot = snapshotRef.current;
     const command = commandRef.current;
-    if (!confirmed || snapshot === null || command === null || previewState.kind !== 'ready') return;
+    if (applyInFlightRef.current || !confirmed || snapshot === null || command === null || previewState.kind !== 'ready') return;
+    applyInFlightRef.current = true;
+    const generation = generationRef.current;
     setApplyState({ kind: 'loading' });
     try {
       const receipt = await apply(snapshot, previewState.preview.previewFingerprint, command);
       const presentation = summarize(receipt);
+      if (generation !== generationRef.current) return;
       setApplyState({ kind: 'ready', result: presentation });
     } catch (error) {
+      if (generation !== generationRef.current) return;
       setApplyState({
         kind: 'error',
-        message: error instanceof Error ? error.message : '工作簿套用失敗。',
+        message: workbookErrorMessage(error, '工作簿套用失敗。'),
         outcomeUnknown: isOutcomeUnknown(error),
+        autoConfirm: canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
       });
+    } finally {
+      applyInFlightRef.current = false;
     }
-  };
+  }, [confirmed, previewState, apply, summarize]);
+
+  useEffect(() => {
+    if (applyState.kind !== 'error' || !applyState.autoConfirm) return undefined;
+    const timer = window.setTimeout(() => {
+      confirmationAttemptsRef.current += 1;
+      void applyWorkbook();
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [applyState, applyWorkbook]);
 
   return { selectedWorkbook, previewState, applyState, confirmed, mutationLocked, setConfirmed, selectWorkbook, clearWorkbook, previewWorkbook, applyWorkbook };
 }
@@ -193,9 +226,10 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   const ready = previewState.kind === 'ready';
   const done = applyState.kind === 'ready';
   const loading = applyState.kind === 'loading';
+  const waiting = loading || (applyState.kind === 'error' && applyState.autoConfirm);
   const unknown = applyState.kind === 'error' && applyState.outcomeUnknown;
   const result = done ? applyState.result : null;
-  const status = loading ? '匯入中' : unknown ? '結果待確認' : done ? '已完成' : ready ? '待確認' : '待選檔';
+  const status = waiting ? '匯入處理中' : unknown ? '結果待確認' : done ? '已完成' : ready ? '待確認' : '待選檔';
   const previewGuidanceId = `imports-${id}-preview-guidance`;
   const applyGuidanceId = `imports-${id}-apply-guidance`;
   const metrics: Array<[string, number | null, string]> = [
@@ -224,16 +258,24 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
       {ready && !loading && !unknown && <section data-surface-id={`imports.${id}.${done ? 'result' : 'preview-result'}`} className="import-simple-result" aria-label={done ? '匯入結果' : '預覽結果'} aria-live="polite">
         <header className="import-simple-result-heading"><h3>{done ? '匯入結果' : '預覽結果'}</h3><span>{result?.replayedWorkbook ? '已處理過，以下為原處理結果' : done && result?.importedCount === null ? '舊紀錄未提供完整筆數' : done ? '本次處理筆數' : '匯入後顯示實際結果'}</span></header>
         <dl className="import-simple-metrics">{metrics.map(([label, value, className]) => <div key={label} className={className}><dt>{label}</dt><dd><span>{value ?? '—'}</span>{value !== null && <small>筆</small>}</dd></div>)}</dl>
+        {result && result.notImportedCount !== 0 && <section className="import-not-imported-details" aria-label="未匯入明細">
+          <h4>未匯入明細</h4>
+          {result.notImportedRows === null ? <p>這份匯入收據未保存逐筆明細，無法從收據確認未匯入的是哪些資料。</p> : <div className="import-details-scroll"><table>
+            <thead><tr><th scope="col">{id === 'hcm-current' ? '來源資料序號' : 'Excel 列號'}</th><th scope="col">案件／查詢編號</th><th scope="col">問題欄位</th><th scope="col">未匯入原因</th></tr></thead>
+            <tbody>{result.notImportedRows.map(row => <tr key={row.sourceRow}><td>{row.sourceRow}</td><td>{row.identifier || '未提供（依來源位置定位）'}</td><td>{row.fields.join('、') || '—'}</td><td>{row.reasons.join('；') || '資料未通過匯入檢查'}</td></tr>)}</tbody>
+          </table></div>}
+        </section>}
       </section>}
-      {loading && <p className="import-simple-busy" role="status">正在匯入，請勿換檔、離頁或重新整理。</p>}
-      {ready && !loading && <footer className="import-simple-actions">
+      {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。請稍候，保持此頁開啟，勿重新整理或重複上傳。</p>}
+      {ready && !waiting && <footer className="import-simple-actions">
         {done ? <><p role="status">本次檔案已處理完成。</p><button type="button" className="import-apply-btn" onClick={() => fileInputRef.current?.click()}>匯入下一份檔案</button></> : <>
           <div><label><input type="checkbox" checked={confirmed} disabled={mutationLocked} onChange={event => onConfirm(event.target.checked)} />我已核對檔案名稱與預覽筆數</label><p id={applyGuidanceId} className="import-control-guidance">{applyControlGuidance(previewState, confirmed, applyState)}</p></div>
           <button type="button" data-control-id={`imports.${id}.apply`} aria-describedby={applyGuidanceId} className="import-apply-btn" disabled={!confirmed || (mutationLocked && !unknown)} onClick={() => void onApply()}>{unknown ? '查詢這次匯入結果' : '確認匯入'}</button>
         </>}
       </footer>}
       {!ready && <p className="import-control-guidance">預覽成功後才能確認匯入。</p>}
-      {applyState.kind === 'error' && <div className="import-error" role="alert">{applyState.message}</div>}
+      {applyState.kind === 'error' && !applyState.outcomeUnknown && <div className="import-error" role="alert">{applyState.message}</div>}
+      {unknown && !waiting && <p className="import-result-state" role="status">等待時間較長，目前尚未取得最終結果，這不代表匯入失敗。請保留本頁，稍後點選「查詢這次匯入結果」。</p>}
     </section>
   );
 };

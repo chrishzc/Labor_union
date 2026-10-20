@@ -81,6 +81,9 @@ export function mapClientBeClassWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new ClientBeClassWorkbookUnauthenticatedError('apply');
+    if (error.code === 'client_beclass_workbook_coordinator_lock_timeout') {
+      return new ClientBeClassWorkbookApplyError(error.code, '客戶 BeClass 匯入等待處理鎖 30 秒後逾時，先前操作可能仍在處理；這不代表資料驗證失敗。最終結果尚未確認，請保留本頁確認結果。', true, error.status);
+    }
     const message = error.status === 403
       ? '目前 Session 沒有套用客戶 BeClass 檔案的權限。'
       : error.status === 409
@@ -88,7 +91,11 @@ export function mapClientBeClassWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? '客戶 BeClass 檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? '客戶 BeClass 匯入服務暫時無法回覆，結果尚未確認。請保留本頁，稍後點選「查詢這次匯入結果」。'
+            ? '客戶 BeClass 匯入服務暫時無法回覆（HTTP 503），結果尚未確認。請保留本頁，稍後點選「查詢這次匯入結果」。'
+            : error.status === 504
+              ? '等待客戶 BeClass 匯入的閘道回應逾時（HTTP 504），結果尚未確認。系統會自動確認，請保留本頁。'
+              : error.status === 502
+                ? '客戶 BeClass 匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認。系統會自動確認，請保留本頁。'
             : '客戶 BeClass 檔案套用目前無法完成。';
     return new ClientBeClassWorkbookApplyError(error.code || `HTTP_${error.status}`, message, error.retryable, error.status);
   }

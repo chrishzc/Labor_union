@@ -72,6 +72,8 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError('apply');
+    if (error.code.endsWith('_lock_timeout')) return new HistoricalOrderWorkbookApplyError(error.code, '歷史訂單匯入等待處理鎖逾時，先前操作可能仍在處理；結果尚未確認，請保留本頁確認結果。', true, error.status);
+    if (error.status === 502 || error.status === 504) return new HistoricalOrderWorkbookApplyError(error.code, error.status === 504 ? '等待歷史訂單匯入的閘道回應逾時（HTTP 504），結果尚未確認，請保留本頁確認結果。' : '歷史訂單匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認，請保留本頁確認結果。', error.retryable, error.status);
     const message = error.status === 403
       ? '目前 Session 沒有套用歷史訂單檔案的權限。'
       : error.status === 409
@@ -79,12 +81,12 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? '歷史訂單檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? '歷史訂單檔案套用服務暫時無法使用，請以相同 Idempotency-Key 重試。'
+            ? '歷史訂單匯入服務暫時無法回覆（HTTP 503），結果尚未確認。請保留本頁並查詢這次匯入結果。'
             : '歷史訂單檔案套用目前無法完成。';
     return new HistoricalOrderWorkbookApplyError(error.code || `HTTP_${error.status}`, message, error.retryable, error.status);
   }
-  if (error instanceof ApiTimeoutError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_timeout', '歷史訂單檔案套用逾時，請以相同 Idempotency-Key 重試。', true);
-  if (error instanceof ApiNetworkError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_network_error', '歷史訂單檔案套用連線失敗，請以相同 Idempotency-Key 重試。', true);
+  if (error instanceof ApiTimeoutError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_timeout', '等待歷史訂單匯入回應逾時，結果尚未確認，資料可能已寫入。系統會自動確認，請保留本頁。', true);
+  if (error instanceof ApiNetworkError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_network_error', '歷史訂單匯入連線中斷，結果尚未確認，資料可能已寫入。系統會自動確認，請保留本頁。', true);
   if (error instanceof ApiAbortError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_aborted', '歷史訂單檔案套用已取消，請先確認結果再重試。', true);
   return new HistoricalOrderWorkbookApplyError('historical_order_apply_unexpected_error', '歷史訂單檔案套用發生未預期錯誤。');
 }

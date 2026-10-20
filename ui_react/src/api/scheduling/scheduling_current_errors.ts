@@ -96,13 +96,13 @@ export function mapSchedulingCurrentError(error: unknown): SchedulingCurrentErro
   if (error instanceof SchedulingCurrentError) return error;
   if (error instanceof ApiAbortError) return new SchedulingAbortedError(error.message);
   if (error instanceof ApiTimeoutError) {
-    return new SchedulingCurrentError('SCHEDULING_TIMEOUT', error.message, {
+    return new SchedulingCurrentError('SCHEDULING_TIMEOUT', '排班查詢等待伺服器回應逾時，尚未取得資料。', {
       retryable: true,
       originalError: error,
     });
   }
   if (error instanceof ApiNetworkError) {
-    return new SchedulingCurrentError('SCHEDULING_NETWORK', error.message, {
+    return new SchedulingCurrentError('SCHEDULING_NETWORK', '排班查詢連線中斷或無法連上伺服器。', {
       retryable: true,
       originalError: error,
     });

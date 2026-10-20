@@ -1,4 +1,4 @@
-/** HCM import keeps this receipt's review rows in the import card without querying the anomaly page. */
+/** HCM import shows only receipt-owned non-imported rows without querying the anomaly page. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hcmWorkbookPreviewClient } from '../api/case_import/hcm_workbook_client';
@@ -67,7 +67,7 @@ describe('DataImport HCM receipt review', () => {
     });
   });
 
-  it('counts imported warning rows once and hides all problem details', async () => {
+  it('counts imported warning rows once and shows only the two non-imported cases', async () => {
     render(<DataImportPage />);
     expect(screen.queryByText('HCM 目前待處理異常')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: '目前 HCM 欄位待修正資料' })).not.toBeInTheDocument();
@@ -83,6 +83,11 @@ describe('DataImport HCM receipt review', () => {
     expect(await screen.findByText('匯入結果')).toBeInTheDocument();
     expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['4', '2', '0', '2']);
     expect(screen.queryByText(/115000002|115000003|行動電話|需修改欄位|常見原因|含警示/)).not.toBeInTheDocument();
+    const details = screen.getByRole('region', { name: '未匯入明細' });
+    expect(details).toHaveTextContent('115000004');
+    expect(details).toHaveTextContent('115000005');
+    expect(details).toHaveTextContent('訂金到期日晚於服務開始日');
+    expect(details.querySelectorAll('tbody tr')).toHaveLength(2);
     expect(screen.queryByText('預覽結果')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /前往異常審核|處理.*待確認|在本頁提交修正/ })).not.toBeInTheDocument();
     expect(hcmResubmissionClient.query).not.toHaveBeenCalled();

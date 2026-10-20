@@ -46,6 +46,12 @@ describe('Case workbook Preview adapters', () => {
 });
 
 describe('Four mutually exclusive import result counters', () => {
+  it('preserves a non-imported HCM row without a case number and rejects incomplete claimed detail', () => {
+    const receipt = { source_content_digest: digest, source_row_count: 1, inserted_count: 0, inserted_with_warning_count: 0, exact_replay_count: 0, skipped_existing_count: 0, review_required_count: 1, failed_count: 0, replayed_workbook: false, row_outcomes_available: true, legacy_summary_only: false,
+      row_outcomes: [{ source_row: 3, case_no: null, outcome: 'review_required' as const, problem_identity: null, problem_fields: ['案件編號'], issue_codes: ['hcm_case_import:case_import_case_no_required'], referral_occurrence_identities: [] }] };
+    expect(adaptHcmImportResult(receipt).notImportedRows).toEqual([{ sourceRow: 3, identifier: null, fields: ['案件編號'], reasons: ['缺少可用的案件編號'] }]);
+    expect(() => adaptHcmImportResult({ ...receipt, row_outcomes: [] })).toThrow('筆數不一致');
+  });
   it('HCM counts imported warnings and email fills once, and includes both duplicate outcomes', () => {
     const receipt = { source_content_digest: digest, source_row_count: 10, inserted_count: 2, inserted_with_warning_count: 2, email_filled_count: 1, exact_replay_count: 1, skipped_existing_count: 2, review_required_count: 1, failed_count: 1, replayed_workbook: false, row_outcomes_available: false, legacy_summary_only: true, row_outcomes: [] };
     expect(adaptHcmImportResult(receipt)).toMatchObject({ sourceCount: 10, importedCount: 5, duplicateCount: 3, notImportedCount: 2 });

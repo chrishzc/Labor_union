@@ -171,7 +171,7 @@ function requestOptions(
     signal: options?.signal,
     headers,
     baseUrl: options?.baseUrl,
-    timeoutMs: HCM_WORKBOOK_PREVIEW_TIMEOUT_MS,
+    timeoutMs: operation === 'apply' ? 180_000 : HCM_WORKBOOK_PREVIEW_TIMEOUT_MS,
   };
 }
 

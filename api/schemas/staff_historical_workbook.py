@@ -21,9 +21,16 @@ class StaffHistoricalWorkbookPreviewView(_StrictView):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class StaffHistoricalWorkbookRowIssueView(_StrictView):
+    source_row: int = Field(ge=1)
+    fields: list[str]
+    issue_codes: list[str]
+
+
 class StaffHistoricalWorkbookReceiptView(StaffHistoricalWorkbookPreviewView):
     exact_replay_count: int = Field(ge=0)
     replayed_workbook: bool
+    row_issues: list[StaffHistoricalWorkbookRowIssueView] | None = None
 
 
 __all__ = ["StaffHistoricalWorkbookPreviewView", "StaffHistoricalWorkbookReceiptView"]

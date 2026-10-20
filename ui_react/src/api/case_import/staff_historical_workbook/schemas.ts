@@ -33,6 +33,11 @@ export const StaffHistoricalWorkbookPreviewEnvelopeSchema = z
 export const StaffHistoricalWorkbookReceiptSchema = StaffHistoricalWorkbookPreviewSchema.extend({
   exact_replay_count: z.number().int().min(0),
   replayed_workbook: z.boolean(),
+  row_issues: z.array(z.strictObject({
+    source_row: z.number().int().positive(),
+    fields: z.array(z.string()),
+    issue_codes: z.array(z.string()),
+  })).nullable().optional(),
 }).strict();
 
 export type StaffHistoricalWorkbookReceipt = z.infer<typeof StaffHistoricalWorkbookReceiptSchema>;

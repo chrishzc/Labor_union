@@ -69,7 +69,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 function requestOptions(signal?: AbortSignal, operation: 'preview' | 'apply' = 'preview'): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new HistoricalOrderWorkbookUnauthenticatedError(operation);
-  return { token, signal, timeoutMs: HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS };
+  return { token, signal, timeoutMs: operation === 'apply' ? 180_000 : HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS };
 }
 
 function applyRequestOptions(idempotencyKey: string, correlationId: string, signal?: AbortSignal): RequestOptions {

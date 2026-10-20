@@ -187,6 +187,8 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
     assert receipt.replayed_rows == 2
     assert receipt.import_counts.as_dict() == {"imported_count": 1, "duplicate_skipped_count": 2, "not_imported_count": 1}
     assert sum(receipt.import_counts.as_dict().values()) == receipt.source_row_count
+    assert [item.source_row for item in receipt.row_issues] == [5]
+    assert receipt.row_issues[0].case_no == workbook.rows[3].case_no
     view = HistoricalOrderWorkbookReceiptView.model_validate(receipt.as_dict())
     assert view.import_counts.duplicate_skipped_count == 2
     with pytest.raises(ValueError, match="historical_order_import_counts_not_conserved"):
@@ -196,6 +198,7 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
         })
     replay = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
     assert replay.import_counts == receipt.import_counts
+    assert replay.as_dict()["row_issues"] == receipt.as_dict()["row_issues"]
     assert workflow.apply_calls == 4
 
 

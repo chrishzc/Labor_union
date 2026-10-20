@@ -10,7 +10,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.routes import client_beclass_import as workbook_route
@@ -33,6 +33,33 @@ from subsystems.case_import import client_beclass_workbook_import as intake
 
 _DIGEST = "a" * 64
 _SHEET = "b" * 64
+
+
+def test_workbook_lock_timeout_explains_lock_wait_and_retains_typed_code(tmp_path, monkeypatch):
+    uploaded = tmp_path / "lock-test.xlsx"
+    uploaded.write_bytes(b"synthetic")
+
+    async def persist(_):
+        return uploaded
+
+    async def execute(operation, path):
+        return operation(path)
+
+    def locked(_):
+        raise intake.ClientBeClassWorkbookUnavailable("client_beclass_workbook_coordinator_lock_timeout")
+
+    monkeypatch.setattr(workbook_route, "_persist_workbook", persist)
+    monkeypatch.setattr(workbook_route, "run_in_threadpool", execute)
+    with pytest.raises(HTTPException) as caught:
+        # Both I/O boundaries are immediate fakes; exercise the error mapping
+        # without opening the event loop's socket pair in the restricted runner.
+        workbook_route._with_workbook(None, locked, "ok", "synthetic-lock-check").send(None)
+    assert caught.value.status_code == 503
+    error = caught.value.detail["error"]
+    assert error["code"] == "client_beclass_workbook_coordinator_lock_timeout"
+    assert "等待協調鎖 30 秒" in error["message"]
+    assert error["retryable"] is True
+    assert not uploaded.exists()
 
 
 @pytest.mark.parametrize("category, expected_status", [
@@ -326,6 +353,9 @@ def test_apply_creates_valid_row_and_records_invalid_review(monkeypatch):
     assert receipt.created_count == 1
     assert receipt.review_required_count == 1
     assert receipt.exact_replay_count == 0
+    assert receipt.as_dict()["row_issues"] == [{"source_row": 3, "query_no": "BAD", "fields": ["姓名"], "issue_codes": ["client_field_missing:姓名"]}]
+    replay = service.apply("ignored.xlsx", "client-test-key", preview.preview_fingerprint, "admin", "corr")
+    assert replay.as_dict()["row_issues"] == receipt.as_dict()["row_issues"]
     assert repository.created[0]["query_no"] == "CASE-1"
     assert repository.binding_lock_modes == [False, False, True]
     assert reconciliation.calls == ["HCM-0007"]

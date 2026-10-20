@@ -78,7 +78,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 function requestOptions(signal?: AbortSignal, operation: 'preview' | 'apply' = 'preview'): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) throw new ClientBeClassWorkbookUnauthenticatedError(operation);
-  return { token, signal, timeoutMs: 60_000 };
+  return { token, signal, timeoutMs: operation === 'apply' ? 180_000 : 60_000 };
 }
 
 function applyRequestOptions(idempotencyKey: string, correlationId: string, signal?: AbortSignal): RequestOptions {

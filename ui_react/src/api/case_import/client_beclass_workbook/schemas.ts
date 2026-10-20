@@ -49,6 +49,12 @@ export const ClientBeClassWorkbookReceiptSchema = z.object({
   existing_conflict_count: z.number().int().min(0),
   existing_source_count: z.number().int().min(0),
   replayed_workbook: z.boolean(),
+  row_issues: z.array(z.strictObject({
+    source_row: z.number().int().positive(),
+    query_no: z.string().max(100).nullable(),
+    fields: z.array(z.string()),
+    issue_codes: z.array(z.string()),
+  })).nullable().optional(),
 }).strict();
 
 export type ClientBeClassWorkbookReceipt = z.infer<typeof ClientBeClassWorkbookReceiptSchema>;

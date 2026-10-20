@@ -70,6 +70,8 @@ export function mapStaffHistoricalWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new StaffHistoricalWorkbookUnauthenticatedError('apply');
+    if (error.code.endsWith('_lock_timeout')) return new StaffHistoricalWorkbookApplyError(error.code, '月嫂歷史匯入等待處理鎖逾時，先前操作可能仍在處理；結果尚未確認，請保留本頁確認結果。', true, error.status);
+    if (error.status === 502 || error.status === 504) return new StaffHistoricalWorkbookApplyError(error.code, error.status === 504 ? '等待月嫂歷史匯入的閘道回應逾時（HTTP 504），結果尚未確認，請保留本頁確認結果。' : '月嫂歷史匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認，請保留本頁確認結果。', error.retryable, error.status);
     const message = error.status === 403
       ? '目前 Session 沒有套用月嫂歷史檔案的權限。'
       : error.status === 409

@@ -118,7 +118,9 @@ async def _with_workbook(workbook: UploadFile, operation, message: str, correlat
             TypedError(
                 ErrorCategory.UNAVAILABLE,
                 _error_code(error, "client_beclass_workbook_unavailable"),
-                "Client BeClass 工作簿服務暫時無法使用。",
+                "客戶 BeClass 匯入等待協調鎖 30 秒後仍未取得鎖；本次請求尚未執行匯入，先前操作可能仍在處理，結果仍待確認。"
+                if str(error) == "client_beclass_workbook_coordinator_lock_timeout"
+                else "Client BeClass 工作簿服務暫時無法使用。",
                 correlation,
                 retryable=True,
             ),

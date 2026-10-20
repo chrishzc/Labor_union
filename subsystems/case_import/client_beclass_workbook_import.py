@@ -86,6 +86,11 @@ class ClientBeClassWorkbookReceipt:
     existing_conflict_count: int
     existing_source_count: int
     replayed_workbook: bool
+    row_issues: tuple[ClientBeClassWorkbookRowIssue, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.row_issues is not None and len(self.row_issues) != self.review_required_count + self.existing_conflict_count:
+            raise ValueError("client_beclass_not_imported_rows_not_conserved")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -97,6 +102,7 @@ class ClientBeClassWorkbookReceipt:
             "existing_conflict_count": self.existing_conflict_count,
             "existing_source_count": self.existing_source_count,
             "replayed_workbook": self.replayed_workbook,
+            "row_issues": None if self.row_issues is None else [item.as_dict() for item in self.row_issues],
         }
 
 
@@ -193,6 +199,7 @@ class ClientBeClassWorkbookImportService:
             if preview.preview_fingerprint != supplied_preview:
                 raise ClientBeClassWorkbookConflict("client_beclass_preview_stale")
             self._claim_workbook(key, workbook.digest, correlation_id)
+            row_issues: list[ClientBeClassWorkbookRowIssue] = []
             outcomes = Counter(
                 self._apply_row(
                     workbook,
@@ -200,11 +207,12 @@ class ClientBeClassWorkbookImportService:
                     row,
                     actor,
                     correlation_id,
+                    row_issues,
                 )
                 for row_number, row in workbook.rows
             )
             _assert_conservation(len(workbook.rows), outcomes)
-            receipt = ClientBeClassWorkbookReceipt(workbook.digest, len(workbook.rows), outcomes["created"], outcomes["exact_replay"], outcomes["review_required"], outcomes["existing_conflict"], outcomes["existing_source"], False)
+            receipt = ClientBeClassWorkbookReceipt(workbook.digest, len(workbook.rows), outcomes["created"], outcomes["exact_replay"], outcomes["review_required"], outcomes["existing_conflict"], outcomes["existing_source"], False, tuple(row_issues))
             self._save_workbook_receipt(
                 key,
                 workbook.digest,
@@ -260,6 +268,7 @@ class ClientBeClassWorkbookImportService:
         row: dict[str, Any],
         actor: str,
         correlation_id: str,
+        row_issues: list[ClientBeClassWorkbookRowIssue] | None = None,
     ) -> str:
         source_identity = _source_identity(workbook.digest, row_number)
         payload = _normalized_payload(row)
@@ -279,6 +288,8 @@ class ClientBeClassWorkbookImportService:
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
             errors = validate_client_beclass_row(row)
             if errors:
+                if row_issues is not None:
+                    row_issues.append(ClientBeClassWorkbookRowIssue(row_number, payload.get("query_no"), tuple(sorted(errors)), _client_validation_issue_codes(errors)))
                 review_identity = self._persist_review(
                     self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
                     source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
@@ -307,6 +318,8 @@ class ClientBeClassWorkbookImportService:
                 unit_of_work.commit()
                 return "existing_source"
             if source_state == "conflict":
+                if row_issues is not None:
+                    row_issues.append(ClientBeClassWorkbookRowIssue(row_number, payload.get("query_no"), ("查詢序號",), ("client_beclass_source_payload_conflict",)))
                 outcome = self._save_review_outcome(
                     workbook, row_number, payload, source_identity, fingerprint,
                     actor, "client_beclass_source_payload_conflict",
@@ -317,6 +330,8 @@ class ClientBeClassWorkbookImportService:
                 payload["name"], payload["phone"], for_update=True
             )
             if resolution.status is not ClientCaseBindingStatus.UNIQUE:
+                if row_issues is not None:
+                    row_issues.append(ClientBeClassWorkbookRowIssue(row_number, payload.get("query_no"), ("姓名", "行動電話"), (resolution.issue_code,)))
                 outcome = self._save_review_outcome(
                     workbook, row_number, payload, source_identity, fingerprint,
                     actor, resolution.issue_code,
@@ -333,6 +348,8 @@ class ClientBeClassWorkbookImportService:
                 review_identity = None
                 if self._repository.source_state(payload) == "conflict":
                     outcome = "existing_conflict"
+                    if row_issues is not None:
+                        row_issues.append(ClientBeClassWorkbookRowIssue(row_number, payload.get("query_no"), ("查詢序號",), ("client_beclass_source_payload_conflict",)))
                     review_identity = self._record_review(
                         workbook, row_number, payload,
                         "client_beclass_source_payload_conflict",
@@ -391,6 +408,8 @@ class ClientBeClassWorkbookImportService:
                     "client_beclass_workbook_idempotency_conflict"
                 )
             payload = json.loads(stored["result_snapshot"])
+            if payload.get("row_issues") is not None:
+                payload["row_issues"] = tuple(ClientBeClassWorkbookRowIssue(**item) for item in payload["row_issues"])
             for case_no in self._repository.bound_case_nos_for_workbook(digest):
                 self._reconciliation.reconcile(case_no)
             unit_of_work.commit()

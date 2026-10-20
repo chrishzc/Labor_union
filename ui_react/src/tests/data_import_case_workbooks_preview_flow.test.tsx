@@ -1,5 +1,5 @@
-/** Four import families show only conserved receipt counts and preserve safe confirmation/recovery. */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+/** Import receipts expose conserved counts, non-imported rows and bounded same-key confirmation. */
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
@@ -32,6 +32,74 @@ async function apply(card: HTMLElement) {
   await within(card).findByText('匯入結果');
 }
 describe('Data Import simple result flows', () => {
+  it.each(cases)('%s shows receipt-owned non-imported rows without using preview warnings', async (kind, label, id) => {
+    const client = id === 'client-beclass' ? clientBeClassWorkbookPreviewClient : id === 'staff-historical' ? staffHistoricalWorkbookPreviewClient : historicalOrderWorkbookPreviewClient;
+    const receipt = await client.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
+    const row_issues = [8, 9].map(source_row => ({ source_row, fields: ['姓名'], issue_codes: ['client_field_missing:姓名'],
+      ...(id === 'client-beclass' ? { query_no: `QUERY-${source_row}` } : id === 'historic-orders' ? { case_no: `CASE-${source_row}` } : {}) }));
+    vi.spyOn(client, 'apply').mockResolvedValue({ ...receipt, row_issues } as never);
+    render(<DataImportPage />);
+    const card = await preview(kind, label, id);
+    await apply(card);
+    const details = within(card).getByRole('region', { name: '未匯入明細' });
+    expect(details.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(details).toHaveTextContent('必填資料缺漏');
+    expect(details).not.toHaveTextContent('CLIENT-007');
+    expect(metrics(card)).toEqual((cases.find(item => item[2] === id)![3]).map(String));
+  });
+
+  it('automatically confirms a lock timeout using the same snapshot, preview and command identity', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '等待處理鎖 30 秒後逾時', true, 503));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+      expect(within(card).getByText('匯入處理中')).toBeInTheDocument();
+      expect(within(card).getByRole('status')).toHaveTextContent('正在等待匯入結果');
+      expect(within(card).queryByRole('button', { name: '查詢這次匯入結果' })).not.toBeInTheDocument();
+      expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(within(card).getByText('匯入結果')).toBeInTheDocument();
+      const calls = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toEqual(calls[0]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('stops automatic confirmation after six attempts and keeps manual result lookup available', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValue(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '處理鎖等待逾時', true, 503));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      for (let attempt = 0; attempt < 8; attempt++) await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(7);
+      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+      expect(within(card).getByText(/等待時間較長/)).toHaveTextContent('這不代表匯入失敗');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([409, 422, 503])('does not automatically resend a definite conflict, validation error or generic unavailable response (%s)', async status => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValue(new ClientBeClassWorkbookApplyError('client_beclass_rejected', '服務回應未完成', status === 503, status));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+      if (status === 503) expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+      else expect(within(card).getByRole('alert')).toHaveTextContent('服務回應未完成');
+    } finally { vi.useRealTimers(); }
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(clientBeClassWorkbookPreviewClient, 'preview').mockResolvedValue({ source_content_digest: digest, sheet_identity: identity, source_row_count: 4, create_count: 1, review_required_count: 1, existing_conflict_count: 1, existing_source_count: 1, preview_fingerprint: fingerprint, row_issues: [{ source_row: 7, query_no: 'CLIENT-007', fields: ['行動電話'], issue_codes: ['client_field_invalid:行動電話'] }] });

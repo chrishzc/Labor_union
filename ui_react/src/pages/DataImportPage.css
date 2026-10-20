@@ -153,6 +153,12 @@
 .import-simple-page .import-apply-btn { min-height: 44px; background: var(--md-sys-color-primary); padding: 10px 24px; font-size: 14px; color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
 .import-simple-page .import-apply-btn:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 .import-simple-busy { padding: 38px 20px; text-align: center; color: #74593f; font-size: 14px; }
+.import-not-imported-details { margin-top: 20px; font-size: 14px; }
+.import-not-imported-details h4 { margin: 0 0 12px; color: #9a3412; }
+.import-details-scroll { overflow-x: auto; }
+.import-not-imported-details table { width: 100%; border-collapse: collapse; text-align: left; }
+.import-not-imported-details :is(th, td) { padding: 10px; border-bottom: 1px solid #f2e2dc; vertical-align: top; overflow-wrap: anywhere; }
+.import-not-imported-details th { background: #fffaf7; white-space: nowrap; }
 @media (max-width: 650px) {
   .import-simple-page-heading h1 { font-size: 23px; }
   .import-simple-page .import-kind-selector > div { display: grid; grid-template-columns: 1fr 1fr; }

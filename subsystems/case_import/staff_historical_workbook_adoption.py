@@ -51,9 +51,14 @@ class StaffHistoricalWorkbookReceipt:
     review_required_count: int
     preview_fingerprint: str
     replayed_workbook: bool
+    row_issues: tuple[dict[str, object], ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.row_issues is not None and len(self.row_issues) != self.blocked_identity_count + self.identity_conflict_count:
+            raise ValueError("staff_historical_not_imported_rows_not_conserved")
 
     def as_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "row_issues": None if self.row_issues is None else list(self.row_issues)}
 
 
 class StaffHistoricalWorkbookConflict(RuntimeError):
@@ -140,12 +145,15 @@ class StaffHistoricalWorkbookService:
 
     def _apply_rows(self, workbook: StaffHistoricalWorkbook, preview_fingerprint: str) -> StaffHistoricalWorkbookReceipt:
         counts = _counts()
+        row_issues = []
         for row in workbook.rows:
             outcome, reviewed = self._apply_row(workbook, row)
             counts[outcome] += 1
             counts["review_required"] += int(reviewed)
+            if outcome in {"blocked_identity", "identity_conflict"}:
+                row_issues.append({"source_row": row.source_row, "fields": sorted(set(row.errors) | {"姓名", "身分證字號"}), "issue_codes": list(_issues(row, outcome))})
         _assert_outcomes(len(workbook.rows), counts)
-        return StaffHistoricalWorkbookReceipt(workbook.source_content_digest, len(workbook.rows), counts["created"], counts["adopted_existing"], counts["exact_replay"], counts["blocked_identity"], counts["identity_conflict"], counts["review_required"], preview_fingerprint, False)
+        return StaffHistoricalWorkbookReceipt(workbook.source_content_digest, len(workbook.rows), counts["created"], counts["adopted_existing"], counts["exact_replay"], counts["blocked_identity"], counts["identity_conflict"], counts["review_required"], preview_fingerprint, False, tuple(row_issues))
 
     def _apply_row(self, workbook: StaffHistoricalWorkbook, row: StaffHistoricalWorkbookRow) -> tuple[str, bool]:
         identity = str(row.record.get("identity_card") or "")

@@ -37,3 +37,4 @@ class ClientBeClassWorkbookReceiptView(BaseModel):
     existing_conflict_count: int = Field(ge=0)
     existing_source_count: int = Field(ge=0)
     replayed_workbook: bool
+    row_issues: list[ClientBeClassWorkbookRowIssueView] | None = None

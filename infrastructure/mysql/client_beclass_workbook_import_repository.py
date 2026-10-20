@@ -25,7 +25,7 @@ class ClientBeClassWorkbookImportRepository:
 
     def acquire_lock(self, key: str) -> bool:
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT GET_LOCK(%s,5) AS acquired", (self._lock_name(key),))
+            cursor.execute("SELECT GET_LOCK(%s,30) AS acquired", (self._lock_name(key),))
             row = cursor.fetchone()
         return bool(row and row["acquired"] == 1)
 

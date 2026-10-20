@@ -59,6 +59,39 @@ describe('Client BeClass workbook Preview client', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  it('distinguishes an actual coordinator lock timeout from a network timeout', async () => {
+    const snapshot = await ClientBeClassWorkbookSnapshot.fromFile(new File(['beclass'], 'beclass.xlsx'));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { error: {
+      category: 'unavailable', code: 'client_beclass_workbook_coordinator_lock_timeout',
+      message: 'Client BeClass 工作簿服務暫時無法使用。', field_errors: [], domain_blockers: [],
+      retryable: true, correlation_id: 'synthetic-correlation', current_version: null,
+    } } }), { status: 503, headers: { 'content-type': 'application/json' } }));
+    await expect(applyClientBeClassWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'same-key', correlationId: 'synthetic-correlation' }))
+      .rejects.toMatchObject({ code: 'client_beclass_workbook_coordinator_lock_timeout', retryable: true, message: expect.stringContaining('等待處理鎖 30 秒後逾時') });
+  });
+
+  it('keeps a slow NAS Apply request pending for more than one minute and accepts its result without resending', async () => {
+    const snapshot = await ClientBeClassWorkbookSnapshot.fromFile(new File(['slow-beclass'], 'beclass.xlsx'));
+    vi.useFakeTimers();
+    try {
+      let finish!: (value: Response) => void;
+      let signal!: AbortSignal;
+      const fetchMock = vi.fn((_path: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+        finish = resolve;
+        signal = init?.signal as AbortSignal;
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      }));
+      globalThis.fetch = fetchMock;
+      const pending = applyClientBeClassWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'slow-same-key', correlationId: 'slow-confirmation' });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(signal.aborted).toBe(false);
+      const receipt = { source_content_digest: snapshot.sha256, source_row_count: 0, created_count: 0, exact_replay_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, replayed_workbook: false };
+      finish(new Response(JSON.stringify({ success: true, message: 'ok', data: receipt, error: null }), { headers: { 'content-type': 'application/json' } }));
+      await expect(pending).resolves.toEqual(receipt);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('strict schema拒絕extra、null與無效digest', () => {
     const base = { source_content_digest: 'a'.repeat(64), sheet_identity: 'b'.repeat(64), source_row_count: 0, create_count: 0, review_required_count: 0, existing_conflict_count: 0, existing_source_count: 0, preview_fingerprint: 'c'.repeat(64) };
     expect(ClientBeClassWorkbookPreviewSchema.safeParse({ ...base, extra: true }).success).toBe(false);

@@ -6,7 +6,7 @@ Description: 協調訂單歷史 workbook Preview、Apply、replay 與逐列 Orde
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -217,6 +217,7 @@ class HistoricalOrderWorkbookReceipt:
     review_references: tuple[str, ...] = ()
     absent_order_cancellation_count: int = 0
     import_counts: HistoricalOrderWorkbookImportCounts | None = None
+    row_issues: tuple[HistoricalOrderWorkbookRowIssue, ...] | None = None
 
     def __post_init__(self) -> None:
         value = self.absent_order_cancellation_count
@@ -226,6 +227,8 @@ class HistoricalOrderWorkbookReceipt:
             counts = self.import_counts.as_dict().values()
             if any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in counts) or sum(counts) != self.source_row_count:
                 raise ValueError("historical_order_import_counts_not_conserved")
+            if self.row_issues is not None and len(self.row_issues) != self.import_counts.not_imported_count:
+                raise ValueError("historical_order_not_imported_rows_not_conserved")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -243,6 +246,7 @@ class HistoricalOrderWorkbookReceipt:
             "result_counts": self.result_counts.as_dict(),
             "review_references": list(self.review_references),
             "import_counts": None if self.import_counts is None else self.import_counts.as_dict(),
+            "row_issues": None if self.row_issues is None else [item.as_dict() for item in self.row_issues],
         }
 
 
@@ -407,6 +411,7 @@ class HistoricalOrderWorkbookImportService:
         review_rows = 0
         review_references: list[str] = []
         import_counts: Counter[str] = Counter()
+        row_issues: list[HistoricalOrderWorkbookRowIssue] = []
         for row in workbook.rows:
             locked_preview = self._workflow.preview_in_current_unit_of_work(
                 row, for_update=True
@@ -430,6 +435,11 @@ class HistoricalOrderWorkbookImportService:
                 import_counts["imported_count"] += 1
             else:
                 import_counts["not_imported_count"] += 1
+                issues = _historical_row_issues(
+                    replace(workbook, rows=(row,)),
+                    (locked_preview,),
+                )
+                row_issues.extend(issues or (HistoricalOrderWorkbookRowIssue(row.source_row, row.case_no, ("來源資料",), (receipt.outcome.value,)),))
             review_rows += int(getattr(receipt, "review_identity", None) is not None)
             review_identity = getattr(receipt, "review_identity", None)
             if review_identity is not None and review_identity not in review_references:
@@ -465,6 +475,7 @@ class HistoricalOrderWorkbookImportService:
                 import_counts["duplicate_skipped_count"],
                 import_counts["not_imported_count"],
             ),
+            row_issues=tuple(row_issues),
         )
 
     def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
@@ -504,6 +515,8 @@ class HistoricalOrderWorkbookImportService:
             )
         if isinstance(snapshot.get("import_counts"), dict):
             snapshot["import_counts"] = HistoricalOrderWorkbookImportCounts(**snapshot["import_counts"])
+        if snapshot.get("row_issues") is not None:
+            snapshot["row_issues"] = tuple(HistoricalOrderWorkbookRowIssue(**item) for item in snapshot["row_issues"])
         return HistoricalOrderWorkbookReceipt(**snapshot)
 
 
