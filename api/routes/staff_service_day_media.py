@@ -11,11 +11,14 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import Response
+from api.error_contracts import typed_http_error
 
 from api.dependencies.service_day_media import get_controlled_file_workflow
 from api.dependencies.service_day_logs import get_service_day_log_application
 from api.routes.line_staff_self_service import _required_staff, _verified_line_user_id
 from api.schemas.base import BaseResponse
+from infrastructure.runtime.file_transfer_settings import FileTransferSettings, file_transfer_settings, size_label
 from api.schemas.line_staff_self_service import (
     StaffLiffRequest,
     StaffServiceDayMediaResponse,
@@ -39,7 +42,12 @@ from domains.controlled_files.reference_finalize import canonical_scheduling_obj
 
 
 router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling Service Day Logs"])
-_MAXIMUM_MEAL_PHOTO_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/service-day-media/settings", response_model=BaseResponse[FileTransferSettings])
+def service_day_media_settings(body: StaffLiffRequest):
+    _verified_staff_identity(body)
+    return BaseResponse(data=file_transfer_settings())
 
 
 @router.post("/service-day-media", response_model=BaseResponse[StaffServiceDayMediaResponse])
@@ -63,9 +71,11 @@ async def upload_service_day_meal_photo(
         development_line_user_id=development_line_user_id,
     )
     line_user_id = _verified_line_user_id(payload)
-    content = await photo.read(_MAXIMUM_MEAL_PHOTO_BYTES + 1)
-    if len(content) > _MAXIMUM_MEAL_PHOTO_BYTES:
-        raise HTTPException(status_code=422, detail={"code": "service_day_meal_photo_too_large"})
+    limit = file_transfer_settings().photo_max_bytes
+    content = await photo.read(limit + 1)
+    if len(content) > limit:
+        raise HTTPException(status_code=422, detail={"code": "service_day_meal_photo_too_large",
+            "message": f"照片超過目前上限 {size_label(limit)}；本次照片未保存，請選擇較小檔案或請管理者調整上限。"})
     try:
         command = LiffMealPhotoUpload(
             line_user_id,
@@ -73,7 +83,7 @@ async def upload_service_day_meal_photo(
             (photo.content_type or "").split(";", 1)[0].lower(),
             IdempotencyKey(idempotency_key),
         )
-        metadata = prepare_liff_meal_photo_upload(command)
+        metadata = prepare_liff_meal_photo_upload(command, maximum_size_bytes=limit)
         if metadata.content_type not in {"image/jpeg", "image/png"}:
             raise ValueError("service_day_meal_photo_content_type_invalid")
         staff_id, verified_line_user_id = _verified_staff_identity(payload)
@@ -134,6 +144,36 @@ def _verified_staff_identity(payload: StaffLiffRequest) -> tuple[int, str]:
     with open_line_unit_of_work() as unit_of_work:
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
     return int(staff["staff_id"]), line_user_id.value
+
+
+@router.post("/service-day-logs/{log_id}/photos/{file_id}/download")
+def download_service_day_photo(
+    log_id: int, file_id: str, body: StaffLiffRequest,
+    controlled_file_workflow=Depends(get_controlled_file_workflow),
+    service_day_log_application=Depends(get_service_day_log_application),
+):
+    """Read only an attachment of a log owned by the freshly verified person."""
+    staff_id, line_user_id = _verified_staff_identity(body)
+    try:
+        result = service_day_log_application.query(log_id, staff_id, line_user_id)
+        if not any(item.controlled_file_object_id == file_id for item in result.controlled_file_attachments):
+            raise ValueError("service_day_log_photo_not_found")
+        readback = controlled_file_workflow.readback(file_id)
+        if (readback.owner != ControlledFileOwner.SCHEDULING
+                or readback.purpose not in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}
+                or readback.subject_reference != result.case_no):
+            raise ValueError("service_day_log_photo_not_found")
+        content = controlled_file_workflow.download(file_id)
+        if content.content_type not in {"image/jpeg", "image/png"}:
+            raise typed_http_error(503, "unavailable", "service_day_log_photo_unavailable",
+                                   "照片目前無法讀取", "service-day-photo")
+    except ControlledFileStorageError as error:
+        raise typed_http_error(503, "unavailable", "service_day_log_photo_unavailable",
+                               "照片儲存目前無法讀取，請稍後重試", "service-day-photo", retryable=error.retryable) from None
+    except (ValueError, ControlledFileWorkflowError):
+        raise HTTPException(404, detail={"code": "service_day_log_photo_not_found"}) from None
+    return Response(content.content, media_type=content.content_type,
+                    headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 __all__ = ["router"]

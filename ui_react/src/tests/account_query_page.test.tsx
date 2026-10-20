@@ -18,6 +18,7 @@ describe('AccountManagementPage query slice', () => {
   });
 
   it('renders the account GET and leaves unsupported controls disabled', async () => {
+    const create = vi.spyOn(accountCenterClient, 'create').mockRejectedValue(new Error('unexpected mutation'));
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText(/根帳號/, { exact: false })).toBeInTheDocument());
     expect(accountDirectoryClient.query).toHaveBeenCalledTimes(1);
@@ -26,7 +27,9 @@ describe('AccountManagementPage query slice', () => {
     expect(screen.queryByRole('button', {name: /強制登出|停權|重設 MFA/})).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /建立工作人員帳號/ }));
     expect(screen.getByRole('dialog', { name: '建立工作人員帳號' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '確認執行' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.getByText('請填寫或選擇「新帳號」後再儲存。')).toBeInTheDocument();
     expect(screen.getByLabelText('新帳號')).toBeVisible();
     expect(screen.queryByLabelText('重設密碼')).not.toBeInTheDocument();
     expect(screen.queryByText(/Access Control Version|帳號識別|Email \/ IP/)).not.toBeInTheDocument();

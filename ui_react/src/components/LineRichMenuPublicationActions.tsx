@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineRichMenuPublicationActions.tsx
@@ -209,6 +210,8 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   };
 
   const busy = previewState === 'loading' || publishState === 'loading' || retryState === 'loading';
+  useUnsavedDraft('圖文選單發布', { '發布原因': publishReason, '重試原因': retryReason }, { busy, resetKey: receipt });
+
 
   return (
     <section className="richmenu-publish-card" aria-label="Rich Menu 發布操作">

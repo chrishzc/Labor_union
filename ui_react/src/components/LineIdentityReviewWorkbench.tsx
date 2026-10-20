@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: LineIdentityReviewWorkbench.tsx
@@ -393,6 +394,8 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
     await openDetail(receipt.requestId, true);
     queue.refresh();
   };
+  useUnsavedDraft('LINE 身分審核', { '決定': decision, '原因': reason }, { busy: mutationStatus === 'loading', resetKey: receipt });
+
 
   return (
     <section className="line-table-container" data-control-id="line.identity.review-workbench">

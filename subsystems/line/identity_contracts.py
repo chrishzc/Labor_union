@@ -43,6 +43,7 @@ class LineIdentityApplyStatus(StrEnum):
     BOUND = "bound"
     PENDING_REVIEW = "pending_review"
     EXISTING = "existing"
+    PENDING_APPROVAL = "pending_approval"
 
 
 @dataclass(frozen=True, slots=True)

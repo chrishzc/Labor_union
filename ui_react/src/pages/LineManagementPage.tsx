@@ -1,3 +1,4 @@
+import { useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: LineManagementPage.tsx
  * Description: 整合 LINE typed Query／Preview／Apply 工作區，所有外送副作用仍由後端 durable task 執行。
@@ -738,6 +739,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   };
 
+  const { requestLeave } = useUnsavedNavigation();
   const localRichMenuConfiguration = richMenuDraftSnapshot && richMenuLocalDefinition
     ? adaptLineRichMenuDraft({ ...richMenuDraftSnapshot, definition: richMenuLocalDefinition })
     : richMenuConfiguration.value;
@@ -764,7 +766,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       {!runtimeOnly && <nav className="line-tab-bar" aria-label="客服與營運功能">
         {(['日常作業', '選單設定'] as const).map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
           <span className="line-nav-group-label">{group}</span>
-          {TABS.filter(([tab]) => group === '選單設定' ? tab === 'richmenu' : tab !== 'richmenu').map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab === 'richmenu' && richMenuDirty && tab !== 'richmenu' && !window.confirm('還有未儲存的選單修改，確定離開並放棄修改？')) return; setActiveTab(tab); }}>{label}</button>)}
+          {TABS.filter(([tab]) => group === '選單設定' ? tab === 'richmenu' : tab !== 'richmenu').map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab !== tab) requestLeave(() => { if (activeTab === 'richmenu') setRichMenuLocalDefinition(null); setActiveTab(tab); }); }}>{label}</button>)}
         </div>)}
       </nav>}
 

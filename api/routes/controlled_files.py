@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Protocol
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, Path, UploadFile
 from fastapi.responses import Response
@@ -16,6 +17,7 @@ from api.dependencies.admin_auth import admin_actor_context, require_persisted_a
 from api.dependencies.controlled_files import get_controlled_file_workflow
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
+from infrastructure.runtime.file_transfer_settings import FileTransferSettings, file_transfer_settings, size_label
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
@@ -161,6 +163,11 @@ class ControlledFileListView(BaseModel):
     items: tuple[ControlledFileDetailView, ...]
 
 
+@router.get("/transfer-settings", response_model=BaseResponse[FileTransferSettings])
+def transfer_settings(principal: AdminPrincipal = Depends(require_persisted_admin)):
+    return BaseResponse(data=file_transfer_settings())
+
+
 @router.post("/staging", response_model=BaseResponse[ControlledFileStagingView])
 def stage_controlled_file(
     document: UploadFile = File(),
@@ -174,13 +181,16 @@ def stage_controlled_file(
     principal: AdminPrincipal = Depends(require_persisted_admin),
     workflow: ControlledFileRouteWorkflow = Depends(get_controlled_file_route_workflow),
 ):
-    content = document.file.read(_MAXIMUM_STAGING_BYTES + 1)
-    if len(content) > _MAXIMUM_STAGING_BYTES:
+    limit = (file_transfer_settings().resume_max_bytes
+             if owner is ControlledFileOwner.STAFF and purpose is ControlledFilePurpose.STAFF_RESUME
+             else _MAXIMUM_STAGING_BYTES)
+    content = document.file.read(limit + 1)
+    if len(content) > limit:
         raise typed_http_error(
             409,
             "conflict",
             "controlled_file_staging_too_large",
-            "staging 檔案超過容量上限",
+            f"檔案超過目前上限 {size_label(limit)}；本次未建立新版本，請選擇較小檔案或請管理者調整上限。",
             correlation_id,
         )
     return _call_workflow(
@@ -342,10 +352,12 @@ def download_controlled_file(
         f"controlled-files-download:{file_id}",
     )
     safe_filename = content.filename.replace('"', "").replace("\r", "").replace("\n", "")
+    ascii_filename = safe_filename.encode("ascii", "ignore").decode() or "download.pdf"
     return Response(
         content=content.content,
         media_type=content.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(safe_filename, safe='')}",
+                 "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
     )
 
 

@@ -66,8 +66,8 @@ def _run_cycle(client: PrivateOperationsClient, identity: dict[str, object]) -> 
 
 def _external_observations() -> list[RuntimeHealthObservation]:
     observations = [
-        _http_probe("api", "FastAPI", _api_health_url()),
-        _http_probe("react", "React Admin", _ui_health_url()),
+        _http_probe("api", "FastAPI", _api_health_url(), ca_file=os.getenv("INTERNAL_API_CA_FILE")),
+        _http_probe("react", "React Admin", _ui_health_url(), ca_file=os.getenv("INTERNAL_API_CA_FILE")),
     ]
     public_url = os.getenv("LINE_PUBLIC_BASE_URL", "").strip().rstrip("/")
     observations.append(
@@ -86,11 +86,11 @@ def _external_observations() -> list[RuntimeHealthObservation]:
     return observations
 
 
-def _http_probe(name: str, component: str, url: str) -> RuntimeHealthObservation:
+def _http_probe(name: str, component: str, url: str, *, ca_file: str | None = None) -> RuntimeHealthObservation:
     now = _now()
     started = time.perf_counter()
     try:
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=3, **({"verify": ca_file} if ca_file else {}))
         response.raise_for_status()
         return RuntimeHealthObservation(
             name,

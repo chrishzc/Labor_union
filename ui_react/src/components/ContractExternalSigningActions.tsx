@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: ContractExternalSigningActions.tsx
@@ -1038,6 +1039,8 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       {draft?.staged && draft.staged.blockers.length > 0 && <ul role="alert">{draft.staged.blockers.map(blocker => <li key={blocker}>{contractCheckReason(blocker)}</li>)}</ul>}
     </article>;
   };
+  useUnsavedDraft('紙本契約回傳', { '待確認文件': Object.values(fileReturns).map(draft => draft.file?.name ?? draft.staged?.filename ?? '').filter(Boolean) }, { baseline: { '待確認文件': [] }, busy: busy || finalProtected, enabled: !completedReadback });
+
 
 
   return (

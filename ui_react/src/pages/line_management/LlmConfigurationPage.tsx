@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../../components/UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from '../../components/useSaveValidation';
 /**
@@ -91,6 +92,7 @@ export const LlmConfigurationPage: React.FC = () => {
     };
   }, []);
 
+  useUnsavedDraft('AI 模型設定', { 'API Key 已輸入（不顯示內容）': !!apiKey }, { baseline: { 'API Key 已輸入（不顯示內容）': false }, busy: saving });
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalized = apiKey.trim();

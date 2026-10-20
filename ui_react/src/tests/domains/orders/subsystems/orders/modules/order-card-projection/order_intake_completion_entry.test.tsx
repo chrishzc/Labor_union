@@ -98,7 +98,7 @@ describe('Orders intake repair entry', () => {
     const stateChanged = vi.fn();
     render(<OrderIntakeRepairPanel caseNo={caseNo} registry repairServiceTime focusMissing onEditStateChange={stateChanged} />);
     const start = await screen.findByLabelText('每日開始時間');
-    expect(start).toHaveFocus();
+    await waitFor(() => expect(start).toHaveFocus());
     expect(screen.queryByRole('button', { name: '確認完成進件補齊' })).not.toBeInTheDocument();
     fireEvent.change(start, { target: { value: '09:00' } });
     fireEvent.change(screen.getByLabelText('每日結束時間'), { target: { value: '17:00' } });

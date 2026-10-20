@@ -1,12 +1,15 @@
+import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LegacyVirtualAccountImport } from '../components/LegacyVirtualAccountImport';
+import { RegistrationApplications } from '../components/RegistrationApplications';
 import { ClientRosterPage } from './ClientRosterPage';
 import type { RegistryEditState } from '../components/ClientRegistryDetailEditor';
 import './ClientRegistryPage.css';
 
-type RegistryTab = 'roster' | 'virtual-accounts';
+type RegistryTab = 'roster' | 'virtual-accounts' | 'applications';
 
 export const ClientRegistryPage: React.FC = () => {
+  const { requestLeave } = useUnsavedNavigation();
   const readLocation = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { caseNo: params.get('case') ?? '', field: params.get('field') ?? '', fromWorkbench: params.get('from') === 'workbench' };
@@ -16,15 +19,13 @@ export const ClientRegistryPage: React.FC = () => {
   const editState = useRef<RegistryEditState>({ dirty: false, busy: false });
   const currentHash = useRef(window.location.hash);
   const onEditStateChange = useCallback((state: RegistryEditState) => { editState.current = state; }, []);
-  const allowLeave = () => !editState.current.busy && (!editState.current.dirty || window.confirm('有尚未儲存的變更，確定放棄並切換？'));
   const selectTab = (tab: RegistryTab) => {
-    if (tab === activeTab || !allowLeave()) return;
-    editState.current = { dirty: false, busy: false };
-    setActiveTab(tab);
+    if (tab === activeTab || editState.current.busy) return;
+    requestLeave(() => { editState.current = { dirty: false, busy: false }; setActiveTab(tab); });
   };
   useEffect(() => {
     const navigate = () => {
-      if (!allowLeave()) { window.history.replaceState(null, '', currentHash.current); return; }
+      if (window.location.hash === currentHash.current) return;
       currentHash.current = window.location.hash;
       const next = readLocation();
       setLocation(next);
@@ -41,9 +42,10 @@ export const ClientRegistryPage: React.FC = () => {
     <div className="client-registry-tabs" role="tablist" aria-label="客戶名冊檢視">
       <button type="button" role="tab" aria-selected={activeTab === 'roster'} onClick={() => selectTab('roster')}>客戶清單</button>
       <button type="button" role="tab" aria-selected={activeTab === 'virtual-accounts'} onClick={() => selectTab('virtual-accounts')}>虛擬帳號匯入</button>
+      <button type="button" role="tab" aria-selected={activeTab === 'applications'} onClick={() => selectTab('applications')}>待核准需求</button>
     </div>
-    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : '虛擬帳號匯入'}>
-      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : <LegacyVirtualAccountImport />}
+    <section role="tabpanel" aria-label={activeTab === 'roster' ? '客戶清單' : activeTab === 'applications' ? '待核准需求' : '虛擬帳號匯入'}>
+      {activeTab === 'roster' ? <ClientRosterPage embedded initialCaseNo={location.caseNo} focusField={location.field} onEditStateChange={onEditStateChange} onOpenServiceArrangement={(caseNo, recalculateDates) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`; }} onReturnToCase={location.fromWorkbench ? (caseNo) => { editState.current = { dirty: false, busy: false }; window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(caseNo)}`; } : undefined} /> : activeTab === 'applications' ? <RegistrationApplications onEditStateChange={onEditStateChange} /> : <LegacyVirtualAccountImport />}
     </section>
   </div>;
 };

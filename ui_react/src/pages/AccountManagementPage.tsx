@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../components/UnsavedChanges';
 import { useSaveValidation } from '../components/useSaveValidation';
 /**
  * File: AccountManagementPage.tsx
@@ -225,6 +226,8 @@ export const AccountManagementPage: React.FC = () => {
 
   const userRows = usersState.data ?? [];
   const auditPageView = auditState.data;
+  useUnsavedDraft('帳號權限', { '帳號': createUsername, '顯示名稱': createDisplayName, '原因': commandReason, '新密碼已輸入（不顯示內容）': !!createPassword || !!commandPassword }, { enabled: !!commandTarget, busy: commandState.status === 'loading', resetKey: commandTarget });
+
 
   return (
     <div className="account-page-container" data-surface-id="account.page">

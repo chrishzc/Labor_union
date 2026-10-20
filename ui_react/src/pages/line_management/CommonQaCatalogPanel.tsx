@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedNavigation } from '../../components/UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from '../../components/useSaveValidation';
 /** Governed Knowledge workflow for LINE common questions and approved answers. */
@@ -216,7 +217,8 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     setEditingItem(item); setIsCreating(false); setModalNotice(null);
   };
 
-  const closeEditor = () => { setEditingItem(null); setIsCreating(false); setModalNotice(null); };
+  const { requestLeave } = useUnsavedNavigation();
+  const closeEditor = () => requestLeave(() => { setEditingItem(null); setIsCreating(false); setModalNotice(null); });
 
   useEffect(() => {
     if (readStatus !== 'ready' || initialEditorOpened) return;
@@ -263,13 +265,15 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
         }),
       });
       if (!response.ok) throw new Error(await apiError(response));
-      closeEditor(); await loadState();
+      setEditingItem(null); setIsCreating(false); setModalNotice(null); await loadState();
       setNotice(editingItem ? '已建立新草稿版本，可直接發布啟用。' : '已新增草稿，可直接發布啟用。');
       setNoticeKind('success');
     } catch (error) {
       setModalNotice(error instanceof Error ? error.message : '儲存失敗。');
     } finally { setBusy(false); }
   };
+  useUnsavedDraft('常見問答', { '題號': formData.id, '問題': formData.question, '答案': formData.answer, '分類': formData.category, '標籤': formData.tag, '其他問法': formData.aliases, '備註': formData.notes }, { enabled: isCreating || !!editingItem, busy, resetKey: editingItem });
+
 
   return (
     <div className="ai-editor-card qa-catalog-panel">

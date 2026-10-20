@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
@@ -277,6 +278,8 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     finally { inFlight.current.delete(caseNo); }
   };
+  useUnsavedDraft('實際開始日期', { '實際開始日期': date }, { enabled: !!query, baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '' }, busy });
+
 
   return (
     <section aria-label={`案件 ${caseNo} 實際開始日`}>

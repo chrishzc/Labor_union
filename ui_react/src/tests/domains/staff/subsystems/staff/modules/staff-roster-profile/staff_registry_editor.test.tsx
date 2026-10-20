@@ -1,3 +1,4 @@
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StaffRegistryEditor } from '../../../../../../../components/StaffRegistryEditor';
@@ -5,20 +6,30 @@ import { STAFF_PROFILE } from './fixtures/staff_profile_contract_fixtures';
 
 const mocks = vi.hoisted(() => ({
   previewProfile: vi.fn(), applyProfile: vi.fn(), previewBank: vi.fn(), applyBank: vi.fn(),
-  currentResume: vi.fn(), uploadResume: vi.fn(), downloadResume: vi.fn(),
+  currentResume: vi.fn(), uploadResume: vi.fn(), downloadResume: vi.fn(), previewResume: vi.fn(), settings: vi.fn(),
 }));
 vi.mock('../../../../../../../api/staff_registry/staff_registry_client', () => ({ staffRegistryClient: mocks }));
-vi.mock('../../../../../../../api/staff_profile/staff_resume_client', () => ({ staffResumeClient: {
+vi.mock('../../../../../../../api/staff_profile/staff_resume_client', () => ({ fileSizeLabel: (bytes: number) => `${(bytes / 1048576).toFixed(2)} MiB`, staffResumeClient: {
   current: mocks.currentResume,
   upload: mocks.uploadResume,
   download: mocks.downloadResume,
+  preview: mocks.previewResume,
+  settings: mocks.settings,
 } }));
+
+function LeaveProbe({ leave }: { leave: () => void }) {
+  const { requestLeave } = useUnsavedNavigation();
+  return <button type="button" onClick={() => requestLeave(leave)}>離開名冊</button>;
+}
 
 describe('Staff registry owner editing', () => {
   beforeEach(() => {
     vi.spyOn(window, 'alert').mockImplementation(() => undefined);
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.currentResume.mockResolvedValue(null);
+    mocks.settings.mockResolvedValue({ photo_max_bytes: 10485760, resume_max_bytes: 20971520, timeout_seconds: 300 });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:resume-preview');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     mocks.previewBank.mockResolvedValue({ staff_id: STAFF_PROFILE.staff_id, current_version: STAFF_PROFILE.bank_accounts_version, operation: 'add', before: null, after: { account_id: null, bank_code: '812', branch_code: '0012', account_last4: '7890', is_primary: false, is_active: true }, preview_fingerprint: 'b'.repeat(64) });
   });
   afterEach(() => vi.restoreAllMocks());
@@ -173,7 +184,44 @@ describe('Staff registry owner editing', () => {
     expect(mocks.uploadResume.mock.calls[1][2]).toBe(mocks.uploadResume.mock.calls[0][2]);
   });
 
-  it('displays full bank account number in account selection when available', () => {
+  it('previews selected and saved PDFs and releases the preview on close', async () => {
+    mocks.currentResume.mockResolvedValue({ file_id: 'cf_' + '1'.repeat(32), filename: 'resume.pdf', version: 1 });
+    mocks.previewResume.mockResolvedValue(new Blob(['%PDF-saved'], { type: 'application/pdf' }));
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '預覽目前履歷' }));
+    expect(await screen.findByLabelText('履歷 PDF 預覽')).toHaveAttribute('data', 'blob:resume-preview');
+    expect(mocks.previewResume).toHaveBeenCalledWith('cf_' + '1'.repeat(32));
+    fireEvent.click(screen.getByRole('button', { name: '關閉履歷預覽' }));
+    await waitFor(() => expect(screen.queryByLabelText('履歷 PDF 預覽')).not.toBeInTheDocument());
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:resume-preview');
+    const file = new File(['%PDF-selected'], 'selected.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('選擇 PDF'), { target: { files: [file] } });
+    expect(await screen.findByLabelText('履歷 PDF 預覽')).toBeInTheDocument();
+    expect(mocks.uploadResume).not.toHaveBeenCalled();
+  });
+
+  it('uses configured capacity and shows an actionable error without uploading', async () => {
+    mocks.settings.mockResolvedValue({ photo_max_bytes: 50, resume_max_bytes: 8, timeout_seconds: 600 });
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
+    await screen.findByText('尚未上傳月嫂履歷 PDF');
+    fireEvent.change(screen.getByLabelText('選擇 PDF'), { target: { files: [new File(['%PDF-too-large'], 'large.pdf', { type: 'application/pdf' })] } });
+    expect(screen.getByRole('alert')).toHaveTextContent('超過目前上限');
+    expect(screen.getByRole('alert')).toHaveTextContent('本次未上傳');
+    expect(screen.getByRole('button', { name: '上傳履歷' })).toBeDisabled();
+    expect(mocks.uploadResume).not.toHaveBeenCalled();
+  });
+
+  it('does not report an empty resume while loading or after a failed read', async () => {
+    mocks.currentResume.mockRejectedValueOnce(new Error('儲存服務暫不可用'));
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
+    expect(screen.queryByText('尚未上傳月嫂履歷 PDF')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('儲存服務暫不可用');
+    expect(screen.queryByText('尚未上傳月嫂履歷 PDF')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取履歷' }));
+    expect(await screen.findByText('尚未上傳月嫂履歷 PDF')).toBeInTheDocument();
+  });
+
+  it('displays full bank account number in account selection when available', async () => {
     const profileWithAccountNo = {
       ...STAFF_PROFILE,
       bank_accounts: [
@@ -181,8 +229,27 @@ describe('Staff registry owner editing', () => {
       ],
     };
     render(<StaffRegistryEditor profile={profileWithAccountNo} onUpdated={vi.fn()} />);
+    await screen.findByText('尚未上傳月嫂履歷 PDF');
     const bankSection = screen.getByRole('heading', { name: /管理銀行帳戶/ }).closest('section') as HTMLElement;
     fireEvent.change(within(bankSection).getByLabelText('動作'), { target: { value: 'replace' } });
     expect(within(bankSection).getByRole('combobox', { name: '帳戶' })).toHaveTextContent('帳號 81230011223344');
   });
+  it('shows real profile changes while keeping complete bank input out of the leave warning', async () => {
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} showResume={false} /><LeaveProbe leave={leave} /></UnsavedChangesProvider>);
+    fireEvent.change(screen.getByLabelText('姓名'), { target: { value: '合成人員' } });
+    const account = '0000111122223333';
+    fireEvent.change(screen.getByLabelText('完整新帳號'), { target: { value: account } });
+    fireEvent.click(screen.getByRole('button', { name: '離開名冊' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    expect(within(warning).getByRole('cell', { name: STAFF_PROFILE.name! })).toBeInTheDocument();
+    expect(within(warning).getByRole('cell', { name: '合成人員' })).toBeInTheDocument();
+    expect(warning).toHaveTextContent('新帳號已輸入（不顯示內容）');
+    expect(warning).not.toHaveTextContent(account);
+    expect(mocks.applyProfile).not.toHaveBeenCalled(); expect(mocks.applyBank).not.toHaveBeenCalled();
+    fireEvent.click(within(warning).getByRole('button', { name: '繼續編輯' }));
+    expect(screen.getByLabelText('完整新帳號')).toHaveValue(account);
+    expect(leave).not.toHaveBeenCalled();
+  });
+
 });

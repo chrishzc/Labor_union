@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: StaffPayoutRemediationWorkbench.tsx
  * Description: PAYOUT-001 的人工核銷工作台，僅以 Job terminal 與 fresh owner readback 解除異常。
@@ -281,6 +282,8 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     catch (caught) { setUnknownOutcome(true); setError(displayError(caught)); }
     finally { if (mounted.current) setBusy(null); }
   };
+  useUnsavedDraft('月嫂付款核銷', { '銀行交易資料列': rowIdsText, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: accepted });
+
 
   if (!query) return <section aria-label="逾期月嫂應付款人工核銷"><h3>逾期月嫂應付款人工核銷</h3>{busy === 'query' && <p role="status">正在讀取最新應付款資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;
 

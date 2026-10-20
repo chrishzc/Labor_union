@@ -64,7 +64,9 @@ class _Cursor:
             self.lastrowid = 17
         elif normalized.startswith("INSERT INTO beclass_records"):
             self.lastrowid = 23
-        elif normalized.startswith("INSERT INTO provisional_registration_conflicts"):
+        elif normalized.startswith("INSERT INTO line_delivery_tasks"):
+            self.lastrowid = 31
+        elif normalized.startswith("INSERT IGNORE INTO provisional_registration_conflicts"):
             self.lastrowid = 29
 
     def fetchone(self):
@@ -115,10 +117,10 @@ def test_first_submission_writes_only_provisional_roots_and_one_task():
     receipt = _application(connection).apply(_intent())
 
     statements = [statement for statement, _ in connection.cursor_instance.statements]
-    assert receipt == ProvisionalRegistrationReceipt(5, 17, 23, "王小美", False, True)
+    assert receipt == ProvisionalRegistrationReceipt(5, None, None, "王小美", False, True)
     assert connection.commits == 1
-    assert any(statement.startswith("INSERT INTO clients") for statement in statements)
-    assert any(statement.startswith("INSERT INTO beclass_records") for statement in statements)
+    assert not any(statement.startswith("INSERT INTO clients") for statement in statements)
+    assert not any(statement.startswith("INSERT INTO beclass_records") for statement in statements)
     assert any("INSERT INTO line_delivery_tasks" in statement for statement in statements)
     assert not any("INSERT INTO orders" in statement for statement in statements)
 
@@ -152,7 +154,7 @@ def test_different_payload_creates_one_admin_conflict_and_returns_conflict():
     statements = [statement for statement, _ in connection.cursor_instance.statements]
     assert connection.commits == 1
     assert connection.rollbacks == 0
-    assert any("INSERT INTO provisional_registration_conflicts" in statement for statement in statements)
+    assert any("INSERT IGNORE INTO provisional_registration_conflicts" in statement for statement in statements)
 
 
 def test_legacy_liff_route_delegates_to_typed_owner(monkeypatch):

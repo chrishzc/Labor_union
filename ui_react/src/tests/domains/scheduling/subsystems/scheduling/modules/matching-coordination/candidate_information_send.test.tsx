@@ -76,7 +76,7 @@ beforeEach(() => {
 
 it.each([1, 2, 3] as const)('shared information sends only document %i to the selected recipient', async kind => {
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  await screen.findByText('測試月嫂');
+  await screen.findByText('未設定 測試月嫂');
   const names = { 1: '服務條件與費用', 2: '照護與飲食需求', 3: '每週服務說明' };
   fireEvent.click(screen.getByRole('button', { name: `寄送${names[kind]}給 測試月嫂` }));
   const confirm = await screen.findByRole('button', { name: `確認寄送${names[kind]}` });
@@ -103,7 +103,7 @@ it('allows a shared order preview without any candidate and never enables sendin
 
 it('blocks a recipient preview when the common document changed before confirmation', async () => {
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
-  await screen.findByText('測試月嫂');
+  await screen.findByText('未設定 測試月嫂');
   const originalPreview = await client.previewCaseInformation('CASE-1', 1);
   vi.mocked(client.previewCaseInformation).mockResolvedValue(originalPreview);
   vi.mocked(client.previewInformation).mockResolvedValue({ case_no: 'CASE-1', candidate_id: 3, info_type: 1,

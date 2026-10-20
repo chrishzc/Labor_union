@@ -21,6 +21,7 @@ describe('Staff roster profile flow', () => {
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffProfileClient, 'query').mockResolvedValue(STAFF_PROFILE);
     vi.spyOn(staffResumeClient, 'current').mockResolvedValue(null);
+    vi.spyOn(staffResumeClient, 'settings').mockResolvedValue({photo_max_bytes:10485760,resume_max_bytes:20971520,timeout_seconds:300});
     const relations = {
       service_regions: [{ value: '北區', detail: 'T01 six region final' }],
       service_periods: [], cooking_skills: [], holiday_availability: [], rest_schedule: [], baby_types: [],
@@ -131,7 +132,7 @@ describe('Staff roster profile flow', () => {
     expect(statusSection.compareDocumentPosition(resumeSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(resumeSection).toBe(document.querySelector('.staff-drawer-content')?.lastElementChild);
     expect(within(masterSection).queryByRole('heading', { name: '月嫂履歷 PDF' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('選擇 PDF')).toBeEnabled();
+    await waitFor(() => expect(screen.getByLabelText('選擇 PDF')).toBeEnabled());
     expect(staffResumeClient.current).toHaveBeenCalledExactlyOnceWith(11);
 
     const profile = await screen.findByTestId('staff-profile-detail');

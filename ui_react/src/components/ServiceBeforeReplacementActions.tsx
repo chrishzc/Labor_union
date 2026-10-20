@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: ServiceBeforeReplacementActions.tsx
  * Description: 呈現服務前換人人工 Query／Preview／確認／Apply，以及同鍵結果對帳與代班轉介。
@@ -240,6 +241,8 @@ export function ServiceBeforeReplacementActions({
     }
     await apply(request, createServiceBeforeReplacementCommandIdentity());
   };
+  useUnsavedDraft('服務前更換月嫂', { '情境': scenario, '原因': reason }, { busy, resetKey: query });
+
 
   return (
     <section aria-label="服務前換人操作" style={{ display: 'grid', gap: '12px' }}>

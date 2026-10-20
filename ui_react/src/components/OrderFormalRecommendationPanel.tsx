@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
@@ -653,6 +654,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     return staffDisplayLabel(segment?.staff_union_no ?? candidate?.staff_union_no, segment?.staff_name ?? candidate?.staff_name ?? '姓名未設定');
   };
   const informationReady = confirmationPreview.status === 'ready' ? [confirmationPreview.data.order_information_1_ready, confirmationPreview.data.order_information_2_ready, confirmationPreview.data.weekly_service_ready] : [false, false, false];
+  useUnsavedDraft('正式推薦確認', { '接案意願': willingnessChoice, '意願原因': willingnessReason, '確認原因': decisionReason, '傳送備註': resumeNote }, { busy: protectedOperation || multiBusy, resetKey: revision });
+
 
   return (
     <section className="formal-recommendation" aria-label={`案件 ${caseNo} 正式推薦媒合方案`}>

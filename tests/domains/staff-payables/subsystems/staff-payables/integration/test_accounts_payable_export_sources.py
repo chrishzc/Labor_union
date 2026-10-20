@@ -4,11 +4,9 @@ import pytest
 
 from infrastructure.mysql.accounts_payable_export_sources import (
     _CLIENT_REFUNDS_SQL,
-    _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
     _STAFF_PAYABLES_SQL,
     MySqlStaffPayableExportSource,
     _formal_case_audit_item,
-    _historical_case_audit_item,
     _missing_case_audit_item,
     _refund_fact,
     _staff_fact,
@@ -94,6 +92,7 @@ def test_case_audit_keeps_exact_historical_settlement_visible_without_relisting_
 
     assert item.disposition == "paid_or_settled"
     assert item.balance.amount == 0
+    assert item.payment_status == "settled"
     assert item.effective_due_date == date(2026, 10, 15)
 
 
@@ -112,116 +111,56 @@ def test_case_audit_reports_unknown_amount_and_unformed_date_instead_of_zero():
     assert item.disposition == "date_not_formed"
 
 
-class _ProjectionCursor:
-    def __init__(self, historical_rows):
-        self.historical_rows = historical_rows
+class _CanonicalCursor:
+    def __init__(self, formal_rows=()):
+        self.formal_rows = formal_rows
         self.rows = ()
         self.statements = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
     def execute(self, statement, parameters):
         self.statements.append((statement, parameters))
-        self.rows = self.historical_rows if statement == _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL else ()
-
-    def fetchall(self):
-        return self.rows
-
-
-class _ProjectionConnection:
-    def __init__(self, historical_rows):
-        self.cursor_instance = _ProjectionCursor(historical_rows)
-
-    def cursor(self):
-        return self.cursor_instance
-
-
-def test_existing_historical_order_without_obligation_is_projected_on_each_load():
-    row = {
-        "case_no": "H-19",
-        "assignment_id": 19,
-        "staff_id": 3,
-        "recipient_name": "月嫂甲",
-        "identity_card": "A123456789",
-        "contracted_service_days": 40,
-        "service_hours_per_day": 9,
-        "floor_fee_ntd": 4_000,
-        "actual_service_days": 26,
-        "payroll_policy_version": "payroll-rate:citizen:v1",
-        "payroll_policy_kind": "citizen",
-        "payroll_hourly_rate_ntd": 300,
-        "adjustment_amount_ntd": 0,
-        "identity_status": "一般市民",
-        "client_policy_version": "client-rate:citizen:v1",
-        "client_hourly_rate_ntd": 300,
-        "completed_on": date(2026, 4, 20),
-        "staff_payment_due_date": None,
-        "primary_account_count": 1,
-        "bank_code": "012",
-        "account_no": "1234567890",
-    }
-    connection = _ProjectionConnection((row,))
-
-    facts = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
-
-    assert len(facts) == 1
-    assert facts[0].obligation_identity == (
-        "historical-service:H-19:revision:1:assignment:19:payable_to_staff"
-    )
-    assert facts[0].amount.amount == 72_800
-    assert facts[0].payment_date == date(2026, 5, 15)
-    assert "NOT EXISTS" in _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL
-
-    row["actual_service_days"] = 20
-    refreshed = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
-
-    assert refreshed[0].amount.amount == 56_000
-
-    later_month = MySqlStaffPayableExportSource(connection).load(date(2026, 9, 15))
-
-    assert later_month == ()
-
-    row["adjustment_amount_ntd"] = -100_000
-    blocked = _historical_case_audit_item(row, date(2026, 5, 15))
-
-    assert blocked.disposition == "blocked"
-    assert blocked.amount_due is None
-    assert blocked.balance is None
+        if "historical_confirmation.confirmation_kind AS" in statement:
+            self.rows = self.formal_rows
+        elif "SELECT orders.case_no,orders.staff_payment_due_date" in statement:
+            self.rows = ({"case_no": "C-1", "staff_payment_due_date": date(2026, 3, 15)},)
+        elif "FROM scheduling_aggregates" in statement:
+            self.rows = ()
+        elif "FROM case_staff_assignments assignment" in statement:
+            self.rows = ({"id": 91, "staff_id": 1}, {"id": 92, "staff_id": 2})
+        elif "SELECT id,name FROM staff" in statement:
+            self.rows = ({"id": 1, "name": "月嫂甲"}, {"id": 2, "name": "月嫂乙"})
+        else:
+            self.rows = ()
+    def fetchall(self): return self.rows
+    def fetchone(self): return self.rows[0] if self.rows else None
 
 
-def test_historical_projection_does_not_include_a_future_due_date():
-    row = {
-        "case_no": "H-20",
-        "assignment_id": 20,
-        "staff_id": 4,
-        "recipient_name": "月嫂乙",
-        "identity_card": "B123456789",
-        "contracted_service_days": 40,
-        "service_hours_per_day": 9,
-        "floor_fee_ntd": 0,
-        "actual_service_days": 10,
-        "payroll_policy_version": "payroll-rate:subsidized-citizen:v1",
-        "payroll_policy_kind": "subsidized_citizen",
-        "payroll_hourly_rate_ntd": 350,
-        "adjustment_amount_ntd": 0,
-        "identity_status": "補助市民",
-        "client_policy_version": "client-rate:subsidized-citizen:v1",
-        "client_hourly_rate_ntd": 350,
-        "completed_on": date(2026, 4, 20),
-        "staff_payment_due_date": None,
-        "primary_account_count": 1,
-        "bank_code": "012",
-        "account_no": "1234567890",
-    }
-    connection = _ProjectionConnection((row,))
+class _CanonicalConnection:
+    def __init__(self, formal_rows=()): self.cursor_instance = _CanonicalCursor(formal_rows)
+    def cursor(self): return self.cursor_instance
 
-    facts = MySqlStaffPayableExportSource(connection).load(date(2026, 5, 15))
 
-    assert facts == ()
+def test_missing_historical_obligation_is_not_recalculated_by_export_query():
+    connection = _CanonicalConnection()
+    source = MySqlStaffPayableExportSource(connection)
+    assert source.load(date(2026, 3, 15)) == ()
+    assert len(connection.cursor_instance.statements) == 1
+    items = source.load_case("C-1", date(2026, 3, 15))
+    assert [item.staff_id for item in items] == [1, 2]
+    assert all(item.source == "order_facts" for item in items)
+    assert all(item.amount_due is None and item.balance is None for item in items)
+    assert all("尚未建立月嫂應付帳務" in item.reason for item in items)
+
+
+def test_current_assignment_and_paid_obligation_are_composed_once_without_relisting_paid_staff():
+    row = _partially_paid_staff_row(payout_status="completed", export_amount_ntd=0)
+    connection = _CanonicalConnection((row,))
+    items = MySqlStaffPayableExportSource(connection).load_case("C-1", date(2026, 3, 15))
+    assert [(item.staff_id, item.payment_status) for item in items] == [(1, "paid"), (2, "pending")]
+    assert items[0].balance.amount == 0
+    assert items[1].amount_due is None and items[1].source == "order_facts"
+    assert sum("FROM case_staff_assignments assignment" in sql for sql, _ in connection.cursor_instance.statements) == 1
 
 
 def _partially_paid_staff_row(**overrides):
@@ -257,6 +196,7 @@ def test_partially_paid_case_audit_preserves_original_amount_and_current_balance
     assert item.disposition == "selected_month"
     assert item.amount_due.amount == 20_000
     assert item.balance.amount == 1500
+    assert item.payment_status == "partially_paid"
 
     other_month = _formal_case_audit_item(row, date(2026, 4, 15))
     assert other_month.disposition == "other_month"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +51,7 @@ class ClientFinanceCaseSummary:
     obligation_count: int
     ledger_entry_count: int
     receipt_entry_count: int
+    receipt_status: Literal["pending", "unpaid", "partially_received", "received", "settled"] = "pending"
 
 
 @dataclass(frozen=True, slots=True)

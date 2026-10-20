@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ExpectedVersion
+from domains.case_import.provisional_registration import ProvisionalRegistrationCandidate
 
 
 class ProvisionalRegistrationConflictError(RuntimeError):
@@ -36,11 +37,21 @@ class ProvisionalRegistrationPreview:
 @dataclass(frozen=True, slots=True)
 class ProvisionalRegistrationReceipt:
     registration_id: int
-    client_id: int
-    beclass_record_id: int
+    client_id: int | None
+    beclass_record_id: int | None
     client_name: str
     replayed: bool
     worker_wakeup_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationApplicationSnapshot:
+    registration_id: int
+    version: int
+    candidate: ProvisionalRegistrationCandidate
+    client_id: int | None
+    beclass_record_id: int | None
+    approved_by_actor: str | None
 
 
 __all__ = [
@@ -49,4 +60,5 @@ __all__ = [
     "ProvisionalRegistrationStorageError",
     "ProvisionalRegistrationPreview",
     "ProvisionalRegistrationReceipt",
+    "RegistrationApplicationSnapshot",
 ]

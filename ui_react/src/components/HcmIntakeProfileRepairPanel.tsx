@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { ClientProfileChanges, ClientRegistryDetail, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
@@ -138,6 +139,8 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
     catch (error) { if (mounted.current) setMessage(error instanceof Error ? error.message : '修正結果讀取失敗。'); }
     finally { if (mounted.current) { setBusy(false); onBusyChange(false); } }
   };
+  useUnsavedDraft('HCM 主檔補登', { ...Object.fromEntries(Object.entries(draft).map(([key, value]) => [Object.entries(PROFILE_FIELDS).find(([, apiField]) => apiField === key)?.[0] ?? key, value])), '原因': reason }, { enabled: !!detail, resetKey: detail, busy: busy || unconfirmed });
+
 
   if (!profileFields.length) return null;
   return <section aria-label="修正進件欄位" style={{ borderTop: '1px solid #fed7aa', paddingTop: 10, display: 'grid', gap: 10, minWidth: 0 }}>

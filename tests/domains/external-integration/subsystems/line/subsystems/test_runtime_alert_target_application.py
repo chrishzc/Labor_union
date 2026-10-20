@@ -161,6 +161,30 @@ def _actor():
     return ActorContext("admin:7", ())
 
 
+def test_preferences_query_and_rejected_edit_do_not_commit():
+    repo = _Repo((_row(),))
+    repo.get_target_preferences = lambda target_id: {"system_health": False}
+    units = []
+    app = RuntimeAlertTargetApplication(_factory(repo, units), lambda: NOW)
+    assert app.get_target_preferences(1) == {"system_health": False}
+    with pytest.raises(RuntimeAlertTargetError) as error:
+        app.save_target_preferences(1, {"system_health": True})
+    assert error.value.code == "line_alert_preferences_fixed"
+    assert all(unit.commits == 0 for unit in units)
+    assert repo.update_calls == repo.save_calls == 0
+
+
+def test_preferences_edit_preserves_missing_target_error():
+    repo = _Repo()
+    def missing(target_id):
+        raise LookupError(target_id)
+    repo.get_target_preferences = missing
+    app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
+    with pytest.raises(RuntimeAlertTargetError) as error:
+        app.save_target_preferences(1, {"system_health": True})
+    assert error.value.code == "line_alert_target_not_found"
+
+
 def _reset(repo, expected, key="reset-1"):
     app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
     return app.reset(

@@ -1,5 +1,6 @@
 /** Import receipts expose conserved counts, non-imported rows and bounded same-key confirmation. */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
@@ -7,6 +8,7 @@ import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_h
 import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
 import { DataImportPage } from '../pages/DataImportPage';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
 const digest = 'a'.repeat(64);
 const identity = 'b'.repeat(64);
 const fingerprint = 'c'.repeat(64);
@@ -31,7 +33,92 @@ async function apply(card: HTMLElement) {
   fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
   await within(card).findByText('匯入結果');
 }
+function ImportNavigationHarness() {
+  const [left, setLeft] = useState(false);
+  const { requestLeave } = useUnsavedNavigation();
+  return <><button className="sidebar-nav-item" onClick={() => requestLeave(() => setLeft(true))}>前往其他頁面</button>{left ? <h1>其他頁面</h1> : <DataImportPage />}</>;
+}
 describe('Data Import simple result flows', () => {
+  it('stopping an in-flight wait releases actual navigation guards without claiming cancellation or sending another Apply', async () => {
+    let rejectApply!: (reason: unknown) => void;
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
+    render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+    expect(screen.queryByRole('heading', { name: '其他頁面' })).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
+    expect(within(card).getByText(/已停止等待與後續自動查詢/)).toHaveTextContent('這不代表匯入已取消');
+    expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeDisabled();
+    expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+    expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    try {
+      await act(async () => { rejectApply(new ClientBeClassWorkbookApplyError('client_beclass_workbook_apply_timeout', '逾時', true)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('stopping between confirmations clears scheduled retries and manual lookup reuses the original command', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '等待鎖逾時', true, 503));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '查詢這次匯入結果' })); });
+      expect(within(card).getByText('匯入結果')).toBeInTheDocument();
+      const calls = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toEqual(calls[0]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not restart automatic confirmation when the original request times out after stopping', async () => {
+    let rejectApply!: (reason: unknown) => void;
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
+    vi.useFakeTimers();
+    try {
+      await act(async () => { rejectApply(new ClientBeClassWorkbookApplyError('client_beclass_workbook_apply_timeout', '逾時', true)); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+      expect(document.querySelector('[data-surface-id="imports.apply-navigation-lock"]')).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('still displays a successful original response after stopping the wait', async () => {
+    const receipt = await clientBeClassWorkbookPreviewClient.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockClear();
+    let finish!: (value: typeof receipt) => void;
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    render(<DataImportPage />);
+    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
+    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
+    await act(async () => { finish(receipt); });
+    expect(within(card).getByText('匯入結果')).toBeInTheDocument();
+    expect(within(card).queryByText(/已停止等待/)).not.toBeInTheDocument();
+    expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+  });
   it.each(cases)('%s shows receipt-owned non-imported rows without using preview warnings', async (kind, label, id) => {
     const client = id === 'client-beclass' ? clientBeClassWorkbookPreviewClient : id === 'staff-historical' ? staffHistoricalWorkbookPreviewClient : historicalOrderWorkbookPreviewClient;
     const receipt = await client.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });

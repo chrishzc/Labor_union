@@ -68,6 +68,14 @@ def _case_no(value: str) -> str:
 
 
 def _summary(row) -> ClientFinanceCaseSummary:
+    outstanding = _nonnegative(row["open_receivable_amount_ntd"], "open_receivable_amount_ntd")
+    has_receipts = int(row["net_receipt_amount_ntd"]) > 0 or int(row["historical_paid_count"]) > 0
+    receipt_status = (
+        "partially_received" if outstanding > 0 and has_receipts else
+        "unpaid" if outstanding > 0 else
+        "received" if has_receipts else
+        "settled" if int(row["receivable_count"]) > 0 else "pending"
+    )
     return ClientFinanceCaseSummary(
         str(row["case_no"]),
         str(_nonnegative(row["aggregate_version"], "aggregate_version")),
@@ -76,6 +84,7 @@ def _summary(row) -> ClientFinanceCaseSummary:
         _nonnegative(row["obligation_count"], "obligation_count"),
         _nonnegative(row["ledger_entry_count"], "ledger_entry_count"),
         _nonnegative(row["receipt_entry_count"], "receipt_entry_count"),
+        receipt_status,
     )
 
 
@@ -198,10 +207,12 @@ _CASE_SUMMARY_SQL = """
 SELECT account.case_no, account.aggregate_version,
        COALESCE(SUM(CASE WHEN obligation.direction='receivable_from_client'
                          AND obligation.status='open'
+                         AND historical.obligation_identity IS NULL
                         THEN obligation.amount_due_ntd ELSE 0 END), 0)
            AS open_receivable_amount_ntd,
        COALESCE(SUM(CASE WHEN obligation.direction='payable_to_client'
                          AND obligation.status='open'
+                         AND historical.obligation_identity IS NULL
                         THEN obligation.amount_due_ntd ELSE 0 END), 0)
            AS open_payable_amount_ntd,
        COUNT(DISTINCT obligation.obligation_identity) AS obligation_count,
@@ -209,10 +220,25 @@ SELECT account.case_no, account.aggregate_version,
          WHERE ledger.case_no=account.case_no) AS ledger_entry_count,
        (SELECT COUNT(*) FROM client_ledger_entries receipt
          WHERE receipt.case_no=account.case_no
-           AND receipt.entry_type='receipt') AS receipt_entry_count
+           AND receipt.entry_type='receipt') AS receipt_entry_count,
+       COUNT(CASE WHEN obligation.direction='receivable_from_client'
+                   AND obligation.status<>'cancelled' THEN 1 END) AS receivable_count,
+       COUNT(CASE WHEN obligation.direction='receivable_from_client'
+                   AND obligation.status<>'cancelled'
+                   AND historical.confirmation_kind='paid' THEN 1 END) AS historical_paid_count,
+       COALESCE((SELECT SUM(CASE WHEN ledger.entry_type='receipt' THEN ledger.amount_ntd
+                                WHEN ledger.entry_type='reversal' AND target.entry_type='receipt' THEN -ledger.amount_ntd
+                                ELSE 0 END)
+          FROM client_ledger_entries ledger
+          LEFT JOIN client_ledger_entries target ON target.id=ledger.reversal_of_entry_id AND target.case_no=ledger.case_no
+         WHERE ledger.case_no=account.case_no),0) AS net_receipt_amount_ntd
 FROM client_finance_accounts account
 LEFT JOIN client_obligations obligation
        ON obligation.case_no=account.case_no
+LEFT JOIN historical_client_payment_projections historical
+       ON historical.obligation_identity=obligation.obligation_identity
+      AND historical.amount_snapshot_ntd=obligation.amount_due_ntd
+      AND historical.obligation_projection_version=obligation.projection_version
 GROUP BY account.case_no, account.aggregate_version
 ORDER BY account.case_no
 """

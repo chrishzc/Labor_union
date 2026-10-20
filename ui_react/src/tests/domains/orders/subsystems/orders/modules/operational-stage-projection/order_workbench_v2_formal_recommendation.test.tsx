@@ -575,7 +575,9 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(screen.getByRole('button', { name: /推薦月嫂給客戶確認.*需要處理/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: '寄送確認資訊給客戶' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '更換月嫂' }));
-    fireEvent.click(await screen.findByRole('button', { name: '換人' }));
+    const replace = await screen.findByRole('button', { name: '換人' });
+    await waitFor(() => expect(replace).toBeEnabled());
+    fireEvent.click(replace);
     await screen.findByText('可以辦理更換');
     fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: '月嫂透過 LINE 通知不接案' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));

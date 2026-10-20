@@ -8,6 +8,9 @@ from types import SimpleNamespace
 import pytest
 
 from api.routes.jobs import get_job_status
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.identities import CorrelationId
+from subsystems.jobs.contracts import DurableJobFailureOutcome
 
 
 def _repository(job):
@@ -40,26 +43,21 @@ def test_public_success_exposes_only_safe_result_reference() -> None:
     assert "receipt_payload" not in response.data.model_dump()
 
 
-def test_public_failure_exposes_closed_typed_error() -> None:
+@pytest.mark.parametrize("category", list(ErrorCategory))
+def test_public_failure_exposes_closed_typed_error(category) -> None:
     job = _job(
         "failed",
-        error={
-            "kind": "failure",
-            "schema_version": 1,
-            "error": {
-                "category": "domain_blocked",
-                "code": "finance_review_required",
-                "message": "Review is required.",
-                "retryable": False,
-                "domain_blockers": ["finance.review"],
-            },
-        },
+        error=DurableJobFailureOutcome.from_typed_error(TypedError(
+            category, "finance_review_required", "Review is required.",
+            CorrelationId("job-public-outcome"), domain_blockers=("finance.review",),
+        )).to_payload(),
     )
 
     response = get_job_status("job-1", None, _repository(job))
 
     assert response.data.outcome.kind == "failure"
     assert response.data.outcome.error.code == "finance_review_required"
+    assert response.data.outcome.error.category is category
 
 
 def test_public_outcome_rejects_raw_or_extra_terminal_payload() -> None:

@@ -18,7 +18,7 @@ from infrastructure.mysql.accounts_payable_export_sources import (
     MySqlClientRefundExportSource,
     MySqlStaffPayableExportSource,
     _CLIENT_REFUNDS_SQL,
-    _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL,
+    _STAFF_PAYABLE_CASE_ORDER_FACTS_SQL,
     _STAFF_PAYABLE_CASE_AUDIT_SQL,
     _STAFF_PAYABLES_SQL,
 )
@@ -63,13 +63,18 @@ class _Connection:
             self.rows = (dict(self.row),) if eligible else ()
         elif statement == _STAFF_PAYABLE_CASE_AUDIT_SQL:
             self.rows = (dict(self.row),) if parameters[0] == self.row["case_no"] else ()
-        elif statement in {_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL, _CLIENT_REFUNDS_SQL}:
+        elif statement == _STAFF_PAYABLE_CASE_ORDER_FACTS_SQL:
+            self.rows = ({"case_no": self.row["case_no"], "staff_payment_due_date": self.row["order_due_date"]},)
+        elif statement == _CLIENT_REFUNDS_SQL or "FROM scheduling_aggregates" in statement or "FROM case_staff_assignments assignment" in statement:
             self.rows = ()
         else:
             assert statement.startswith(("SET TRANSACTION", "START TRANSACTION"))
 
     def fetchall(self):
         return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
     def rollback(self):
         self.rollbacks += 1

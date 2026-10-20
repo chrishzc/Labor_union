@@ -17,10 +17,6 @@ from typing import Any, Callable
 
 import requests
 from dotenv import dotenv_values
-from google.auth import jwt
-from google.auth.exceptions import DefaultCredentialsError, TransportError
-from google.auth.transport.requests import Request as GoogleAuthRequest
-from google.oauth2.id_token import fetch_id_token
 
 
 DATABASE_CREDENTIAL_VARIABLES = (
@@ -28,6 +24,11 @@ DATABASE_CREDENTIAL_VARIABLES = (
     "DB_PORT",
     "DB_USER",
     "DB_PASSWORD",
+    "DB_PASSWORD_FILE",
+    "DB_ACCESS_USER",
+    "DB_ACCESS_PASSWORD_FILE",
+    "DB_MAINTENANCE_USER",
+    "DB_MAINTENANCE_PASSWORD_FILE",
     "DB_DATABASE",
     "MYSQL_HOST",
     "MYSQL_PORT",
@@ -40,7 +41,8 @@ LOCAL_PRIVATE_API_VARIABLES = (
     "INTERNAL_API_BASE_URL",
     "INTERNAL_SERVICE_SHARED_KEY",
     "INTERNAL_SERVICE_AUTH_MODE",
-    "INTERNAL_SERVICE_OIDC_AUDIENCE",
+    "INTERNAL_SERVICE_TOKEN_FILE",
+    "INTERNAL_API_CA_FILE",
     "INTERNAL_API_MAX_ATTEMPTS",
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -97,23 +99,6 @@ class PrivateOperationError(RuntimeError):
         self.code = code
 
 
-class GoogleOidcTokenProvider:
-    def __init__(self) -> None:
-        self._token = ""
-        self._refresh_at_epoch = 0.0
-
-    def __call__(self, audience: str) -> str:
-        now = time.time()
-        if self._token and now < self._refresh_at_epoch:
-            return self._token
-        token = fetch_id_token(GoogleAuthRequest(), audience)
-        claims = jwt.decode(token, verify=False)
-        expires_at = float(claims.get("exp", now + 60))
-        self._token = token
-        self._refresh_at_epoch = max(now, expires_at - 300)
-        return token
-
-
 class PrivateOperationsClient:
     # Transport, authentication and retry injections stay together as one immutable client policy.
     def __init__(
@@ -124,8 +109,8 @@ class PrivateOperationsClient:
         shared_key: str | None = None,
         timeout_seconds: float = 55.0,
         auth_mode: str | None = None,
-        oidc_audience: str | None = None,
-        token_provider: Callable[[str], str] | None = None,
+        token_file: str | None = None,
+        ca_file: str | None = None,
         max_attempts: int | None = None,
         retry_base_seconds: float = 0.5,
         retry_max_seconds: float = 5.0,
@@ -153,13 +138,13 @@ class PrivateOperationsClient:
             local_environment,
             "local_shared_key",
         )
-        self._oidc_audience = _configured_value(
-            oidc_audience,
-            "INTERNAL_SERVICE_OIDC_AUDIENCE",
+        self._token_file = _configured_value(
+            token_file,
+            "INTERNAL_SERVICE_TOKEN_FILE",
             local_environment,
             "",
         )
-        self._token_provider = token_provider or GoogleOidcTokenProvider()
+        self._ca_file = _configured_value(ca_file, "INTERNAL_API_CA_FILE", local_environment, "")
         self._max_attempts = max_attempts or int(
             _configured_value(
                 None,
@@ -229,6 +214,7 @@ class PrivateOperationsClient:
                 self._base_url + path,
                 headers=self._request_headers(),
                 timeout=self._timeout_seconds,
+                **({"verify": self._ca_file or True} if self._auth_mode == "nas_service_token" else {}),
             )
         except requests.RequestException as error:
             raise PrivateOperationError(
@@ -244,6 +230,7 @@ class PrivateOperationsClient:
                 json=payload,
                 headers=self._request_headers(),
                 timeout=self._timeout_seconds,
+                **({"verify": self._ca_file or True} if self._auth_mode == "nas_service_token" else {}),
             )
         except requests.RequestException as error:
             raise PrivateOperationError(
@@ -257,36 +244,24 @@ class PrivateOperationsClient:
         if self._auth_mode == "local_shared_key" and self._shared_key:
             headers["X-Internal-Service-Key"] = self._shared_key
             return headers
-        if self._auth_mode == "google_oidc" and self._oidc_audience:
-            headers["Authorization"] = f"Bearer {self._oidc_token()}"
+        if self._auth_mode == "nas_service_token":
+            if not self._base_url.startswith("https://"):
+                raise PrivateOperationError("Private machine operations require HTTPS.", retryable=False,
+                                            code="internal_service_https_required")
+            try:
+                token = Path(self._token_file).read_text(encoding="utf-8").strip()
+                if len(token) < 32 or any(character.isspace() for character in token):
+                    raise ValueError("invalid machine credential")
+            except (OSError, ValueError):
+                raise PrivateOperationError("Worker machine credential is unavailable.", retryable=False,
+                                            code="internal_service_authentication_unavailable") from None
+            headers["Authorization"] = f"Bearer {token}"
             return headers
         raise PrivateOperationError(
             "Private API authentication is not configured.",
             retryable=False,
             code="internal_service_authentication_unavailable",
         )
-
-    def _oidc_token(self) -> str:
-        try:
-            return self._token_provider(self._oidc_audience)
-        except TransportError as error:
-            raise PrivateOperationError(
-                "Google OIDC token service is temporarily unavailable.",
-                retryable=True,
-                code="google_oidc_token_temporarily_unavailable",
-            ) from error
-        except DefaultCredentialsError as error:
-            raise PrivateOperationError(
-                "Google OIDC credentials are not configured.",
-                retryable=False,
-                code="google_oidc_credentials_unavailable",
-            ) from error
-        except Exception as error:
-            raise PrivateOperationError(
-                "Google OIDC token could not be created.",
-                retryable=False,
-                code="google_oidc_token_invalid",
-            ) from error
 
     def _retry_delay(self, attempt_index: int) -> float:
         ceiling = min(

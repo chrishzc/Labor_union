@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: SafeReviewLinkWorkbench.tsx
  * Description: M4 管理端／行動端安全審核連結去敏 readback 與一次性操作入口。
@@ -76,6 +77,8 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
     } catch (reason) { setError(errorText(reason)); }
     finally { setBusy(false); }
   };
+  useUnsavedDraft('審核連結', { '審核內容已輸入（不顯示權杖）': !!rawToken, '能力': capability, '目標': target, '目標版本': targetVersion, '撤銷原因': revokeReason }, { busy, resetKey: receipt });
+
 
   return (
     <section className="line-workspace-card" data-control-id="line.safe-review-link.workbench">

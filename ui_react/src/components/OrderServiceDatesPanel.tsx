@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
@@ -632,6 +633,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     // Only the first empty date table is calculated; saved dates and manual drafts are preserved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate]);
+  useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
+
 
   return (
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}

@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `subsystems/line/configuration_application.py`
+  - `subsystems/line/configuration_store.py` — 既有配置檔案入口，NAS 可用 LINE_CONFIG_ROOT 指定初始化後的持久化位置，不改 published draft owner。
   - `subsystems/line/configuration_contracts.py`
   - `domains/line/rich_menu_draft.py`
   - `subsystems/line/rich_menu_publication_workflow.py`

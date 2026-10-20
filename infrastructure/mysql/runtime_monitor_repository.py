@@ -252,56 +252,11 @@ class MySqlRuntimeMonitorRepository:
         if target is None:
             raise LookupError("line_alert_target_not_found")
         target_type = target.get("target_type") if hasattr(target, "get") else target[1]
-        default_pref = dict(DEFAULT_ADMIN_PREFERENCES if target_type == "admin_user" else DEFAULT_GROUP_PREFERENCES)
-        with self._connection.cursor() as cursor:
-            cursor.execute("SELECT preferences_json FROM line_alert_target_preferences WHERE target_id=%s", (target_id,))
-            row = cursor.fetchone()
-        if row:
-            raw = row.get("preferences_json") if hasattr(row, "get") else row[0]
-            if isinstance(raw, str):
-                try:
-                    loaded = json.loads(raw)
-                    if isinstance(loaded, dict):
-                        if "dispatch_emergency" in loaded:
-                            default_pref["dispatch_matching"] = bool(loaded["dispatch_emergency"])
-                            default_pref["staff_leave_urgent"] = bool(loaded["dispatch_emergency"])
-                        default_pref.update({k: bool(v) for k, v in loaded.items() if k in default_pref})
-                except Exception:
-                    pass
-            elif isinstance(raw, dict):
-                if "dispatch_emergency" in raw:
-                    default_pref["dispatch_matching"] = bool(raw["dispatch_emergency"])
-                    default_pref["staff_leave_urgent"] = bool(raw["dispatch_emergency"])
-                default_pref.update({k: bool(v) for k, v in raw.items() if k in default_pref})
-        return default_pref
-
-    def save_target_preferences(self, target_id: int, preferences: dict[str, bool]) -> dict[str, bool]:
-        target = self.get_alert_target(target_id, for_update=False)
-        if target is None:
-            raise LookupError("line_alert_target_not_found")
-        target_type = target.get("target_type") if hasattr(target, "get") else target[1]
-        current_pref = dict(DEFAULT_ADMIN_PREFERENCES if target_type == "admin_user" else DEFAULT_GROUP_PREFERENCES)
-        for k in ("customer_service", "dispatch_matching", "staff_leave_urgent", "system_health", "contract_signing"):
-            if k in preferences:
-                current_pref[k] = bool(preferences[k])
-        dumped = json.dumps(current_pref, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                """INSERT INTO line_alert_target_preferences (target_id, preferences_json)
-                   VALUES (%s, %s)
-                   ON DUPLICATE KEY UPDATE preferences_json=VALUES(preferences_json)""",
-                (target_id, dumped),
-            )
-        return current_pref
+        return dict(DEFAULT_ADMIN_PREFERENCES if target_type == "admin_user" else DEFAULT_GROUP_PREFERENCES)
 
     def pending_alert_targets(self, event_id: int):
         with self._connection.cursor() as cursor:
-            try:
-                cursor.execute(_PENDING_TARGETS, (event_id,))
-            except Exception as error:
-                if not _missing_optional_preferences_table(error):
-                    raise
-                cursor.execute(_PENDING_TARGETS_WITH_DEFAULT_PREFERENCES, (event_id,))
+            cursor.execute(_PENDING_TARGETS, (event_id,))
             return tuple(cursor.fetchall() or ())
 
     def append_alert_intent(self, event_id, target_id, task_id, status, target_type, target_id_value, error_code=None):
@@ -405,26 +360,12 @@ DEFAULT_ADMIN_PREFERENCES = {
     "contract_signing": True,
 }
 
-_PENDING_TARGETS = """SELECT t.id,t.target_type,t.group_id,t.minimum_status,a.linked_line_user_id,e.resulting_status,e.check_name,e.message,e.occurred_at_utc,p.preferences_json
-FROM runtime_health_events e JOIN line_alert_notification_targets t ON t.enabled=TRUE
-LEFT JOIN admin_users a ON a.id=t.admin_user_id
-LEFT JOIN line_alert_target_preferences p ON p.target_id=t.id
-LEFT JOIN line_alert_delivery_intents i ON i.health_event_id=e.id AND i.target_id=t.id
-WHERE e.id=%s AND i.id IS NULL"""
-_PENDING_TARGETS_WITH_DEFAULT_PREFERENCES = """SELECT t.id,t.target_type,t.group_id,t.minimum_status,a.linked_line_user_id,e.resulting_status,e.check_name,e.message,e.occurred_at_utc,NULL AS preferences_json
+_PENDING_TARGETS = """SELECT t.id,t.target_type,t.group_id,t.minimum_status,a.linked_line_user_id,e.resulting_status,e.check_name,e.message,e.occurred_at_utc,NULL AS preferences_json
 FROM runtime_health_events e JOIN line_alert_notification_targets t ON t.enabled=TRUE
 LEFT JOIN admin_users a ON a.id=t.admin_user_id
 LEFT JOIN line_alert_delivery_intents i ON i.health_event_id=e.id AND i.target_id=t.id
 WHERE e.id=%s AND i.id IS NULL"""
 _INSERT_ALERT_INTENT = "INSERT INTO line_alert_delivery_intents (health_event_id,target_id,delivery_task_id,projection_status,resolved_line_target_type,resolved_line_target_id,error_code) VALUES (%s,%s,%s,%s,%s,%s,%s)"
-
-
-def _missing_optional_preferences_table(error: Exception) -> bool:
-    return (
-        bool(error.args)
-        and error.args[0] == 1146
-        and "line_alert_target_preferences" in str(error)
-    )
 
 
 def _json_object(value):

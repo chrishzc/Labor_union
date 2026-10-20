@@ -38,7 +38,7 @@ const preferenceEditor = () => within(document.querySelector('[data-surface-id="
 describe('Staff request budget', () => {
   beforeEach(() => {
     vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
   });
@@ -60,7 +60,7 @@ describe('Staff request budget', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
     await screen.findByRole('combobox', { name: '可承接區域值1' });
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: 'request budget' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: 'request budget' } });
     fireEvent.click(preferenceEditor().getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     fireEvent.click(preferenceEditor().getByRole('button', { name: '確認儲存' }));

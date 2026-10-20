@@ -1,5 +1,6 @@
 """Persistence for existing qualification columns/relations, without hidden commits."""
 import json
+from infrastructure.mysql.nas_mutations import call_mutation
 
 from domains.staff.qualification_editing import QualificationEditingError, normalize_facts
 from subsystems.staff.qualification_editing_workflow import COMMAND_FAMILY
@@ -34,7 +35,7 @@ class MySqlStaffQualificationEditingRepository:
             for key, table, column in (("certifications", "staff_certifications", "certification_type"), ("transportation", "staff_transportation", "vehicle_type")):
                 old, new = set(getattr(before, key)), set(getattr(after, key))
                 for value in sorted(old - new):
-                    cursor.execute(f"DELETE FROM {table} WHERE staff_id=%s AND {column}=%s", (staff_id, value))
+                    call_mutation(cursor, f"lu_nas_remove_{table}_v1", staff_id, value, None)
                 for value in sorted(new - old):
                     cursor.execute(f"INSERT INTO {table} (staff_id,{column}) VALUES (%s,%s)", (staff_id, value))
 

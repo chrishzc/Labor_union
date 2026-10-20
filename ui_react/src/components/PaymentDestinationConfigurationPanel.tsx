@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useState } from 'react';
@@ -24,6 +25,7 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
     return () => { active = false; };
   }, [reload]);
 
+  useUnsavedChanges('工會／代收付帳戶', current && (account !== (current.account_display ?? '') || reason !== '') ? [{ label: '帳戶設定', before: '既有設定（不顯示帳號）', after: '已修改，請核對原畫面的設定' }] : [], { busy: status === 'saving' });
   const runPreview = async () => {
     if (!current || !account.trim()) return;
     setStatus('saving'); setMessage('');

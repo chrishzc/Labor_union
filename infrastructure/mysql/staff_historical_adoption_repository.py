@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
+from infrastructure.mysql.nas_mutations import call_mutation, relation_snapshot
 
 
 RELATION_COLUMNS = {
@@ -81,10 +82,8 @@ class MySqlStaffHistoricalAdoptionRepository:
             if candidate and _has_cross_staff_bank_collision(cursor, staff_id, candidate):
                 return False, True
             if replace_existing:
-                cursor.execute(
-                    "DELETE FROM staff_bank_accounts WHERE staff_id=%s",
-                    (staff_id,),
-                )
+                call_mutation(cursor, "lu_nas_replace_staff_banks_v1", staff_id,
+                              relation_snapshot(existing, ("bank_code", "branch_code", "account_no", "is_primary")))
             if candidate:
                 cursor.executemany(
                     "INSERT INTO staff_bank_accounts "
@@ -119,10 +118,9 @@ class MySqlStaffHistoricalAdoptionRepository:
             if not replace_existing and existing:
                 return False, True
             if replace_existing:
-                cursor.execute(
-                    f"DELETE FROM {table_name} WHERE staff_id=%s",
-                    (staff_id,),
-                )
+                columns = (value_column, detail_column) if detail_column else (value_column,)
+                call_mutation(cursor, f"lu_nas_replace_{table_name}_v1", staff_id,
+                              relation_snapshot(existing, columns))
             columns = f"staff_id,{value_column}" + (f",{detail_column}" if detail_column else "")
             placeholders = ",".join(["%s"] * (2 + int(detail_column is not None)))
             if candidate:

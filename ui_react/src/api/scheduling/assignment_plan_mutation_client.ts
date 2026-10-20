@@ -41,7 +41,7 @@ const AcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), stat
 const FailureSchema = z.strictObject({
   kind: z.literal('failure'), schema_version: z.literal(1),
   error: z.strictObject({
-    category: z.enum(['validation', 'conflict', 'domain_blocked', 'idempotency_mismatch', 'unavailable', 'internal']),
+    category: z.enum(['validation', 'forbidden', 'not_found', 'conflict', 'domain_blocked', 'idempotency_mismatch', 'unavailable', 'internal']),
     code: z.string().min(1), message: z.string().min(1), retryable: z.boolean(),
     correlation_id: z.string().nullable(), domain_blockers: z.array(z.string()),
   }),

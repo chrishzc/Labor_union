@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: StaffPage.tsx
  * Description: 管理月嫂名冊、資格、接案偏好、不可服務期間與任職狀態。
@@ -309,6 +310,8 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setPreview(null); setStatus(''); setPhase('editing');
     setDraft(current => ({ ...current, service_periods: current.service_periods.map((item, rowIndex) => rowIndex === index ? { ...item, ...changes, detail: null } : item) }));
   };
+  useUnsavedDraft('六大接案能力', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: locked });
+
   return <section data-surface-id={surfaceId}>
     <h3>服務能力與接案條件</h3>
     <p>從選單選擇條件，需要時再新增條件，服務時段可自訂起迄時間，預覽後確認儲存。</p>
@@ -970,6 +973,7 @@ export const StaffPage: React.FC = () => {
 
 
 
+  const { requestLeave } = useUnsavedNavigation();
   const changeSelectedStaff = (value: string) => {
     if (selectedStaff !== null) return;
     invalidateSlice();
@@ -1130,6 +1134,9 @@ export const StaffPage: React.FC = () => {
           </section>
         </section>
   );
+  useUnsavedDraft('月嫂請假與暫停', { '開始日期': availabilityReason.trim() || availabilityAction.preview ? rangeStart : undefined, '結束日期': availabilityReason.trim() || availabilityAction.preview ? rangeEnd : undefined, '請假類型': availabilityKind, '請假原因': availabilityReason, '取消原因': cancelReason, '恢復日期': endPauseResumeDate, '結束暫停原因': endPauseReason }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: availabilityAction.phase === 'observed' ? availabilityAction.receipt : null, discard: () => { setAvailabilityReason(''); setCancelReason(''); setEndPauseReason(''); setEndPauseResumeDate(''); } });
+  useUnsavedDraft('月嫂任職狀態', { '狀態生效日': lifecycleEffectiveAt, '狀態原因': lifecycleReasonCode }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: lifecycleAction.phase === 'observed' ? lifecycleAction.receipt : null, discard: () => { setLifecycleEffectiveAt(''); setLifecycleReasonCode(''); } });
+
 
   return (
     <div data-surface-id="staff.page">
@@ -1348,7 +1355,7 @@ export const StaffPage: React.FC = () => {
         size="wide"
         footer={
           <div className="staff-drawer-footer">
-            <button type="button" data-control-id="staff.drawer.close" className="staff-close-btn" disabled={interactionLocked} onClick={() => setSelectedStaff(null)}>關閉</button>
+            <button type="button" data-control-id="staff.drawer.close" className="staff-close-btn" disabled={interactionLocked} onClick={() => requestLeave(() => setSelectedStaff(null))}>關閉</button>
           </div>
         }
       >

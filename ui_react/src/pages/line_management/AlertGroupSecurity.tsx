@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../../components/UnsavedChanges';
 /**
  * File: AlertGroupSecurity.tsx
  * Description: 以 typed LINE runtime target 契約完成查詢、Preview、確認、Apply、receipt 與 readback。
@@ -102,7 +103,7 @@ const MESSAGE_CATEGORIES: MessageCategoryMeta[] = [
       { label: '通報時間', value: '2026-09-13 16:30' },
     ],
     sampleAction: '🔗 點擊開啟手機審核中心接手處理',
-    tipText: '建議維持開啟。當重大客訴發生時，群組幹部可即時查看並由電話或私訊接手安撫。',
+    tipText: '此分類依固定規則允許推播。重大客訴發生時，群組幹部可查看並由電話或私訊接手安撫。',
   },
   {
     key: 'dispatch_matching',
@@ -117,7 +118,7 @@ const MESSAGE_CATEGORIES: MessageCategoryMeta[] = [
     flexCaseNo: 'CASE-2026-S13',
     flexBody: '已詢問 3 位月嫂，皆未願意承接。客戶目前無法調整條件，請由工會人員接手處理。',
     flexBtnLabel: '開啟待辦工作台',
-    tipText: '建議維持開啟。當 Zero-Pool（所有月嫂皆無法承接）或需人工調整媒合條件時，群組可直接點擊工作台接手。',
+    tipText: '此分類依固定規則允許推播。所有月嫂皆無法承接或需人工調整媒合條件時，群組可點擊工作台接手。',
   },
   {
     key: 'staff_leave_urgent',
@@ -135,7 +136,7 @@ const MESSAGE_CATEGORIES: MessageCategoryMeta[] = [
       { label: '目前狀態', value: '等待專員代班直接指派' },
     ],
     sampleAction: '🔗 開啟排班總表進行代班指派',
-    tipText: '建議維持開啟。可讓幹部第一時間收到缺工通報，避免產婦無人服務引發重大爭議。',
+    tipText: '此分類依固定規則允許推播，讓幹部收到缺工通報並處理代班。',
   },
   {
     key: 'system_health',
@@ -153,7 +154,7 @@ const MESSAGE_CATEGORIES: MessageCategoryMeta[] = [
       { label: '記錄時間', value: '2026-09-13 16:30 UTC' },
     ],
     sampleAction: null,
-    tipText: '工會專員建議關閉。關閉後系統異常訊息將不會推播到幹部群組，群組只專注處理業務與客訴！',
+    tipText: '依固定規則，系統異常通報不推播至幹部群組，由管理員通知對象接收。',
   },
   {
     key: 'contract_signing',
@@ -171,7 +172,7 @@ const MESSAGE_CATEGORIES: MessageCategoryMeta[] = [
       { label: '完成時間', value: '2026-09-13 15:45' },
     ],
     sampleAction: '📄 點擊查看電子簽署紀錄',
-    tipText: '可依幹部群組需要開啟。方便行政專員掌握每日簽約結案進度。',
+    tipText: '此分類依固定規則允許推播，供行政專員掌握簽約結案進度。',
   },
 ];
 
@@ -226,23 +227,14 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
   const [reloadKey, setReloadKey] = useState<number>(0);
   const [copied, setCopied] = useState<boolean>(false);
   const [activePreviewKey, setActivePreviewKey] = useState<MessageCategoryKey>('customer_service');
-  const [savedSuccessTip, setSavedSuccessTip] = useState<string | null>(null);
   const [prefLoading, setPrefLoading] = useState<boolean>(false);
-  const [prefSaving, setPrefSaving] = useState<boolean>(false);
 
-  // 群組訊息推播分類開關偏好
-  const [categoryPreferences, setCategoryPreferences] = useState<Record<MessageCategoryKey, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem('line_alert_msg_categories');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return {
+  const [categoryPreferences, setCategoryPreferences] = useState<Record<MessageCategoryKey, boolean>>({
       customer_service: true,
       dispatch_matching: true,
       staff_leave_urgent: true,
       system_health: false, // 預設關閉系統 IT 異常，實現使用者「不想讓群組顯示系統異常通知」的需求
       contract_signing: true,
-    };
   });
 
   const groupTarget = targets.find((target) => target.target_kind === 'group') ?? null;
@@ -258,13 +250,10 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       .then((prefs) => {
         if (active) {
           setCategoryPreferences(prefs);
-          try {
-            localStorage.setItem('line_alert_msg_categories', JSON.stringify(prefs));
-          } catch {}
         }
       })
-      .catch(() => {
-        // Fallback to existing state if error
+      .catch((error) => {
+        if (active) setErrorMessage(publicFailureMessage(error));
       })
       .finally(() => {
         if (active) setPrefLoading(false);
@@ -273,35 +262,6 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       active = false;
     };
   }, [groupTargetId, targetClient]);
-
-  const handleToggleCategory = async (key: MessageCategoryKey) => {
-    const nextState = !categoryPreferences[key];
-    const previous = { ...categoryPreferences };
-    const updated = { ...categoryPreferences, [key]: nextState };
-    setCategoryPreferences(updated);
-    try {
-      localStorage.setItem('line_alert_msg_categories', JSON.stringify(updated));
-    } catch {}
-
-    if (groupTarget) {
-      const updater = targetClient.updatePreferences ?? lineRuntimeTargetClient.updatePreferences;
-      setPrefSaving(true);
-      try {
-        const saved = await updater(groupTarget.target_id, updated);
-        setCategoryPreferences(saved);
-        setSavedSuccessTip(`已儲存「${MESSAGE_CATEGORIES.find((c) => c.key === key)?.label}」推播開關為：${nextState ? '開啟' : '關閉'}`);
-        setTimeout(() => setSavedSuccessTip(null), 3000);
-      } catch (err) {
-        setCategoryPreferences(previous);
-        setErrorMessage(publicFailureMessage(err));
-      } finally {
-        setPrefSaving(false);
-      }
-    } else {
-      setSavedSuccessTip(`已更新「${MESSAGE_CATEGORIES.find((c) => c.key === key)?.label}」推播開關為：${nextState ? '開啟' : '關閉'}`);
-      setTimeout(() => setSavedSuccessTip(null), 3000);
-    }
-  };
 
   const handleCopyCommand = async (text: string) => {
     try {
@@ -423,6 +383,8 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       setBusy(false);
     }
   };
+  useUnsavedDraft('群組通知設定', { '原因': reason, '有待確認設定': !!pending }, { busy, resetKey: receipt });
+
 
   return (
     <div className="alert-group-security-container">
@@ -620,17 +582,12 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
               <SlidersHorizontal aria-hidden="true" style={{ width: 20, height: 20, verticalAlign: 'middle', marginRight: 8 }} />
               群組訊息推播分類與即時預覽
             </h2>
-            <p>設定此幹部群組要出現哪些訊息；點選不同分類可在右側直接預覽手機 LINE 接收到的排版樣式。</p>
+            <p>群組依固定規則推播，分類不提供個別修改；點選分類可預覽 LINE 訊息樣式。</p>
           </div>
-          {(prefLoading || prefSaving) && (
+          {prefLoading && (
             <div className="alert-save-tip" role="status">
               <RefreshCw aria-hidden="true" className="spin" style={{ width: 14, height: 14, marginRight: 4 }} />
-              {prefLoading ? '正在載入群組推播設定…' : '同步儲存至資料庫中…'}
-            </div>
-          )}
-          {!prefLoading && !prefSaving && savedSuccessTip && (
-            <div className="alert-save-tip" role="status">
-              <Check aria-hidden="true" /> {savedSuccessTip}
+              正在載入群組推播規則…
             </div>
           )}
         </div>
@@ -654,16 +611,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
                         {isEnabled ? '🟢 允許推播' : '⚪ 已過濾 (不發送)'}
                       </span>
                     </div>
-                    <label className="alert-msg-switch" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={isEnabled}
-                        disabled={prefLoading || prefSaving}
-                        onChange={() => void handleToggleCategory(category.key)}
-                        aria-label={`切換${category.label}`}
-                      />
-                      <span className="slider round"></span>
-                    </label>
+                    <span>固定規則</span>
                   </div>
 
                   <strong className="alert-msg-name">{category.label}</strong>
@@ -754,16 +702,16 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
             </div>
 
             <div className="alert-phone-tip-box">
-              <strong>💡 訊息說明與配置建議：</strong>
+              <strong>💡 訊息說明與固定規則：</strong>
               <p>{activeMeta.tipText}</p>
               {!categoryPreferences[activeMeta.key] && (
                 <div className="alert-status-callout muted">
-                  🛡️ <strong>此訊息目前已被您關閉</strong>：當觸發相關事件時，系統<strong>不會</strong>將此訊息推播到幹部 LINE 群組。
+                  🛡️ <strong>此分類依固定規則不推播至群組</strong>：當觸發相關事件時，系統<strong>不會</strong>將此訊息推播到幹部 LINE 群組。
                 </div>
               )}
               {categoryPreferences[activeMeta.key] && (
                 <div className="alert-status-callout active">
-                  📢 <strong>此訊息目前已開啟接收</strong>：當觸發此類事件時，幹部群組會即時收到上方預覽卡片。
+                  📢 <strong>固定規則允許此分類</strong>：通知對象啟用且符合發送條件時，系統會將此類訊息推播到幹部群組。
                 </div>
               )}
             </div>

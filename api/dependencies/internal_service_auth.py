@@ -1,29 +1,23 @@
 """
 File: internal_service_auth.py
-Description: 驗證 Private API 的本機 shared key 或 Google OIDC caller，所有錯誤皆 fail closed。
+Description: 驗證 Private API 的本機 shared key 或 NAS 獨立機器憑證，所有錯誤皆 fail closed。
 """
 
 from __future__ import annotations
 
 import hmac
+import hashlib
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
 
-import requests
-from cachecontrol import CacheControl
 from fastapi import Header, HTTPException, Request, status
-from google.auth.transport.requests import Request as GoogleAuthRequest
-from google.oauth2 import id_token
+from infrastructure.runtime.worker_credentials import read_verifiers, LINE_MEDIA_SERVICE
 
 
 LOCAL_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
 MINIMUM_SHARED_KEY_LENGTH = 32
 SERVICE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}")
-SERVICE_ACCOUNT_EMAIL_SUFFIX = ".iam.gserviceaccount.com"
-GOOGLE_OIDC_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
-_GOOGLE_AUTH_REQUEST = GoogleAuthRequest(session=CacheControl(requests.Session()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +32,28 @@ def require_internal_service(
     x_internal_service_key: str | None = Header(default=None),
     x_internal_service_name: str | None = Header(default=None),
 ) -> InternalServicePrincipal:
-    """Authenticate a local shared-key caller or a production Google OIDC caller."""
+    """Bind a verified machine credential to its configured service identity."""
     app_environment = os.getenv("APP_ENV", "").strip().lower()
     service_name = _validated_service_name(x_internal_service_name)
-    if app_environment in LOCAL_ENVIRONMENTS:
+    mode = os.getenv("INTERNAL_SERVICE_AUTH_MODE", "").strip().lower()
+    if mode == "nas_service_token":
+        if request.url.scheme != "https":
+            raise HTTPException(status_code=426, detail={
+                "code": "internal_service_https_required",
+                "message": "Private machine operations require HTTPS.", "retryable": False,
+            })
+        principal = _authenticate_nas(service_name, authorization)
+    elif app_environment in LOCAL_ENVIRONMENTS and mode in {"", "local_shared_key"}:
         principal = _authenticate_local(service_name, x_internal_service_key)
     else:
-        principal = _authenticate_google_oidc(service_name, authorization)
+        raise _authentication_unavailable()
+    if (principal.service_name == LINE_MEDIA_SERVICE
+            and not request.url.path.startswith("/internal/v1/line-media/")):
+        raise HTTPException(status_code=403, detail={
+            "code": "internal_service_operation_forbidden",
+            "message": "The photo credential cannot run other internal operations.",
+            "retryable": False,
+        })
     request.state.internal_service_principal = principal
     return principal
 
@@ -78,49 +87,23 @@ def _authenticate_local(
     return InternalServicePrincipal(service_name, "local_shared_key")
 
 
-def _authenticate_google_oidc(
+def _authenticate_nas(
     service_name: str,
     authorization: str | None,
 ) -> InternalServicePrincipal:
-    if os.getenv("INTERNAL_SERVICE_AUTH_MODE", "").strip().lower() != "google_oidc":
-        raise _authentication_unavailable()
-    audience = os.getenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "").strip()
-    expected_email = _allowed_oidc_callers().get(service_name)
-    if not audience:
-        raise _authentication_unavailable()
-    if not expected_email:
-        raise _authentication_failed()
-    claims = _verified_claims(_bearer_token(authorization), audience)
-    if not _claims_match_email(claims, expected_email):
-        raise _authentication_failed()
-    return InternalServicePrincipal(service_name, "google_oidc")
-
-
-def _verified_claims(token: str, audience: str) -> dict[str, Any]:
+    path = os.getenv("INTERNAL_SERVICE_CREDENTIALS_FILE", "").strip()
     try:
-        return _verify_google_oidc_token(token, audience)
-    except Exception as error:
-        raise _authentication_failed() from error
-
-
-def _verify_google_oidc_token(token: str, audience: str) -> dict[str, Any]:
-    claims = id_token.verify_oauth2_token(token, _GOOGLE_AUTH_REQUEST, audience)
-    if claims.get("iss") not in GOOGLE_OIDC_ISSUERS:
-        raise ValueError("Google OIDC issuer is invalid")
-    return dict(claims)
-
-
-def _allowed_oidc_callers() -> dict[str, str]:
-    configured = os.getenv("INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS", "").strip()
-    callers: dict[str, str] = {}
-    for entry in filter(None, (item.strip() for item in configured.split(","))):
-        service_name, separator, email = entry.partition("=")
-        valid_service = SERVICE_NAME_PATTERN.fullmatch(service_name) is not None
-        valid_email = email.endswith(SERVICE_ACCOUNT_EMAIL_SUFFIX)
-        if not separator or not valid_service or not valid_email or service_name in callers:
-            raise _authentication_unavailable()
-        callers[service_name] = email
-    return callers
+        verifiers = read_verifiers(path)
+    except (OSError, ValueError, TypeError):
+        raise _authentication_unavailable() from None
+    digest = hashlib.sha256(_bearer_token(authorization).encode("utf-8")).hexdigest()
+    # Identity comes from the credential; the caller's header is only a claim.
+    for configured_service, expected in verifiers.items():
+        if hmac.compare_digest(digest, expected):
+            if service_name not in {"unknown-internal-service", configured_service}:
+                raise _authentication_failed()
+            return InternalServicePrincipal(configured_service, "nas_service_token")
+    raise _authentication_failed()
 
 
 def _bearer_token(authorization: str | None) -> str:
@@ -128,11 +111,6 @@ def _bearer_token(authorization: str | None) -> str:
     if not separator or scheme.lower() != "bearer" or not token.strip():
         raise _authentication_failed()
     return token.strip()
-
-
-def _claims_match_email(claims: dict[str, Any], expected_email: str) -> bool:
-    email = str(claims.get("email", ""))
-    return claims.get("email_verified") is True and hmac.compare_digest(email, expected_email)
 
 
 def _validated_service_name(value: str | None) -> str:

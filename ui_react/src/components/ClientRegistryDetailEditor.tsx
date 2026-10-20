@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from './UnsavedChanges';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { clientRegistryClient } from '../api/client_registry/client_registry_client';
 import type { BeClassChanges, ClientProfileChanges, ClientRegistryChangeHistoryItem, ClientRegistryDetail, RegistryMutationPreview } from '../api/client_registry/client_registry_schemas';
@@ -125,6 +126,8 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const pending = Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || repairState.busy || staffState.busy || intakeState.busy || accountState.busy;
   const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty || intakeState.dirty || accountState.dirty;
   useEffect(() => { onStateChange({ dirty, busy: pending || termsState.busy }); }, [dirty, pending, termsState.busy, onStateChange]);
+  const dirtySections = (['profile', 'beclass', 'care'] as const).filter(section => Object.keys(changes[section]).length > 0);
+  const unsavedRef = useUnsavedChanges('客戶名冊', (['profile', 'beclass', 'care'] as const).flatMap(section => Object.keys(changes[section]).map(field => ({ label: `${title[section]}／${labels[section][field] ?? field}`, before: display(source(detail, section)[field]), after: display(changes[section][field]) }))), { busy: pending || termsState.busy, save: dirtySections.length === 1 && actions[dirtySections[0]].preview ? () => apply(dirtySections[0]) : undefined });
   const update = (section: Section, field: string, value: Scalar) => {
     setDrafts((current) => ({ ...current, [section]: { ...current[section], [field]: value } }));
     setActions((current) => ({ ...current, [section]: idle() }));
@@ -214,7 +217,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     await onRefresh();
     setRefreshError('');
   };
-  return <div className="client-registry-page client-registry-detail-editor" aria-label={`${detail.case_no} 案件資料編輯`}>
+  return <div ref={unsavedRef} className="client-registry-page client-registry-detail-editor" aria-label={`${detail.case_no} 案件資料編輯`}>
     {refreshError && <p role="alert">{refreshError}<button type="button" onClick={() => void refreshRelated()}>重新讀取案件資料</button></p>}
     {renderSection('profile')}
     {renderSection('beclass')}{renderSection('care')}

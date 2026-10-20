@@ -12,7 +12,7 @@ import { ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/fi
 
 function row(changes: Partial<CashRequirementRow> = {}): CashRequirementRow {
   return { row_id: 'C-1:staff:1', case_no: 'C-1', recipient_name: '月嫂甲', payment_type: 'staff_payable',
-    certainty: 'confirmed', source: 'staff_obligation', source_amount_ntd: 24000, unpaid_amount_ntd: 18000,
+    certainty: 'confirmed', source: 'staff_obligation', payment_status: 'pending' as const, source_amount_ntd: 24000, unpaid_amount_ntd: 18000,
     payment_date: '2026-11-15', date_is_estimate: false, pending_reasons: [], ...changes };
 }
 function response(rows: CashRequirementRow[], next_cursor: string | null = null) {
@@ -64,9 +64,9 @@ describe('cash planning panel', () => {
   it('groups known amounts by month and keeps unknown dates visible under any month filter', async () => {
     vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([
       row(), row({ row_id: 'C-1:subsidy', payment_type: 'client_subsidy_return', certainty: 'estimated', source: 'subsidy_estimate',
-        source_amount_ntd: 12000, unpaid_amount_ntd: 12000, payment_date: '2027-01-15', date_is_estimate: true,
+        payment_status: 'pending' as const, source_amount_ntd: 12000, unpaid_amount_ntd: 12000, payment_date: '2027-01-15', date_is_estimate: true,
         pending_reasons: ['服務尚未完成'] }),
-      row({ row_id: 'C-2:unknown', case_no: 'C-2', source_amount_ntd: null, unpaid_amount_ntd: null, payment_date: null, pending_reasons: ['金額待確認'] }),
+      row({ row_id: 'C-2:unknown', case_no: 'C-2', payment_status: 'pending' as const, source_amount_ntd: null, unpaid_amount_ntd: null, payment_date: null, pending_reasons: ['金額待確認'] }),
     ]);
     render(<CashRequirementsPanel />);
     expect(await screen.findByRole('region', { name: '2026-11 資金需求' })).toHaveTextContent('NT$ 18,000');

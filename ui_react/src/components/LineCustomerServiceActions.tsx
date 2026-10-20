@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineCustomerServiceActions.tsx
  * Description: 提供客服接手、內部備註與建立 LINE durable 回覆任務的 typed 操作面板。
@@ -264,6 +265,8 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
 
   const busy = mutationState === 'loading';
   const noteUnchanged = internalNote === (detail.ticket.internalNote ?? '');
+  useUnsavedDraft('客服處理', { '內部備註': internalNote, '回覆內容': replyText, '回覆後結案': resolveAfterReply }, { baseline: { '內部備註': detail.ticket.internalNote ?? '', '回覆內容': '', '回覆後結案': false }, busy });
+
 
   return (
     <section className="line-action-panel" aria-label="客服工單操作">

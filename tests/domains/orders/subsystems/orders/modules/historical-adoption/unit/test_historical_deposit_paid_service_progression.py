@@ -320,7 +320,8 @@ def test_matching_effective_assignment_is_reused_for_historical_actual_start():
     )
     repository = Repository()
     workflow = HistoricalOrderAdoptionWorkflow(
-        repository, _UnitOfWork, _Writer(), Rebuilder()
+        repository, _UnitOfWork, _Writer(), Rebuilder(),
+        default_accounting=SimpleNamespace(establish_default_in_current_unit_of_work=lambda **_: None),
     )
 
     preview = workflow.preview(row)

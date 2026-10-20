@@ -9,6 +9,8 @@
 
 ## Implementation
 - primary owner: subsystems/scheduling/holiday_maintenance.py
+- holiday command adapter: `infrastructure/mysql/admin_command_repository.py` — 共用 adapter 檔案中的 holiday mutation，由 owner UoW 呼叫固定用途刪除程序。
+- holiday query adapter: `infrastructure/mysql/scheduling_holiday_query.py`
 - typed client: ui_react/src/api/scheduling/holiday_client.ts
 - presentation: ui_react/src/pages/SchedulingPage.tsx
 - CSV presentation: ui_react/src/components/scheduling/OfficialHolidayCsvImport.tsx

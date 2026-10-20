@@ -5,6 +5,8 @@ Description: 實作國定假日 horizon 查詢、鎖定、mutation 與 immutable
 
 from __future__ import annotations
 
+from infrastructure.mysql.nas_mutations import call_mutation
+
 import json
 from datetime import date
 
@@ -104,7 +106,7 @@ class MySqlSchedulingHolidayQuery:
 
     def delete_holiday(self, holiday_date: date) -> None:
         with self._connection.cursor() as cursor:
-            cursor.execute("DELETE FROM holidays WHERE holiday_date=%s", (holiday_date,))
+            call_mutation(cursor, "lu_nas_delete_holiday_v1", holiday_date)
 
 
 def _holiday_fact(row) -> HolidayFact:

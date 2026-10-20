@@ -36,6 +36,8 @@ ACCESS_CONTROL_PROFILES = frozenset(
 
 def get_access_control_connection_factory() -> ConnectionFactory:
     """Compose the production connection provider at the API boundary."""
+    if os.getenv("DEPLOYMENT_PROFILE") == "nas":
+        return lambda: get_connection("access")
     return get_connection
 
 

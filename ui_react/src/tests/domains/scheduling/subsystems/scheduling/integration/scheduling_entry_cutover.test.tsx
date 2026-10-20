@@ -328,7 +328,7 @@ function installFetchStub(mode: FetchMode): FetchRecord[] {
       return jsonResponse(PERFORMANCE_RESPONSE);
     }
     if (url.pathname === STAFF_SUMMARY_ENDPOINT) {
-      return jsonResponse(STAFF_RESPONSE_ONE);
+      return jsonResponse({ ...STAFF_RESPONSE_ONE, data: { ...STAFF_RESPONSE_ONE.data, next_cursor: null } });
     }
     if (url.pathname === ORDER_SUMMARY_ENDPOINT) {
       return schedulingOrderSummaryResponse();
@@ -453,6 +453,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(calendarRequests(requests)).toHaveLength(2));
 
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled());
     fireEvent.change(screen.getByRole('combobox', { name: '資格查詢案件編號' }), {
       target: { value: 'CASE-SCH-011' },
     });
@@ -489,10 +490,10 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(monthReloads.every((request) => request.query.get('range_start') !== initialRangeStart)).toBe(true);
 
     fireEvent.change(screen.getByPlaceholderText('按月嫂姓名或編號...'), { target: { value: '不存在' } });
-    fireEvent.click(screen.getByRole('button', { name: /🟡 待派單／防撞期/ }));
-    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /🟡 待派單／排班緩衝期/ }));
+    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    fireEvent.click(screen.getByRole('button', { name: /服務人員排班甘特月曆/ }));
+    fireEvent.click(screen.getByRole('button', { name: /排班月曆/ }));
     expect(calendarRequests(requests)).toHaveLength(initial + 2);
     expectOnlyGet(requests);
   });
@@ -574,11 +575,11 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(screen.getByRole('combobox', { name: '資格查詢案件編號' })).toBeEnabled();
     expect(document.querySelector('[data-control-id="scheduling.candidate-pool.add"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(screen.getByText(/請先輸入訂單編號/)).toBeInTheDocument();
+    expect(await screen.findByText('目前沒有服務中且已有排班的案件。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled();

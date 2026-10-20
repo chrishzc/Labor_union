@@ -12,6 +12,7 @@ from infrastructure.db.controlled_file_repository import (
     MySqlControlledFileWorkflowRepository,
 )
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+from infrastructure.runtime.file_transfer_settings import file_read_capacity
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
@@ -22,9 +23,10 @@ def get_controlled_file_workflow() -> Iterator[ControlledFileWorkflow]:
     connection = get_connection()
     try:
         root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None
+        capacity = file_read_capacity()
         yield ControlledFileWorkflow(
             MySqlControlledFileWorkflowRepository(connection),
-            FileSystemControlledFileStorage(root),
+            FileSystemControlledFileStorage(root, max_staging_bytes=capacity, max_read_bytes=capacity),
             lambda: MySqlUnitOfWork(connection),
             SystemBusinessClock(),
         )

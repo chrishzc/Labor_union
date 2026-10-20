@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useId, useRef, useState } from 'react';
 import { staffQualificationEditingClient, type QualificationFacts, type QualificationSnapshot } from '../api/staff/qualification_editing_client';
 
@@ -31,6 +32,7 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
     finally { if (current === epoch.current) setBusy(false); }
   };
   useEffect(() => { void load(); return () => { ++epoch.current; controller.current?.abort(); }; }, [staffId]);
+  const unsavedRef = useUnsavedDraft('專業資格與服務資料', { '專業技能': lists.special_skills, '一般證照': lists.certifications, '交通方式': lists.transportation, '按摩證書': massage, '最多照顧寶寶數': care, '備註': reason }, { enabled: !!snapshot, busy, baseline: snapshot ? { '專業技能': snapshot.after.special_skills.join('\n'), '一般證照': snapshot.after.certifications.join('\n'), '交通方式': snapshot.after.transportation.join('\n'), '按摩證書': snapshot.after.has_massage_cert === null ? '' : String(snapshot.after.has_massage_cert), '最多照顧寶寶數': snapshot.after.care_babies === null ? '' : String(snapshot.after.care_babies), '備註': '' } : null });
   const facts = (): QualificationFacts => ({ special_skills: lists.special_skills.split('\n').map(v => v.trim()).filter(Boolean), certifications: lists.certifications.split('\n').map(v => v.trim()).filter(Boolean), transportation: lists.transportation.split('\n').map(v => v.trim()).filter(Boolean), has_massage_cert: massage === '' ? null : massage === 'true', care_babies: care === '' ? null : Number(care) });
   const doPreview = async () => {
     const current = epoch.current; setBusy(true); invalidate();
@@ -46,7 +48,7 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
     catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };
-  return <section className="staff-holiday-op-card" aria-label="專業資格與服務資料編輯">
+  return <section ref={unsavedRef} className="staff-holiday-op-card" aria-label="專業資格與服務資料編輯">
     <h3 className="staff-op-title">✏️ 專業資格與服務資料</h3>
     <p>技能、一般證照及交通方式每行填一項；刪除該行即可移除。按摩證書獨立登錄，與一般證照分開保存。</p>
     {snapshot && <><div className="staff-op-grid">

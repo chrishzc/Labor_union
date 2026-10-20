@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
+import pytest
 
 from domains.orders.historical_adoption import (
     HistoricalOrderCurrentFacts,
@@ -97,6 +98,47 @@ def test_complete_service_history_builds_completed_assignment_before_historical_
     assert repository.persisted[0][2] == (91,)
 
 
+def test_completed_history_without_accounting_owner_cannot_write_assignment_or_adoption():
+    row = _row(caregiver_name="月嫂甲", start=_START, end=_END)
+    repository = _Repository()
+    writer = _Writer()
+    workflow = HistoricalOrderAdoptionWorkflow(repository, _UnitOfWork, writer,
+        clock=SimpleNamespace(today=lambda: _BUSINESS_DATE))
+    preview = workflow.preview(row)
+    with pytest.raises(ValueError, match="historical_default_accounting_unavailable"):
+        workflow.apply(HistoricalOrderAdoptionRequest(row, preview.fingerprint, "missing-accounting-owner",
+            "test-operator", "verify atomic adoption", "missing-accounting-owner:correlation"))
+    assert writer.calls == []
+    assert repository.persisted == []
+
+
+def test_accounting_failure_after_adoption_writes_rolls_back_outer_transaction():
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+
+    class Connection:
+        def __init__(self): self.events = []
+        def begin(self): self.events.append("begin")
+        def commit(self): self.events.append("commit")
+        def rollback(self): self.events.append("rollback")
+
+    class Accounting:
+        def establish_default_in_current_unit_of_work(self, **_):
+            raise ValueError("historical_client_payment_terms_missing")
+
+    row = _row(caregiver_name="月嫂甲", start=_START, end=_END)
+    repository = _Repository()
+    writer = _Writer()
+    connection = Connection()
+    workflow = HistoricalOrderAdoptionWorkflow(repository, lambda: MySqlUnitOfWork(connection), writer,
+        clock=SimpleNamespace(today=lambda: _BUSINESS_DATE), default_accounting=Accounting())
+    preview = workflow.preview(row)
+    with pytest.raises(ValueError, match="historical_client_payment_terms_missing"):
+        workflow.apply(HistoricalOrderAdoptionRequest(row, preview.fingerprint, "atomic-accounting-failure",
+            "test-operator", "verify atomic adoption", "atomic-accounting-failure:correlation"))
+    assert len(writer.calls) == 1 and len(repository.persisted) == 1
+    assert connection.events == ["begin", "rollback"]
+
+
 def test_existing_completed_historical_assignment_is_reused_without_generation_requirement():
     row = _row(caregiver_name="月嫂甲", start=_START, end=_END)
     repository = _Repository(
@@ -159,6 +201,7 @@ def _workflow(repository, writer):
         _UnitOfWork,
         writer,
         clock=SimpleNamespace(today=lambda: _BUSINESS_DATE),
+        default_accounting=SimpleNamespace(establish_default_in_current_unit_of_work=lambda **_: None),
     )
 
 

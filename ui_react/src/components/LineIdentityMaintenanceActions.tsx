@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineIdentityMaintenanceActions.tsx
  * Description: 提供 LINE 身分對象更正與解除失敗維護操作，強制 Preview、確認與安全錯誤呈現。
@@ -183,6 +184,8 @@ export function LineIdentityMaintenanceActions({
       setMaintenanceError(safeError(error, 'LINE 身分解除維護操作失敗。'));
     }
   };
+  useUnsavedDraft('LINE 身分維護', { '目標編號': targetReference, '更正原因': replacementReason, '維護原因': maintenanceReason }, { busy: replacementState === 'loading' || maintenanceState === 'loading', resetKey: replacementResult ?? maintenanceResult });
+
 
   return (
     <div className="line-action-panel" data-control-id="line.identity.maintenance">

@@ -23,6 +23,7 @@
   - `api/routes/matching_schedule_confirmation.py`
   - `api/routes/assignment_plan.py`
   - `ui_react/src/api/scheduling/matching_schedule_confirmation_client.ts`
+  - `ui_react/src/api/scheduling/assignment_plan_mutation_client.ts` — canonical Apply／closed job outcome transport。
   - `ui_react/src/api/scheduling/service_arrangement_status_client.ts` — strict automatic arrangement status and completion status transport。
   - `ui_react/src/components/MatchingScheduleAndAssignmentActions.tsx`
   - `ui_react/src/components/OrderAssignmentPlanPanel.tsx`
@@ -31,6 +32,7 @@
 
 ## Boundaries
 - Assignment Plan Query 僅讀 current Orders／Scheduling 與 nullable 已存在的 Finance／Payroll 版本；缺根或時數不阻擋唯讀，Preview／Apply 保留完整正式驗證。
+  - `infrastructure/mysql/order_terms_read_model.py` 的 `select_current_assignments` 共用於 Assignment Plan Query 與付款查核；最新採納的歷史 assignment 無 generation 時仍回傳同一 identity。唯讀 Query 使用 `AssignmentPlanQueryAssignment`，不把 mutation 的逐日日期條件當成查閱資格。
 
 - 推薦與排班介面呈現自動等待訂金鎖及已轉正式班表狀態，不要求使用者手動 acquire；保留正式換人／日期調整入口及既有排班條件驗證。
 - 自動排班 discovery 以 active plan／current 日期版本掃描，不依賴日期表 snapshot 已建立；dispatch 在獨立原 UoW 借用 canonical 等待鎖 writer，銜接升級前已確認但從未保留的案件。Query 仍零寫入，明確釋放／已轉換的鎖不自行恢復；衝突維持 awaiting_conditions，不 enqueue 排班。

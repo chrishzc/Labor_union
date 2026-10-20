@@ -87,7 +87,7 @@ def test_staff_schedule_mutations_use_typed_preview_apply_readback() -> None:
     assert "送出結果尚未確認。請勿重複送出" in baby_log
     assert "日誌已送出，但目前無法重新讀取結果。請勿重複送出" in baby_log
     assert "/service-day-media" in baby_log
-    assert "受控檔案 staging" in baby_log
+    assert "選檔預覽不會直接送出" in baby_log
     assert "requires_cooking" in baby_log
     assert "selectServiceDay" in baby_log
     assert "Preview 指紋" not in baby_log

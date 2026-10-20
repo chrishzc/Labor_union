@@ -48,6 +48,7 @@ class ClientFinanceCaseSummaryView(_StrictModel):
     obligation_count: int = Field(ge=0)
     ledger_entry_count: int = Field(ge=0)
     receipt_entry_count: int = Field(ge=0)
+    receipt_status: Literal["pending", "unpaid", "partially_received", "received", "settled"]
 
 
 class ClientFinanceCaseView(_StrictModel):

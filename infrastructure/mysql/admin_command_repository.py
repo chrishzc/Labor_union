@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from infrastructure.mysql.nas_mutations import call_mutation
 
 
 class AdminCommandRepository:
@@ -34,7 +35,7 @@ class AdminCommandRepository:
 
     def delete_holiday(self, holiday_date):
         with self._connection.cursor() as cursor:
-            cursor.execute("DELETE FROM holidays WHERE holiday_date = %s", (holiday_date,))
+            call_mutation(cursor, "lu_nas_delete_holiday_v1", holiday_date)
 
     def update_client_name(self, case_no, client_name):
         with self._connection.cursor() as cursor:

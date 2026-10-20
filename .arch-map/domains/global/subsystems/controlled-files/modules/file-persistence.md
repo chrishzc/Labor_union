@@ -14,7 +14,7 @@
 - inbound: `subsystems/controlled_files/workflow.py` — typed facts、claims、receipts 與 caller-owned transaction。
 
 ## Contracts
-- `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` — 受控檔案 opaque identity、Preview/Apply、receipt 與 storage boundary。
+- `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` — 受控檔案 opaque identity、Preview/Apply、receipt 與 storage boundary。
 
 ## Verification
 - layout_status: `custom_current`

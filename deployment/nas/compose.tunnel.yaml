@@ -1,0 +1,23 @@
+# Optional overlay, enabled only after internal qualification and LINE setup.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.1
+    restart: unless-stopped
+    profiles: [tunnel]
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yaml", "run"]
+    user: "65532:65532"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    volumes:
+      - ./tunnel/config.yaml:/etc/cloudflared/config.yaml:ro
+      - ./tunnel/credentials.json:/etc/cloudflared/credentials.json:ro
+      - private-ca:/run/private-ca:ro
+    networks: [line-control, tunnel-egress]
+    depends_on:
+      line-api: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+networks:
+  tunnel-egress: {}

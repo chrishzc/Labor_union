@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineUnboundPairingWorkbench.tsx
  * Description: 提供未綁定 LINE 之正式訂單與狀態 C 產婦暫存登記手動配對工作台。
@@ -163,6 +164,8 @@ export function LineUnboundPairingWorkbench({
     }
     return false;
   };
+  useUnsavedDraft('報名案件配對', { '已選案件': !!selectedOrder, '已選報名': !!selectedProvisional, '原因': reason }, { busy: submitting, resetKey: successMessage });
+
 
   return (
     <section

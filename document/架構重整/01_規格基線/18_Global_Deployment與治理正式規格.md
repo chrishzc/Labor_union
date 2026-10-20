@@ -22,9 +22,18 @@
 8. Schema 變更必須使用 preserve-data release manifest、backup、candidate、validation、switch 與 recovery receipt。
 9. Release 未通過 post-start readback 不得標示完成。
 10. 部署位置變更不得改變 Domain ownership、typed API contract、transaction 或資料語意。
-11. Production Private Operations caller 使用 Google-signed OIDC ID token；local shared key 不得 fallback 到 production。
+11. NAS production Private Operations caller 依 `17` 的 NAS-WORKER-01/02 使用各 Worker 獨立機器憑證與私人 HTTPS；不依賴 Google OIDC，local shared key 不得 fallback 到 production。
 12. 外部副作用只由已提交的 outbox、inbox 或 durable job 執行。
 13. 技術 log、技術紀錄與營運觀測資料以正向 allowlist 管理，最長保留 30 天；會員、訂單、排班、款項、合約、客服案件、正式業務事件、投遞證據、稽核證據、migration／release／backup 證據與受控業務檔案不得因本政策刪除。
+
+### 2.1 NAS Container Manager 測試模板（2026-10-19 人工授權）
+
+- 以 `deployment/nas/compose.yaml`、同目錄 `.env`（由 `.env.example` 填寫）及既有 README 提供無 SSH 的專案入口。預設基本組；`durable/knowledge/incident/monitor/line/tunnel/line-check` 分階段啟動，LINE Worker 僅在最後一組執行 --check，不隱含收送訊息 Authority。
+- 新安裝使用新專案名稱、新空白 bind roots、新 named volumes。初始化在變更檔案擁有者／產生新設定前拒絕非空受控檔案、LINE 媒體與知識根目錄；已標記安裝只驗證，不補造第六個 token 或覆寫現有秘密，不替代 preserve-data 升級。
+- 2026-10-20 人工授權將正式 Compose 對齊已啟動 NAS 並補齊維護流程：DS220+ 不設定不支援的 NanoCPUS，記憶體與安全邊界不變；data 引用既有 `${COMPOSE_PROJECT_NAME}_data` internal 網路，external 僅表示 Compose 不擁有其生命週期。既有安裝保留原專案名稱、.env、全部憑證／MFA keyring、資料卷與 bind roots；新測試才建立獨立網路及資料。一般換版與 DB preserve-data migration 分開；先在隔離環境驗重啟、重建、換版操作、失敗回復及冷備份還原，不操作真實 NAS、不建置或上傳映像。相同 digest 的 tag 切換不能作為不同程式版本相容性的證據；本機 Docker 亦不替代 DSM GUI／ACL／防火牆實機驗收。
+- 2026-10-20 人工採用 Synology DDNS／Let’s Encrypt／DSM 反向代理的新安裝方案：管理 API 不發布 host port，management-egress bridge 使用操作者確認不重疊的固定 subnet／API IP，僅供同機 DSM 作 HTTPS 目的地。瀏覽器入口使用管理子網域與專屬 HTTPS port（文件預設 19443），由 DSM 指派公信憑證並設定內網來源允許、其餘拒絕；內網 DNS 將管理子網域解析至 NAS 內網 IP，不增加路由器入站轉送或管理 Tunnel。初次內部憑證仍含 NAS IP／可選 hostname，Worker／DB 的驗證不變；DSM 上游私人 CA 鏈驗證未經實機證據不得宣稱完成，公信入口憑證不代表所有內部憑證已自動續期。
+- 五個 Worker 加照片代理使用六組獨立 token。公開 LINE 不掛受控業務檔案或 app-data／knowledge；透過專用內部網路與原始 LINE token 再驗證呼叫私人照片／日誌入口。MySQL／Redis／LINE API 不發布 host port，Tunnel 僅接 LINE origin。
+- GUI 操作、實際環境值、DSM ACL、來源限制、CA 信任與 NAS 2 GB 容量需實機驗證；不得由靜態 Compose 或暫存 initializer 測試宣稱已完成部署。模板交付不包含映像 build／push、既有資料異動或外部 provider effect。
 
 ## 3. Logical topology
 

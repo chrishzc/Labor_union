@@ -41,15 +41,16 @@ class MySqlAnomalyRuntime:
     hcm_field_correction_terminal_predicate = HCM_FIELD_CORRECTION_TERMINAL_PREDICATE
 
     def __init__(self, *, issue_identity_secret: str | bytes | None = None,
-                 owner_snapshot_reader=None, current_issue_detectors=None) -> None:
+                 owner_snapshot_reader=None, current_issue_detectors=None, connection_factory=None) -> None:
         # The legacy composition argument is intentionally not an identity input.
         # Current issue identity comes from deterministic owner lifecycle facts.
         del issue_identity_secret
         self._owner_snapshot_reader = owner_snapshot_reader
         self._current_issue_detectors = dict(current_issue_detectors or {})
+        self._connection_factory = connection_factory
 
     def connection(self):
-        return get_connection()
+        return (self._connection_factory or get_connection)()
 
     def anomaly_repository(self, connection):
         return MySqlAnomalyRepository(connection)
@@ -146,9 +147,9 @@ class MySqlAnomalyRuntime:
 
 
 def build_anomaly_runtime(
-    *, issue_identity_secret: str | bytes | None = None
+    *, issue_identity_secret: str | bytes | None = None, connection_factory=None
 ) -> AnomalyRuntime:
-    return MySqlAnomalyRuntime(issue_identity_secret=issue_identity_secret)
+    return MySqlAnomalyRuntime(issue_identity_secret=issue_identity_secret, connection_factory=connection_factory)
 
 
 __all__ = ["MySqlAnomalyRuntime", "build_anomaly_runtime"]

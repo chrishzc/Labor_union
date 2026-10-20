@@ -221,8 +221,8 @@ class ProvisionalRegistrationPreviewResponse(BaseModel):
 
 class ProvisionalRegistrationResponse(BaseModel):
     registration_id: int
-    client_id: int
-    beclass_record_id: int
+    client_id: int | None
+    beclass_record_id: int | None
     client_name: str
     replayed: bool
     identity_status: str | None = None

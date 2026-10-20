@@ -12,6 +12,7 @@ const summary = z.strictObject({
   case_no: z.string().min(1), account_version: version,
   open_receivable_amount_ntd: amount, open_payable_amount_ntd: amount,
   obligation_count: amount, ledger_entry_count: amount, receipt_entry_count: amount,
+  receipt_status: z.enum(['pending', 'unpaid', 'partially_received', 'received', 'settled']),
 });
 const detail = z.strictObject({
   case_no: z.string().min(1), account_version: version,

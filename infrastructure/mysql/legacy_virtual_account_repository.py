@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infrastructure.mysql.nas_mutations import call_mutation
+
 import json
 
 from subsystems.client_finance.case_virtual_account import AccountMapping
@@ -107,12 +109,9 @@ class MySqlLegacyVirtualAccountRepository:
 
     def replace_case_account(self, case_no: str, account: str, digest: str, actor: str) -> None:
         with self.connection.cursor() as cursor:
-            cursor.execute("DELETE FROM client_legacy_virtual_accounts WHERE case_no=%s", (case_no,))
-            cursor.execute(
-                "INSERT INTO client_legacy_virtual_accounts "
-                "(case_no,virtual_account,source_content_digest,source_row,created_by) VALUES (%s,%s,%s,2,%s)",
-                (case_no, account, digest, actor),
-            )
+            cursor.execute("SELECT id FROM client_legacy_virtual_accounts WHERE case_no=%s ORDER BY id FOR UPDATE", (case_no,))
+            expected = json.dumps([int(row["id"]) for row in cursor.fetchall()])
+            call_mutation(cursor, "lu_nas_replace_case_account_v1", case_no, expected, account, digest, actor)
 
     def save_case_account_receipt(self, key: str, command: str, actor: str, result: dict) -> None:
         with self.connection.cursor() as cursor:

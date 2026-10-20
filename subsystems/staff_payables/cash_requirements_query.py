@@ -10,6 +10,7 @@ from domains.client_finance.subsidy_return_projection import project_subsidy_ret
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem
 
 PaymentKind = Literal["staff_payable", "client_refund", "client_subsidy_return"]
+PaymentStatus = Literal["pending", "partially_paid", "paid", "settled"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,8 @@ class CashRefundFact:
     payment_date: date | None
     recipient_name: str
     recipient_ready: bool
+    payment_status: PaymentStatus = "pending"
+    settled_amount_ntd: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,7 @@ class CashRequirementRow:
     date_is_estimate: bool
     pending_reasons: tuple[str, ...]
     staff_id: int | None = None
+    payment_status: PaymentStatus = "pending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,14 +81,12 @@ def query_cash_requirements(repository: CashRequirementsRepository, *, page_size
 def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
     rows = []
     for item in case.staff_items:
-        if item.disposition == "paid_or_settled" or (item.balance is not None and item.balance.amount <= 0):
-            continue
         if not case.has_arrangement and item.source == "order_facts":
             continue
         reasons = []
         if item.amount_due is None:
             reasons.append("月嫂應付金額缺少計算依據，待確認")
-        if item.effective_due_date is None:
+        if item.effective_due_date is None and item.payment_status not in {"paid", "settled"}:
             reasons.append("月嫂付款日尚未確定")
         if item.disposition == "blocked":
             reasons.append("月嫂付款狀態或受款資料待確認")
@@ -94,18 +96,19 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             "staff_payable", "confirmed" if item.source == "formal_obligation" else "estimated", source,
             None if item.amount_due is None else item.amount_due.amount,
             None if item.balance is None else item.balance.amount, item.effective_due_date, False, tuple(reasons), item.staff_id,
+            item.payment_status,
         ))
     for refund in case.refunds:
-        if refund.amount_ntd <= 0:
+        if refund.amount_ntd <= 0 and refund.payment_status not in {"paid", "settled"}:
             continue
         reasons = []
-        if refund.payment_date is None:
+        if refund.payment_date is None and refund.payment_status not in {"paid", "settled"}:
             reasons.append("退款付款日尚未確定")
-        if not refund.recipient_ready:
+        if not refund.recipient_ready and refund.payment_status not in {"paid", "settled"}:
             reasons.append("退款收款資料待確認")
         rows.append(CashRequirementRow(refund.identity, case.case_no, refund.recipient_name,
-            refund.kind, "confirmed", "client_refund", refund.amount_ntd, refund.amount_ntd,
-            refund.payment_date, False, tuple(reasons)))
+            refund.kind, "confirmed", "client_refund", refund.amount_ntd + refund.settled_amount_ntd, refund.amount_ntd,
+            refund.payment_date, False, tuple(reasons), payment_status=refund.payment_status))
     if case.has_subsidy_return or not case.has_arrangement or case.order_status == "訂單取消":
         return tuple(rows)
     projection = project_subsidy_return(

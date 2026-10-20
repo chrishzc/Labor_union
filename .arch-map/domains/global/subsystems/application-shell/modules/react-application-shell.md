@@ -11,10 +11,12 @@
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
 - shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。
+- shared presentation: `ui_react/src/components/UnsavedChanges.tsx`、`ui_react/src/components/UnsavedChanges.css` — 管理端表單提供草稿差異與原儲存狀態，shell 在切頁／Hash／登出前攔截，Drawer 與各 local navigation 在卸載前共用差異提示；不新增 writer、持久草稿或略過 owner Preview／Confirm。
 - primary: `ui_react/src/components/MasterLayout.tsx`
 - composed page: `ui_react/src/pages/ClientRegistryPage.tsx`
 - composed page: `ui_react/src/pages/ClientRosterPage.tsx`
 - primary: `ui_react/vite.config.ts`
+- composed page: `ui_react/src/pages/FileSettingsPage.tsx` — `#file-settings` in 稽核與系統; the controlled-files owner enforces root permission and owns settings, not the shell.
 
 ## Contracts
 - 已登入的案件、客戶、財務、歷史服務帳務與 LINE 管理頁掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
@@ -25,6 +27,7 @@
 - layout_status: `custom_current`
 - integration_root: `ui_react/src/tests/challenger_auth_navigation.test.tsx`
 - integration_root: `ui_react/src/tests/react_entrypoint_registry.test.ts`
+- integration_root: `ui_react/src/tests/setup.ts` — Vite-configured shared React test environment, DOM cleanup and browser API doubles; no business oracle.
 - integration_root: `ui_react/src/tests/domains/global/subsystems/application-shell/modules/react-application-shell/`
 - routing: `.arch-map/tests/domains/global/subsystems/application-shell/modules/react-application-shell.md`
 

@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -126,6 +127,8 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       setBusy(false);
     }
   };
+  useUnsavedDraft('正式服務日期修正', { '服務日期選擇': selections, '修正原因': reason }, { enabled: !!facts, resetKey: facts, busy });
+
 
   return <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 排班日期更正`}>
     <div className="service-date-heading"><p className="service-date-instruction">請在原有月曆調整已完成的服務日期。更正會保留原完工紀錄，並更新有效排班與週報。</p></div>

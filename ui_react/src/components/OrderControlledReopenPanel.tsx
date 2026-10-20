@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
@@ -87,6 +88,8 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
       }
     }
   };
+  useUnsavedDraft('受控重開案件', { '重開原因': draft?.reason ?? '' }, { baseline: { '重開原因': '' }, enabled: status !== 'observed', busy: unresolved });
+
 
   return (
     <section aria-label={`案件 ${caseNo} 受控重開`}>

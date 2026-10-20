@@ -35,7 +35,7 @@ const MANUAL_SNAPSHOT: StaffCasePreferenceManualSnapshot = {
 
 describe('Staff case preference summary flow', () => {
   beforeEach(() => {
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
@@ -102,15 +102,16 @@ describe('Staff case preference summary flow', () => {
     render(<StaffCasePreferenceManualEditor staffId={11} />);
     fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '新竹縣' } });
+    const confirm = screen.getByRole('button', { name: '確認儲存' });
+    expect(confirm).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
 
-    const confirm = await screen.findByRole('button', { name: '確認儲存' });
-    expect(confirm).toBeDisabled();
+    expect(confirm).toBeEnabled();
     expect(staffCasePreferenceManualClient.apply).not.toHaveBeenCalled();
     expect(screen.getByTestId('staff-case-preference-manual-preview')).toHaveTextContent('可承接區域（變更前）');
     expect(screen.getByTestId('staff-case-preference-manual-preview')).toHaveTextContent('可承接區域（變更後）');
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試六項編輯' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試六項編輯' } });
     expect(confirm).toBeEnabled();
 
     const savedRelations = {
@@ -136,7 +137,7 @@ describe('Staff case preference summary flow', () => {
   it('requires a new preview after changing a previewed field', async () => {
     render(<StaffCasePreferenceManualEditor staffId={11} />);
     fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試預覽失效' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試預覽失效' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     expect(await screen.findByRole('button', { name: '確認儲存' })).toBeEnabled();
@@ -158,7 +159,7 @@ describe('Staff case preference summary flow', () => {
   it('does not report success when the post-apply owner query fails', async () => {
     render(<StaffCasePreferenceManualEditor staffId={11} />);
     fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('六大接案能力變更原因'), { target: { value: '測試回讀失敗' } });
+    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試回讀失敗' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     await screen.findByText('預覽已完成，尚未寫入。');
     const confirm = await screen.findByRole('button', { name: '確認儲存' });

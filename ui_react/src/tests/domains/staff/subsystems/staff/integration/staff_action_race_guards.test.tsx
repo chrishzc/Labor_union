@@ -78,7 +78,7 @@ describe('Staff action async race guards', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(staffCasePreferenceManualClient, 'queryOptions').mockResolvedValue(STAFF_MANUAL_OPTIONS);
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffCasePreferenceManualClient, 'query').mockResolvedValue(manualSnapshot(11));
     vi.spyOn(staffCasePreferenceManualClient, 'preview').mockResolvedValue(manualPreview);

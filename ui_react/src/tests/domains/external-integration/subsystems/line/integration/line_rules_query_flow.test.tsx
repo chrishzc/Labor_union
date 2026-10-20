@@ -9,6 +9,7 @@ import type { LineConfigurationQueryClient } from '../../../../../../api/line_co
 import type { LineNotificationRulesCatalog } from '../../../../../../api/line_configuration/line_configuration_query_schemas';
 import type { LineIdentityClient } from '../../../../../../api/line_identity/line_identity_client';
 import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
+import { sessionClient } from '../../../../../../api/auth/session_client';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_RESOLVE_PREVIEW_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
@@ -25,10 +26,16 @@ function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RU
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+const onboardingClient = {
+  get: vi.fn().mockResolvedValue({ template_id: 'customer_onboarding_welcome', content: '測試歡迎內容', revision: 1, variables: [], sample_preview: '測試歡迎內容' }),
+  preview: vi.fn(), update: vi.fn(),
+};
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.clearSession(); });
 
 describe('LINE 通知規則 query 與 mutation 接線', () => {
-  it('只在頁籤啟用時查一次，並可從目錄新增或由明細編輯真實規則', async () => {
+  it('只在頁籤啟用時查一次，通知內容與發送設定沿用同一真實規則', async () => {
+    sessionClient.setSession('synthetic-line-rules-session', { id: 7, username: 'line-rules-test', display_name: '測試管理員', role: 'admin' });
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
       expect(String(input)).toBe('/api/v1/line/notification-rules/deposit_notice/message-template');
       expect(options?.method).toBe('GET');
@@ -40,26 +47,32 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     });
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration } = dependencies();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
     expect(configuration.getNotificationRules).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    await waitFor(() => expect(screen.getAllByText('deposit_notice').length).toBeGreaterThan(0));
+    await screen.findByRole('button', { name: '編輯訂金確認內容' });
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: '新增／編輯通知規則' }));
-    expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
-    expect(screen.getByLabelText('通知規則：')).toHaveValue('deposit_notice');
-    fireEvent.click(screen.getByRole('button', { name: '關閉編輯區' }));
+    fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
+    fireEvent.click(screen.getByText('發送設定'));
+    fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
+    expect(screen.getByRole('region', { name: 'LINE 通知規則維護' })).toBeInTheDocument();
+    expect(screen.getByLabelText('收件者')).toHaveValue('client');
+    expect(screen.getByLabelText('排程方式')).toHaveValue('immediate');
+    fireEvent.click(screen.getByRole('button', { name: '返回內容' }));
+    fireEvent.click(screen.getByRole('button', { name: '關閉通知內容' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
+    fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
     expect(screen.getAllByText('訂金確認').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: '編輯此規則' }));
+    fireEvent.click(screen.getByText('發送設定'));
+    fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
     expect(screen.queryByText('系統唯一規則識別碼：deposit_notice')).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: '通知規則編輯區' })).toBeInTheDocument();
-    expect(screen.getByLabelText('通知規則：')).toHaveValue('deposit_notice');
+    expect(screen.getByRole('region', { name: 'LINE 通知規則維護' })).toBeInTheDocument();
+    expect(screen.getByLabelText('收件者')).toHaveValue('client');
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
@@ -68,9 +81,12 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
   it('revision 0 的空 definition 顯示真實空狀態而不是 mock 規則', async () => {
     const empty = { revision: 0, definition: {} } as const;
     const { customer, identity, configuration } = dependencies(empty);
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    await screen.findByText('目前尚未設定通知規則');
+    expect(await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' })).toBeInTheDocument();
+    // An empty rules definition retains the welcome entry, without inventing notification rules.
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '編輯訂金確認內容' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Current revision|revision：0/i)).not.toBeInTheDocument();
     expect(screen.queryByText('FLOW-13')).not.toBeInTheDocument();
   });

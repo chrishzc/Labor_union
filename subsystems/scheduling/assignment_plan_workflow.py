@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import Callable, Protocol
 
@@ -14,7 +15,6 @@ from domains.scheduling.assignment_plan import (
     AssignmentPlanDomainError,
     AssignmentPlanFacts,
     AssignmentPlanIntent,
-    EffectiveAssignmentFact,
     build_assignment_plan_candidate,
     impacted_staff_ids,
 )
@@ -37,6 +37,18 @@ _REASON_MAXIMUM_LENGTH = 500
 
 
 @dataclass(frozen=True, slots=True)
+class AssignmentPlanQueryAssignment:
+    """Saved assignment identity and interval, independent of mutation readiness."""
+
+    assignment_id: int
+    staff_id: int
+    sequence: int
+    assigned_start_date: date
+    assigned_end_date: date
+    official_service_dates: tuple[date, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AssignmentPlanQuerySnapshot:
     case_no: str
     order_version: int
@@ -47,7 +59,7 @@ class AssignmentPlanQuerySnapshot:
     contracted_service_days: int
     service_hours_per_day: float | None
     service_started: bool
-    effective_assignments: tuple[EffectiveAssignmentFact, ...]
+    effective_assignments: tuple[AssignmentPlanQueryAssignment, ...]
 
 
 @dataclass(frozen=True, slots=True)

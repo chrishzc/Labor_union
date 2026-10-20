@@ -759,6 +759,7 @@ def test_completed_historical_actual_start_skips_formal_rebuild(tmp_path):
         _UnitOfWork,
         _SchedulingHistoricalAssignment(),
         rebuilder,
+        default_accounting=SimpleNamespace(establish_default_in_current_unit_of_work=lambda **_: None),
     )
     preview = workflow.preview(row)
     assert preview.pairings[0].resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE

@@ -441,6 +441,27 @@ Rich Menu publication history 是唯讀、server-owned 的 numbered query；回�
 
 ### 4.1 正式內部使用者存取模型
 
+#### 2026-10-19 NAS 部署權限裁決（優先於下方舊部署認證敘述）
+
+Authority：使用者核准本次最終權限清單並授權實作、設定與依序驗證；不包含真實 NAS 部署、Docker Hub push、LINE provider 發送或既有資料重建。
+
+- NAS-AUTH-01：保留所有 enabled 內部人員相同業務功能與唯一 root 帳號中心。合法假日刪除、資格／偏好移除、匯入替換、虛擬帳號替換、排班替換、異常投影重查、封存及知識清理均保留；不以停用功能或一律 soft delete 取代。
+- NAS-DB-01：日常執行帳號無直接 DELETE、DDL、GRANT OPTION、CREATE USER。刪除只透過用途固定、目標受限的 P01–P10 程序；EXECUTE 必須逐程序授權。DEFINER 為不可登入、僅持必要資料操作權的專用帳號，非 root。程序不接收 SQL／table name，不自行 COMMIT／ROLLBACK，caller 保持唯一 outer UoW。
+- NAS-DB-02：P01 日期；P02 指定 staff 的資格／交通差異；P03 六項固定關聯；P04 指定 staff 的偏好集合；P05 依既有來源判定的 staff 歷史替換；P06 指定案件與舊 mapping 集合；P07 指定案件的被替換排班世代；P08 已由 owner fresh recheck 判定失效的 issue；P09 已封存且符合既有期限的 audit；P10 符合既有狀態、版本、期限／capacity Preview 的 knowledge target。程序限制不取代 typed owner 業務驗證。重播、stale、跨對象、交易失敗不得放寬既有契約。
+- NAS-DB-03：管理／LINE 對外／維運作業以不同權限連線；LINE 不持 P01–P10 或管理憑證。欄位權限不得被舊的整庫 grant 覆蓋。既有資料保存、fresh bootstrap、upgrade、backup／restore 分別驗證，不重寫已發布 schema artifacts。
+- 既有 `SELECT ... FOR UPDATE` 的 MySQL 執行前提：四個 runtime profile 與 locked definer 僅在本專案 database scope 持 `LOCK TABLES`，維持原本 row-lock／outer UoW，不以增加核心 UPDATE 或直接 DELETE 解決鎖定讀取授權。database 名稱的底線依 partial_revokes 設定正確處理，不能擴成其他庫的 pattern；鎖定權本身不增加業務寫入欄位。依據為 MySQL 8.0 官方 locking-read／GRANT 契約，實際 grant 仍須 engine 驗證。
+- NAS-WORKER-01：NAS production 使用 `nas_service_token`；每個 Worker 獨立隨機憑證，API 由憑證對應驗證後的 service identity，不能藉 X-Internal-Service-Name 或 body 冒充另一服務。API 只保存 verifier；Worker 只掛載自己的憑證及 CA，不取得 DB credential。Google OIDC 不再是此部署認證路徑。
+- NAS-WORKER-02：私人操作只在隔離網路提供 HTTPS，Worker 驗證 server 憑證；缺憑證、未知／撤銷 token、錯服務、明文連線皆 fail closed。初始化準備憑證，不新增人員啟用碼。既有 local development shared-key 工作流限 local/test，不能 fallback 成 production。
+- NAS-LINE-01：LINE token 於後端驗證，再核對 current bound identity 與本人案件／assignment/day。需求表單先保存完整申請，工會核准才建立 Client／BeClass 與完成對應 binding；同筆申請重複核准不得建立重複客戶。既有已建立客戶不回退成待審。
+- NAS-LINE-02：異動申請仍只寫 Customer Service intake；正式核心異動由工會與既有 owner writer 執行。日誌／照片保留本人有效服務範圍直接提交，不增加逐筆工會核准。
+- NAS-LINE-03（2026-10-19 使用者取消偏好表）：告警分類沿用既有固定規則，群組的 system_health 關閉，管理員開啟，其他既有分類皆開啟。不新增 `line_alert_target_preferences`、不另存個別偏好。管理介面分類改為唯讀並保留訊息預覽；GET 回讀固定規則，舊 PATCH 對存在的對象回 HTTP 409／`line_alert_preferences_fixed`，不存在仍回 404，不進行寫入或 commit。告警對象的啟停與重設維持原有 Preview／Apply。
+- NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。這次只修改後端、直接測試與契約，不準備或修改 Compose，不改前端、不搬移檔案、不操作 NAS 或既有資料；部署 UID／ACL／掛載與前端畫面於後續驗收。
+
+- NAS-LINE-04 的資料庫邊界：公開 LINE profile 對 controlled-file staging／objects／receipts／finalize／lease／reference／cleanup／reconciliation 及日誌主檔／附件／完成事件僅 SELECT，不可直接 INSERT／UPDATE；私人管理後端保留原受限 management profile 的合法 writer。原 LINE 通知 outbox／checkpoint、LINE 專用媒體及其他既有功能權限不變；不加寬任何 DB 權限，不新增表。
+- 本人附件下載：`POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 保留 LINE token 在 body；私人對應路徑為 `/internal/v1/line-media/service-day-logs/{log_id}/photos/{file_id}/download`。先查本人日誌，限制 file_id 為該日誌已保存附件且屬 Scheduling／相同案件／寶寶或餐食照片，再經原 controlled-file digest-verified download 讀取；未授權／不相關檔案皆不得開檔。只回 JPEG／PNG，private no-store／nosniff；不提供任意檔案下載、公開 URL 或 token query。前端後續以 authenticated fetch／Blob 使用，不在本輪實作畫面。
+
+驗收對照：上述每一契約均需包含合法成功與邊界拒絕。DB 必須在 local disposable MySQL 驗直接刪除／DDL 拒絕、授權程序成功、錯目標與 stale 拒絕及 outer rollback；Worker 必須驗各服務隔離、HTTPS／CA、撤銷與不攜 DB credential。NAS 與 provider 未執行不得宣稱通過。
+
 2026-08-16 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
 role、capability、職稱或部門限制內部使用者可操作的業務功能，也不採 fixed role bundle、dynamic
 grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enabled 帳號一樣可使用完整業務功能集合。
@@ -455,8 +476,8 @@ grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enable
   root 遺失只能依受控離線維運程序復原，沒有 production HTTP break-glass endpoint。
 
 - human authorization 不接受 `X-Legacy-Shared-Key` 或任何 legacy shared key。machine caller 在
-  local/test 只可使用 `INTERNAL_SERVICE_SHARED_KEY`，production 只可使用已驗證且 caller allowlist
-  通過的 Google-signed OIDC；兩者都不能冒充 human actor。
+  local/test 可使用 `INTERNAL_SERVICE_SHARED_KEY`；本次 NAS production 依 NAS-WORKER-01/02
+  使用 HTTPS 與逐服務獨立機器憑證。machine identity 不能冒充 human actor。
 - body、query、UI session label 或任意 role／capability 字串不得成為 actor 或改變可用功能。
 - UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
 - 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
@@ -702,7 +723,11 @@ Preview 尚無可靠執行結果時只顯示來源筆數，其餘以「—」呈
 不代表檔案驗證失敗，也不能據此判定 NAS／網路故障。
 只有匯入 Apply 的等待逾時、連線中斷、閘道 502／504 或處理鎖等待結果待確認時，UI 才每隔
 5 秒沿用原始快照、Preview 與相同 idempotency key 自動確認，最多 6 次且同一時間只有一個請求。
-確認期間維持換檔／導覽鎖；成功、確定失敗或離頁即停止，達上限仍未確認則保留人工查詢按鈕。
+確認期間維持換檔鎖；等待中與結果待確認時均提供「停止等待」，立即解除導覽鎖並停止後續自動確認。
+停止等待不取消已送出的後端 Apply、不撤銷已寫入資料，也不宣稱成功或失敗；原請求未結束前不得再送查詢。
+留在本頁仍可接收原請求結果，原請求結束後可沿用同快照、Preview 與 key 人工確認。離頁不受未儲存表單
+的 busy 鎖阻擋；操作前須告知離頁後目前需重新選取原檔案確認結果，不宣稱自動恢復頁面。
+成功、確定失敗或離頁即停止自動確認，達上限仍未確認則保留人工查詢及停止等待按鈕。
 同日人工澄清：NAS 慢連線造成的鎖等待／回應逾時，在自動確認期間持續顯示「匯入處理中」
 與中性等待說明，不顯示錯誤警示或要求使用者按查詢。四種 Apply 每次等待上限延長為 180 秒，
 Client BeClass 協調鎖等待延長為 30 秒；不改 Preview 等待上限。自動確認次數用完仍未確認時，

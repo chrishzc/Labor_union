@@ -82,15 +82,15 @@ const REVIEW_PAGE = {
 
 async function showPreview() {
   render(<FinancePage />);
-  fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
-  fireEvent.change(screen.getByLabelText('選擇銀行流水工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
+  fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+  fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
   fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
-  await screen.findByText('可自動入帳', { selector: '.finance-kpi-label' });
+  await screen.findByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
 }
 function reviewCount() {
-  return screen.getByText('待人工確認', { selector: '.finance-kpi-label' }).parentElement?.querySelector('.finance-kpi-value')?.textContent;
+  return screen.getByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' }).textContent?.match(/需人工處理 (\d+)/)?.[1];
 }
 
 describe('Finance source-review owner readback', () => {
@@ -128,17 +128,17 @@ describe('Finance source-review owner readback', () => {
 
   it('settles manual-review KPI and list from the same batch owner fact and supports a consistent re-query', async () => {
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
 
     const file = new File(['finance-review'], 'finance.xlsx');
-    fireEvent.change(screen.getByLabelText('選擇銀行流水工作簿'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
 
     expect(await screen.findByText(BATCH)).toBeInTheDocument();
-    const manualReviewKpi = screen.getByText('待人工確認', { selector: '.finance-kpi-label' }).parentElement;
-    expect(manualReviewKpi?.querySelector('.finance-kpi-value')?.textContent).toBe('1');
+    const manualReviewSummary = screen.getByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
+    expect(manualReviewSummary).toHaveTextContent('需人工處理 1');
     expect(screen.getByText(/批次/).parentElement).toHaveTextContent(BATCH);
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
@@ -146,7 +146,7 @@ describe('Finance source-review owner readback', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新查詢人工確認' }));
     await waitFor(() => expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(2));
     expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2);
-    expect(manualReviewKpi?.querySelector('.finance-kpi-value')?.textContent).toBe('1');
+    expect(manualReviewSummary).toHaveTextContent('需人工處理 1');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
   });
 
@@ -224,15 +224,15 @@ describe('Finance source-review owner readback', () => {
     let resolve!: (value: FinanceImportBatchPreview) => void;
     vi.mocked(financeImportMutationClient.preview).mockReturnValue(new Promise((done) => { resolve = done; }));
     render(<FinancePage />);
-    fireEvent.click(screen.getByRole('button', { name: '銀行流水匯入' }));
-    const input = screen.getByLabelText('選擇銀行流水工作簿');
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+    const input = screen.getByLabelText('選擇銀行交易明細工作簿');
     fireEvent.change(input, { target: { files: [new File(['first'], 'first.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
     fireEvent.change(input, { target: { files: [new File(['second'], 'second.xlsx')] } });
     await act(async () => { resolve(PREVIEW); });
-    expect(screen.queryByText('可自動入帳', { selector: '.finance-kpi-label' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' })).not.toBeInTheDocument();
     expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
   });
 

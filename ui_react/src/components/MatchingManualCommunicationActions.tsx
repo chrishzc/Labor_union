@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: MatchingManualCommunicationActions.tsx
@@ -83,6 +84,8 @@ export const CandidateManualInformationActions: React.FC<CandidateManualInformat
       setBusy(null);
     }
   };
+  useUnsavedDraft('人工傳送月嫂資訊', { '確認方式': method, '原因': reason }, { busy: busy !== null, resetKey: notice });
+
 
   if (disabledReason) return null;
   return (
@@ -197,6 +200,8 @@ export const CustomerProfilesManualActions: React.FC<CustomerProfilesManualProps
       setBusy(null);
     }
   };
+  useUnsavedDraft('人工傳送客戶資訊', { '確認方式': method, '原因': reason }, { busy: busy !== null, resetKey: notice });
+
 
   if (currentStatus !== null) {
     return (

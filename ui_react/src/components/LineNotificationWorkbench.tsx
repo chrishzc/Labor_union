@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 /**
@@ -96,7 +97,6 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [discardOpen, setDiscardOpen] = useState(false);
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
@@ -108,6 +108,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const contentDirty = selected?.data !== null && selected !== null && content !== selected.data.content;
   const dirty = contentDirty || settingsDirty;
   const updating = saving || settingsBusy;
+  useUnsavedDraft(selected?.name ?? '通知內容', { '通知內容': content }, { baseline: { '通知內容': selected?.data?.content ?? '' }, enabled: !!selected && !!selected.data, busy: updating, save: contentDirty ? () => save() : undefined });
   const settingsState = useCallback((changed: boolean, busy: boolean) => { setSettingsDirty(changed); setSettingsBusy(busy); }, []);
 
   useEffect(() => {
@@ -170,14 +171,16 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     return () => window.removeEventListener('beforeunload', guard);
   }, [dirty]);
 
+  const { requestLeave } = useUnsavedNavigation();
   const close = () => {
     if (updating) return;
-    if (dirty) { setDiscardOpen(true); return; }
+    requestLeave(() => {
     setSelected(null);
     setEditingSettings(false);
     setSettingsDirty(false);
     setSaveError(null);
     window.requestAnimationFrame(() => opener.current?.focus());
+    });
   };
 
   const open = (entry: NotificationEntry, button: HTMLButtonElement) => {
@@ -185,7 +188,6 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setSelected(entry);
     setContent(entry.data?.content ?? '');
     setSaveError(null);
-    setDiscardOpen(false);
     setEditingSettings(false);
     setSettingsDirty(false);
     setNotice(null);
@@ -244,10 +246,9 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
           <td data-label="操作"><button type="button" className="notification-text-button" data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} onClick={event => open(entry, event.currentTarget)}>{entry.data ? '編輯內容' : '查看狀態'}</button></td>
         </tr>)}</tbody></table>}
       </div>
-      <Drawer isOpen={selected !== null} title={discardOpen ? '放棄尚未儲存的修改？' : selected?.name ?? '通知內容'} className="notification-content-drawer" closeLabel="關閉通知內容" closeDisabled={updating} onClose={discardOpen ? () => setDiscardOpen(false) : close}
-        footer={discardOpen ? <><button type="button" className="notification-button" onClick={() => setDiscardOpen(false)}>繼續編輯</button><button type="button" className="notification-button danger" onClick={() => { setDiscardOpen(false); setSettingsDirty(false); setSelected(null); }}>放棄修改</button></> : editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => { if (settingsDirty) setDiscardOpen(true); else setEditingSettings(false); }}>返回內容</button> : <><button type="button" className="notification-button" disabled={saving} onClick={close}>取消</button>{selected?.data && <button type="button" className="notification-button primary" disabled={saving || !contentDirty} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button>}</>}>
-        {discardOpen && <p>離開後，這則通知尚未儲存的修改會被捨棄。</p>}
-        <fieldset className="notification-editor-scope" disabled={discardOpen} hidden={discardOpen}>
+      <Drawer isOpen={selected !== null} title={selected?.name ?? '通知內容'} className="notification-content-drawer" closeLabel="關閉通知內容" closeDisabled={updating} onClose={close}
+        footer={editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => { requestLeave(() => { setSettingsDirty(false); setEditingSettings(false); }); }}>返回內容</button> : <><button type="button" className="notification-button" disabled={saving} onClick={close}>取消</button>{selected?.data && <button type="button" className="notification-button primary" disabled={saving || !contentDirty} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button>}</>}>
+        <fieldset className="notification-editor-scope" >
         {selected && editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : selected && <>
           {selected.error && <p className="notification-feedback error" role="alert">{selected.error}</p>}
           {selected.data && <>

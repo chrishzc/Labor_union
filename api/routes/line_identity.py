@@ -21,6 +21,7 @@ from api.dependencies.admin_auth import (
 from api.dependencies.line_identity import (
     get_liff_token_verifier,
     get_line_identity_application,
+    get_line_admin_identity_application,
     get_line_identity_review_application,
     get_line_identity_management_application,
 )
@@ -323,7 +324,7 @@ def apply_staff(payload: StaffIdentityApplyRequest):
 def preview_admin(payload: AdminIdentityBindingRequest):
     line_user_id = _verified_line_user_id(payload)
     preview = _translate_identity_errors(
-        get_line_identity_application().preview_admin,
+        get_line_admin_identity_application().preview_admin,
         LineIdentityFlowId(payload.flow_id),
         line_user_id,
         AdminCredentialProof(payload.username.strip(), payload.password.get_secret_value()),
@@ -338,7 +339,7 @@ def preview_admin(payload: AdminIdentityBindingRequest):
 def apply_admin(payload: AdminIdentityBindingApplyRequest):
     line_user_id = _verified_line_user_id(payload)
     result = _translate_identity_errors(
-        get_line_identity_application().apply_admin,
+        get_line_admin_identity_application().apply_admin,
         LineIdentityFlowId(payload.flow_id),
         line_user_id,
         AdminCredentialProof(payload.username.strip(), payload.password.get_secret_value()),

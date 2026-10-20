@@ -6,7 +6,7 @@ import pytest
 from subsystems.scheduling import availability_lock_acquisition_workflow as workflow
 
 
-@pytest.mark.parametrize('scenario', ['ready', 'not_ready', 'unavailable', 'changed_staff'])
+@pytest.mark.parametrize('scenario', ['ready', 'not_ready', 'unavailable', 'changed_staff', 'occupied'])
 def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(monkeypatch, scenario):
     statements = []
 
@@ -26,12 +26,14 @@ def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(monkeypatch
     writes = []
     def acquire(conn, cursor, request, fingerprint):
         assert conn is connection and fingerprint is None
+        if scenario == 'occupied':
+            raise ValueError('{"conflicts":[{"staff_id":99,"lock_date":"2026-08-10","source_type":"active_lock","source_id":88}]}')
         writes.append(request)
         return {'lock_id': 17, 'result': 'created'}
     monkeypatch.setattr(workflow, '_acquire_caregiver_availability_lock_in_transaction', acquire)
     locked_staff = (100,) if scenario == 'changed_staff' else (99,)
-    if scenario in {'unavailable', 'changed_staff'}:
-        code = 'occupancy_conflict' if scenario == 'unavailable' else 'stale_plan'
+    if scenario in {'unavailable', 'changed_staff', 'occupied'}:
+        code = 'stale_plan' if scenario == 'changed_staff' else 'occupancy_conflict'
         with pytest.raises(ValueError, match=code):
             workflow.reserve_confirmed_matching_plan(connection, 'CASE-1', 'admin:1', locked_staff)
     else:
@@ -41,5 +43,8 @@ def test_auto_reservation_is_scoped_idempotent_and_never_owns_commit(monkeypatch
     if writes:
         assert writes[0]['event_key'] == 'auto-waiting-deposit:8:14'
         assert writes[0]['case_no'] == 'CASE-1'
+        assert writes[0]['plan_id'] == 8
+        assert writes[0]['actor'] == 'admin:1'
     assert all(sql.startswith('SELECT ') for sql, _ in statements)
     assert statements[0][0].endswith(' FOR UPDATE')
+    assert 'NOT EXISTS (SELECT 1 FROM caregiver_availability_locks' in statements[0][0]

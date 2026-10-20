@@ -31,9 +31,10 @@ describe('真實 AI 測試回饋狀態', () => {
 
     render(<RealLlmSemanticTestPanel />);
     await screen.findByDisplayValue('已發布問題');
-    fireEvent.click(screen.getByRole('button', { name: '執行真實 AI 智能解答' }));
+    fireEvent.click(screen.getByRole('button', { name: '測試回答' }));
     await screen.findByText('核准答案');
     expect(screen.queryByText(/provider：|Knowledge index：|來源：/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('回饋操作（會正式送出）'));
     fireEvent.click(screen.getByRole('button', { name: '未解決（通報專人客服）' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('回饋尚未送出'));

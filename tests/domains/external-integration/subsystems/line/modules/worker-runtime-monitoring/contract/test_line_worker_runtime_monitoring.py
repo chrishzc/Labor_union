@@ -88,7 +88,7 @@ def test_runtime_monitor_uses_shared_stale_window_and_reports_cycle_failure(
     assert failure.details == {"age_seconds": 1.0, "last_error_code": "RuntimeError"}
 
 
-def test_runtime_alert_projection_uses_default_preferences_when_optional_table_is_absent() -> None:
+def test_runtime_alert_projection_uses_fixed_rules_without_a_preferences_table() -> None:
     class Cursor:
         def __init__(self) -> None:
             self.executed = []
@@ -101,11 +101,6 @@ def test_runtime_alert_projection_uses_default_preferences_when_optional_table_i
 
         def execute(self, sql, params) -> None:
             self.executed.append((sql, params))
-            if len(self.executed) == 1:
-                raise RuntimeError(
-                    1146,
-                    "Table 'union_db.line_alert_target_preferences' doesn't exist",
-                )
 
         def fetchall(self):
             return ({"id": 7, "preferences_json": None},)
@@ -116,6 +111,36 @@ def test_runtime_alert_projection_uses_default_preferences_when_optional_table_i
     targets = MySqlRuntimeMonitorRepository(connection).pending_alert_targets(41)
 
     assert targets == ({"id": 7, "preferences_json": None},)
-    assert len(cursor.executed) == 2
-    assert "line_alert_target_preferences" in cursor.executed[0][0]
-    assert "NULL AS preferences_json" in cursor.executed[1][0]
+    assert len(cursor.executed) == 1
+    assert "line_alert_target_preferences" not in cursor.executed[0][0]
+    assert "NULL AS preferences_json" in cursor.executed[0][0]
+
+
+@pytest.mark.parametrize("error_code", [1142, 1146])
+def test_runtime_alert_projection_does_not_hide_required_table_errors(error_code) -> None:
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params):
+            raise RuntimeError(error_code, "required runtime table unavailable")
+
+    repository = MySqlRuntimeMonitorRepository(SimpleNamespace(cursor=Cursor))
+    with pytest.raises(RuntimeError) as error:
+        repository.pending_alert_targets(41)
+    assert error.value.args[0] == error_code
+
+
+@pytest.mark.parametrize("target_type,system_health", [("group", False), ("admin_user", True)])
+def test_runtime_alert_preferences_are_fixed_by_target_type(target_type, system_health) -> None:
+    repository = MySqlRuntimeMonitorRepository(SimpleNamespace())
+    repository.get_alert_target = lambda target_id, **kwargs: {"target_type": target_type}
+    expected = dict(customer_service=True, dispatch_matching=True, staff_leave_urgent=True,
+                    system_health=system_health, contract_signing=True)
+    result = repository.get_target_preferences(7)
+    assert result == expected
+    result["customer_service"] = False
+    assert repository.get_target_preferences(7) == expected

@@ -95,7 +95,7 @@ function installFetchStub(): FetchRecord[] {
       return jsonResponse(PERFORMANCE_RESPONSE);
     }
     if (url.pathname === STAFF_ROSTER_ENDPOINT) {
-      return jsonResponse({ ...STAFF_RESPONSE_ONE, data: { ...STAFF_RESPONSE_ONE.data, items: STAFF_RESPONSE_ONE.data.items.map(item => ({ ...item, profile: { ...STAFF_PROFILE, staff_id: item.id }, service_profile: { ...STAFF_QUALIFICATION_RESPONSE.data.service_profile, cooking_skills: [] } })) } });
+      return jsonResponse({ ...STAFF_RESPONSE_ONE, data: { ...STAFF_RESPONSE_ONE.data, next_cursor: null, items: STAFF_RESPONSE_ONE.data.items.map(item => ({ ...item, profile: { ...STAFF_PROFILE, staff_id: item.id }, service_profile: { ...STAFF_QUALIFICATION_RESPONSE.data.service_profile, cooking_skills: [] } })) } });
     }
     if (url.pathname === STAFF_LIFECYCLE_ENDPOINT) {
       return jsonResponse({

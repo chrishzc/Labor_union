@@ -180,7 +180,7 @@ describe('待辦看板 Beta 候選池回讀後刷新正式投影', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉測試工作 Drawer' }));
     expect(await screen.findByText('回讀後測試客戶')).toBeInTheDocument();
     expect(screen.getByText('2026-09-10 ~ 2026-09-30')).toBeInTheDocument();
-    expect(screen.getByText('回讀後測試月嫂')).toBeInTheDocument();
+    expect(screen.getByText('編號待確認 回讀後測試月嫂')).toBeInTheDocument();
     expect(screen.queryByText('回讀前測試客戶')).not.toBeInTheDocument();
     expect(mocks.loadSummaries).toHaveBeenCalledTimes(3);
     expect(originalSignal.aborted).toBe(true);

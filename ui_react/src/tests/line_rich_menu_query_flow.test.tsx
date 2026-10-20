@@ -223,7 +223,7 @@ describe('Rich Menu shared draft persistence', () => {
     expect(screen.getByLabelText('自訂選單底色')).toHaveValue('#123456');
     fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
     await screen.findByRole('dialog');
-    fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '確認背景色及按鈕名稱' } });
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '確認背景色及按鈕名稱' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
     fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
     await screen.findByText('草稿已儲存並重新載入；尚未發布至 LINE。');
@@ -249,7 +249,7 @@ describe('Rich Menu shared draft persistence', () => {
     render(<LineManagementPage customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
     fireEvent.change(await screen.findByLabelText('自訂選單底色'), { target: { value: '#123456' } });
     fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' })); await screen.findByRole('dialog');
-    fireEvent.change(screen.getByLabelText('變更原因'), { target: { value: '驗證讀回衝突' } });
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '驗證讀回衝突' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
     fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
     await screen.findAllByText(/重新載入的內容與確認結果不同/);

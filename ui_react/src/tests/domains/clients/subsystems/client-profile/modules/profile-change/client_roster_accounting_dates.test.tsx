@@ -50,7 +50,7 @@ describe('client roster accounting date columns', () => {
     expect(row[15]).toHaveTextContent('2026-09-15');
     expect(row[16]).toHaveTextContent('月嫂甲／薪資：2026-10-15');
     expect(row[16]).toHaveTextContent('月嫂乙／調整：2026-08-15');
-    expect(row[16]).toHaveTextContent('月嫂 #9／薪資：無值');
+    expect(row[16]).toHaveTextContent('未設定 姓名未設定／薪資：無值');
     expect(row[17]).toHaveTextContent('2026-10-15');
     expect(row[17]).toHaveTextContent('2026-11-15');
     expect(row[18].textContent).toBe('2026-10');

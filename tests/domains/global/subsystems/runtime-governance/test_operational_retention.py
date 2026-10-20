@@ -128,6 +128,12 @@ class FakeCursor:
     def fetchall(self):
         return (self.locked_row,) if self.locked_row is not None else ()
 
+    def fetchone(self):
+        return self.locked_row
+
+    def nextset(self):
+        return None
+
 
 class FakeConnection:
     def __init__(self, locked_row):
@@ -312,21 +318,10 @@ def test_mysql_source_deletes_request_graph_in_fk_order_and_checks_index_before_
     )
 
     assert source._delete_one(_row_candidate("request", request_row, 25)) is True
-    delete_statements = [
-        statement for statement in request_connection.fake_cursor.statements
-        if statement.startswith("DELETE")
-    ]
-    assert [
-        "knowledge_answer_sources",
-        "knowledge_answer_receipts",
-        "knowledge_jobs",
-        "knowledge_answer_requests",
-    ] == [next(name for name in (
-        "knowledge_answer_sources",
-        "knowledge_answer_receipts",
-        "knowledge_jobs",
-        "knowledge_answer_requests",
-    ) if name in statement) for statement in delete_statements]
+    calls = [execution for execution in request_connection.fake_cursor.executions if execution[0].startswith("CALL")]
+    assert calls == [("CALL `lu_nas_purge_knowledge_request_v1`(%s,%s,%s,%s,%s,%s)",
+                      (7, "answered", NOW.replace(tzinfo=None), 3, 4, 5))]
+    assert request_connection.commits == 1
 
     preview_row = {**request_row, "id": 9, "state": "stale"}
     changed_row = {**preview_row, "state": "failed"}
@@ -379,9 +374,53 @@ def test_mysql_source_removes_index_metadata_when_vector_collection_is_already_m
     assert source._delete_one(_row_candidate("index", index_row, 25)) is True
     assert client.delete_names == ["union_knowledge_v9"]
     assert (
-        "DELETE FROM knowledge_indexes WHERE index_version=%s",
-        ("9",),
+        "CALL `lu_nas_purge_knowledge_index_v1`(%s,%s,%s)",
+        (9, "stale", NOW.replace(tzinfo=None)),
     ) in connection.fake_cursor.executions
+    assert connection.commits == 1
+
+
+def test_index_that_became_active_after_preview_preserves_files_and_row(monkeypatch):
+    from infrastructure.runtime import operational_retention as adapter
+    connection = FakeConnection({"index_version": 9})
+    chroma = FakeChroma()
+    source = MySqlKnowledgeRetentionSource(lambda: connection, chroma,
+        high_water_bytes=None, low_water_bytes=None)
+    monkeypatch.setattr(adapter, "_locked_candidate", lambda *_: None)
+    assert source._delete_one(candidate("index:9", 31)) is False
+    assert chroma.deleted_versions == []
+    assert connection.commits == 0 and connection.rollbacks == 1
+    assert not any(sql.startswith("CALL") for sql in connection.fake_cursor.statements)
+
+
+def test_index_file_failure_prevents_database_commit_and_requires_reconciliation():
+    row = {"id": 9, "occurred_at_utc": NOW, "state": "stale",
+           "receipt_version": 0, "source_version": 0, "job_version": 0}
+    connection = FakeConnection(row)
+    class FailedFiles:
+        def delete_index(self, _):
+            assert connection.commits == 0
+            raise OSError("unavailable")
+    source = MySqlKnowledgeRetentionSource(lambda: connection, FailedFiles(),
+        high_water_bytes=None, low_water_bytes=None)
+    result = source.delete((_row_candidate("index", row, 25),))
+    assert result.deleted_count == 0 and result.failed_count == 1
+    assert result.error_code == "retention_source_reconciliation_required"
+    assert connection.commits == 0 and connection.rollbacks == 1
+
+
+def test_old_index_artifact_is_removed_before_version_can_be_reused_after_commit():
+    row = {"id": 9, "occurred_at_utc": NOW, "state": "stale",
+           "receipt_version": 0, "source_version": 0, "job_version": 0}
+    connection = FakeConnection(row)
+    class Files:
+        def delete_index(self, version):
+            assert version == 9 and connection.commits == 0
+            assert any(sql.startswith("CALL `lu_nas_purge_knowledge_index_v1`")
+                       for sql in connection.fake_cursor.statements)
+    source = MySqlKnowledgeRetentionSource(lambda: connection, Files(),
+        high_water_bytes=None, low_water_bytes=None)
+    assert source._delete_one(_row_candidate("index", row, 25)) is True
     assert connection.commits == 1
 
 

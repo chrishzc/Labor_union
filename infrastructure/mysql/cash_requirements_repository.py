@@ -4,7 +4,6 @@ from datetime import date
 from decimal import Decimal
 
 from infrastructure.mysql.accounts_payable_export_sources import MySqlStaffPayableExportSource
-from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem
 from subsystems.staff_payables.cash_requirements_query import CashRefundFact, CashRequirementCase
 
 
@@ -22,26 +21,17 @@ class MySqlCashRequirementsRepository:
     def _case(self, row):
         case_no = row["case_no"]
         with self._connection.cursor() as cursor:
-            cursor.execute(_REFUNDS_SQL, (case_no,))
+            cursor.execute(_REFUNDS_SQL, (case_no, case_no))
             refunds = tuple(CashRefundFact(
                 str(r["obligation_identity"]),
                 "client_subsidy_return" if r["obligation_type"] == "subsidy_return" else "client_refund",
-                int(r["amount_due_ntd"]), r["due_date"], str(row["client_name"]), bool(r["recipient_ready"]),
+                0 if r["confirmation_kind"] else int(r["amount_due_ntd"]), r["due_date"], str(row["client_name"]), bool(r["recipient_ready"]),
+                r["confirmation_kind"] or ("paid" if int(r["amount_due_ntd"]) == 0 and int(r["net_paid_ntd"]) > 0 else
+                                           "settled" if int(r["amount_due_ntd"]) == 0 else
+                                           "partially_paid" if int(r["net_paid_ntd"]) > 0 else "pending"),
+                int(r["amount_snapshot_ntd"]) if r["confirmation_kind"] else max(0, int(r["net_paid_ntd"])),
             ) for r in cursor.fetchall())
         staff_items = self._staff.load_case(case_no, date.min)
-        if row["has_arrangement"]:
-            with self._connection.cursor() as cursor:
-                cursor.execute(_ARRANGED_STAFF_SQL, (case_no,))
-                arranged_staff = tuple(cursor.fetchall())
-            if arranged_staff:
-                # A successor date assignment may retain the prior payable for
-                # the same staff. Keep that owner fact, including paid evidence.
-                staff_items = tuple(item for item in staff_items if item.source != "order_facts")
-                covered_staff = {item.staff_id for item in staff_items}
-                staff_items += tuple(CaseStaffPayableAuditItem(
-                    str(case_no), int(staff["staff_id"]), staff["recipient_name"], None, None, None,
-                    None, None, "order_facts", "missing_calculation_basis", "月嫂應付金額待確認",
-                ) for staff in arranged_staff if staff["staff_id"] not in covered_staff)
         hours = row["historical_hours"]
         if hours is None and row["work_day_count"] and row["service_hours_per_day"] is not None:
             hours = Decimal(str(row["work_day_count"])) * Decimal(str(row["service_hours_per_day"]))
@@ -79,7 +69,11 @@ SELECT o.case_no,c.name AS client_name,o.status AS order_status,c.identity_statu
          AND b.status<>'cancelled') AS receivable_count,
        (SELECT COUNT(*) FROM client_obligations b WHERE b.case_no=o.case_no
          AND b.direction='receivable_from_client' AND b.obligation_type IN ('deposit','first','second')
-         AND b.status='open' AND b.amount_due_ntd>0) AS open_receivable_count,
+         AND b.status='open' AND b.amount_due_ntd>0
+         AND NOT EXISTS (SELECT 1 FROM historical_client_payment_projections historical
+                          WHERE historical.obligation_identity=b.obligation_identity
+                            AND historical.amount_snapshot_ntd=b.amount_due_ntd
+                            AND historical.obligation_projection_version=b.projection_version)) AS open_receivable_count,
        (SELECT COUNT(*) FROM client_obligations b WHERE b.case_no=o.case_no
          AND b.direction='payable_to_client' AND b.obligation_type='subsidy_return'
          AND b.status<>'cancelled') AS return_count
@@ -95,27 +89,34 @@ WHERE (%s IS NULL OR o.case_no>%s)
        OR EXISTS(SELECT 1 FROM staff_obligations b WHERE b.case_no=o.case_no
                   AND b.direction='payable_to_staff' AND b.status<>'cancelled' AND b.amount_due_ntd>0)
        OR EXISTS(SELECT 1 FROM client_obligations b WHERE b.case_no=o.case_no
-                  AND b.direction='payable_to_client' AND b.status='open' AND b.amount_due_ntd>0))
+                  AND b.direction='payable_to_client' AND b.status<>'cancelled'))
 ORDER BY o.case_no LIMIT %s
 """
 
 _REFUNDS_SQL = """
 SELECT b.obligation_identity,b.obligation_type,b.amount_due_ntd,b.due_date,
+       historical.confirmation_kind,historical.amount_snapshot_ntd,
+       COALESCE(paid.net_paid_ntd,0) AS net_paid_ntd,
        (snapshot.bank_code IS NOT NULL AND snapshot.bank_code<>''
         AND snapshot.bank_account IS NOT NULL AND snapshot.bank_account<>'') AS recipient_ready
 FROM client_obligations b
 LEFT JOIN client_refund_recipient_snapshots snapshot ON snapshot.refund_obligation_identity=b.obligation_identity
-WHERE b.case_no=%s AND b.direction='payable_to_client' AND b.status='open'
-  AND b.obligation_type IN ('refund','subsidy_return') AND b.amount_due_ntd>0
+LEFT JOIN historical_client_payment_projections historical
+  ON historical.obligation_identity=b.obligation_identity
+ AND historical.amount_snapshot_ntd=b.amount_due_ntd
+ AND historical.obligation_projection_version=b.projection_version
+LEFT JOIN (
+    SELECT allocation.obligation_identity,
+           SUM(CASE WHEN ledger.entry_type IN ('refund','subsidy_return') THEN allocation.amount_ntd
+                    WHEN ledger.entry_type='reversal' AND target.entry_type IN ('refund','subsidy_return') THEN -allocation.amount_ntd
+                    ELSE 0 END) AS net_paid_ntd
+    FROM client_ledger_obligation_allocations allocation
+    JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id
+    LEFT JOIN client_ledger_entries target ON target.id=ledger.reversal_of_entry_id AND target.case_no=ledger.case_no
+    WHERE ledger.case_no=%s
+    GROUP BY allocation.obligation_identity
+) paid ON paid.obligation_identity=b.obligation_identity
+WHERE b.case_no=%s AND b.direction='payable_to_client' AND b.status<>'cancelled'
+  AND b.obligation_type IN ('refund','subsidy_return')
 ORDER BY b.obligation_identity
-"""
-
-_ARRANGED_STAFF_SQL = """
-SELECT DISTINCT a.staff_id,staff.name AS recipient_name
-FROM case_staff_assignments a
-JOIN staff ON staff.id=a.staff_id
-LEFT JOIN scheduling_aggregates scheduling ON scheduling.case_no=a.case_no
-WHERE a.case_no=%s AND a.status IN ('planned','active','completed')
-  AND (a.generation_id=scheduling.effective_generation_id OR a.generation_id IS NULL)
-ORDER BY a.staff_id
 """

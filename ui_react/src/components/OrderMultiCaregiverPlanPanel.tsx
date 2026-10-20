@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
@@ -252,6 +253,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
         orderMutationFlowStore.setFormalPlanCreation(caseNo, { ...state, status: 'observation_failed', error: '案件畫面已切換；保留收據，只能重新讀取原案件結果。' });
         return;
       }
+      unsaved.markSaved();
       orderMutationFlowStore.clearFormalPlanCreation(caseNo, 'multi');
       setMessage(`正式 ${command.segments.length} 段多月嫂方案 #${receipt.plan_id} 已建立並完成回讀；請從正式方案續辦各段意願與客戶推薦。`);
       onObserved?.();
@@ -327,6 +329,8 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   const staffName = (staffId: number) => staffChoices.status === 'ready'
     ? staffChoices.staff.find((candidate) => candidate.id === staffId)?.name ?? '月嫂'
     : '月嫂';
+  const unsaved = useUnsavedDraft('多人照護計畫', { '照護段數': segmentCount, '月嫂選擇': selectedStaffIds }, { busy: busy || creationProtected });
+
 
   return (
     <section className="order-multi-panel" aria-label={`案件 ${caseNo} 多月嫂分段方案`}>

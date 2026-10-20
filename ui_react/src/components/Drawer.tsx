@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useId, useRef } from 'react';
 import './Drawer.css';
+import { useUnsavedNavigation } from './UnsavedChanges';
 
 interface DrawerProps {
   isOpen: boolean;
@@ -31,12 +32,13 @@ export const Drawer: React.FC<DrawerProps> = ({
   className,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
   const titleId = useId();
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
+  const { requestLeave, pending: leavePending } = useUnsavedNavigation();
+  const leavePendingRef = useRef(leavePending);
+  leavePendingRef.current = leavePending;
+  const close = () => { if (!closeDisabled) requestLeave(onClose); };
+  const closeRef = useRef(close);
+  closeRef.current = close;
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -50,8 +52,9 @@ export const Drawer: React.FC<DrawerProps> = ({
     window.requestAnimationFrame(() => firstTarget?.focus());
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (leavePendingRef.current) return;
       if (e.key === 'Escape' && isOpen && !closeDisabled) {
-        onCloseRef.current();
+        closeRef.current();
       }
       if (e.key === 'Tab') {
         const elements = focusableElements();
@@ -84,7 +87,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   return (
     <div
       className={`drawer-backdrop${className ? ` ${className}` : ''}`}
-      onClick={closeDisabled ? undefined : onClose}
+      onClick={closeDisabled ? undefined : close}
     >
       <div
         ref={containerRef}
@@ -98,7 +101,7 @@ export const Drawer: React.FC<DrawerProps> = ({
       >
         <div className="drawer-header">
           <h2 className="drawer-title" id={titleId}>{title}</h2>
-          <button className="drawer-close-btn" onClick={onClose} aria-label={closeLabel} disabled={closeDisabled}>
+          <button className="drawer-close-btn" onClick={close} aria-label={closeLabel} disabled={closeDisabled}>
             ✕
           </button>
         </div>

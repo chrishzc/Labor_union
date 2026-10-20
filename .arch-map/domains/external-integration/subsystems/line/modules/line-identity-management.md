@@ -16,6 +16,8 @@
 - primary:
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`
+  - `subsystems/line/identity_contracts.py`
+  - `api/dependencies/line_identity.py` — NAS 管理員 credential binding 使用內部 access profile；外部客戶／月嫂仍用 LINE profile。
   - `subsystems/line/webhook_identity_handlers.py` — webhook identity dispatch 與未注入 canonical Service Help application 時的 bounded guidance fallback。
   - `subsystems/line/identity_management_application.py`
   - `subsystems/line/identity_management_contracts.py`

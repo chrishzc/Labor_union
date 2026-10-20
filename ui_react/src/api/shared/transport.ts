@@ -20,6 +20,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
   baseUrl?: string;
   cache?: RequestCache;
+  responseType?: 'json' | 'blob';
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -78,6 +79,7 @@ export async function request<T = unknown>(
     signal: externalSignal,
     baseUrl = '',
     cache,
+    responseType = 'json',
   } = options;
 
   // Build query string
@@ -99,10 +101,10 @@ export async function request<T = unknown>(
   const controller = new AbortController();
   let isTimedOut = false;
 
-  const timer = setTimeout(() => {
+  const timer = timeoutMs > 0 ? setTimeout(() => {
     isTimedOut = true;
     controller.abort();
-  }, timeoutMs);
+  }, timeoutMs) : undefined;
 
   if (externalSignal) {
     if (externalSignal.aborted) {
@@ -148,9 +150,10 @@ export async function request<T = unknown>(
       cache,
     });
 
-    clearTimeout(timer);
-
     // Parse response body
+    if (response.ok && responseType === 'blob') {
+      return await response.blob() as T;
+    }
     let responseData: unknown = null;
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -261,6 +264,8 @@ export async function request<T = unknown>(
       error instanceof Error ? error.message : '網路請求失敗',
       error
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 

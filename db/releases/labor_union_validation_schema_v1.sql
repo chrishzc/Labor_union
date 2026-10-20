@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-10-14-v45
+-- Release: labor-union-validation-schema-2026-10-19-v46
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21789,3 +21789,12 @@ ALTER TABLE staff
 ALTER TABLE caregiver_candidate_contact_events
     MODIFY COLUMN event_type ENUM('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent') NOT NULL;
 -- END SOURCE: db/schema_parts/232_candidate_weekly_information.sql
+
+-- BEGIN SOURCE: db/schema_parts/1052_nas_registration_approval.sql
+-- Additive only: existing completed registrations and bindings are preserved.
+ALTER TABLE provisional_client_registrations
+    ADD COLUMN application_payload JSON NULL,
+    ADD COLUMN application_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    ADD COLUMN approved_by_actor VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+    ADD COLUMN approved_at_utc DATETIME(6) NULL;
+-- END SOURCE: db/schema_parts/1052_nas_registration_approval.sql

@@ -25,13 +25,13 @@ beforeEach(() => {
   vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
   vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: caseNo, client_name: '測試客戶', order_status: '訂單完成', staff_name: null, identity_status: '一般市民', start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: 5, total_employer_self_pay_payable: 20000 }], next_cursor: null, etag: 'a'.repeat(64) });
   vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({ case_no: caseNo, client_id: 1, staff_id: null, client_name: '測試客戶', staff_name: null, order_status: '訂單完成', identity_status: '一般市民', cancel_reason: null, line_group_id: null, contract_identity: null, actual_start_date: null, actual_end_date: null, deposit_date: null, start_date: null, end_date: null, service_days: 5, service_hours_per_day: 8, deposit_service_days: null, floor_fee: 0, custom_rest_dates: null });
-  vi.spyOn(clientFinanceHistoryClient, 'queryAll').mockResolvedValue([{ case_no: caseNo, account_version: '3', open_receivable_amount_ntd: 0, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 1, receipt_entry_count: 0 }]);
+  vi.spyOn(clientFinanceHistoryClient, 'queryAll').mockResolvedValue([{ case_no: caseNo, account_version: '3', open_receivable_amount_ntd: 0, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 1, receipt_entry_count: 0, receipt_status: 'settled' as const }]);
   vi.spyOn(clientFinanceHistoryClient, 'query').mockResolvedValue({ case_no: caseNo, account_version: '3', obligations: [], ledger_entries: [{ entry_id: 10, entry_type: 'subsidy_advance', amount_ntd: 12000, occurred_on: '2026-03-15', reconciliation_reference: 'test', reversal_of_entry_id: null, created_at: '2026-03-15T00:00:00', allocations: [] }] });
   vi.spyOn(clientSubsidyReturnQueryClient, 'queryAll').mockResolvedValue({ rows: [], next_cursor: null });
   vi.spyOn(orderGovernmentSubsidyProjectionClient, 'queryAll').mockResolvedValue([government]);
   vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([
-    { row_id: 'formal', case_no: caseNo, recipient_name: '測試客戶', payment_type: 'client_subsidy_return', certainty: 'confirmed', source: 'client_refund', source_amount_ntd: 12000, unpaid_amount_ntd: 12000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [] },
-    { row_id: 'estimate', case_no: 'TEST-002', recipient_name: '預估客戶', payment_type: 'client_subsidy_return', certainty: 'estimated', source: 'subsidy_estimate', source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] },
+    { row_id: 'formal', case_no: caseNo, recipient_name: '測試客戶', payment_type: 'client_subsidy_return', certainty: 'confirmed', source: 'client_refund', payment_status: 'pending' as const, source_amount_ntd: 12000, unpaid_amount_ntd: 12000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [] },
+    { row_id: 'estimate', case_no: 'TEST-002', recipient_name: '預估客戶', payment_type: 'client_subsidy_return', certainty: 'estimated', source: 'subsidy_estimate', payment_status: 'pending' as const, source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] },
   ]);
   vi.spyOn(recovery, 'queryAll').mockResolvedValue([advance, { ...advance, advance_id: 11, case_no: 'TEST-001-OTHER', client_name: '其他案件客戶' }]);
   vi.spyOn(recovery, 'preview').mockResolvedValue({ row: advance, account_version: 3, batch_version: 5, preview_fingerprint: 'a'.repeat(64) });
@@ -46,12 +46,63 @@ async function openDetail() {
   return drawer;
 }
 describe('three finance workspaces', () => {
+  it('distinguishes a missing canonical payable from an unpaid or zero balance', async () => {
+    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
+      row_id: 'missing', case_no: 'HISTORICAL-MISSING', recipient_name: '帳務未建月嫂', staff_id: 9,
+      payment_type: 'staff_payable', certainty: 'estimated', source: 'missing_payroll', payment_status: 'pending',
+      source_amount_ntd: null, unpaid_amount_ntd: null, payment_date: null, date_is_estimate: false,
+      pending_reasons: ['尚未建立月嫂應付帳務'],
+    }]);
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    const row = (await screen.findByText('未設定 帳務未建月嫂')).closest('tr')!;
+    expect(within(row).getByText('尚未建立應付帳務')).toBeInTheDocument();
+    expect(within(row).queryByText('NT$ 0')).not.toBeInTheDocument();
+    expect(within(row).queryByText('確認待付')).not.toBeInTheDocument();
+  });
+  it('shows owner payment status after requery without mixing paid rows into outstanding totals', async () => {
+    const base = { row_id: 'paid', case_no: 'HISTORICAL', recipient_name: '歷史月嫂', payment_type: 'staff_payable' as const,
+      certainty: 'confirmed' as const, source: 'staff_obligation' as const, source_amount_ntd: 24000, unpaid_amount_ntd: 0,
+      payment_date: null, date_is_estimate: false, pending_reasons: [], staff_id: 9, payment_status: 'paid' as const };
+    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([
+      base, { ...base, row_id: 'partial', recipient_name: '部分付款月嫂', unpaid_amount_ntd: 5000, payment_status: 'partially_paid' },
+      { ...base, row_id: 'settled', recipient_name: '結清月嫂', payment_status: 'settled' },
+    ]);
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    const paid = (await screen.findByText('未設定 歷史月嫂')).closest('tr')!;
+    expect(within(paid).getByText('已付款')).toBeInTheDocument();
+    expect(within(paid).getByText('NT$ 0')).toBeInTheDocument();
+    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('確認待付 NT$ 5,000');
+    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'paid' } });
+    expect(screen.queryByText('未設定 部分付款月嫂')).not.toBeInTheDocument();
+    expect(screen.queryByText('未設定 結清月嫂')).not.toBeInTheDocument();
+    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{ ...base, unpaid_amount_ntd: 24000, payment_status: 'pending' }]);
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await waitFor(() => expect(screen.queryByText('未設定 歷史月嫂')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'all' } });
+    expect(await screen.findByText('未設定 歷史月嫂')).toBeInTheDocument();
+    expect(within(screen.getByText('未設定 歷史月嫂').closest('tr')!).getByText('確認待付')).toBeInTheDocument();
+  });
+
+  it('shows historical receipt status from the owner even without canonical receipt entries', async () => {
+    vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([
+      { case_no: 'HISTORICAL-PAID', account_version: '4', open_receivable_amount_ntd: 0, open_payable_amount_ntd: 0,
+        obligation_count: 1, ledger_entry_count: 0, receipt_entry_count: 0, receipt_status: 'received' },
+    ]);
+    render(<FinancePage />);
+    const row = (await screen.findByText('HISTORICAL-PAID')).closest('tr')!;
+    expect(within(row).getByText('已收款')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('狀態'), { target: { value: 'history' } });
+    expect(screen.getByText('HISTORICAL-PAID')).toBeInTheDocument();
+  });
+
   it('filters received clients by actual receipts, retaining partially collected cases and excluding other ledger-only cases', async () => {
-    const base = { case_no: 'PARTIAL', account_version: '3', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 2, receipt_entry_count: 1 };
+    const base = { case_no: 'PARTIAL', account_version: '3', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 2, receipt_entry_count: 1, receipt_status: 'partially_received' as const };
     vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([
       base,
-      { ...base, case_no: 'PAID', open_receivable_amount_ntd: 0 },
-      ...['REFUND', 'ADJUSTMENT', 'REVERSAL', 'SUBSIDY_RETURN', 'SUBSIDY_ADVANCE'].map(case_no => ({ ...base, case_no, receipt_entry_count: 0 })),
+      { ...base, case_no: 'PAID', open_receivable_amount_ntd: 0, receipt_status: 'received' },
+      ...['REFUND', 'ADJUSTMENT', 'REVERSAL', 'SUBSIDY_RETURN', 'SUBSIDY_ADVANCE'].map(case_no => ({ ...base, case_no, receipt_entry_count: 0, receipt_status: 'unpaid' as const })),
     ]);
     render(<FinancePage />);
     await screen.findByText('PARTIAL');
@@ -87,6 +138,7 @@ describe('three finance workspaces', () => {
     expect(screen.getByRole('option', { name: '已確認服務結束' })).toBeInTheDocument();
     expect(within(table).queryByText('NT$ 0')).not.toBeInTheDocument();
     expect(within(table).getByText('NT$ 1,500')).toBeInTheDocument();
+    expect(within(screen.getByText('TEST-APPROVED').closest('tr')!).getByText('部分收款')).toBeInTheDocument();
     expect(within(table).getByText('補助單價待確認')).toBeInTheDocument();
     expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('預估補助小計 NT$ 14,400');
     expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('已核准待收小計 NT$ 1,500');
@@ -116,7 +168,7 @@ describe('three finance workspaces', () => {
     expect(cashRequirementsQueryClient.queryAll).toHaveBeenCalledTimes(1);
   });
   it('distinguishes confirmed payables from pending service completion without relabelling other estimates', async () => {
-    const base = { row_id: 'service', case_no: 'SERVICE', recipient_name: '服務待結束客戶', payment_type: 'client_subsidy_return' as const, certainty: 'estimated' as const, source: 'subsidy_estimate' as const, source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] };
+    const base = { row_id: 'service', case_no: 'SERVICE', recipient_name: '服務待結束客戶', payment_type: 'client_subsidy_return' as const, certainty: 'estimated' as const, source: 'subsidy_estimate' as const, payment_status: 'pending' as const, source_amount_ntd: 9000, unpaid_amount_ntd: 9000, payment_date: null, date_is_estimate: false, pending_reasons: ['服務尚未完成'] };
     vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([
       base,
       { ...base, row_id: 'other', case_no: 'OTHER', recipient_name: '收款待確認客戶', pending_reasons: ['客戶服務費尚未收齊'] },
@@ -125,7 +177,7 @@ describe('three finance workspaces', () => {
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '付款' }));
     await screen.findByText('服務待結束客戶');
-    expect(within(screen.getByLabelText('付款狀態')).getAllByRole('option').map(option => option.textContent)).toEqual(['全部', '確認待付', '待確認服務結束']);
+    expect(within(screen.getByLabelText('付款狀態')).getAllByRole('option').map(option => option.textContent)).toEqual(['全部', '確認待付', '待確認服務結束', '部分付款', '已付款', '已結清']);
     expect(within(screen.getByText('收款待確認客戶').closest('tr')!).getByText('待確認', { selector: '.finance-badge' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'service_pending' } });
     expect(screen.getByText('服務待結束客戶')).toBeInTheDocument();
@@ -150,7 +202,7 @@ describe('three finance workspaces', () => {
     expect(clientSubsidyReturnQueryClient.queryAll).toHaveBeenLastCalledWith(expect.objectContaining({ caseNo, signal: expect.any(AbortSignal) }));
   });
   it('opens the staff identified by the payable instead of the first directory record', async () => {
-    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{ row_id: 'staff:22', case_no: caseNo, recipient_name: '第二位人員', payment_type: 'staff_payable', certainty: 'confirmed', source: 'staff_obligation', source_amount_ntd: 42000, unpaid_amount_ntd: 42000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [], staff_id: 22 }]);
+    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{ row_id: 'staff:22', case_no: caseNo, recipient_name: '第二位人員', payment_type: 'staff_payable', certainty: 'confirmed', source: 'staff_obligation', payment_status: 'pending' as const, source_amount_ntd: 42000, unpaid_amount_ntd: 42000, payment_date: '2026-10-15', date_is_estimate: false, pending_reasons: [], staff_id: 22 }]);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [{ id: 11, name: '第一位人員', phone: null, education: null }, { id: 22, name: '第二位人員', phone: null, education: null }], next_cursor: null });
     vi.spyOn(staffPayablesQueryClient, 'query').mockResolvedValue({ staff_id: 22, staff_payables_version: 1, obligations: [], events: [] });
     render(<FinancePage />);
@@ -164,6 +216,7 @@ describe('three finance workspaces', () => {
     render(<FinancePage />);
     fireEvent.change(screen.getByLabelText('收款來源'), { target: { value: 'government' } });
     await waitFor(() => expect(screen.getAllByText('2026 年第 4 季').length).toBeGreaterThan(0));
+    expect(within(screen.getByRole('table')).getByText('已收款')).toBeInTheDocument();
     expect(screen.queryByText('2027 年第 4 季')).not.toBeInTheDocument();
     const drawer = await openDetail();
     expect(await within(drawer).findByText('2027-01')).toBeInTheDocument();

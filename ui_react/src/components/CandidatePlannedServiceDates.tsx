@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { OrderTerms, OrderCalendarDetail } from '../api/orders/order_query_schemas';
@@ -133,6 +134,8 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
     } catch (reason) { if (currentIdentity.current === identity) setError(message(reason)); }
     finally { saving.current = false; if (currentIdentity.current === identity) setBusy(null); }
   };
+  useUnsavedDraft('人選預計服務日期', { '服務日期': dates }, { enabled: !!facts, baseline: { '服務日期': facts?.dates.current_dates ?? [] }, busy: busy !== null || unresolved });
+
 
   return <section aria-label="預計服務日期設定">
     <p>原始匯入服務方式：<strong aria-label="原始匯入服務方式">{facts?.mode.original_service_type ?? facts?.mode.service_mode ?? '尚未提供'}</strong></p>

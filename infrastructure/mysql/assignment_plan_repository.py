@@ -32,6 +32,7 @@ from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanReceipt,
     AssignmentPlanWorkflowFacts,
     AssignmentPlanQuerySnapshot,
+    AssignmentPlanQueryAssignment,
     AssignmentPlanQueryResult,
     CommandClaimState,
     StoredAssignmentPlanReceipt,
@@ -45,6 +46,7 @@ from .order_terms_read_model import (
     select_scheduling_aggregate,
     _select_generation,
     _select_assignments,
+    select_current_assignments,
     _select_schedules,
     _service_dates_by_assignment,
     _service_started,
@@ -53,6 +55,8 @@ from .scheduling_replacement_writer import persist_scheduling_replacement
 
 
 _COMMAND_FAMILY = "scheduling_assignment_plan"
+
+
 
 
 def _require_schedule_confirmation_gate(
@@ -178,13 +182,13 @@ class MySqlAssignmentPlanRepository:
             order = select_order(cursor, case_no, lock=False)
             aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
             generation = _select_generation(cursor, aggregate, lock=False)
-            rows = _select_assignments(cursor, generation, lock=False)
+            rows = select_current_assignments(cursor, case_no, generation["id"] if generation else None)
             dates = _service_dates_by_assignment(_select_schedules(cursor, generation, lock=False))
             cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s", (case_no,))
             finance = cursor.fetchone()
             cursor.execute("SELECT aggregate_version FROM payroll_case_accounts WHERE case_no=%s", (case_no,))
             payroll = cursor.fetchone()
-        assignments = tuple(EffectiveAssignmentFact(
+        assignments = tuple(AssignmentPlanQueryAssignment(
             assignment_id=int(row["id"]), staff_id=int(row["staff_id"]), sequence=int(row["assignment_sequence"]),
             assigned_start_date=row["assigned_start_date"], assigned_end_date=row["assigned_end_date"],
             official_service_dates=dates.get(int(row["id"]), ()),

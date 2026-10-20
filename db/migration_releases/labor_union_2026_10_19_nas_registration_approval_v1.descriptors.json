@@ -1,0 +1,44 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-nas-registration-approval-2026-10-19-v1",
+  "descriptors": {
+    "1052_nas_registration_approval.sql": {
+      "tables": {},
+      "parent_columns": {
+        "provisional_client_registrations": {
+          "application_payload": {
+            "column_type": "json",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "application_version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          },
+          "approved_by_actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_unicode_ci"
+          },
+          "approved_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

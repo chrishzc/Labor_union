@@ -1,3 +1,4 @@
+import { UnsavedChangesProvider } from '../components/UnsavedChanges';
 /**
  * File: line_notification_rules_mutation_panel.test.tsx
  * Description: 驗證通知規則欄位編輯、Preview 確認 Save、刪除專用 Preview 與 receipt 顯示。
@@ -335,7 +336,7 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
   function Harness() {
     const [search, setSearch] = useState('');
     const [enabled, setEnabled] = useState<'all' | 'enabled' | 'disabled'>('all');
-    return <LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} search={search} enabled={enabled} onSearchChange={setSearch} onEnabledChange={setEnabled} />;
+    return <UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} search={search} enabled={enabled} onSearchChange={setSearch} onEnabledChange={setEnabled} /></UnsavedChangesProvider>;
   }
   return { templates, onboarding, configuration, Harness };
 }

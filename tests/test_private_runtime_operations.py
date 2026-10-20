@@ -26,6 +26,7 @@ from infrastructure.http.private_operations_client import (
     PrivateOperationsClient,
     discard_database_credentials,
 )
+from infrastructure.runtime.worker_credentials import prepare_credentials
 import infrastructure.http.private_operations_client as private_operations_client
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
@@ -110,116 +111,67 @@ def test_production_rejects_local_shared_key(monkeypatch) -> None:
     assert response.json()["detail"]["code"] == "internal_service_authentication_unavailable"
 
 
-def test_production_accepts_allowlisted_google_oidc_caller(monkeypatch) -> None:
+def _nas_client(monkeypatch, tmp_path):
+    prepare_credentials(tmp_path)
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "google_oidc")
-    monkeypatch.setenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "https://private-api.example")
-    monkeypatch.setenv(
-        "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS",
-        "durable-job-worker=durable@example.iam.gserviceaccount.com",
-    )
-    monkeypatch.setattr(
-        internal_service_auth.id_token,
-        "verify_oauth2_token",
-        lambda *_args, **_kwargs: {
-            "iss": "https://accounts.google.com",
-            "email": "durable@example.iam.gserviceaccount.com",
-            "email_verified": True,
-            "sub": "caller-subject",
-        },
-    )
+    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "nas_service_token")
+    monkeypatch.setenv("INTERNAL_SERVICE_CREDENTIALS_FILE", str(tmp_path / "api/verifiers.json"))
+    app = FastAPI()
+    app.include_router(private_operations.router)
+    return TestClient(app, base_url="https://private-api.example"), {
+        "Authorization": "Bearer " + (tmp_path / "durable-job-worker/token").read_text().strip(),
+        "X-Internal-Service-Name": "durable-job-worker",
+    }
 
-    response = _client().post(
+
+def test_production_accepts_bound_nas_machine_credential(monkeypatch, tmp_path) -> None:
+    client, headers = _nas_client(monkeypatch, tmp_path)
+    response = client.post(
         "/internal/v1/runtime/check",
         json={},
-        headers={
-            "Authorization": "Bearer signed-id-token",
-            "X-Internal-Service-Name": "durable-job-worker",
-        },
+        headers=headers,
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["service"] == "durable-job-worker"
 
 
-def test_production_rejects_oidc_caller_not_bound_to_service_name(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "google_oidc")
-    monkeypatch.setenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "https://private-api.example")
-    monkeypatch.setenv(
-        "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS",
-        "line-worker=line@example.iam.gserviceaccount.com",
-    )
-
-    response = _client().post(
+def test_production_rejects_credential_claiming_another_worker(monkeypatch, tmp_path) -> None:
+    client, headers = _nas_client(monkeypatch, tmp_path)
+    headers["X-Internal-Service-Name"] = "line-worker"
+    response = client.post(
         "/internal/v1/runtime/check",
         json={},
-        headers={
-            "Authorization": "Bearer signed-id-token",
-            "X-Internal-Service-Name": "durable-job-worker",
-        },
+        headers=headers,
     )
 
     assert response.status_code == 401
     assert response.json()["detail"]["retryable"] is False
 
 
-def test_production_rejects_invalid_oidc_token(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "google_oidc")
-    monkeypatch.setenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "https://private-api.example")
-    monkeypatch.setenv(
-        "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS",
-        "durable-job-worker=durable@example.iam.gserviceaccount.com",
-    )
-    monkeypatch.setattr(
-        internal_service_auth,
-        "_verify_google_oidc_token",
-        lambda token, audience: (_ for _ in ()).throw(ValueError("bad signature")),
-    )
-
-    response = _client().post(
+def test_production_rejects_revoked_machine_credential(monkeypatch, tmp_path) -> None:
+    client, headers = _nas_client(monkeypatch, tmp_path)
+    headers["Authorization"] = "Bearer revoked-machine-token"
+    response = client.post(
         "/internal/v1/runtime/check",
         json={},
-        headers={
-            "Authorization": "Bearer invalid-token",
-            "X-Internal-Service-Name": "durable-job-worker",
-        },
+        headers=headers,
     )
 
     assert response.status_code == 401
-    assert "bad signature" not in response.text
+    assert "revoked-machine-token" not in response.text
 
 
-def test_production_rejects_wrong_google_oidc_issuer(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "google_oidc")
-    monkeypatch.setenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "https://private-api.example")
-    monkeypatch.setenv(
-        "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS",
-        "durable-job-worker=durable@example.iam.gserviceaccount.com",
-    )
-    monkeypatch.setattr(
-        internal_service_auth.id_token,
-        "verify_oauth2_token",
-        lambda *_args, **_kwargs: {
-            "iss": "https://identity-provider.example",
-            "email": "durable@example.iam.gserviceaccount.com",
-            "email_verified": True,
-        },
-    )
-
+def test_production_rejects_cleartext_machine_credential(monkeypatch, tmp_path) -> None:
+    _, headers = _nas_client(monkeypatch, tmp_path)
     response = _client().post(
         "/internal/v1/runtime/check",
         json={},
-        headers={
-            "Authorization": "Bearer wrong-issuer-token",
-            "X-Internal-Service-Name": "durable-job-worker",
-        },
+        headers=headers,
     )
 
-    assert response.status_code == 401
-    assert response.json()["detail"]["code"] == "internal_service_authentication_failed"
+    assert response.status_code == 426
+    assert response.json()["detail"]["code"] == "internal_service_https_required"
 
 
 def test_missing_environment_fails_closed(monkeypatch) -> None:
@@ -315,6 +267,14 @@ def test_durable_composition_delegates_heartbeat_to_typed_application_after_work
     monkeypatch.setattr(private_operation_dependencies, "BackgroundJobRepository", Repository)
     monkeypatch.setattr(private_operation_dependencies, "DurableJobWorker", Worker)
     monkeypatch.setattr(private_operation_dependencies, "default_job_handlers", lambda: {})
+    # This oracle isolates worker/heartbeat ordering from the independent
+    # service-arrangement and due-order discovery adapters.
+    monkeypatch.setattr(private_operation_dependencies, "build_service_arrangement_automation",
+        lambda _: SimpleNamespace(dispatch_pending=lambda: None))
+    monkeypatch.setattr(private_operation_dependencies, "MySqlDueOrderAutoCompletionRepository", lambda _: object())
+    monkeypatch.setattr(private_operation_dependencies, "DurableJobCommandApplication", lambda *_: object())
+    monkeypatch.setattr(private_operation_dependencies, "AutoCompletionJobDispatcher",
+        lambda *_: SimpleNamespace(dispatch_due_orders=lambda _: None))
     monkeypatch.setattr(
         private_operation_dependencies,
         "get_runtime_heartbeat_application",
@@ -644,29 +604,32 @@ def test_private_client_retries_transient_failure_within_budget(monkeypatch) -> 
     assert delays == [0.25]
 
 
-def test_private_client_uses_google_oidc_without_shared_key(monkeypatch) -> None:
+def test_private_client_uses_own_machine_credential_and_ca(monkeypatch, tmp_path) -> None:
     captured = {}
 
     def fake_post(url, **kwargs):
         captured.update(kwargs["headers"])
+        assert kwargs["verify"] == "private-api-ca.pem"
         return _Response(200, {"data": {"status": "ready"}})
 
     monkeypatch.setattr(
         "infrastructure.http.private_operations_client.requests.post",
         fake_post,
     )
+    prepare_credentials(tmp_path)
+    token_path = tmp_path / "durable-job-worker/token"
     client = PrivateOperationsClient(
         "durable-job-worker",
         base_url="https://private-api.example",
         shared_key="",
-        auth_mode="google_oidc",
-        oidc_audience="https://private-api.example",
-        token_provider=lambda audience: "signed-token",
+        auth_mode="nas_service_token",
+        token_file=str(token_path),
+        ca_file="private-api-ca.pem",
     )
 
     client.check()
 
-    assert captured["Authorization"] == "Bearer signed-token"
+    assert captured["Authorization"] == "Bearer " + token_path.read_text().strip()
     assert "X-Internal-Service-Key" not in captured
 
 

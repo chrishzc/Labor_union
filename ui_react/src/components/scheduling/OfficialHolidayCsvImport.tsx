@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../UnsavedChanges';
 /**
  * File: OfficialHolidayCsvImport.tsx
  * Description: Manual upload UI for the official government office-calendar CSV.
@@ -44,6 +45,7 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
   const [loadingFile, setLoadingFile] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  useUnsavedDraft('官方假日匯入', { '待匯入檔案': prepared?.fileName ?? '' }, { baseline: { '待匯入檔案': '' }, enabled: !summary, busy: importing });
   const selectFile = async (file: File | null) => {
     setPrepared(null);
     setSummary(null);

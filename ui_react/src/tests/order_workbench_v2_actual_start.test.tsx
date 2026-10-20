@@ -34,16 +34,16 @@ function receipt(): ActualStartReceipt {
 function commitFacts() { facts = { ...facts, current_actual_start_date: '2026-09-02', order_version: 3, scheduling_version: 4 }; }
 async function open() {
   fireEvent.click(screen.getByRole('button', { name: '讀取實際開始日' }));
-  await screen.findByLabelText('Beta 實際開始日期');
+  await screen.findByLabelText('更正實際開始日期');
 }
 async function confirm() {
-  fireEvent.change(screen.getByLabelText('Beta 實際開始日期'), { target: { value: '2026-09-02' } });
-  const button = screen.getByRole('button', { name: '預覽新排班' });
+  fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: '2026-09-02' } });
+  const button = screen.getByRole('button', { name: '預覽日期與排班調整' });
   await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button);
 }
 async function applyPreview() {
-  const button = await screen.findByRole('button', { name: '確認並儲存新排班' });
+  const button = await screen.findByRole('button', { name: '儲存日期與排班調整' });
   fireEvent.click(button);
 }
 
@@ -60,7 +60,7 @@ describe('Beta 實際開始日正式操作', () => {
     const onObserved = vi.fn(); render(<OrderActualStartPanel caseNo={CASE} onObserved={onObserved} />);
     await open(); await confirm();
     expect(mocks.preview).toHaveBeenCalledWith(CASE, { new_actual_start_date: '2026-09-02' });
-    expect(await screen.findByText(/月嫂 7：占用 2026-09-02 至 2026-09-03/)).toBeInTheDocument();
+    expect(await screen.findByText(/未設定 姓名未設定：服務期間 2026-09-02 至 2026-09-03/)).toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
     await applyPreview();
     await screen.findByText('實際開始日已完成正式回讀：2026-09-02');
@@ -74,16 +74,16 @@ describe('Beta 實際開始日正式操作', () => {
   it('service_data_locked 不能改日期或 Preview', async () => {
     facts.service_data_locked = true;
     render(<OrderActualStartPanel caseNo={CASE} />); await open();
-    expect(screen.getByLabelText('Beta 實際開始日期')).toBeDisabled();
-    expect(screen.getByRole('button', { name: '預覽新排班' })).toBeDisabled();
+    expect(screen.getByLabelText('更正實際開始日期')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '預覽日期與排班調整' })).toBeDisabled();
     expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.apply).not.toHaveBeenCalled();
   });
 
   it('預覽案件識別不同即停止', async () => {
     mocks.preview.mockResolvedValue({ ...preview(), actual_start: { case_no: 'OTHER', official_service_dates: [] } });
     render(<OrderActualStartPanel caseNo={CASE} />); await open();
-    fireEvent.change(screen.getByLabelText('Beta 實際開始日期'), { target: { value: '2026-09-02' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新排班' }));
+    fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: '2026-09-02' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽日期與排班調整' }));
     await screen.findByText('實際開始日預覽 identity 不一致。'); expect(mocks.apply).not.toHaveBeenCalled();
   });
 
@@ -110,7 +110,7 @@ describe('Beta 實際開始日正式操作', () => {
     render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
     await applyPreview();
     await screen.findByText('實際開始日未通過檢查，請重新讀取並預覽：版本過期（stale_preview）');
-    expect(screen.queryByLabelText('Beta 實際開始日期')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('更正實際開始日期')).not.toBeInTheDocument();
     expect(mocks.apply).toHaveBeenCalledTimes(1);
   });
 
@@ -128,7 +128,7 @@ describe('Beta 實際開始日正式操作', () => {
     mocks.apply.mockImplementation(() => new Promise<ActualStartReceipt>((resolve) => { finish = resolve; }));
     const onObserved = vi.fn(); const view = render(<OrderActualStartPanel caseNo={CASE} onObserved={onObserved} />);
     await open(); await confirm();
-    const button = await screen.findByRole('button', { name: '確認並儲存新排班' }); fireEvent.click(button); fireEvent.click(button);
+    const button = await screen.findByRole('button', { name: '儲存日期與排班調整' }); fireEvent.click(button); fireEvent.click(button);
     await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
     view.unmount(); commitFacts(); await act(async () => { finish(receipt()); });
     expect(onObserved).not.toHaveBeenCalled();
@@ -137,12 +137,12 @@ describe('Beta 實際開始日正式操作', () => {
   it('取消或更改開始日會捨棄舊預覽且不寫入', async () => {
     render(<OrderActualStartPanel caseNo={CASE} />); await open(); await confirm();
     fireEvent.click(await screen.findByRole('button', { name: '取消本次預覽' }));
-    expect(screen.queryByRole('button', { name: '確認並儲存新排班' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存日期與排班調整' })).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
     await confirm();
-    expect(await screen.findByRole('button', { name: '確認並儲存新排班' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Beta 實際開始日期'), { target: { value: '2026-09-04' } });
-    expect(screen.queryByRole('button', { name: '確認並儲存新排班' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '儲存日期與排班調整' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('更正實際開始日期'), { target: { value: '2026-09-04' } });
+    expect(screen.queryByRole('button', { name: '儲存日期與排班調整' })).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 });

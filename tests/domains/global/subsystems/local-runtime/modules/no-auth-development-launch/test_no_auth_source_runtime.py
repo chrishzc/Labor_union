@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import pytest
 
 
 ROOT = Path(__file__).parents[7]
@@ -14,6 +15,35 @@ BATCH_SOURCE = (
 POWERSHELL_SOURCE = (
     ROOT / "scripts" / "launchers" / "configure_local_admin_no_auth.ps1"
 ).read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows cmd.exe")
+def test_windows_anomaly_key_command_executes_without_exposing_key(tmp_path: Path) -> None:
+    start = BATCH_SOURCE.index('if not defined ANOMALY_ISSUE_IDENTITY_KEY_V1 (')
+    end = BATCH_SOURCE.index('call "%~dp0start_local_development.bat"', start)
+    script = tmp_path / "key check.bat"
+    script.write_text(
+        '@echo off\nsetlocal\n'
+        f'set "LOCAL_PYTHON={sys.executable}"\n'
+        + BATCH_SOURCE[start:end]
+        + '"%LOCAL_PYTHON%" -c "import os; v=os.environ[\'ANOMALY_ISSUE_IDENTITY_KEY_V1\']; '
+        'assert len(v)>=32; print(\'passed\')"\n'
+        'exit /b %errorlevel%\n:_bootstrap_failed\nexit /b 1\n',
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.pop("ANOMALY_ISSUE_IDENTITY_KEY_V1", None)
+    for existing in (None, "test-existing-process-key-at-least-32-characters"):
+        if existing is not None:
+            env["ANOMALY_ISSUE_IDENTITY_KEY_V1"] = existing
+            env["LOCAL_PYTHON"] = sys.executable
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", str(script)],
+            capture_output=True, text=True, env=env, timeout=15,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "passed"
+        assert not result.stderr
 
 
 def test_no_auth_launcher_forces_source_runtime_before_delegation() -> None:

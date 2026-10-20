@@ -139,7 +139,12 @@ def test_partial_staff_balance_is_included_by_mysql_without_relisting_paid_or_bl
 def _create_minimum_schema(connection):
     statements = (
         "CREATE TABLE staff(id BIGINT PRIMARY KEY,name VARCHAR(100),identity_card VARCHAR(20))",
-        "CREATE TABLE orders(case_no VARCHAR(50) PRIMARY KEY,staff_payment_due_date DATE NULL)",
+        "CREATE TABLE orders(case_no VARCHAR(50) PRIMARY KEY,staff_payment_due_date DATE NULL,status VARCHAR(50) DEFAULT '訂單完成')",
+        "CREATE TABLE scheduling_aggregates(case_no VARCHAR(50) PRIMARY KEY,aggregate_version BIGINT,generation_counter BIGINT,effective_generation_id BIGINT)",
+        "CREATE TABLE case_staff_assignments(id BIGINT PRIMARY KEY,case_no VARCHAR(50),staff_id BIGINT,assignment_sequence INT,"
+        "assigned_start_date DATE,assigned_end_date DATE,status VARCHAR(30),generation_id BIGINT)",
+        "CREATE TABLE historical_order_adoption_receipts(id BIGINT PRIMARY KEY,case_no VARCHAR(50),outcome VARCHAR(30))",
+        "CREATE TABLE historical_order_pairing_evidence(receipt_id BIGINT,assignment_id BIGINT,staff_id BIGINT)",
         "CREATE TABLE staff_obligations("
         "obligation_identity VARCHAR(191) PRIMARY KEY,case_no VARCHAR(50),staff_id BIGINT,"
         "amount_due_ntd INT,due_date DATE,direction VARCHAR(50),status VARCHAR(30),"

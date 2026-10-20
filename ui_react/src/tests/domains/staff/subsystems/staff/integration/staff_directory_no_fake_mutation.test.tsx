@@ -10,7 +10,7 @@ import { STAFF_PAGE_ONE } from '../../../../../fixtures/staff/staff_directory_co
 
 describe('StaffPage zero fake mutation', () => {
   beforeEach(() => {
-    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue(STAFF_PAGE_ONE);
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
   });
 

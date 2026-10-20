@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
-import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
+import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError, mapHistoricalOrderWorkbookApplyError } from '../api/orders/historical_order_workbook/errors';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { HistoricalOrderWorkbookPreviewSchema, HistoricalOrderWorkbookReceiptSchema } from '../api/orders/historical_order_workbook/schemas';
 import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
 
@@ -14,6 +15,16 @@ function setSession(): void {
 }
 
 describe('Historical Orders workbook Preview client', () => {
+  it.each([
+    ['historical_client_payment_terms_missing', '付款條款'],
+    ['historical_payroll_rate_policy_missing', '薪資費率'],
+    ['historical_default_accounting_unavailable', '服務未就緒'],
+  ])('帳務建立失敗 %s 不得顯示成功或要求盲目重送', (code, message) => {
+    const error = mapHistoricalOrderWorkbookApplyError(new ApiHttpError(422, code, 'typed blocker'));
+    expect(error).toMatchObject({ code, retryable: false });
+    expect(error.message).toContain(message);
+    expect(error.message).toContain('本次匯入未完成');
+  });
   beforeEach(() => { vi.restoreAllMocks(); setSession(); });
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 

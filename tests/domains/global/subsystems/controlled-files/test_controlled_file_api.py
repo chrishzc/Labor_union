@@ -123,6 +123,62 @@ def _intent() -> dict[str, object]:
     }
 
 
+def test_resume_capacity_is_configurable_without_changing_other_document_limits(monkeypatch):
+    from api.routes.controlled_files import stage_controlled_file
+    workflow = _workflow()
+    principal = AdminPrincipal(17, "storage-admin", "檔案管理員", "operator")
+    monkeypatch.setenv("FILE_RESUME_MAX_BYTES", "8")
+    arguments = dict(owner=ControlledFileOwner.STAFF, purpose=ControlledFilePurpose.STAFF_RESUME,
+        subject_reference="11", object_key="resume", logical_folder="staff/11/resume",
+        idempotency_key="resume-size", correlation_id="resume-size", principal=principal, workflow=workflow)
+    with pytest.raises(HTTPException) as failure:
+        stage_controlled_file(document=UploadFile(BytesIO(b"%PDF-large"), filename="resume.pdf"), **arguments)
+    assert failure.value.status_code == 409
+    assert "8 bytes" in failure.value.detail["error"]["message"]
+    workflow.stage.assert_not_called()
+    monkeypatch.setenv("FILE_RESUME_MAX_BYTES", "40")
+    stage_controlled_file(document=UploadFile(BytesIO(b"%PDF-large"), filename="resume.pdf",
+        headers=Headers({"content-type": "application/pdf"})), **arguments)
+    workflow.stage.assert_called_once()
+    assert controlled_files.transfer_settings(principal).data.resume_max_bytes == 40
+
+
+def test_unicode_resume_filename_download_has_safe_headers():
+    from dataclasses import replace
+    workflow = _workflow()
+    workflow.download.return_value = replace(workflow.download.return_value, filename="月嫂履歷.pdf")
+    response = controlled_files.download_controlled_file(_FILE_ID,
+        AdminPrincipal(17, "storage-admin", "檔案管理員", "operator"), workflow)
+    assert "filename*=UTF-8''%E6%9C%88" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize("source", ["controlled_files", "service_day_media", "service_day_logs"])
+def test_configured_capacity_reaches_actual_storage_and_readback(monkeypatch, tmp_path, source):
+    import importlib
+    from types import SimpleNamespace
+    module = importlib.import_module("api.dependencies." + source)
+    connection = SimpleNamespace(close=lambda: None)
+    monkeypatch.setattr(module, "get_connection", lambda: connection)
+    monkeypatch.setattr(module, "MySqlControlledFileWorkflowRepository", lambda _: None)
+    monkeypatch.setattr(module, "ControlledFileWorkflow", lambda _repository, storage, *_args: storage)
+    if source == "service_day_logs":
+        monkeypatch.setattr(module, "MySqlServiceDayLogRepository", lambda _: None)
+        monkeypatch.setattr(module, "ServiceDayLogApplication", lambda _repository, _uow, storage: storage)
+    monkeypatch.setenv("CONTROLLED_FILE_STORAGE_ROOT", str(tmp_path))
+    monkeypatch.setenv("FILE_PHOTO_MAX_BYTES", str(22 * 1024 * 1024))
+    monkeypatch.setenv("FILE_RESUME_MAX_BYTES", str(22 * 1024 * 1024))
+    factory = module.get_service_day_log_application if source == "service_day_logs" else module.get_controlled_file_workflow
+    generator = factory()
+    storage = next(generator)
+    content = b"x" * (20 * 1024 * 1024 + 1)
+    staged = storage.put_staged(idempotency_key="configured-storage", filename="large.pdf",
+        mime_type="application/pdf", content=content)
+    assert storage.read_registered_staged(staged.staging_id, expected_sha256=staged.sha256_digest).content == content
+    generator.close()
+
+
 def test_all_seven_storage_entries_are_active_authenticated_compositions() -> None:
     workflow = _workflow()
     client = _client(workflow)

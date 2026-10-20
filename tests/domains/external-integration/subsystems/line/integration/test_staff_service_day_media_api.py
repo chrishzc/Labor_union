@@ -41,6 +41,38 @@ def _dependencies(recorded):
     return ControlledFiles(), Logs()
 
 
+def test_configured_photo_capacity_rejects_before_staging_and_accepts_after_increase(monkeypatch):
+    from fastapi import HTTPException
+    from api.schemas.line_staff_self_service import StaffLiffRequest
+    from infrastructure.runtime.file_transfer_settings import file_transfer_settings
+    recorded = {}
+    controlled, logs = _dependencies(recorded)
+    monkeypatch.setattr(staff_service_day_media, "_verified_line_user_id", lambda _: LineUserId("U-caregiver"))
+    monkeypatch.setattr(staff_service_day_media, "_verified_staff_identity", lambda _: (8, "U-caregiver"))
+    monkeypatch.setenv("FILE_PHOTO_MAX_BYTES", "13")
+    monkeypatch.setenv("FILE_TRANSFER_TIMEOUT_SECONDS", "900")
+    content = b"\x89PNG\r\n\x1a\nphoto"
+    arguments = dict(photo=Upload(content, "image/png"), line_id_token="token", assignment_id=71,
+                     service_date=date(2026, 8, 16), idempotency_key="configured-photo",
+                     controlled_file_workflow=controlled, service_day_log_application=logs)
+    # Exact boundary is accepted, not interpreted as a meal-content classifier.
+    response = asyncio.run(staff_service_day_media.upload_service_day_meal_photo(**arguments))
+    assert response.data["size_bytes"] == 13
+    recorded.clear()
+    monkeypatch.setenv("FILE_PHOTO_MAX_BYTES", "12")
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(staff_service_day_media.upload_service_day_meal_photo(**arguments))
+    assert failure.value.status_code == 422
+    assert "12 bytes" in failure.value.detail["message"]
+    assert "stage" not in recorded
+    assert staff_service_day_media.service_day_media_settings(StaffLiffRequest(line_id_token="token")).data.timeout_seconds == 900
+    monkeypatch.setenv("FILE_PHOTO_MAX_BYTES", str(11 * 1024 * 1024))
+    arguments["photo"] = Upload(b"\x89PNG\r\n\x1a\n" + b"x" * (10 * 1024 * 1024), "image/png")
+    assert asyncio.run(staff_service_day_media.upload_service_day_meal_photo(**arguments)).data["size_bytes"] > 10 * 1024 * 1024
+    monkeypatch.setenv("FILE_TRANSFER_TIMEOUT_SECONDS", "0")
+    assert file_transfer_settings().timeout_seconds == 0
+
+
 def test_upload_meal_photo_stages_controlled_file_for_bound_assignment(monkeypatch) -> None:
     recorded = {}
     controlled_files, logs = _dependencies(recorded)

@@ -21,6 +21,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §2、§4 — LIFF 身分與需求調查的 transport boundary。
 - `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` §4 — registration Preview 零正式寫入，Apply 交由 current owner contract。
+- Apply 成功呈現待工會核准及申請編號；未核准時 client／beclass IDs 為 null，不宣稱完成綁定或已建立正式客戶。
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/registration-presentation/contract/test_line_registration_presentation.py`

@@ -173,7 +173,7 @@ function installFetchStub(options: FetchStubOptions = {}): RequestRecord[] {
     requests.push({ path, method: String(init?.method ?? 'GET').toUpperCase() });
 
     if (path === SYSTEM_STATUS_ENDPOINT) return response(systemStatusResponse());
-    if (path === '/api/v1/client-payments') return options.receiptStatus === 503 ? response(typedUnavailableResponse(), 503) : response({ success: true, message: 'ok', error: null, data: { cases: options.emptyCases ? [] : [{ case_no: 'CASE-FIN-001', account_version: '1', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 0, receipt_entry_count: 0 }] } });
+    if (path === '/api/v1/client-payments') return options.receiptStatus === 503 ? response(typedUnavailableResponse(), 503) : response({ success: true, message: 'ok', error: null, data: { cases: options.emptyCases ? [] : [{ case_no: 'CASE-FIN-001', account_version: '1', open_receivable_amount_ntd: 5000, open_payable_amount_ntd: 0, obligation_count: 1, ledger_entry_count: 0, receipt_entry_count: 0, receipt_status: 'unpaid' as const }] } });
     if (path === '/api/v1/finance-reports/accounts-payable/cash-requirements') return response({ success: true, message: 'ok', error: null, data: { rows: [], next_cursor: null } });
     if (path === ORDERS_SUMMARY_ENDPOINT) return response(ordersSummaryResponse(Boolean(options.emptyCases)));
     if (path === CLIENT_RECEIPT_ENDPOINT) {
@@ -278,6 +278,18 @@ describe('Finance #finance entry static subgate', () => {
     expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '付款' }));
+    fireEvent.click(await screen.findByRole('button', { name: '人員與歷史付款' }));
+    await waitFor(() => expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument());
+    const staffReadsBeforeRefresh = countPath(requests, STAFF_DIRECTORY_ENDPOINT);
+    const payableReadsBeforeRefresh = countPath(requests, STAFF_PAYABLE_ENDPOINT);
+    expect(staffReadsBeforeRefresh).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    await waitFor(() => expect(countPath(requests, STAFF_DIRECTORY_ENDPOINT)).toBe(staffReadsBeforeRefresh + 1));
+    await waitFor(() => expect(countPath(requests, STAFF_PAYABLE_ENDPOINT)).toBe(payableReadsBeforeRefresh + 1));
+    expect(document.querySelector('[data-obligation-id="OBL-S-1"]')).toBeInTheDocument();
+    expect(requests.every(request => request.method === 'GET')).toBe(true);
   });
 
   it('正常 Finance Import 不查詢或顯示歷史批次 identity', async () => {

@@ -1,5 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import { FinancePage } from '../../../../../../../pages/FinancePage';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
+import { historicalCompletionClient } from '../../../../../../../api/orders/historical_completion_client';
+import { HistoricalCompletionSchema } from '../../../../../../../api/orders/historical_completion_schemas';
+import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
+import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
+import { RECEIPT_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 import { HistoricalOrderAdoptionEvidenceSchema } from '../../../../../../../api/orders/historical_adoption_evidence_schemas';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS, type CoreStageCode } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
@@ -24,23 +33,36 @@ const mocks = vi.hoisted(() => ({
   matchingContact: vi.fn(),
   matchingPreview: vi.fn(),
   candidatePool: vi.fn(),
+  summaries: vi.fn(),
+  getStart: vi.fn(), getCalendar: vi.fn(), previewStart: vi.fn(), applyStart: vi.fn(),
+  getDates: vi.fn(), calculate: vi.fn(), previewDates: vi.fn(), applyDates: vi.fn(),
 }));
+const dateWorkspace = vi.hoisted(() => ({ live: false }));
 
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
   orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core },
 }));
-vi.mock('../../../../../../../components/HistoricalCompletionPanel', () => ({
-  HistoricalCompletionPanel: ({ onCompleted }: { onCompleted?: () => void }) => (
-    <button onClick={onCompleted}>模擬帳務完成正式回讀成功</button>
-  ),
-}));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({
+  loadAllOrderSummaries: mocks.summaries,
   ordersQueryClient: {
     getOrderDetail: mocks.detail,
     getOrderTerms: mocks.terms,
     getAssignmentPlan: mocks.assignment,
+    getOrderSummaries: vi.fn(),
+    getActualStart: mocks.getStart,
+    getOrderCalendarDetail: mocks.getCalendar,
   },
 }));
+vi.mock('../../../../../../../api/orders/order_actual_start_client', () => ({ orderActualStartClient: { preview: mocks.previewStart, apply: mocks.applyStart } }));
+vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ ordersMutationClient: { getServiceDates: mocks.getDates, previewServiceDates: mocks.previewDates, applyServiceDates: mocks.applyDates } }));
+vi.mock('../../../../../../../api/scheduling/schedule_precision_client', () => ({ schedulePrecisionClient: { calculate: mocks.calculate } }));
+vi.mock('../../../../../../../api/client_finance/deposit_skip_client', () => ({ depositSkipClient: {
+  query: vi.fn(async (caseNo: string) => ({ case_no: caseNo, deposit_required_ntd: 0, deposit_net_received_ntd: 0, unpaid_progression_allowed: false, blockers: ['deposit_skip.deposit_obligation_required'] })),
+  preview: vi.fn(), apply: vi.fn(),
+} }));
+vi.mock('../../../../../../../api/scheduling/service_arrangement_status_client', () => ({ serviceArrangementStatusClient: {
+  completion: vi.fn(async (caseNo: string) => ({ case_no: caseNo, current_status: '訂單成立', completion_instant: null, state: 'awaiting_schedule', blockers: [] })),
+} }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({
   waitingDepositLockClient: { queryPlan: mocks.matchingPlan },
 }));
@@ -64,12 +86,13 @@ vi.mock('../../../../../../../api/orders/historical_service_accounting_client', 
     applyPrecisionRestart: mocks.restartApply,
   },
 }));
-vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({
-  OrderServiceDatesPanel: (props: { calculationRevision?: number }) => {
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../../../../../components/OrderServiceDatesPanel')>();
+  return { OrderServiceDatesPanel: (props: ComponentProps<typeof actual.OrderServiceDatesPanel>) => {
     mocks.serviceDatesRender(props);
-    return <div aria-label="服務日期精算工作區">服務日期精算已開啟</div>;
-  },
-}));
+    return dateWorkspace.live ? <div aria-label="服務日期精算工作區"><actual.OrderServiceDatesPanel {...props} /></div> : <div aria-label="服務日期精算工作區">服務日期精算已開啟</div>;
+  } };
+});
 vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({
   OrderActualStartPanel: (props: { onObserved?: (operation: 'date_only' | 'reschedule') => void; onOpenServiceDates?: () => void }) => {
     mocks.actualStartRender(props);
@@ -169,25 +192,98 @@ function orderDetail(orderStatus = '歷史訂單－未服務') {
   };
 }
 
+function useLiveDateWorkspace() {
+  dateWorkspace.live = true;
+  sessionClient.setSession('synthetic-historical-workspace', { id: 7, username: 'historical-test', display_name: '測試工會人員', role: 'admin' });
+  let orderVersion = 12;
+  let actualStart: string | null = null;
+  const days = (start: string, count: number) => Array.from({ length: count }, (_, i) => new Date(Date.parse(`${start}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10));
+  const terms = mocks.terms.getMockImplementation()!;
+  mocks.terms.mockImplementation(async () => ({ ...await terms(), order_version: orderVersion }));
+  const restart = mocks.restartApply.getMockImplementation()!;
+  mocks.restartApply.mockImplementation(async (...args) => { const receipt = await restart(...args); orderVersion = receipt.order_version; return receipt; });
+  mocks.getStart.mockImplementation(async () => ({ case_no: 'CASE-FUTURE', current_actual_start_date: actualStart, planned_start_date: '2026-09-03', service_data_locked: false,
+    order_version: orderVersion, scheduling_version: 4, scheduling_generation: 2, client_finance_version: 2, payroll_version: 2, has_formal_assignments: false }));
+  mocks.getCalendar.mockResolvedValue({ case_no: 'CASE-FUTURE', service_mode: '連續服務', original_service_type: '連續服務' });
+  mocks.getDates.mockImplementation(async () => ({ case_no: 'CASE-FUTURE', order_version: orderVersion, scheduling_version: 4,
+    contracted_service_days: 20, suggested_dates: [], selectable_dates: days(actualStart ?? '2026-09-03', 40), current_version: null,
+    current_dates: [], bound_staff: [{ staff_id: 42, staff_name: '陳月嫂' }], arrangement_pending: true }));
+  mocks.calculate.mockImplementation(async ({ actual_start_date }) => ({ actual_start_date, actual_end_date: days(actual_start_date, 20)[19], target_service_days: 20,
+    total_calendar_days: 20, actual_work_days_count: 20, rest_days_count: 0, national_holidays_found: [], total_estimated_salary: null, weekly_stats: [],
+    day_by_day: days(actual_start_date, 20).map((date, i) => ({ date, day_num: i + 1, is_work_day: true, is_rest_day: false, holiday_name: null })) }));
+  mocks.previewStart.mockImplementation(async (_caseNo, { new_actual_start_date }) => ({ operation: 'date_only', case_no: 'CASE-FUTURE', before_actual_start_date: actualStart,
+    after_actual_start_date: new_actual_start_date, order_version: orderVersion, scheduling_version: 4, scheduling_generation: 2,
+    client_finance_version: 2, payroll_version: 2, preview_fingerprint: '2'.repeat(64) }));
+  mocks.applyStart.mockImplementation(async (caseNo, payload) => {
+    expect(caseNo).toBe('CASE-FUTURE');
+    expect(payload.expected_order_version).toBe(orderVersion);
+    expect(payload.preview_fingerprint).toBe('2'.repeat(64));
+    actualStart = payload.new_actual_start_date; orderVersion++;
+    mocks.detail.mockResolvedValue({ ...orderDetail('訂單成立'), actual_start_date: actualStart });
+    return { operation: 'date_only', case_no: caseNo, actual_start_date: actualStart, order_version: orderVersion,
+      scheduling_version: 4, scheduling_generation: 2, client_finance_version: 2, payroll_version: 2, preview_fingerprint: payload.preview_fingerprint, changed: true };
+  });
+}
+
 describe('historical Drawer immutable evidence boundary', () => {
-  it('refreshes the case after historical accounting completion and removes the action', async () => {
+  it('從同案帳務頁 Query／Preview／Confirm／Apply，回到案件後回讀完成狀態並移除操作', async () => {
     let status = '歷史訂單－服務完成';
     mocks.core.mockImplementation(async () => ({ items: [timeline(status)] }));
     mocks.detail.mockImplementation(async () => orderDetail(status));
+    mocks.summaries.mockImplementation(async () => ({ items: [{ case_no: 'CASE-FUTURE', client_name: '正式客戶', order_status: status,
+      staff_name: null, identity_status: null, start_date: '2026-09-03', end_date: '2026-09-22', actual_start_date: null, actual_end_date: null,
+      service_days: 20, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'a'.repeat(64) }));
+    vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue({ ...RECEIPT_RESPONSE.data, case_no: 'CASE-FUTURE' });
+    vi.spyOn(accountsPayableQueryClient, 'queryCase').mockResolvedValue({ case_no: 'CASE-FUTURE', target_payment_date: '2026-09-01', items: [] });
+    const projection = HistoricalCompletionSchema.parse({ case_no: 'CASE-FUTURE', state: 'completed', step_11_status: 'completed', step_11_completed: true,
+      historical_alerts_completed: true, active_alerts: [], owner_versions: [{ owner: 'orders', version: '12' }, { owner: 'client_finance', version: '2' }],
+      owner_source_versions: [{ kind: 'staff_obligation', identity: 'obligation:17', version: '2' }], source_fingerprint: 'a'.repeat(64), projection_fingerprint: 'b'.repeat(64) });
+    const query = vi.spyOn(historicalCompletionClient, 'query').mockResolvedValue(projection);
+    const preview = { case_no: 'CASE-FUTURE', before_status: '歷史訂單－服務完成' as const, after_status: '歷史訂單－帳務完成' as const,
+      expected_order_version: '12', resulting_order_version: '13', expected_client_finance_version: '2', expected_source_versions: projection.owner_source_versions,
+      business_date: '2026-09-01', preview_fingerprint: 'c'.repeat(64) };
+    const previewQuery = vi.spyOn(historicalCompletionClient, 'preview').mockResolvedValue(preview);
+    const apply = vi.spyOn(historicalCompletionClient, 'apply').mockImplementation(async () => {
+      status = '歷史訂單－帳務完成';
+      return { case_no: 'CASE-FUTURE', lifecycle_event_id: 99, resulting_order_version: '13', after_status: '歷史訂單－帳務完成', replayed: false };
+    });
     const onObserved = vi.fn();
-    render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
-    const confirm = await screen.findByRole('button', { name: '模擬帳務完成正式回讀成功' });
+    const view = render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
+    await screen.findByRole('heading', { name: '服務完工' });
+    const entry = screen.getByRole('link', { name: '查看本案帳務 →' });
+    expect(entry).toHaveAttribute('href', '#finance?tab=client-receipts&case_no=CASE-FUTURE&from=workbench');
     const readsBefore = mocks.core.mock.calls.length;
-    status = '歷史訂單－帳務完成';
+    act(() => window.history.replaceState(null, '', entry.getAttribute('href')!));
+    view.rerender(<FinancePage />);
+    fireEvent.click(await screen.findByRole('button', { name: '預覽並確認帳務完成' }));
+    const confirm = await screen.findByRole('button', { name: '確認推進至帳務完成' });
+    expect(confirm).toBeDisabled();
+    expect(apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認客戶款項及所有月嫂款項均已結清' }));
+    expect(confirm).toBeEnabled();
     fireEvent.click(confirm);
-    await waitFor(() => expect(screen.queryByRole('button', { name: '模擬帳務完成正式回讀成功' })).not.toBeInTheDocument());
+    await waitFor(() => expect(mocks.summaries).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '確認推進至帳務完成' })).not.toBeInTheDocument());
+    expect(query).toHaveBeenCalledWith('CASE-FUTURE', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(previewQuery).toHaveBeenCalledWith('CASE-FUTURE');
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith(preview, '確認歷史訂單客戶款項及月嫂款項皆已結清');
+    expect(mocks.summaries.mock.invocationCallOrder.at(-1)).toBeGreaterThan(apply.mock.invocationCallOrder[0]!);
+    const returnEntry = screen.getByRole('link', { name: '← 返回案件處理' });
+    expect(returnEntry).toHaveAttribute('href', '#order-workbench-v2?case=CASE-FUTURE');
+    act(() => window.history.replaceState(null, '', returnEntry.getAttribute('href')!));
+    view.rerender(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} onObserved={onObserved} />);
+    await screen.findByRole('heading', { name: '服務完工' });
     expect(mocks.core.mock.calls.length).toBeGreaterThan(readsBefore);
-    expect(onObserved).toHaveBeenCalledTimes(1);
+    expect(onObserved).not.toHaveBeenCalled();
     expect(screen.getAllByText(/歷史訂單－帳務完成/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '確認推進至帳務完成' })).not.toBeInTheDocument();
   });
 
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    dateWorkspace.live = false;
+    orderMutationFlowStore.clearAll();
     mocks.matchingPlan.mockRejectedValue(new ApiHttpError(404, 'not_found', '尚無有效媒合方案'));
     mocks.core.mockResolvedValue({
       items: [timeline()],
@@ -268,6 +364,7 @@ describe('historical Drawer immutable evidence boundary', () => {
       };
     });
   });
+  afterEach(() => { sessionClient.clearSession(); orderMutationFlowStore.clearAll(); window.history.replaceState(null, '', '#'); vi.restoreAllMocks(); });
 
   it('future source period 與 evidence-only staff 保留在來源區，formal owner/assignment 不被覆寫', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-FUTURE" branchType="historical" onClose={vi.fn()} />);
@@ -324,6 +421,7 @@ describe('historical Drawer immutable evidence boundary', () => {
   });
 
   it.each(['歷史訂單－未服務', '歷史訂單－服務中'])('%s keeps the blocked intake drawer open and restarts through owner Query / Preview / Apply / readback', async (status) => {
+    useLiveDateWorkspace();
     mocks.detail.mockResolvedValue(orderDetail(status));
     mocks.core.mockResolvedValue({
       items: [timeline(status)],
@@ -359,16 +457,30 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
       expect.objectContaining({ calculationRevision: 1 }),
     );
-    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
-    fireEvent.click(screen.getByRole('button', { name: '確認／更正實際開始日' }));
-    fireEvent.click(await screen.findByRole('button', { name: '模擬尚未建立排班' }));
+    const startInput = await screen.findByLabelText('實際開始日');
+    await waitFor(() => expect(startInput).toHaveValue('2026-09-03'));
+    expect(mocks.applyStart).not.toHaveBeenCalled();
+    expect(mocks.applyDates).not.toHaveBeenCalled();
+    fireEvent.change(startInput, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
+    expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
+    expect(startInput).toHaveValue('');
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
-    fireEvent.click(await screen.findByRole('button', { name: '模擬實際開始日正式回讀成功' }));
+    await act(async () => { fireEvent.change(startInput, { target: { value: '2026-09-04' } }); });
+    await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('20 / 20 天'));
+    const saveStart = screen.getByRole('button', { name: '儲存實際開始日' });
+    await waitFor(() => expect(saveStart).toBeEnabled());
+    fireEvent.click(saveStart);
+    await screen.findByText('實際開始日已儲存；服務日期尚未儲存。');
     expect(await screen.findByLabelText('服務日期精算工作區')).toBeInTheDocument();
-    expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(
-      expect.objectContaining({ calculationRevision: 2 }),
-    );
+    await waitFor(() => expect(mocks.serviceDatesRender).toHaveBeenLastCalledWith(expect.objectContaining({ calculationRevision: 1, projectionRevision: 2 })));
+    expect(mocks.applyStart).toHaveBeenCalledTimes(1);
+    expect(mocks.applyStart).toHaveBeenCalledWith('CASE-FUTURE', expect.objectContaining({ operation: 'date_only', new_actual_start_date: '2026-09-04', expected_order_version: 13, preview_fingerprint: '2'.repeat(64) }), expect.objectContaining({ idempotencyKey: expect.stringContaining('service-dates-start-') }));
+    expect(mocks.getStart.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyStart.mock.invocationCallOrder[0]!);
+    expect(mocks.detail.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyStart.mock.invocationCallOrder[0]!);
+    expect(mocks.previewDates).not.toHaveBeenCalled();
+    expect(mocks.applyDates).not.toHaveBeenCalled();
     expect(mocks.intakeApply).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: GovernmentOverpaymentRecoveryWorkbench.tsx
  * Description: GOVSUB-006 的 bounded Query／Preview／Confirm／Apply／owner readback 工作區。
@@ -318,6 +319,8 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   const busy = status === 'loading' || status === 'previewing' || status === 'applying';
   const commandLocked = receipt !== null || outcomeUnknown || readbackUnavailable || needsRecheck || completionVerified || staleOwnerRefreshRequired;
   const effectiveReadback = readback ?? query;
+  useUnsavedDraft('政府溢收退回', { '退回金額': targetAmounts, '原因': reason, '佐證': evidence }, { enabled: !!query, busy: busy || outcomeUnknown || readbackUnavailable, resetKey: completionVerified });
+
 
   if (status === 'loading' && !query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-loading">正在讀取政府溢撥資料…</section>;
   if (!query) return <section aria-label="政府溢撥處置" data-surface-id="government-overpayment-recovery-error"><div role="alert">{error ?? '政府溢撥資料無法讀取。'}</div><button type="button" onClick={() => void reload()}>重新查詢</button></section>;

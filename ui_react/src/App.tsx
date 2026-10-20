@@ -2,7 +2,8 @@
  * File: App.tsx
  * Description: 應用程式根元件，實作含 bounded query 的 Hash 路由、認證守衛與頁面切換。
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { UnsavedChangesProvider, useUnsavedNavigation } from './components/UnsavedChanges';
 import './styles/design-tokens.css';
 import {
   MasterLayout,
@@ -31,6 +32,7 @@ import { FinancePage } from './pages/FinancePage';
 import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { StorageManagementPage } from './pages/StorageManagementPage';
+import { FileSettingsPage } from './pages/FileSettingsPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
@@ -60,7 +62,9 @@ function getPageFromHash(): PageType {
   return 'order-workbench-v2';
 }
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { requestLeave } = useUnsavedNavigation();
+  const committedHash = useRef(window.location.hash);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => sessionClient.isAuthenticated());
   const [currentPage, setCurrentPage] = useState<PageType>(() => getPageFromHash());
   const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
@@ -69,16 +73,25 @@ export const App: React.FC = () => {
   const currentSection: SectionType = PAGE_SECTION_MAP[currentPage] || 'operations';
 
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleHashChange = (event: HashChangeEvent) => {
+      const nextHash = window.location.hash;
+      if (nextHash === committedHash.current) return;
+      const previousHash = event.oldURL ? new URL(event.oldURL).hash : committedHash.current;
       const page = getPageFromHash();
-      setCurrentPage(page);
+      window.history.replaceState(null, '', previousHash || '#order-workbench-v2');
+      requestLeave(() => {
+        committedHash.current = nextHash;
+        window.history.replaceState(null, '', nextHash);
+        setCurrentPage(page);
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
     };
 
-    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('hashchange', handleHashChange, true);
     return () => {
-      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('hashchange', handleHashChange, true);
     };
-  }, []);
+  }, [requestLeave]);
 
   useEffect(() => {
     const handleSessionUnauthorized = (event: Event) => {
@@ -100,7 +113,6 @@ export const App: React.FC = () => {
       setWorkbenchHomeRequest(value => value + 1);
       return;
     }
-    setCurrentPage(page);
     window.location.hash = `#${page}`;
   };
 
@@ -115,13 +127,19 @@ export const App: React.FC = () => {
   const handleLoginSuccess = (_username: string) => {
     setIsLoggedIn(true);
     const targetPage = getPageFromHash();
+    committedHash.current = `#${targetPage}`;
+    setCurrentPage(targetPage);
     window.location.hash = `#${targetPage}`;
   };
 
-  const handleLogout = async () => {
-    await sessionClient.logout();
-    setIsLoggedIn(false);
-    window.location.hash = '#login';
+  const handleLogout = () => {
+    requestLeave(() => {
+      void sessionClient.logout().finally(() => {
+        setIsLoggedIn(false);
+        committedHash.current = '#login';
+        window.location.hash = '#login';
+      });
+    });
   };
 
   if (!isLoggedIn) {
@@ -164,10 +182,13 @@ export const App: React.FC = () => {
         {/* Audit & System Section */}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'storage-management' && <StorageManagementPage />}
+        {currentPage === 'file-settings' && <FileSettingsPage />}
         </StaffIdentityProvider>
       </MasterLayout>
     </ErrorBoundary>
   );
 };
+
+export const App: React.FC = () => <UnsavedChangesProvider><AppContent /></UnsavedChangesProvider>;
 
 export default App;

@@ -8,6 +8,8 @@ this adapter must not invent a cross-domain owner query.
 
 from __future__ import annotations
 
+from infrastructure.mysql.nas_mutations import call_mutation
+
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -222,7 +224,11 @@ class MySqlCurrentIssueRepository:
 
     def delete_current(self, issue_key: str) -> None:
         with _cursor(self._connection) as cursor:
-            cursor.execute("DELETE FROM current_anomaly_issues WHERE issue_key=%s", (issue_key,))
+            cursor.execute("SELECT owner_domain,owner_root_type,owner_snapshot_token FROM current_anomaly_issues WHERE issue_key=%s FOR UPDATE", (issue_key,))
+            row = cursor.fetchone()
+            if row is not None:
+                call_mutation(cursor, "lu_nas_remove_current_issue_v1", issue_key,
+                              row["owner_domain"], row["owner_root_type"], row["owner_snapshot_token"])
 
     def append_recheck_intent(self, intent: RecheckIntent) -> None:
         payload = {

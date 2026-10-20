@@ -48,6 +48,11 @@ describe('PAYOUT-001 remediation client', () => {
     await expect(staffPayoutRemediationClient.queryJob('job-1')).rejects.toMatchObject({ code: 'STAFF_PAYOUT_SCHEMA_MISMATCH' });
   });
 
+  it.each(['not_found', 'forbidden'])('Job 保留 canonical %s 業務拒絕結果', async (category) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(response({ job_id: 'job-1', status: 'failed', command_type: 'staff_payout_apply', attempt_count: 1, max_attempts: 3, outcome: { kind: 'failure', schema_version: 1, error: { category, code: 'owner_rejected', message: '無法執行此工作。', retryable: false, correlation_id: 'isolated-job', domain_blockers: [] } } }));
+    await expect(staffPayoutRemediationClient.queryJob('job-1')).resolves.toMatchObject({ status: 'failed', outcome: { error: { category } } });
+  });
+
   it('拒絕空白／重複 selection、無 reason 與無登入，且不發送 request', async () => {
     const fetch = vi.fn(); globalThis.fetch = fetch;
     await expect(staffPayoutRemediationClient.preview({ financeImportRowIds: [91, 91], obligationIdentities: ['obligation:11:CASE-1'] })).rejects.toBeInstanceOf(StaffPayoutRemediationError);

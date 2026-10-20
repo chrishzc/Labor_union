@@ -25,7 +25,11 @@ _operation_lock = threading.Lock()
 _source_scan_state = ArchitectureSourceScanState.start()
 _next_audit_retention_at = 0.0
 _next_operational_retention_at = 0.0
-_anomaly_runtime = build_anomaly_runtime()
+def _maintenance_connection():
+    return get_connection("maintenance")
+
+
+_anomaly_runtime = build_anomaly_runtime(connection_factory=_maintenance_connection)
 
 
 def run_incident_maintenance_cycle(identity: WorkerRuntimeIdentity) -> int:
@@ -45,7 +49,7 @@ def _archive_audits_if_due() -> int:
     if now < _next_audit_retention_at:
         return 0
     archived_count = archive_due_security_audits_once(
-        connection_factory=get_connection,
+        connection_factory=_maintenance_connection,
         unit_of_work_factory=MySqlUnitOfWork,
     )
     _next_audit_retention_at = now + AUDIT_RETENTION_INTERVAL_SECONDS
@@ -57,6 +61,6 @@ def _run_operational_retention_if_due() -> int:
     now = time.monotonic()
     if now < _next_operational_retention_at:
         return 0
-    processed = run_automatic_retention_cycle()
+    processed = run_automatic_retention_cycle(connection_factory=_maintenance_connection)
     _next_operational_retention_at = now + AUDIT_RETENTION_INTERVAL_SECONDS
     return processed

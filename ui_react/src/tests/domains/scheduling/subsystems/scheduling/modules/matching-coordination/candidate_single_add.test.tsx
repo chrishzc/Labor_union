@@ -31,7 +31,7 @@ beforeEach(() => {
 async function search(onPoolReadback = vi.fn()) {
   render(<OrderCandidateQueryPanel caseNo="CASE-ADD" presentation="workbench" includeMultiCaregiver={false} onPoolReadback={onPoolReadback} />);
   fireEvent.click(screen.getByRole('button', { name: '查詢合適人選' }));
-  await screen.findByText('月嫂甲');
+  await screen.findByText('未設定 月嫂甲');
   return onPoolReadback;
 }
 

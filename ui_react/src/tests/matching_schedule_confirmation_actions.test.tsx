@@ -15,6 +15,19 @@ import { assignmentPlanMutationClient } from '../api/scheduling/assignment_plan_
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { serviceArrangementStatusClient } from '../api/scheduling/service_arrangement_status_client';
+
+describe('正式排班 canonical job failure transport', () => {
+  afterEach(() => sessionClient.clearSession());
+  it.each(['not_found', 'forbidden'])('保留 %s 終態而不誤判 schema failure', async (category) => {
+    sessionClient.setSession('isolated-job-token', { id: 7, username: 'admin', display_name: 'Admin', role: 'admin' });
+    vi.spyOn(transport, 'get').mockResolvedValue({ success: true, message: 'ok', error: null, data: {
+      job_id: 'isolated-job', status: 'failed', command_type: 'assignment_plan_apply', attempt_count: 1, max_attempts: 3,
+      outcome: { kind: 'failure', schema_version: 1, error: { category, code: 'owner_rejected', message: '無法執行此工作。', retryable: false, correlation_id: 'isolated-job', domain_blockers: [] } },
+    } });
+    await expect(assignmentPlanMutationClient.queryJob('isolated-job')).resolves.toMatchObject({ status: 'failed', outcome: { error: { category } } });
+  });
+});
+
 beforeEach(() => { vi.spyOn(serviceArrangementStatusClient, 'arrangement').mockResolvedValue({ case_no: 'CASE-M3-RECIPIENT-001', plan_id: 12, state: 'awaiting_confirmations', blockers: [], job_id: null, assignment_count: 0 }); });
 
 afterEach(() => {

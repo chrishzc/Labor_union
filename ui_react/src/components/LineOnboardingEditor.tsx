@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineOnboardingEditor.tsx
  * Description: 提供 LINE 新好友 Onboarding 歡迎訊息的手動編輯、即時預覽與儲存工作台。
@@ -117,6 +118,7 @@ export const LineOnboardingEditor: React.FC<LineOnboardingEditorProps> = ({
     setContent((prev) => `${prev}\n{url}`);
   };
 
+  useUnsavedDraft('新好友歡迎訊息', { '歡迎訊息': content }, { baseline: { '歡迎訊息': savedContent }, busy: saving, enabled: !loading });
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!data) return;

@@ -350,17 +350,9 @@ def _app() -> RuntimeAlertTargetApplication:
 
 def _target_error(error: RuntimeAlertTargetError, correlation_id: str) -> HTTPException:
     statuses = {"validation": 422, "not_found": 404, "conflict": 409, "idempotency_mismatch": 409, "unavailable": 503}
-    return HTTPException(
-        status_code=statuses.get(error.category, 500),
-        detail={"error": {
-            "category": error.category,
-            "code": error.code,
-            "message": error.message,
-            "correlation_id": correlation_id,
-            "field_errors": [],
-            "domain_blockers": [],
-            "retryable": error.retryable,
-        }},
+    return typed_http_error(
+        statuses.get(error.category, 500), error.category, error.code,
+        error.message, correlation_id, retryable=error.retryable,
     )
 
 

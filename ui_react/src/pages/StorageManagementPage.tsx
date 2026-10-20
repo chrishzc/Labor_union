@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../components/UnsavedChanges';
 import { useRef } from 'react';
 import { useSaveValidation } from '../components/useSaveValidation';
 /** Audit & System storage-management Query, Preview and confirmed Apply surface. */
@@ -133,6 +134,8 @@ export const StorageManagementPage: React.FC = () => {
       setWorking(false);
     }
   };
+  useUnsavedDraft('儲存空間清理', { '清理模式': mode, '原因': reason, '已核對': confirmed }, { enabled: !!selected, busy: working, resetKey: receipt });
+
 
   return (
     <main className="storage-management-page" aria-labelledby="storage-management-title">

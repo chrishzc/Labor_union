@@ -5,27 +5,10 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from domains.client_finance.historical_obligation_calculation import (
-    build_historical_client_obligation_candidate,
-)
-from domains.orders.floor_fee import prorate_historical_floor_fee
-from domains.payroll.calculation import (
-    AssignmentRateSnapshot,
-    PayrollAdjustment,
-    PayrollPolicyKind,
-    PayrollTerms,
-)
-from domains.payroll.historical_calculation import (
-    HistoricalAssignmentServiceFacts,
-    build_historical_case_payroll_candidate,
-)
-from domains.payroll.payment_due_date import (
-    calculate_staff_payment_due_date,
-    is_full_subsidy_eligible,
-)
 from domains.staff_payables.reconciliation import StaffPayableStatus
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem, ClientRefundExportFact, StaffPayableExportFact
+from infrastructure.mysql.order_terms_read_model import select_current_assignments, select_scheduling_aggregate
 
 
 class MySqlReadOnlySnapshot:
@@ -59,14 +42,7 @@ class MySqlStaffPayableExportSource:
         with self._connection.cursor() as cursor:
             cursor.execute(_STAFF_PAYABLES_SQL, (target_payment_date,))
             rows = tuple(cursor.fetchall())
-            cursor.execute(_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL, ())
-            historical_rows = tuple(cursor.fetchall())
-        projected = tuple(
-            fact
-            for row in historical_rows
-            if (fact := _historical_staff_fact(row, target_payment_date)) is not None
-        )
-        facts = tuple(_staff_fact(row) for row in rows) + projected
+        facts = tuple(_staff_fact(row) for row in rows)
         return tuple(sorted(facts, key=lambda item: (item.staff_id, item.obligation_identity)))
 
     def load_case(
@@ -75,18 +51,24 @@ class MySqlStaffPayableExportSource:
         with self._connection.cursor() as cursor:
             cursor.execute(_STAFF_PAYABLE_CASE_AUDIT_SQL, (case_no,))
             formal_rows = tuple(cursor.fetchall())
-            if formal_rows:
-                return tuple(_formal_case_audit_item(row, target_payment_date) for row in formal_rows)
-            cursor.execute(_HISTORICAL_STAFF_PAYABLE_CASE_PROJECTION_SQL, (case_no,))
-            historical_rows = tuple(cursor.fetchall())
-            if historical_rows:
-                return tuple(
-                    _historical_case_audit_item(row, target_payment_date)
-                    for row in historical_rows
-                )
             cursor.execute(_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL, (case_no,))
             order_rows = tuple(cursor.fetchall())
-        return tuple(_missing_case_audit_item(row) for row in order_rows)
+            items = tuple(_formal_case_audit_item(row, target_payment_date) for row in formal_rows)
+            if not order_rows:
+                return items
+            aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+            assignments = select_current_assignments(cursor, case_no, aggregate["effective_generation_id"])
+            covered_staff = {item.staff_id for item in items}
+            missing = tuple({int(assignment["staff_id"]): assignment for assignment in assignments
+                             if int(assignment["staff_id"]) not in covered_staff}.values())
+            names = {}
+            if missing:
+                cursor.execute("SELECT id,name FROM staff WHERE id IN (" + ",".join("%s" for _ in missing) + ")",
+                               tuple(item["staff_id"] for item in missing))
+                names = {int(row["id"]): row["name"] for row in cursor.fetchall()}
+        return items + tuple(_missing_case_audit_item({**row, "staff_id": assignment["staff_id"] if assignment else None,
+            "recipient_name": names.get(int(assignment["staff_id"])) if assignment else None})
+            for row in order_rows for assignment in (missing or (() if items else (None,))))
 
 
 class MySqlClientRefundExportSource:
@@ -123,88 +105,6 @@ def _staff_fact(row) -> StaffPayableExportFact:
     )
 
 
-def _historical_staff_fact(row, target_payment_date: date) -> StaffPayableExportFact | None:
-    fact = _historical_staff_export_fact(row)
-    return fact if fact is not None and fact.payment_date == target_payment_date else None
-
-
-def _historical_staff_export_fact(row) -> StaffPayableExportFact | None:
-    assignment_id = _integer(row["assignment_id"], "assignment id")
-    staff_id = _integer(row["staff_id"], "staff id")
-    actual_days = _integer(row["actual_service_days"], "actual service days")
-    contracted_days = _integer(row["contracted_service_days"], "contracted service days")
-    floor_fee = prorate_historical_floor_fee(
-        MoneyNTD(_integer(row["floor_fee_ntd"], "floor fee")),
-        contracted_days,
-        actual_days,
-    )
-    assignment_identity = f"assignment:{assignment_id}"
-    payroll = build_historical_case_payroll_candidate(
-        (HistoricalAssignmentServiceFacts(assignment_identity, staff_id, actual_days),),
-        (
-            AssignmentRateSnapshot(
-                assignment_identity,
-                str(row["payroll_policy_version"]),
-                PayrollPolicyKind(str(row["payroll_policy_kind"])),
-                MoneyNTD(_integer(row["payroll_hourly_rate_ntd"], "payroll hourly rate")),
-            ),
-        ),
-        PayrollTerms(
-            contracted_days,
-            Decimal(str(row["service_hours_per_day"])),
-            MoneyNTD(_integer(row["floor_fee_ntd"], "floor fee")),
-        ),
-        (
-            PayrollAdjustment(
-                assignment_identity,
-                MoneyNTD(_integer(row["adjustment_amount_ntd"], "payroll adjustment")),
-            ),
-        ),
-    )
-    client = build_historical_client_obligation_candidate(
-        identity_status=str(row["identity_status"]),
-        client_policy_version=str(row["client_policy_version"]),
-        client_hourly_rate=MoneyNTD(
-            _integer(row["client_hourly_rate_ntd"], "client hourly rate")
-        ),
-        actual_service_days=actual_days,
-        service_hours_per_day=Decimal(str(row["service_hours_per_day"])),
-        historical_floor_fee=floor_fee,
-    )
-    due_date = row.get("staff_payment_due_date") or calculate_staff_payment_due_date(
-        _date_value(row["completed_on"]),
-        client.total_receivable.amount,
-        is_full_subsidy_eligible(str(row["identity_status"]))
-        and client.total_receivable.is_zero,
-    )
-    due_date = _date_value(due_date)
-    amount = payroll.total_payable
-    if amount.amount <= 0:
-        return None
-    status = _staff_status(
-        {
-            **row,
-            "payout_status": "payable",
-            "primary_account_count": row["primary_account_count"],
-        }
-    )
-    return StaffPayableExportFact(
-        obligation_identity=(
-            f"historical-service:{row['case_no']}:revision:1:"
-            f"assignment:{assignment_id}:payable_to_staff"
-        ),
-        case_no=str(row["case_no"]),
-        staff_id=staff_id,
-        recipient_name=_clean_text(row.get("recipient_name")) or "missing",
-        bank_code=_canonical_bank_value(row.get("bank_code"), status),
-        bank_account=_canonical_bank_value(row.get("account_no"), status),
-        amount=amount,
-        payment_date=due_date,
-        status=status,
-        recipient_identity_card=_clean_text(row.get("identity_card")),
-    )
-
-
 def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
     due_date = row.get("due_date")
     payout_status = str(row.get("payout_status") or "payable")
@@ -232,53 +132,18 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
         source="formal_obligation",
         disposition=disposition,
         reason=reason,
-    )
-
-
-def _historical_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
-    fact = _historical_staff_export_fact(row)
-    if fact is None:
-        return CaseStaffPayableAuditItem(
-            case_no=str(row["case_no"]),
-            staff_id=_integer(row["staff_id"], "staff id"),
-            recipient_name=_clean_text(row.get("recipient_name")) or None,
-            obligation_identity=None,
-            amount_due=None,
-            balance=None,
-            order_due_date=row.get("staff_payment_due_date"),
-            effective_due_date=None,
-            source="historical_projection",
-            disposition="blocked",
-            reason="合法歷史計算未形成正數月嫂應付款。",
-        )
-    status = fact.status
-    if status is StaffPayableStatus.ANOMALY:
-        disposition, reason = "blocked", "合法歷史計算已形成，但受款資料尚有 blocker。"
-    elif fact.payment_date == target_payment_date:
-        disposition, reason = "selected_month", "合法歷史唯讀計算列入所選付款月份。"
-    else:
-        disposition, reason = "other_month", "合法歷史唯讀計算屬於其他付款月份。"
-    return CaseStaffPayableAuditItem(
-        case_no=fact.case_no,
-        staff_id=fact.staff_id,
-        recipient_name=fact.recipient_name,
-        obligation_identity=fact.obligation_identity,
-        amount_due=fact.amount,
-        balance=fact.amount,
-        order_due_date=row.get("staff_payment_due_date"),
-        effective_due_date=fact.payment_date,
-        source="historical_projection",
-        disposition=disposition,
-        reason=reason,
+        payment_status=(historical_confirmation if historical_confirmation is not None else
+                        "paid" if payout_status == "completed" else
+                        "partially_paid" if payout_status == "partially_paid" else "pending"),
     )
 
 
 def _missing_case_audit_item(row) -> CaseStaffPayableAuditItem:
     due_date = row.get("staff_payment_due_date")
     if due_date is None:
-        disposition, reason = "date_not_formed", "案件月嫂應付日尚未形成。"
+        disposition, reason = "date_not_formed", "尚未建立月嫂應付帳務與應付日，請由服務天數帳務流程補建。"
     else:
-        disposition, reason = "missing_calculation_basis", "案件已有應付日，但缺少形成月嫂義務所需的正式計算依據。"
+        disposition, reason = "missing_calculation_basis", "案件已有應付日，但尚未建立月嫂應付帳務；請由服務天數帳務流程補建。"
     staff_id = row.get("staff_id")
     return CaseStaffPayableAuditItem(
         case_no=str(row["case_no"]),
@@ -478,86 +343,9 @@ ORDER BY obligations.staff_id, obligations.obligation_identity
 """
 
 
-_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL = """
-SELECT orders.case_no,
-       assignment.id AS assignment_id,
-       evidence.staff_id,
-       staff.name AS recipient_name,
-       staff.identity_card,
-       orders.service_days AS contracted_service_days,
-       orders.service_hours_per_day,
-       orders.floor_fee AS floor_fee_ntd,
-       COALESCE(day_item.actual_service_days, orders.service_days) AS actual_service_days,
-       COALESCE(rate.policy_version, case_rate.policy_version) AS payroll_policy_version,
-       COALESCE(rate.policy_kind, case_rate.policy_kind) AS payroll_policy_kind,
-       COALESCE(rate.hourly_rate_ntd, case_rate.hourly_rate_ntd) AS payroll_hourly_rate_ntd,
-       COALESCE(adjustments.amount_ntd, 0) AS adjustment_amount_ntd,
-       clients.identity_status,
-       client_terms.policy_version AS client_policy_version,
-       client_terms.client_hourly_rate_ntd,
-       COALESCE(orders.actual_end_date, orders.end_date) AS completed_on,
-       orders.staff_payment_due_date,
-       (SELECT COUNT(*) FROM staff_bank_accounts account
-         WHERE account.staff_id=evidence.staff_id AND account.is_primary=1) AS primary_account_count,
-       (SELECT MAX(account.bank_code) FROM staff_bank_accounts account
-         WHERE account.staff_id=evidence.staff_id AND account.is_primary=1) AS bank_code,
-       (SELECT MAX(account.account_no) FROM staff_bank_accounts account
-         WHERE account.staff_id=evidence.staff_id AND account.is_primary=1) AS account_no
-FROM orders
-JOIN clients ON clients.id=orders.client_id
-JOIN historical_order_adoption_receipts receipt ON receipt.id=(
-    SELECT MAX(candidate.id)
-    FROM historical_order_adoption_receipts candidate
-    WHERE candidate.case_no=orders.case_no AND candidate.outcome='adopted'
-)
-JOIN historical_order_pairing_evidence evidence
-  ON evidence.receipt_id=receipt.id AND evidence.assignment_id IS NOT NULL
-JOIN case_staff_assignments assignment ON assignment.id=evidence.assignment_id
-JOIN staff ON staff.id=evidence.staff_id
-JOIN case_payroll_rate_policy_snapshots case_rate ON case_rate.case_no=orders.case_no
-LEFT JOIN assignment_payroll_rate_snapshots rate ON rate.assignment_id=assignment.id
-JOIN client_payment_terms client_terms ON client_terms.case_no=orders.case_no
-LEFT JOIN historical_service_day_projections day_projection
-  ON day_projection.case_no=orders.case_no
-LEFT JOIN historical_service_day_items day_item
-  ON day_item.event_id=day_projection.current_event_id
- AND day_item.assignment_id=assignment.id
-LEFT JOIN (
-    SELECT assignment_id, SUM(amount_ntd) AS amount_ntd
-    FROM payroll_adjustment_allocations
-    GROUP BY assignment_id
-) adjustments ON adjustments.assignment_id=assignment.id
-WHERE orders.status='歷史訂單－服務完成'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM staff_obligations obligation
-      WHERE obligation.case_no=orders.case_no
-        AND obligation.assignment_id=assignment.id
-        AND obligation.obligation_kind='service_pay'
-  )
-ORDER BY evidence.staff_id, orders.case_no, assignment.id
-"""
-
-_HISTORICAL_STAFF_PAYABLE_CASE_PROJECTION_SQL = (
-    _HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL.replace(
-        "\nORDER BY evidence.staff_id, orders.case_no, assignment.id",
-        "\n  AND orders.case_no=%s\nORDER BY evidence.staff_id, orders.case_no, assignment.id",
-    )
-)
-
 _STAFF_PAYABLE_CASE_ORDER_FACTS_SQL = """
-SELECT orders.case_no,
-       orders.staff_payment_due_date,
-       COALESCE(assignment.staff_id, orders.staff_id) AS staff_id,
-       staff.name AS recipient_name
+SELECT orders.case_no,orders.staff_payment_due_date
 FROM orders
-LEFT JOIN case_staff_assignments assignment ON assignment.id = (
-    SELECT MAX(candidate.id)
-    FROM case_staff_assignments candidate
-    WHERE candidate.case_no = orders.case_no
-      AND candidate.status IN ('planned', 'active', 'completed')
-)
-LEFT JOIN staff ON staff.id = COALESCE(assignment.staff_id, orders.staff_id)
 WHERE orders.case_no = %s
 """
 
@@ -612,4 +400,4 @@ ORDER BY obligations.case_no, obligations.obligation_identity
 
 
 
-__all__ = ['MySqlClientRefundExportSource', 'MySqlReadOnlySnapshot', 'MySqlStaffPayableExportSource', '_HISTORICAL_STAFF_PAYABLE_PROJECTION_SQL']
+__all__ = ['MySqlClientRefundExportSource', 'MySqlReadOnlySnapshot', 'MySqlStaffPayableExportSource']

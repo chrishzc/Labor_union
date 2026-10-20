@@ -14,6 +14,10 @@ afterEach(() => {
 
 // Polyfill DOM APIs in happy-dom
 if (typeof window !== 'undefined') {
+  // Browser dialogs need callable test doubles for Vitest 4 spies.
+  // Confirmations remain declined unless a component test explicitly opts in.
+  window.alert ??= vi.fn();
+  window.confirm ??= vi.fn(() => false);
   window.scrollTo = vi.fn();
   window.matchMedia =
     window.matchMedia ||

@@ -70,14 +70,12 @@ def prepare(settings: Path = Path("/settings"), data: Path = Path("/data")) -> N
            "ADMIN_ENTRY_TARGET_STATE_PATH=/data/admin-entry-target-state.json\n"
            "CONTROLLED_FILE_STORAGE_ROOT=/data/controlled-files\n"
            "MEDIA_STORAGE_ROOT=/data/media\nCONTRACT_DOCUMENT_ARCHIVE_ROOT=/data/contracts\n"
-           "INTERNAL_SERVICE_OIDC_AUDIENCE=https://nas-preview.internal\n"
-           "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS=\n")
-    _write(settings / "worker.env", "INTERNAL_API_BASE_URL=http://api:8080\n"
-           "INTERNAL_SERVICE_AUTH_MODE=google_oidc\n"
-           "INTERNAL_SERVICE_OIDC_AUDIENCE=https://nas-preview.internal\n"
-           "GOOGLE_APPLICATION_CREDENTIALS=/run/line-oidc.json\n")
-    _write(settings / "line-oidc.json", "{}\n", 0o400)
-    os.chown(settings / "line-oidc.json", 1000, -1)
+           "INTERNAL_SERVICE_AUTH_MODE=nas_service_token\n"
+           "INTERNAL_SERVICE_CREDENTIALS_FILE=/run/worker-verifiers/verifiers.json\n")
+    _write(settings / "worker.env", "INTERNAL_API_BASE_URL=https://management-api:8443\n"
+           "INTERNAL_SERVICE_AUTH_MODE=nas_service_token\n"
+           "INTERNAL_SERVICE_TOKEN_FILE=/run/worker/token\n"
+           "INTERNAL_API_CA_FILE=/run/private-ca/ca.pem\n")
     for name in ("controlled-files", "media", "contracts"):
         (data / name).mkdir()
     # Exact canonical entry-state owner; no invented/relaxed artifact state.

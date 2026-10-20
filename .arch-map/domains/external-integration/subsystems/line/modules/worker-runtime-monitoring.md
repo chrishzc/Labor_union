@@ -12,6 +12,7 @@
   - `subsystems/line/worker_runtime.py`
   - `subsystems/line/runtime_monitoring_application.py`
 - persistence adapter: `infrastructure/mysql/runtime_monitor_repository.py`
+- 告警候選查詢只使用既有 target／event／delivery 資料表，分類依固定 target type 規則；不依賴個別偏好表，不吞掉必要資料表的權限／缺表錯誤。
 
 ## Contracts
 - `subsystems/line/runtime_contracts.py::LineWorkerHeartbeat` — success／failure heartbeat typed fact。

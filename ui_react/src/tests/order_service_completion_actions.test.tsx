@@ -59,7 +59,7 @@ describe('OrderServiceCompletionActions', () => {
   it('preserves Preview confirmation gating and completion readback', async () => {
     const onCompleted = vi.fn();
     render(<OrderServiceCompletionActions caseNo="115000001" orderStatus="服務中" onCompleted={onCompleted} />);
-    expect(screen.getByText(/核對正式排班/)).toBeInTheDocument();
+    expect(screen.getByText(/重新核對排班、完整服務日、服務結束時刻與可完成條件/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/lifecycle controls|fingerprint|idempotency|receipt/i);
 
     fireEvent.click(screen.getByRole('button', { name: '檢查服務完成影響' }));

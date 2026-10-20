@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
@@ -450,6 +451,17 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
     const current = orderMutationFlowStore.getCandidateWillingness(caseNo, candidateId);
     if (current?.status === 'observation_failed' && current.receipt) void observeWillingness(candidateId);
   };
+  const originalResponse = state.status === 'ready' && responseTarget ? state.data.candidates.find(candidate => candidate.id === responseTarget.id) : undefined;
+  const willingnessText = (value: string | undefined) => value === 'willing' ? '願意承接' : value === 'unwilling' ? '無意願' : '未回覆';
+  useUnsavedChanges('人選回覆', [
+    ...Object.entries(reasonDrafts).flatMap(([id, value]) => {
+      const candidate = state.status === 'ready' ? state.data.candidates.find(item => item.id === Number(id)) : undefined;
+      return value === (candidate?.reason ?? '') ? [] : [{ label: `人選 ${id} 回覆原因`, before: candidate?.reason || '未填寫', after: value || '未填寫' }];
+    }),
+    ...(responseTarget && willingnessText(responseChoice) !== willingnessText(originalResponse?.willingness)
+      ? [{ label: `${responseTarget.name} 接案意願`, before: willingnessText(originalResponse?.willingness), after: willingnessText(responseChoice) }] : []),
+  ], { busy: protectedOperation });
+
 
   return (
     <section className="order-candidate-list" aria-label={`案件 ${caseNo} 候選聯絡狀態`}>

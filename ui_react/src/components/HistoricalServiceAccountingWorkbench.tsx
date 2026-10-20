@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import React, { useEffect, useState } from 'react';
 import { historicalServiceAccountingClient, type HistoricalCaregiverDays, type HistoricalServiceAccountingPreview, type HistoricalServiceAccountingQuery } from '../api/orders/historical_service_accounting_client';
@@ -31,6 +32,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
     return () => { active = false; };
   }, []);
 
+  const { requestLeave } = useUnsavedNavigation();
   const inputs = (): HistoricalCaregiverDays[] => (facts?.assignments ?? []).map((item) => ({ assignment_identity: item.assignment_identity, staff_id: item.staff_id, actual_service_days: Number(days[item.assignment_identity]) }));
   const run = async (operation: () => Promise<void>) => { setBusy(true); setMessage(''); try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : '處理失敗。'); } finally { setBusy(false); } };
   const caseOptionsUnavailable = orderListState !== 'ready' || orderSummaries.length === 0;
@@ -41,12 +43,14 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
       : orderSummaries.length === 0
         ? '目前沒有可選案件'
         : '請選擇案件';
+  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days }, { busy, resetKey: facts });
+
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
     <h2>🧮 歷史訂單實際服務天數與帳務</h2>
     <p>只填每位月嫂的實際服務天數；系統會自動重算月嫂應付，已有付款紀錄時則建立差額，不改動歷史訂單完成狀態。</p>
     <div className="import-result-title-row">
-      <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable} onChange={(event) => { setCaseNo(event.target.value); setFacts(null); setPreview(null); }}>
+      <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable} onChange={(event) => { const value = event.target.value; requestLeave(() => { setCaseNo(value); setFacts(null); setPreview(null); }); }}>
         <option value="">{casePlaceholder}</option>
         {orderSummaries.map((item) => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}｜{item.order_status}</option>)}
       </select></label>
@@ -61,7 +65,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>
       <p>客戶應付 {preview.client_obligation_amount_ntd.toLocaleString()} 元；月嫂應付合計 {preview.staff_obligation_amount_ntd.toLocaleString()} 元。</p>
       {preview.payroll_assignments.map((item) => <p key={item.assignment_identity}>{staffIdentity.label(item.staff_id, facts?.assignments.find(person => person.staff_id === item.staff_id)?.staff_name)}：{item.actual_service_days} 天，應付 {item.total_payable_ntd.toLocaleString()} 元。</p>)}
-      <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。'); setPreview(null); })}>確認更新帳務</button>
+      <button type="button" disabled={busy} onClick={() => void run(async () => { const receipt = await historicalServiceAccountingClient.apply(preview, inputs(), '核對舊系統實際服務天數'); unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。'); setPreview(null); })}>確認更新帳務</button>
     </div>}
     {message && <p role="alert">{message}</p>}
   </section>;

@@ -7,6 +7,7 @@ import os
 from api.dependencies.line_worker_operation import _media_storage_root
 from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+from infrastructure.runtime.file_transfer_settings import file_read_capacity
 from infrastructure.line.media_adapters import FileSystemLineMediaObjectStore
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
@@ -29,7 +30,9 @@ def get_controlled_file_workflow():
         yield ControlledFileWorkflow(
             MySqlControlledFileWorkflowRepository(connection),
             FileSystemControlledFileStorage(
-                os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None
+                os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None,
+                max_staging_bytes=file_read_capacity(),
+                max_read_bytes=file_read_capacity(),
             ),
             lambda: MySqlUnitOfWork(connection),
             SystemBusinessClock(),

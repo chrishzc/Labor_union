@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   intakeBlockerMessage,
@@ -571,6 +572,8 @@ export function OrderIntakeRepairPanel({
     || completion.apply_allowed
     || termsRepairEligible
     || ((historicalRestartAvailable || historicalCompleted) && completion.blockers.length > 0);
+  useUnsavedDraft('案件資料補登', { '客戶姓名': clientName, '開始日期': startDate, '服務天數': serviceDays, '每日服務時數': serviceHours, '開始時間': startTime, '結束時間': endTime, '跨日': endDayOffset, '原因': reason }, { enabled: !loading && !!completion, resetKey: completion, busy: controlsLocked });
+
 
   if (summaryHref) {
     const missing = completion?.missing_fields.map((field) => FIELD_LABELS[field]) ?? [];

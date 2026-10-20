@@ -257,12 +257,7 @@ class HistoricalServiceAccountingWorkflow:
         actor: str,
         correlation_id: str,
     ) -> HistoricalServiceAccountingReceipt | None:
-        try:
-            facts = self._repository.load(case_no, for_update=True)
-        except ValueError as exc:
-            if str(exc) == "historical_client_payment_terms_missing":
-                return None  # 付款條款未設定，需後台手動建立帳務
-            raise
+        facts = self._repository.load(case_no, for_update=True)
         if facts.historical_day_revision > 0:
             return None
         if len(facts.assignments) != 1:

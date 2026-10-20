@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import {
   candidateContactPoolClient,
@@ -307,6 +308,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     : null;
   useEffect(() => { onEditStateChange?.({ dirty: selectedStaffIds.size > 0, busy: busy || recoveryPending }); }, [selectedStaffIds, busy, recoveryPending, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
+  useUnsavedDraft('新增詢問人選', { '已選月嫂': [...selectedStaffIds] }, { baseline: { '已選月嫂': [] }, busy: multiBusy || addState.status === 'saving' || !!flow });
+
 
   return (
     <section aria-label={`案件 ${caseNo} 正式候選查詢`}>

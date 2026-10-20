@@ -72,6 +72,10 @@ def test_retention_archives_after_two_years_without_deleting_archive() -> None:
 
     assert "ONLINE_RETENTION_YEARS = 2" in source
     assert "INTERVAL 2 YEAR" in source
-    assert "INSERT IGNORE INTO admin_audit_log_archive" in source
-    assert "DELETE FROM admin_audit_log_archive" not in source
+    from infrastructure.mysql.nas_mutations import PROCEDURES
+    procedure = PROCEDURES["lu_nas_archive_audits_v1"][1]
+    assert "CALL lu_nas_archive_audits_v1(%s)" in source
+    assert "INSERT IGNORE INTO admin_audit_log_archive" in procedure
+    assert "INTERVAL 2 YEAR" in procedure
+    assert "DELETE FROM admin_audit_log_archive" not in procedure
     assert "admin_audit_log_archive" in schema

@@ -106,8 +106,12 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
 
     const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
     await waitFor(() => expect(send).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '手動記錄客戶決定' }));
     const directAccept = screen.getByRole('button', { name: '記錄方案 51 客戶接受' });
-    expect(directAccept).toBeDisabled();
+    const beforeInvalid = mocks.queryContactState.mock.calls.length;
+    fireEvent.click(directAccept);
+    expect(screen.getByText('請填寫或選擇「客戶回覆依據」後再儲存。')).toBeInTheDocument();
+    expect(mocks.queryContactState).toHaveBeenCalledTimes(beforeInvalid);
     fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), {
       target: { value: '電話已確認客戶接受。' },
     });
@@ -115,6 +119,7 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
     fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '' } });
 
     fireEvent.click(send);
+    fireEvent.click(await screen.findByRole('button', { name: '確認寄送' }));
 
     await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalledWith(
       CASE_NO,
@@ -127,8 +132,11 @@ describe('issue #277 stage-5 customer recommendation ordering', () => {
 
     const accept = screen.getByRole('button', { name: '記錄方案 51 客戶接受' });
     const decline = screen.getByRole('button', { name: '記錄方案 51 客戶拒絕' });
-    expect(accept).toBeDisabled();
-    expect(decline).toBeDisabled();
+    const beforeBlankDecisions = mocks.queryContactState.mock.calls.length;
+    fireEvent.click(accept);
+    fireEvent.click(decline);
+    expect(screen.getByText('請填寫或選擇「客戶回覆依據」後再儲存。')).toBeInTheDocument();
+    expect(mocks.queryContactState).toHaveBeenCalledTimes(beforeBlankDecisions);
     expect(screen.getByLabelText('方案 51 客戶決策依據')).toHaveValue('');
   });
 });

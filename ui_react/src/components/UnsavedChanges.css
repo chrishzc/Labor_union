@@ -1,0 +1,13 @@
+.unsaved-dialog { border: 1px solid var(--md-sys-color-outline-variant, #d7dce2); border-radius: 16px; padding: 24px; width: min(780px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; color: var(--md-sys-color-on-surface, #20272e); background: var(--md-sys-color-surface, white); box-sizing: border-box; }
+.unsaved-dialog::backdrop { background: #10182088; }
+.unsaved-dialog h2 { margin-top: 0; font-size: 1.35rem; }
+.unsaved-dialog h3 { font-size: 1rem; margin: 20px 0 8px; }
+.unsaved-table { overflow: auto; }
+.unsaved-dialog table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.unsaved-dialog th, .unsaved-dialog td { text-align: left; vertical-align: top; border-bottom: 1px solid #d7dce2; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.unsaved-dialog th { font-weight: 600; }
+.unsaved-dialog thead { background: #f1f5f5; }
+.unsaved-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 24px; }
+.unsaved-actions button { border: 1px solid #bac7c7; border-radius: 8px; background: transparent; color: inherit; padding: 10px 16px; font: inherit; cursor: pointer; }
+.unsaved-actions .unsaved-save { background: #23685d; border-color: #23685d; color: white; }
+.unsaved-actions button:disabled { opacity: .5; cursor: default; }

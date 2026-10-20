@@ -83,7 +83,9 @@ def _result(metadata: LineMediaMetadata, outcome: str) -> LiffMealPhotoUploadRes
     )
 
 
-def prepare_liff_meal_photo_upload(command: LiffMealPhotoUpload) -> LineMediaMetadata:
+def prepare_liff_meal_photo_upload(
+    command: LiffMealPhotoUpload, *, maximum_size_bytes: int | None = None,
+) -> LineMediaMetadata:
     if not command.content:
         raise ValueError("service_day_meal_photo_is_empty")
     detected_type = _image_content_type(command.content)
@@ -103,7 +105,9 @@ def prepare_liff_meal_photo_upload(command: LiffMealPhotoUpload) -> LineMediaMet
         received_at=datetime.now(timezone.utc),
         category=LineMediaCategory.USER_UPLOAD,
     )
-    validate_media_against_policy(metadata, MEAL_PHOTO_POLICY)
+    policy = (MEAL_PHOTO_POLICY if maximum_size_bytes is None else
+              LineMediaPolicy(MEAL_PHOTO_POLICY.allowed_content_types, maximum_size_bytes))
+    validate_media_against_policy(metadata, policy)
     return metadata
 
 

@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: OrderServiceCompletionActions.tsx
  * Description: 提供管理員依 AutoComplete owner command 完成服務的 Preview、確認、Apply 與 receipt UI。
@@ -166,6 +167,8 @@ const ServiceCompletionForCase: React.FC<Props> = ({
     setError(null);
     try { await observeCompletion(); } finally { working.current = false; }
   };
+  useUnsavedDraft('服務完成確認', { '原因': reason, '已確認': confirmed }, { resetKey: status === 'completed', busy: ['applying', 'outcome_unknown', 'observation_failed', 'observing'].includes(status) });
+
 
   return (
     <div className="calendar-workbench-card" style={{ marginTop: '16px' }}>

@@ -1,3 +1,4 @@
+import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
@@ -139,7 +140,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     }
   };
   const sortLabel = (sortBy: ClientRegistrySortBy) => appliedFilters.sortBy === sortBy ? (appliedFilters.sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
-  const openDetail = async (caseNo: string) => {
+  const readDetail = async (caseNo: string) => {
     const request = ++detailRequest.current;
     setSelectedCaseNo(caseNo); setDetail(null); setDetailError(null); setDetailLoading(true);
     try {
@@ -151,6 +152,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       if (detailRequest.current === request) setDetailLoading(false);
     }
   };
+  const openDetail = (caseNo: string) => requestLeave(() => { void readDetail(caseNo); });
   useEffect(() => {
     if (initialCaseNo) void openDetail(initialCaseNo);
   }, [initialCaseNo]);
@@ -166,12 +168,14 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     if (listId === listRequest.current) setPage(refreshedPage);
     return result;
   };
+  const { requestLeave } = useUnsavedNavigation();
   const closeDetail = () => {
     if (editState.busy) return;
-    if (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並關閉？')) return;
+    requestLeave(() => {
     setEditState({ dirty: false, busy: false });
     detailRequest.current += 1;
     setSelectedCaseNo(null); setDetail(null); setDetailError(null); setDetailLoading(false);
+    });
   };
   const exportWorkbook = async (kind: 'order-accounting' | 'case-inspection') => {
     const label = kind === 'case-inspection' ? '案件資料檢查' : '訂單帳務';
@@ -280,13 +284,13 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       closeDisabled={editState.busy}
     >
       {onReturnToCase && selectedCaseNo && <div className="registry-return-row"><button type="button" disabled={editState.busy} onClick={() => {
-        if (editState.busy || (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並返回案件？'))) return;
+        if (editState.busy) return;
         onReturnToCase(selectedCaseNo);
       }}>返回案件處理 →</button></div>}
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
       {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} onOpenServiceArrangement={recalculateDates => {
-        if (editState.busy || (editState.dirty && !window.confirm('有尚未儲存的變更，確定放棄並前往服务安排？'))) return;
+        if (editState.busy) return;
         if (onOpenServiceArrangement) onOpenServiceArrangement(detail.case_no, recalculateDates);
         else window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(detail.case_no)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`;
       }} />}

@@ -6,6 +6,7 @@ Description: 提供 Staff matching preference 的 MySQL aggregate lock 與持久
 from __future__ import annotations
 
 import json
+from infrastructure.mysql.nas_mutations import call_mutation
 from collections.abc import Mapping
 from typing import Any
 
@@ -154,7 +155,7 @@ class MySqlStaffMatchingPreferenceRepository:
                 (staff_id, version, actor, actor),
             )
             definition_ids = _definition_ids(cursor, tuple(values))
-            _delete_removed_values(cursor, staff_id, tuple(definition_ids.values()))
+            _delete_removed_values(cursor, staff_id, tuple(definition_ids.values()), version)
             for key, value in values.items():
                 cursor.execute(
                     _VALUE_UPSERT,
@@ -224,16 +225,8 @@ def _definition_ids(cursor, keys):
     return result
 
 
-def _delete_removed_values(cursor, staff_id, kept_definition_ids):
-    if not kept_definition_ids:
-        cursor.execute("DELETE FROM staff_matching_preference_values WHERE staff_id=%s", (staff_id,))
-        return
-    placeholders = ",".join(["%s"] * len(kept_definition_ids))
-    cursor.execute(
-        "DELETE FROM staff_matching_preference_values "
-        f"WHERE staff_id=%s AND definition_id NOT IN ({placeholders})",
-        (staff_id, *kept_definition_ids),
-    )
+def _delete_removed_values(cursor, staff_id, kept_definition_ids, version):
+    call_mutation(cursor, "lu_nas_trim_preferences_v1", staff_id, version, json.dumps(kept_definition_ids))
 
 
 def _event_values(event):

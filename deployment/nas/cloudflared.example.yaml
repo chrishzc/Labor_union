@@ -1,0 +1,16 @@
+# 用文字編輯器填完後，另存為同專案的 tunnel/config.yaml（UTF-8）。
+# 【必填】下列 Tunnel UUID 與兩個 hostname；YAML 不會展開 .env。
+# credentials.json 是該 Tunnel 專用憑證，另存於 tunnel/credentials.json。
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/credentials.json
+ingress:
+  - hostname: REPLACE_WITH_LINE_PUBLIC_HOSTNAME
+    path: ^/internal(/|$)
+    service: http_status:404
+  - hostname: REPLACE_WITH_LINE_PUBLIC_HOSTNAME
+    service: https://line-api:8443
+    originRequest:
+      originServerName: line-api
+      caPool: /run/private-ca/ca.pem
+      noTLSVerify: false
+  - service: http_status:404

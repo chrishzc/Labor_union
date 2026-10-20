@@ -5,6 +5,7 @@ import { OrderTermsMutationPanel } from '../../../../../../../components/OrderTe
 import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
 import { OrderAssignmentPlanPanel } from '../../../../../../../components/OrderAssignmentPlanPanel';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { OrderTerms } from '../../../../../../../api/orders/order_query_schemas';
 
 const mocks = vi.hoisted(() => ({ termsQuery: vi.fn(), termsPreview: vi.fn(), termsApply: vi.fn(), pool: vi.fn(), willingness: vi.fn(),
@@ -97,7 +98,7 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
   it('候選意願需同案件同 candidate 的實際 readback，才通知外層', async () => {
     mocks.pool.mockResolvedValueOnce(pool('pending')).mockResolvedValue(pool('willing', 18));
     const onObserved = vi.fn(); render(<OrderCandidateContactStatusPanel caseNo={CASE} onObserved={onObserved} />);
-    await screen.findByText('測試月嫂');
+    await screen.findByText('未設定 測試月嫂');
     fireEvent.click(screen.getByText('記錄電話或現場詢問結果'));
     fireEvent.click(await screen.findByRole('button', { name: '記錄 測試月嫂 願意' }));
     await screen.findByText('回覆已儲存。');
@@ -105,8 +106,10 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
   });
 
   it('正式指派單純 GET 不刷新父頁形成迴圈，更換完成後的 GET 才通知', async () => {
+    mocks.active.mockRejectedValue(new ApiHttpError(404, 'resource_not_found', '無媒合方案'));
     const onObserved = vi.fn(); render(<OrderAssignmentPlanPanel caseNo={CASE} onObserved={onObserved} />);
-    fireEvent.click(screen.getByRole('button', { name: '讀取正式指派與排班' }));
+    await screen.findByRole('region', { name: `案件 ${CASE} 正式指派與排班回讀` });
+    fireEvent.click(await screen.findByText('查看目前月嫂與排班明細'));
     await screen.findByText('尚無正式指派'); expect(onObserved).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '服務前更換月嫂' }));
     fireEvent.click(screen.getByRole('button', { name: '模擬正式更換完成' }));
@@ -117,9 +120,13 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
     let resolve!: (value: { intent_id: number; delivery_status: string }) => void;
     mocks.sendConfirmation.mockImplementation(() => new Promise((done) => { resolve = done; }));
     const onObserved = vi.fn(); const view = render(<OrderFormalRecommendationPanel caseNo={CASE} onObserved={onObserved} />);
+    const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
+    await waitFor(() => expect(send).toBeEnabled());
+    fireEvent.click(send);
+    fireEvent.click(screen.getByText('調整寄送訊息'));
     fireEvent.change(await screen.findByLabelText('方案 51 確認資訊備註'), { target: { value: '人工核對履歷。' } });
-    await waitFor(() => expect(screen.getByRole('button', { name: '寄送確認資訊給客戶' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '確認寄送' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
     await waitFor(() => expect(mocks.sendConfirmation).toHaveBeenCalledTimes(1));
     view.unmount();
     await act(async () => { resolve({ intent_id: 81, delivery_status: 'pending' }); });

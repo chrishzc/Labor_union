@@ -27,6 +27,7 @@ from api.routes import (
     admin_auth,
     admin_entry_targets,
     account_center,
+    registration_applications,
     anomaly_necessity_migration,
     anomaly_recovery,
     anomaly_registry,
@@ -51,6 +52,7 @@ from api.routes import (
     client_payment_destination,
     contracts,
     controlled_files,
+    file_settings,
     data_browser_admin,
     finance_import,
     hcm_import,
@@ -251,6 +253,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 app.include_router(line_router)
 app.include_router(admin_auth.router)
 app.include_router(account_center.router)
+app.include_router(registration_applications.router)
 app.include_router(admin_audit.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
@@ -352,6 +355,7 @@ app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(controlled_files.router)
+app.include_router(file_settings.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
 app.include_router(client_beclass_import.router)

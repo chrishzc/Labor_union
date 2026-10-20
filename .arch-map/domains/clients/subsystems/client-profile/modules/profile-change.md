@@ -33,6 +33,7 @@
   - 變更歷程置於 Drawer 最下方，依選取案件與正式 detail 回讀自動重新 Query；保留 server 時間／流程順序、原因、操作人員及臺北時間。失敗可單獨重讀，晚回應不污染已切換案件；獨立歷程分頁已合併。
 - `ui_react/src/components/OrderTermsUnavailableNote.tsx` — 名冊編輯與唯讀詳情共用服務條件提示；日期／天數缺件以 Orders completion Preview 的 actual missing fields 顯示，查詢失敗不推定空值，錯誤代碼置於技術資訊。
 - `ui_react/src/components/ClientRegistryServiceStaff.tsx` — Drawer 顯示 Scheduling effective assignments，借用 Staff bounded 摘要讀取姓名與公會編號；組合既有服務前換人操作，完成後回讀且保留其他區草稿，已服務轉介請假代班。
+  - 歷史與正常案件均使用 Scheduling Assignment Plan Query 的 canonical assignment；歷史 binding 由 owner 選取，不在 UI 另讀歷史來源。無逐日排班仍顯示已保存的人員／期間，不提供正常換人／日期更正操作。
   - 「服務安排與月嫂」倒數第二區加入 Orders actual-start 更正；有指派時原子更新各段排班。草稿／結果未明受既有名冊關閉鎖保護，成功後以相同 case 深連結至 service work group 核對。
 - `ui_react/src/components/ClientRegistryReplacementCandidates.tsx` — 倒數第二區續辦接任人選；組合現有候選查詢／保存、意願紀錄與正式推薦／客戶確認。三步保持草稿、結果未明及回讀關閉鎖；推薦不冒充 effective assignment。
 - `ui_react/src/components/ClientRosterColumnFilter.tsx` — Excel 式表頭篩選；只讀 allowlisted 全名冊選項，不在單頁上過濾。

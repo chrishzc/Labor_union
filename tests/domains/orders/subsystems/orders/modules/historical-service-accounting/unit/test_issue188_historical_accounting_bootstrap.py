@@ -119,6 +119,15 @@ def test_missing_client_payment_terms_fails_closed_with_specific_code():
         repository.load("CASE-188", for_update=False)
 
 
+def test_default_accounting_cannot_silently_skip_missing_payment_terms():
+    repository = MySqlHistoricalServiceAccountingRepository(_LoadConnection(terms=False))
+    workflow = HistoricalServiceAccountingWorkflow(repository, lambda: None)
+    with pytest.raises(ValueError, match="historical_client_payment_terms_missing"):
+        workflow.establish_default_in_current_unit_of_work(case_no="CASE-188", source_identity="source:188",
+            actor="admin", correlation_id="corr-188")
+    assert len(repository._connection.cursor_instance.statements) == 1
+
+
 def test_missing_payroll_rate_fails_closed_with_specific_code():
     repository = MySqlHistoricalServiceAccountingRepository(_LoadConnection(rate=False))
 

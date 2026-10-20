@@ -120,7 +120,11 @@ async def create_first_root(request: Request):
 def create_app():
     """Attach setup only to the NAS entry, never to the normal API application."""
     from scripts.nas_test_runtime import management_preview_app
-    app = management_preview_app()
+    return attach_setup(management_preview_app())
+
+
+def attach_setup(app):
+    """Share the first-root boundary with the complete internal NAS application."""
     app.include_router(router)
 
     @app.middleware("http")

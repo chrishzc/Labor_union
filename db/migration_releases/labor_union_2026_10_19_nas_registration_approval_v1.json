@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-nas-registration-approval-2026-10-19-v1",
+  "release_metadata": {
+    "release_name": "NAS registration human approval",
+    "application_version": "nas-security-v1",
+    "published_at": "2026-10-19",
+    "description": "Add pending application snapshot and approval metadata; preserve existing clients and bindings without business backfill"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-candidate-weekly-information-2026-10-14-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1052_nas_registration_approval.sql",
+      "relative_path": "db/schema_parts/1052_nas_registration_approval.sql",
+      "sha256": "f3fd5f0d1063344fd219288c5e07f72a8b1732b01e779bbca6b87f09046918d7",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-additive-columns-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "nas-registration-approval-exact",
+      "phase": "post-schema",
+      "policy": "Exact four additive parent columns; preserve all existing registrations, Client and BeClass references, bindings and enum values; no business-row backfill",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "nas-security-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "nas-registration-approval-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_19_nas_registration_approval_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.descriptors.json",
+    "sha256": "dd22ec07abd22e0e62ec88e8371da1d3d251b454abbd8590189dd343f99fcd56",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

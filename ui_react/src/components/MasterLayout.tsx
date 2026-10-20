@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Database,
   FileBarChart,
+  FolderOpen,
   HardDrive,
   HeartHandshake,
   History,
@@ -48,7 +49,8 @@ export type PageType =
   | 'finance'
   | 'historical-service-accounting'
   | 'account-management'
-  | 'storage-management';
+  | 'storage-management'
+  | 'file-settings';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-workbench-v2': 'operations',
@@ -69,6 +71,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
 
   'account-management': 'audit',
   'storage-management': 'audit',
+  'file-settings': 'audit',
 };
 
 export interface NavItem {
@@ -101,6 +104,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Audit & System Section
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
   { id: 'storage-management', icon: HardDrive, label: '儲存空間管理', section: 'audit' },
+  { id: 'file-settings', icon: FolderOpen, label: '檔案設定', section: 'audit' },
 ];
 
 const SECTION_LABELS: Record<SectionType, string> = {
@@ -198,10 +202,6 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   const handleSectionClick = (section: SectionType) => {
     setIsSidebarOpen(false);
     onSelectSection(section);
-    const firstPage = NAV_ITEMS.find((item) => item.section === section);
-    if (firstPage) {
-      onSelectPage(firstPage.id);
-    }
   };
 
   return (

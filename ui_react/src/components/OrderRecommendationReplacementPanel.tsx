@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { compareStaffUnionNumbers } from '../adapters/staff/staff_directory_adapter';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -156,6 +157,8 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
     } catch (caught) { const message = failure(caught); setError(message); persist({ ...value, error: message }); }
     finally { running.current = false; setBusy(false); }
   };
+  useUnsavedDraft('更換推薦月嫂', { '照護段': segmentIndex, '月嫂': staffId, '原因': reason }, { busy: busy || flow !== undefined, resetKey: replacementReceipt });
+
   if (source?.started) return <section className="formal-recommendation-inline-form"><h4>本案已有實際服務</h4><p>請由請假代班安排接續人員，保留原月嫂的服務與薪資紀錄。</p><a href={`#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`}>前往請假代班 →</a></section>;
   const continueReplacement = async (result: ServiceBeforeReplacementApplyResult) => {
     setReplacementReceipt(result); setError(null); setBusy(true);

@@ -152,10 +152,8 @@ class HistoricalOrderAdoptionWorkflow:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
         self._scheduling_historical_assignment = scheduling_historical_assignment
-        # Compatibility-only dependencies: historical adoption deliberately
-        # does not invoke Actual Start calculation, scheduling generation, or
-        # finance/payroll projection.  The workbook carries interval evidence,
-        # not a reconstructed daily roster.
+        # Historical adoption does not reconstruct Actual Start or daily
+        # schedules. Its accounting owner still runs in the same outer UoW.
         del actual_start_rebuilder
         self._scheduling_historical_assignment = scheduling_historical_assignment
         self._clock = clock or SystemBusinessClock()
@@ -190,6 +188,10 @@ class HistoricalOrderAdoptionWorkflow:
             raise RuntimeError("historical_order_candidate_stale")
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
             return _unmatched_receipt(preview)
+        if (preview.outcome is HistoricalOrderOutcome.ADOPTED
+                and preview.result is HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED
+                and self._default_accounting is None):
+            raise ValueError("historical_default_accounting_unavailable")
         assignment_ids = self._append_assignment_candidates(preview)
         self._ensure_matching_pending_deposit(request, preview)
         receipt = self._repository.persist(request, preview, assignment_ids)
@@ -201,10 +203,11 @@ class HistoricalOrderAdoptionWorkflow:
         request: HistoricalOrderAdoptionRequest,
         preview: HistoricalOrderAdoptionPreview,
     ) -> None:
-        if preview.result is not HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED:
+        if (preview.outcome is not HistoricalOrderOutcome.ADOPTED
+                or preview.result is not HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED):
             return
         if self._default_accounting is None:
-            return
+            raise ValueError("historical_default_accounting_unavailable")
         self._default_accounting.establish_default_in_current_unit_of_work(
             case_no=str(preview.case_no),
             source_identity=request.row.source_identity,

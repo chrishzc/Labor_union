@@ -9,6 +9,8 @@ const appSource = source('src/App.tsx');
 const layoutSource = source('src/components/MasterLayout.tsx');
 const workbenchSource = source('src/pages/OrderWorkbenchV2Page.tsx');
 const schedulingSource = source('src/pages/SchedulingPage.tsx');
+const recommendationSource = source('src/components/OrderFormalRecommendationPanel.tsx');
+const replacementSource = source('src/components/OrderRecommendationReplacementPanel.tsx');
 
 describe('Order Workbench V2 parity reconciliation', () => {
   it('routes intake repair, historical restart, replacement, and accounting blockers through existing owner flows', () => {
@@ -19,14 +21,15 @@ describe('Order Workbench V2 parity reconciliation', () => {
     expect(drawerSource).toContain('historicalServiceAccountingClient.previewPrecisionRestart(caseNo)');
     expect(drawerSource).toContain('historicalServiceAccountingClient.applyPrecisionRestart(');
     expect(drawerSource).toContain("observed.order_status !== '訂單成立'");
-    expect(drawerSource).toContain('data-surface-id="orders.service-before-replacement.entry"');
-    expect(drawerSource).toContain('<ServiceBeforeReplacementActions');
+    expect(drawerSource).toContain('openReplacementRequest={replacementRequest}');
+    expect(recommendationSource).toContain('<OrderRecommendationReplacementPanel caseNo={caseNo}');
+    expect(replacementSource).toContain('<ServiceBeforeReplacementActions caseNo={caseNo}');
     expect(drawerSource).toContain("historicalAccounting.status === 'error'");
   });
 
   it('uses the workbench as the sole canonical order navigation after #148', () => {
     expect(appSource).toContain("'order-beta': 'order-workbench-v2'");
-    expect(appSource).toContain("currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page />");
+    expect(appSource).toMatch(/currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page(?:\s+homeNavigationRequest=\{workbenchHomeRequest\})?\s*\/>/);
     expect(appSource).toContain("return 'order-workbench-v2'");
     expect(layoutSource).toContain("{ id: 'order-workbench-v2', icon: LayoutDashboard, label: '待辦看板'");
     expect(layoutSource).not.toContain("'order-tracker'");

@@ -1,3 +1,4 @@
+import { useUnsavedNavigation } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import type { OrderWorkbenchScope } from '../api/orders/order_core_stage_projection_client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
@@ -203,9 +204,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     setRefreshRevision((revision) => revision + 1);
     onObserved?.();
   }, [onObserved]);
+  const { requestLeave, pending: leavePending } = useUnsavedNavigation();
   const guardedClose = useCallback(() => {
-    if (!operationBusyRef.current) onClose();
-  }, [onClose]);
+    if (!operationBusyRef.current) requestLeave(onClose);
+  }, [onClose, requestLeave]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
@@ -364,7 +366,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   };
   const navigationLocked = operationBusy || historicalRestart.status === 'applying' || caseOperation || addingCandidates
     || candidateAddState.busy || candidateContactState.busy || recommendationState.busy || multiBusy
-    || serviceConfirmationState.busy || serviceConfirmationState.dirty || depositBusy;
+    || serviceConfirmationState.busy || depositBusy;
   const previousHomeRequest = useRef(homeNavigationRequest);
   useEffect(() => {
     if (previousHomeRequest.current === homeNavigationRequest) return;
@@ -497,7 +499,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   presentation="workbench" focusedCandidateId={focusedCandidateId} onEditStateChange={setCandidateContactState} onAddCandidates={() => setAddingCandidates(true)}
                   onOpenCustomerConfirmation={id => { setRecommendedCandidateId(id); openGroup('recommendation'); }} />
                 {addingCandidates && <CandidateInquiryDialog title="新增候選月嫂" wide busy={candidateAddState.busy}
-                  onClose={() => { if (!candidateAddState.dirty || window.confirm('要放棄尚未加入的人選並關閉嗎？')) setAddingCandidates(false); }}>
+                  onClose={() => { requestLeave(() => setAddingCandidates(false)); }}>
                   <div className="candidate-inquiry-dialog-content"><p>查詢後，點選人選旁的「加入候選池」。已加入的人選會標示「已加入」；加入候選池尚未形成排班。</p>
                     <OrderCandidateQueryPanel caseNo={caseNo} presentation="workbench" includeMultiCaregiver={false} onEditStateChange={setCandidateAddState}
                       onPoolReadback={ids => { setFocusedCandidateId(ids?.[0]); refreshFacts(); }} />
@@ -635,10 +637,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
       </div>
       <dialog ref={operationDialogRef} className="order-case-operation-dialog" aria-labelledby="order-case-operation-title" onCancel={(event) => {
         event.preventDefault();
-        if (!operationBusyRef.current) setOperation(null);
+        if (!operationBusyRef.current && !leavePending) requestLeave(() => setOperation(null));
       }}>
         <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{operation === 'reopen' ? '重開訂單' : currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
-          <button type="button" disabled={operationBusy} onClick={() => setOperation(null)}>返回案件處理</button>
+          <button type="button" disabled={operationBusy} onClick={() => requestLeave(() => setOperation(null))}>返回案件處理</button>
         </header>
         {operationBusy && <p role="status">操作結果或正式回讀尚未確認，請先完成確認再返回案件。</p>}
         {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}

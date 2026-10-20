@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -510,6 +511,8 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
       if (mounted.current && activeCase.current === caseNo) setStatus('idle');
     }
   };
+  useUnsavedDraft('訂單條件', Object.fromEntries(Object.entries(draft).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), { baseline: Object.fromEntries(Object.entries(draftFromQuery(currentQuery)).map(([field, value]) => [({ plannedStartDate: '開始日期', serviceDays: '服務天數', serviceHoursPerDay: '每日服務時數', requiresCooking: '需烹飪', floorFeeNtd: '樓層費總額', startTime: '開始時間', endTime: '結束時間', endDayOffset: '跨日' } as Record<string, string>)[field] ?? field, value])), busy: status !== 'idle' || outcomeUnknown || Boolean(receipt && !readback) });
+
 
   return (
     <section className="order-v2-drawer-section" aria-labelledby="order-v2-terms-mutation-heading">

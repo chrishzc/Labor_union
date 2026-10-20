@@ -22,7 +22,7 @@ vi.mock('../../../../../../../components/OrderWorkbenchV2OwnerContext', () => ({
 vi.mock('../../../../../../../components/OrderServiceCompletionActions', () => ({ OrderServiceCompletionActions: () => <p>正常完工操作入口</p> }));
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.core } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderDetail: mocks.detail, getOrderTerms: mocks.terms, getAssignmentPlan: mocks.assignment } }));
-vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: () => <p>日期操作入口</p> }));
+vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: ({ completedCorrection }: { completedCorrection?: boolean }) => <p>{completedCorrection ? '正式日期更正操作入口' : '日期操作入口'}</p> }));
 vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班操作入口</p> }));
 vi.mock('../../../../../../../components/OrderOfficialDateCorrectionPanel', () => ({ OrderOfficialDateCorrectionPanel: () => <p>正式日期更正操作入口</p> }));
 const CASE = 'CASE-LIFECYCLE-DRAWER';

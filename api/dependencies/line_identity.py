@@ -8,6 +8,8 @@ from functools import lru_cache
 
 from infrastructure.line.liff_token_verifier import LineLoginTokenVerifier
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from infrastructure.mysql.line_unit_of_work import ManagedLineMySqlUnitOfWork
+from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.line.identity_application import LineIdentityApplication
 from subsystems.line.identity_management_application import LineIdentityManagementApplication
 from subsystems.line.identity_review_application import LineIdentityReviewApplication
@@ -16,6 +18,13 @@ from subsystems.line.identity_review_application import LineIdentityReviewApplic
 @lru_cache(maxsize=1)
 def get_line_identity_application() -> LineIdentityApplication:
     return LineIdentityApplication(open_line_unit_of_work, _utc_now)
+
+
+@lru_cache(maxsize=1)
+def get_line_admin_identity_application() -> LineIdentityApplication:
+    # Only the internal admin credential verification endpoints use this
+    # account-security identity. The public LINE container has no such secret.
+    return LineIdentityApplication(lambda: ManagedLineMySqlUnitOfWork(get_connection("access")), _utc_now)
 
 
 @lru_cache(maxsize=1)

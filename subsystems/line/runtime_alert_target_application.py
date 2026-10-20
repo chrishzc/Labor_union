@@ -63,22 +63,10 @@ class RuntimeAlertTargetApplication:
                 ) from error
 
     def save_target_preferences(self, target_id: int, preferences: dict[str, bool]) -> dict[str, bool]:
-        unit_of_work = self._unit_of_work_factory()
-        unit_of_work.__enter__()
-        try:
-            result = unit_of_work.runtime_monitor.save_target_preferences(target_id, preferences)
-            unit_of_work.commit()
-            return result
-        except LookupError as error:
-            unit_of_work.rollback()
-            raise RuntimeAlertTargetError(
-                "not_found", "line_alert_target_not_found", "LINE 告警對象不存在"
-            ) from error
-        except Exception:
-            unit_of_work.rollback()
-            raise
-        finally:
-            unit_of_work.__exit__(None, None, None)
+        self.get_target_preferences(target_id)
+        raise RuntimeAlertTargetError(
+            "conflict", "line_alert_preferences_fixed", "通知分類使用固定規則，無法個別修改"
+        )
 
     def preview(self, command) -> LineAlertTargetMutationPreview:
         operation = _operation(command)

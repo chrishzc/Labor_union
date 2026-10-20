@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from infrastructure.mysql.nas_mutations import call_mutation
 from typing import Any
 
 from domains.staff.case_preference_manual import (
@@ -62,7 +63,7 @@ class MySqlStaffCasePreferenceManualRepository:
                 new = {item.value: item for item in relations[key]}
                 for value, item in old.items():
                     if new.get(value) != item:
-                        cursor.execute(f"DELETE FROM {table} WHERE staff_id=%s AND {value_column}=%s", (staff_id, value))
+                        call_mutation(cursor, f"lu_nas_remove_{table}_v1", staff_id, value, item.detail)
                 added = [item for value, item in new.items() if old.get(value) != item]
                 if added:
                     cursor.executemany(

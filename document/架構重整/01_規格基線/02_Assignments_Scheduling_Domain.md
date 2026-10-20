@@ -29,6 +29,8 @@
 
 `orders.staff_id`、`planned_hours`、`actual_hours_adjustments`、`replaced_assignment_id` 及 `original_assigned_*` 不得成為新架構依賴。
 
+Assignment Plan Query 與付款查核共用 current assignment 選取：有效 generation 的 assignment，或歷史服務分支由最新成功 adoption 精確綁定且未取消／被替換的既有 assignment。歷史 assignment 的 `generation_id IS NULL` 不代表沒有月嫂。唯讀回傳允許已保存期間而無逐日排班，不借用正常 mutation 的日期完整性條件，不放寬 Preview／Apply invariant；名冊、歷史服務天數與應付帳務引用相同 assignment identity（2026-10-20 人工根源修正）。
+
 ## 3. Domain invariants
 
 - assignment／schedule 改動一律 Preview，Apply 時 cancel-old／create-new，不原地截短、換人或覆寫。

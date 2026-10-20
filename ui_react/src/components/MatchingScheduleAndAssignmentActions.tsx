@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 /**
@@ -275,7 +276,6 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
       try {
         const status = await serviceArrangementStatusClient.arrangement(caseNo, planId, controller.signal);
         if (controller.signal.aborted) return;
-        setAutomatic(status); setAutomaticError('');
         if (!orderMutationFlowStore.getScheduleMutation(caseNo, planId)) {
           const current = await matchingScheduleConfirmationClient.query(caseNo, planId, controller.signal);
           if (!controller.signal.aborted && !orderMutationFlowStore.getScheduleMutation(caseNo, planId)) setSchedule(current);
@@ -287,6 +287,8 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
           await completionCallback.current();
           observedAutomatic.current = true;
         }
+        if (controller.signal.aborted) return;
+        setAutomatic(status); setAutomaticError('');
       } catch (error) { if (!controller.signal.aborted) setAutomaticError(message(error, '無法讀取自動排班狀態。')); }
       finally { polling = false; }
     };
@@ -327,6 +329,8 @@ export const MatchingScheduleAndAssignmentActions: React.FC<Props> = ({
     } catch (error) { if (generation === scheduleGeneration.current) setScheduleError(message(error, '無法保存確認紀錄。')); }
     finally { if (generation === scheduleGeneration.current) setScheduleBusy(null); }
   };
+  useUnsavedDraft('手動記錄日期確認', { '確認紀錄': confirmationNote }, { baseline: { '確認紀錄': '' }, busy: protectedMutation });
+
 
   return <div className="service-arrangement-confirmation" data-surface-id="orders.matching.schedule-confirmation">
     {recoveryControls}

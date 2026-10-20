@@ -453,6 +453,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
         : page([row], params.stage)
     ));
     setOwnerFacts('CASE-DRAWER');
+    clientMocks.getOrderDetail.mockResolvedValue({ ...detail('CASE-DRAWER', '林小芳'), staff_id: 42, staff_name: '正式月嫂甲' });
 
     render(<OrderWorkbenchV2Page />);
     await waitFor(() => expect(screen.getByText('CASE-DRAWER')).toBeInTheDocument());
@@ -468,7 +469,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(within(dialog).getAllByText('2026-10-01').length).toBeGreaterThan(0);
     expect(caseContext).toHaveTextContent('20 日');
     expect(within(dialog).getAllByText('2026-10-03').length).toBeGreaterThan(0);
-    expect(caseContext).toHaveTextContent('1 段正式指派');
+    expect(within(caseContext as HTMLElement).getByText('服務月嫂').parentElement).toHaveTextContent(/^服務月嫂未設定 正式月嫂甲$/);
     expect(within(dialog).getByText('服務日期工作區')).toBeVisible();
     expect(within(dialog).queryByText(/lineage_source_assignment_ids/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: /確認客戶與服務需求/ }));
@@ -510,6 +511,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
       return page([normal], params.stage);
     });
     setOwnerFacts('CASE-HISTORY', '正式客戶', 99);
+    clientMocks.getOrderDetail.mockResolvedValue({ ...detail('CASE-HISTORY', '正式客戶'), staff_id: 99, staff_name: '正式月嫂乙' });
     clientMocks.historicalQuery.mockResolvedValue({
       case_no: 'CASE-HISTORY',
       lifecycle_status: '歷史訂單－服務完成',
@@ -540,7 +542,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(within(dialog).queryByTestId('drawer-core-stage')).not.toBeInTheDocument();
     await within(dialog).findByRole('heading', { name: '服務完工' });
     const assignmentSection = dialog.querySelector('.order-case-context')! as HTMLElement;
-    await waitFor(() => expect(assignmentSection).toHaveTextContent('1 段正式指派'));
+    await waitFor(() => expect(within(assignmentSection).getByText('服務月嫂').parentElement).toHaveTextContent(/^服務月嫂未設定 正式月嫂乙$/));
     const historicalRegion = within(dialog).getByRole('heading', { name: '歷史服務資料' }).closest('section')!;
     await waitFor(() => expect(within(historicalRegion).getByText(/歷史月嫂/)).toBeInTheDocument());
     expect(within(assignmentSection).queryByText(/歷史月嫂/)).not.toBeInTheDocument();

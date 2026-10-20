@@ -60,7 +60,7 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 - 選擇「未申請市府平台」：開啟新竹市政府月子照顧服務平台，提示先完成市府申請。
 - 選擇「已申請市府平台」：進入 `/line-registration` 的需求調查流程。
 - Gateway／registration 頁不得因 query string、browser local state 或單次點擊即宣稱 binding、案件或申請成功。
-- Registration Preview 零正式寫入；Apply 可依 current owner contract 建立 provisional registration 及其合法 intake roots。不得沿用「Client／BeClass 一律不得新增」的舊驗收，也不得由前端自行決定建立結果。
+- 2026-10-19 人工裁決：Registration Preview 零寫入；外部 Apply 只保存完整需求申請及必要事件，回傳待工會核准，不建立 Client／BeClass 或宣稱已綁定正式客戶。工會核准才由 Case Import owning flow 建立正式客戶、來源資料及對應 LINE binding；核准具重複操作與競爭保護。既有已完成 registration／客戶／綁定保存。此段取代先前外部 Apply 可立即建立 intake Client 的規則，並依 `17` 的 NAS-LINE-01 驗收。
 - 後續 verify、provisional registration、binding 與人工 review 依 `17`、`23` 與 `26` 的 owner contract 執行；任何資料庫 mutation 都必須走 typed application boundary。
 
 ### 4.1 加好友引導：只保留即時歡迎（2026-09-16 使用者裁決）

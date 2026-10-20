@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from domains.case_import.provisional_registration import ProvisionalRegistrationIntent
+from domains.case_import.provisional_registration import ProvisionalRegistrationIntent, build_provisional_registration_candidate
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import (
     LineBindingSubjectType,
@@ -19,7 +19,7 @@ from domains.line.identity_binding import (
     LineIdentityBindingStatus,
 )
 from shared_kernel.identities import CorrelationId, ExpectedVersion
-from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationReceipt
+from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationReceipt, RegistrationApplicationSnapshot
 from subsystems.line.identity_application import LineIdentityApplication
 from subsystems.line.identity_contracts import LineIdentityCandidate
 
@@ -27,18 +27,24 @@ from subsystems.line.identity_contracts import LineIdentityCandidate
 NOW = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
 
 
-def test_registration_commits_roots_projection_and_intents_once() -> None:
+def test_registration_intake_does_not_create_binding_then_human_approval_commits_once() -> None:
     uow = _RegistrationUow()
     receipt, binding = _preview_then_apply(
         _application(uow),
         CorrelationId("line-registration:test"),
     )
 
-    assert receipt.client_id == 17
-    assert binding.status.value == "bound"
+    assert receipt.client_id is None
+    assert binding.status.value == "pending_approval"
     assert uow.commits == 1
     assert uow.rollbacks == 0
     assert uow.registration.candidates
+    assert uow.customer.bind_calls == []
+    assert uow.platform_observations == [LineUserId("U-registration")]
+    assert uow.outbox.items == uow.delivery.items == []
+    receipt, binding = _application(uow).approve_registration(5, 1, "admin:7", CorrelationId("approve:5"))
+    assert receipt.client_id == 17 and binding.status.value == "bound"
+    assert uow.commits == 2
     assert uow.customer.bind_calls == [
         ("17", LineUserId("U-registration"), LineUserId("U-registration"))
     ]
@@ -50,10 +56,8 @@ def test_registration_does_not_require_preexisting_customer_lookup() -> None:
     uow = _RegistrationUow()
     uow.customer.resolve_result = None
 
-    receipt, binding = _preview_then_apply(
-        _application(uow),
-        CorrelationId("line-registration:test-no-preexisting-customer"),
-    )
+    receipt, binding = _application(uow).approve_registration(5, 1, "admin:7",
+        CorrelationId("line-registration:test-no-preexisting-customer"))
 
     assert receipt.client_id == 17
     assert binding.status.value == "bound"
@@ -69,10 +73,7 @@ def test_registration_rolls_back_when_binding_projection_fails() -> None:
     uow.customer.error = RuntimeError("owner_projection_conflict")
 
     with pytest.raises(RuntimeError, match="owner_projection_conflict"):
-        _preview_then_apply(
-            _application(uow),
-            CorrelationId("line-registration:test-failure"),
-        )
+        _application(uow).approve_registration(5, 1, "admin:7", CorrelationId("line-registration:test-failure"))
 
     assert uow.commits == 0
     assert uow.rollbacks == 1
@@ -151,6 +152,8 @@ class _RegistrationUow:
         self.customers = self.customer
         self.delivery_tasks = self.delivery
         self.provisional_registrations = self.registration
+        self.platform_observations = []
+        self.platform_users = SimpleNamespace(ensure_verified_user=self.platform_observations.append)
 
     def __enter__(self):
         return self
@@ -170,6 +173,14 @@ class _RegistrationRepository:
 
     def apply(self, candidate):
         self.candidates.append(candidate)
+        return ProvisionalRegistrationReceipt(5, None, None, "王小美", False, True)
+
+    def load_application(self, registration_id):
+        return RegistrationApplicationSnapshot(registration_id, 1, build_provisional_registration_candidate(_intent()),
+                                               None, None, None)
+
+    def approve(self, registration_id, expected_version, actor):
+        assert expected_version == 1 and actor == "admin:7"
         return ProvisionalRegistrationReceipt(5, 17, 23, "王小美", False, True)
 
 

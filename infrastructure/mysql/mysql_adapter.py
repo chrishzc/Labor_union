@@ -8,6 +8,7 @@ import json
 import re
 import pymysql
 import math
+from pathlib import Path
 from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 from subsystems.client_finance.virtual_account_resolution import (
@@ -28,15 +29,24 @@ def _database_config_from_environment() -> dict:
             "development GCE+IAP reverse SSH DB bridge is forbidden in production"
         )
 
+    nas_profile = deployment_profile == "nas"
+    if nas_profile and any(not os.getenv(key) for key in ("DB_HOST", "DB_USER", "DB_DATABASE")):
+        raise RuntimeError("NAS database identity is not configured")
+    password_file = os.getenv("DB_PASSWORD_FILE", "").strip()
+    password = Path(password_file).read_text(encoding="utf-8").strip() if password_file else os.getenv("DB_PASSWORD", "1234")
+    if nas_profile and (not password_file and not os.getenv("DB_PASSWORD") or os.getenv("DB_USER") == "root"):
+        raise RuntimeError("NAS requires a non-root database credential")
     config = {
         "host": os.getenv("DB_HOST", "127.0.0.1"),
         "port": int(os.getenv("DB_PORT", "3306")),
         "user": os.getenv("DB_USER", "root"),
-        "password": os.getenv("DB_PASSWORD", "1234"),
+        "password": password,
         "database": os.getenv("DB_DATABASE", "union_db"),
         "charset": "utf8mb4",
     }
     ssl_mode = os.getenv("DB_SSL_MODE", "disabled").strip().lower()
+    if nas_profile and ssl_mode != "verify_identity":
+        raise RuntimeError("NAS requires MySQL TLS with server identity verification")
     if ssl_mode == "disabled":
         return config
     if ssl_mode not in {"verify_ca", "verify_identity"}:
@@ -99,9 +109,19 @@ def generate_virtual_account(case_no) -> str:
     """Compatibility wrapper around the Client Finance-owned rule."""
     return build_client_virtual_account(case_no) or ""
 
-def get_connection():
+def get_connection(profile=None):
     """建立並回傳資料庫連線"""
-    return pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    config = dict(DB_CONFIG)
+    if profile is not None and os.getenv("DEPLOYMENT_PROFILE") == "nas":
+        if profile not in {"access", "maintenance"}:
+            raise ValueError("invalid NAS database connection profile")
+        prefix = "DB_" + profile.upper()
+        user = os.getenv(prefix + "_USER", "").strip()
+        password_file = os.getenv(prefix + "_PASSWORD_FILE", "").strip()
+        if not user or user == "root" or not password_file:
+            raise RuntimeError("NAS privileged operation connection is not configured")
+        config.update(user=user, password=Path(password_file).read_text(encoding="utf-8").strip())
+    return pymysql.connect(**config, cursorclass=pymysql.cursors.DictCursor)
 
 
 def _resolve_case_no(case_ref) -> str:

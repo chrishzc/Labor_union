@@ -1273,9 +1273,9 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             const successDescription = document.querySelector('.success-desc');
             successDescription.style.whiteSpace = 'pre-line';
             successDescription.textContent = [
-                '登記資料已安全提交成功！',
-                `LINE 身分狀態：${receipt.identity_status || '處理完成'}`,
-                '我們已為您完成需求調查登記，工會客服人員將儘速為您安排專屬媒合服務（提醒您：送出登記不代表已完成媒合）。',
+                receipt.identity_status === 'pending_approval' ? '需求申請已送出，待工會人員核准。' : '登記資料已提交。',
+                `申請編號：${receipt.registration_id}`,
+                receipt.identity_status === 'pending_approval' ? '核准後才會建立正式客戶資料及完成對應綁定。送出申請不代表已完成媒合。' : '請由工會人員確認後續服務安排。',
                 '通知已排入系統佇列（不代表 LINE 訊息已送達）。'
             ].join('\n');
             document.getElementById('formHeader').style.display = 'none';

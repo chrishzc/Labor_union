@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useState } from 'react';
 import { financeImportCorrectionClient, type FinanceImportCorrectionPreview, type FinanceImportCorrectionSelection } from '../api/finance_import/finance_import_correction_client';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
@@ -86,6 +87,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff }:
     } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
     finally { setBusy(false); }
   };
+  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '原因': reason }, { busy, resetKey: submitted });
+
   return <section aria-label="銀行款項更正" className="order-case-review-note">
     <p>將這筆銀行紀錄對應至正確的客戶收款或月嫂付款。金額由後端核對，不可手動標記已付。</p>
     <fieldset disabled={busy || submitted || retryCommand !== null}>

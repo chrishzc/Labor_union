@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useState, type FC } from 'react';
 import { depositSkipClient, type DepositSkipPreview } from '../api/client_finance/deposit_skip_client';
 
@@ -48,6 +49,8 @@ export const ClientDepositSkipActions: FC<Props> = ({ caseNo, onCommitted }) => 
       setBusy(false);
     }
   };
+  useUnsavedDraft('定金略過確認', { '原因': reason }, { busy });
+
 
   return (
     <section aria-label="一般市民訂金未付人工放行">

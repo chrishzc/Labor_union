@@ -7,6 +7,7 @@ import os
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
 from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+from infrastructure.runtime.file_transfer_settings import file_read_capacity
 from infrastructure.mysql.service_day_log_repository import MySqlServiceDayLogRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
@@ -20,7 +21,9 @@ def get_service_day_log_application():
         controlled_file_workflow = ControlledFileWorkflow(
             MySqlControlledFileWorkflowRepository(connection),
             FileSystemControlledFileStorage(
-                os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None
+                os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip() or None,
+                max_staging_bytes=file_read_capacity(),
+                max_read_bytes=file_read_capacity(),
             ),
             lambda: MySqlUnitOfWork(connection),
             SystemBusinessClock(),

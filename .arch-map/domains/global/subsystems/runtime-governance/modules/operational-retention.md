@@ -38,6 +38,7 @@ Preview／Apply。永久 denylist、production enablement、schema migration 與
 - Knowledge Retrieval：只提供 observation graph／index artifact typed adapter。
 - Controlled Files：提供 owned-root 與 business-artifact protection facts；不把受控業務檔案交給 retention owner。
 - Application Shell：只呈現「稽核與系統 → 儲存空間管理」typed API projection。
+- NAS SQL adapter 委派 fixed-purpose knowledge cleanup procedures；索引沿用鎖定交易內清理舊 artifact 後才 commit，避免 MAX(index_version)+1 重用後誤刪新索引。檔案失敗不 commit，回報 reconciliation_required；不宣稱檔案能隨 DB 回滾。stale preview 若已變為 active index，不刪資料或檔案。
 
 ## Verification
 

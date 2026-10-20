@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = PROJECT_ROOT / "config"
+CONFIG_DIR = Path(os.getenv("LINE_CONFIG_ROOT", str(PROJECT_ROOT / "config")))
 
 CONFIG_FILES = {
     "message_templates": "message_templates.json",

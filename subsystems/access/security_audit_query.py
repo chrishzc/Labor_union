@@ -266,5 +266,6 @@ def _expired_audit_select_sql() -> str:
 def _archive_audit_rows(cursor: Any, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
-    cursor.executemany("INSERT IGNORE INTO admin_audit_log_archive (source_audit_id,admin_user_id,action,resource_type,resource_id,request_path,http_method,result_status,ip_address,details_json,created_at) VALUES (%(id)s,%(admin_user_id)s,%(action)s,%(resource_type)s,%(resource_id)s,%(request_path)s,%(http_method)s,%(result_status)s,%(ip_address)s,%(details_json)s,%(created_at)s)", rows)
-    cursor.execute(f"DELETE FROM admin_audit_logs WHERE id IN ({','.join(['%s'] * len(rows))})", [row["id"] for row in rows])
+    cursor.execute("CALL lu_nas_archive_audits_v1(%s)", (json.dumps([row["id"] for row in rows]),))
+    while cursor.nextset():
+        pass

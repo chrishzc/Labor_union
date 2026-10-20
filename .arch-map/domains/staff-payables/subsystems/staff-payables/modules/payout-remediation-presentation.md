@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/components/StaffPayoutRemediationWorkbench.tsx`
+- transport: `ui_react/src/api/staff_payables/staff_payout_remediation_client.ts`、`ui_react/src/api/staff_payables/staff_payout_remediation_schemas.ts`
 
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables owner workflow與結清條件。
@@ -17,6 +18,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/staff_payout_remediation_workbench.test.tsx`
+- test_root: `ui_react/src/tests/staff_payout_remediation_client.test.ts`
 - routing: `.arch-map/tests/domains/staff-payables/subsystems/staff-payables/modules/payout-remediation-presentation.md`
 
 ## Change triggers

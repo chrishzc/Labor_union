@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: StaffOverpaymentRecoveryActions.tsx
  * Description: Staff overpayment recovery 的 owner Query／matching／collection／adjustment 工作台。
@@ -226,6 +227,8 @@ export function StaffOverpaymentRecoveryActions({
       setOperation('query');
     }
   };
+  useUnsavedDraft('月嫂溢付追回', { '銀行交易資料列': rowIdText, '原因': reason, '佐證': evidenceReference }, { busy: busy || outcomeUnknown, resetKey: query });
+
 
   if (!query && !error) return <section aria-label="月嫂超額付款追償"><p role="status">正在查詢最新追償資料…</p></section>;
 

@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: ClientOverRefundRecoveryWorkbench.tsx
  * Description: 客戶退款超額追償的 bounded owner workbench；只以 Query／Preview／Apply 與 root readback 決定畫面。
@@ -167,6 +168,8 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
   };
 
   const invalidate = (setter: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { setter(event.target.value); setPreview(null); setPreviewKey(null); applyCommand.current = null; setNotice(null); };
+  useUnsavedDraft('客戶溢退追回', { '處理方式': action, '金額': amount, '原因': reason, '佐證': evidence, '銀行交易資料列': rowId, '核銷紀錄': matchingIdentity, '核銷版本': matchingVersion }, { busy, resetKey: query });
+
   if (loading && !query) return <section aria-label="客戶退款超額追償處理"><p>正在讀取最新客戶追償資料…</p></section>;
   if (queryError && !query) return <section aria-label="客戶退款超額追償處理"><p role="alert">{queryError}</p><button type="button" onClick={() => void readOwner()}>重新查詢</button></section>;
   if (!query) return null;

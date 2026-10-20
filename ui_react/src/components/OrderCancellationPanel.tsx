@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -268,6 +269,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     }
     finally { inFlight.current.delete(caseNo); }
   };
+  useUnsavedDraft('取消訂單', { '服務天數確認': days, '取消原因': reason }, { enabled: !!query, resetKey: query, busy });
+
 
   return (
     <section aria-label={`案件 ${caseNo} 訂單取消`}>

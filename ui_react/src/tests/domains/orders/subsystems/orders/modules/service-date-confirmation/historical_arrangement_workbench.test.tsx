@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
@@ -14,6 +15,7 @@ vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', ()
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: {
   getOrderDetail: calls.detail, getOrderTerms: calls.terms, getAssignmentPlan: calls.assignment,
   getActualStart: calls.start,
+  getOrderCalendarDetail: vi.fn(async (caseNo: string) => ({ case_no: caseNo, service_mode: '連續服務', original_service_type: '連續服務' })),
 } }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({
   waitingDepositLockClient: { queryPlan: calls.matching },
@@ -25,6 +27,17 @@ vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ orders
 // Unrelated work groups may remain mounted while the service facts are loading.
 vi.mock('../../../../../../../components/OrderIntakeRepairPanel', () => ({ OrderIntakeRepairPanel: () => null }));
 vi.mock('../../../../../../../components/OrderTermsMutationPanel', () => ({ OrderTermsMutationPanel: () => null }));
+vi.mock('../../../../../../../api/client_finance/deposit_skip_client', () => ({ depositSkipClient: {
+  query: vi.fn(async (caseNo: string) => ({ case_no: caseNo, deposit_required_ntd: 0, deposit_net_received_ntd: 0, unpaid_progression_allowed: false, blockers: ['deposit_skip.deposit_obligation_required'] })),
+  preview: vi.fn(), apply: vi.fn(),
+} }));
+vi.mock('../../../../../../../api/scheduling/service_arrangement_status_client', () => ({ serviceArrangementStatusClient: {
+  completion: vi.fn(async (caseNo: string) => ({ case_no: caseNo, current_status: '訂單成立', completion_instant: null, state: 'awaiting_schedule', blockers: [] })),
+} }));
+vi.mock('../../../../../../../api/staff_directory/staff_directory_client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../../../../../api/staff_directory/staff_directory_client')>(),
+  createStaffDirectoryClient: () => ({ queryPage: vi.fn(async () => ({ items: [{ id: 12, union_no: null, name: '既定月嫂', phone: null, education: null }], next_cursor: null })) }),
+}));
 
 const CASE = 'HIST-ARRANGEMENT-WORKBENCH';
 const dates = ['2026-09-14', '2026-09-15', '2026-09-16'];
@@ -41,6 +54,7 @@ const assignment = () => ({ case_no: CASE, order_version: 3, scheduling_version:
     actual_hours: null, lineage_source_assignment_ids: [] }] });
 
 beforeEach(() => {
+  sessionClient.setSession('synthetic-historical-arrangement-session', { id: 7, username: 'historical-arrangement-test', display_name: '測試工會人員', role: 'admin' });
   Object.values(calls).forEach((call) => call.mockReset());
   orderMutationFlowStore.clearAll(); confirmedVersion = 2; schedulingVersion = 1;
   calls.core.mockImplementation(async () => ({ items: [{ case_no: CASE, lifecycle_status: '訂單成立', branch_type: 'normal',
@@ -77,21 +91,28 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => sessionClient.clearSession());
+
 it('日期保存後聚焦下一步；正式排班沿用既定月嫂，明確確認才建立並刷新指派', async () => {
   const observed = vi.fn();
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} onObserved={observed} />);
-  await screen.findByRole('button', { name: '前往正式排班' });
+  fireEvent.click(await screen.findByRole('button', { name: /設定服務日期/ }));
+  await screen.findByRole('button', { name: '前往排班' });
   expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '確認服務日期' }));
-  fireEvent.click(await screen.findByRole('button', { name: '完成服務日期確認' }));
-  await screen.findByText('服務日期已確認並回讀版本 #3。');
+  const saveDates = screen.getByRole('button', { name: '儲存服務日期' });
+  await waitFor(() => expect(saveDates).toBeEnabled());
+  fireEvent.click(saveDates);
+  await waitFor(() => expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent('日期確認版本#3'));
   expect(screen.getByLabelText('服務日期確認後下一步')).toHaveFocus();
   expect(calls.applyArrangement).not.toHaveBeenCalled();
   expect(calls.previewArrangement).not.toHaveBeenCalled();
 
-  await waitFor(() => expect(screen.getByRole('button', { name: '前往正式排班' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: '前往正式排班' }));
-  expect(screen.getByRole('button', { name: '正式排班' })).toHaveAttribute('aria-pressed', 'true');
+  const datesStep = screen.getByRole('button', { name: /設定服務日期/ });
+  await waitFor(() => expect(datesStep).toBeEnabled());
+  fireEvent.click(datesStep);
+  await waitFor(() => expect(screen.getByRole('button', { name: '前往排班' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '前往排班' }));
+  expect(screen.getByRole('button', { name: /確認排班/ })).toHaveAttribute('aria-current', 'step');
   expect(screen.getByLabelText('待建立正式安排摘要')).toHaveTextContent('既定月嫂');
   expect(screen.queryByText(/請至「推薦確認」確認人選/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
@@ -106,7 +127,10 @@ it('日期保存後聚焦下一步；正式排班沿用既定月嫂，明確確�
   expect(calls.applyArrangement).toHaveBeenCalledWith(CASE, expect.objectContaining({
     expected_confirmed_version: 3, expected_scheduling_version: 1, segments: [{ staff_id: 12, service_dates: dates }],
   }), expect.anything());
-  expect(within(screen.getByLabelText('第 1 段正式指派')).getByText(dates.join('、'))).toBeInTheDocument();
+  const assignmentDetails = screen.getByLabelText('第 1 段正式指派');
+  expect(within(assignmentDetails).getByText(`${dates[0]} ~ ${dates[2]}`)).toBeInTheDocument();
+  expect(within(assignmentDetails).getByText('3 天')).toBeInTheDocument();
+  expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent(dates.join('、'));
   expect(screen.queryByText(/請至「推薦確認」確認人選/)).not.toBeInTheDocument();
   expect(observed).toHaveBeenCalledTimes(2);
 });
@@ -116,19 +140,20 @@ it('建立安排期間鎖定案件導覽；切回日期再返回仍保留原操�
   calls.applyArrangement.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
   const close = vi.fn();
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={close} />);
-  fireEvent.click(await screen.findByRole('button', { name: '前往正式排班' }));
+  fireEvent.click(await screen.findByRole('button', { name: /設定服務日期/ }));
+  fireEvent.click(await screen.findByRole('button', { name: '前往排班' }));
   fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
   const apply = await screen.findByRole('button', { name: '建立正式安排' });
   await waitFor(() => expect(apply).toBeEnabled());
   fireEvent.click(apply);
   await waitFor(() => expect(screen.getByRole('button', { name: '← 返回待辦看板' })).toBeDisabled());
-  expect(screen.getByRole('button', { name: '確認日期' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /設定服務日期/ })).toBeDisabled();
   expect(close).not.toHaveBeenCalled();
   await act(async () => reject(new Error('網路中斷')));
   await screen.findByText('網路中斷');
-  fireEvent.click(screen.getByRole('button', { name: '調整開始日與服務日期' }));
+  fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
   expect(screen.getByLabelText('實際開始日')).toHaveValue(dates[0]);
-  fireEvent.click(screen.getByRole('button', { name: '正式排班' }));
+  fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
   fireEvent.click(screen.getByRole('button', { name: '以原操作確認結果' }));
   await screen.findByText('歷史案件正式安排已建立並回讀。');
   expect(calls.applyArrangement).toHaveBeenCalledTimes(2);
@@ -137,14 +162,15 @@ it('建立安排期間鎖定案件導覽；切回日期再返回仍保留原操�
 
 it('開始日尚未確認時不能切到正式排班建立舊日期，返回後保留此次輸入', async () => {
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
-  await screen.findByRole('button', { name: '前往正式排班' });
+  fireEvent.click(await screen.findByRole('button', { name: /設定服務日期/ }));
+  await screen.findByRole('button', { name: '前往排班' });
   fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '' } });
-  expect(screen.getByRole('button', { name: '前往正式排班' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: '正式排班' }));
+  expect(screen.getByRole('button', { name: '前往排班' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
   expect(screen.getByText('開始日或服務日期尚未完成保存與回讀，請先回到「確認日期」接續確認。')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
   expect(calls.applyArrangement).not.toHaveBeenCalled();
   expect(calls.previewArrangement).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '調整開始日與服務日期' }));
+  fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
   expect(screen.getByLabelText('實際開始日')).toHaveValue('');
 });

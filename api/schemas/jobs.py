@@ -6,6 +6,7 @@ Description: 定義背景工作狀態與安全觀察的公開傳輸契約。
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from shared_kernel.errors import ErrorCategory
 
 _JobCommandType = Literal[
     "assignment_plan_apply",
@@ -31,14 +32,7 @@ class JobSuccessOutcomeView(BaseModel):
 class JobFailureErrorView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    category: Literal[
-        "validation",
-        "conflict",
-        "domain_blocked",
-        "idempotency_mismatch",
-        "unavailable",
-        "internal",
-    ]
+    category: ErrorCategory
     code: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=512)
     retryable: bool

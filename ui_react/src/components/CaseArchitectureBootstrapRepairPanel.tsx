@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import React, { useEffect, useRef, useState } from 'react';
 
 import {
@@ -137,6 +138,8 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
       setBusy(null);
     }
   };
+  useUnsavedDraft('案件條件補登', { '開始日期': startDate, '服務天數': serviceDays }, { enabled: !!status, resetKey: status, busy: busy !== null && busy !== 'status' });
+
 
   return <div className="registry-bootstrap-repair" aria-label="案件初始資料修復" style={{ borderTop: '1px solid #fed7aa', marginTop: '12px', paddingTop: '12px', display: 'grid', gap: '8px' }}>
     <strong>{status?.ready ? '帳務與排班資料已建立' : '建立帳務與排班資料'}</strong>

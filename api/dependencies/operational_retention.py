@@ -18,7 +18,8 @@ from subsystems.runtime_governance.operational_retention import OperationalReten
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def operational_retention_application() -> OperationalRetentionApplication:
+def operational_retention_application(*, connection_factory=None) -> OperationalRetentionApplication:
+    factory = connection_factory or get_connection
     db_high = _optional_positive_int("OPERATIONAL_RETENTION_DB_HIGH_WATER_BYTES")
     db_low = _optional_positive_int("OPERATIONAL_RETENTION_DB_LOW_WATER_BYTES")
     file_high = _optional_positive_int("OPERATIONAL_RETENTION_FILE_HIGH_WATER_BYTES")
@@ -27,7 +28,7 @@ def operational_retention_application() -> OperationalRetentionApplication:
     chroma_path = _configured_path(os.getenv("KNOWLEDGE_CHROMA_PATH", "db/chroma_knowledge"))
     sources = (
         MySqlKnowledgeRetentionSource(
-            get_connection,
+            factory,
             ChromaKnowledgeGateway(str(chroma_path)),
             high_water_bytes=db_high,
             low_water_bytes=db_low,
@@ -39,7 +40,7 @@ def operational_retention_application() -> OperationalRetentionApplication:
             segment_max_bytes=segment_max,
         ),
     )
-    return OperationalRetentionApplication(sources, MySqlRetentionEvidenceStore(get_connection))
+    return OperationalRetentionApplication(sources, MySqlRetentionEvidenceStore(factory))
 
 
 def automatic_retention_enabled() -> bool:
@@ -51,10 +52,10 @@ def automatic_retention_enabled() -> bool:
     }
 
 
-def run_automatic_retention_cycle() -> int:
+def run_automatic_retention_cycle(*, connection_factory=None) -> int:
     if not automatic_retention_enabled():
         return 0
-    receipts = operational_retention_application().run_automatic()
+    receipts = operational_retention_application(connection_factory=connection_factory).run_automatic()
     return sum(receipt.deleted_count for receipt in receipts)
 
 

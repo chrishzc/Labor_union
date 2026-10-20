@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 /**
@@ -71,6 +72,7 @@ export const LineNotificationTemplateEditor: React.FC<
   }, [client, reloadVersion, ruleId]);
 
   const hasChanges = content !== savedContent;
+  const unsavedRef = useUnsavedDraft('通知訊息內容', { '通知內容': content }, { baseline: { '通知內容': savedContent }, busy: saving, enabled: !loading && !!template, save: () => save() });
   const preview = useMemo(
     () => renderPreview(content, template?.variables ?? []),
     [content, template?.variables],
@@ -98,7 +100,7 @@ export const LineNotificationTemplateEditor: React.FC<
   };
 
   return (
-    <section className="notification-template-editor" aria-label="通知訊息內容編輯">
+    <section ref={unsavedRef} className="notification-template-editor" aria-label="通知訊息內容編輯">
       <div className="notification-template-heading">
         <div>
           <h5>通知訊息內容</h5>

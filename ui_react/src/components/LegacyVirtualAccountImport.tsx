@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import React, { useState } from 'react';
 
 import {
@@ -64,6 +65,8 @@ export const LegacyVirtualAccountImport: React.FC = () => {
       setBusy(false);
     }
   };
+  useUnsavedDraft('虛擬帳號匯入', { '待匯入檔案': file?.name ?? '' }, { baseline: { '待匯入檔案': '' }, enabled: !receipt, busy });
+
 
   return <section className="registry-editor legacy-va-import">
     <h2>匯入舊流程虛擬帳號</h2>

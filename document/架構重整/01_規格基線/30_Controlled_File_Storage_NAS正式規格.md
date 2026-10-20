@@ -88,6 +88,9 @@ POST /api/v1/data-center/reconciliation/preview
 POST /api/v1/data-center/reconciliation/apply
 POST /api/v1/data-center/staging/preview
 POST /api/v1/data-center/staging/cleanup
+GET  /api/v1/storage/transfer-settings
+GET  /api/v1/storage/settings
+PUT  /api/v1/storage/settings
 ```
 
 不得建立 generic alternate upload route、Data Browser table mutation 或直接 filesystem endpoint 來取代上述 owner boundary。若 current implementation 的 exact route 變更，必須先更新本 formal contract 與 consumer／test，再移除舊 route；不得雙軌長期並存。
@@ -257,6 +260,17 @@ UI 不能：
 - 把 browser local state 當正式狀態；
 - 因下載成功就宣稱 business submission 成功；
 - 因 NAS path 可見就跳過 owner authorization。
+
+### 13A. NAS 檔案設定（2026-10-19 人工授權）
+
+- 「稽核與系統 → 檔案設定」提供真實 Query、畫面變更預覽、確認儲存與 server readback；不顯示原設計分類說明，不提供檔案瀏覽或搬移操作。
+- `/api/v1/storage/settings` 僅允許 enabled persisted root human session。一般登入工會人員仍可透過既有 `/transfer-settings` 與業務入口使用檔案，不取得 NAS 路徑設定權限；公開 LINE 與機器憑證不能讀寫管理設定。
+- 依後續人工確認，取消可編輯 NAS 路徑備註與待部署狀態。設定只保存照片／履歷 bytes 上限、等待秒數與設定 version；Query 的 `container_root` 唯讀顯示 `CONTROLLED_FILE_STORAGE_ROOT` 解析後的程式路徑，未設定回 null。容器無法據此證明 NAS host source path、掛載或 ACL；實體掛載留待 Compose 設定。
+- PUT 不接受 `nas_path` 或 `container_root`；前端預覽／儲存僅有容量與等待時間。先前 JSON 裡的 `nas_path` 不再採用或投影，既有容量、版本與讀取容量仍保留，不以舊備註切換儲存位置。
+- `FILE_SETTINGS_PATH` 指向部署者配置的持久化 JSON 設定檔；未指定時，使用受控根目錄的父層 `file-settings.json`，無根目錄的本機開發則使用 `data/runtime/file-settings.json`。原子替換與程序間鎖保護同一設定檔；`expected_version` CAS 拒絕 stale／busy，無新 DB table、fingerprint 或 migration。
+- 設定檔的明確值優先於環境初值。容量／等待時間於後續操作重新讀取，即時生效；公開 LINE 經既有私人 HTTPS／獨立機器認證讀取同一限制，不掛載或寫入管理設定檔。`0` 僅停用應用層檔案計時，外層仍可能中斷。
+- 儲存結果不明時不得宣稱失敗或盲目重送，UI 保留錯誤並要求重新 Query；版本衝突顯示 typed 409。舊版合法大檔的讀取容量保留於內部設定 metadata，降低新上傳容量不因此封鎖既有檔案。
+
 
 ## 14. Current implementation／acceptance 邊界
 

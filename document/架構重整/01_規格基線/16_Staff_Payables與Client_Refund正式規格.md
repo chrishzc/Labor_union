@@ -249,11 +249,9 @@ Export：
 
 1. 在一致 read snapshot 讀取 `payable`／`partially_paid` 的月嫂款項，只取正數 remaining，不重列原始應付總額；以及 review=`normal` 的
    `pending`／`partially_refunded` 客戶退款義務；
-   對已採納且服務完成、但舊資料尚無 `service_pay` obligation 的歷史訂單，Query 必須在
-   同一 snapshot 以最新歷史實際天數 revision 投影；沒有 revision 時使用 Orders 原
-   `service_days`。投影沿用 assignment／case rate snapshot、Payroll 公式、調整額與付款到期日
-   規則，且使用預定的 revision-1 obligation identity；正式 obligation 一旦存在即排除 fallback，
-   每次載入重算但不得寫 DB、不得據此宣稱已付款或已結清。月嫂列只接受
+   歷史訂單也只讀 Payroll 已建立的正式 obligation、其同一 assignment binding 與 Staff Payables 的目前餘額。
+   已採納舊案若缺少義務，單案查核明確列為「尚未建立月嫂應付帳務」，由既有服務天數帳務 Preview／Apply 補建；
+   Query 不從歷史來源重算薪資、不產生預定 obligation identity，也不將未建立義務的金額列入付款清冊（2026-10-20 人工要求移除平行帳務）。月嫂列只接受
    `due_date = target_payment_date`；較早月份未付款項不得混入所選月份清單；
 2. 月嫂列依 `staff_id + target_payment_date + bank_identity` 聚合；
 3. anomaly／completed／refunded／review-required 不進應付款清單；
@@ -407,6 +405,16 @@ package_route:
 - canonical Client Finance 歷史查詢須接受已存在的 `subsidy_return` 與 `subsidy_advance` entry types，使同案歷史可讀；不增 ledger 類型、不補寫資料。無 schema migration、production 寫入或 external provider effect。
 
 驗收：三個入口可操作；正式與預估不混算；款項保留來源唯一性；補助退款→代墊→政府入款→回收在隔離資料庫可重送且不重複付款；歷史含補助與沖正可讀；銀行原預覽／確認／結果不明與重送保護仍通過；必要實際 GET、桌面及手機呈現通過。
+
+### 2.5.3 收付款完成狀態（2026-10-20 人工修正）
+
+依本次人工指示，實際收付款後，帳務清單必須呈現「已收款／已付款」，不得持續顯示待確認。此節取代 §2.5.1、§2.5.2 中付款主清單只列未付項目的呈現限制；會計清冊仍只匯出符合既有條件的未付餘額，不改 writer、交易邊界或銀行外部效果。
+
+- 付款清單保留已付款及歷史已結清項目。既有唯讀 cash requirements 每列增加 `payment_status`：`pending`、`partially_paid`、`paid`、`settled`；與 `certainty` 分開。銀行付款投影 completed 或 exact current 歷史 paid 證據顯示「已付款」；歷史 settled 顯示「已結清」，不能冒稱已匯款。部分付款顯示剩餘款，已付／結清列未付餘額為零，不增加待付小計；款項種類、既有預估及服務結束篩選保留，增加部分付款／已付款／已結清篩選。付款日期沿原來源，不以到期日冒稱實際匯款日。
+- 客戶帳務摘要增加 `receipt_status`：`pending`、`unpaid`、`partially_received`、`received`、`settled`。清單分別顯示待確認、待收款、部分收款、已收款、已結清；已收款篩選包含部分收款。canonical receipt／reversal 淨額與 exact current 歷史 paid 證據提供收款依據；歷史 settled 不等於實際收款。`receipt_entry_count` 保持只計 canonical receipt，不能拿其他 ledger 類型當收款證據。
+- 政府補助收款列沿既有 owner `substatus_code` 呈現收款狀態：`paid` 顯示已收款、`partially_paid` 顯示部分收款；服務結束確認仍是獨立欄位，不取代入款狀態。
+- 歷史 owner overlay 只有 obligation identity、金額快照與 obligation version 都符合目前義務時才有效；有效 paid／settled 不再列為未收／未付。沖正或後續版本造成新餘額時，重新查詢須顯示目前狀態，不沿用失效的歷史確認。
+- 直接驗證包含：已採納歷史收付款、正常付款、部分收付款、沖正後重新未付、歷史金額／版本失效、無帳務資料與零餘額；Query 不建立付款或結清事實。
 
 ### 2.6 Typed errors
 

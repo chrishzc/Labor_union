@@ -48,6 +48,7 @@ class CashRequirementRowView(BaseModel):
     date_is_estimate: bool
     pending_reasons: list[str]
     staff_id: int | None = Field(default=None, gt=0)
+    payment_status: Literal["pending", "partially_paid", "paid", "settled"]
 
 
 class CashRequirementsPageView(BaseModel):

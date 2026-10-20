@@ -72,6 +72,9 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError('apply');
+    if (error.code === 'historical_client_payment_terms_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少客戶付款條款，無法建立應收應付；本次匯入未完成，請先補齊付款條款。', false, error.status);
+    if (error.code === 'historical_payroll_rate_policy_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少月嫂薪資費率，無法建立應付帳務；本次匯入未完成，請先補齊費率。', false, error.status);
+    if (error.code === 'historical_default_accounting_unavailable') return new HistoricalOrderWorkbookApplyError(error.code, '歷史帳務建立服務未就緒，本次匯入未完成，請由系統管理員檢查服務設定。', false, error.status);
     if (error.code.endsWith('_lock_timeout')) return new HistoricalOrderWorkbookApplyError(error.code, '歷史訂單匯入等待處理鎖逾時，先前操作可能仍在處理；結果尚未確認，請保留本頁確認結果。', true, error.status);
     if (error.status === 502 || error.status === 504) return new HistoricalOrderWorkbookApplyError(error.code, error.status === 504 ? '等待歷史訂單匯入的閘道回應逾時（HTTP 504），結果尚未確認，請保留本頁確認結果。' : '歷史訂單匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認，請保留本頁確認結果。', error.retryable, error.status);
     const message = error.status === 403

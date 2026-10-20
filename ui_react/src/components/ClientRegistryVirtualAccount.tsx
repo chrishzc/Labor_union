@@ -1,3 +1,4 @@
+import { useUnsavedChanges } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import React, { useEffect, useRef, useState } from 'react';
@@ -26,6 +27,7 @@ export const ClientRegistryVirtualAccount: React.FC<Props> = ({ caseNo, disabled
   const [message, setMessage] = useState('');
   const sequence = useRef(0);
   const busy = ['applying', 'unknown', 'readback', 'readback_failed'].includes(phase);
+  useUnsavedChanges('案件虛擬帳號', view && account !== initialAccount(view) ? [{ label: '虛擬帳號', before: '既有帳號（不顯示內容）', after: account ? '已輸入變更（不顯示內容）' : '清空' }] : [], { busy });
   const dirty = !!view && account !== initialAccount(view);
   useEffect(() => { onStateChange({ dirty, busy }); }, [dirty, busy, onStateChange]);
   const load = async () => {

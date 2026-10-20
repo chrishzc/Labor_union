@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from '../UnsavedChanges';
 /**
  * File: WeeklyMetricsEditor.tsx
  * Description: 依查詢期間涵蓋的週一至週日週次，編輯該週推廣次數與詢問人次。
@@ -35,6 +36,7 @@ export const WeeklyMetricsEditor: React.FC<WeeklyMetricsEditorProps> = ({ metric
     setDrafts(Object.fromEntries(metrics.map((metric) => [metric.week_start_date, draftOf(metric)])));
   }, [metrics]);
 
+  useUnsavedDraft('每週推廣與詢問數值', Object.fromEntries(metrics.flatMap(metric => { const value = drafts[metric.week_start_date] ?? draftOf(metric); return [[`${metric.week_start_date} 推廣次數`, value.promotion], [`${metric.week_start_date} 詢問人次`, value.inquiry]]; })), { baseline: Object.fromEntries(metrics.flatMap(metric => [[`${metric.week_start_date} 推廣次數`, draftOf(metric).promotion], [`${metric.week_start_date} 詢問人次`, draftOf(metric).inquiry]])), busy: savingWeek !== null });
   const change = (week: string, field: keyof Draft, value: string) => {
     setMessage(null);
     setDrafts((current) => ({

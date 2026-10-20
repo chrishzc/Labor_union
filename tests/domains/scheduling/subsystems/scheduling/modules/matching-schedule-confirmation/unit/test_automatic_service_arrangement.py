@@ -1,5 +1,7 @@
 from datetime import date
+from dataclasses import replace
 from types import SimpleNamespace
+import pytest
 
 from domains.scheduling.assignment_plan import AssignmentPlanIntent, AssignmentPlanSegmentIntent
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -108,6 +110,11 @@ def test_repeated_discovery_keeps_one_canonical_identity_and_actor():
     assert command.submitted_by == 'system:automatic-service-arrangement'
     assert command.payload['idempotency_key'] == command.command_identity
     assert command.payload['expected_scheduling_version'] == 2
+    assert command.payload['expected_order_version'] == 4
+    assert command.payload['expected_client_finance_version'] == 3
+    assert command.payload['expected_payroll_version'] == 1
+    assert command.payload['preview_fingerprint'] == 'a' * 64
+    assert command.payload['case_no'] == 'CASE-1'
     assert command.payload['segments'][0]['official_service_dates'] == ['2026-11-01', '2026-11-02']
 
 
@@ -124,4 +131,49 @@ def test_failed_command_is_not_blindly_reenqueued():
     identity = jobs.commands[0].command_identity
     source.jobs[identity] = (status.job_id, 'failed')
     assert app.dispatch_case('CASE-1', 7).state == 'failed'
+    assert len(jobs.commands) == 1
+
+
+@pytest.mark.parametrize('field,value', [('case_no', 'CASE-2'), ('plan_id', 8), ('confirmed_version', 4)])
+def test_automatic_identity_changes_with_current_case_plan_or_dates(field, value):
+    app, source, _, jobs = ports()
+    app.dispatch_case('CASE-1', 7)
+    original = jobs.commands[0]
+    source.proposal_value = replace(source.proposal_value, **{field: value})
+    app.dispatch_case(source.proposal_value.case_no, source.proposal_value.plan_id)
+    assert len(jobs.commands) == 2
+    assert jobs.commands[1].command_identity != original.command_identity
+    assert original.payload['preview_fingerprint'] == 'a' * 64
+    assert jobs.commands[1].payload['idempotency_key'] == jobs.commands[1].command_identity
+
+
+def test_changed_fingerprint_cannot_reuse_the_original_apply_identity():
+    app, _, preview, jobs = ports()
+    original_preview = preview.preview
+    app.dispatch_case('CASE-1', 7)
+    original = jobs.commands[0]
+    def changed(request):
+        result = original_preview(request)
+        result.fingerprint = PreviewFingerprint('b' * 64)
+        return result
+    preview.preview = changed
+    app.dispatch_case('CASE-1', 7)
+    assert len(jobs.commands) == 2
+    assert jobs.commands[1].command_identity != original.command_identity
+    assert original.payload['preview_fingerprint'] == 'a' * 64
+    assert jobs.commands[1].payload['preview_fingerprint'] == 'b' * 64
+
+
+def test_job_success_without_owner_readback_is_not_effective_or_reenqueued():
+    app, source, _, jobs = ports()
+    queued = app.dispatch_case('CASE-1', 7)
+    command = jobs.commands[0]
+    source.jobs[command.command_identity] = (queued.job_id, 'succeeded')
+    observed = app.dispatch_case('CASE-1', 7)
+    assert observed.state == 'failed'
+    assert observed.blockers == ('automatic_arrangement_result_requires_readback',)
+    assert len(jobs.commands) == 1
+    source.proposal_value = replace(source.proposal_value, assignment_count=1)
+    assert app.query('CASE-1', 7).state == 'effective'
+    assert app.query('CASE-1', 7).assignment_count == 1
     assert len(jobs.commands) == 1

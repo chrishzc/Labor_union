@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 /**
@@ -341,6 +342,8 @@ export const LineNotificationRulesMutationPanel: React.FC<
       setMessage(displayError(error));
     }
   };
+  useUnsavedDraft('通知發送設定', { '規則': draft }, { baseline: { '規則': baseline }, busy });
+
 
   return (
     <section className="richmenu-card notification-mutation-panel" aria-label="LINE 通知規則維護">

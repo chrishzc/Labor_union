@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from '../components/useSaveValidation';
 /**
@@ -413,6 +414,8 @@ function HolidayPolicyWorkspace() {
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
+  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '雙倍薪資': doublePay, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+
 
   return (
     <section className="holiday-policy-workspace" data-surface-id="scheduling.holiday-policy">
@@ -1063,6 +1066,9 @@ function LeaveSubstitutionWorkspace({
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
+  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason, '已核對': confirmed }, { busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('LINE 請假申請處理', Object.fromEntries(inboxItems.filter(item => item.request_status === 'pending').map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, inboxReasonById[item.id] ?? ''])), { baseline: Object.fromEntries(inboxItems.map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, ''])), busy: inboxBusy });
+
 
   return (
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
@@ -2015,6 +2021,7 @@ function buildGanttSpans(
 }
 
 export const SchedulingPage: React.FC = () => {
+  const { requestLeave } = useUnsavedNavigation();
   const [activeTab, setActiveTab] = useState<SchedulingTab>(
     () => parseSchedulingDeepLink(window.location.hash).tab,
   );
@@ -2575,21 +2582,21 @@ export const SchedulingPage: React.FC = () => {
           data-surface-id="scheduling.tab.calendar"
           className={`scheduling-tab-btn ${activeTab === 'calendar' ? 'active' : ''}`}
           aria-current={activeTab === 'calendar' ? 'page' : undefined}
-          onClick={() => setActiveTab('calendar')}
+          onClick={() => { if (('calendar') !== activeTab) requestLeave(() => setActiveTab('calendar')); }}
         >
           📅 排班月曆
         </button>
         <button
           data-surface-id="scheduling.tab.leave_sub"
           className={`scheduling-tab-btn ${activeTab === 'leave_sub' ? 'active' : ''}`}
-          onClick={() => setActiveTab('leave_sub')}
+          onClick={() => { if (('leave_sub') !== activeTab) requestLeave(() => setActiveTab('leave_sub')); }}
         >
           🚑 請假與代班
         </button>
         <button
           data-surface-id="scheduling.tab.holidays"
           className={`scheduling-tab-btn ${activeTab === 'holidays' ? 'active' : ''}`}
-          onClick={() => setActiveTab('holidays')}
+          onClick={() => { if (('holidays') !== activeTab) requestLeave(() => setActiveTab('holidays')); }}
         >
           🗓️ 國定假日政策
         </button>

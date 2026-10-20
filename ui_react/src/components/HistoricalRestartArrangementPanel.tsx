@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
@@ -118,6 +119,8 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
       setBusy(false);
     }
   };
+  useUnsavedDraft('歷史案件服務安排', { '分配天數': allocation, '原因': reason }, { busy });
+
 
   return <section aria-label="歷史訂單建立正式安排" className="order-v2-inline-notice">
     <h3>建立正式安排</h3>

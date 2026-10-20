@@ -74,6 +74,7 @@ class CaseStaffPayableAuditItem:
     source: CaseStaffPayableSource
     disposition: CaseStaffPayableDisposition
     reason: str
+    payment_status: Literal["pending", "partially_paid", "paid", "settled"] = "pending"
 
 
 @dataclass(frozen=True, slots=True)

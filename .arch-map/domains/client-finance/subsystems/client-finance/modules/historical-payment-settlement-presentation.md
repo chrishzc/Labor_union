@@ -18,7 +18,8 @@
 - shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — 由同一案件入口集中補助與退款／代墊／回收；只讀 typed owner facts，回收委派既有 SubsidyAdvanceSettlementPanel。
 - immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。
 - history adapter: `infrastructure/mysql/client_payments_query_repository.py`、`api/schemas/client_payments.py` — 既有 read model 接受已存在的 subsidy_return／subsidy_advance 類型，不改 writer 或歷史資料。
-- receipt filter contract: `subsystems/client_finance/client_payments_query.py` → `api/routes/client_payments.py` → strict history client；摘要 `receipt_entry_count` 只計 canonical receipt，收款頁「已收款」以其是否大於零篩選，其他 ledger 類型不作收款證據。跨層驗證：`tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_summary_query.py`。
+  - 摘要 `receipt_status` 組合 canonical receipt／reversal 淨額及 exact current historical payment overlay，分開呈現待收、部分收款、已收款、已結清；有效歷史 overlay 從未收／未付餘額扣除，不改 canonical receipt 計數。
+- receipt filter contract: `subsystems/client_finance/client_payments_query.py` → `api/routes/client_payments.py` → strict history client；摘要 `receipt_entry_count` 只計 canonical receipt，收款頁「已收款」依 `receipt_status` 包含已收／部分收款，其他 ledger 類型不作收款證據。跨層驗證：`tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_summary_query.py`。
 - government read client: `ui_react/src/api/orders/order_government_subsidy_projection_client.ts` — 既有 bounded projection GET；完整循游標載入並核對唯一性／游標，失敗不交付部分結果。
 - retained source clients: `ui_react/src/api/accounts_payable/cash_requirements_query_client.ts`、`ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — 預估與正式未退款仍由原 owner 投影。`ClientSubsidyReturnQueryPanel.tsx`、`CashRequirementsPanel.tsx` 不再是 Finance 主入口；不刪除其仍有效的來源測試。
 

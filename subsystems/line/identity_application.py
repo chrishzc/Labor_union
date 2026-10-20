@@ -278,11 +278,22 @@ class LineIdentityApplication:
             )
             if current_preview_fingerprint != preview_fingerprint:
                 raise LineIdentityConflictError("registration_preview_stale")
+            # A verified direct LIFF submission can precede any webhook/open-flow.
+            # Persist the existing platform observation in this same intake UoW
+            # so later human approval can establish the role binding atomically.
+            unit_of_work.platform_users.ensure_verified_user(line_user_id)
             outcome = unit_of_work.provisional_registrations.apply(candidate)
             if isinstance(outcome, ProvisionalRegistrationConflict):
                 raise ProvisionalRegistrationConflictError("registration_conflict")
             if not isinstance(outcome, ProvisionalRegistrationReceipt):
                 raise RuntimeError("registration_receipt_invalid")
+            if outcome.client_id is None:
+                if flow_id is not None:
+                    unit_of_work.identity_flows.consume(flow_id, LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                                                        line_user_id, self._now())
+                unit_of_work.commit()
+                return outcome, LineIdentityApplyResult(LineIdentityApplyStatus.PENDING_APPROVAL,
+                                                        line_user_id, LineBindingSubjectType.CUSTOMER, "")
             # Case Import is the owner of provisional registration and creates
             # the customer root in this same UoW.  Registration must therefore
             # not perform a proof lookup that assumes a pre-existing customer;
@@ -320,6 +331,40 @@ class LineIdentityApplication:
                 correlation_id,
                 owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
             )
+            unit_of_work.commit()
+        return outcome, result
+
+    def pending_registrations(self, *, after_id=0, limit=50):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.provisional_registrations.pending_applications(after_id=after_id, limit=limit)
+
+    def registration_application(self, registration_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.provisional_registrations.load_application(registration_id)
+
+    def approve_registration(self, registration_id, expected_version, actor, correlation_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            # Read the binding first; the registration row lock and the binding
+            # owner's version check preserve the existing outer transaction.
+            application = unit_of_work.provisional_registrations.load_application(registration_id)
+            line_user_id = LineUserId(application.candidate.line_user_id)
+            binding = unit_of_work.identities.get(line_user_id, LineBindingSubjectType.CUSTOMER)
+            if binding and binding.status is LineIdentityBindingStatus.BOUND and (
+                application.client_id is None or binding.subject_reference != str(application.client_id)
+            ):
+                raise LineIdentityConflictError("registration_customer_binding_changed")
+            outcome = unit_of_work.provisional_registrations.approve(registration_id, expected_version, actor)
+            customer = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, str(outcome.client_id),
+                                             line_user_id if binding and binding.status is LineIdentityBindingStatus.BOUND else None)
+            preview = _customer_preview(unit_of_work, line_user_id, customer)
+            result = self._apply_customer_candidate(
+                unit_of_work, LineIdentityFlowId(f"registration-approval:{registration_id}"), preview,
+                CustomerIdentityProof(str(application.candidate.client_payload["name"]),
+                                      str(application.candidate.client_payload["phone"])),
+                correlation_id, owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
+            )
+            if result.status not in {LineIdentityApplyStatus.BOUND, LineIdentityApplyStatus.EXISTING}:
+                raise LineIdentityConflictError("registration_customer_binding_changed")
             unit_of_work.commit()
         return outcome, result
 

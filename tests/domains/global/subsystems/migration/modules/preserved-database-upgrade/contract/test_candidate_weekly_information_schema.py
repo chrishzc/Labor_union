@@ -25,7 +25,7 @@ def test_release_widens_only_the_enum_and_preserves_history():
     assert canonical["tables"] == {} and canonical["indexes"] == {} and canonical["foreign_keys"] == {}
     assert canonical["checks"] == {} and canonical["triggers"] == {}
     assert validate_schema_assembly() == []
-    assert MANIFEST.name == migration.DEFAULT_RELEASE_MANIFESTS[-1]
+    assert MANIFEST.name == migration.DEFAULT_RELEASE_MANIFESTS[-2]
     assert (ROOT / "db/schema_parts/232_candidate_weekly_information.sql").read_bytes() == (ROOT / "db/schema_parts" / ARTIFACT).read_bytes()
     statements = migration.split_sql((ROOT / "db/schema_parts" / ARTIFACT).read_text(encoding="utf-8"))
     assert len(statements) == 1 and migration._local_classify_statement(statements[0]) == "candidate_weekly_information_enum_widen"

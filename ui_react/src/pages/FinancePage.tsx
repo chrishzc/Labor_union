@@ -1,5 +1,6 @@
+import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useSaveValidation } from '../components/useSaveValidation';
-import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
+import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
  * Description: 呈現Finance查詢與受控銀行交易明細 Upload、Preview、durable Apply、terminal receipt 工作區。
@@ -88,7 +89,9 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 }
 
 export const FinancePage: React.FC = () => {
+  const { requestLeave } = useUnsavedNavigation();
   const staffIdentity = useStaffIdentityLabels();
+  const sharedStaffDirectory = useStaffIdentityDirectory();
   const [entry] = useState(() => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
@@ -122,6 +125,7 @@ export const FinancePage: React.FC = () => {
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
+  const staffReload = useRef(reload);
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
   const financeApplyCommandByPreview = useRef(new Map<string, { correlationId: string; reason: string }>());
@@ -212,6 +216,23 @@ export const FinancePage: React.FC = () => {
 
   useEffect(() => {
     if (activeTab !== 'staff-payables' && activeTab !== 'finance-import') return;
+    if (sharedStaffDirectory !== null) {
+      if (staffReload.current !== reload) {
+        staffReload.current = reload;
+        sharedStaffDirectory.refresh();
+        return;
+      }
+      if (sharedStaffDirectory.status === 'loading') setPayables({ kind: 'loading' });
+      else if (sharedStaffDirectory.status === 'error') setPayables({ kind: 'error', message: '服務人員清單載入失敗，請重新整理。' });
+      else {
+        const people = [...sharedStaffDirectory.people.values()].sort(compareStaffUnionNumbers)
+          .map(person => ({ id: person.id, label: staffDisplayLabel(person.unionNo, person.name ?? `服務人員摘要 #${person.id}`) }));
+        setStaff(people);
+        setSelectedStaff(value => value !== null && people.some(person => person.id === value) ? value : people[0]?.id ?? null);
+        if (people.length === 0) setPayables({ kind: 'empty' });
+      }
+      return;
+    }
     return schedule('staff', (request) => {
       setPayables({ kind: 'loading' });
       void loadAllStaffDirectoryPages(
@@ -228,17 +249,18 @@ export const FinancePage: React.FC = () => {
       })
       .catch((error: unknown) => { if (current('staff', request.sequence, request.controller)) setPayables({ kind: 'error', message: financeErrorMessage(error, '服務人員清單載入失敗，請重新整理。') }); });
     });
-  }, [activeTab, reload]);
+  }, [activeTab, reload, sharedStaffDirectory]);
 
   useEffect(() => {
     if (activeTab !== 'staff-payables' || selectedStaff === null) return;
+    if (sharedStaffDirectory !== null && sharedStaffDirectory.status !== 'ready') return;
     return schedule('payables', (request) => {
       setPayables({ kind: 'loading' });
       void staffPayablesQueryClient.query(selectedStaff, { signal: request.controller.signal })
         .then((data) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'ready', data: adaptStaffPayablesQuery(data) }); })
         .catch((error: unknown) => { if (current('payables', request.sequence, request.controller)) setPayables({ kind: 'error', message: financeErrorMessage(error, '月嫂應付款查詢失敗，請重新整理。') }); });
     });
-  }, [activeTab, selectedStaff, reload]);
+  }, [activeTab, selectedStaff, reload, sharedStaffDirectory]);
 
   useEffect(() => {
     if (payables.kind !== 'ready') { setHistoricalStaffCase(''); return; }
@@ -357,18 +379,20 @@ export const FinancePage: React.FC = () => {
       if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
     }
   };
+  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '已核對銀行交易明細預覽，確認匯入' }, enabled: batchOutcome.kind !== 'ready', busy: applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason('已核對銀行交易明細預覽，確認匯入'); setApplyConfirmed(false); } });
+
 
   return (
     <div data-surface-id="finance.page">
       {entry.fromWorkbench && entry.caseNo && <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>← 返回案件處理</a>}
       <header className="page-header-banner finance-page-header">
         <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收款、付款與銀行對帳，依工作集中處理。</p></div>
-        <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => setActiveTab('payment-destination')}>帳務設定</button>
+        <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => { if (('payment-destination') !== activeTab) requestLeave(() => setActiveTab('payment-destination')); }}>帳務設定</button>
       </header>
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
-        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => setActiveTab(id)}>{label}</button>)}
+        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
       </nav>
-      {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
+      {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
       {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
       {activeTab === 'payments' && <FinancePaymentsWorkspace revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId => { if (staffId !== undefined) setSelectedStaff(staffId); setActiveTab('staff-payables'); }} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank} />}
       {subsidyCase && <CaseSubsidyDetailDrawer key={subsidyCase} caseNo={subsidyCase} onClose={() => setSubsidyCase('')} onOpenBank={openBank} onChanged={() => setReload(value => value + 1)} />}
@@ -398,7 +422,7 @@ export const FinancePage: React.FC = () => {
               <select
                 className="finance-select"
                 value={selectedCase}
-                onChange={(event) => setSelectedCase(event.target.value)}
+                onChange={(event) => { const value = event.target.value; requestLeave(() => setSelectedCase(value)); }}
               >
                 {cases.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
@@ -503,7 +527,7 @@ export const FinancePage: React.FC = () => {
               <select
                 className="finance-select"
                 value={selectedStaff ?? ''}
-                onChange={(event) => setSelectedStaff(Number(event.target.value))}
+                onChange={(event) => { const value = Number(event.target.value); requestLeave(() => setSelectedStaff(value)); }}
               >
                 {staff.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>

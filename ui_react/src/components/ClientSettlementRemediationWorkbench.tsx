@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: ClientSettlementRemediationWorkbench.tsx
  * Description: 客戶應收、一般退款與補助退還的 bounded owner Q/P/A 工作台。
@@ -133,6 +134,8 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       setUnknownOutcome(Boolean(typed?.retryable)); setError(settlementErrorMessage(caught));
     } finally { setBusy(null); }
   };
+  useUnsavedDraft('客戶款項核銷', { '期別': stage, '款項項目': obligationIds, '銀行交易資料列': bankIds, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: query });
+
 
   if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取客戶帳務資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void reload(true)}>重新查詢</button></section>;
   return <section aria-label={`${title(target.kind)}人工處理`} data-surface-id="client-settlement-remediation" style={{ border: '1px solid #fed7aa', borderRadius: 12, padding: 16, marginTop: 12 }}>

@@ -1,3 +1,4 @@
+import { useUnsavedNavigation } from '../../components/UnsavedChanges';
 /**
  * Unified AI customer-service studio: curated common QA plus event-rule workspace.
  */
@@ -11,6 +12,7 @@ import { KnowledgeFeedbackPanel } from './KnowledgeFeedbackPanel';
 type StudioTab = 'qa' | 'rules' | 'test' | 'feedback';
 
 export const AiCustomerServiceStudioPage: React.FC = () => {
+  const { requestLeave } = useUnsavedNavigation();
   const [activeTab, setActiveTab] = useState<StudioTab>('qa');
   const [qaTarget, setQaTarget] = useState<{ id?: string; question?: string }>({});
 
@@ -31,16 +33,16 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
       </header>
 
       <nav className="line-hub-section-tabs" aria-label="AI 客服工作室功能">
-        <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => { setQaTarget({}); setActiveTab('qa'); }}>
+        <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => requestLeave(() => { setQaTarget({}); setActiveTab('qa'); })}>
           <BookOpenText aria-hidden="true" />常見問答
         </button>
-        <button type="button" className={activeTab === 'rules' ? 'active' : ''} aria-current={activeTab === 'rules' ? 'page' : undefined} onClick={() => setActiveTab('rules')}>
+        <button type="button" className={activeTab === 'rules' ? 'active' : ''} aria-current={activeTab === 'rules' ? 'page' : undefined} onClick={() => { if (('rules') !== activeTab) requestLeave(() => setActiveTab('rules')); }}>
           <Workflow aria-hidden="true" />引導動作
         </button>
-        <button type="button" className={activeTab === 'test' ? 'active' : ''} aria-current={activeTab === 'test' ? 'page' : undefined} onClick={() => setActiveTab('test')}>
+        <button type="button" className={activeTab === 'test' ? 'active' : ''} aria-current={activeTab === 'test' ? 'page' : undefined} onClick={() => { if (('test') !== activeTab) requestLeave(() => setActiveTab('test')); }}>
           <FlaskConical aria-hidden="true" />回答測試
         </button>
-        <button type="button" className={activeTab === 'feedback' ? 'active' : ''} aria-current={activeTab === 'feedback' ? 'page' : undefined} onClick={() => setActiveTab('feedback')}>
+        <button type="button" className={activeTab === 'feedback' ? 'active' : ''} aria-current={activeTab === 'feedback' ? 'page' : undefined} onClick={() => { if (('feedback') !== activeTab) requestLeave(() => setActiveTab('feedback')); }}>
           <MessageSquareHeart aria-hidden="true" />回饋分析
         </button>
       </nav>

@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from './useSaveValidation';
 /** Government receipts recover an existing union advance; no customer payout. */
@@ -123,6 +124,8 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
   };
   const rows = result.kind === 'ready' ? result.rows.filter(row => status === 'all' || row.status === status) : [];
   const locked = busy || unknown;
+  useUnsavedDraft('補助墊款結清', { '原因': reason, '已核對': confirmed }, { busy: busy || unknown, resetKey: reload });
+
 
   return <section className={compact ? 'finance-advance-detail' : 'finance-workspace subsidy-refund-panel'} aria-labelledby="advance-settlement-heading">
     <div className="finance-section-heading">

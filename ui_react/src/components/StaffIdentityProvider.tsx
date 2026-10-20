@@ -1,15 +1,17 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createStaffDirectoryClient, loadAllStaffDirectoryPages } from '../api/staff_directory/staff_directory_client';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 type Identity = { id: number; name: string | null; unionNo: string | null };
 type Snapshot = { status: 'loading' | 'ready' | 'error'; people: ReadonlyMap<number, Identity> };
-const StaffIdentityContext = createContext<Snapshot | null>(null);
+const StaffIdentityContext = createContext<(Snapshot & { refresh: () => void }) | null>(null);
 
 /** One authenticated, read-only directory per mounted administrative page. */
 export function StaffIdentityProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
   const [snapshot, setSnapshot] = useState<Snapshot>({ status: 'loading', people: new Map() });
   const [revision, setRevision] = useState(0);
+  const refresh = useCallback(() => setRevision(value => value + 1), []);
+  const sharedDirectory = useMemo(() => enabled ? { ...snapshot, refresh } : null, [enabled, snapshot, refresh]);
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
@@ -25,10 +27,14 @@ export function StaffIdentityProvider({ children, enabled = true }: { children: 
       .catch(() => { if (!controller.signal.aborted) setSnapshot({ status: 'error', people: new Map() }); });
     return () => controller.abort();
   }, [enabled, revision]);
-  return <StaffIdentityContext.Provider value={enabled ? snapshot : null}>
-    {enabled && snapshot.status === 'error' && <p role="status">公會編號暫時無法讀取。<button type="button" onClick={() => setRevision(value => value + 1)}>重新讀取公會編號</button></p>}
+  return <StaffIdentityContext.Provider value={sharedDirectory}>
+    {enabled && snapshot.status === 'error' && <p role="status">公會編號暫時無法讀取。<button type="button" onClick={refresh}>重新讀取公會編號</button></p>}
     {children}
   </StaffIdentityContext.Provider>;
+}
+
+export function useStaffIdentityDirectory() {
+  return useContext(StaffIdentityContext);
 }
 
 export function useStaffIdentityLabels() {

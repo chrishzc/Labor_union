@@ -27,8 +27,8 @@ workflow／repository／storage port 保護。
   `modules/file-persistence.md`
 
 ## Contracts
-- `document/功能開發計畫/NAS_檔案庫與資料中心管理介面正式規範.md` §9 — exact seven
-  `/api/v1/storage` routes, authenticated management boundary, opaque projection and
+- `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` §4–§13 — current formal
+  controlled-file routes, authenticated management boundary, opaque projection and
   Preview/Apply/receipt contract.
 - `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md` §9 —
   additive schema and developer DB change gates.

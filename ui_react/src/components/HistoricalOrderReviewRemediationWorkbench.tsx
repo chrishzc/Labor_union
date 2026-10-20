@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: HistoricalOrderReviewRemediationWorkbench.tsx
  * Description: 歷史訂單 review 的單列更正工作台；先 Query、再 Preview、最後明確 Confirm／Apply。
@@ -237,6 +238,8 @@ export const HistoricalOrderReviewRemediationWorkbench: React.FC<HistoricalOrder
     }
     setBusy(false);
   };
+  useUnsavedDraft('歷史訂單覆核', { '檔案': fileName, '原因': reason, '佐證': evidence }, { busy: busy || unknownOutcome, enabled: !applyResult, baseline: { '檔案': '', '原因': '', '佐證': '' } });
+
 
   if (loading && !context) return <section aria-label="歷史訂單 review 更正"><p>正在讀取歷史訂單 review 根事實…</p></section>;
   if (queryError && !context) return <section aria-label="歷史訂單 review 更正"><p role="alert">{queryError}</p><button type="button" onClick={() => void readOwner()}>重新查詢</button></section>;

@@ -32,14 +32,38 @@ def include_source(name: str) -> bool:
     if any(part in {"node_modules", "__pycache__", "dist", "scratch"} for part in path.parts):
         return False
     lower = path.name.lower()
-    if lower.startswith(".env") or lower in {"credentials.json", "token.json"}:
+    if lower.startswith(".env") or lower.endswith(".env") or lower in {
+        "credentials.json", "token.json", "token", "verifiers.json", ".npmrc", ".pypirc", "pip.conf",
+    }:
         return False
     if lower.startswith(("service_account", "client_secret")) or path.suffix.lower() in SECRET_SUFFIXES:
         return False
     return True
 
 
-def prepare(output: Path) -> dict:
+def _use_patched_previous_ui_toolchain(context: Path) -> None:
+    """Patch historical build tools only when every other manifest fact agrees."""
+    current = context / "ui_react"
+    previous = context / "previous_ui"
+    manifests = [json.loads((folder / "package.json").read_text(encoding="utf-8"))
+                 for folder in (current, previous)]
+    for manifest in manifests:
+        for name in ("vitest", "happy-dom"):
+            manifest.get("devDependencies", {}).pop(name, None)
+    if manifests[0] != manifests[1]:
+        raise ValueError("historical frontend dependencies differ; review its toolchain before building")
+    runtime_locks = []
+    for folder in (current, previous):
+        lock = json.loads((folder / "package-lock.json").read_text(encoding="utf-8"))
+        runtime_locks.append({name: tuple(package.get(key) for key in ("version", "resolved", "integrity"))
+                              for name, package in lock["packages"].items() if name and not package.get("dev")})
+    if runtime_locks[0] != runtime_locks[1]:
+        raise ValueError("historical frontend runtime lock differs; review before building")
+    for name in ("package.json", "package-lock.json"):
+        shutil.copyfile(current / name, previous / name)
+
+
+def prepare(output: Path, *, secure: bool = False) -> dict:
     from scripts.compact_fresh_schema import SQL_PATH, load_compact_plan
     from infrastructure.runtime.react_admin_api_compatibility import load_react_admin_api_compatibility_registry
     output = output.resolve()
@@ -89,6 +113,34 @@ def prepare(output: Path) -> dict:
                 "schema_release": plan["release_id"], "image": "labor-union-nas-test:local",
                 "platform": "linux/amd64", "previous_ui_note": "historical source build, not an attested deployed rollback",
                 "working_tree_included": True}
+    if secure:
+        # Preserve historical application sources; share only the audited build
+        # manifests after proving unrelated dependencies and scripts agree.
+        _use_patched_previous_ui_toolchain(context)
+        metadata["previous_ui_dependency_source"] = "current audited frontend manifests; historical application sources preserved"
+        # Keep the secret-filtered context and real previous frontend source;
+        # never send the repository root or ignored local files to Docker.
+        files = ("deployment/nas/Dockerfile", "deployment/nas/20-lock-legacy-app.sql", "deployment/nas/mysql-client.cnf",
+                 "deployment/nas-test/99-ready.sh", "deployment/nas-test/web-setup/index.html",
+                 "deployment/nas-test/web-setup/setup.js")
+        for name in files:
+            destination = context / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, destination)
+        shutil.copyfile(ROOT / "deployment/nas/Dockerfile", context / "Dockerfile")
+        (context / ".dockerignore").write_text(
+            "**/.env\n**/.env.*\n**/*.env\n**/credentials.json\n**/token.json\n**/token\n**/verifiers.json\n"
+            "**/.npmrc\n**/.pypirc\n**/pip.conf\n**/*.pem\n**/*.key\n**/*.pfx\n**/*.p12\n"
+            "**/node_modules\n**/__pycache__\n**/*.py[cod]\n.git\n", encoding="utf-8")
+        css = (ROOT / "ui_react/src/pages/LoginPage.css").read_text(encoding="utf-8")
+        (context / "nas-setup-style.css").write_text(css + "\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif}"
+            "[hidden]{display:none!important}\n", encoding="utf-8")
+        for filename in ("compose.yaml", ".env.example", "compose.tunnel.yaml", "cloudflared.example.yaml", "README.md"):
+            shutil.copyfile(ROOT / "deployment/nas" / filename, output / filename)
+        metadata.update(image="chris23144638/cecec:nas-secure-20261019-r2", mode="nas-security/v1",
+                        database_engine_qualification="not_run", image_build="not_run", image_published=False)
+        (output / "bundle.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return metadata
     for filename in ("compose.yaml", "nas.sh", "README.md", "limits.env.example"):
         shutil.copyfile(ROOT / "deployment/nas-test" / filename, output / filename)
     shutil.copyfile(ROOT / "deployment/nas-test/Dockerfile", context / "Dockerfile")
@@ -250,6 +302,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--secure", action="store_true", help="Prepare the separate, full NAS security image context")
     mode.add_argument("--synology-from", type=Path,
                         help="Existing verified bundle whose image is already on Docker Hub")
     mode.add_argument("--web-setup-from", type=Path,
@@ -258,7 +311,7 @@ def main() -> None:
     if args.web_setup_from:
         result = prepare_web_setup(args.output, args.web_setup_from)
     else:
-        result = prepare_synology(args.output, args.synology_from) if args.synology_from else prepare(args.output)
+        result = prepare_synology(args.output, args.synology_from) if args.synology_from else prepare(args.output, secure=args.secure)
     print(json.dumps(result, ensure_ascii=False))
 
 

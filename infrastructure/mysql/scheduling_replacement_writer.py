@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 import json
+from infrastructure.mysql.nas_mutations import call_mutation
 from typing import Any
 
 from domains.scheduling.generation import (
@@ -290,10 +291,7 @@ def _insert_released_buffer(
 def _cancel_previous(cursor, command, previous_generation_id) -> None:
     _cancel_previous_schedules(cursor, previous_generation_id)
     _cancel_previous_assignments(cursor, command, previous_generation_id)
-    cursor.execute(
-        "DELETE FROM scheduling_effective_occupancy WHERE generation_id=%s",
-        (previous_generation_id,),
-    )
+    call_mutation(cursor, "lu_nas_cancel_occupancy_v1", command.candidate.case_no, previous_generation_id)
     cursor.execute(
         "UPDATE scheduling_generations SET status='cancelled',"
         "effective_marker=NULL,cancelled_at=CURRENT_TIMESTAMP "

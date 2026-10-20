@@ -13,6 +13,7 @@ import pymysql
 from infrastructure.knowledge.chroma_gateway import ChromaKnowledgeGateway
 from infrastructure.mysql.line_repository_support import aware_utc, database_utc
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.nas_mutations import call_mutation
 from subsystems.runtime_governance.operational_retention import (
     RetentionCandidate,
     RetentionDeleteResult,
@@ -236,6 +237,19 @@ class MySqlKnowledgeRetentionSource:
                 with connection.cursor(pymysql.cursors.DictCursor) as cursor:
                     current = _locked_candidate(cursor, kind, int(raw_id))
                     if current is None:
+                        table, key = {"request": ("knowledge_answer_requests", "id"),
+                                      "job": ("knowledge_jobs", "id"),
+                                      "index": ("knowledge_indexes", "index_version")}[kind]
+                        cursor.execute(f"SELECT `{key}` FROM `{table}` WHERE `{key}`=%s FOR UPDATE", (int(raw_id),))
+                        if cursor.fetchone() is not None:
+                            # The row exists but is no longer eligible. Never remove
+                            # a now-active index just because the old preview is stale.
+                            unit_of_work.rollback()
+                            return False
+                        if kind == "index":
+                            if not self._remove_index_files(int(raw_id)):
+                                unit_of_work.rollback()
+                                return False
                         unit_of_work.commit()
                         return True
                     current_candidate = _row_candidate(
@@ -246,31 +260,40 @@ class MySqlKnowledgeRetentionSource:
                     if current_candidate.version != candidate.version:
                         unit_of_work.rollback()
                         return False
-                    if kind == "index":
-                        self._chroma.delete_index(int(raw_id))
                     if kind == "request":
-                        cursor.execute(
-                            "DELETE s FROM knowledge_answer_sources s "
-                            "JOIN knowledge_answer_receipts r ON r.id=s.answer_receipt_id "
-                            "WHERE r.answer_request_id=%s",
-                            (raw_id,),
-                        )
-                        cursor.execute("DELETE FROM knowledge_answer_receipts WHERE answer_request_id=%s", (raw_id,))
-                        cursor.execute("DELETE FROM knowledge_jobs WHERE answer_request_id=%s", (raw_id,))
-                        cursor.execute("DELETE FROM knowledge_answer_requests WHERE id=%s", (raw_id,))
+                        call_mutation(cursor, "lu_nas_purge_knowledge_request_v1", int(raw_id),
+                                      current["state"], database_utc(current_candidate.occurred_at_utc),
+                                      int(current.get("receipt_version", 0)), int(current.get("source_version", 0)),
+                                      int(current.get("job_version", 0)))
                     elif kind == "job":
-                        cursor.execute(
-                            "DELETE FROM knowledge_jobs WHERE id=%s AND answer_request_id IS NULL",
-                            (raw_id,),
-                        )
+                        call_mutation(cursor, "lu_nas_purge_knowledge_job_v1", int(raw_id), current["state"],
+                                      database_utc(current_candidate.occurred_at_utc), int(current["job_version"]))
                     elif kind == "index":
-                        cursor.execute("DELETE FROM knowledge_indexes WHERE index_version=%s", (raw_id,))
+                        call_mutation(cursor, "lu_nas_purge_knowledge_index_v1", int(raw_id), current["state"],
+                                      database_utc(current_candidate.occurred_at_utc))
                     else:
                         raise ValueError("unsupported retention candidate")
+                if kind == "index":
+                    # The allocator uses MAX(index_version)+1. Keep the SQL
+                    # deletion uncommitted until the old artifact is removed,
+                    # otherwise a new build could reuse the version/path.
+                    # Files are not transactionally restored by MySQL rollback.
+                    if not self._remove_index_files(int(raw_id)):
+                        unit_of_work.rollback()
+                        return False
                 unit_of_work.commit()
                 return True
         finally:
             connection.close()
+
+    def _remove_index_files(self, index_version: int) -> bool:
+        try:
+            self._chroma.delete_index(index_version)
+        except Exception:
+            # Preserve the DB row for retry/reconciliation when file deletion
+            # failed; never claim that filesystem effects are transactional.
+            return False
+        return True
 
 
 class ManagedLogRetentionSource:

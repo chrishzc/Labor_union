@@ -24,19 +24,30 @@
 - LINE preview startup: `scripts/run_line_worker.py` 的 `--check` 只執行 Private API 認證握手，不進入任何 work cycle。
 - Current NAS web-setup r2 image: `scripts/nas_appliance.py`、`deployment/nas-test/Dockerfile.web-setup`、`deployment/nas-test/compose.web-setup.yaml`；`scripts/package_nas_preview.py --web-setup-from` 將初始化 SQL／helper／首次設定表單一起包進新映像，單一 Compose 自動初始化 named volumes，API 讀取設定後降為 UID 1000。無部署啟用碼、固定網址必填或額外 8 並行限制；HTTPS 維持現況，NAS 憑證／代理仍待確認。PDF／匯入／背景工作程式保留，主專案不自動執行工作。操作與驗收由 `deployment/nas-test/README.web-setup.md` 承接；前版包保留作已交付的隔離測試版本。
 - NAS r2 最後手動 LINE startup 專案 `deployment/nas-test/line-check.web-setup.yaml` 透過 `nas_appliance line-check` 載入 Worker CLI 的 `--help`，無網路／資料卷、不要求 OIDC 或認證握手；只驗證程式可載入，不代表實際工作可運作。標準 `scripts/run_line_worker.py --check` 的認證行為不變。
+- NAS 完整服務新入口：`scripts/nas_security_runtime.py`、`api/nas_apps.py`、`deployment/nas/compose.yaml`、`deployment/nas/Dockerfile`；管理與對外 LINE API 分離，初次 root 沿用 `api/routes/nas_setup.py:attach_setup`，LINE 保留受驗證 LIFF 申請／日誌／照片入口。初始化受 canonical compact schema gate 保護；不覆寫舊安裝。此來源取代新部署的舊 OIDC 假設，不代表已交付 r2 映像更新。
+- NAS machine auth：`infrastructure/runtime/worker_credentials.py`、`api/dependencies/internal_service_auth.py`、`infrastructure/http/private_operations_client.py`；逐 Worker token、API 只有 verifier、HTTPS／CA、憑證決定 service。`scripts/run_service_monitor.py` 的內部探測使用相同私人 CA。
+- NAS GUI current template：`deployment/nas/compose.yaml`、`deployment/nas/.env.example`、`deployment/nas/README.md`；單檔 Compose 以 `.env` 的 `COMPOSE_PROFILES` 逐組啟動，預設只有基本組。2026-10-20 新安裝採 Synology DDNS／Let’s Encrypt／DSM 內網反向代理：管理 API 不發布 host port，management-egress 使用 NAS_PROXY_SUBNET／NAS_PROXY_API_IP 固定 bridge 位址供同機 DSM HTTPS 轉送，瀏覽器使用 DSM 公信入口（文件預設 19443）。檔案仍使用指定空白 bind roots；公開 LINE 不掛正式業務檔案，經專用 line-media-control 網路及 line-media-proxy token 呼叫私人檔案 API。主檔已含選用 cloudflared，GUI 不需 tunnel overlay。
+- GUI initializer 只處理新安裝：非空檔案根目錄在寫入前拒絕，初始化產生五個 Worker 加照片代理六組獨立 token；管理憑證納入設定的 NAS IPv4／可選 hostname，公開 CA 副本輸出至 app-data 供操作者信任；既有標記安裝不補造或輪替秘密。
+- NAS 維護：`deployment/nas/README.md` 定義原專案的停止／依賴順序啟動、保留資料重建、無 DB 變更換版與回復、冷備份及獨立還原範圍。正式 Compose 不設定 NanoCPUS，data 引用既有 `${COMPOSE_PROJECT_NAME}_data` internal 網路；新隔離測試自行準備專用網路，不借用 NAS／既有 Docker 資料。opt-in lifecycle test 與 container probe 位於下列 Module root，不建置／推送映像。
+- NAS MySQL client config：`deployment/nas/mysql-client.cnf` 由 initializer 複製至 bootstrap，並掛入 `/etc/mysql/conf.d`，讓 fresh SQL 與 seed 以 UTF-8 執行。私人 API 憑證包含 strict chain 所需識別資訊；管理端另自動產生既有 PDF final-preview HMAC key。
+- NAS build context：`scripts/package_nas_preview.py --secure` 沿用秘密過濾與真實 previous React artifact，不上傳映像；`deployment/nas/compose.tunnel.yaml` 只連 public LINE origin，`cloudflared.example.yaml` 拒絕私人路徑；`deployment/nas/README.md` 記錄配置與部署驗收順序。
 
 ## Contracts
 - session key 不寫入 `.env`、不輸出，且不透過 command argument 傳遞。
 - API readiness 不等於 Private API authentication readiness；認證握手失敗時 fail closed，不啟動任何 worker。
-- NAS preview 預設只發布 loopback HTTP；MySQL／Redis 不發布 host port；LINE check 為手動 profile、production OIDC，缺憑證時 blocked，無一般 LINE cycle。既有標準 Compose／launcher 不因 preview 改變。
-- DSM GUI 版本的 LINE check 改為獨立手動專案；prepare 無網路、禁止覆寫已有設定／資料。API 不發布 host port，DSM HTTPS 反向代理以 API 的 bridge IP:8080 連入並限制單一工會電腦來源，不需 SSH；重新部署須核對容器 IP，憑證／NAS 來源規則須由部署者設定與實測。
+- 舊 preview handoff 是歷史隔離測試版本；新 NAS 完整服務 source 不使用 Google OIDC。MySQL／Redis 不發布 host port，LINE check 為手動 profile、獨立機器憑證與 HTTPS，無一般 LINE cycle。既有標準 Compose／launcher 不因 NAS profile 改變。
+- 舊 r2 DSM GUI 版本的 LINE check 是獨立手動專案、以 DSM 代理 bridge IP:8080；新完整服務模板改用獨立 line-check profile，仍只 --check，不進行業務週期。現行新安裝的管理 API 不發布埠，DSM 公信入口須套內網來源允許及其餘拒絕，內網 DNS／DSM ACL／實際隔離須實測；DSM 到容器的私人 CA 鏈驗證不得由瀏覽器憑證推定。prepare 無網路，禁止覆寫已有設定／資料。
 - supervisor 只清理本次建立且可重新驗證身分的 process tree。
 - 標準入口不再啟動 MySQL 容器；NAS 入口拒絕 loopback DB_HOST，dry-run 零連線，schema 非 current 時不啟動 runtime。
 - 唯讀 schema 查核：連線最多 5 秒、單次查詢預設最多 30 秒；明確 caller timeout 可縮短，無 retry 或寫入。
 - Windows local-bypass 沒有主機 npm 時，由 Docker 執行 Vite，主機 loopback gateway 轉送 relative API 與前端 HTTP／WebSocket；API、gateway 與 Docker published port 均限 loopback，gateway 納入同一 owned supervision。
 
 ## Verification
+- layout_status: `custom_current`
+- layout_basis: 既有 Private Runtime Operations 系統契約檔仍為 API／worker／monitor 的共同 consumer；本次只替換已退役 OIDC 的認證 oracle，保留 local／heartbeat／worker 契約及既有 discovery。新 NAS 專屬測試使用下列 canonical Module root。
+- test_root: `tests/test_private_runtime_operations.py`
 - test_root: `tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/`
+- `test_nas_compose_lifecycle.py` 與 `nas_lifecycle_probe.py` — 本機明確 opt-in 的隔離 Compose／資料卷演練；不代表 DSM GUI 或 NAS 網路已驗證。
 
 ## Provenance
 - Windows entrypoint, process ownership and Private API client/auth boundary — `source_observed` — current launcher, supervisor and authenticated private runtime implementation.

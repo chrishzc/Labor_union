@@ -73,7 +73,7 @@ const JobFailureSchema = z.strictObject({
   kind: z.literal('failure'),
   schema_version: z.literal(1),
   error: z.strictObject({
-    category: z.enum(['validation', 'conflict', 'domain_blocked', 'idempotency_mismatch', 'unavailable', 'internal']),
+    category: z.enum(['validation', 'forbidden', 'not_found', 'conflict', 'domain_blocked', 'idempotency_mismatch', 'unavailable', 'internal']),
     code: z.string().min(1).max(128),
     message: z.string().min(1).max(512),
     retryable: z.boolean(),

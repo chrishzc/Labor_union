@@ -124,6 +124,7 @@ def get_all_client_payments(
                         obligation_count=item.obligation_count,
                         ledger_entry_count=item.ledger_entry_count,
                         receipt_entry_count=item.receipt_entry_count,
+                        receipt_status=item.receipt_status,
                     )
                     for item in result.cases
                 ]

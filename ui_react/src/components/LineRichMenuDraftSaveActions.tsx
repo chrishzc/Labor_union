@@ -1,3 +1,4 @@
+import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineRichMenuDraftSaveActions.tsx
  * Description: 以同一共用草稿執行零寫入檢查、明確確認、保存與重新查詢，不建立發布工作。
@@ -115,6 +116,8 @@ export const LineRichMenuDraftSaveActions: React.FC<Props> = ({ draft, definitio
       if (!controller.signal.aborted) { setFailed(true); setConfirmed(false); setMessage(error instanceof Error ? error.message : '草稿儲存或重新載入失敗，請確認目前版本後再試。'); }
     } finally { finish(controller); }
   };
+  useUnsavedDraft('圖文選單草稿', { '變更內容': changedFields(draft.definition, definition), '原因': reason }, { baseline: { '變更內容': [], '原因': '' }, busy });
+
 
   return <>
     {message && <p className={failed ? 'line-error richmenu-save-message' : 'richmenu-save-message'} role={failed ? 'alert' : 'status'}>{message}</p>}

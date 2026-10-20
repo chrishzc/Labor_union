@@ -470,6 +470,35 @@ def _select_generation(cursor: Any, aggregate_row, lock: bool):
     return generation_row
 
 
+# Historical adoption writes the same assignment root without inventing daily
+# schedules. Its latest adopted binding selects that root for the current view.
+_CURRENT_ASSIGNMENTS_QUERY_SQL = """
+SELECT assignment.id,assignment.staff_id,assignment.assignment_sequence,
+       assignment.assigned_start_date,assignment.assigned_end_date
+FROM case_staff_assignments assignment
+WHERE assignment.case_no=%s AND assignment.status IN ('planned','active','completed')
+  AND (assignment.generation_id=%s OR (
+       assignment.generation_id IS NULL AND EXISTS (
+           SELECT 1 FROM historical_order_pairing_evidence evidence
+           JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id
+           JOIN orders historical_order ON historical_order.case_no=receipt.case_no
+           WHERE receipt.case_no=assignment.case_no
+             AND receipt.outcome='adopted'
+             AND receipt.id=(SELECT MAX(latest.id) FROM historical_order_adoption_receipts latest
+                             WHERE latest.case_no=assignment.case_no AND latest.outcome='adopted')
+             AND evidence.assignment_id=assignment.id AND evidence.staff_id=assignment.staff_id
+             AND historical_order.status IN ('歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成')
+       )))
+ORDER BY assignment.assignment_sequence,assignment.id
+"""
+
+
+def select_current_assignments(cursor: Any, case_no: str, effective_generation_id: int | None):
+    """Read canonical current assignments without requiring reconstructed schedules."""
+    cursor.execute(_CURRENT_ASSIGNMENTS_QUERY_SQL, (case_no, effective_generation_id))
+    return tuple(cursor.fetchall())
+
+
 def _select_assignments(cursor: Any, generation_row, lock: bool):
     if generation_row is None:
         return ()

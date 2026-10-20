@@ -1,3 +1,4 @@
+import { useUnsavedDraft, useUnsavedChanges } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: ContractSigningActions.tsx
@@ -72,6 +73,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
   const intents = useRef(new Map<string, Intent>());
   const staffIdentity = useStaffIdentityLabels();
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [submittedDownloadUrl, setSubmittedDownloadUrl] = useState('');
   const [staffFiles, setStaffFiles] = useState<Record<number, File | null>>({});
   const [clientFile, setClientFile] = useState<File | null>(null);
   const [staffManualDrafts, setStaffManualDrafts] = useState<Record<number, ManualAttestationDraft>>({});
@@ -110,7 +112,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
   const validDownloadUrl = (() => {
     try { return new URL(downloadUrl).protocol === 'https:'; } catch { return false; }
   })();
-  const run = async (operation: () => Promise<ContractSigningReceipt>) => {
+  const run = async (operation: () => Promise<ContractSigningReceipt>, onSaved?: () => void) => {
     setState('working');
     setResult(null);
     let receipt: ContractSigningReceipt;
@@ -123,6 +125,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
     }
 
     setState('success');
+    onSaved?.();
     setResult(receiptText(receipt));
     try {
       await onCommitted();
@@ -143,6 +146,9 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
       setResult(message(error));
     }
   };
+  useUnsavedChanges('契約寄送網址', downloadUrl !== submittedDownloadUrl ? [{ label: '受控下載網址', before: submittedDownloadUrl ? '原下載網址（不顯示內容）' : '未填寫', after: downloadUrl ? '已輸入或修改下載網址（不顯示內容）' : '清空' }] : [], { busy: state === 'working' });
+  useUnsavedDraft('契約簽署文件', { '客戶文件': clientFile?.name ?? '', '月嫂文件': Object.values(staffFiles).map(file => file?.name ?? '').filter(Boolean), '客戶人工證據檔': clientManualDraft.file?.name ?? '', '客戶人工確認方式': clientManualDraft.confirmationMethod, '客戶人工確認原因': clientManualDraft.reason, '月嫂人工證據': Object.values(staffManualDrafts).map(draft => ({ '檔案': draft.file?.name ?? '', '方式': draft.confirmationMethod, '原因': draft.reason })) }, { busy: state === 'working' });
+
 
   return (
     <section className="contract-signing-panel" aria-label="契約寄送與簽回文件操作" data-control-id="orders.contract-signing.actions">
@@ -248,7 +254,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                       disabled={state === 'working' || !validDownloadUrl}
                       onClick={() => void run(() =>
                         contractSigningMutationClient.sendStaff(caseNo, segment.segment_id, downloadUrl, currentIntent(`staff-send-${segment.segment_id}`))
-                      )}
+                      , () => setSubmittedDownloadUrl(downloadUrl))}
                     >
                       🚀 確認建立月嫂契約寄送任務
                     </button>
@@ -276,7 +282,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                       disabled={state === 'working' || !file || version === null}
                       onClick={() => void run(() =>
                         contractSigningMutationClient.uploadStaffSignedReturn(caseNo, segment.segment_id, file!, version!, currentIntent(`staff-return-${segment.segment_id}`))
-                      )}
+                      , () => setStaffFiles(current => ({ ...current, [segment.segment_id]: null })))}
                     >
                       📤 確認記錄月嫂簽回
                     </button>
@@ -351,7 +357,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                         disabled={state === 'working' || !manual.file || manual.preview === null}
                         onClick={() => void run(() =>
                           contractSigningMutationClient.recordManualStaffAttestation(caseNo, segment.segment_id, manual.file!, manual.confirmationMethod, manual.reason, manual.preview!.preview_fingerprint, currentIntent(`staff-manual-${segment.segment_id}`))
-                        )}
+                        , () => setStaffManualDrafts(current => { const next = { ...current }; delete next[segment.segment_id]; return next; }))}
                       >
                         ✅ 確認記錄人工月嫂簽約
                       </button>
@@ -404,7 +410,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                     disabled={state === 'working' || !validDownloadUrl || signing.commitment_id === null}
                     onClick={() => void run(() =>
                       contractSigningMutationClient.sendClient(caseNo, downloadUrl, currentIntent('client-send'))
-                    )}
+                    , () => setSubmittedDownloadUrl(downloadUrl))}
                   >
                     🚀 確認建立客戶契約寄送任務
                   </button>
@@ -431,7 +437,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                     disabled={state === 'working' || !clientFile || version === null}
                     onClick={() => void run(() =>
                       contractSigningMutationClient.uploadClientSignedReturn(caseNo, clientFile!, version!, currentIntent('client-return'))
-                    )}
+                    , () => setClientFile(null))}
                   >
                     📤 確認客戶簽約完成
                   </button>
@@ -506,7 +512,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                       disabled={state === 'working' || !clientManualDraft.file || clientManualDraft.preview === null}
                       onClick={() => void run(() =>
                         contractSigningMutationClient.recordManualClientAttestation(caseNo, clientManualDraft.file!, clientManualDraft.confirmationMethod, clientManualDraft.reason, clientManualDraft.preview!.preview_fingerprint, currentIntent('client-manual'))
-                      )}
+                      , () => setClientManualDraft(defaultManualAttestationDraft()))}
                     >
                       ✅ 確認記錄人工客戶簽約並完成契約
                     </button>
