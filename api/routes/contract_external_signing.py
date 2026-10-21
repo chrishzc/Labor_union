@@ -23,6 +23,7 @@ from api.dependencies.admin_auth import admin_actor_context, require_persisted_a
 from api.dependencies.contract_external_signing import (
     ContractExternalSigningApplication,
     get_contract_external_signing_application,
+    get_full_contract_preview_application,
     testing_signing_skip_allowed,
 )
 from api.error_contracts import typed_http_error
@@ -56,8 +57,13 @@ from subsystems.contract_signing.final_document_workflow import (
     signed_contract_intent,
     signed_contract_object_key,
 )
-from subsystems.contract_signing.full_contract_preview import FullContractPreviewError
+from subsystems.contract_signing.full_contract_preview import (
+    FullContractPreviewApplication,
+    FullContractPreviewError,
+    FullContractPreviewResult,
+)
 from subsystems.contract_signing.contract_renderer import ContractRendererError
+from infrastructure.file.browser_contract_renderer import render_contract_print_html
 from subsystems.contract_signing.unsigned_contract_pdf import UnsignedContractPdfError
 from subsystems.controlled_files.contracts import ControlledFileStorageError
 from subsystems.controlled_files.workflow import (
@@ -575,6 +581,48 @@ def preview_full_staff_contract(
             )
         ),
         "full-contract-preview",
+    )
+
+
+def _contract_print_response(preview: FullContractPreviewResult) -> Response:
+    if not preview.ready_to_print or preview.workbook_content is None:
+        raise FullContractPreviewError(
+            "contract_print_source_unavailable", "契約模板或文件資料無法列印，請重新讀取。"
+        )
+    label = "客戶服務契約" if preview.scope == "client" else "月嫂委任契約"
+    return Response(
+        render_contract_print_html(
+            preview.workbook_content,
+            title=f"{preview.case_no}－{label}",
+            missing_fields=bool(preview.warnings),
+        ),
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{case_no}/contract-signing/client/print", response_class=Response)
+def print_client_contract(
+    case_no: str = ApiPath(pattern=_CASE),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: FullContractPreviewApplication = Depends(get_full_contract_preview_application),
+):
+    return _call(
+        lambda: _contract_print_response(application.preview_client(case_no)),
+        "contract-print",
+    )
+
+
+@router.get("/{case_no}/contract-signing/staff-segments/{segment_id}/print", response_class=Response)
+def print_staff_contract(
+    case_no: str = ApiPath(pattern=_CASE),
+    segment_id: int = ApiPath(ge=1),
+    _: AdminPrincipal = Depends(require_persisted_admin),
+    application: FullContractPreviewApplication = Depends(get_full_contract_preview_application),
+):
+    return _call(
+        lambda: _contract_print_response(application.preview_staff_segment(case_no, segment_id)),
+        "contract-print",
     )
 
 

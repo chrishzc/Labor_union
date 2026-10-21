@@ -297,6 +297,10 @@ def test_client_preview_uses_exact_target_and_returns_typed_cell_values(monkeypa
     assert result.blockers == ()
     assert result.ready_to_print is True
     assert result.field_values == {"A1": "value"}
+    assert result.workbook_content is not None
+    rendered = load_workbook(BytesIO(result.workbook_content))
+    assert rendered.active["A1"].value == "value"
+    rendered.close()
 
 
 def test_staff_segment_preview_uses_resolved_assignment_identity(monkeypatch, tmp_path):

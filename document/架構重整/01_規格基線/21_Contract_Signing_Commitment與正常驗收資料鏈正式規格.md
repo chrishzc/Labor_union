@@ -459,6 +459,16 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
    重複填入每一份個人契約。
 6. 新投影不得覆寫已簽回原始文件，也不得冒充先前已簽內容。本節不新增文件版本、簽章、
    缺件管理或欄位 registry。
+
+### 2026-10-21 NAS 瀏覽器列印裁決與實作邊界
+
+人工授權：目前一般契約輸出不需要自動歸檔或傳送簽署，新增「瀏覽器列印」供使用者列印或另存 PDF，並驗證版面。此入口使用目前有效資料與既有核准 XLSX 的完整條文、套值及版面；不以後端 Chromium、既存 PDF、簽約 session 或 accepted plan 為前置條件，也不列印欄位摘要。
+
+- 公開入口：authenticated `GET /api/v1/orders/{case_no}/contract-signing/client/print` 與 `GET /api/v1/orders/{case_no}/contract-signing/staff-segments/{segment_id}/print`。回傳不快取的完整 HTML，只沿用現有 Full Contract Preview owner projection；既有身分、exact target 及技術失敗語意不變，缺值留白並沿用欄位提醒。
+- 有界 write set：Full Contract Preview transient workbook result、既有 browser renderer 的 HTML 輸出、上述 routes、React 契約列印入口與直接測試；不改 schema、business facts、簽署 state machine、正式 PDF persistence 或外部 provider。
+- 列印零寫入，不建立 document version、archive、receipt、交接或通知。既存正式 PDF 下載及簽回流程保留；開啟列印視窗不能宣稱已儲存 PDF 或完成簽署。
+- 版面驗收：A4 直向、8 mm 頁邊、194 mm 內容寬，保留模板欄寬比例、合併格、字級、列高與條文；避免列內斷頁，不截斷長欄位。列印前等待字型載入，提供重印按鈕及 A4／100%／停用頁首頁尾／背景圖形提示。必須以兩份核准模板及合成長值檢查實際瀏覽器輸出；未驗證的瀏覽器／OS 字型組合不得宣稱保證一致。
+- 完成門：focused renderer、projection、authenticated route、前端列印與原契約操作測試，以及實際版面檢查；只授權本機編修與驗證，不含 image build／發布、NAS 部署、真實資料或外部操作。
 7. 管理端 `GET /api/v1/orders/{case_no}/contract-external-signing` 必須涵蓋文件準備階段。
    案件存在但尚無可推導的簽約工作時，Query 回傳 HTTP 200 與 `state=preparing`、目前方案的
    `staff_segments` 及已生成文件的 bounded `documents`，不以 `external_signing_session_facts_unavailable`

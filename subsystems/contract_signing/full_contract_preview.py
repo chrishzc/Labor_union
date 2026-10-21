@@ -93,6 +93,8 @@ class FullContractPreviewResult:
     warnings: tuple[str, ...]
     blockers: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint
+    # Internal, transient source for browser printing; never part of public JSON.
+    workbook_content: bytes | None = None
 
     @property
     def ready_to_print(self) -> bool:
@@ -168,6 +170,7 @@ class FullContractPreviewApplication:
         blockers, warnings, field_states = _mapping_validation(
             template_key, mapping_path, facts
         )
+        content = None
         if not blockers:
             from subsystems.contract_signing.contract_renderer import external_formula_cells, render_contract_template
             content = render_contract_template(
@@ -211,6 +214,7 @@ class FullContractPreviewApplication:
             warnings=tuple(warnings),
             blockers=tuple(blockers),
             preview_fingerprint=fingerprint,
+            workbook_content=content,
         )
 
 

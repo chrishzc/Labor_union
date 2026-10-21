@@ -53,11 +53,11 @@ export function OrderContractPreview({ caseNo, revision: factsRevision = 0, init
   }, [caseNo, scope, segmentId, revision, factsRevision]);
   return <section aria-label="契約套值欄位預覽">
     {showScopeControls && <div className="order-information-choice"><button type="button" aria-pressed={scope === 'client'} onClick={() => { setScope('client'); setResult(null); setError(null); }}><strong>客戶服務契約</strong><span>服務約定、費用與付款安排</span></button><button type="button" aria-pressed={scope === 'staff'} onClick={() => { setScope('staff'); setResult(null); setError(null); }}><strong>服務人員委任契約</strong><span>月嫂服務區段、報酬與責任</span></button></div>}
-    <p className="order-case-review-note">此處是契約欄位摘要；完整條文請核對下載的 PDF。付款日期顯示預計繳款日。</p>
+    <p className="order-case-review-note">此處是契約欄位摘要；完整條文可透過瀏覽器列印查看，並另存為 PDF。付款日期顯示預計繳款日。</p>
     <button type="button" disabled={loading} onClick={() => setRevision((value) => value + 1)}>{loading ? '讀取契約資料中…' : '重新讀取契約資料'}</button>
     {scope === 'staff' && targets.length > 1 && <label>選擇月嫂契約<select value={segmentId ?? ''} onChange={(event) => { setResult(null); setSelection({ caseNo, revision: factsRevision, segmentId: event.target.value ? Number(event.target.value) : null }); }}><option value="">請選擇</option>{targets.map((target, index) => ({ target, index })).sort((a, b) => staffIdentity.compare(Number(a.target.staff_reference), Number(b.target.staff_reference))).map(({ target, index }) => <option key={target.segment_id} value={target.segment_id}>{staffIdentity.label(Number(target.staff_reference))} · 第 {index + 1} 份契約</option>)}</select></label>}
     {error && <p role="alert">無法取得本案契約資料：{error} 下方僅為版面，不能視為已產生文件。</p>}
-    {result && result.warnings.length > 0 && <p role="status">目前資料仍有缺漏；已有內容可繼續預覽與下載，系統不會猜測或補造缺少的值。</p>}
+    {result && result.warnings.length > 0 && <p role="status">目前資料仍有缺漏；已有內容可繼續核對與列印，系統不會猜測或補造缺少的值。</p>}
     {result && !result.ready_to_print && <p role="alert">契約模板或文件產生發生技術問題，暫時無法產生文件。</p>}
     {result?.blockers.includes('contract_pdf_external_reference_unresolved') && <p role="alert">契約模板缺少舊版引用內容，暫不能產生可簽署 PDF。</p>}
     <article className="order-information-paper"><header><small>案件 {caseNo} · 套值欄位預覽</small><h3>{scope === 'client' ? '坐月子到府服務契約' : '到宅坐月子服務人員委任契約'}</h3></header><dl>{FIELDS[scope].map(([cell, label]) => {

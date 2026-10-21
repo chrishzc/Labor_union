@@ -112,7 +112,19 @@ def _render_html_pdf(html: str) -> bytes:
         ) from None
 
 
-def _workbook_html(content: bytes) -> str:
+def render_contract_print_html(content: bytes, *, title: str, missing_fields: bool = False) -> str:
+    """Produce the full approved document without starting a server browser."""
+    html = _workbook_html(content, browser_print=True)
+    if missing_fields:
+        html = html.replace(
+            '<aside class="print-controls">',
+            '<aside class="print-controls"><p>部分契約欄位尚未提供，已留白；請核對目前資料。</p>',
+            1,
+        )
+    return html.replace("<head>", f"<head><title>{escape(title)}</title>", 1)
+
+
+def _workbook_html(content: bytes, *, browser_print: bool = False) -> str:
     workbook = None
     try:
         workbook = load_workbook(BytesIO(content), data_only=True)
@@ -168,21 +180,40 @@ def _workbook_html(content: bytes) -> str:
                     f' colspan="{colspan}"' if colspan > 1 else ""
                 )
                 cells.append(
-                    f'<td{span} style="{_cell_style(cell, colspan, background, scale)}">{_cell_text(cell.value)}</td>'
+                    f'<td{span} style="{_cell_style(cell, colspan, background, scale, browser_print=browser_print)}">{_cell_text(cell.value)}</td>'
                 )
             row_style = f' style="height:{height * scale:.2f}pt"' if height else ""
             rows.append(f"<tr{row_style}>{''.join(cells)}</tr>")
+        print_style = (
+            "html{background:#eee}body{width:194mm;margin:0 auto;padding:12px 0}"
+            "article{width:194mm;background:white}"
+            "table{print-color-adjust:exact;-webkit-print-color-adjust:exact}"
+            "td{line-height:1.2}"
+            ".print-controls{font:14px/1.6 sans-serif;margin:0 0 16px;padding:12px;background:white}"
+            "@media print{html{background:white}body{width:194mm;margin:0;padding:0}"
+            ".print-controls{display:none}}"
+            if browser_print else ""
+        )
+        controls = (
+            '<aside class="print-controls"><button type="button" id="print-contract">列印／另存 PDF</button>'
+            '<p>請選 A4、直向、縮放 100%，關閉頁首及頁尾並開啟背景圖形。'
+            '可在目的地選擇「另存為 PDF」。此文件使用目前資料，不代表已完成簽署。</p></aside>'
+            if browser_print else ""
+        )
         return (
             '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><style>'
             "@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}"
             "table{width:100%;border-collapse:collapse;table-layout:fixed}"
             "tr{break-inside:avoid}"
             "td{box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;vertical-align:middle}"
-            "</style></head><body><table><colgroup>"
+            + print_style
+            + "</style></head><body>"
+            + controls
+            + ("<article><table><colgroup>" if browser_print else "<table><colgroup>")
             + columns
             + "</colgroup>"
             + "".join(rows)
-            + "</table></body></html>"
+            + ("</table></article></body></html>" if browser_print else "</table></body></html>")
         )
     except ContractRendererError:
         raise
@@ -278,10 +309,11 @@ def _nearest_non_highlight_fill(worksheet, row: int, start: int, step: int, min_
     return None
 
 
-def _cell_style(cell, colspan: int, background: str | None, scale: float = 1.0) -> str:
+def _cell_style(cell, colspan: int, background: str | None, scale: float = 1.0, *, browser_print: bool = False) -> str:
     styles = ["padding:1px 2px"]
     if cell.font.name:
-        styles.append(f"font-family:{escape(cell.font.name)}")
+        fallback = ",PMingLiU,Noto Serif CJK TC,serif" if browser_print else ""
+        styles.append(f"font-family:{escape(cell.font.name)}{fallback}")
     if cell.font.sz:
         styles.append(f"font-size:{cell.font.sz * scale:.2f}pt")
     if (
@@ -303,7 +335,9 @@ def _cell_style(cell, colspan: int, background: str | None, scale: float = 1.0) 
         vertical = "middle" if cell.alignment.vertical == "center" else cell.alignment.vertical
         styles.append(f"vertical-align:{vertical}")
     if cell.alignment.wrap_text:
-        styles.extend(("white-space:pre-wrap", "overflow-wrap:anywhere", "overflow:hidden"))
+        styles.extend(("white-space:pre-wrap", "overflow-wrap:anywhere"))
+        if not browser_print:
+            styles.append("overflow:hidden")
     if background:
         styles.append(f"background:{background}")
     for side_name in ("top", "right", "bottom", "left"):
@@ -316,4 +350,4 @@ def _cell_style(cell, colspan: int, background: str | None, scale: float = 1.0) 
     return ";".join(styles)
 
 
-__all__ = ["BrowserContractRenderer"]
+__all__ = ["BrowserContractRenderer", "render_contract_print_html"]

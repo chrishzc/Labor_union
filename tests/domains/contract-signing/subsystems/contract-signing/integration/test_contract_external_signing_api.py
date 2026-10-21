@@ -310,6 +310,7 @@ def _client(application: FakeApplication) -> TestClient:
     principal = AdminPrincipal(7, "admin", "管理員", "system_admin", is_root=True)
     app.dependency_overrides[require_persisted_admin] = lambda: principal
     app.dependency_overrides[route._application] = lambda: application
+    app.dependency_overrides[route.get_full_contract_preview_application] = lambda: application.full_preview
     return TestClient(app)
 
 
@@ -317,6 +318,7 @@ def _local_bypass_client(application: FakeApplication) -> TestClient:
     app = FastAPI()
     app.include_router(route.router)
     app.dependency_overrides[route._application] = lambda: application
+    app.dependency_overrides[route.get_full_contract_preview_application] = lambda: application.full_preview
     return TestClient(app)
 
 
@@ -511,6 +513,100 @@ def test_full_contract_preview_preserves_not_found_target_and_blocker_mapping() 
     )
     assert response.status_code == 404
     assert response.json()["detail"]["error"]["code"] == "contract_preview_target_not_found"
+
+
+@pytest.mark.parametrize("target", ["client", "staff-segments/71"])
+def test_browser_print_is_authenticated_exact_target_and_does_not_prepare_or_persist(target):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    application = FakeApplication()
+    workbook = Workbook()
+    workbook.active["A1"] = "完整契約測試 <script>"
+    workbook.active.print_area = "A1:A1"
+    output = BytesIO()
+    workbook.save(output)
+    preview = application.full_preview._result(
+        ContractPreviewScope.CLIENT if target == "client" else ContractPreviewScope.STAFF
+    )
+    preview.workbook_content = output.getvalue()
+    calls = []
+    application.full_preview.preview_client = lambda case: (calls.append((case, None)), preview)[1]
+    application.full_preview.preview_staff_segment = lambda case, segment: (calls.append((case, segment)), preview)[1]
+    response = _client(application).get(f"/api/v1/orders/{CASE_NO}/contract-signing/{target}/print")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    assert "完整契約測試 &lt;script&gt;" in response.text
+    assert calls == [(CASE_NO, None if target == "client" else 71)]
+    # The fake has no PDF preparation/archive implementation: those paths cannot run.
+    assert application.reports.command is None
+
+
+def test_browser_print_preserves_typed_blocker_and_requires_login():
+    application = FakeApplication()
+    preview = application.full_preview._result(ContractPreviewScope.CLIENT)
+    preview.ready_to_print = False
+    application.full_preview.preview_client = lambda _case: preview
+    response = _client(application).get(f"/api/v1/orders/{CASE_NO}/contract-signing/client/print")
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"]["code"] == "contract_print_source_unavailable"
+    app = FastAPI()
+    app.include_router(route.router)
+    def unauthenticated():
+        raise route.HTTPException(status_code=401, detail="login required")
+    app.dependency_overrides[require_persisted_admin] = unauthenticated
+    app.dependency_overrides[route._application] = lambda: application
+    app.dependency_overrides[route.get_full_contract_preview_application] = lambda: application.full_preview
+    assert TestClient(app).get(f"/api/v1/orders/{CASE_NO}/contract-signing/client/print").status_code == 401
+
+
+def test_browser_print_readonly_composition_does_not_access_signing_secret_or_storage(monkeypatch):
+    class Connection:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    monkeypatch.setattr(dependencies, "get_connection", lambda: connection)
+    def forbidden():
+        raise AssertionError("Printing must not initialize signing or file storage")
+    monkeypatch.setattr(dependencies, "_preview_token_secret", forbidden)
+    monkeypatch.setattr(dependencies, "_controlled_file_storage_root", forbidden)
+    generator = dependencies.get_full_contract_preview_application()
+    assert isinstance(next(generator), route.FullContractPreviewApplication)
+    generator.close()
+    assert connection.closed
+
+
+def test_browser_print_route_body_and_registered_auth_are_independent_of_pdf_preparation():
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    application = FakeApplication()
+    workbook = Workbook()
+    workbook.active["A1"] = "瀏覽器列印完整契約"
+    workbook.active.print_area = "A1:A1"
+    output = BytesIO()
+    workbook.save(output)
+    preview = application.full_preview._result(ContractPreviewScope.CLIENT)
+    preview.workbook_content = output.getvalue()
+    application.full_preview.preview_client = lambda case: preview
+    response = route.print_client_contract(CASE_NO, application=application.full_preview)
+    assert response.status_code == 200
+    assert "瀏覽器列印完整契約" in response.body.decode("utf-8")
+    assert response.headers["cache-control"] == "no-store"
+    for endpoint in (route.print_client_contract, route.print_staff_contract):
+        declaration = next(entry for entry in route.router.routes if entry.endpoint is endpoint)
+        assert require_persisted_admin in [item.call for item in declaration.dependant.dependencies]
+        assert dependencies.get_full_contract_preview_application in [item.call for item in declaration.dependant.dependencies]
+    preview.ready_to_print = False
+    with pytest.raises(route.HTTPException) as error:
+        route.print_client_contract(CASE_NO, application=application.full_preview)
+    assert error.value.status_code == 409
+    assert error.value.detail["error"]["code"] == "contract_print_source_unavailable"
+    assert application.reports.command is None
 
 
 def test_manual_staff_report_uses_persisted_admin_and_closed_receipt_identity() -> None:

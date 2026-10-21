@@ -20,7 +20,7 @@ import {
 } from '../api/orders/contract_external_signing_client';
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { sessionClient } from '../api/auth/session_client';
-import { previewContractFields } from '../api/orders/contract_full_preview_client';
+import { openContractPrintView, previewContractFields } from '../api/orders/contract_full_preview_client';
 import { OrderContractPreview } from './OrderContractPreview';
 import { CandidateInquiryDialog } from './CandidateInquiryDialog';
 import {
@@ -780,6 +780,24 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
     await submitReminders({ caseNo, sessionId: query.session_id, expectedStatusVersion: query.status_version, actor, identity: createExternalSigningCommandIdentity('signing-reminders') });
   };
 
+  const printContract = async (scope: 'client' | 'staff', segmentId: number | null) => {
+    unsignedDownloadController.current?.abort();
+    const controller = new AbortController();
+    unsignedDownloadController.current = controller;
+    const generation = requestGeneration.current;
+    setUiState({ type: 'working', operation: 'download' });
+    setNotice(null);
+    try {
+      await openContractPrintView(caseNo, scope, segmentId, controller.signal);
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
+      setNotice('已開啟完整契約列印視窗；請選 A4、直向、縮放 100%，關閉頁首及頁尾，可另存為 PDF。');
+      setUiState({ type: 'ready' });
+    } catch (error) {
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
+      setUiState({ type: 'error', message: safeErrorMessage(error) });
+    }
+  };
+
   const downloadUnsigned = async (documentVersionId: number, targetLabel: string) => {
     unsignedDownloadController.current?.abort();
     const controller = new AbortController();
@@ -1046,19 +1064,16 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
   return (
     <section aria-label="外部平台簽約與最終 PDF" data-control-id="orders.contract-external-signing.actions" className="contract-signing-workflow">
       <section className="contract-documents-card" aria-label="契約文件">
-        <ol className="contract-signing-progress" aria-label="簽約進度">{['下載契約', '送交簽署', '回收簽署文件'].map((label, index) => <li key={label} className={index < phase ? 'complete' : index === phase ? 'current' : ''} aria-current={index === phase ? 'step' : undefined}><span>{index < phase ? '✓' : index + 1}</span>{label}</li>)}</ol>
+        <ol className="contract-signing-progress" aria-label="簽約進度">{['列印契約', '送交簽署', '回收簽署文件'].map((label, index) => <li key={label} className={index < phase ? 'complete' : index === phase ? 'current' : ''} aria-current={index === phase ? 'step' : undefined}><span>{index < phase ? '✓' : index + 1}</span>{label}</li>)}</ol>
         <header className="contract-documents-heading"><h3>契約文件</h3>{query && documentsReady && <span className="contract-document-status complete" aria-label={stateLabel(query)}>{documentRows.length} 份已備妥</span>}</header>
         {metadataError && <p role="alert">{metadataError}</p>}
-        {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚未選定可下載契約的月嫂，請先建立推薦方案。</p>}
+        {!query && uiState.type === 'ready' && preparationSegments.length === 0 && <p role="status">目前尚未選定可列印契約的月嫂，請先建立推薦方案。</p>}
         <div className="contract-documents-list">{documentRows.map(row => <article className="contract-document-row" key={row.key}>
           <div><strong>{row.title}{metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}</strong><p>{contractMetadata[row.key]?.period || '服務期間待核對'}</p></div>
           {row.documentId !== null && <span className="contract-document-status complete">已備妥</span>}
-          <div className="contract-document-actions"><button type="button" disabled={busy || finalProtected} onClick={() => setReviewTarget({ scope: row.scope, segmentId: row.segmentId })}>核對資料</button>
+          <div className="contract-document-actions"><button type="button" aria-label={`瀏覽器列印 · ${row.title}${metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}`} disabled={busy} onClick={() => void printContract(row.scope, row.segmentId)}>瀏覽器列印</button><button type="button" disabled={busy || finalProtected} onClick={() => setReviewTarget({ scope: row.scope, segmentId: row.segmentId })}>核對資料</button>
             {row.scope === 'client' && row.documentId !== null && <button type="button" disabled={busy || finalProtected || !!unsignedPreparationFlow || !!fileReturns.client?.file || !!fileReturns.client?.staged} onClick={() => void prepareUnsigned('client', null, true)}>重新產生客戶契約</button>}
-            <button type="button" aria-label={`下載 PDF · ${row.title}${metadataLabel(row.key) ? ` · ${metadataLabel(row.key)}` : ''}`} disabled={busy || finalProtected || !!unsignedPreparationFlow || (!query && preparationSegments.length === 0)} onClick={() => {
-              if (row.documentId !== null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂');
-              else void prepareUnsigned(row.scope, row.segmentId, true);
-            }}>下載 PDF</button></div>
+          </div>
         </article>)}</div>
       </section>
       <section className="contract-signing-actions-card" aria-label="送交簽署與提醒">
@@ -1079,7 +1094,7 @@ export function ContractExternalSigningActions({ caseNo, revision = 0, onCommitt
       </section>
       {handoffConfirmationOpen && <CandidateInquiryDialog title="確認已送交簽署平台" busy={busy} onClose={() => setHandoffConfirmationOpen(false)}><div className="contract-signing-confirm-body"><p>請確認已將客戶及所有月嫂的契約送交外部簽署平台。</p><small>此操作只記錄交接，不會發送 LINE 簽署提醒。</small></div><footer className="contract-signing-confirm-footer"><button type="button" disabled={busy} onClick={() => setHandoffConfirmationOpen(false)}>返回</button><button className="btn-primary-action" type="button" disabled={busy} onClick={() => { setHandoffConfirmationOpen(false); void recordHandoff(); }}>確認已送交</button></footer></CandidateInquiryDialog>}
       {reminderConfirmationOpen && <CandidateInquiryDialog title="確認發送簽署提醒" busy={busy} onClose={() => setReminderConfirmationOpen(false)}><div className="contract-signing-confirm-body"><p>將一次通知本案客戶與所有月嫂：</p><ul>{reminderTargets.map((target, index) => <li key={`${target.scope}:${index}`}>{target.name} · {target.scope === 'client' ? '客戶' : '月嫂'}</li>)}</ul><small>未綁定 LINE 的對象會列出人工通知提示。</small></div><footer className="contract-signing-confirm-footer"><button type="button" disabled={busy} onClick={() => setReminderConfirmationOpen(false)}>取消</button><button className="btn-primary-action" type="button" disabled={busy || !query?.handoff_recorded || query.state === 'completed' || query.state === 'superseded' || reminderFlow?.status === 'outcome_unknown'} onClick={() => void sendReminders()}>確認發送提醒</button></footer></CandidateInquiryDialog>}
-      {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文請核對下載的 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => { const row = documentRows.find(row => row.scope === reviewTarget.scope && row.segmentId === reviewTarget.segmentId); if (row?.documentId != null) void downloadUnsigned(row.documentId, row.scope === 'client' ? '客戶' : '月嫂'); else void prepareUnsigned(reviewTarget.scope, reviewTarget.segmentId, true); }}>下載 PDF</button></footer></CandidateInquiryDialog>}
+      {reviewTarget && <CandidateInquiryDialog title={`核對資料 · ${reviewTarget.scope === 'client' ? '客戶服務契約' : '月嫂委任契約'}`} side onClose={() => setReviewTarget(null)}><div className="contract-review-body"><OrderContractPreview key={`${caseNo}:${reviewTarget.scope}:${reviewTarget.segmentId}`} caseNo={caseNo} revision={revision} initialScope={reviewTarget.scope} targetSegmentId={reviewTarget.segmentId} targetStaffId={contractMetadata[`staff:${reviewTarget.segmentId}`]?.staffId} staffLabels={documentRows.filter(row => row.scope === 'staff').map(row => metadataLabel(row.key) || '月嫂資料待確認')} showScopeControls={false} /></div><footer className="contract-review-footer"><small>完整條文可透過瀏覽器列印查看，並另存為 PDF。</small><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void printContract(reviewTarget.scope, reviewTarget.segmentId)}>瀏覽器列印</button></footer></CandidateInquiryDialog>}
 
       {query?.handoff_recorded && query.state !== 'completed' && query.state !== 'superseded' && <section className="contract-return-card" aria-label="回收簽署文件">
         <header className="contract-documents-heading"><h3>回收簽署文件</h3><span className="contract-document-status">{checkedCount}／{requiredReturnTargets.length} 份已檢查</span></header>

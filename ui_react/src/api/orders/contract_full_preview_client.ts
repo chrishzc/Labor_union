@@ -25,3 +25,38 @@ export async function previewContractFields(caseNo: string, scope: 'client' | 's
   if (response.data.case_no !== caseNo || response.data.scope !== scope || response.data.template_key !== expectedTemplate) throw new Error('契約預覽對象不一致。');
   return response.data;
 }
+
+/** Open during the click gesture, then print the authenticated, full template. */
+export async function openContractPrintView(caseNo: string, scope: 'client' | 'staff', segmentId: number | null, signal: AbortSignal): Promise<void> {
+  if (scope === 'staff' && (segmentId === null || !Number.isSafeInteger(segmentId) || segmentId <= 0)) throw new Error('請先選擇月嫂契約。');
+  const view = window.open('', '_blank');
+  if (!view) throw new Error('瀏覽器已封鎖列印視窗，請允許此網站開啟彈出式視窗後再試。');
+  view.opener = null;
+  const close = () => view.close();
+  signal.addEventListener('abort', close, { once: true });
+  try {
+    view.document.title = '正在準備契約列印';
+    view.document.body.textContent = '正在讀取完整契約…';
+    const target = scope === 'client' ? 'client' : `staff-segments/${segmentId}`;
+    const blob = await transport.get<Blob>(`/api/v1/orders/${encodeURIComponent(caseNo)}/contract-signing/${target}/print`, {
+      token: sessionClient.getToken(), signal, cache: 'no-store', responseType: 'blob',
+    });
+    if (signal.aborted || view.closed) return;
+    if (blob.type.split(';')[0].trim().toLowerCase() !== 'text/html') throw new Error('契約列印內容格式無效。');
+    const html = await blob.text();
+    if (signal.aborted || view.closed) return;
+    view.document.open();
+    view.document.write(html);
+    view.document.close();
+    view.document.getElementById('print-contract')?.addEventListener('click', () => view.print());
+    await view.document.fonts.ready;
+    if (signal.aborted || view.closed) return;
+    view.focus();
+    view.print();
+  } catch (error) {
+    close();
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', close);
+  }
+}

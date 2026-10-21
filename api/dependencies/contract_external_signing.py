@@ -449,6 +449,15 @@ class ContractExternalSigningApplication:
         return documents
 
 
+def get_full_contract_preview_application() -> Iterator[FullContractPreviewApplication]:
+    """Read-only composition: printing needs neither storage nor signing secrets."""
+    connection = get_connection()
+    try:
+        yield FullContractPreviewApplication(MySqlFullContractProjectionRepository(connection))
+    finally:
+        connection.close()
+
+
 def get_contract_external_signing_application() -> Iterator[ContractExternalSigningApplication]:
     connection = get_connection()
     try:
