@@ -233,13 +233,31 @@ describe('Scheduling staff leave inbox flow', () => {
     expect(screen.getByRole('combobox', { name: '服務日' })).toHaveValue('301');
   });
 
-  it('人工指定補班日期會原樣送入既有 Preview', async () => {
+  it('人工指定補班日期在儲存時原樣送入 Preview 與 Apply，並回讀新服務日', async () => {
     seedQueryReady();
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
+    let applied = false;
+    const apply = vi.spyOn(leaveSubstitutionClient, 'apply').mockImplementation(async () => {
+      applied = true;
+      return { ...LEAVE_RECEIPT, linked_request: null };
+    });
+    vi.mocked(leaveSubstitutionClient.listAssignments).mockImplementation(async () => applied ? [{
+      ...LEAVE_OBSERVED_ASSIGNMENTS[0], staff_id: 11,
+      assigned_start_date: '2026-08-11', assigned_end_date: '2026-08-11',
+      official_schedules: [{ schedule_id: 302, work_date: '2026-08-11' }],
+    }] : [...LEAVE_ASSIGNMENTS]);
     const preview = vi.spyOn(leaveSubstitutionClient, 'preview').mockResolvedValue({
       ...LEAVE_PREVIEW,
+      linked_request: null,
+      assignments: LEAVE_PREVIEW.assignments.map((assignment) => ({
+        ...assignment, staff_id: 11,
+        assigned_start_date: '2026-08-11', assigned_end_date: '2026-08-11',
+        official_service_dates: ['2026-08-11'],
+      })),
       outcomes: LEAVE_PREVIEW.outcomes.map((outcome) => ({
         ...outcome,
+        resolution_type: 'defer_following_assignments' as const,
+        resulting_staff_id: 11,
         resulting_service_date: '2026-08-11',
       })),
     });
@@ -251,7 +269,7 @@ describe('Scheduling staff leave inbox flow', () => {
     fireEvent.change(screen.getByLabelText('指定補班日期'), {
       target: { value: '2026-08-11' },
     });
-    fireEvent.click(await screen.findByRole('button', { name: '🔍 檢查代班影響' }));
+    fireEvent.click(await screen.findByRole('button', { name: '儲存代班變更' }));
 
     await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
     expect(preview.mock.calls[0]?.[1].items[0]).toMatchObject({
@@ -262,7 +280,23 @@ describe('Scheduling staff leave inbox flow', () => {
       substitute_staff_id: null,
       is_double_pay: false,
     });
-    expect(await screen.findByText('2026-08-11')).toBeInTheDocument();
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply.mock.calls[0]?.[1]).toMatchObject({
+      original_assignment_id: 31,
+      items: preview.mock.calls[0]?.[1].items,
+      expected_order_version: LEAVE_PREVIEW.order_version,
+      expected_scheduling_version: LEAVE_PREVIEW.scheduling_version,
+      expected_client_finance_version: LEAVE_PREVIEW.client_finance_version,
+      expected_payroll_version: LEAVE_PREVIEW.payroll_version,
+      preview_fingerprint: LEAVE_PREVIEW.preview_fingerprint,
+      reason: '',
+    });
+    expect(preview.mock.invocationCallOrder[0]).toBeLessThan(apply.mock.invocationCallOrder[0]);
+    expect(await screen.findByText('已重新查詢並確認最新指派。')).toBeInTheDocument();
+    expect(vi.mocked(leaveSubstitutionClient.listAssignments).mock.invocationCallOrder.at(-1))
+      .toBeGreaterThan(apply.mock.invocationCallOrder[0]);
+    expect(leaveSubstitutionFlowStore.get(LEAVE_CASE_NO)?.assignments?.[0].official_schedules[0].work_date)
+      .toBe('2026-08-11');
   });
 
   it('提供管理員取消 pending 待辦的原因與 typed receipt', async () => {
@@ -279,11 +313,13 @@ describe('Scheduling staff leave inbox flow', () => {
     });
 
     renderLeaveWorkspace();
-    fireEvent.change(await screen.findByPlaceholderText('退回／取消原因說明…'), { target: { value: '電話確認撤回請假' } });
+    fireEvent.change(await screen.findByRole('textbox', { name: '請假待辦處理原因（選填）' }), { target: { value: '電話確認撤回請假' } });
     fireEvent.click(screen.getByRole('button', { name: '取消待辦' }));
 
     await waitFor(() => expect(review).toHaveBeenCalledTimes(1));
+    expect(review).toHaveBeenCalledWith(PENDING_ITEM, 'cancel', '電話確認撤回請假');
     expect(await screen.findByText(/已取消.*請假待辦/)).toHaveTextContent('待辦狀態已更新');
+    await waitFor(() => expect(screen.queryByRole('button', { name: '取消待辦' })).not.toBeInTheDocument());
     expect(screen.queryByText(/已通知月嫂/)).not.toBeInTheDocument();
   });
 
