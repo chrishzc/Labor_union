@@ -63,6 +63,7 @@ def test_previous_ui_toolchain_rejects_unrelated_dependency_changes(tmp_path, se
     '.env', 'ui_react/.env.production', 'config/app.env', 'config/credentials.json',
     'config/tokens/token', 'config/verifiers.json', 'config/service_account_live.json',
     'config/private.pem', 'ui_react/.npmrc',
+    'config/certificate-maintenance/transactions/fixture/candidate/db-key',
 ])
 def test_build_source_filter_rejects_live_settings_and_credentials(name):
     from scripts.package_nas_preview import include_source

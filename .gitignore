@@ -68,6 +68,7 @@ history/refactor_line_bot
 task-*.md
 PROJECT_SPEC.md
 scratch/
+certificate-maintenance/
 .pytest_tmp/
 .pytest_tmp_*
 

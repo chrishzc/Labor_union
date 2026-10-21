@@ -1,5 +1,11 @@
 # 群暉 DDNS／Let’s Encrypt／內網管理反向代理
 
+既有 NAS 整合維護設定：先讀 [DSM-SETUP.md](DSM-SETUP.md)，一次準備完整 Compose、憑證維護與每日 03:00 不停機 SQL 備份；原 `.env` 保留，日後才由 DSM 建立兩個排程。以下部署／生命週期內容另供操作參考，不是安裝排程時必須重建專案的步驟。
+
+每日不停機 SQL 備份：另保存 [SQL-BACKUPS.md](SQL-BACKUPS.md) 與 `backup-database.sh`，由 DSM 每日 03:00 執行並永久保留本專案 SQL；不改 Compose／.env，不包含實體檔案／金鑰，不能代替下方完整冷備份。首次路徑／通知／容量與實際排程需在 DSM 設定。
+
+內部憑證維護：另保存 [CERTIFICATES.md](CERTIFICATES.md)、`maintain-certificates.sh` 與 `nas_certificate_maintenance.py`（來源 `scripts/nas_certificate_maintenance.py`）。由 DSM 每日排程執行，未完成 DSM 設定就不會自動續期。`certificates` 是手動維護 profile，不加入一般 COMPOSE_PROFILES，不啟動 LINE 工作，也不修復 Container Manager 的 undefined 問題。
+
 沿用已上傳映像 `chris23144638/cecec:nas-secure-20261020`（linux/amd64），不需修改、重建或重新上傳映像。程式已提供 HTTPS、依目前 Host 驗證的首次 root 建立、相對路徑前端與受限代理標頭信任。本次只調部署入口；沒有連接 NAS、申請實際網域或變更既有資料。NAS／DSM 實機驗證仍須完成。
 
 ```text
@@ -301,4 +307,4 @@ API→Redis 的 PING 亦通過。最終去敏結果為 `scratch/nas-lifecycle-bf
 
 目前記憶體是初始上限，不是實測用量；正式 DS220+ Compose 不設定 NanoCPUS。基本 API 768 MiB、MySQL 512 MiB、Redis 64 MiB；每個 Worker 128 MiB、LINE API 384 MiB、Tunnel 128 MiB，尚不含 DSM。
 全部一起啟動的上限已超過 2 GB；須照順序逐組測，PDF／Chromium 可能超限而被終止，接受高延遲並不能避免記憶體不足。
-私人 API／DB 測試憑證沿用 90 天效期，尚無自動換證功能；長期正式運行前必須完成換證及信任更新驗證。
+私人 API／DB 初始憑證仍為 90 天；首次執行另附的 DSM 憑證維護工作後才導入可續期 CA。程式準備與 DSM 排程啟用分開，實際維護依 CERTIFICATES.md 驗收，不因更新映像就宣稱已自動續期。

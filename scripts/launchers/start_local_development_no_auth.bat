@@ -40,7 +40,7 @@ if exist "%ADMIN_ENTRY_TARGET_STATE_PATH%" (
 )
 if errorlevel 1 goto _bootstrap_failed
 if not defined ANOMALY_ISSUE_IDENTITY_KEY_V1 (
-  for /f "usebackq delims=" %%K in (`""%LOCAL_PYTHON%" -c "import secrets; print(secrets.token_urlsafe(32))""`) do set "ANOMALY_ISSUE_IDENTITY_KEY_V1=%%K"
+  for /f "usebackq delims=" %%K in (`call "%LOCAL_PYTHON%" -c "import secrets; print(secrets.token_urlsafe(32))"`) do set "ANOMALY_ISSUE_IDENTITY_KEY_V1=%%K"
 )
 if not defined ANOMALY_ISSUE_IDENTITY_KEY_V1 goto _bootstrap_failed
 

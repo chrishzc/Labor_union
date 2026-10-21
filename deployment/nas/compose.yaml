@@ -30,6 +30,38 @@ x-worker: &worker
     management-api: {condition: service_healthy}
 
 services:
+  # DSM host task only: never part of the default application startup chain.
+  certificate-maintenance:
+    <<: *app
+    profiles: [certificates]
+    restart: "no"
+    entrypoint: ["python", "-m", "scripts.nas_certificate_maintenance"]
+    command: ["status"]
+    network_mode: none
+    mem_limit: 128m
+    environment:
+      NAS_CERT_LEAF_DAYS: ${NAS_CERT_LEAF_DAYS:-90}
+      NAS_CERT_RENEW_BEFORE_DAYS: ${NAS_CERT_RENEW_BEFORE_DAYS:-30}
+      NAS_CERT_CA_DAYS: ${NAS_CERT_CA_DAYS:-1825}
+      NAS_CERT_ROTATE_BEFORE_DAYS: ${NAS_CERT_ROTATE_BEFORE_DAYS:-180}
+      NAS_CERT_OVERLAP_DAYS: ${NAS_CERT_OVERLAP_DAYS:-30}
+    volumes:
+      # Allows the tested script to run with the existing image; no image build required.
+      - type: bind
+        source: ${NAS_CERT_MAINTENANCE_SCRIPT:-./nas_certificate_maintenance.py}
+        target: /app/scripts/nas_certificate_maintenance.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${NAS_CERT_MAINTENANCE_ROOT:-./certificate-maintenance}
+        target: /maintenance
+        bind: {create_host_path: false}
+      - private-ca:/certificates/private-ca
+      - management-tls:/certificates/management-tls
+      - line-tls:/certificates/line-tls
+      - db-ca:/certificates/db-ca
+      - server-tls:/certificates/server-tls
+
   initialize:
     <<: *app
     restart: "no"

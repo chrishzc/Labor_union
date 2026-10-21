@@ -34,8 +34,11 @@
 - 2026-10-20 人工採用 Synology DDNS／Let’s Encrypt／DSM 反向代理的新安裝方案：管理 API 不發布 host port，management-egress bridge 使用操作者確認不重疊的固定 subnet／API IP，僅供同機 DSM 作 HTTPS 目的地。瀏覽器入口使用管理子網域與專屬 HTTPS port（文件預設 19443），由 DSM 指派公信憑證並設定內網來源允許、其餘拒絕；內網 DNS 將管理子網域解析至 NAS 內網 IP，不增加路由器入站轉送或管理 Tunnel。初次內部憑證仍含 NAS IP／可選 hostname，Worker／DB 的驗證不變；DSM 上游私人 CA 鏈驗證未經實機證據不得宣稱完成，公信入口憑證不代表所有內部憑證已自動續期。
 - 五個 Worker 加照片代理使用六組獨立 token。公開 LINE 不掛受控業務檔案或 app-data／knowledge；透過專用內部網路與原始 LINE token 再驗證呼叫私人照片／日誌入口。MySQL／Redis／LINE API 不發布 host port，Tunnel 僅接 LINE origin。
 - GUI 操作、實際環境值、DSM ACL、來源限制、CA 信任與 NAS 2 GB 容量需實機驗證；不得由靜態 Compose 或暫存 initializer 測試宣稱已完成部署。模板交付不包含映像 build／push、既有資料異動或外部 provider effect。
+- 2026-10-20 人工採用低維護憑證方案二並要求先準備程式／DSM 教學：由 DSM 每日排程執行 certificates 一次性 profile，不新增常駐 CA、公開入口、通知服務或業務資料表。原初始化仍拒絕覆寫；首次維護將 legacy API／DB CA 分別導入可續期簽發狀態，保留全部帳號、MFA／Worker token、DB 密碼／GRANT、資料卷與業務檔案。CA 私鑰僅存在管理者保護的維護目錄，簽發工作不掛 Docker socket、業務資料或 DB 密碼；主機腳本核對 project／service／volume 歸屬，限定服務操作與等待時間。先發布新舊 CA 信任，再換服務憑證並做實際新連線驗證，重疊期後移除舊信任；失敗不降級 TLS，已過期備份不得宣稱回復成功，journal 支援續跑。失敗及成功回復均以非零結束通知 DSM；正常工作不寄每日信。維護腳本可透過唯讀掛載搭配已驗證舊映像，不代表已完成 DSM 排程、實際寄信、NAS ACL 或實機負載驗收；本次不建置／上傳或操作 NAS。
 
 ## 3. Logical topology
+
+2026-10-20 人工授權的每日 SQL 備份：DSM 03:00 以獨立 root 維護腳本將本專案資料庫匯出到未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務、不重建映像或變更 Compose／.env／DB GRANT。僅支援非空 InnoDB 資料庫的 single-transaction／quick 線上快照，包含結構、資料、view、routines、triggers、events；不包含實體檔案、金鑰或 MySQL 系統帳號。管理者不得同時執行 schema 變更。來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記須檢查，失敗非零通知 DSM 並保留舊備份；不冒充完整災難備份或每日還原驗證。DSM ACL／實際收信／容量與 NAS 負載仍須實機驗收。操作由 deployment/nas/SQL-BACKUPS.md 承接。
 
 ```text
 External Platform / React Admin

@@ -29,7 +29,7 @@ def include_source(name: str) -> bool:
     path = PurePosixPath(name)
     if name not in METADATA and path.parts[0] not in RUNTIME_ROOTS:
         return name == "document/line/AI客服QA題庫.jsonl"
-    if any(part in {"node_modules", "__pycache__", "dist", "scratch"} for part in path.parts):
+    if any(part in {"node_modules", "__pycache__", "dist", "scratch", "certificate-maintenance"} for part in path.parts):
         return False
     lower = path.name.lower()
     if lower.startswith(".env") or lower.endswith(".env") or lower in {
@@ -137,6 +137,9 @@ def prepare(output: Path, *, secure: bool = False) -> dict:
             "[hidden]{display:none!important}\n", encoding="utf-8")
         for filename in ("compose.yaml", ".env.example", "compose.tunnel.yaml", "cloudflared.example.yaml", "README.md"):
             shutil.copyfile(ROOT / "deployment/nas" / filename, output / filename)
+        for filename in ("maintain-certificates.sh", "CERTIFICATES.md"):
+            shutil.copyfile(ROOT / "deployment/nas" / filename, output / filename)
+        shutil.copyfile(ROOT / "scripts/nas_certificate_maintenance.py", output / "nas_certificate_maintenance.py")
         metadata.update(image="chris23144638/cecec:nas-secure-20261019-r2", mode="nas-security/v1",
                         database_engine_qualification="not_run", image_build="not_run", image_published=False)
         (output / "bundle.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

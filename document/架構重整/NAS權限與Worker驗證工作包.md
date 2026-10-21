@@ -323,3 +323,21 @@ PASS：全部 profiles 解析、正式／NAS handoff 模型相等、記憶體與
 限制／NOT_RUN：沿用既有應用映像 `sha256:33b4d0aa8c65526bc20e03eecb256dce83ed80e8f4934d932677789ea7cb1eda`，tag→digest 不涉及不同程式碼版本，不代表未來版本或 schema migration 相容性已驗證。NAS Container Manager undefined、DSM 特有 ACL、防火牆、2 GB 容量、整機開機及真實外部 LINE／Cloudflare 收送均未由本機 Docker 演練替代；NAS 真實資料、網路與入口不變。先前已交付 scratch 包保留歷史原樣，後續維護唯一來源改用正式 deployment/nas 文件。
 
 最後檢查：本次十個檔案 strict UTF-8／空白與 scoped git diff --check PASS。架構 closure 在較早快照為 PASS；最終全工作區執行為 FAILED，唯一原因是本次開始時未在 dirty 清單、亦不在本次 write set 的 `ui_react/src/tests/client_beclass_workbook_client.test.ts` 出現 `TEST_OUTSIDE_ARCHITECTURE_OWNER`。未改寫、搬移或刪除此其他成果，也未將較早快照冒充最終工作區全通過；這不改變上述本機 NAS 隔離演練 PASS，但全工作區架構 gate 尚未完成。
+
+### DSM 低維護憑證排程程式與教學（2026-10-20 人工授權）
+
+Authority：使用者確認採 DSM 排程方案二，要求先準備相關程式及操作教學保存，實機設定稍後進行。準備原專案的憑證維護 profile、簽發／回復核心、主機協調腳本及逐步 DSM 教學；不操作 NAS、不修改既有資料、不建置／上傳映像。既有 initialization helpers 維持不覆寫舊安裝，首回維護才將 legacy API／DB CA 導入可續期狀態，不重跑 fresh schema。
+
+實作：`scripts/nas_certificate_maintenance.py`、`deployment/nas/maintain-certificates.sh` 與 `CERTIFICATES.md`。每日由 DSM 啟動無網路／無 Docker socket 的一次性簽發容器，僅掛五個憑證卷及管理者保護的狀態目錄；服務重載由主機限定 project／service／volume labels 執行。簽發私鑰不交給 API／LINE／Worker。先新舊 CA 共同信任，再換 leaf、實際新連線驗證，重疊後移除舊信任；檔案與目錄同步後才前進 journal。每操作 45 秒、整體 600 秒及 30 秒結束上限，flock 防重疊；失敗回復後仍以非零回傳觸發 DSM 異常信，不將已過期備份冒充可用回復。
+
+公開 CA 複本由獨立 UID 1000 無網路容器原子替換，不掛簽發私鑰，避免 host root 跟隨應用資料裡的符號連結。保留所有帳號、MFA、DB 密碼／GRANT、Worker token 與業務檔案；無資料表／前端新增。主機讀受保護設定的 DB probe 沿用 API bootstrap 讀設定後降 UID 1000 的邊界。程式可透過唯讀掛載搭配現有映像執行，未建新映像。
+
+PASS：Linux 26 項憑證／實際 TLS／協調器測試，涵蓋到期續簽、CA 輪替與移除舊信任、錯誤候選、斷點續跑（包括只寫入新憑證、私鑰尚未替換的半套狀態）、過期後恢復與拒絕假回復、真實檔案 UID／模式、無副作用 check、重疊鎖定、錯誤歸屬拒絕及失敗後通知退出碼。Windows focused run 為 54 passed／7 Linux 專屬 skipped，含原 NAS／setup／打包排除的 35 項 regression；Linux 專屬情境已由 Linux run 覆蓋，沒有降低正式權限。
+
+PASS：兩個 opt-in 本機 Docker 情境同次最終執行全部通過（2 passed，約 3 分 27 秒）：MySQL 8.0.46／API 實際 legacy CA 導入、ALTER INSTANCE RELOAD TLS、候選錯誤拒絕與憑證回復、再次 CA 輪替、原 root／工會帳號實際 MFA 登入與 session／機器憑證／業務檔案保持、原 token 的 Worker 認證握手（無工作週期）；另於 UID 1000 真實容器驗證公開 CA 複製不跟隨惡意符號連結。最後補上半套 cert/key 被中斷且舊 CA 已過期的回歸，將身份核對固定至交易前快照，並同步 journal 刪除的目錄狀態後重跑通過。兩個整合情境與 Linux 26／既有 regression 35 合計 63 個不同受測情境，不重複累加 Windows 的重疊數量。
+
+PASS：使用全新無秘密 env 解析全部 profiles，無 host ports／build／NanoCPUS，簽發容器 network none／沒有業務卷及 Docker socket。源程式 strict UTF-8／AST／scoped diff check 通過。Windows 首輪唯讀檔案屬性與 sandbox localhost 限制均屬 fixture／環境差異，保留 Linux 真實檔案模式驗證；最終 localhost TLS 實際交換資料後關閉，無執行緒提前中斷警告。原有兩個套件警告未擴大修正。
+
+FAILED（全工作區架構 closure，非本次檔案）：`ui_react/src/tests/client_beclass_workbook_client.test.ts` 的 TEST_OUTSIDE_ARCHITECTURE_OWNER，以及 `tests/fixtures/case_import/hcm_ui_demo_20261020.xlsx` 的 TEST_OWNER_TOO_BROAD。這兩項不在本次 write set；未改寫其他成果。沒有把功能驗證 PASS 說成整個 workspace gate 通過。
+
+NOT_RUN：DSM 真正工作排程、郵件送達、NAS ACL、DSM timeout／flock 工具支援、2 GB 負載、實際 Cloudflare origin 重載、NAS 憑證切換及 Container Manager undefined 修復。通知只驗證結果與非零退出碼，未對外寄信。預備檔案保存於 `scratch/nas-cert-maintenance-20261020-delivery/`；真實 Docker 各次演練為 `scratch/nas-cert-docker-*/result.json`，全部只用新建資料，容器已停止。模型與 closure 分別為 `scratch/nas-cert-model-20261020/result.json`、`scratch/nas-cert-architecture-20261020.json`。使用者稍後仍須依教學完成 DSM 核取清單；檔案與映像存在不代表排程已啟用。

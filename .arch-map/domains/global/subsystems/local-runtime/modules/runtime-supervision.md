@@ -29,10 +29,13 @@
 - NAS GUI current template：`deployment/nas/compose.yaml`、`deployment/nas/.env.example`、`deployment/nas/README.md`；單檔 Compose 以 `.env` 的 `COMPOSE_PROFILES` 逐組啟動，預設只有基本組。2026-10-20 新安裝採 Synology DDNS／Let’s Encrypt／DSM 內網反向代理：管理 API 不發布 host port，management-egress 使用 NAS_PROXY_SUBNET／NAS_PROXY_API_IP 固定 bridge 位址供同機 DSM HTTPS 轉送，瀏覽器使用 DSM 公信入口（文件預設 19443）。檔案仍使用指定空白 bind roots；公開 LINE 不掛正式業務檔案，經專用 line-media-control 網路及 line-media-proxy token 呼叫私人檔案 API。主檔已含選用 cloudflared，GUI 不需 tunnel overlay。
 - GUI initializer 只處理新安裝：非空檔案根目錄在寫入前拒絕，初始化產生五個 Worker 加照片代理六組獨立 token；管理憑證納入設定的 NAS IPv4／可選 hostname，公開 CA 副本輸出至 app-data 供操作者信任；既有標記安裝不補造或輪替秘密。
 - NAS 維護：`deployment/nas/README.md` 定義原專案的停止／依賴順序啟動、保留資料重建、無 DB 變更換版與回復、冷備份及獨立還原範圍。正式 Compose 不設定 NanoCPUS，data 引用既有 `${COMPOSE_PROJECT_NAME}_data` internal 網路；新隔離測試自行準備專用網路，不借用 NAS／既有 Docker 資料。opt-in lifecycle test 與 container probe 位於下列 Module root，不建置／推送映像。
+- NAS 憑證維護：`scripts/nas_certificate_maintenance.py` 與 `deployment/nas/maintain-certificates.sh`，由 DSM 排程協調、certificates profile 一次性無網路簽發；`deployment/nas/CERTIFICATES.md` 承接安裝／通知教學。既有初始化仍不覆寫舊安裝，首次排程將 legacy CA 導入可續期信任；兩組 CA 分離、先雙重信任再換 leaf、保留重疊期、可回復及續跑。簽發容器不掛 DB 密碼、業務資料或 Docker socket；DB probe 沿用 bootstrap 讀設定後降為 UID 1000，再做 scoped 唯讀連線。實際 DSM 啟用與通知須另驗。
 - NAS MySQL client config：`deployment/nas/mysql-client.cnf` 由 initializer 複製至 bootstrap，並掛入 `/etc/mysql/conf.d`，讓 fresh SQL 與 seed 以 UTF-8 執行。私人 API 憑證包含 strict chain 所需識別資訊；管理端另自動產生既有 PDF final-preview HMAC key。
 - NAS build context：`scripts/package_nas_preview.py --secure` 沿用秘密過濾與真實 previous React artifact，不上傳映像；`deployment/nas/compose.tunnel.yaml` 只連 public LINE origin，`cloudflared.example.yaml` 拒絕私人路徑；`deployment/nas/README.md` 記錄配置與部署驗收順序。
 
 ## Contracts
+- NAS 線上 SQL 備份：`deployment/nas/backup-database.sh` 與 `deployment/nas/SQL-BACKUPS.md`，DSM 每日 03:00、獨立管理者備份資料夾、永久保存。僅匯出所屬非空 InnoDB 資料庫的一致性快照與 stored programs，不停止服務、不改 Compose／.env、不包含業務檔案／金鑰／MySQL 系統帳號。`test_nas_sql_backup.py` 位於下列 Module test root，驗證 host 失敗隔離及 opt-in MySQL 併發寫入／獨立還原。
+
 - session key 不寫入 `.env`、不輸出，且不透過 command argument 傳遞。
 - API readiness 不等於 Private API authentication readiness；認證握手失敗時 fail closed，不啟動任何 worker。
 - 舊 preview handoff 是歷史隔離測試版本；新 NAS 完整服務 source 不使用 Google OIDC。MySQL／Redis 不發布 host port，LINE check 為手動 profile、獨立機器憑證與 HTTPS，無一般 LINE cycle。既有標準 Compose／launcher 不因 NAS profile 改變。
@@ -48,6 +51,7 @@
 - test_root: `tests/test_private_runtime_operations.py`
 - test_root: `tests/domains/global/subsystems/local-runtime/modules/runtime-supervision/`
 - `test_nas_compose_lifecycle.py` 與 `nas_lifecycle_probe.py` — 本機明確 opt-in 的隔離 Compose／資料卷演練；不代表 DSM GUI 或 NAS 網路已驗證。
+- `test_nas_certificate_maintenance.py` — Linux 憑證狀態／TLS／主機協調器與失敗通知退出碼；`test_nas_certificate_docker.py` — 明確 opt-in 的獨立 MySQL／API 換證、回復、原帳號／MFA／檔案及機器認證，沒有 provider 工作週期。
 
 ## Provenance
 - Windows entrypoint, process ownership and Private API client/auth boundary — `source_observed` — current launcher, supervisor and authenticated private runtime implementation.
