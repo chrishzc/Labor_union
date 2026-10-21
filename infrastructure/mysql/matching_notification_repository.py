@@ -346,7 +346,7 @@ class MySqlMatchingNotificationRepository:
         information = MySqlOrderInformationRepository(self._connection)
         info_1 = information.preview_matching_plan_information(case_no, plan_id, 1, for_update=True)
         info_2 = information.preview_matching_plan_information(case_no, plan_id, 2, for_update=True)
-        weekly = _proposed_weekly_rows(segments, include_staff_identity=True)
+        weekly = _customer_confirmation_weekly_rows(segments)
         return {
             "profiles": profiles,
             "order_information_1": info_1,
@@ -453,10 +453,13 @@ class MySqlMatchingNotificationRepository:
         weekly_ready = True
         weekly = ()
         try:
-            weekly = _proposed_weekly_rows(segments)
+            weekly = _customer_confirmation_weekly_rows(segments)
             weekly_row_count = len(weekly)
             if weekly_row_count == 0:
                 raise ValueError("weekly service projection is empty")
+        except MatchingDecisionNotReadyError as error:
+            weekly_ready = False
+            blockers.append(str(error))
         except (LookupError, TypeError, ValueError):
             weekly_ready = False
             blockers.append("每周服務中說明尚未就緒。")
@@ -745,6 +748,33 @@ def _resume_previews(segments, rows):
     return tuple(result), tuple(blockers)
 
 
+def _customer_confirmation_weekly_rows(segments):
+    """Use saved Orders dates; only multi-caregiver plans allocate by segment."""
+    dates = _json_dates(segments[0].get("service_dates"))
+    if not dates:
+        raise MatchingDecisionNotReadyError("請先試算並保存預計服務日期，才能寄送客戶確認資訊。")
+    if len(dates) != segments[0]["service_days"]:
+        raise MatchingDecisionNotReadyError("預計服務日期與約定天數不同，請重新確認。")
+
+    allocated = set()
+    projected = []
+    for segment in segments:
+        selected = dates if len(segments) == 1 else frozenset(
+            day for day in dates
+            if _date(segment["assigned_start_date"]) <= day <= _date(segment["assigned_end_date"])
+        )
+        if not selected or allocated.intersection(selected):
+            raise MatchingDecisionNotReadyError("推薦月嫂服務區段未完整且唯一涵蓋已保存日期，請重新確認分段。")
+        allocated.update(selected)
+        projected.append({
+            **segment, "service_dates": selected,
+            "assigned_start_date": min(selected), "assigned_end_date": max(selected),
+        })
+    if allocated != dates:
+        raise MatchingDecisionNotReadyError("推薦月嫂服務區段未完整且唯一涵蓋已保存日期，請重新確認分段。")
+    return _proposed_weekly_rows(projected, include_staff_identity=True)
+
+
 def _proposed_weekly_rows(segments, *, include_staff_identity=False):
     special_dates = _json_dates(segments[0].get("custom_rest_dates"))
     projection = project_proposed_weekly_service(
@@ -921,11 +951,10 @@ FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id
 WHERE s.plan_id=%s ORDER BY s.segment_order"""
 _CONFIRMATION_SCHEDULE_FACTS_SQL = """SELECT segment.id AS segment_id,segment.staff_id,
 segment.assigned_start_date,segment.assigned_end_date,plan.case_no,client.name AS client_name,
-staff.name AS staff_name,staff.weekly_rest_days,orders.custom_rest_dates,orders.service_hours_per_day,
+staff.name AS staff_name,staff.weekly_rest_days,orders.custom_rest_dates,orders.service_hours_per_day,orders.service_days,
 (SELECT JSON_ARRAYAGG(d.service_date) FROM confirmed_service_date_versions v
  JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id
- WHERE v.case_no=plan.case_no AND v.is_current=1
- AND d.service_date BETWEEN segment.assigned_start_date AND segment.assigned_end_date) AS service_dates
+ WHERE v.case_no=plan.case_no AND v.is_current=1) AS service_dates
 FROM caregiver_matching_plans plan JOIN caregiver_matching_plan_segments segment ON segment.plan_id=plan.id
 JOIN orders ON orders.case_no=plan.case_no JOIN clients client ON client.id=orders.client_id
 JOIN staff ON staff.id=segment.staff_id WHERE plan.id=%s AND plan.case_no=%s

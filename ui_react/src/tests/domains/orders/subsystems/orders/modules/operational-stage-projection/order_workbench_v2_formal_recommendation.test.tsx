@@ -74,10 +74,11 @@ async function loadCandidates() {
   await openCandidatePicker();
   await screen.findByText('未設定 月嫂甲');
 }
-async function openSending() {
+async function prepareSending() {
   const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
   await waitFor(() => expect(send).toBeEnabled());
-  if (!screen.queryByRole('button', { name: '確認寄送' })) fireEvent.click(send);
+  const summary = screen.getByText('調整寄送訊息');
+  if (!summary.closest('details')?.open) fireEvent.click(summary);
 }
 async function openManual() {
   if (!screen.queryByLabelText('方案 51 客戶決策依據')) fireEvent.click(await screen.findByRole('button', { name: '手動記錄客戶決定' }));
@@ -279,10 +280,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     const onObserved = await openExisting();
     await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
-    await openSending();
+    await prepareSending();
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '請核對完整確認資訊。' } });
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
     expect(mocks.sendCustomerConfirmation).toHaveBeenCalledWith(
       CASE, 51, 4, '請核對完整確認資訊。', expect.stringMatching(/^orders-customer-confirmation-51-/),
@@ -332,11 +333,11 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   it('送出前版本已變更時停止，不用新版本偷換使用者已確認的方案', async () => {
     contact.customer_profiles_status = null;
     await openExisting();
-    await openSending();
+    await prepareSending();
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '核對履歷' } });
     contact.plan.communication_version = 6;
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('正式方案版本已變更，請重新讀取後確認。');
     expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
@@ -345,10 +346,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     await openExisting();
     mocks.queryPlan.mockResolvedValue({ ...activePlan(), planId: 52 });
-    await openSending();
+    await prepareSending();
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '核對履歷' } });
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('目前有效方案已變更，請重新載入；不對其他方案執行操作。');
     expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
   });
@@ -357,10 +358,10 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     mocks.sendCustomerConfirmation.mockResolvedValue({ intent_id: 81, delivery_status: 'pending' });
     const onObserved = await openExisting();
-    await openSending();
+    await prepareSending();
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '核對履歷' } });
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('操作後正式方案回讀尚未確認預期結果，請重新讀取；不重送操作。');
     expect(onObserved).not.toHaveBeenCalled();
     expect(mocks.sendCustomerConfirmation).toHaveBeenCalledTimes(1);
@@ -371,16 +372,16 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     mocks.sendCustomerConfirmation.mockRejectedValueOnce(new Error('連線中斷，結果尚未確認。'));
     await openExisting();
     await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
-    await openSending();
+    await prepareSending();
     fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '核對完整確認資訊' } });
 
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('連線中斷，結果尚未確認。');
     fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
     await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
 
     expect(mocks.sendCustomerConfirmation).toHaveBeenCalledTimes(2);
@@ -417,20 +418,18 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(screen.getByRole('radio', { name: '願意承接' })).toHaveFocus();
     expect(mocks.recordFormalPlanWillingness).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('radio', { name: '願意承接' }));
-    fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText('修改原因（必填）')).toHaveFocus();
-    expect(mocks.recordFormalPlanWillingness).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('修改原因（必填）'), { target: { value: '電話確認月嫂改為願意承接本段服務。' } });
+    expect(screen.getByLabelText('修改原因（選填）')).not.toBeRequired();
+    const reason = prior === 'unwilling' ? '' : '電話確認月嫂改為願意承接本段服務。';
+    fireEvent.change(screen.getByLabelText('修改原因（選填）'), { target: { value: reason } });
     fireEvent.click(save);
     await screen.findByText('月嫂意願變更已儲存並完成回讀。');
     expect(mocks.recordFormalPlanWillingness).toHaveBeenCalledWith(
-      CASE, 51, 72, 4, '電話確認月嫂改為願意承接本段服務。',
+      CASE, 51, 72, 4, reason,
       expect.stringMatching(/^orders-formal-manual-willingness-51-72-/), 'operator-1', 'willing',
     );
     expect(mocks.previewCustomerConfirmation).toHaveBeenCalledWith(CASE, 51, 5, expect.anything());
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText('確認資訊發送工作已建立：#81（狀態：等待系統寄送）；尚不代表 LINE 已送達。');
     expect(mocks.sendCustomerConfirmation).toHaveBeenCalledWith(
       CASE, 51, 5, '請查收正式推薦月嫂的完整確認資訊。', expect.stringMatching(/^orders-customer-confirmation-51-/),
@@ -442,7 +441,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     contact.customer_profiles_status = null;
     await openExisting();
     fireEvent.click(screen.getByRole('button', { name: '手動修改月嫂意願' }));
-    fireEvent.change(screen.getByLabelText('修改原因（必填）'), { target: { value: '月嫂來電通知無法承接。' } });
+    fireEvent.change(screen.getByLabelText('修改原因（選填）'), { target: { value: '月嫂來電通知無法承接。' } });
     window.alert = vi.fn();
     const save = screen.getByRole('button', { name: '儲存意願變更' });
     expect(save).toBeEnabled();
@@ -466,7 +465,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await openExisting();
     fireEvent.click(screen.getByRole('button', { name: '手動修改月嫂意願' }));
     fireEvent.click(screen.getByRole('radio', { name: '願意承接' }));
-    fireEvent.change(screen.getByLabelText('修改原因（必填）'), { target: { value: '月嫂確認可承接。' } });
+    fireEvent.change(screen.getByLabelText('修改原因（選填）'), { target: { value: '月嫂確認可承接。' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存意願變更' }));
     await screen.findAllByText('正式人工回覆已收到收據，但目前方案回讀尚未確認相同版本與結果；只能重新讀取。');
     expect(screen.queryByRole('button', { name: '寄送確認資訊給客戶' })).not.toBeInTheDocument();
@@ -488,7 +487,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await openExisting();
     fireEvent.click(screen.getByRole('button', { name: '手動修改月嫂意願' }));
     fireEvent.click(screen.getByRole('radio', { name: '願意承接' }));
-    fireEvent.change(screen.getByLabelText('修改原因（必填）'), { target: { value: '月嫂確認可承接。' } });
+    fireEvent.change(screen.getByLabelText('修改原因（選填）'), { target: { value: '月嫂確認可承接。' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存意願變更' }));
     await screen.findByText('本案已有正式指派，請由換人或請假代班記錄人員異動。');
     expect(mocks.recordFormalPlanWillingness).not.toHaveBeenCalled();
@@ -579,11 +578,8 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     await waitFor(() => expect(replace).toBeEnabled());
     fireEvent.click(replace);
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: '月嫂透過 LINE 通知不接案' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: '月嫂透過 LINE 通知不接案' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
     await waitFor(() => expect(mocks.replacementApply).toHaveBeenCalledTimes(1));
     if (readbackCase !== 'none') {
       await screen.findByText(readbackCase === 'network' ? '換人後回讀暫時失敗' : '換人已登記，但原推薦仍為有效方案；請重新讀取，不重送換人。');
@@ -600,8 +596,8 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     fireEvent.click(select);
     await screen.findByText('正式媒合方案已建立：#52');
     expect(contact.customer_decision).toBe('pending');
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await screen.findByText(/確認資訊發送工作已建立/);
     expect(mocks.sendCustomerConfirmation).toHaveBeenCalledWith(CASE, 52, 0, expect.any(String), expect.any(String));
     await openManual();
@@ -629,6 +625,29 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(screen.queryByText('更換推薦人選')).not.toBeInTheDocument();
   });
 
+  it('保存日期更新即使方案及溝通版本相同，也重讀確認內容且保留訊息草稿', async () => {
+    exists = true;
+    contact.customer_profiles_status = null;
+    const view = render(<OrderFormalRecommendationPanel caseNo={CASE} revision={0} />);
+    const information = await screen.findByRole('button', { name: '查看每週服務說明' });
+    await waitFor(() => expect(information).toBeEnabled());
+    fireEvent.click(screen.getByText('調整寄送訊息'));
+    fireEvent.change(screen.getByLabelText('方案 51 確認資訊備註'), { target: { value: '保留這次確認訊息' } });
+    fireEvent.click(information);
+    expect(screen.getByRole('table')).toHaveTextContent('40 小時');
+
+    const previous = mocks.previewCustomerConfirmation.mock.results.at(-1)!;
+    const data = await previous.value;
+    mocks.previewCustomerConfirmation.mockResolvedValue({ ...data, weekly_service_rows: [{
+      ...data.weekly_service_rows[0], service_hours_per_day: 8.5, weekly_work_days: 1, weekly_hours: 8.5,
+    }] });
+    view.rerender(<OrderFormalRecommendationPanel caseNo={CASE} revision={1} />);
+    await screen.findByText('8.5 小時');
+    expect(screen.getByLabelText('方案 51 確認資訊備註')).toHaveValue('保留這次確認訊息');
+    expect(mocks.previewCustomerConfirmation).toHaveBeenLastCalledWith(CASE, 51, 4, expect.anything());
+    expect(mocks.sendCustomerConfirmation).not.toHaveBeenCalled();
+  });
+
   it('缺月嫂履歷時顯示人工傳送提醒但仍允許寄送確認資訊', async () => {
     contact.customer_profiles_status = null;
     mocks.previewCustomerConfirmation.mockResolvedValue({
@@ -651,8 +670,8 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(await screen.findByText(/履歷 PDF 未附/)).toBeInTheDocument();
     const send = screen.getByRole('button', { name: '寄送確認資訊給客戶' });
     expect(send).toBeEnabled();
-    await openSending();
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await prepareSending();
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await waitFor(() => expect(mocks.sendCustomerConfirmation).toHaveBeenCalled());
   });
 });

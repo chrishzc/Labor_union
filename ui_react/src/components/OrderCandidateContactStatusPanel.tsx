@@ -652,6 +652,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
         </>
       )}
       {presentation === 'workbench' && sharedInformation && <OrderCandidateInformationPanel caseNo={caseNo} initialKind={sharedInformation.kind}
+        onDatesSaved={onObserved}
         onClose={() => { setSharedInformation(null); setInformationRevision(value => value + 1); }} />}
     </section>
   );

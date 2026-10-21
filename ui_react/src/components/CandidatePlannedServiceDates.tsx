@@ -15,11 +15,12 @@ const sameDates = (a: string[], b: string[]) => a.length === b.length && a.every
 const message = (error: unknown) => error instanceof Error ? error.message : '預計日期操作失敗，請重新讀取。';
 
 /** Only dates enter the existing Orders writer; weekday choices stay in this view. */
-export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, onPreview, onSharedPreview, onEditStateChange }: {
+export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, onPreview, onSharedPreview, onEditStateChange, onSaved }: {
   caseNo: string; candidateId?: number; startDate: string;
   onPreview?: (preview: CandidateWeeklyServicePreview | null) => void;
   onSharedPreview?: (preview: CaseWeeklyServicePreview | null) => void;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
+  onSaved?: () => void;
 }) {
   const [facts, setFacts] = useState<{ terms: OrderTerms; mode: OrderCalendarDetail; dates: ServiceDateConfirmationQueryView } | null>(null);
   const [weekdays, setWeekdays] = useState<number[] | null>(null);
@@ -129,6 +130,7 @@ export function CandidatePlannedServiceDates({ caseNo, candidateId, startDate, o
       if (currentIdentity.current !== identity) return;
       setFacts({ ...facts, dates: saved }); setDates(saved.current_dates);
       setSuccess('預計日期已保存，後續寄送將使用這份日期。');
+      onSaved?.();
       const preview = await loadWeekly();
       if (currentIdentity.current === identity) emitPreview(preview);
     } catch (reason) { if (currentIdentity.current === identity) setError(message(reason)); }

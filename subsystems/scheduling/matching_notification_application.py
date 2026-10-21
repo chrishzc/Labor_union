@@ -185,7 +185,7 @@ class MatchingNotificationApplication:
                     week_end_date=str(item["week_end_date"]),
                     service_hours_per_day=float(item["service_hours_per_day"]),
                     weekly_work_days=int(item["weekly_work_days"]),
-                    weekly_hours=int(item["weekly_hours"]),
+                    weekly_hours=float(item["weekly_hours"]),
                 )
                 for item in raw["weekly_service_rows"]
             ),

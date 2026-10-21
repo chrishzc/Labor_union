@@ -79,13 +79,9 @@ it.each([1, 2, 3] as const)('shared information sends only document %i to the se
   await screen.findByText('未設定 測試月嫂');
   const names = { 1: '服務條件與費用', 2: '照護與飲食需求', 3: '每週服務說明' };
   fireEvent.click(screen.getByRole('button', { name: `寄送${names[kind]}給 測試月嫂` }));
-  const confirm = await screen.findByRole('button', { name: `確認寄送${names[kind]}` });
-  await waitFor(() => expect(confirm).toBeEnabled());
   expect(screen.queryByRole('dialog', { name: '訂單共用資訊' })).not.toBeInTheDocument();
-  expect(client.sendInformation).not.toHaveBeenCalled();
-  fireEvent.click(confirm);
   await waitFor(() => expect(client.sendInformation).toHaveBeenCalledWith(expect.objectContaining({ candidateId: 3, infoType: kind })));
-  await waitFor(() => expect(screen.queryByRole('region', { name: '寄送前確認' })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole('region', { name: '寄送資訊' })).not.toBeInTheDocument());
   expect(client.sendInformation).toHaveBeenCalledTimes(1);
 });
 
@@ -101,7 +97,7 @@ it('allows a shared order preview without any candidate and never enables sendin
   expect(client.sendInformation).not.toHaveBeenCalled();
 });
 
-it('blocks a recipient preview when the common document changed before confirmation', async () => {
+it('blocks sending when the common document changes before the recipient check', async () => {
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   await screen.findByText('未設定 測試月嫂');
   const originalPreview = await client.previewCaseInformation('CASE-1', 1);
@@ -119,7 +115,7 @@ it('keeps weekly sending disabled when the server has no saved dates', async () 
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   fireEvent.click(await screen.findByRole('button', { name: '寄送每週服務說明給 測試月嫂' }));
   expect(await screen.findByText(/完成並保存預計日期/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '確認寄送每週服務說明' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '確認寄送每週服務說明' })).not.toBeInTheDocument();
   expect(client.sendInformation).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '查看這份內容' }));
   const drawer = screen.getByRole('dialog', { name: '訂單共用資訊' });
@@ -137,9 +133,6 @@ it('binds the separate document buttons to their own candidate', async () => {
   vi.mocked(client.sendInformation).mockImplementation(async () => { sent = true; return { status: 'queued', event_id: 4, line_task_id: 5 }; });
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   fireEvent.click(await screen.findByRole('button', { name: '寄送照護與飲食需求給 另一位月嫂' }));
-  const confirm = await screen.findByRole('button', { name: '確認寄送照護與飲食需求' });
-  await waitFor(() => expect(confirm).toBeEnabled());
-  fireEvent.click(confirm);
   await waitFor(() => expect(client.sendInformation).toHaveBeenCalledWith(expect.objectContaining({ candidateId: 4, infoType: 2 })));
   expect(client.sendInformation).toHaveBeenCalledTimes(1);
 });
@@ -151,9 +144,6 @@ it.each([
   vi.mocked(client.sendInformation).mockRejectedValue(new ApiHttpError(409, code, message));
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" presentation="workbench" />);
   fireEvent.click(await screen.findByRole('button', { name: '寄送服務條件與費用給 測試月嫂' }));
-  const confirm = await screen.findByRole('button', { name: '確認寄送服務條件與費用' });
-  await waitFor(() => expect(confirm).toBeEnabled());
-  fireEvent.click(confirm);
   expect(await screen.findByRole('alert')).toHaveTextContent(message);
   expect(screen.queryByText('寄送結果尚未確認；請確認寄送結果。')).not.toBeInTheDocument();
   expect(client.sendInformation).toHaveBeenCalledTimes(1);
@@ -188,7 +178,7 @@ it.each(['willing', 'unwilling'] as const)('saves %s from the candidate card, re
   const form = screen.getByRole('form', { name: '手動記錄接案意願（測試月嫂）' });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   fireEvent.click(within(form).getByRole('radio', { name: willingness === 'willing' ? '願意承接' : '無意願' }));
-  expect(within(form).getByRole('textbox', { name: '詢問結果備註' }).hasAttribute('required')).toBe(willingness === 'unwilling');
+  expect(within(form).getByRole('textbox', { name: '詢問結果備註' })).not.toBeRequired();
   if (reason) fireEvent.change(within(form).getByRole('textbox', { name: '詢問結果備註' }), { target: { value: reason } });
   fireEvent.submit(form);
   await waitFor(() => expect(screen.queryByRole('form', { name: '手動記錄接案意願（測試月嫂）' })).not.toBeInTheDocument());
@@ -198,12 +188,9 @@ it.each(['willing', 'unwilling'] as const)('saves %s from the candidate card, re
   expect(screen.getByText('回覆已儲存。')).toBeInTheDocument();
 });
 
-it.each([1, 2] as const)('previews information %i independently and sends exactly that preview', async (kind) => {
+it.each([1, 2] as const)('sends information %i once with its recipient preview fingerprint', async (kind) => {
   render(<OrderCandidateContactStatusPanel caseNo="CASE-1" />);
   fireEvent.click(await screen.findByRole('button', { name: `寄送訂單資訊－${kind}` }));
-  await screen.findByText(`資訊${kind}：契約與服務約定`);
-  expect(client.sendInformation).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByText('確認寄送'));
   await waitFor(() => expect(client.sendInformation).toHaveBeenCalledWith({
     caseNo: 'CASE-1', candidateId: 3, infoType: kind, previewFingerprint: String(kind).repeat(64),
     actor: 'operator-1', eventKey: `information-${kind}-key`,

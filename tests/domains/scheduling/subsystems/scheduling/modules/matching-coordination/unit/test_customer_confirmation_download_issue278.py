@@ -168,13 +168,15 @@ def test_confirmation_preview_lists_missing_resume_as_non_blocking_manual_notice
     assert blockers == ("月嫂 李小華 未附履歷；確認資訊仍可寄送，請由公會人員另行透過 LINE 傳送履歷。",)
 
 
-def test_confirmation_preview_allows_send_when_only_resume_is_missing():
+@pytest.mark.parametrize("hours_per_day,work_days", [(8, 5), (8.5, 1)])
+def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_day, work_days):
     plan = MatchingPlanReference("CASE-278", 51, 4)
     state = SimpleNamespace(
         plan=plan,
         plan_is_active=True,
         plan_status="proposed",
         order_status="洽談中",
+        replacement_matching_open=False,
         all_willing=True,
         customer_profiles_are_available=False,
         customer_line_user_id=object(),
@@ -194,7 +196,7 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing():
                 "weekly_service_row_count": 2,
                 "order_information_1": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－1"},),
                 "order_information_2": ({"segment_id": 71, "staff_id": 100, "staff_name": "王小美", "text": "訂單資訊－2"},),
-                "weekly_service_rows": ({"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40},),
+                "weekly_service_rows": ({"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": hours_per_day, "weekly_work_days": work_days, "weekly_hours": hours_per_day * work_days},),
                 "caregiver_resumes": ({
                     "staff_id": 100,
                     "staff_name": "王小美",
@@ -230,4 +232,4 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing():
     assert preview.blockers == ()
     assert preview.caregiver_resumes[0].staff_name == "王小美"
     assert preview.order_information_1[0].text == "訂單資訊－1"
-    assert preview.weekly_service_rows[0].weekly_hours == 40
+    assert preview.weekly_service_rows[0].weekly_hours == hours_per_day * work_days

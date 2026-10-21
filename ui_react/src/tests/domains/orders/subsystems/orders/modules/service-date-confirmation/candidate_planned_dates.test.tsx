@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CandidatePlannedServiceDates } from '../../../../../../../components/CandidatePlannedServiceDates';
+import { OrderCandidateContactStatusPanel } from '../../../../../../../components/OrderCandidateContactStatusPanel';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { ApiNetworkError } from '../../../../../../../api/shared/typed_errors';
 
@@ -8,7 +9,17 @@ const mocks = vi.hoisted(() => ({ terms: vi.fn(), mode: vi.fn(), query: vi.fn(),
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderTerms: mocks.terms, getOrderCalendarDetail: mocks.mode } }));
 vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ ordersMutationClient: { getServiceDates: mocks.query, previewServiceDates: mocks.preview, applyServiceDates: mocks.apply } }));
 vi.mock('../../../../../../../api/scheduling/schedule_precision_client', () => ({ schedulePrecisionClient: { calculate: mocks.calculate } }));
-vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { previewWeeklyService: mocks.weekly } }));
+vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({
+  createCandidateInformationSendCommand: vi.fn(), createCandidateWillingnessCommand: vi.fn(),
+  candidateContactPoolClient: {
+    previewWeeklyService: mocks.weekly,
+    previewCaseWeeklyService: (caseNo: string, options: unknown) => mocks.weekly(caseNo, undefined, options),
+    query: vi.fn(async (caseNo: string) => ({ case_no: caseNo, pool_id: null, candidates: [] })),
+    previewCaseInformation: vi.fn(async (caseNo: string, kind: number) => ({
+      case_no: caseNo, info_type: kind, start_date: '2026-11-05', line_sections: [], send_allowed: true,
+    })),
+  },
+}));
 const CASE = 'PLANNED-UI';
 const fingerprint = 'a'.repeat(64);
 const chosen = ['2026-11-05', '2026-11-07', '2026-11-09'];
@@ -19,7 +30,8 @@ const query = () => ({ case_no: CASE, order_version: orderVersion, scheduling_ve
 const result = (dates = chosen) => ({ actual_start_date: '2026-11-05', target_service_days: 3,
   day_by_day: dates.map(date => ({ date, is_work_day: true })) });
 const onPreview = vi.fn();
-const open = () => render(<CandidatePlannedServiceDates caseNo={CASE} candidateId={7} startDate="2026-11-05" onPreview={onPreview} />);
+const onSaved = vi.fn();
+const open = () => render(<CandidatePlannedServiceDates caseNo={CASE} candidateId={7} startDate="2026-11-05" onPreview={onPreview} onSaved={onSaved} />);
 async function choose() {
   await waitFor(() => expect(screen.getByRole('checkbox', { name: '星期五' })).toBeEnabled());
   fireEvent.click(screen.getByRole('checkbox', { name: '星期五' }));
@@ -27,7 +39,7 @@ async function choose() {
   await waitFor(() => expect(screen.getByRole('button', { name: '保存預計日期' })).toBeEnabled());
 }
 beforeEach(() => {
-  Object.values(mocks).forEach(mock => mock.mockReset()); onPreview.mockReset();
+  Object.values(mocks).forEach(mock => mock.mockReset()); onPreview.mockReset(); onSaved.mockReset();
   saved = []; version = null; orderVersion = 1; orderMutationFlowStore.clearAll();
   mocks.terms.mockImplementation(async () => ({ case_no: CASE, order_version: orderVersion, scheduling_version: 0, scheduling_generation: 0, assignments: [], terms: {} }));
   mocks.mode.mockResolvedValue({ case_no: CASE, service_mode: null, original_service_type: '休五、日' });
@@ -45,6 +57,7 @@ beforeEach(() => {
 
 it('即時試算零寫入，一次保存日期，無第二步確認；重開使用保存日期而不恢復星期', async () => {
   const view = open(); await choose();
+  expect(onSaved).not.toHaveBeenCalled();
   expect(screen.getByLabelText('原始匯入服務方式')).toHaveTextContent('休五、日');
   expect(mocks.calculate).toHaveBeenLastCalledWith(expect.objectContaining({ service_mode: '休五、日', custom_rest_weekdays: [4, 6] }));
   expect(mocks.weekly).toHaveBeenLastCalledWith(CASE, 7, { serviceDates: chosen });
@@ -52,6 +65,7 @@ it('即時試算零寫入，一次保存日期，無第二步確認；重開使�
   fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
   await screen.findByText('預計日期已保存，後續寄送將使用這份日期。');
   expect(mocks.apply).toHaveBeenCalledTimes(1);
+  expect(onSaved).toHaveBeenCalledTimes(1);
   expect(mocks.apply.mock.calls[0][1].service_dates).toEqual(chosen);
   expect(mocks.apply.mock.calls[0][1]).not.toHaveProperty('custom_rest_weekdays');
   expect(screen.queryByRole('button', { name: /確認/ })).not.toBeInTheDocument();
@@ -60,6 +74,7 @@ it('即時試算零寫入，一次保存日期，無第二步確認；重開使�
   open(); await screen.findByText(/預計服務日期：3 天/);
   expect(screen.getByRole('checkbox', { name: '星期五' })).not.toBeChecked();
   expect(mocks.calculate).toHaveBeenCalledTimes(count);
+  expect(onSaved).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: '保存預計日期' })).toBeDisabled();
 });
 
@@ -88,14 +103,32 @@ it('保存前有他人更新版本時不覆寫', async () => {
   fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
   await screen.findByText('案件日期已被更新，請重新開啟後再保存。');
   expect(mocks.apply).not.toHaveBeenCalled();
+  expect(onSaved).not.toHaveBeenCalled();
 });
 
 it('保存結果未明時沿用原冪等鍵，不能重新試算覆蓋原操作', async () => {
   mocks.apply.mockRejectedValueOnce(new ApiNetworkError('連線中斷'));
   open(); await choose(); fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
   await screen.findByRole('button', { name: '接續保存預計日期' });
+  expect(onSaved).not.toHaveBeenCalled();
   expect(screen.getByRole('checkbox', { name: '星期五' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '接續保存預計日期' }));
   await screen.findByText('預計日期已保存，後續寄送將使用這份日期。');
   expect(mocks.apply.mock.calls[0][2].idempotencyKey).toBe(mocks.apply.mock.calls[1][2].idempotencyKey);
+  expect(onSaved).toHaveBeenCalledTimes(1);
+});
+
+it('共用資訊保存完成回讀後，經詢問面板通知工作台刷新；僅查閱不通知', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+  const onObserved = vi.fn();
+  render(<OrderCandidateContactStatusPanel caseNo={CASE} presentation="workbench" onObserved={onObserved} />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看訂單資訊' }));
+  fireEvent.click(await screen.findByRole('button', { name: '每週服務說明' }));
+  await choose();
+  expect(onObserved).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保存預計日期' }));
+  await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
+  expect(saved).toEqual(chosen);
+  expect(mocks.apply).toHaveBeenCalledTimes(1);
 });
