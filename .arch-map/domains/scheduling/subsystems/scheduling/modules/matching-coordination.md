@@ -72,6 +72,7 @@
   - `db/schema_parts/1039_matching_plan_create_receipts.sql` — preserve-only byte-equivalent bridge for the same receipt root; it is not a second writer or a fresh-bootstrap table.
 
 ## Dependencies
+- outbound: `scheduling/staff-availability` — 初步候選與多月嫂可選資料訂閱暫停／取消／恢復成功通知；受保護的操作完成後重查，保留多月嫂分段日期草稿。
 - outbound: `staff/staff-roster-profile` — 候選 availability、候選池與正式推薦 contact-state Query 借用 current `staff.union_no`，透過 nullable `staff_union_no` typed projection 呈現；既有推薦從原 contact-state 取得編號，不額外重查候選池。React 人選清單與推薦選單共用公會編號自然排序及「編號 姓名」標籤，不改 mutation、意願或外部寄送內容。
 - 候選查詢可沿既有加入 writer 明示更新 active 人選的過期詢問期間；追加 pending 及前後日期事件，保留歷史並重新取得意願，不發送 LINE。
 
