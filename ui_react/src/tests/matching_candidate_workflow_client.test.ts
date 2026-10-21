@@ -51,7 +51,8 @@ describe('matchingCandidateWorkflowClient', () => {
         full_selected_segment_coverage: true,
         uncovered_segment_dates: [],
         source_scheduling_version: 3,
-        filter_results: { schedule: true },
+        filter_results: { region: false, preferred_service_days: false },
+        matching_conditions: { region: { status: 'pending' as const, required_value: null, staff_values: [] }, preferred_service_days: { status: 'pending' as const, required_value: null, staff_values: [] } },
       }],
       conflicts: [],
     }));
@@ -66,10 +67,10 @@ describe('matchingCandidateWorkflowClient', () => {
         segment_count: 1,
         segment_drafts: [{ start_date: '2026-09-01', end_date: '2026-09-05' }],
         filters: {
-          region: true,
-          cooking: true,
-          preferred_service_days: true,
-          daily_service_hours: true,
+          region: false,
+          cooking: false,
+          preferred_service_days: false,
+          daily_service_hours: false,
         },
       }),
       { token: 'volatile-token' },
@@ -83,12 +84,12 @@ describe('matchingCandidateWorkflowClient', () => {
     }));
     await matchingCandidateWorkflowClient.searchSingleCaregiver(
       'CASE-MATCH-FILTER', '2026-09-01', '2026-09-05',
-      { region: false, cooking: true, preferred_service_days: true, daily_service_hours: false },
+      { region: false, cooking: false, preferred_service_days: false, daily_service_hours: false },
     );
     expect(post).toHaveBeenCalledWith(
       '/api/v1/orders/CASE-MATCH-FILTER/caregiver-segment-availability/search',
       expect.objectContaining({ filters: {
-        region: false, cooking: true, preferred_service_days: true, daily_service_hours: false,
+        region: false, cooking: false, preferred_service_days: false, daily_service_hours: false,
       } }),
       { token: 'volatile-token' },
     );
@@ -121,7 +122,8 @@ describe('matchingCandidateWorkflowClient', () => {
         full_selected_segment_coverage: false,
         uncovered_segment_dates: ['2026-09-01'],
         source_scheduling_version: 3,
-        filter_results: { schedule: false },
+        filter_results: { region: false, preferred_service_days: false },
+        matching_conditions: { region: { status: 'pending' as const, required_value: null, staff_values: [] }, preferred_service_days: { status: 'pending' as const, required_value: null, staff_values: [] } },
       }],
       conflicts: [{ segment_index: 0, staff_id: 8892, work_date: '2026-09-01', reason_code: 'active_lock' }],
     }));

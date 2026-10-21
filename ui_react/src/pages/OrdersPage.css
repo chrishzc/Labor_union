@@ -1824,3 +1824,13 @@ button.calendar-date-cell {
 
 
 .order-shift-preset[aria-pressed="true"]:not(:disabled) { background: var(--md-sys-color-primary-hover); border-color: var(--md-sys-color-primary-hover); box-shadow: inset 0 0 0 2px var(--md-sys-color-on-primary); outline: 2px solid var(--md-sys-color-primary-hover); outline-offset: 1px; }
+
+.candidate-add-details { min-width: 0; flex: 1; }
+.candidate-query-requirements { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0; color: #4a2818; }
+.candidate-name-and-preferences { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 6px; min-width: 0; }
+.candidate-service-preferences { display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.candidate-preference-badge { display: inline; border-radius: 8px; padding: 4px 8px; font-size: .85rem; line-height: 1.6; overflow-wrap: anywhere; }
+.candidate-preference-badge > span { white-space: nowrap; }
+.candidate-preference-badge.matched { color: #166534; background: #dcfce7; }
+.candidate-preference-badge.not_matched { color: #854d0e; background: #fef3c7; }
+.candidate-preference-badge.pending { color: #4b5563; background: #f3f4f6; }

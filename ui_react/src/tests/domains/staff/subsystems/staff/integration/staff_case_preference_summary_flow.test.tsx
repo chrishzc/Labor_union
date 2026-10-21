@@ -53,124 +53,65 @@ describe('Staff case preference summary flow', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('preserves the roster summary and renders only the current six-topic editor in the Drawer', async () => {
+  it('keeps imported service information inside professional data and only two preferences in the drawer', async () => {
     render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-
+    await screen.findByText('去敏人員甲');
     fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-    const card = document.querySelector('[data-control-id="staff.row.11"]');
-    expect(card).not.toBeNull();
-    const cardView = within(card as HTMLElement);
-
-    expect(cardView.getByRole('cell', { name: '去敏人員甲' })).toBeInTheDocument();
-    expect(cardView.queryByRole('group')).not.toBeInTheDocument();
-
-    fireEvent.click(cardView.getByRole('button', { name: /查看 .* 的詳情/ }));
-    const drawer = document.querySelector('[data-surface-id="staff.qualification.preferences"]');
-    expect(drawer).not.toBeNull();
-    const drawerView = within(drawer as HTMLElement);
-    await drawerView.findByRole('combobox', { name: '可承接區域值1' });
-
-    expect(drawer?.querySelector('[data-surface-id="staff.drawer.case-preference-summary"]')).toBeNull();
-    expect(drawer?.querySelectorAll('[data-surface-id="staff.qualification.case-preference-manual"]')).toHaveLength(1);
-    expect(drawerView.getByRole('group', { name: '可承接區域' })).toHaveTextContent('偏遠地區需先確認交通');
-    expect(drawerView.getByRole('group', { name: '下廚能力' })).toHaveTextContent('家常菜');
-    expect(drawerView.queryByRole('group', { name: '交通方式' })).not.toBeInTheDocument();
-    const manualView = within(drawer!.querySelector('[data-surface-id="staff.qualification.case-preference-manual"]') as HTMLElement);
-    expect(manualView.getAllByRole('group')).toHaveLength(6);
-    expect(drawerView.getByRole('button', { name: '預覽變更' })).toBeEnabled();
-    expect(drawerView.getByRole('button', { name: '確認儲存' })).toBeDisabled();
-    expect(screen.queryByText('查看接案偏好摘要')).not.toBeInTheDocument();
+    const card = document.querySelector('[data-control-id="staff.row.11"]') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: /查看 .* 的詳情/ }));
+    const area = document.querySelector('[data-surface-id="staff.qualification.preferences"]') as HTMLElement;
+    await within(area).findByLabelText('可承接區域值1');
+    const information = within(area).getByRole('region', { name: '匯入服務資訊' });
+    expect(information.closest('[aria-label="專業資格與服務資料編輯"]')).not.toBeNull();
+    expect(within(information).getByText('家常菜')).toBeInTheDocument();
+    const preferences = within(within(area).getByRole('region', { name: '服務偏好' }));
+    expect(preferences.getAllByRole('group')).toHaveLength(2);
+    expect(preferences.queryByText('下廚能力')).not.toBeInTheDocument();
+    expect(preferences.getByRole('button', { name: '儲存服務偏好' })).toBeEnabled();
     expect(staffCasePreferenceSummaryClient.query).not.toHaveBeenCalled();
   });
 
-  it('keeps the Staff row visible and shows the case-preference read failure in details', async () => {
-    vi.mocked(staffCasePreferenceManualClient.query).mockRejectedValue(new Error('接案條件暫時不可讀'));
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-
-    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
-
-    expect(screen.getByText('去敏人員甲')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    expect(await screen.findByText('接案條件暫時不可讀')).toBeInTheDocument();
-    expect(within(screen.getByRole('table', { name: '月嫂名冊清單' })).getByText('去敏人員甲')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '🏖️ 接案狀態管理' })).toBeInTheDocument();
-  });
-
-  it('edits the same six cards, confirms a preview, and displays owner readback after saving', async () => {
-    render(<StaffCasePreferenceManualEditor staffId={11} />);
-    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '新竹縣' } });
-    const confirm = screen.getByRole('button', { name: '確認儲存' });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
-    await screen.findByText('預覽已完成，尚未寫入。');
-
-    expect(confirm).toBeEnabled();
+  it('shows an owner read failure without reporting success', async () => {
+    vi.mocked(staffCasePreferenceManualClient.query).mockRejectedValueOnce(new Error('偏好讀取失敗'));
+    render(<StaffCasePreferenceManualEditor staffId={11} directEditing />);
+    expect(await screen.findByText('偏好讀取失敗')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(staffCasePreferenceManualClient.apply).not.toHaveBeenCalled();
-    expect(screen.getByTestId('staff-case-preference-manual-preview')).toHaveTextContent('可承接區域（變更前）');
-    expect(screen.getByTestId('staff-case-preference-manual-preview')).toHaveTextContent('可承接區域（變更後）');
-    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試六項編輯' } });
-    expect(confirm).toBeEnabled();
-
-    const savedRelations = {
-      ...MANUAL_RELATIONS, service_regions: [{ value: '新竹縣', detail: null }],
-    };
-    vi.mocked(staffCasePreferenceManualClient.query).mockResolvedValueOnce({
-      ...MANUAL_SNAPSHOT, before: savedRelations, after: savedRelations, snapshot_fingerprint: 'c'.repeat(64),
-    });
-    fireEvent.click(confirm);
-
-    expect(await screen.findByText('已儲存並重新查詢六大接案能力。')).toBeInTheDocument();
-    expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(11, {
-      ...savedRelations, expected_snapshot_fingerprint: 'a'.repeat(64),
-      preview_fingerprint: 'b'.repeat(64), reason: '測試六項編輯',
-    }, expect.objectContaining({ idempotencyKey: expect.any(String), signal: expect.any(AbortSignal) }));
-    expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('新竹縣');
-    expect(screen.getAllByRole('group')).toHaveLength(6);
-    expect(screen.getByRole('button', { name: '編輯六項偏好' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('可承接區域值1')).not.toBeInTheDocument();
   });
 
-  it('requires a new preview after changing a previewed field', async () => {
+  it('saves two preferences through owner preview/apply and displays the fresh owner readback', async () => {
+    const changed = { ...MANUAL_RELATIONS, service_regions: [{ value: '東區', detail: null }] };
+    vi.mocked(staffCasePreferenceManualClient.query).mockResolvedValueOnce(MANUAL_SNAPSHOT).mockResolvedValue({ ...MANUAL_SNAPSHOT, after: changed });
     render(<StaffCasePreferenceManualEditor staffId={11} />);
-    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試預覽失效' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
-    await screen.findByText('預覽已完成，尚未寫入。');
-    expect(await screen.findByRole('button', { name: '確認儲存' })).toBeEnabled();
-
+    fireEvent.click(await screen.findByRole('button', { name: '編輯服務偏好' }));
     fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
-    expect(screen.getByRole('button', { name: '確認儲存' })).toBeDisabled();
-    expect(screen.queryByTestId('staff-case-preference-manual-preview')).not.toBeInTheDocument();
-    expect(staffCasePreferenceManualClient.apply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
-    await screen.findByText('預覽已完成，尚未寫入。');
-    expect(await screen.findByRole('button', { name: '確認儲存' })).toBeEnabled();
-    expect(staffCasePreferenceManualClient.preview).toHaveBeenLastCalledWith(
-      11,
-      { ...MANUAL_RELATIONS, service_regions: [{ value: '東區', detail: null }] },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
+    await screen.findByText('已儲存並重新查詢服務偏好。');
+    expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledWith(11, changed, expect.anything());
+    expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledWith(11, expect.objectContaining(changed), expect.anything());
+    expect(screen.getByRole('group', { name: '可承接區域' })).toHaveTextContent('東區');
+    expect(screen.getByRole('region', { name: '匯入服務資訊' })).toHaveTextContent('家常菜');
+  });
+
+  it('obtains a new owner preview for each changed save', async () => {
+    render(<StaffCasePreferenceManualEditor staffId={11} directEditing />);
+    await screen.findByLabelText('可承接區域值1');
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
+    await screen.findByText('已儲存並重新查詢服務偏好。');
+    fireEvent.change(screen.getByLabelText('可承接區域值1'), { target: { value: '東區' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
+    await waitFor(() => expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledTimes(2));
+    expect(staffCasePreferenceManualClient.preview).toHaveBeenCalledTimes(2);
+    expect(staffCasePreferenceManualClient.preview).toHaveBeenLastCalledWith(11, expect.objectContaining({ service_regions: [{ value: '東區', detail: null }] }), expect.anything());
   });
 
   it('does not report success when the post-apply owner query fails', async () => {
-    render(<StaffCasePreferenceManualEditor staffId={11} />);
-    fireEvent.click(await screen.findByRole('button', { name: '編輯六項偏好' }));
-    fireEvent.change(screen.getByLabelText('接案條件備註（選填）'), { target: { value: '測試回讀失敗' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
-    await screen.findByText('預覽已完成，尚未寫入。');
-    const confirm = await screen.findByRole('button', { name: '確認儲存' });
-    vi.mocked(staffCasePreferenceManualClient.query).mockRejectedValueOnce(new Error('回讀暫時失敗'));
-    fireEvent.click(confirm);
-
-    expect(await screen.findByText('回讀暫時失敗')).toBeInTheDocument();
-    expect(screen.queryByText('已儲存並重新查詢六大接案能力。')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重新查詢' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認儲存' })).not.toBeInTheDocument();
+    vi.mocked(staffCasePreferenceManualClient.query).mockResolvedValueOnce(MANUAL_SNAPSHOT).mockRejectedValueOnce(new Error('重新查詢失敗'));
+    render(<StaffCasePreferenceManualEditor staffId={11} directEditing />);
+    await screen.findByLabelText('可承接區域值1');
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務偏好' }));
+    await screen.findByText('重新查詢失敗');
     expect(staffCasePreferenceManualClient.apply).toHaveBeenCalledTimes(1);
-    expect(staffCasePreferenceManualClient.query).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('已儲存並重新查詢服務偏好。')).not.toBeInTheDocument();
   });
 });

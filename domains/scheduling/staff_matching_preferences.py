@@ -5,7 +5,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Literal, Mapping
+
+
+@dataclass(frozen=True, slots=True)
+class StaffMatchingCondition:
+    status: Literal["matched", "not_matched", "pending"]
+    required_value: str | None
+    staff_values: tuple[str, ...]
+
+
+def region_condition(required_location: str, regions: Iterable[str]) -> StaffMatchingCondition:
+    values = tuple(regions)
+    known = tuple(value for value in values if value.strip() and value not in {"其他", "其它"})
+    status = "pending"
+    if required_location and known:
+        status = "matched" if any(value in required_location or required_location in value for value in known) else "not_matched"
+    return StaffMatchingCondition(status, required_location or None, values)
+
+
+def weekly_service_condition(required_mode: object, rest_schedule: Iterable[tuple[str, str | None]]) -> StaffMatchingCondition:
+    rows = tuple(rest_schedule)
+    values = tuple(f"{value}（{detail}）" if detail else value for value, detail in rows)
+    required = _service_mode(required_mode)
+    known = tuple(_service_mode(_capability_value(value, detail)) for value, detail in rows)
+    status = "pending"
+    if required is not None and known:
+        if required in known:
+            status = "matched"
+        elif all(mode is not None for mode in known):
+            status = "not_matched"
+    return StaffMatchingCondition(status, required_mode if isinstance(required_mode, str) and required_mode else None, values)
 
 
 def _service_mode(value: object) -> str | None:

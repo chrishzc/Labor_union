@@ -24,7 +24,7 @@ function availability(): MatchingAvailability {
       supported_service_dates: ['2026-09-01'], supported_ranges: [{ start_date: '2026-09-01', end_date: '2026-09-01', service_day_count: 1 }],
       supported_day_count: 1, required_day_count: 1, full_case_coverage: false,
       selected_segment_start: '2026-09-01', selected_segment_end: '2026-09-01', full_selected_segment_coverage: true,
-      uncovered_segment_dates: [], source_scheduling_version: 1, filter_results: {},
+      uncovered_segment_dates: [], source_scheduling_version: 1, filter_results: {}, matching_conditions: { region: { status: 'pending' as const, required_value: null, staff_values: [] }, preferred_service_days: { status: 'pending' as const, required_value: null, staff_values: [] } },
     })), conflicts: [] };
 }
 function segments(count = 2): MatchingPlanSegmentInput[] {

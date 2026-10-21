@@ -1,12 +1,13 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { staffQualificationEditingClient, type QualificationFacts, type QualificationSnapshot } from '../api/staff/qualification_editing_client';
 
 const labels: Record<keyof QualificationFacts, string> = { special_skills: '專業技能', has_massage_cert: '按摩證書', certifications: '一般證照', care_babies: '最多照顧寶寶數', transportation: '交通方式' };
 const listKeys = ['special_skills', 'certifications', 'transportation'] as const;
 const display = (value: QualificationFacts[keyof QualificationFacts]) => Array.isArray(value) ? value.join('、') || '尚未登錄' : value === null ? '尚未登錄' : typeof value === 'boolean' ? value ? '有' : '無' : String(value);
 
-export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: number; onUpdated: () => void | Promise<void> }) {
+export function StaffQualificationEditor({ staffId, onUpdated, importedServiceInformation }: { staffId: number; onUpdated: () => void | Promise<void>; importedServiceInformation?: ReactNode }) {
   const saveGuidanceId = useId();
   const [messageError, setMessageError] = useState(false);
   const [snapshot, setSnapshot] = useState<QualificationSnapshot | null>(null);
@@ -59,6 +60,7 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
     {preview && <div aria-label="專業資格變更預覽">{(Object.keys(labels) as Array<keyof QualificationFacts>).filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>)}</div>}
     <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>
     <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessageError(false); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy} onClick={() => void doApply()}>儲存</button></div></>}
+    {importedServiceInformation}
     {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取專業資格</button>}
     {message && <p role={messageError ? "alert" : "status"} className={messageError ? "staff-op-error" : undefined}>{message}</p>}
   </section>;

@@ -60,12 +60,21 @@ class CanonicalStore:
                 {"staff_id": 3, "preference_key": "daily_service_hours", "order_fact_key": "service_hours_per_day",
                  "comparison_operator": "contains_integer", "value_json": {"values": [24]}},
             ] if self.numeric_preferences else []
+        elif sql.startswith("CALL `lu_nas_remove_"):
+            table = sql.split("lu_nas_remove_", 1)[1].split("_v1", 1)[0]
+            value_column, detail_column = next((spec[1], spec[2]) for spec in RELATION_SPECS.values() if spec[0] == table)
+            self.tables[table] = [row for row in self.tables[table]
+                                  if (row["staff_id"], row[value_column], row.get(detail_column)) != tuple(params)]
+            self.rows = []
         else:
             table = sql.split("FROM ")[1].split()[0]
             if sql.startswith("DELETE"):
                 column = sql.split(" AND ")[1].split("=")[0] if " AND " in sql else None
                 self.tables[table] = [row for row in self.tables[table] if row["staff_id"] != params[0] or (column and row[column] != params[1])]
             self.rows = deepcopy(self.tables[table])
+
+    def nextset(self):
+        return None
 
     def executemany(self, sql, values):
         table = sql.split("INSERT INTO ")[1].split()[0]
@@ -97,66 +106,98 @@ def inquiry(store, *, mode=True, hours=True):
     )["candidate_options"]
 
 
-@pytest.mark.parametrize("numeric_preferences", [False, True])
-def test_roster_save_changes_the_next_query_without_numeric_preference_sync(numeric_preferences):
+def test_roster_save_updates_hints_and_preserves_imported_relations():
     store = CanonicalStore()
-    store.numeric_preferences = numeric_preferences
+    store.tables["staff_regions"] = [{"staff_id": 3, "region_name": "桃園市", "custom_region_detail": "原登錄說明"}]
+    store.tables["staff_cooking_skills"] = [{"staff_id": 3, "skill_name": "其他", "custom_skill_detail": "原下廚資訊"}]
+    store.tables["staff_holiday_availability"] = [{"staff_id": 3, "holiday_name": "端午節", "custom_holiday_detail": None}]
+    store.tables["staff_baby_types"] = [{"staff_id": 3, "baby_type": "單胞胎", "custom_baby_detail": None}]
+    store.order.update(city="新竹市", service_type="週休一日")
     before = deepcopy(store.tables)
-    assert [item["staff_id"] for item in inquiry(store)] == [3]
-    assert inquiry(store)[0]["staff_union_no"] == "A003"
-    assert store.tables == before  # Query remains read-only.
+    option = inquiry(store)[0]
+    assert option["staff_union_no"] == "A003"
+    assert option["matching_conditions"]["preferred_service_days"] == {
+        "status": "not_matched", "required_value": "週休一日", "staff_values": ["週休二日"],
+    }
+    assert option["matching_conditions"]["region"]["status"] == "not_matched"
+    assert option["matching_conditions"]["region"]["staff_values"] == ["桃園市"]
+    assert store.tables == before
 
     writer = MySqlStaffCasePreferenceManualRepository(store)
-    relations = {key: () for key in RELATION_KEYS}
-    relations.update({"service_periods": (RelationValue("12小時"),), "rest_schedule": (RelationValue("週休1日"),)})
+    relations = writer.load_relations(3, for_update=False)
+    relations = {**relations, "rest_schedule": (RelationValue("週休1日"),)}
     writer.replace_relations(3, relations, before=writer.load_relations(3, for_update=False))
-    assert inquiry(store) == []
-    assert inquiry(store, mode=False, hours=False)[0]["staff_id"] == 3
-    store.order.update({"service_type": "休周日", "service_hours_per_day": Decimal("12.0")})
-    assert [item["staff_id"] for item in inquiry(store)] == [3]
-    assert not any("INSERT INTO staff_matching_preference" in sql for sql in store.statements)
+    assert inquiry(store)[0]["matching_conditions"]["preferred_service_days"]["status"] == "matched"
+    for table in ("staff_time_slots", "staff_cooking_skills", "staff_holiday_availability", "staff_baby_types"):
+        assert store.tables[table] == before[table]
 
 
-def test_service_modes_do_not_use_total_day_count_and_formal_search_keeps_candidates():
+def test_only_region_and_weekly_service_are_hints_for_inquiry_and_formal_queries():
     store = CanonicalStore()
-    store.order["service_days"] = 60
-    assert inquiry(store)[0]["filter_results"]["preferred_service_days"] is True
-    store.order["service_type"] = "休周日"
-    assert inquiry(store, hours=False) == []
-    assert len(inquiry(store, mode=False)) == 1
-    store.order["service_hours_per_day"] = Decimal("12.0")
-    assert inquiry(store, mode=False) == []
-    result = search_segmented_caregiver_availability(
-        "CAPABILITY-1", 1, [], "2026-10-13", store,
-        filter_policy={"region": False, "cooking": False},
-    )
-    assert result["candidate_options"][0]["filter_results"]["preferred_service_days"] is False
-    assert result["candidate_options"][0]["filter_results"]["daily_service_hours"] is False
+    store.order.update(service_type="週休一日", requires_cooking=True, service_hours_per_day=Decimal("12"), city="新竹市")
+    store.tables["staff_regions"] = [{"staff_id": 3, "region_name": "桃園市", "custom_region_detail": None}]
+    for search in (
+        lambda: search_candidate_inquiry_availability("CAPABILITY-1", [], "2026-10-21", store, filter_policy={
+            "region": True, "cooking": True, "preferred_service_days": True, "daily_service_hours": True,
+            "enabled_preference_keys": ["preferred_service_days", "daily_service_hours", "custom_preference"],
+        }),
+        lambda: search_segmented_caregiver_availability("CAPABILITY-1", 1, [], "2026-10-21", store),
+    ):
+        option = search()["candidate_options"][0]
+        assert set(option["matching_conditions"]) == {"region", "preferred_service_days"}
+        assert option["filter_results"] == {"region": False, "preferred_service_days": False}
+    assert not any(table in sql for sql in store.statements for table in (
+        "staff_time_slots", "staff_cooking_skills", "staff_matching_preference_values",
+        "staff_holiday_availability", "staff_baby_types",
+    ))
 
 
-def test_validated_staff_clock_window_keeps_eight_service_hours_in_matching():
-    store=CanonicalStore()
-    store.tables['staff_time_slots']=[{'staff_id':3,'slot_name':'8小時(08:30-17:00)','custom_slot_detail':None}]
-    assert [item['staff_id'] for item in inquiry(store)] == [3]
-    store.order['service_hours_per_day']=Decimal('4.0')
-    assert inquiry(store)==[]
-
-
-@pytest.mark.parametrize("hours", [Decimal("8.5"), Decimal("NaN"), 0, True])
-def test_inquiry_does_not_guess_non_integer_hours(hours):
+@pytest.mark.parametrize("required,rows,status,values", [
+    (None, [], "pending", []),
+    (None, [("週休二日", None)], "pending", ["週休二日"]),
+    ("週休一日", [], "pending", []),
+    ("依情況排休", [("週休二日", None)], "pending", ["週休二日"]),
+    ("每月排休六天", [("其他", "可協調排休")], "pending", ["其他（可協調排休）"]),
+    ("週休一日", [("其他", "依情況")], "pending", ["其他（依情況）"]),
+    ("週休一日", [("週休二日", None), ("其他", "依情況")], "pending", ["週休二日", "其他（依情況）"]),
+    ("週休一日", [("週休二日", None)], "not_matched", ["週休二日"]),
+    ("周休二日", [("週一至週五", None)], "matched", ["週一至週五"]),
+])
+def test_weekly_hint_preserves_original_values_and_never_excludes(required, rows, status, values):
     store = CanonicalStore()
-    store.order["service_hours_per_day"] = hours
-    assert inquiry(store) == []
+    store.order["service_type"] = required
+    store.tables["staff_weekly_rest"] = [{"staff_id": 3, "rest_type": value, "custom_rest_detail": detail} for value, detail in rows]
+    condition = inquiry(store)[0]["matching_conditions"]["preferred_service_days"]
+    assert condition["status"] == status
+    assert condition["staff_values"] == values
+    assert condition["required_value"] == required
 
 
-def test_inquiry_keeps_missing_requirements_pending_but_rejects_unknown_modes():
+def test_missing_region_is_pending_and_unknown_cooking_does_not_block_formal_query():
     store = CanonicalStore()
-    store.order.update({"service_type": None, "service_hours_per_day": None})
-    store.tables["staff_time_slots"] = []
-    store.tables["staff_weekly_rest"] = []
-    assert len(inquiry(store)) == 1
-    store.order["service_type"] = "依情況排休"
-    assert inquiry(store) == []
+    result = search_segmented_caregiver_availability("CAPABILITY-1", 1, [], "2026-10-21", store)
+    assert result["candidate_options"][0]["matching_conditions"]["region"] == {
+        "status": "pending", "required_value": None, "staff_values": [],
+    }
+
+
+def test_condition_projection_round_trips_through_the_closed_http_schema():
+    from api.routes.caregiver_segment_availability import CaregiverSegmentAvailabilityResponse
+    from pydantic import ValidationError
+
+    store = CanonicalStore()
+    store.order["service_type"] = "週休一日"
+    store.order.update(city="新竹市", address="東區測試路7號")
+    result = search_candidate_inquiry_availability("CAPABILITY-1", [], "2026-10-21", store)
+    response = CaregiverSegmentAvailabilityResponse.model_validate(result)
+    condition = response.candidate_options[0].matching_conditions.preferred_service_days
+    assert condition.status == "not_matched"
+    assert condition.staff_values == ["週休二日"]
+    assert response.candidate_options[0].matching_conditions.region.required_value == "新竹市"
+    assert "測試路7號" not in response.model_dump_json()
+    result["candidate_options"][0]["matching_conditions"]["region"]["status"] = "unknown-status"
+    with pytest.raises(ValidationError):
+        CaregiverSegmentAvailabilityResponse.model_validate(result)
 
 
 @pytest.mark.parametrize("required,options,matched", [

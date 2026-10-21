@@ -1,5 +1,5 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import {
   candidateContactPoolClient,
   createCandidateAddCommand,
@@ -11,9 +11,8 @@ import {
   matchingCandidateWorkflowClient,
   type MatchingAvailability,
   type MatchingCandidateOption,
-  type MatchingFilterPolicy,
 } from '../api/scheduling/matching_candidate_workflow_client';
-import { ApiHttpError } from '../api/shared/typed_errors';
+import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
@@ -27,7 +26,6 @@ interface OrderCandidateQueryPanelProps {
 }
 
 type CandidateQueryState =
-  | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; data: MatchingAvailability }
   | { status: 'blocked'; message: string }
@@ -49,19 +47,21 @@ const MATCHING_BLOCKER_CODES = new Set([
   'caregiver_availability_stage_conflict',
 ]);
 
-const FILTER_OPTIONS: readonly {
-  key: keyof MatchingFilterPolicy;
-  label: string;
-}[] = [
-  { key: 'region', label: '服務地區' },
-  { key: 'cooking', label: '下廚料理' },
-  { key: 'preferred_service_days', label: '服務方式' },
-  { key: 'daily_service_hours', label: '每日服務時數' },
-];
+function CandidateServicePreferences({ candidate }: { candidate: MatchingCandidateOption }) {
+  const labels = { matched: '符合', not_matched: '不符合', pending: '待確認' };
+  return <span className="candidate-service-preferences" aria-label={`${candidate.staff_name}服務偏好`}>
+    {([['region', '區域'], ['preferred_service_days', '週間服務']] as const).map(([key, label]) => {
+      const condition = candidate.matching_conditions[key];
+      return <span key={key} className={`candidate-preference-badge ${condition.status}`}>
+        {label}：{condition.staff_values.join('、') || '尚未登錄'}<span> · {labels[condition.status]}</span>
+      </span>;
+    })}
+  </span>;
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiHttpError) {
-    if (error.code === 'matching_preference_source_not_ready') return '月嫂媒合偏好資料尚未備妥，請先在月嫂名冊補齊媒合偏好，再重新查詢。';
+    if (error.code === 'matching_preference_source_not_ready') return '案件服務期間或來源資料尚未備妥，請先確認案件服務方式與日期，再重新查詢。';
     if (error.code === 'official_service_dates_incomplete') return '服務日期尚未完整，請到「服務安排 → 確認日期」完成日期後再查詢。';
     if (error.code === 'caregiver_availability_stage_conflict') return '目前案件狀態不允許查詢候選，請重新讀取案件進度，確認目前應辦事項。';
   }
@@ -71,7 +71,9 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function queryFailure(error: unknown): CandidateQueryState {
-  const message = errorMessage(error, '正式候選查詢失敗');
+  const message = error instanceof ApiNetworkError ? '目前無法連線，請確認網路後重新查詢。'
+    : error instanceof ApiTimeoutError ? '查詢逾時，請稍後重新查詢。'
+    : errorMessage(error, '候選月嫂查詢失敗');
   if (error instanceof ApiHttpError && MATCHING_BLOCKER_CODES.has(error.code)) {
     return { status: 'blocked', message };
   }
@@ -111,8 +113,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       queryController.current = null;
     };
   }, []);
-  const [filters, setFilters] = useState<MatchingFilterPolicy>(() => ({ ...defaultMatchingFilterPolicy }));
-  const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'idle' });
+  const [queryState, setQueryState] = useState<CandidateQueryState>({ status: 'loading' });
   const [selectedStaffIds, setSelectedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [joinedStaffIds, setJoinedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
   const [outdatedStaffIds, setOutdatedStaffIds] = useState<ReadonlySet<number>>(() => new Set());
@@ -121,14 +122,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   const flow = useSyncExternalStore(subscribeCandidatePoolAdd, () => orderMutationFlowStore.getCandidatePoolAdd(caseNo));
   const addInFlight = useRef(false);
 
-  const updateFilter = (key: keyof MatchingFilterPolicy) => {
-    setFilters((current) => ({ ...current, [key]: !current[key] }));
-    setSelectedStaffIds(new Set());
-    setAddState({ status: 'idle' });
-    setQueryState({ status: 'idle' });
-  };
-
-  const queryCandidates = () => {
+  const queryCandidates = useCallback(() => {
     queryController.current?.abort();
     const controller = new AbortController();
     queryController.current = controller;
@@ -136,7 +130,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     setAddState({ status: 'idle' });
     setQueryState({ status: 'loading' });
     void Promise.all([
-      matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, filters, { signal: controller.signal }),
+      matchingCandidateWorkflowClient.searchInquiryCandidates(caseNo, defaultMatchingFilterPolicy, { signal: controller.signal }),
       presentation === 'workbench' ? candidateContactPoolClient.query(caseNo, { signal: controller.signal }) : Promise.resolve(null),
     ]).then(([data, pool]) => {
         if (!mounted.current || queryController.current !== controller) return;
@@ -152,7 +146,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       .catch((error) => {
         if (mounted.current && queryController.current === controller) setQueryState(queryFailure(error));
       });
-  };
+  }, [caseNo, presentation]);
+
+  useEffect(() => { queryCandidates(); }, [queryCandidates]);
 
   const candidates = queryState.status === 'ready' ? formalCandidates(queryState.data) : [];
 
@@ -312,20 +308,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
 
 
   return (
-    <section aria-label={`案件 ${caseNo} 正式候選查詢`}>
-      <fieldset disabled={busy} aria-label="媒合篩選條件">
-        <legend>媒合篩選條件</legend>
-        {FILTER_OPTIONS.map((option) => (
-          <label key={option.key}>
-            <input
-              type="checkbox"
-              checked={filters[option.key]}
-              onChange={() => updateFilter(option.key)}
-            />
-            {option.label}
-          </label>
-        ))}
-      </fieldset>
+    <section aria-label={`案件 ${caseNo} 候選月嫂查詢`}>
+      <p className="order-v2-row-meta">區域與週間服務僅作提示，不符合仍可加入候選池並協調。</p>
 
       <button
         type="button"
@@ -333,15 +317,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
         onClick={queryCandidates}
         disabled={busy}
       >
-        {queryState.status === 'loading' ? '查詢中…' : presentation === 'workbench' ? '查詢合適人選' : '查詢符合條件月嫂'}
+        {queryState.status === 'loading' ? '正在載入月嫂…' : '重新查詢'}
       </button>
-
-      {queryState.status === 'idle' && (
-        <div className="order-v2-notice warning" role="status">
-          <strong>尚未查詢</strong>
-          <span>依預計服務期間查詢；尚未填寫的需求待確認，不阻擋初步詢問。</span>
-        </div>
-      )}
 
       {queryState.status === 'loading' && (
         <div className="order-v2-notice warning" role="status">
@@ -369,6 +346,11 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
           <div className="order-v2-case-meta">
             <span>服務期間：{queryState.data.planned_start_date} ～ {queryState.data.planned_end_date}</span>
           </div>
+          {candidates[0] && <div className="candidate-query-requirements" aria-label="本案需求">
+            <strong>本案需求</strong>
+            <span>服務地區：{candidates[0].matching_conditions.region.required_value || '待確認'}</span>
+            <span>週間服務：{candidates[0].matching_conditions.preferred_service_days.required_value || '待確認'}</span>
+          </div>}
 
           {candidates.length > 0 ? (
             <>
@@ -376,9 +358,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                 <strong>可詢問 {candidates.length} 位</strong>
                 <span>有檔期衝突仍可加入候選池並協調；排班前須確認調整後的完整服務日期。</span>
               </div>
-              <div className="order-v2-business-summary" aria-label="正式符合條件候選">
+              <div className="order-v2-business-summary" aria-label="可詢問月嫂">
                 {candidates.map((candidate) => presentation === 'workbench' ? <div key={candidate.staff_id} className="candidate-add-row">
-                  <div><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><br />空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
+                  <div className="candidate-add-details"><div className="candidate-name-and-preferences"><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><CandidateServicePreferences candidate={candidate} /></div>空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                     {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
                     {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id && value.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
                     {queryState.data.conflicts.some(value => value.staff_id === candidate.staff_id) && <details><summary>查看衝突日期與原因</summary><ul>
@@ -404,7 +386,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                       disabled={busy}
                     />
                     <span>
-                      <strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><br />
+                      <span className="candidate-name-and-preferences"><strong>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</strong><CandidateServicePreferences candidate={candidate} /></span>
                       空閒 {candidate.supported_day_count}/{candidate.required_day_count} 天
                       {!candidate.full_case_coverage && <span role="status"> · 有檔期衝突，待公會協調</span>}
                       {queryState.data.conflicts.some((conflict) => conflict.staff_id === candidate.staff_id && conflict.reason_code === 'buffer') && <span role="status"> · 七天緩衝期重疊，僅提醒</span>}
@@ -423,8 +405,8 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
             </>
           ) : (
             <div className="order-v2-notice blocked" role="status">
-              <strong>沒有符合條件</strong>
-              <span>目前沒有符合查詢條件的月嫂，可調整篩選條件後重新查詢。</span>
+              <strong>目前沒有可詢問月嫂</strong>
+              <span>請確認案件服務期間與月嫂資料，或稍後重新查詢。</span>
             </div>
           )}
         </>
@@ -449,7 +431,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
       {flow?.status === 'outcome_unknown' && <button type="button" onClick={retryCandidatePoolAdd}>以原操作重新確認加入候選池</button>}
       {flow?.status === 'observation_failed' && <button type="button" onClick={retryCandidatePoolReadback}>只重新讀取候選池結果</button>}
       {includeMultiCaregiver && <fieldset disabled={queryState.status === 'loading' || addState.status === 'saving'} style={{ border: 0, padding: 0 }}>
-        <OrderMultiCaregiverPlanPanel caseNo={caseNo} filters={filters} onObserved={onPoolReadback} onBusyChange={setMultiBusy} />
+        <OrderMultiCaregiverPlanPanel caseNo={caseNo} filters={defaultMatchingFilterPolicy} onObserved={onPoolReadback} onBusyChange={setMultiBusy} />
       </fieldset>}
     </section>
   );

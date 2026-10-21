@@ -6,12 +6,11 @@ Description: 讀取媒合可用性 fresh facts，遇到來源未備妥時 fail c
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from decimal import Decimal
 from typing import Any, Dict, List
 
 from domains.scheduling.staff_matching_preferences import (
-    service_hours_matches,
-    service_mode_matches,
+    region_condition,
+    weekly_service_condition,
 )
 from domains.scheduling.waiting_deposit_lock import (
     WaitingDepositOccupancyKind,
@@ -154,18 +153,9 @@ def _search_availability(
         raise ValueError("case not found")
     if order_row["status"] not in {"洽談中", "訂單成立"}:
         raise ValueError("case is not in negotiation stage")
-    policy = _filter_policy(filter_policy)
-    if inquiry:
-        # Missing intake answers are pending, not false requirements.  Keep the
-        # source unchanged and apply only filters whose case requirement exists.
-        for key, fact in (("cooking", "requires_cooking"),
-                          ("preferred_service_days", "service_type"), ("daily_service_hours", "service_hours_per_day")):
-            if order_row.get(fact) is None or order_row.get(fact) == "":
-                policy[key] = False
-        if not any(str(order_row.get(key) or "").strip() for key in ("city", "address")):
-            policy["region"] = False
-    if policy["cooking"] and order_row.get("requires_cooking") is None:
-        raise ValueError("matching_preference_source_not_ready")
+    # Legacy filter keys remain accepted by the transport. Service preferences
+    # are informational and never remove an otherwise eligible candidate.
+    del filter_policy
 
     planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
     planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
@@ -184,15 +174,14 @@ def _search_availability(
         raise ValueError("service period exceeds the Orders selectable range")
 
     candidate_rows = loaded_facts["staff_rows"]
-    filter_results = {
-        int(row["id"]): _staff_filter_results(row, order_row, policy)
+    matching_conditions = {
+        int(row["id"]): _staff_matching_conditions(row, order_row)
         for row in candidate_rows
     }
-    candidate_rows = [
-        row
-        for row in candidate_rows
-        if _passes_enabled_filters(filter_results[int(row["id"])], policy, include_preferences=inquiry)
-    ]
+    filter_results = {
+        staff_id: {key: value["status"] == "matched" for key, value in conditions.items()}
+        for staff_id, conditions in matching_conditions.items()
+    }
     candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
     assignments = loaded_facts["assignments"]
 
@@ -286,6 +275,7 @@ def _search_availability(
                 segment_drafts,
                 int(order_row.get("scheduling_version") or 0),
                 filter_results,
+                matching_conditions=matching_conditions,
                 include_unavailable=inquiry,
             )
             if include_candidate_options
@@ -332,7 +322,7 @@ def _expand_staff_unavailability_days(row, window_start, window_end):
 
 
 def _candidate_options(candidate_rows, staff_rows, required_service_dates, segment_drafts,
-                       scheduling_version, filter_results, *, include_unavailable=False):
+                       scheduling_version, filter_results, *, matching_conditions, include_unavailable=False):
     staff_names = {
         int(row["id"]): str(row.get("name") or "")
         for row in staff_rows
@@ -352,6 +342,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
                 "coverage_day_count": 0,
                 "available_ranges": [],
                 "filter_results": filter_results.get(key[1], {}),
+                "matching_conditions": matching_conditions[key[1]],
             },
         )
         start_date = _as_optional_date(candidate["start_date"], "candidate.start_date")
@@ -369,6 +360,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
                 "staff_union_no": staff_union_numbers.get(staff_id),
                 "coverage_day_count": 0, "available_ranges": [],
                 "filter_results": filter_results.get(staff_id, {}),
+                "matching_conditions": matching_conditions[staff_id],
             })
     return [_coverage_view(options[key], required_service_dates, segment_drafts,
                            scheduling_version) for key in sorted(options)]
@@ -391,86 +383,28 @@ def _filter_policy(raw):
     }
 
 
+def _staff_matching_conditions(staff, order):
+    location = " ".join(str(order.get(key) or "").strip() for key in ("city", "address")).strip()
+    conditions = {
+        "region": region_condition(location, staff.get("regions") or ()),
+        "preferred_service_days": weekly_service_condition(order.get("service_type"), staff.get("rest_schedule") or ()),
+    }
+    result = {key: {"status": condition.status, "required_value": condition.required_value,
+                    "staff_values": list(condition.staff_values)} for key, condition in conditions.items()}
+    # Matching can consume the address without copying a home address into every
+    # candidate's display projection.
+    result["region"]["required_value"] = str(order.get("city") or "").strip() or ("依案件服務地址" if location else None)
+    return result
+
+
 def _staff_filter_results(staff, order, policy):
-    preferences = staff.get("matching_preferences") or {}
-    enabled_keys = set(policy["enabled_preference_keys"])
-    # Built-in conditions always use canonical Staff capabilities, including
-    # when a caller repeats their legacy keys in enabled_preference_keys.
-    enabled_keys.difference_update(("preferred_service_days", "daily_service_hours"))
-    preference_results = {
-        key: _preference_matches(
-            fact,
-            order,
-            policy["preferred_service_days_tolerance"],
-        )
-        for key, fact in preferences.items()
-        if key in enabled_keys
-    }
-    for key in enabled_keys:
-        preference_results.setdefault(key, False)
-    location = " ".join(
-        str(order.get(key) or "").strip() for key in ("city", "address")
-    ).strip()
-    regions = tuple(str(item) for item in staff.get("regions") or ())
-    return {
-        "region": bool(
-            location
-            and any(item in location or location in item for item in regions)
-        ),
-        "cooking": _cooking_matches(order, staff),
-        **preference_results,
-        "preferred_service_days": service_mode_matches(
-            order.get("service_type"), staff.get("rest_schedule") or (),
-        ),
-        "daily_service_hours": service_hours_matches(
-            _integer_hours(order.get("service_hours_per_day")), staff.get("service_periods") or (),
-        ),
-    }
-
-
-def _integer_hours(value):
-    if isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value():
-        return int(value)
-    return value
-
-
-def _preference_matches(fact, order, tolerance):
-    required = order.get(fact.get("order_fact_key"))
-    if isinstance(required, Decimal) and required == required.to_integral_value():
-        required = int(required)
-    if isinstance(required, bool) or not isinstance(required, int) or required <= 0:
-        return False
-    value = fact.get("value") or {}
-    if fact.get("comparison_operator") == "range_with_tolerance":
-        minimum, maximum = value.get("minimum"), value.get("maximum")
-        return (
-            isinstance(minimum, int)
-            and isinstance(maximum, int)
-            and minimum - tolerance <= required <= maximum + tolerance
-        )
-    if fact.get("comparison_operator") == "contains_integer":
-        return required in (value.get("values") or ())
-    return False
+    """Compatibility projection; callers must use matching_conditions for unknowns."""
+    return {key: condition["status"] == "matched" for key, condition in _staff_matching_conditions(staff, order).items()}
 
 
 def _passes_enabled_filters(results, policy, *, include_preferences=False):
-    if policy["region"] and not results["region"]:
-        return False
-    if policy["cooking"] and not results["cooking"]:
-        return False
-    if include_preferences and any(
-        policy[key] and not results.get(key, False)
-        for key in ("preferred_service_days", "daily_service_hours")
-    ):
-        return False
+    """Service preferences are hints, including for callers with legacy flags."""
     return True
-
-
-def _cooking_matches(order, staff):
-    requirement = order.get("requires_cooking")
-    if requirement is None:
-        return False
-    return not requirement or bool(staff.get("cooking_skills"))
 
 
 def _coverage_view(option, required_service_dates, segment_drafts, scheduling_version):

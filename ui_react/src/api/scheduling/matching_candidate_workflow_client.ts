@@ -29,6 +29,11 @@ const SegmentCandidateSchema = z.strictObject({
   start_date: IsoDateSchema,
   end_date: IsoDateSchema,
 });
+const MatchingConditionSchema = z.strictObject({
+  status: z.enum(['matched', 'not_matched', 'pending']),
+  required_value: z.string().nullable(),
+  staff_values: z.array(z.string()),
+});
 const CandidateOptionSchema = z.strictObject({
   segment_index: z.number().int().nonnegative(),
   staff_id: z.number().int().positive(),
@@ -53,6 +58,10 @@ const CandidateOptionSchema = z.strictObject({
   uncovered_segment_dates: z.array(IsoDateSchema),
   source_scheduling_version: z.number().int().nonnegative(),
   filter_results: z.record(z.string(), z.boolean()),
+  matching_conditions: z.strictObject({
+    region: MatchingConditionSchema,
+    preferred_service_days: MatchingConditionSchema,
+  }),
 });
 const AvailabilitySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
@@ -115,10 +124,10 @@ export type MatchingFilterPolicy = Readonly<{
 type MatchingQueryOptions = Pick<RequestOptions, 'signal'>;
 
 export const defaultMatchingFilterPolicy: MatchingFilterPolicy = Object.freeze({
-  region: true,
-  cooking: true,
-  preferred_service_days: true,
-  daily_service_hours: true,
+  region: false,
+  cooking: false,
+  preferred_service_days: false,
+  daily_service_hours: false,
 });
 
 const MatchingFilterPolicySchema = z.strictObject({

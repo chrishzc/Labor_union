@@ -501,7 +501,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                   onOpenCustomerConfirmation={id => { setRecommendedCandidateId(id); openGroup('recommendation'); }} />
                 {addingCandidates && <CandidateInquiryDialog title="新增候選月嫂" wide busy={candidateAddState.busy}
                   onClose={() => { requestLeave(() => setAddingCandidates(false)); }}>
-                  <div className="candidate-inquiry-dialog-content"><p>查詢後，點選人選旁的「加入候選池」。已加入的人選會標示「已加入」；加入候選池尚未形成排班。</p>
+                  <div className="candidate-inquiry-dialog-content"><p>人選會自動載入，點選人選旁的「加入候選池」即可加入。已加入的人選會標示「已加入」；加入候選池尚未形成排班。</p>
                     <OrderCandidateQueryPanel caseNo={caseNo} presentation="workbench" includeMultiCaregiver={false} onEditStateChange={setCandidateAddState}
                       onPoolReadback={ids => { setFocusedCandidateId(ids?.[0]); refreshFacts(); }} />
                   </div>

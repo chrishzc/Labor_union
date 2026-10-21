@@ -152,9 +152,11 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 const MANUAL_RELATION_KEYS = ['service_regions', 'service_periods', 'cooking_skills', 'holiday_availability', 'rest_schedule', 'baby_types'] as const;
+const PREFERENCE_RELATION_KEYS = ['service_regions', 'rest_schedule'] as const;
+const IMPORTED_SERVICE_KEYS = ['service_periods', 'cooking_skills', 'holiday_availability', 'baby_types'] as const;
 const MANUAL_RELATION_LABELS: Record<typeof MANUAL_RELATION_KEYS[number], string> = {
   service_regions: '可承接區域', service_periods: '可承接時段', cooking_skills: '下廚能力',
-  holiday_availability: '特殊節日意願', rest_schedule: '週間服務／排休', baby_types: '可承接胎數／型態',
+  holiday_availability: '特殊節日意願', rest_schedule: '週間服務', baby_types: '可承接胎數／型態',
 };
 type ManualRelationKey = typeof MANUAL_RELATION_KEYS[number];
 const EMPTY_MANUAL_RELATIONS: StaffCasePreferenceRelations = {
@@ -172,20 +174,20 @@ export function appendManualDraftRow(current: StaffCasePreferenceRelations, key:
 }
 
 function requestRelations(draft: StaffCasePreferenceRelations): StaffCasePreferenceRelations {
-  return Object.fromEntries(MANUAL_RELATION_KEYS.map((key) => [
-    key,
-    draft[key].filter((item) => item.value.trim()).map((item) => ({ value: item.value.trim(), detail: item.detail?.trim() || null, ...(key === 'service_periods' ? { ...(item.service_hours !== undefined ? { service_hours: item.service_hours } : {}), ...(item.start_time !== undefined ? { start_time: item.start_time } : {}), ...(item.end_time !== undefined ? { end_time: item.end_time } : {}), ...(item.end_day_offset !== undefined ? { end_day_offset: item.end_day_offset } : {}) } : {}) })),
-  ])) as StaffCasePreferenceRelations;
+  // The existing six-relation writer receives every untouched imported fact.
+  return { ...draft, ...Object.fromEntries(PREFERENCE_RELATION_KEYS.map(key => [key,
+    draft[key].filter(item => item.value.trim()).map(item => ({ value: item.value.trim(), detail: item.detail })),
+  ])) };
 }
 
 function displayRelations(values: readonly { value: string; detail: string | null }[]): string {
-  return values.map((item) => item.detail ? item.value + '（' + item.detail + '）' : item.value).join('、') || '（空）';
+  return values.map((item) => item.detail ? item.value + '（' + item.detail + '）' : item.value).join('、') || '尚未登錄';
 }
 
 export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCasePreferenceManualSnapshot }) {
   return <div data-testid="staff-case-preference-manual-preview">
-    <h4>六大接案能力變更預覽</h4>
-    {MANUAL_RELATION_KEYS.map((key) => <div key={key}>
+    <h4>服務偏好變更預覽</h4>
+    {PREFERENCE_RELATION_KEYS.map((key) => <div key={key}>
       <span>{MANUAL_RELATION_LABELS[key]}（變更前）: {displayRelations(preview.before[key])}</span>
       {' '}
       <span>{MANUAL_RELATION_LABELS[key]}（變更後）: {displayRelations(preview.after[key])}</span>
@@ -193,7 +195,7 @@ export function StaffCasePreferenceManualPreview({ preview }: { preview: StaffCa
   </div>;
 }
 
-export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean }) {
+export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.drawer.case-preference-manual', onUpdated, directEditing = false, renderQualifications }: { staffId: number; surfaceId?: string; onUpdated?: () => void | Promise<void>; directEditing?: boolean; renderQualifications?: (information: React.ReactNode) => React.ReactNode }) {
   const saveGuidanceId = useId();
   const [snapshot, setSnapshot] = useState<StaffCasePreferenceManualSnapshot | null>(null);
   const [draft, setDraft] = useState<StaffCasePreferenceRelations>(() => EMPTY_MANUAL_RELATIONS);
@@ -232,7 +234,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       if (epoch === loadEpoch.current) {
         setPhase('error');
         setStatusError(true);
-        setStatus(error instanceof Error ? error.message : '六大接案能力載入失敗。');
+        setStatus(error instanceof Error ? error.message : '服務偏好載入失敗。');
       }
       return false;
     }
@@ -247,7 +249,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   }, [load]);
   const doApply = async () => {
     if (!snapshot || !['editing', 'preview_ready'].includes(phase)) return;
-    if (MANUAL_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) { setStatusError(true); setStatus('請選擇新增條件，或移除尚未選擇的項目。'); return; }
+    if (PREFERENCE_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) { setStatusError(true); setStatus('請選擇新增條件，或移除尚未選擇的項目。'); return; }
     setStatusError(false);
     const epoch = loadEpoch.current;
     requestControllerRef.current?.abort();
@@ -266,7 +268,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
         reason: reason.trim(),
       }, { idempotencyKey: nextIntentKey('staff-case-preference-manual'), signal: controller.signal });
       if (epoch !== loadEpoch.current) return;
-      if (await load()) { setStatus('已儲存並重新查詢六大接案能力。'); await onUpdated?.(); }
+      if (await load()) { setStatus('已儲存並重新查詢服務偏好。'); await onUpdated?.(); }
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
@@ -283,53 +285,54 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setPreview(null); setStatus(''); setPhase('editing');
     setDraft(current => { const next = updateManualDraftRow(current, key, index, field, value); if (field === 'value' && value !== current[key][index].value) next[key][index].detail = null; return next; });
   };
-  const editTimeRow = (index: number, changes: Partial<StaffCasePreferenceRelations['service_periods'][number]>) => {
-    setPreview(null); setStatus(''); setPhase('editing');
-    setDraft(current => ({ ...current, service_periods: current.service_periods.map((item, rowIndex) => rowIndex === index ? { ...item, ...changes, detail: null } : item) }));
-  };
-  useUnsavedDraft('六大接案能力', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: phase === 'previewing' || applying });
+  useUnsavedDraft('服務偏好', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: phase === 'previewing' || applying });
 
-  return <section data-surface-id={surfaceId}>
-    <h3>服務能力與接案條件</h3>
-    <p>從選單選擇條件，需要時再新增條件，服務時段可自訂起迄時間，填妥後直接儲存。</p>
-    {phase === 'loading' && <p role="status">正在載入六大接案能力…</p>}
-    {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯六項偏好</button>}
-    {snapshot && options && <div className="staff-qual-grid">
-      {MANUAL_RELATION_KEYS.map((key) => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
-        <h4>{MANUAL_RELATION_LABELS[key]}</h4>
-        {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
-          {draft[key].length === 0 && <p className="staff-manual-empty">尚未設定條件</p>}
-          {draft[key].map((item, index) => <div className="staff-manual-condition" key={index}>
-            <div className="staff-manual-condition-main">
-              <select aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value} onChange={event => { if (key === 'service_periods') { const hours = Number(event.target.value.replace('小時', '')); editTimeRow(index, { value: event.target.value, service_hours: hours, end_day_offset: item.end_day_offset ?? (hours === 24 ? 1 : 0) }); } else editRow(key, index, 'value', event.target.value); }}>
-                <option value="">請選擇條件</option>
-                {item.value && !options[key].includes(key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value) && <option value={key === 'service_periods' && item.service_hours ? `${item.service_hours}小時` : item.value}>既有值：{item.value}</option>}
-                {options[key].map(value => <option key={value} value={value} disabled={key !== 'service_periods' && draft[key].some((row, rowIndex) => rowIndex !== index && row.value === value)}>{value}</option>)}
-              </select>
-              <button type="button" className="staff-secondary-btn" disabled={locked} aria-label={`移除${MANUAL_RELATION_LABELS[key]}第${index + 1}項`} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => ({ ...current, [key]: current[key].filter((_, rowIndex) => rowIndex !== index) })); }}>移除</button>
-            </div>
-            {key === 'service_periods' && item.value && <div className="staff-op-grid staff-service-time-grid">
-              <label className="staff-op-field">開始時間<input type="time" aria-label={`可承接時段開始時間${index + 1}`} disabled={locked} value={item.start_time ?? ''} onChange={event => editTimeRow(index, { start_time: event.target.value || null, end_day_offset: item.end_day_offset ?? 0 })} /></label>
-              <label className="staff-op-field">結束時間<input type="time" aria-label={`可承接時段結束時間${index + 1}`} disabled={locked} value={item.end_time ?? ''} onChange={event => editTimeRow(index, { end_time: event.target.value || null, end_day_offset: item.end_day_offset ?? 0 })} /></label>
-              <label className="staff-op-field">結束日<select aria-label={`可承接時段結束日${index + 1}`} disabled={locked} value={item.end_day_offset ?? 0} onChange={event => editTimeRow(index, { end_day_offset: Number(event.target.value) })}><option value={0}>當日</option><option value={1}>次日</option></select></label>
-              <p className="staff-service-time-rule">{item.service_hours === 8 || item.value === '8小時' ? '8 小時服務＋30 分鐘休息，起迄共 8.5 小時。' : item.service_hours === 24 || item.value === '24小時' ? '起迄共 24 小時，結束日請選次日。' : item.service_hours === 4 || item.value === '4小時' ? '4 小時服務，起迄共 4 小時，不扣休息。' : '請先選擇 4、8 或 24 小時，再設定起迄。'}{!item.start_time && !item.end_time && (snapshot.after.service_periods.some(before => before.value === item.value) ? ' 既有未設定時間的條件可保留；修改時段時須填齊。' : ' 請填齊開始與結束時間。')}</p>
-            </div>}
-            {item.detail && <small className="staff-source-note">來源資料：{item.detail}</small>}
-          </div>)}
-          <button type="button" className="staff-secondary-btn" aria-label={`新增${MANUAL_RELATION_LABELS[key]}條件`} disabled={locked || draft[key].some(item => !item.value) || (key !== 'service_periods' && options[key].every(value => draft[key].some(item => item.value === value)))} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => appendManualDraftRow(current, key)); }}>＋ 新增條件</button>
-        </>}
-      </div>)}
-    </div>}
-    {editing && <label className="staff-op-field">備註（選填）<input aria-label="接案條件備註（選填）" placeholder="有需要補充的內容再填寫" disabled={locked} value={reason} onChange={(event) => { setReason(event.target.value); if (statusError) { setStatusError(false); setStatus(''); } }} /></label>}
-    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>}
-    <div className="staff-op-actions">
-      {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setStatusError(false); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
-      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked} onClick={() => void doApply()}>儲存</button>}
-      {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
-    </div>
-    {preview && <StaffCasePreferenceManualPreview preview={preview} />}
-    {status && <p role={statusError ? "alert" : "status"} className={statusError ? "staff-op-error" : undefined}>{status}</p>}
+  const importedInformation = <section className="staff-imported-service-information" aria-label="匯入服務資訊">
+    <h4>匯入服務資訊</h4>
+    <p>原登錄內容保留，供查閱，不列入配對條件。</p>
+    {snapshot ? <dl className="staff-imported-service-grid">{IMPORTED_SERVICE_KEYS.map(key => <div key={key}>
+      <dt>{MANUAL_RELATION_LABELS[key]}</dt><dd>{displayRelations(snapshot.after[key])}</dd>
+    </div>)}</dl> : <p>{phase === 'loading' ? '正在載入匯入服務資訊…' : '匯入服務資訊尚未取得，請重新查詢。'}</p>}
   </section>;
+
+  return <>
+    {renderQualifications ? renderQualifications(importedInformation) : <section aria-label="專業資格與服務資料"><h3>專業資格與服務資料</h3>{importedInformation}</section>}
+    <section data-surface-id={surfaceId} aria-label="服務偏好">
+      <h3>服務偏好</h3>
+      <p>只維護可承接區域與週間服務。配對池顯示符合狀態及月嫂登錄值，不因偏好排除人選。</p>
+      {phase === 'loading' && <p role="status">正在載入服務偏好…</p>}
+      {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯服務偏好</button>}
+      {snapshot && options && <div className="staff-qual-grid staff-preference-grid">
+        {PREFERENCE_RELATION_KEYS.map(key => <div key={key} className="staff-qual-card" role="group" aria-label={MANUAL_RELATION_LABELS[key]}>
+          <h4>{MANUAL_RELATION_LABELS[key]}</h4>
+          {!editing ? <p>{displayRelations(snapshot.after[key])}</p> : <>
+            {draft[key].length === 0 && <p className="staff-manual-empty">尚未設定條件</p>}
+            {draft[key].map((item, index) => <div className="staff-manual-condition" key={index}>
+              <div className="staff-manual-condition-main">
+                <select aria-label={MANUAL_RELATION_LABELS[key] + '值' + (index + 1)} disabled={locked} value={item.value} onChange={event => editRow(key, index, 'value', event.target.value)}>
+                  <option value="">請選擇條件</option>
+                  {item.value && !options[key].includes(item.value) && <option value={item.value}>既有值：{item.value}</option>}
+                  {options[key].map(value => <option key={value} value={value} disabled={draft[key].some((row, rowIndex) => rowIndex !== index && row.value === value)}>{value}</option>)}
+                </select>
+                <button type="button" className="staff-secondary-btn" disabled={locked} aria-label={`移除${MANUAL_RELATION_LABELS[key]}第${index + 1}項`} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => ({ ...current, [key]: current[key].filter((_, rowIndex) => rowIndex !== index) })); }}>移除</button>
+              </div>
+              {item.detail && <small className="staff-source-note">來源資料：{item.detail}</small>}
+            </div>)}
+            <button type="button" className="staff-secondary-btn" aria-label={`新增${MANUAL_RELATION_LABELS[key]}條件`} disabled={locked || draft[key].some(item => !item.value) || options[key].every(value => draft[key].some(item => item.value === value))} onClick={() => { setPreview(null); setStatus(''); setPhase('editing'); setDraft(current => appendManualDraftRow(current, key)); }}>＋ 新增條件</button>
+          </>}
+        </div>)}
+      </div>}
+      {editing && <label className="staff-op-field">備註（選填）<input aria-label="接案條件備註（選填）" placeholder="有需要補充的內容再填寫" disabled={locked} value={reason} onChange={event => { setReason(event.target.value); if (statusError) { setStatusError(false); setStatus(''); } }} /></label>}
+      {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>}
+      <div className="staff-op-actions">
+        {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setStatusError(false); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
+        {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked} onClick={() => void doApply()}>儲存服務偏好</button>}
+        {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
+      </div>
+      {preview && <StaffCasePreferenceManualPreview preview={preview} />}
+      {status && <p role={statusError ? 'alert' : 'status'} className={statusError ? 'staff-op-error' : undefined}>{status}</p>}
+    </section>
+  </>;
 }
 
 function todayIsoDate(): string {
@@ -1371,14 +1374,10 @@ export const StaffPage: React.FC = () => {
                   </div>
                 )}
 
-                {qualification.status === 'ready' && (
-                  <>
-                    {selectedStaffId !== null && <StaffQualificationEditor staffId={selectedStaffId} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />}
-                  </>
-                )}
-
                 <section data-surface-id="staff.qualification.preferences">
-                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} />}
+                  {selectedStaffId !== null && <StaffCasePreferenceManualEditor staffId={selectedStaffId} directEditing surfaceId="staff.qualification.case-preference-manual" onUpdated={() => setSliceRetryGeneration(value => value + 1)} renderQualifications={information => qualification.status === 'ready'
+                    ? <StaffQualificationEditor staffId={selectedStaffId} importedServiceInformation={information} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
+                    : <section aria-label="專業資格與服務資料"><h3>專業資格與服務資料</h3>{information}</section>} />}
                 </section>
 
                 {/* 6 大專業資格審核主檔 */}

@@ -124,12 +124,54 @@ def test_manual_options_prevent_new_free_text_but_keep_existing_legacy_facts():
     repo.relations["cooking_skills"] = [{"value": "可下廚", "detail": None}]
     workflow = _workflow(repo)
     assert workflow.preview(531, repo.relations).after["cooking_skills"][0].value == "可下廚"
-    assert "台北市" in RELATION_OPTIONS["service_regions"]
+    assert set(RELATION_OPTIONS["service_regions"]) == {
+        "東區", "北區", "香山區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮",
+        "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉", "尖石鄉", "五峰鄉",
+    }
+    for region in ("台北市", "新竹市", "新竹縣"):
+        with pytest.raises(ValueError, match="option_invalid"):
+            workflow.preview(531, {**repo.relations, "service_regions": [{"value": region, "detail": None}]})
+    assert workflow.preview(531, {**repo.relations, "service_regions": [{"value": "竹北市", "detail": None}]}).after["service_regions"][0].value == "竹北市"
+    assert RELATION_OPTIONS["rest_schedule"] == ("週休一日", "週休二日", "連續服務")
+    for value in RELATION_OPTIONS["rest_schedule"]:
+        assert workflow.preview(531, {**repo.relations, "rest_schedule": [{"value": value, "detail": None}]}).after["rest_schedule"][0].value == value
+    for value in ("週一至週五", "休周六", "休周日"):
+        with pytest.raises(ValueError, match="option_invalid"):
+            workflow.preview(531, {**repo.relations, "rest_schedule": [{"value": value, "detail": None}]})
     with pytest.raises(ValueError, match="time_required"):
         workflow.preview(531, {**_relations(), "service_periods": [{"value": "8 小時", "detail": None}]})
     with pytest.raises(ValueError, match="option_invalid"):
         workflow.preview(531, {**_relations(), "cooking_skills": [{"value": "其他", "detail": None}]})
     assert repo.writes == 0
+
+
+def test_retired_region_value_and_all_imported_facts_survive_weekly_service_save():
+    repo = _Repo()
+    repo.relations["service_regions"] = [{"value": "台北市", "detail": "原匯入區域說明"}]
+    workflow = _workflow(repo)
+    before = workflow.query(531)
+    proposed = {**repo.relations, "rest_schedule": [{"value": "週休二日", "detail": None}]}
+    preview = workflow.preview(531, proposed)
+    workflow.apply(531, proposed, _request(preview))
+    after = workflow.query(531)
+    for key in RELATION_KEYS:
+        if key != "rest_schedule":
+            assert after.relations[key] == before.relations[key]
+    assert after.relations["rest_schedule"] == (RelationValue("週休二日"),)
+
+
+def test_legacy_weekly_service_stays_unchanged_when_saving_an_allowed_region():
+    repo = _Repo()
+    repo.relations["rest_schedule"] = [{"value": "週一至週五", "detail": "保留原排休說明"}]
+    workflow = _workflow(repo)
+    before = workflow.query(531)
+    proposed = {**repo.relations, "service_regions": [{"value": "竹北市", "detail": None}]}
+    preview = workflow.preview(531, proposed)
+    workflow.apply(531, proposed, _request(preview))
+    after = workflow.query(531)
+    for key in RELATION_KEYS:
+        if key != "service_regions":
+            assert after.relations[key] == before.relations[key]
 
 
 @pytest.mark.parametrize("key", ["service_regions", "service_periods", "cooking_skills", "holiday_availability", "rest_schedule", "baby_types"])

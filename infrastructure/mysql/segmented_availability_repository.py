@@ -127,32 +127,9 @@ class MySqlSegmentedAvailabilityFactsRepository:
         staff_rows = cursor.fetchall() or []
         by_id = {int(row["id"]): row for row in staff_rows}
         _attach_region_rows(cursor, by_id)
-        _attach_grouped_rows(
-            cursor, by_id, "staff_cooking_skills", "skill_name", "cooking_skills"
-        )
-        _attach_capability_rows(
-            cursor, by_id, "staff_time_slots", "slot_name", "custom_slot_detail", "service_periods"
-        )
         _attach_capability_rows(
             cursor, by_id, "staff_weekly_rest", "rest_type", "custom_rest_detail", "rest_schedule"
         )
-        cursor.execute(
-            "SELECT v.staff_id,d.preference_key,d.order_fact_key,"
-            "d.comparison_operator,v.value_json FROM staff_matching_preference_values v "
-            "JOIN staff_matching_preference_definitions d ON d.id=v.definition_id "
-            "WHERE d.status='active' AND d.is_filterable=1 "
-            "AND d.preference_key NOT IN ('preferred_service_days','daily_service_hours')"
-        )
-        for value_row in cursor.fetchall() or []:
-            staff = by_id.get(int(value_row["staff_id"]))
-            if staff is None:
-                continue
-            preferences = staff.setdefault("matching_preferences", {})
-            preferences[str(value_row["preference_key"])] = {
-                "comparison_operator": str(value_row["comparison_operator"]),
-                "order_fact_key": str(value_row["order_fact_key"]),
-                "value": _json_object(value_row["value_json"]),
-            }
         return staff_rows
 
     def _load_assignments(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:

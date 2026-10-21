@@ -76,13 +76,14 @@ class CaregiverSegmentDraft(BaseModel):
 
 
 class CaregiverMatchingFilterPolicy(BaseModel):
+    """Legacy request shape; service preferences no longer exclude candidates."""
     model_config = ConfigDict(extra="forbid")
 
     schedule: bool = True
     region: bool = True
-    preferred_service_days: bool = Field(default=True, description="比對案件服務方式與月嫂週間服務／排休；不比對總服務天數")
+    preferred_service_days: bool = Field(default=True, description="相容舊請求；週間服務僅作提示，不排除候選")
     cooking: bool = True
-    daily_service_hours: bool = Field(default=True, description="比對案件每日時數與月嫂名冊的可承接時段")
+    daily_service_hours: bool = Field(default=True, description="相容舊請求；每日時數已退出偏好比對")
     preferred_service_days_tolerance: int = Field(default=0, ge=0, le=60)
     enabled_preference_keys: list[str] = Field(default_factory=list)
 
@@ -153,6 +154,21 @@ class CaregiverSupportedRange(CaregiverAvailabilityRange):
     service_day_count: int = Field(ge=1)
 
 
+class CaregiverMatchingCondition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["matched", "not_matched", "pending"]
+    required_value: str | None
+    staff_values: list[str]
+
+
+class CaregiverMatchingConditions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    region: CaregiverMatchingCondition
+    preferred_service_days: CaregiverMatchingCondition
+
+
 class CaregiverCandidateOption(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -179,6 +195,7 @@ class CaregiverCandidateOption(BaseModel):
     uncovered_segment_dates: list[date]
     source_scheduling_version: int = Field(ge=0)
     filter_results: dict[str, bool] = Field(default_factory=dict)
+    matching_conditions: CaregiverMatchingConditions
 
 
 class CaregiverConflict(BaseModel):

@@ -38,14 +38,14 @@ READ_ONLY_RELATION_SPECS = {
 }
 ALL_RELATION_KEYS = (*RELATION_KEYS, "transportation")
 
-# Staff-owned manual choices: existing adopted BeClass values plus nationwide
-# service areas and service ways named by the current matching contract.
+# Staff-owned manual choices. Regions are Hsinchu City's three districts and
+# Hsinchu County's thirteen townships/cities; unchanged imported facts stay valid.
 RELATION_OPTIONS: dict[RelationKey, tuple[str, ...]] = {
-    "service_regions": ("台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣", "澎湖縣", "金門縣", "連江縣", "北區", "東區", "香山區", "其他"),
+    "service_regions": ("東區", "北區", "香山區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮", "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉", "尖石鄉", "五峰鄉"),
     "service_periods": ("4小時", "8小時", "24小時"),
     "cooking_skills": ("葷食", "素食", "其他"),
     "holiday_availability": ("年節農曆過年初一", "年節農曆過年初二", "年節農曆過年初三", "端午節", "中秋節", "國定假日必休", "其他"),
-    "rest_schedule": ("連續服務", "週休1日", "週休2日", "週一至週五", "休周六", "休周日", "其他"),
+    "rest_schedule": ("週休一日", "週休二日", "連續服務"),
     "baby_types": ("單胞胎", "雙胞胎", "其他"),
 }
 RELATION_OPTIONS = {key: tuple(value for value in values if value != "其他") for key, values in RELATION_OPTIONS.items()}

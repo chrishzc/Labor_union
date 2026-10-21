@@ -32,7 +32,7 @@ Staff Matching Profile 是 Scheduling 內的 aggregate，不新增第十三個�
 1. `StaffPreferenceDefinitionWorkflow`：建立、停用與查詢偏好定義。
 2. `StaffPreferenceValueWorkflow`：設定月嫂偏好值。
 3. `StaffUnavailabilityWorkflow`：建立／取消長假或暫停接案期間。
-4. `MatchingRecommendationQuery`：組合五項內建條件與啟用中的自訂偏好條件。
+4. `MatchingRecommendationQuery`：以區域與週間服務提供符合狀態及月嫂原登錄值；偏好不排除候選（2026-10-21 裁決）。
 5. `StaffCalendarQuery`：顯示不可服務區間，但不把它誤標為 assignment、正式服務日或一般七日 buffer。
 
 ### Modules
@@ -48,7 +48,7 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ## 3. 自訂月嫂偏好
 
-以下數字偏好 definition／value API 保留其獨立數值語意與既有資料。2026-10-13 人工裁決的內建候選篩選改用 Staff canonical 服務能力；本節兩個 initial definitions 不再是候選查詢「服務方式／每日服務時數」的資料來源，也不得覆蓋名冊資料。
+以下數字偏好 definition／value API 保留其獨立數值語意與既有資料。依 2026-10-21 人工裁決，數字偏好不參與候選提示或排除，也不得覆蓋名冊 canonical 資料；目前兩項服務偏好依 PREF-21-01～05。
 
 ### 3.1 定義
 
@@ -77,9 +77,9 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ### 3.2 Matching 語意
 
-- 正式媒合中的偏好只影響排序與 explanation，不是接案資格或硬性排除條件；正式媒合 Query 的 checkbox 不得因此移除 selectable candidate。營運工作台「新增候選月嫂」的初步詢問 Query 例外：勾選「服務方式」或「每日服務時數」時，已填案件需求須與月嫂名冊已登錄的 canonical 服務能力相符才列入查詢結果；來源與比對依本文件末段 MATCH-CAP-01／02。未填案件需求不套用該項篩選。此篩選不改變加入／聯絡時的檔期 fresh-read 或正式媒合資格。
+- 2026-10-21 最新人工裁決：名冊與候選查詢的服務偏好只保留可承接區域、週間服務；初步詢問及正式分段查詢均僅提供符合提示，不因偏好排除或禁止加入候選池。姓名旁分項顯示月嫂原登錄值與符合／不符合／待確認；細則依末段 PREF-21-01～05。
 - integer target 落在月嫂 `[minimum, maximum]` 內，或存在於 integer set 內，為 `matched`；否則 `not_matched`。
-- 月嫂未設定啟用中的自訂偏好時為 `source_not_ready`；正式媒合仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。初步詢問的服務方式／每日時數依 canonical 服務能力判讀，不以數字偏好有無登錄決定結果；若啟用該項已填需求的篩選，但對應服務能力空白或無法明確比對，則不列入查詢結果。
+- 月嫂未設定啟用中的自訂偏好時為 `source_not_ready`；正式媒合仍可列為 selectable，但排序不得把未知值當成 matched，UI 必須明示尚未登錄。目前兩項偏好只讀 canonical Staff relations；數字偏好不參與候選提示或排除，資料不足顯示待確認。
 - Query 回傳 definition identity／version、顯示名稱、target、staff value、result 與 reason code；UI 不解析中文名稱決定規則。
 - Query 結果綁定 Staff preference、Orders 與 Scheduling source versions；選擇或 Apply 前必須 fresh recheck。
 - 單純 `not_matched` 或 `source_not_ready` 不得投影 `SCHEDULE-005` 或任何硬性異常；只有偏好 root 本身違反 schema/version invariant，或正式 assignment／不可服務期間等其他 owner root 衝突時，才由其對應 anomaly code 處理。
@@ -113,8 +113,7 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
   時仍可執行，不得順帶變更日期、時段、工時、費用或其他服務條款。服務資料鎖形成後固定拒絕。
 - 原始 `survey_details` 保留為來源 evidence；正規化後布林值進 reconciliation fingerprint、event與
   Orders root。不得在 Matching Query 每次重新解析自由文字。
-- 月嫂料理能力使用 `staff_cooking_skills`。案件不需要下廚時條件為 `not_applicable`；需要下廚時，
-  至少有一筆有效料理能力才為 `matched`。
+- 月嫂料理能力使用 `staff_cooking_skills`，保留為匯入服務資訊；依 2026-10-21 裁決退出候選偏好比對。Orders `requires_cooking` 及其 intake／reconciliation 契約維持，不因本次 UI 收斂刪除資料或改變訂單需求。
 
 ## 5. 長假／暫停接案
 
@@ -183,7 +182,7 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
 
 - Module：偏好 range、matching comparison、明確下廚 normalization、不可服務日期及 overlap。
 - Subsystem：Query 零寫入、Preview 零寫入、Apply replay／payload mismatch／stale／rollback。
-- Domain：五項預設 filter、自訂偏好加入／停用、長假與 Calendar／Matching 同源、buffer-only 仍顯示。
+- Domain：兩項 canonical 服務偏好提示、月嫂原值與待確認、匯入資料保留、長假與 Calendar／Matching 同源、buffer-only 仍顯示。
 - Browser：不可服務期間 mutation controls 只有在操作者展開可見面板後才可掛載；收合時不得留下可由
   螢幕閱讀器或自動化誤觸的隱藏控制。建立不可服務期間必須走 Preview → Apply，並顯示 typed receipt
   的 staff、action、block、aggregate version、idempotency facts 與 fresh readback；其後驗證配對結果刷新、
@@ -285,7 +284,7 @@ Case Import 的 Staff Historical BeClass adoption 只負責把已知 workbook so
 
 既有 numeric Staff Matching Profile QPA、各 relation 的 canonical adoption 與 transportation 的 `source_not_ready` 唯讀語意均保留；本邊界不新增 version table、schema、migration，也不把 raw workbook 或其他能力欄位升格為可寫偏好。
 
-## 2026-10-13 內建媒合條件共用名冊 canonical 來源（SPEC_READY）
+## 2026-10-13 內建媒合條件共用名冊 canonical 來源（歷次裁決；偏好項目及排除語意由 2026-10-21 取代）
 
 ### 六項接案條件與自訂服務起迄（2026-10-13 最新人工裁決）
 
@@ -329,3 +328,19 @@ Authority：使用者明確不接受名冊與媒合不同步，並指定「偏�
 驗收：① 只登錄名冊的週休二日與 8 小時，即可通過相同需求，數字偏好無資料亦可；② 週休二日不可當成休周日，8 小時不可匹配 12 小時，單獨勾選／合併勾選結果皆正確；③ 名冊修改服務方式／時數後下一次查詢反映新值，即使數字偏好殘留舊值也不影響；④ 空白案件需求、其他明確值、未知／含糊值與正式分段行為符合 MATCH-CAP-03；⑤ HTTP key 與候選 schema 相容，UI 顯示「服務方式」。
 
 convergence: READY；blocking gaps: none。已辨識的非阻擋事實：目前本機月嫂保存「週一至週五」、畫面期間的案件保存「休周日」，本裁決下為不相符；不得為產生候選而改寫它們。
+
+
+## 2026-10-21 服務偏好收斂與姓名旁提示（最新人工裁決）
+
+Authority：使用者確認兩頁預覽，要求名冊「服務偏好」與配對池只保留可承接區域、週間服務；原匯入資訊移到「專業資格與服務資料」保留顯示。不符合仍可顯示、選取、加入候選池；姓名旁必須直接顯示月嫂原登錄值，例如案件週休一日、月嫂週休二日時顯示「週間服務：週休二日 · 不符合」。本節取代較早的初步詢問硬性偏好篩選、每日時數／料理及自訂數字偏好參與候選篩選之敘述；不改變任職、檔期、正式服務日及正式排班資格。
+
+- **PREF-21-01：名冊與保留資料。** 服務偏好僅顯示及維護 `staff_regions`、`staff_weekly_rest`。`staff_time_slots`、`staff_cooking_skills`、`staff_holiday_availability`、`staff_baby_types` 原登錄值與各自 detail 在「專業資格與服務資料／匯入服務資訊」唯讀顯示；不刪除、清空、重匯或改寫。沿既有六 relation QPA writer，前端每次提交均完整保留其餘四項快照，stale 與原交易邊界維持。既有數字偏好 API／資料保留其獨立契約，不增加第二份偏好副本。
+- **PREF-21-02：候選與選用。** 取消四項偏好 checkbox；改為「查詢可詢問月嫂」。區域、週間服務均不排除候選，也不因不符合或待確認禁止加入候選池；料理、每日時數、節日、胎數及數字偏好均不參與此查詢的偏好提示或排除。初步詢問仍提示檔期衝突，正式分段／建立方案／正式排班沿原 fresh-read、日期與占用資格。舊 request `filters` 結構保留相容，但偏好 flags 不恢復硬性篩選。
+- **PREF-21-03：來源與原值。** 區域需求讀 `clients.city`／`address`，月嫂讀 `staff_regions`（其他沿本母題 detail）；週間需求讀 `clients.service_type`，月嫂讀 `staff_weekly_rest.rest_type`／`custom_rest_detail`。週間比對沿 MATCH-CAP-01 的同義方式；顯示值保留原文，不把週休二日改寫為案件的週休一日。每列回傳 typed `matching_conditions.region` 與 `matching_conditions.preferred_service_days`，各包含 `status`（`matched`／`not_matched`／`pending`）、`required_value`、`staff_values`；區域需求顯示縣市，只有地址時顯示「依案件服務地址」，不把完整住宅地址複製到每位候選的提示；既有 `filter_results` 只保留這兩項 bool 相容投影，UI 不以 bool 推測未知狀態。
+- **PREF-21-04：畫面與未知。** 兩項提示都緊鄰姓名，分別顯示「區域：月嫂原值 · 符合狀態」、「週間服務：月嫂原值 · 符合狀態」；所有已登錄值均保留可讀，不能僅寫「不符合」。案件需求缺漏、月嫂尚未登錄或週間資料無法明確辨識時標示「待確認」，不得當成符合或不符合；無登錄值顯示「尚未登錄」。狀態有文字，不僅依賴顏色；檔期提醒另列。已登錄但需求缺漏時仍顯示月嫂原值。
+- **PREF-21-05：範圍。** 本機正式規格、兩頁 UI、必要 typed 查詢投影及 focused tests／畫面驗證；不新增 schema、migration、writer、交易或 provider 邊界，不修改 DB、commit、push 或部署。地區同義字及同名行政區的完整辨識策略不在本次變更範圍；不自行引入行政區碼或改寫原值。
+- **PREF-21-06：可承接區域選項（後續人工裁決）。** 新增／變更區域只可選新竹市的東區、北區、香山區，以及新竹縣的竹北市、竹東鎮、新埔鎮、關西鎮、湖口鄉、新豐鄉、芎林鄉、橫山鄉、北埔鄉、寶山鄉、峨眉鄉、尖石鄉、五峰鄉，共 16 項。新竹市、新竹縣及其他縣市名稱不列為新選項。沿 Staff owner `RELATION_OPTIONS` 與既有 `/options`、Preview／Apply 驗證，不新增 UI 私有清單。既有區域原值及 detail 仍可查閱並原樣保存；非現行選項在原資料列標為「既有值」，不提供給新增列，不自動轉換、清空或遷移。配對提示的既有文字比對及不排除候選語意維持。行政區名稱核對：[新竹市行政區域](https://dep-n-district.hccg.gov.tw/ch/home.jsp?id=10&parentpath=0)、[新竹縣十三鄉鎮市](https://www.hsinchu.gov.tw/cp.aspx?n=101)。
+- **PREF-21-07：週間服務選項與人工判讀（後續人工裁決）。** 以客戶主要三種服務方式為準，名冊新增選項僅「週休一日、週休二日、連續服務」；週一至週五、休周六、休周日等不再提供新增。既有原值、數字寫法及 detail 不改寫或清空，原資料列可顯示「既有值」並原樣保存。沿既有周／週與一／1、二／2同義比對；新選項收斂不另行推測或改變既有特殊值的語意。配對畫面同時保留上方客戶週間需求原文及每位姓名旁月嫂原文；無法明確判讀標為「待確認」，明確不符仍顯示「不符合」。即使所有月嫂皆不符合或待確認，也照常列出及允許加入候選池，供人員直接語意比對並協調，不為取得符合者改寫任何一方資料。
+- **PREF-21-08：候選清單自動載入（後續人工裁決）。** 開啟「新增候選月嫂」即自動查詢可詢問人選並讀取已加入狀態，不要求先按查詢；共用候選查詢介面採相同行為。初始即顯示載入中，成功顯示人選或明確空結果，失敗顯示原因與「重新查詢」入口；成功後也可手動重新查詢 current facts。抽屜重開、切換案件均重新讀取；關閉／卸載取消未完成查詢，舊案件或舊請求結果不得覆蓋目前畫面。自動行為只有 Query，不自動新增候選、寄送或建立方案。候選池狀態與多月嫂分段選單沿既有自動讀取，不把需人工填寫並確認的操作改為自動寫入。
+
+驗收：① 名冊偏好僅兩項可編輯，四項匯入資訊在資格區可讀；保存區域／週間後其他四 relation 與 detail 完全保留。② 案件週休一日、月嫂週休二日，姓名旁顯示月嫂「週休二日 · 不符合」且可加入。③ 區域不符同樣保留原登錄區域、可加入；兩項相符／不符／缺資料／無法辨識均有正確提示。④ 料理、時數及舊數字偏好差異不影響候選集合；舊 flags 不能重啟排除。⑤ 查詢零寫入、下一次查詢反映 current relations；正式排班及占用資格維持。⑥ focused Python／React 驗證與實際元件瀏覽器畫面檢查，清楚區分 mock API 驗證與真 DB 驗證。

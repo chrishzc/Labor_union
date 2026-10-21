@@ -1062,3 +1062,15 @@ p.staff-service-time-rule,
 .staff-drawer-section [role="alert"] {
   color: var(--md-sys-color-error);
 }
+
+.staff-preference-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.staff-imported-service-information { margin: 18px 0; padding-top: 16px; border-top: 1px solid #dec0b6; }
+.staff-imported-service-information h4 { margin: 0 0 6px; color: #4a2818; }
+.staff-imported-service-information > p { color: #74593f; font-size: .9rem; }
+.staff-imported-service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.staff-imported-service-grid > div { min-width: 0; }
+.staff-imported-service-grid dt { color: #74593f; font-size: .85rem; margin-bottom: 4px; }
+.staff-imported-service-grid dd { margin: 0; overflow-wrap: anywhere; color: #4a2818; }
+@media (max-width: 640px) {
+  .staff-preference-grid, .staff-imported-service-grid { grid-template-columns: minmax(0, 1fr); }
+}

@@ -13,6 +13,7 @@ vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () 
 }));
 
 const option = (staffId: number, name: string) => ({
+  matching_conditions: { region: { status: 'not_matched', required_value: '新竹市', staff_values: ['桃園市'] }, preferred_service_days: { status: 'not_matched', required_value: '週休一日', staff_values: ['週休二日'] } },
   segment_index: 0, staff_id: staffId, staff_name: name, supported_day_count: 5, required_day_count: 5,
   full_case_coverage: true, selected_segment_start: '2026-09-01', selected_segment_end: '2026-09-05',
 });
@@ -30,7 +31,6 @@ beforeEach(() => {
 
 async function search(onPoolReadback = vi.fn()) {
   render(<OrderCandidateQueryPanel caseNo="CASE-ADD" presentation="workbench" includeMultiCaregiver={false} onPoolReadback={onPoolReadback} />);
-  fireEvent.click(screen.getByRole('button', { name: '查詢合適人選' }));
   await screen.findByText('未設定 月嫂甲');
   return onPoolReadback;
 }
@@ -40,7 +40,7 @@ it('reads existing membership, allows withdrawn candidates and replaces selectio
   await search();
   expect(screen.getByRole('button', { name: '已加入候選池（月嫂甲）' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '加入候選池（月嫂乙）' })).toBeEnabled();
-  expect(screen.getAllByRole('checkbox')).toHaveLength(4); // only matching filters
+  expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   expect(screen.queryByRole('button', { name: /加入候選清單/ })).not.toBeInTheDocument();
   expect(mocks.add).not.toHaveBeenCalled();
 });
