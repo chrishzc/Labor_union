@@ -101,7 +101,9 @@
 .order-multi-selectors { display: grid; grid-template-columns: 150px repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; padding-top: 18px; border-top: 1px solid #eee2d9; }
 .order-multi-selectors.many { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .order-multi-selectors label, .order-case-page .order-multi-selectors label { display: flex; flex-direction: column; align-items: stretch; gap: 7px; min-width: 0; color: #493526; font-weight: 650; }
-.order-multi-selectors select { width: 100%; }
+.order-multi-selectors select, .order-multi-selectors input { width: 100%; min-width: 0; box-sizing: border-box; }
+.order-multi-selectors fieldset { display: grid; gap: 12px; margin: 0; }
+.order-multi-selectors legend { padding: 0 5px; color: #493526; font-weight: 700; }
 .order-multi-hint { margin: 12px 0 16px; color: #756358; font-size: .77rem; }
 .order-multi-setup > .order-v2-open-drawer { width: 100%; background: #b95125; border-color: #b95125; color: #fff; font-weight: 700; }
 .order-case-page .order-multi-setup > .order-v2-open-drawer { background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); }

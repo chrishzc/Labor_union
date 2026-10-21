@@ -36,6 +36,7 @@ import { OrderAutomaticCompletionStatus } from './OrderAutomaticCompletionStatus
 import { ServiceArrangementDepositGate } from './ServiceArrangementDepositGate';
 import { OrderServiceDatesPanel } from './OrderServiceDatesPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
+import { serviceHandoverHref } from '../adapters/scheduling/service_handover_navigation';
 import { OrderCancellationPanel } from './OrderCancellationPanel';
 import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
@@ -626,7 +627,17 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 refreshFacts();
               }} onBusyChange={onOperationBusyChange} onOpenServiceDates={() => { setServiceView('dates'); openGroup('service'); }} />}
               {!showCompletion && <OrderAutomaticCompletionStatus caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}
-              {currentBranch === 'normal' && !terminalStatus && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => { setReplacementRequest(value => value + 1); openGroup('recommendation'); }}>服務前更換月嫂 →</button>}
+              {currentBranch === 'normal' && !terminalStatus && assignmentPlan.status === 'ready' && assignmentPlan.data.service_started
+                ? <div className="order-case-action-row">
+                    {assignmentPlan.data.assignments.map(segment => <a key={segment.assignment_id ?? segment.staff_id}
+                      aria-disabled={navigationLocked || factsRefreshing || undefined}
+                      onClick={event => { if (navigationLocked || factsRefreshing) event.preventDefault(); }}
+                      href={serviceHandoverHref(caseNo, segment.assignment_id ?? undefined)}>服務中換人{assignmentPlan.data.assignments.length > 1 ? ` · ${staffIdentity.label(segment.staff_id)}` : ''} →</a>)}
+                    <a aria-disabled={navigationLocked || factsRefreshing || undefined}
+                      onClick={event => { if (navigationLocked || factsRefreshing) event.preventDefault(); }}
+                      href={`#scheduling?tab=leave_sub&case_no=${encodeURIComponent(caseNo)}`}>臨時代班 →</a>
+                  </div>
+                : currentBranch === 'normal' && !terminalStatus && assignmentPlan.status === 'ready' && !assignmentPlan.data.service_started && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => { setReplacementRequest(value => value + 1); openGroup('recommendation'); }}>服務前更換月嫂 →</button>}
 
             </section>}
           </div>}
