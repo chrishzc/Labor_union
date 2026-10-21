@@ -163,7 +163,7 @@ describe('Staff roster profile flow', () => {
       .toEqual(['16', '15', '13', '14', '17', '11', '12', '18']);
     expect(screen.queryByRole('button', { name: '載入下一頁' })).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
-      { pageSize: 200, afterId: 15, includeProfile: true }, expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      { pageSize: 200, afterId: 15, includeProfile: true, lifecycleState: 'active' }, expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     fireEvent.change(screen.getByLabelText('即時搜尋月嫂'), { target: { value: '排序測試' } });
     await screen.findByText('搜尋結果 8 位服務人員');
