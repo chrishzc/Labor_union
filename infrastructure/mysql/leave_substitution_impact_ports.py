@@ -59,6 +59,10 @@ class MySqlPayrollLeaveImpactPort:
         client_finance = build_client_finance_assignment_impact(facts, scheduling)
         return build_payroll_assignment_impact(facts, scheduling, client_finance)
 
+    def preview_handover(self, facts, scheduling):
+        client_finance = build_client_finance_assignment_impact(facts, scheduling)
+        return build_payroll_assignment_impact(facts, scheduling, client_finance, handover=True)
+
     def persist_leave_substitution(self, candidate, context, scheduling_result):
         impact = _domain_impact(candidate)
         command = PayrollImpactPersistenceCommand(
@@ -102,6 +106,7 @@ class MySqlOrdersLeaveImpactPort:
             reason=context.reason,
             correlation_id=context.correlation_id,
             trigger_event="leave_substitution_applied",
+            staff_payment_due_date=payload.staff_payment_due_date,
         )
         with self._connection.cursor() as cursor:
             persist_order_lifecycle_impact(cursor, command)

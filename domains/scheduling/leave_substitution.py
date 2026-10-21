@@ -82,6 +82,7 @@ class LeaveSubstitutionItem:
 class LeaveSubstitutionBatchIntent:
     original_assignment_id: int
     items: tuple[LeaveSubstitutionItem, ...]
+    handover_date: date | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(
@@ -89,6 +90,8 @@ class LeaveSubstitutionBatchIntent:
             "original assignment id",
         )
         _validate_batch_items(self.items)
+        if self.handover_date is not None:
+            _require_date(self.handover_date, "handover date")
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,7 @@ class LeaveSubstitutionFacts:
     service_data_locked: bool
     fixed_rest_weekdays: tuple[int, ...] = ()
     approved_holiday_work_dates: tuple[date, ...] = ()
+    business_date: date | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.official_schedules, tuple):
@@ -159,11 +163,12 @@ def build_leave_substitution_candidate(
             "service data is permanently locked",
         )
     selected = _selected_schedule_facts(facts, intent)
+    _validate_handover(facts, intent)
     transformed = _transform_service_ownership(
         facts,
         intent,
         selected,
-        _canonical_holiday_rest_dates(holiday_rest_dates),
+        () if intent.handover_date is not None else _canonical_holiday_rest_dates(holiday_rest_dates),
     )
     assignments = _build_assignments(facts, intent, transformed)
     buffers = _build_buffers(assignments, facts.assignment_plan.service_started)
@@ -185,6 +190,28 @@ def build_leave_substitution_candidate(
         impacted_staff_ids=_impacted_staff_ids(facts, intent),
         fingerprint=fingerprint,
     )
+
+
+def _validate_handover(facts, intent):
+    if intent.handover_date is None:
+        return
+    if not facts.assignment_plan.service_started:
+        _raise_invalid("handover_service_not_started")
+    if facts.business_date is None or intent.handover_date < facts.business_date:
+        _raise_invalid("handover_date_in_past")
+    remaining = tuple(row for row in facts.official_schedules
+                      if row.assignment_id == intent.original_assignment_id
+                      and row.work_date >= intent.handover_date)
+    if not remaining:
+        _raise_invalid("handover_remaining_service_missing")
+    if tuple(item.original_schedule_id for item in intent.items) != tuple(row.schedule_id for row in remaining):
+        _raise_invalid("handover_remaining_service_changed")
+    if len({item.substitute_staff_id for item in intent.items}) != 1:
+        _raise_invalid("handover_requires_one_successor")
+    if any(item.resolution_type is not LeaveResolutionType.SUBSTITUTE
+           or item.is_double_pay != row.is_double_pay
+           for item, row in zip(intent.items, remaining)):
+        _raise_invalid("handover_must_preserve_service_terms")
 
 
 def _validate_resolution(item: LeaveSubstitutionItem) -> None:
@@ -472,6 +499,21 @@ def _substitute_assignment_candidates(
     intent: LeaveSubstitutionBatchIntent,
     rows: tuple[_ServiceOwner, ...],
 ) -> tuple[AssignmentCandidate, ...]:
+    if intent.handover_date is not None:
+        selected_ids = {item.original_schedule_id for item in intent.items}
+        selected = tuple(row for row in rows if row.source_schedule_id in selected_ids)
+        return (AssignmentCandidate(
+            candidate_key="pending-sequence",
+            source_assignment_id=intent.original_assignment_id,
+            staff_id=intent.items[0].substitute_staff_id,
+            sequence=1,
+            assigned_start_date=selected[0].service_date,
+            assigned_end_date=selected[-1].service_date,
+            service_dates=tuple(row.service_date for row in selected),
+            actual_hours=len(selected) * facts.assignment_plan.service_hours_per_day,
+            lineage_source_assignment_ids=(intent.original_assignment_id,),
+            double_pay_dates=tuple(row.service_date for row in selected if row.is_double_pay),
+        ),)
     schedule_by_id = {
         item.schedule_id: item for item in facts.official_schedules
     }
@@ -598,6 +640,8 @@ def _leave_occupancy_keys(
     intent: LeaveSubstitutionBatchIntent,
     selected: dict[date, OfficialScheduleFact],
 ) -> set[tuple[int, date]]:
+    if intent.handover_date is not None:
+        return set()
     deferred_dates = _deferred_dates(intent)
     return {
         (
@@ -714,6 +758,7 @@ def _impacted_staff_ids(
 
 def _candidate_payload(facts, intent, scheduling, outcomes):
     return {
+        **({"handover_date": intent.handover_date.isoformat()} if intent.handover_date else {}),
         "case_no": facts.assignment_plan.case_no,
         "versions": {
             "order": facts.assignment_plan.order_version,

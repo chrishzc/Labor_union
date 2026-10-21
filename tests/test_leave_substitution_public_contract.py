@@ -23,6 +23,27 @@ from api.schemas.leave_substitution import (
 _FINGERPRINT = "b" * 64
 
 
+def test_database_error_records_mysql_code_and_correlation_without_raw_sql(caplog):
+    import logging
+    from fastapi import HTTPException
+    from pymysql.err import OperationalError
+    from api.routes.leave_substitution import _call_endpoint
+    from shared_kernel.identities import CorrelationId
+
+    def failing_preview():
+        raise OperationalError(1054, "raw-sql-and-row-values-must-not-be-logged")
+
+    with caplog.at_level(logging.ERROR, logger="api.routes.leave_substitution"):
+        with pytest.raises(HTTPException) as caught:
+            _call_endpoint(failing_preview, "preview", CorrelationId("leave-database-diagnostic"))
+
+    assert caught.value.status_code == 500
+    assert caught.value.detail["error"]["code"] == "leave_substitution_database_error"
+    assert "mysql_code=1054" in caplog.text
+    assert "correlation_id=leave-database-diagnostic" in caplog.text
+    assert "raw-sql-and-row-values" not in caplog.text
+
+
 def _impact() -> dict[str, object]:
     return {
         "expected_version": 1,

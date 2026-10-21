@@ -199,3 +199,15 @@ Stable errors：
 - final writer scan 必須證明 `staff_obligations`／`staff_obligation_events`、rate snapshot、
   floor-fee allocation 與 payroll adjustment 只有 Payroll persistence adapter 可寫；
   `staff_payments` 只允許 compatibility read projection，不得成為新 obligation writer。
+
+## 9. 服務中換人的付款承接（2026-10-21）
+
+使用者核可服務中換人及帳務銜接的實作。沿用既有 Payroll owner 與 Scheduling outer UoW，不新增付款或月結 lifecycle。
+
+- 原 rate snapshot 逐值承接；原 adjustment allocation 只承接給同一來源家族的原受款月嫂一次，不複製至接任人。透過 assignment lineage 追溯原 allocation，不搬動 immutable allocation。
+- 未付款 projection 可關閉後依新服務事實建立。已有付款歷史的原 obligation／event／付款 links 不覆寫；以原 obligation identity 為根，追加 `staff-handover:` immutable 差額，等於新合法 entitlement 減去該根加既有換人差額的 entitlement，並非減去已付額。
+- Staff Payables 以原 obligation 加其來源相同的換人差額推導有效應付額；差額列不形成第二張可獨立付款的帳單。剩餘應付為有效應付減實付淨額的正值。已付超過新合法 entitlement 的新增差額，經 Staff Payables typed port 依唯一 correction identity 建立追償。
+- 重複交接須沿 Scheduling ancestry 找回原 obligation；既有差額只計一次。已存在不同來源的已付 adjustment、義務來源不唯一、或需沖減既有追償時，回明確 blocker，交由原帳務處理流程核對，不自動抵銷。
+- 付款家族的 ancestry 只延續同一月嫂；經過其他月嫂後再接任屬新付款家族，不承接該月嫂早期其他家族的 adjustment／付款／追償。薪資雙薪根事實與正式服務日標記不一致時阻擋，不猜算。
+- 已含換人差額的後續代班／條款影響使用相同來源承接與 Staff Payables typed coordination。尚未支援此來源的通用薪資重建入口須回 `payroll_handover_settlement_required`，不得另建原全額義務。歷史付款／結清 overlay 不得當成未付款重開。
+- 已形成的付款日保留。Preview 零寫入；Apply 在 sorted staff-account locks 下重新讀實付與版本，Payroll 差額、Staff Payables projection／追償、排班與 receipt 同一交易提交；不執行銀行付款或對外通知。

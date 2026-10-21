@@ -22,6 +22,8 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/assignment-terms-impact/`
+- test_root: `tests/domains/payroll/subsystems/payroll/integration/test_service_handover_accounting.py`
+- handover contract: `document/架構重整/01_規格基線/03_Payroll_Domain.md` §9；沿同月嫂家族追溯 obligation／adjustment，append entitlement delta，Staff Payables 獨立處理超付，不以原全額重建。
 
 ## Provenance
 - Assignment-owned rate snapshots 由 Payroll writer 保存 — `source_observed` — `infrastructure/mysql/payroll_terms_writer.py`。

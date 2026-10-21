@@ -60,6 +60,27 @@ describe('leave substitution flow adapter', () => {
     leaveSubstitutionFlowStore.clearAll();
   });
 
+  it('keeps the newer automatic handover preview when an older response arrives late', async () => {
+    let resolveOlder!: (value: typeof LEAVE_PREVIEW) => void;
+    const olderResponse = new Promise<typeof LEAVE_PREVIEW>(resolve => { resolveOlder = resolve; });
+    const client = fakeClient();
+    const firstRequest = { ...LEAVE_PREVIEW_REQUEST, handover_date: '2026-08-03',
+      leave_request_id: null, expected_leave_request_version: null };
+    const nextRequest = { ...firstRequest, items: firstRequest.items.map(item => ({ ...item, substitute_staff_id: 13 })) };
+    const nextPreview = { ...LEAVE_PREVIEW, preview_fingerprint: 'b'.repeat(64),
+      outcomes: LEAVE_PREVIEW.outcomes.map(item => ({ ...item, resulting_staff_id: 13 })) };
+    vi.mocked(client.preview).mockReturnValueOnce(olderResponse).mockResolvedValueOnce(nextPreview);
+    await queryLeaveSubstitutionFlow(LEAVE_CASE_NO, { client });
+    setLeaveSubstitutionDraft(LEAVE_CASE_NO, firstRequest);
+    const older = previewLeaveSubstitutionFlow(LEAVE_CASE_NO, { client });
+    setLeaveSubstitutionDraft(LEAVE_CASE_NO, nextRequest);
+    await previewLeaveSubstitutionFlow(LEAVE_CASE_NO, { client });
+    resolveOlder(LEAVE_PREVIEW);
+    await older;
+    expect(leaveSubstitutionFlowStore.get(LEAVE_CASE_NO)?.preview).toEqual(nextPreview);
+    expect(leaveSubstitutionFlowStore.get(LEAVE_CASE_NO)?.previewRequest).toEqual(nextRequest);
+  });
+
   it('runs Query -> Preview -> Apply -> receipt -> re-query without leaking the test client into transport options', async () => {
     const client = fakeClient();
 

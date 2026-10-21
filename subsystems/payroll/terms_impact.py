@@ -59,6 +59,8 @@ class SourceAssignmentPayrollTerms:
     policy_kind: PayrollPolicyKind
     double_pay_dates: tuple[date, ...] = ()
     adjustment_total: MoneyNTD = MoneyNTD(0)
+    ancestor_assignment_ids: tuple[int, ...] = ()
+    hourly_rate: MoneyNTD | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.source_assignment_id, "source assignment id")
@@ -73,6 +75,7 @@ class SourceAssignmentPayrollTerms:
 class CasePayrollPolicyTerms:
     policy_version: str
     policy_kind: PayrollPolicyKind
+    hourly_rate: MoneyNTD | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.policy_version, "payroll policy version", _IDENTITY_MAXIMUM_LENGTH)
@@ -90,6 +93,8 @@ class ExistingStaffObligationTermsFact:
     paid_net_amount: MoneyNTD
     payout_history_exists: bool
     due_date: date | None
+    source_obligation_identity: str | None = None
+    historically_settled: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(self.obligation_identity, "staff obligation identity", _IDENTITY_MAXIMUM_LENGTH)
@@ -109,12 +114,19 @@ class PayrollTermsSourceFacts:
     existing_obligations: tuple[ExistingStaffObligationTermsFact, ...]
     staff_payment_due_date: date | None
     case_policy: CasePayrollPolicyTerms | None = None
+    recovery_balances: tuple["PayrollRecoveryBalance", ...] = ()
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _IDENTITY_MAXIMUM_LENGTH)
         require_nonnegative_integer(self.payroll_version, "payroll version")
         if self.case_policy is not None and not isinstance(self.case_policy, CasePayrollPolicyTerms):
             raise TypeError("case payroll policy is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PayrollRecoveryBalance:
+    staff_id: int
+    remaining_amount: MoneyNTD
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +180,17 @@ class PayrollSpecialPayEventCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class PayrollFrozenSettlement:
+    obligation_identity: str
+    correction_identity: str | None
+    staff_id: int
+    previous_entitlement: MoneyNTD
+    revised_entitlement: MoneyNTD
+    paid_net_amount: MoneyNTD
+    recovery_increase: MoneyNTD
+
+
+@dataclass(frozen=True, slots=True)
 class PayrollTermsImpactCandidate:
     case_no: str
     expected_payroll_version: int
@@ -178,11 +201,15 @@ class PayrollTermsImpactCandidate:
     blockers: tuple[str, ...]
     fingerprint: PreviewFingerprint
     special_pay_events: tuple[PayrollSpecialPayEventCandidate, ...] = ()
+    frozen_settlements: tuple[PayrollFrozenSettlement, ...] = ()
+    rate_source_assignments: tuple[tuple[str, int | None], ...] = ()
 
 
 def build_payroll_terms_impact_candidate(facts: PayrollTermsImpactFacts, change_identity: str) -> PayrollTermsImpactCandidate:
     require_canonical_text(change_identity, "change identity", _IDENTITY_MAXIMUM_LENGTH)
     payroll, rates = _calculate_payroll(facts)
+    if _has_handover_corrections(facts):
+        return _handover_candidate(facts, payroll, rates, change_identity)
     return _candidate(facts, payroll, rates, _build_actions(facts, payroll, change_identity))
 
 
@@ -244,9 +271,128 @@ def build_preassignment_payroll_noop(
 
 
 def build_payroll_cancellation_impact(source_facts: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms, change_identity: str) -> PayrollTermsImpactCandidate:
+    if _has_handover_corrections(source_facts):
+        return build_payroll_handover_impact(source_facts, scheduling, order_terms, change_identity)
     facts = _impact_facts(source_facts, scheduling, order_terms)
     payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy)
     return _candidate(facts, payroll, rates, _build_cancellation_actions(facts, payroll, change_identity))
+
+
+def calculate_assignment_payroll(source_facts, scheduling, order_terms):
+    """Read-only owner calculation for a before/after service arrangement."""
+    facts = _impact_facts(source_facts, scheduling, order_terms)
+    payroll, _ = _calculate_cancellation_payroll(facts, source_facts.case_policy)
+    return payroll
+
+
+def build_payroll_handover_impact(source_facts, scheduling, order_terms, change_identity):
+    """Preserve paid roots and append only the change in legal entitlement.
+
+    Corrections belong to the original obligation, across Scheduling generations.
+    Staff Payables projects that root with these corrections; they are never a
+    second independently payable bill.
+    """
+    facts = _impact_facts(source_facts, scheduling, order_terms)
+    payroll, rates = _calculate_cancellation_payroll(facts, source_facts.case_policy, candidate_special_pay=True)
+    return _handover_candidate(facts, payroll, rates, change_identity)
+
+
+def _has_handover_corrections(facts):
+    return any(item.obligation_identity.startswith("staff-handover:") for item in facts.existing_obligations)
+
+
+def _handover_candidate(facts, payroll, rates, change_identity):
+    if any(item.paid_net_amount.amount > 0 and not item.payout_history_exists for item in facts.existing_obligations):
+        raise ValueError("handover_paid_history_review_required")
+    if any(item.total_payable.amount < 0 for item in payroll.assignments):
+        raise ValueError("handover_adjustment_review_required")
+    if any(item.historically_settled for item in facts.existing_obligations):
+        raise ValueError("handover_historical_payment_review_required")
+    roots = _service_obligations_by_source(facts)
+    by_source = {item.source_assignment_id: item for item in facts.source_terms}
+    children = {}
+    for obligation in facts.existing_obligations:
+        if obligation.obligation_kind is not StaffObligationKind.SERVICE_PAY:
+            children.setdefault(obligation.source_obligation_identity, []).append(obligation)
+    if children.get(None):
+        raise ValueError("handover_obligation_lineage_ambiguous")
+    actions, settlements, retained = [], [], set()
+    for assignment in payroll.assignments:
+        segment = _scheduling_assignment(facts, assignment)
+        source = by_source.get(segment.source_assignment_id)
+        ancestry = (segment.source_assignment_id,) + (source.ancestor_assignment_ids if source else ())
+        matches = [root for root in roots.values()
+                   if source is not None and source.staff_id == assignment.staff_id
+                   and root.source_assignment_id in ancestry and root.staff_id == assignment.staff_id]
+        if len(matches) > 1:
+            raise ValueError("handover_obligation_lineage_ambiguous")
+        if not matches:
+            actions.append(_establish_action(facts, assignment, segment.source_assignment_id))
+            continue
+        root = matches[0]
+        if root.obligation_identity in retained:
+            raise ValueError("handover_obligation_lineage_ambiguous")
+        retained.add(root.obligation_identity)
+        _handover_root_actions(facts, root, assignment.total_payable, assignment.assignment_identity,
+                               children.get(root.obligation_identity, ()), change_identity, actions, settlements)
+    for root in roots.values():
+        if root.obligation_identity not in retained:
+            _handover_root_actions(facts, root, MoneyNTD(0), None,
+                                   children.get(root.obligation_identity, ()), change_identity, actions, settlements)
+    candidate = _candidate(facts, payroll, rates, tuple(actions))
+    return replace(candidate, frozen_settlements=tuple(settlements), fingerprint=fingerprint_payload({
+        "payroll": candidate.fingerprint.value,
+        "settlements": tuple((item.obligation_identity, item.previous_entitlement.amount,
+                              item.revised_entitlement.amount, item.paid_net_amount.amount,
+                              item.recovery_increase.amount) for item in settlements),
+    }))
+
+
+def _handover_root_actions(facts, root, total, key, children, change_identity, actions, settlements):
+    # Unpaid adjustment projections can be rebuilt; immutable allocations stay
+    # with their original caregiver. A paid independent correction needs review.
+    corrections = [item for item in children if item.obligation_identity.startswith("staff-handover:")]
+    independent = [item for item in children if item not in corrections]
+    if any(not item.obligation_identity.startswith("staff-obligation:adjustment:") for item in independent):
+        raise ValueError("handover_obligation_lineage_ambiguous")
+    if any(item.payout_history_exists for item in independent):
+        raise ValueError("handover_paid_adjustment_review_required")
+    actions.extend(_close_unpaid_action(item) for item in independent)
+    if not root.payout_history_exists:
+        if corrections:
+            raise ValueError("handover_obligation_lineage_ambiguous")
+        actions.append(_close_unpaid_action(root))
+        if key is not None:
+            actions.append(PayrollTermsAction(
+                PayrollTermsActionKind.ESTABLISH, _obligation_identity("service", facts.case_no, key),
+                None, root.source_assignment_id, key, root.staff_id, StaffObligationKind.SERVICE_PAY,
+                StaffObligationDirection.PAYABLE_TO_STAFF, total, root.due_date,
+            ))
+        return
+    previous = root.contractual_amount.amount + sum(
+        item.contractual_amount.amount * (1 if item.direction is StaffObligationDirection.PAYABLE_TO_STAFF else -1)
+        for item in corrections
+    )
+    if previous < 0 or any(item.payout_history_exists for item in corrections):
+        raise ValueError("handover_obligation_lineage_ambiguous")
+    recovery_delta = max(0, root.paid_net_amount.amount - total.amount) - max(0, root.paid_net_amount.amount - previous)
+    if recovery_delta < 0:
+        raise ValueError("handover_recovery_adjustment_required")
+    delta = total.amount - previous
+    identity = None
+    if delta:
+        identity = "staff-handover:" + fingerprint_payload({
+            "case": facts.case_no, "change": change_identity, "root": root.obligation_identity,
+        }).value
+        actions.append(PayrollTermsAction(
+            PayrollTermsActionKind.APPEND_FROZEN_DIFFERENCE, identity, root.obligation_identity,
+            root.source_assignment_id, key, root.staff_id,
+            StaffObligationKind.ADJUSTMENT if delta > 0 else StaffObligationKind.REVERSAL,
+            StaffObligationDirection.PAYABLE_TO_STAFF if delta > 0 else StaffObligationDirection.RECEIVABLE_FROM_STAFF,
+            MoneyNTD(abs(delta)), root.due_date,
+        ))
+    settlements.append(PayrollFrozenSettlement(root.obligation_identity, identity, root.staff_id,
+        MoneyNTD(previous), total, root.paid_net_amount, MoneyNTD(recovery_delta)))
 
 
 def _impact_facts(source, scheduling, order_terms):
@@ -271,9 +417,9 @@ def _calculate_payroll(facts):
     return build_case_payroll_candidate(service_facts, rates, facts.payroll_terms, _carried_adjustments(facts, terms)), rates
 
 
-def _calculate_cancellation_payroll(facts, case_policy):
+def _calculate_cancellation_payroll(facts, case_policy, *, candidate_special_pay=False):
     policies = _cancellation_policies(facts, case_policy)
-    service_facts = _cancellation_service_facts(facts, policies)
+    service_facts = _cancellation_service_facts(facts, policies, candidate_special_pay=candidate_special_pay)
     rates = _cancellation_rate_snapshots(facts, policies)
     return build_case_payroll_candidate(service_facts, rates, facts.payroll_terms, _cancellation_adjustments(facts, policies)), rates
 
@@ -297,7 +443,12 @@ def _candidate_double_pay_dates(assignment, source_terms):
 
 
 def _carried_rate_snapshots(facts, source_terms):
-    return tuple(rate_snapshot(item.candidate_key, source_terms[item.source_assignment_id].policy_version, source_terms[item.source_assignment_id].policy_kind) for item in facts.scheduling.assignments)
+    return tuple(_exact_rate(item.candidate_key, source_terms[item.source_assignment_id]) for item in facts.scheduling.assignments)
+
+
+def _exact_rate(identity, policy):
+    return (AssignmentRateSnapshot(identity, policy.policy_version, policy.policy_kind, policy.hourly_rate)
+            if policy.hourly_rate is not None else rate_snapshot(identity, policy.policy_version, policy.policy_kind))
 
 
 def _carried_adjustments(facts, source_terms):
@@ -323,8 +474,10 @@ def _cancellation_policies(facts, case_policy):
     return policies
 
 
-def _cancellation_service_facts(facts, policies):
-    return tuple(OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates, _cancellation_double_pay_dates(item, policies)) for item in facts.scheduling.assignments)
+def _cancellation_service_facts(facts, policies, *, candidate_special_pay=False):
+    return tuple(OfficialAssignmentServiceFacts(item.candidate_key, item.staff_id, item.service_dates,
+        item.double_pay_dates if candidate_special_pay else _cancellation_double_pay_dates(item, policies))
+        for item in facts.scheduling.assignments)
 
 
 def _cancellation_double_pay_dates(assignment, policies):
@@ -333,11 +486,20 @@ def _cancellation_double_pay_dates(assignment, policies):
 
 
 def _cancellation_rate_snapshots(facts, policies):
-    return tuple(rate_snapshot(item.candidate_key, policies[item.candidate_key].policy_version, policies[item.candidate_key].policy_kind) for item in facts.scheduling.assignments)
+    return tuple(_exact_rate(item.candidate_key, policies[item.candidate_key]) for item in facts.scheduling.assignments)
 
 
 def _cancellation_adjustments(facts, policies):
-    return tuple(PayrollAdjustment(item.candidate_key, policies[item.candidate_key].adjustment_total) for item in facts.scheduling.assignments if hasattr(policies[item.candidate_key], "adjustment_total") and not policies[item.candidate_key].adjustment_total.is_zero)
+    adjustments = []
+    for source in facts.source_terms:
+        if source.adjustment_total.is_zero:
+            continue
+        owners = tuple(item for item in facts.scheduling.assignments
+                       if item.source_assignment_id == source.source_assignment_id and item.staff_id == source.staff_id)
+        if len(owners) != 1:
+            raise ValueError("payroll_adjustment_owner_ambiguous")
+        adjustments.append(PayrollAdjustment(owners[0].candidate_key, source.adjustment_total))
+    return tuple(adjustments)
 
 
 def _build_actions(facts, payroll, change_identity):
@@ -349,6 +511,8 @@ def _build_cancellation_actions(facts, payroll, change_identity):
 
 
 def _actions_for_payroll(facts, payroll, change_identity):
+    if _has_handover_corrections(facts):
+        raise ValueError("payroll_handover_settlement_required")
     existing = _service_obligations_by_source(facts)
     actions = []
     retained = set()
@@ -439,6 +603,8 @@ def _candidate(facts, payroll, rate_snapshots, actions):
         "payroll_version": facts.payroll_version,
         "payroll_fingerprint": payroll.fingerprint.value,
         "rates": tuple(_rate_payload(item) for item in rate_snapshots),
+        "rate_sources": tuple((item.candidate_key, getattr(item, "source_assignment_id", None))
+                              for item in facts.scheduling.assignments),
         "actions": tuple(_action_payload(item) for item in actions),
         "special_pay_events": tuple(
             {
@@ -459,6 +625,8 @@ def _candidate(facts, payroll, rate_snapshots, actions):
         (),
         fingerprint_payload(payload),
         special_pay_events,
+        rate_source_assignments=tuple((item.candidate_key, getattr(item, "source_assignment_id", None))
+                                      for item in facts.scheduling.assignments),
     )
 
 
@@ -492,5 +660,3 @@ def _require_nonnegative_money(value, field_name):
 def _validate_existing_obligation_state(item):
     if not isinstance(item.payout_history_exists, bool):
         raise TypeError("payout history exists must be bool")
-    if item.payout_history_exists and item.paid_net_amount.amount == 0:
-        raise ValueError("payout history requires paid amount")

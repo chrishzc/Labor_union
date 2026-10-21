@@ -164,6 +164,17 @@ function assertReceiptObserved(
     throw new LeaveSubstitutionContractError('請假代班 re-query 仍包含已取消的原始服務日。');
   }
   const observedStaffIds = new Set(assignments.map((assignment) => assignment.staff_id));
+  if (request.handover_date) {
+    const expected = new Map(draft.assignments?.flatMap(assignment => assignment.official_schedules.map(day =>
+      [day.work_date, { staffId: assignment.staff_id, doublePay: day.is_double_pay ?? false }] as const)) ?? []);
+    request.items.forEach(item => expected.set(item.work_date, { staffId: item.substitute_staff_id!, doublePay: item.is_double_pay }));
+    const actual = assignments.flatMap(assignment => assignment.official_schedules.map(day =>
+      ({ date: day.work_date, staffId: assignment.staff_id, doublePay: day.is_double_pay ?? false })));
+    if (actual.length !== expected.size || new Set(actual.map(day => day.date)).size !== expected.size
+      || actual.some(day => expected.get(day.date)?.staffId !== day.staffId || expected.get(day.date)?.doublePay !== day.doublePay)) {
+      throw new LeaveSubstitutionContractError('換人後的正式服務日、人員或雙薪標記與本次安排不一致，請重新讀取已儲存安排。');
+    }
+  }
   if (
     request.items.some(
       (item) => item.resolution_type === 'substitute' &&
@@ -232,10 +243,19 @@ export async function previewLeaveSubstitutionFlow(caseNo: string, options?: Lea
       ...requestOptionsOf(options),
       correlationId: draft.correlationId,
     });
+    if (leaveSubstitutionFlowStore.get(caseNo)?.previewRequest !== request) return preview;
+    if (preview.case_no !== caseNo || (request.handover_date && (preview.outcomes.length !== request.items.length
+      || request.items.some(item => !preview.outcomes.some(outcome => outcome.original_schedule_id === item.original_schedule_id
+        && outcome.original_assignment_id === request.original_assignment_id && outcome.original_work_date === item.work_date
+        && outcome.resulting_service_date === item.work_date && outcome.resulting_staff_id === item.substitute_staff_id
+        && outcome.is_double_pay === item.is_double_pay))))) {
+      throw new LeaveSubstitutionContractError('換人影響與本案或交接安排不一致，請重新查詢。');
+    }
     leaveSubstitutionFlowStore.setPreviewReady(caseNo, preview);
     return preview;
   } catch (error) {
     const typed = normalize(error);
+    if (leaveSubstitutionFlowStore.get(caseNo)?.previewRequest !== request) throw typed;
     if (isStale(typed)) leaveSubstitutionFlowStore.setStale(caseNo, typed);
     else leaveSubstitutionFlowStore.setTypedError(caseNo, typed);
     throw typed;

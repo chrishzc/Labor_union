@@ -14,6 +14,7 @@ from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
+from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.validation import require_canonical_text
 from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanPersistenceContext, AssignmentPlanWorkflowFacts, VersionedImpactCandidate
 from subsystems.scheduling.holiday_calendar_query import (
@@ -119,6 +120,8 @@ class LeaveSubstitutionPreviewRequest:
 
     def __post_init__(self) -> None:
         _validate_case_number(self.case_no)
+        if self.intent.handover_date is not None and self.linked_request is not None:
+            raise ValueError("handover_linked_leave_not_supported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +134,15 @@ class LeaveSubstitutionApplyRequest:
     def __post_init__(self) -> None:
         _validate_case_number(self.case_no)
         require_canonical_text(self.reason, "leave/substitution reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
+        if not self.reason.strip():
+            object.__setattr__(self, "reason", "服務中換人" if self.intent.handover_date is not None else "排班代班調整")
+        if self.intent.handover_date is not None and self.linked_request is not None:
+            raise ValueError("handover_linked_leave_not_supported")
+
+
+@dataclass(frozen=True, slots=True)
+class LeaveSubstitutionPersistenceContext(AssignmentPlanPersistenceContext):
+    handover_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +151,7 @@ class LeaveSubstitutionPreview:
     order_version: int; scheduling_version: int; client_finance_version: int; payroll_version: int; fingerprint: PreviewFingerprint
     calendar_candidate: "LeaveCalendarCandidate"; apply_readiness: "LeaveApplyReadiness"
     linked_request: LinkedLeaveRequestResult | None
+    accounting: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,9 +255,10 @@ class LeaveSubstitutionWorkflowError(Exception):
 
 
 class LeaveSubstitutionWorkflow:
-    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork], linked_request_resolver: LeaveLinkedRequestResolver | None = None) -> None:
+    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork], linked_request_resolver: LeaveLinkedRequestResolver | None = None, clock: BusinessClock | None = None) -> None:
         self._repository = repository; self._client_finance_port = client_finance_port; self._payroll_port = payroll_port; self._orders_port = orders_port; self._holiday_query = holiday_query; self._unit_of_work_factory = unit_of_work_factory
         self._linked_request_resolver = linked_request_resolver or _NoLinkedRequestResolver()
+        self._clock = clock or SystemBusinessClock()
 
     def preview(self, request: LeaveSubstitutionPreviewRequest) -> LeaveSubstitutionPreview:
         facts = self._repository.load_for_preview(request.case_no, request.intent)
@@ -255,6 +269,13 @@ class LeaveSubstitutionWorkflow:
     def apply(self, request: LeaveSubstitutionApplyRequest) -> LeaveSubstitutionReceipt:
         try: return self._apply_transaction(request)
         except LeaveSubstitutionWorkflowError: raise
+        except ValueError as exception:
+            if str(exception) in {"staff_payables_correction_stale", "staff_overpayment_recovery_stale"}:
+                raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, str(exception),
+                    "付款或追償資料已變更，請重新查詢最新資料後再儲存。") from exception
+            raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED,
+                "handover_accounting_integrity_blocked" if request.intent.handover_date else "leave_substitution_integrity_blocked",
+                "帳務或服務資料無法一致銜接，這次變更未完成；請核對本案帳務後重新查詢。") from exception
         except Exception as exception:
             if _mysql_error_code(exception) in {1205, 1213}:
                 raise
@@ -321,6 +342,9 @@ class LeaveSubstitutionWorkflow:
         return self._persist(request, preview, command_fingerprint, linked)
 
     def _build_preview(self, facts, intent, correlation_id, linked_request, *, lock_holidays):
+        facts = replace(facts, scheduling_facts=replace(
+            facts.leave_facts, business_date=self._clock.today(),
+        ))
         try:
             holiday_facts = _query_holiday_facts(
                 facts.leave_facts,
@@ -345,11 +369,18 @@ class LeaveSubstitutionWorkflow:
             facts.leave_facts,
             candidate,
             holiday_facts,
+            handover=intent.handover_date is not None,
         )
-        client_finance, payroll, orders = self._build_impacts(facts, candidate, correlation_id)
-        return _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders, calendar_candidate, linked_request)
+        client_finance, payroll, orders = self._build_impacts(facts, candidate, correlation_id, intent)
+        result = _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders, calendar_candidate, linked_request)
+        if intent.handover_date is not None and facts.impact_facts is not None:
+            from subsystems.scheduling.service_handover_accounting import build_handover_accounting
+            result = replace(result, accounting=build_handover_accounting(
+                facts.impact_facts, candidate.scheduling, payroll, client_finance,
+            ))
+        return result
 
-    def _build_impacts(self, facts, candidate, correlation_id):
+    def _build_impacts(self, facts, candidate, correlation_id, intent):
         if facts.impact_facts is None:
             blocked = tuple(_blocked_impact(code) for code in facts.preview_blockers)
             return blocked[0], blocked[0], blocked[0]
@@ -360,11 +391,19 @@ class LeaveSubstitutionWorkflow:
             )
         )
         payroll = _preview_impact(
-            lambda: self._payroll_port.preview_leave_substitution(
+            lambda: (self._payroll_port.preview_handover if intent.handover_date is not None
+                     else self._payroll_port.preview_leave_substitution)(
                 facts.impact_facts,
                 candidate.scheduling,
             )
         )
+        if intent.handover_date is not None:
+            for source in facts.impact_facts.payroll.source_terms:
+                official_double_pay = tuple(row.work_date for row in facts.official_schedules
+                                            if row.assignment_id == source.source_assignment_id and row.is_double_pay)
+                if official_double_pay != source.double_pay_dates:
+                    payroll = _blocked_impact("payroll_special_pay_lineage_mismatch")
+                    break
         orders = _preview_impact(
             lambda: self._orders_port.preview_leave_substitution(
                 facts.impact_facts,
@@ -375,7 +414,7 @@ class LeaveSubstitutionWorkflow:
         return client_finance, payroll, orders
 
     def _persist(self, request, preview, command_fingerprint, linked):
-        context = AssignmentPlanPersistenceContext(request.idempotency_key, request.actor, request.reason, request.correlation_id, preview.fingerprint, command_fingerprint, preview.order_version, ())
+        context = LeaveSubstitutionPersistenceContext(request.idempotency_key, request.actor, request.reason, request.correlation_id, preview.fingerprint, command_fingerprint, preview.order_version, (), request.intent.handover_date)
         scheduling_result = self._repository.replace_scheduling_generation(preview.candidate.scheduling, context)
         event_ids = self._repository.append_batch_outcomes(request, preview, command_fingerprint, scheduling_result)
         self._client_finance_port.persist_leave_substitution(preview.client_finance_impact, context, scheduling_result)
@@ -410,7 +449,7 @@ def _blocked_impact(blocker):
     )
 
 
-def _calendar_candidate(facts, candidate, holiday_facts):
+def _calendar_candidate(facts, candidate, holiday_facts, *, handover=False):
     before = {item.work_date: item.staff_id for item in facts.official_schedules}
     after = {service_date: assignment.staff_id for assignment in candidate.scheduling.assignments for service_date in assignment.service_dates}
     outcomes = {item.original_work_date: item for item in candidate.outcomes}
@@ -447,7 +486,7 @@ def _calendar_candidate(facts, candidate, holiday_facts):
         facts.assignment_plan.contracted_service_days,
         outcomes_by_type.count("defer_following_assignments"),
         outcomes_by_type.count("substitute"),
-        len(candidate.outcomes),
+        0 if handover else len(candidate.outcomes),
         len(holidays),
         len(fixed_rest_days),
         holiday_facts.holiday_version,
@@ -542,9 +581,11 @@ def _raise_if_claim_mismatched(request, claim):
     if claim is CommandClaimState.MISMATCH: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "此操作識別已用於不同的代班內容；請先重新整理指派並核對已儲存結果，需改內容時重新預覽。")
 def _raise_replay_integrity(request, message): raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, "invalid_batch_replay_snapshot", message)
 def _command_fingerprint(request): return fingerprint_payload({"family":"scheduling-leave-substitution","batch_key":request.idempotency_key.value,"case_no":request.case_no,"request_fingerprint":_request_fingerprint(request).value,"expected_versions":{"order":request.expected_order_version.value,"scheduling":request.expected_scheduling_version.value,"client_finance":request.expected_client_finance_version.value,"payroll":request.expected_payroll_version.value},"preview_fingerprint":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
-def leave_request_fingerprint(intent): return fingerprint_payload({"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in intent.items)})
+def leave_request_fingerprint(intent): return fingerprint_payload({**_handover_identity(intent),"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in intent.items)})
 def _request_fingerprint(request): return fingerprint_payload(_request_snapshot(request))
-def _request_snapshot(request): return {"case_no":request.case_no,"original_assignment_id":request.intent.original_assignment_id,"items":[{"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in request.intent.items],"linked_request":None if request.linked_request is None else {"request_id":request.linked_request.request_id,"expected_version":request.linked_request.expected_version}}
+def _request_snapshot(request): return {**_handover_identity(request.intent),"case_no":request.case_no,"original_assignment_id":request.intent.original_assignment_id,"items":[{"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay,"replacement_work_date":None if item.replacement_work_date is None else item.replacement_work_date.isoformat()} for item in request.intent.items],"linked_request":None if request.linked_request is None else {"request_id":request.linked_request.request_id,"expected_version":request.linked_request.expected_version}}
+def _handover_identity(intent):
+    return {"handover_date": intent.handover_date.isoformat()} if intent.handover_date else {}
 def _receipt_snapshot(receipt): return {"batch_key":receipt.batch_key,"case_no":receipt.case_no,"order_version":receipt.order_version,"scheduling_generation":receipt.scheduling_generation,"scheduling_version":receipt.scheduling_version,"client_finance_version":receipt.client_finance_version,"payroll_version":receipt.payroll_version,"outcome_event_ids":list(receipt.outcome_event_ids),"preview_fingerprint":receipt.preview_fingerprint.value,"linked_request":_linked_result_payload(receipt.linked_request)}
 def _linked_result_payload(result): return None if result is None else {"request_id":result.request_id,"expected_version":result.expected_version,"resolved_version":result.resolved_version,"status":result.status,"receipt_key":result.receipt_key,"notification_intent":result.notification_intent,"staff_id":result.staff_id}
 def _resolve_linked_preview(resolver, request):
@@ -588,6 +629,19 @@ def _raise_replay_repository_error(request, error):
         _raise_replay_integrity(request, "batch replay snapshot is invalid")
     raise error
 def _domain_workflow_error(correlation_id, exception):
+    code = str(exception)
+    handover_messages = {
+        "handover_service_not_started": "本案尚未開始服務，請由原案件辦理服務前更換月嫂。",
+        "handover_date_in_past": "交接日期不能早於今天，請重新查詢本案服務日期。",
+        "handover_remaining_service_missing": "交接日之後沒有這位原月嫂的正式服務日。",
+        "handover_remaining_service_changed": "剩餘服務日期已變更，請重新查詢最新資料後再儲存。",
+        "handover_requires_one_successor": "請指定同一位接任月嫂承接這次剩餘服務。",
+        "handover_must_preserve_service_terms": "換人必須保留原服務日期、時數與雙薪約定。",
+    }
+    if code in handover_messages:
+        return _workflow_error(correlation_id,
+            ErrorCategory.CONFLICT if code == "handover_remaining_service_changed" else ErrorCategory.VALIDATION,
+            code, handover_messages[code])
     categories = {LeaveSubstitutionIssue.INVALID_INTENT:ErrorCategory.VALIDATION,LeaveSubstitutionIssue.ASSIGNMENT_NOT_FOUND:ErrorCategory.NOT_FOUND}; return _workflow_error(correlation_id,categories.get(exception.issue,ErrorCategory.DOMAIN_BLOCKED),exception.issue.value,str(exception))
 def _impact_workflow_error(correlation_id, exception):
     code = str(exception) or "leave_substitution_impact_invalid"; return LeaveSubstitutionWorkflowError(TypedError(ErrorCategory.DOMAIN_BLOCKED,code,"A dependent Domain rejected the leave/substitution impact.",correlation_id,domain_blockers=(code,)))

@@ -31,9 +31,10 @@ def test_actual_start_replacement_retires_effective_generation_before_schedule_i
         events.append("insert_assignments")
         return {"staff-16": 52}
 
-    def cancel_previous(_cursor, _command, previous_generation_id):
+    def cancel_previous(_cursor, _command, previous_generation_id, generation_id):
         nonlocal retired
         assert previous_generation_id == 114
+        assert generation_id == 115
         retired = True
         events.append("retire_previous")
 
@@ -97,3 +98,31 @@ def test_actual_start_replacement_retires_effective_generation_before_schedule_i
     assert result.generation_id == 115
     assert result.rebuild_event_id == 901
     assert result.scheduling_receipt_id == 902
+
+
+def test_generation_retirement_uses_nas_cancel_occupancy_procedure():
+    """Generation retirement uses the canonical lu_nas_cancel_occupancy_v1 procedure."""
+    statements = []
+
+    class Cursor:
+        rowcount = 1
+
+        def execute(self, statement, parameters):
+            statements.append((statement, parameters))
+
+        def nextset(self):
+            return None
+
+    command = SimpleNamespace(candidate=SimpleNamespace(
+        case_no="CASE-NATIVE", cancelled_assignment_ids=(41,),
+    ))
+    replacement_writer._cancel_previous(Cursor(), command, 17)
+
+    occupancy_statements = [
+        (sql, parameters) for sql, parameters in statements
+        if sql.startswith("CALL `lu_nas_cancel_occupancy_v1`")
+    ]
+    assert len(occupancy_statements) == 1
+    sql, parameters = occupancy_statements[0]
+    assert parameters == ("CASE-NATIVE", 17)
+    assert statements[-1][0].startswith("UPDATE scheduling_generations SET status='cancelled'")

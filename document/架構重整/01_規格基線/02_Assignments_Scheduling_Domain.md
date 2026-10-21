@@ -215,6 +215,8 @@ UI 以 owner assignments 回讀證明排班生效，不以 job accepted 取代�
 
 ### Leave／Substitution
 
+代班工作台的案件選單以 server-owned 進行中訂單集合及 current effective assignment-owned 正式服務日為準；已正式排班但尚未開始服務的案件亦須納入，直到服務完成。完成、取消及尚無正式排班服務日的案件不納入，不得只以 Orders「服務中」標籤篩選。
+
 多日請假為一次 Preview、一個 fingerprint、一次 Apply transaction；每一天保存 immutable outcome。正式結果只允許順延或指定代班。代班建立獨立 assignment；取消或更正以反向／替代事件處理。
 
 2026-09-20 人工裁決：順延處理可選擇指定補班日期。未指定時仍依案件固定週休、國定假日及目前有效的國定假日上班協議自動順延；指定時只將該次服務由原服務日移至明確新日，不得無聲改成其他日期，也不得連帶移動其他既有服務日。原日與新日不得重複計入，全案服務日數守恆；與同案服務日、案件休假條件或人員占用衝突時，Preview／Apply 必須沿既有 typed blocker／conflict fail closed。指定日期須納入 request snapshot、fingerprint、immutable outcome 與正式 generation readback，不建立另一套單日 CRUD 或平行 writer。
@@ -656,3 +658,14 @@ Scheduling 正式收納 `Matching Coordination` 為本 Domain 內的 subsystem�
 - Query 唯讀、Preview 零寫入、Apply 仍由 owning workflow 取得 fresh facts、lock、single outer UoW 與 receipt；跨域協調不改變本 Domain 的 assignment／leave／service-day SSOT。
 - 首次建立 criteria snapshot 的 Preview 沒有既存 snapshot 可供瀏覽器取得 source tuple，必須由後端 fresh-read owner facts 並在回應中回傳 canonical tuple；該 Preview 不接受 client source-version assertion。後續 Apply 必須攜帶 Preview 回傳的完整 canonical tuple 與 fingerprint，並重新 fresh-read 驗證。
 - M3 Phase E schema 只屬候選 inventory／spec planning，未授權 DDL、seed、backfill、destructive 或資料庫操作；若需變更，另立 approved schema Work Package 並重跑全部 DB gates。
+
+## 2026-10-21 服務中換人
+
+人工 Authority：使用者核可服務中換人介面並明確指示開始實作。服務安排保留原路徑導向：原案件 → 服務中換人專用頁 → 原案件；臨時代班維持原請假代班頁。不得新增案件處理階段或將已服務案件重置媒合。
+
+- 沿用 leave-substitution Query／Preview／Apply 與唯一 outer UoW；command 新增可選 `handover_date`，空值維持既有請假代班語意與歷史 command identity。
+- 換人要求已開始服務。交接日以 Asia/Taipei business clock 驗證，不得早於今日；含交接日，只更換指定原 assignment 尚餘的全部 official service dates。後端驗證完整集合、單一不同接任人及原雙薪標記；不得由 UI 任意漏選或改寫已服務日、其他 assignment、休假政策、服務日或時數。
+- 接任日期集合形成一個 assignment，不逐日新增；仍遵守最多四個有效 assignments、逐日 ownership、檔期與服務量守恆。保留不可變 generation／outcome／lineage。
+- 原月嫂在交接後不新增請假占用。原因選填；畫面一次儲存，內部 fresh Preview 與 Apply 版本／fingerprint 防護保留。結果不明時維持原 command identity 重查，不自動另建命令。
+- 既有合法請假占用隨 generation 承接，immutable outcome 不改寫；服務中換人本身不建立新的請假占用，亦不關聯請假待辦或因此新增 LINE 通知。原服務段已變更時，專用頁可在同案重新選取最新正式段。
+- 金額明細來自 Payroll／Client Finance owner candidate。不能唯一追溯或帳務不相容時顯示 typed blocker，不猜金額、不繼續寫入。

@@ -111,13 +111,26 @@ def _cancel_previous_state(cursor, command, previous_generation_id, generation_i
     if previous_generation_id is None:
         return
     _cancel_previous_buffers(cursor, command, previous_generation_id)
-    if command.command_family == "orders_actual_start_rebuild":
+    if command.command_family == "orders_actual_start_rebuild" or command.preserve_leave_occupancy:
         _preserve_previous_leave_occupancy(
             cursor, command, previous_generation_id, generation_id,
         )
     else:
         _cancel_previous_leave_occupancy(cursor, command, previous_generation_id)
     _cancel_previous(cursor, command, previous_generation_id)
+
+
+def _canonical_change_reason(command: SchedulingReplacementCommand) -> str:
+    raw_reason = (command.reason or "").strip()
+    if raw_reason:
+        return raw_reason
+    if command.preserve_leave_occupancy or command.command_family == "leave_substitution":
+        return "服務中換人" if command.preserve_leave_occupancy else "排班代班調整"
+    if command.command_family == "orders_actual_start_rebuild":
+        return "實際開工排班重建"
+    if command.command_family == "orders_official_service_date_correction":
+        return "正式服務日更正"
+    return "服務安排更動"
 
 
 def _insert_generation(cursor: Any, command: SchedulingReplacementCommand) -> int:
@@ -132,7 +145,7 @@ def _insert_generation(cursor: Any, command: SchedulingReplacementCommand) -> in
             candidate.generation_number,
             candidate.resulting_aggregate_version,
             command.actor.actor_id,
-            command.reason,
+            _canonical_change_reason(command),
         ),
     )
     return int(cursor.lastrowid)
@@ -354,8 +367,9 @@ def _preserve_previous_leave_occupancy(
     }
     if any(
         (int(row["staff_id"]), row["occupancy_date"]) in official_dates
-        or (int(row["resulting_staff_id"]), row["resulting_service_date"])
-        not in official_dates
+        or (row["resulting_service_date"] not in {day for _, day in official_dates}
+            if command.preserve_leave_occupancy
+            else (int(row["resulting_staff_id"]), row["resulting_service_date"]) not in official_dates)
         for row in rows
     ):
         raise ValueError("actual_start_leave_outcome_conflict")
@@ -492,7 +506,7 @@ def _append_rebuild_event(
             command.preview_fingerprint.value,
             command.idempotency_key.value,
             command.actor.actor_id,
-            command.reason,
+            _canonical_change_reason(command),
             command.correlation_id.value,
         ),
     )

@@ -785,3 +785,12 @@ settlement link，不新增第二筆客戶退款，也不重開已結清client o
 - `subsystems/staff_payables/accounts_payable_export.py`
 
 live files只證明目前已有相符結構，不會因存在而自動取得規格權威。
+
+## 7. 服務中換人的已付義務銜接（2026-10-21）
+
+依使用者核可的服務中換人介面實作，Staff Payables 只消費 Payroll 提供的來源明確 correction，不重算薪資。
+
+- 原付薪 obligation 及實際付款歷史保留。`staff-handover:` 差額不可被付款選單、匯出或自助應付查詢當成另一張獨立 payable；原 obligation 的有效金額包含其換人差額。
+- Payroll correction 後同步刷新 Staff Payables projection，實付仍由正式 payout／return／reversal links 推導，不憑儲存換人標記付款或結清。實付大於有效金額時停止該根的付款資格，獨立追償保存該 correction 與原 obligation。
+- 只對本次新形成的超付建立追償；重播不得重建，連續換人不得重複計入先前超付。未收回不影響合法排班交接，但不得抵扣其他案件或新月嫂薪資。
+- Client Finance 保持原 exact-settlement 契約；換人未改變服務日期、時數、費率或雙薪時，由 owner candidate 證明客戶帳款差額，而非 UI 固定寫零。異常歷史帳款仍阻擋。

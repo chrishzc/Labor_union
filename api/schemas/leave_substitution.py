@@ -44,11 +44,14 @@ class LeaveSubstitutionPreviewBody(BaseModel):
 
     original_assignment_id: int = Field(gt=0)
     items: tuple[LeaveSubstitutionItemInput, ...] = ()
+    handover_date: date | None = None
     leave_request_id: int | None = Field(default=None, gt=0)
     expected_leave_request_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def require_complete_linked_request_identity(self):
+        if self.handover_date is not None and self.leave_request_id is not None:
+            raise ValueError("handover_linked_leave_not_supported")
         if (self.leave_request_id is None) != (
             self.expected_leave_request_version is None
         ):
@@ -59,6 +62,7 @@ class LeaveSubstitutionPreviewBody(BaseModel):
         return LeaveSubstitutionBatchIntent(
             self.original_assignment_id,
             tuple(item.to_domain() for item in self.items),
+            self.handover_date,
         )
 
 
@@ -141,6 +145,7 @@ class LeaveOfficialScheduleSummaryView(BaseModel):
 
     schedule_id: int = Field(gt=0)
     work_date: date
+    is_double_pay: bool = False
 
 
 class LeaveAssignmentSummaryView(BaseModel):
@@ -159,6 +164,40 @@ class LeaveImpactSummaryView(BaseModel):
     resulting_version: int = Field(ge=0)
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     blockers: list[str]
+
+
+class HandoverPayBreakdownView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    salary_ntd: int
+    floor_fee_ntd: int
+    adjustment_ntd: int
+    total_ntd: int
+
+
+class HandoverStaffAccountingView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff_id: int = Field(gt=0)
+    before: HandoverPayBreakdownView
+    after: HandoverPayBreakdownView
+    paid_net_ntd: int = Field(ge=0)
+    payable_after_ntd: int = Field(ge=0)
+    recovery_increase_ntd: int = Field(ge=0)
+    recovery_after_ntd: int = Field(ge=0)
+    payment_due_date: date | None
+
+
+class HandoverClientAccountingView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    before_ntd: int
+    after_ntd: int
+    difference_ntd: int
+    settled_ntd: int
+
+
+class HandoverAccountingView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    staff: list[HandoverStaffAccountingView]
+    client: HandoverClientAccountingView
 
 
 class LinkedLeaveRequestView(BaseModel):
@@ -191,6 +230,7 @@ class LeaveSubstitutionPreviewView(BaseModel):
     apply_readiness: LeaveApplyReadinessView
     linked_request: LinkedLeaveRequestView | None
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    accounting: HandoverAccountingView | None = None
 
 
 class CustomerLeaveDeferPreviewView(LeaveSubstitutionPreviewView):

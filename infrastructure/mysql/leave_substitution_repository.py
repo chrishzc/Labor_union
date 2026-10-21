@@ -48,6 +48,7 @@ from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionReceipt,
     LeaveSubstitutionWorkflowFacts,
     StoredLeaveSubstitutionReceipt,
+    _request_snapshot as _canonical_request_snapshot,
 )
 from subsystems.scheduling.matching_leave_integration import (
     CanonicalSchedulingLeaveReference,
@@ -111,7 +112,8 @@ def _group_effective_assignment_schedules(rows):
             raise ValueError("duplicate official schedule projection")
         schedule_identities[assignment_id].add(schedule_identity)
         assignment["official_schedules"].append(
-            {"schedule_id": schedule_identity[0], "work_date": work_date}
+            {"schedule_id": schedule_identity[0], "work_date": work_date,
+             "is_double_pay": bool(row.get("is_double_pay", False))}
         )
 
     return tuple(
@@ -190,7 +192,7 @@ class MySqlLeaveSubstitutionRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT a.id,a.staff_id,a.assigned_start_date,a.assigned_end_date,"
-                "s.id AS schedule_id,s.work_date "
+                "s.id AS schedule_id,s.work_date,s.is_double_pay "
                 "FROM scheduling_aggregates g JOIN case_staff_assignments a "
                 "ON a.generation_id=g.effective_generation_id "
                 "LEFT JOIN staff_schedule s "
@@ -235,6 +237,13 @@ class MySqlLeaveSubstitutionRepository:
 
         def after_staff_lock(cursor):
             nonlocal evidence_rows, claim_state, linked_request
+            if request.intent.handover_date is not None:
+                cursor.execute(
+                    "SELECT staff_id FROM staff_payable_accounts WHERE staff_id IN ("
+                    + ",".join("%s" for _ in preflight_staff_ids)
+                    + ") ORDER BY staff_id FOR UPDATE", preflight_staff_ids,
+                )
+                cursor.fetchall()
             claim_state = _claim_command(
                 cursor,
                 request,
@@ -302,6 +311,7 @@ class MySqlLeaveSubstitutionRepository:
             actor=context.actor,
             reason=context.reason,
             correlation_id=context.correlation_id,
+            preserve_leave_occupancy=getattr(context, "handover_date", None) is not None,
         )
         with self._connection.cursor() as cursor:
             return persist_scheduling_replacement(cursor, command)
@@ -738,33 +748,7 @@ def _insert_batch_header(cursor, request, preview, command_fingerprint):
 
 
 def _request_snapshot(request):
-    return {
-        "case_no": request.case_no,
-        "original_assignment_id": request.intent.original_assignment_id,
-        "items": [
-            {
-                "original_schedule_id": item.original_schedule_id,
-                "work_date": item.work_date.isoformat(),
-                "resolution_type": item.resolution_type.value,
-                "substitute_staff_id": item.substitute_staff_id,
-                "is_double_pay": item.is_double_pay,
-                "replacement_work_date": (
-                    None
-                    if item.replacement_work_date is None
-                    else item.replacement_work_date.isoformat()
-                ),
-            }
-            for item in request.intent.items
-        ],
-        "linked_request": (
-            None
-            if request.linked_request is None
-            else {
-                "request_id": request.linked_request.request_id,
-                "expected_version": request.linked_request.expected_version,
-            }
-        ),
-    }
+    return _canonical_request_snapshot(request)
 
 
 # Assignment resolution and immutable outcome lineage are one persisted fact.
@@ -822,6 +806,8 @@ def _insert_leave_occupancy(
     scheduling_result,
     event_ids,
 ):
+    if request.intent.handover_date is not None:
+        return
     rows = tuple(
         (
             request.idempotency_key.value,

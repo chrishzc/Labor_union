@@ -34,6 +34,7 @@ export const LeaveResolutionTypeSchema = z.enum([
 export const LeaveOfficialScheduleSummarySchema = z.strictObject({
   schedule_id: z.number().int().positive(),
   work_date: LeaveSubstitutionIsoDateSchema,
+  is_double_pay: z.boolean().optional(),
 });
 
 export const LeaveSubstitutionAssignmentSchema = z
@@ -119,6 +120,7 @@ function validateLinkedRequestIdentity(
 
 const leaveSubstitutionCommandFields = {
   original_assignment_id: z.number().int().positive(),
+  handover_date: LeaveSubstitutionIsoDateSchema.nullable().optional(),
   items: z.array(LeaveSubstitutionItemSchema),
   ...linkedRequestIdentityFields,
 };
@@ -226,6 +228,11 @@ export const LeaveSubstitutionAssignmentPlanSegmentSchema = z
     }
   });
 
+const handoverPayBreakdownSchema = z.strictObject({
+  salary_ntd: z.number().int(), floor_fee_ntd: z.number().int(),
+  adjustment_ntd: z.number().int(), total_ntd: z.number().int(),
+});
+
 export const LeaveSubstitutionPreviewSchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   order_version: z.number().int().nonnegative(),
@@ -243,6 +250,22 @@ export const LeaveSubstitutionPreviewSchema = z.strictObject({
   apply_readiness: LeaveSubstitutionApplyReadinessSchema,
   linked_request: LinkedLeaveRequestSchema.nullable(),
   preview_fingerprint: LeaveSubstitutionFingerprintSchema,
+  accounting: z.strictObject({
+    staff: z.array(z.strictObject({
+      staff_id: z.number().int().positive(),
+      before: handoverPayBreakdownSchema,
+      after: handoverPayBreakdownSchema,
+      paid_net_ntd: z.number().int().nonnegative(),
+      payable_after_ntd: z.number().int().nonnegative(),
+      recovery_increase_ntd: z.number().int().nonnegative(),
+      recovery_after_ntd: z.number().int().nonnegative(),
+      payment_due_date: LeaveSubstitutionIsoDateSchema.nullable(),
+    })),
+    client: z.strictObject({
+      before_ntd: z.number().int(), after_ntd: z.number().int(),
+      difference_ntd: z.number().int(), settled_ntd: z.number().int(),
+    }),
+  }).nullable().optional(),
 });
 
 export const LeaveSubstitutionReceiptSchema = z.strictObject({

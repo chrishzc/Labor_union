@@ -8,6 +8,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
@@ -48,6 +49,7 @@ from subsystems.scheduling.leave_substitution_workflow import (
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Leave Substitution"])
+logger = logging.getLogger(__name__)
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
 
@@ -75,6 +77,7 @@ def list_leave_assignments(
                     {
                         "schedule_id": schedule["schedule_id"],
                         "work_date": schedule["work_date"],
+                        "is_double_pay": schedule.get("is_double_pay", False),
                     }
                     for schedule in row["official_schedules"]
                 ],
@@ -286,6 +289,7 @@ def _preview_payload(preview):
         "apply_readiness": _materialize(preview.apply_readiness),
         "linked_request": _linked_payload(preview.linked_request),
         "preview_fingerprint": preview.fingerprint.value,
+        "accounting": _materialize(preview.accounting),
     }
 
 
@@ -389,6 +393,11 @@ def _raise_mysql_error(error, correlation_id):
             retryable=True,
         )
         raise _http_error(503, typed, headers={"Retry-After": "1"}) from error
+    logger.error(
+        "Leave/substitution database operation failed: mysql_code=%s correlation_id=%s",
+        mysql_code,
+        correlation_id.value,
+    )
     raise _http_error(500, _database_error(correlation_id)) from error
 
 
