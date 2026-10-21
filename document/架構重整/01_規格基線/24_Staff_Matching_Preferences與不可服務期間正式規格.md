@@ -350,3 +350,21 @@ Authority：使用者確認兩頁預覽，要求名冊「服務偏好」與配�
 - **PREF-21-08：候選清單自動載入（後續人工裁決）。** 開啟「新增候選月嫂」即自動查詢可詢問人選並讀取已加入狀態，不要求先按查詢；共用候選查詢介面採相同行為。初始即顯示載入中，成功顯示人選或明確空結果，失敗顯示原因與「重新查詢」入口；成功後也可手動重新查詢 current facts。抽屜重開、切換案件均重新讀取；關閉／卸載取消未完成查詢，舊案件或舊請求結果不得覆蓋目前畫面。自動行為只有 Query，不自動新增候選、寄送或建立方案。候選池狀態與多月嫂分段選單沿既有自動讀取，不把需人工填寫並確認的操作改為自動寫入。
 
 驗收：① 名冊偏好僅兩項可編輯，四項匯入資訊在資格區可讀；保存區域／週間後其他四 relation 與 detail 完全保留。② 案件週休一日、月嫂週休二日，姓名旁顯示月嫂「週休二日 · 不符合」且可加入。③ 區域不符同樣保留原登錄區域、可加入；兩項相符／不符／缺資料／無法辨識均有正確提示。④ 料理、時數及舊數字偏好差異不影響候選集合；舊 flags 不能重啟排除。⑤ 查詢零寫入、下一次查詢反映 current relations；正式排班及占用資格維持。⑥ focused Python／React 驗證與實際元件瀏覽器畫面檢查，清楚區分 mock API 驗證與真 DB 驗證。
+
+## 2026-10-21 人工逐位機車通勤查詢與月免費額度（COMMUTE-21）
+
+Authority：使用者接受官方 Routes API 費用，確認月嫂名冊地址為起點，要求人員逐位手動觸發、自行決定查詢人數並計算本月免費額度；明確授權依此規劃實作。此節為本次 T3 bounded implementation package：owner 維持 Scheduling matching-coordination，不新增 Domain、資料表、migration 或第二份地址主檔。
+
+- **COMMUTE-21-01：手動效果。** 新增候選、已加入候選卡片及多月嫂分段已選人員各提供單人查詢。開頁、名單重新讀取及切換案件零 Google 呼叫；不提供整批、背景查詢或自動重試。查詢結果不改候選資格、原排序、意願、排班或任何 business root。
+- **COMMUTE-21-02：來源與傳輸。** 起點由 Staff current city/address、終點由案件 current client city/address 組成；僅管理員可觸發，staff 須沿既有 status 與 lifecycle active 規則。缺地址先 typed block 且零用量。後端固定官方 HTTPS computeRoutes、TWO_WHEELER、單一起訖點，僅要求距離與時間。金鑰只讀 GOOGLE_MAPS_ROUTES_API_KEY；未設定回 typed unavailable，零 Google 請求。地址、key、原始 provider payload 不進 job、log、receipt 或前端請求參數。
+- **COMMUTE-21-03：持久紀錄與重送。** 沿 existing background_jobs canonical command，單次人工 event_key 綁定 case/staff/immutable admin actor。外部請求前在同一 outer transaction enqueue 並 claim running，commit 後才呼叫 Google；max_attempts=1。同 key 同命令不再呼叫 provider，不同命令 typed conflict。Google 回傳距離僅用於當次畫面，不持久保存、跨操作快取或寫入 staff/client；重播只能證明原操作已受理，不宣稱可恢復未保存的距離。外部成功但 receipt 未確認、連線逾時或 process interruption 均保守視為用量待確認，不能 blind retry。現有 worker 只能將到期、已達 max_attempts 的 lease 關閉，不重送 provider。
+- **COMMUTE-21-04：計次。** 所有管理員共用後端紀錄，按 America/Los_Angeles calendar month，使用 UTC 起訖範圍查 metadata。免費 1000 次及分級單價是 2026-10-21 官方 observed pricing；Google 改價時須更新此值與測試，非工會固定業務限制。畫面分開顯示本系統已送出、已知估計計費、待確認、免費已用、保守剩餘、超額及未稅美元估價。未送出不計；200/no-route 計入估計計費；401/403/429/5xx 視為不計費；其他無法由 HTTP 狀態唯一裁決的 4xx 與 timeout 待確認，不把所有失敗當免費。
+- **COMMUTE-21-05：帳務核對。** 不假稱已接入 Google 帳單 API。管理員可從 Google 報表人工登錄同帳務帳戶、全部專案、本月 Compute Routes Enterprise 累計次數及實際報表 cutoff，沿 metadata-only canonical job 保存核對者、月份、次數與 UTC 截止時間。只接受本計費月內、不晚於現在且含時區的截止時間；預設未核對。採最新 cutoff，估算等於該累計數加 cutoff（含）之後本系統已知計費；早於 cutoff 的本機紀錄不重複加計。其餘系統在 cutoff 後的用量仍須後續核對，畫面明示估算及最終以 Google 帳務為準。
+- **COMMUTE-21-06：公開入口。** admin-only GET /api/v1/scheduling/commute-usage；POST /api/v1/orders/{case_no}/caregivers/{staff_id}/commute，僅接受 event_key；POST /api/v1/scheduling/commute-usage/reconciliation，僅接受 event_key/month/count/through。回應 no-store、typed identity/error；API 不接 raw 地址或 batch staff IDs。
+- **COMMUTE-21-07：顯示。** 成功顯示機車單程公里、預估分鐘、查詢時間、Google Maps attribution 及 beta 路線提醒；無路線、缺地址、未設定、連線錯誤各明確說明，不能用零公里或汽車路線替代。查詢中禁止重複點擊；結果未明以原 key 確認；重查明示增加用量。切換人員/案件卸載舊結果，不以舊結果覆蓋新人選。
+
+實作 write set：subsystems/scheduling/commute_query.py、infrastructure/http/google_routes.py、infrastructure/mysql/commute_query_repository.py、api/routes/commute.py、api/main.py router registration、React commute client/components 與三個既有媒合入口、對應 module tests、此 owner spec／map、NAS 既有 environment template／操作文件。既有 dirty成果保留，不 commit/push/deploy，不建立或填寫真實 key，不查真實地址。
+
+驗收工作包：A1 手動單人、零自動 provider；A2 claim-before-effect、same-key 不重送、typed conflict；A3 來源缺漏/退役/未設定零計費；A4 月界/DST/免費/付費/unknown；A5 全帳戶人工核對不重複加計；A6 UI identity、loading/error、Google attribution/beta；A7 focused Python/React regression、real MySQL connection-local temporary-table check、build、模擬資料 browser capture、git diff check 及 architecture closure。操作上限：Google 實際 API 驗收須先由使用者申請與設定；本次只用 fake provider。無 schema diff，migration gate 不適用；既有 development DB 僅建立連線專用 temporary tables，關閉即移除，不改既有 rows。
+
+參考：[官方單價](https://developers.google.com/maps/billing-and-pricing/pricing)、[計費月界](https://developers.google.com/maps/billing-and-pricing/pay-as-you-go)、[狀態與帳務](https://developers.google.com/maps/reporting-and-monitoring/reporting)、[Routes 儲存與標示政策](https://developers.google.com/maps/documentation/routes/policies)。
