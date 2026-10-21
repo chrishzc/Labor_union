@@ -2,7 +2,7 @@
  * @file LoginPage.tsx
  * @description 登入頁面元件，實作雙階段帳密挑戰與 TOTP 動態碼驗證流程、錯誤處理與機密安全防護。
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import './LoginPage.css';
 import { sessionClient } from '../api/auth/session_client';
@@ -187,6 +187,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [challengeExpiresAt, setChallengeExpiresAt] = useState<string | null>(null);
   const [totpDigits, setTotpDigits] = useState(['', '', '', '', '', '']);
+  const isTotpComposing = useRef(false);
   const [provisioningUri, setProvisioningUri] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
@@ -234,7 +235,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const handleTotpChange = (index: number, value: string) => {
+  const focusNextTotpInput = (index: number) => {
+    if (index < 5) {
+      document.getElementById(`totp-${index + 1}`)?.focus();
+    }
+  };
+
+  const handleTotpChange = (index: number, value: string, advanceFocus = true) => {
     if (value.length > 1) {
       value = value.charAt(value.length - 1);
     }
@@ -247,13 +254,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setTotpDigits(newDigits);
 
     // Auto focus next input if digit entered
-    if (value && index < 5) {
-      const nextInput = document.getElementById(`totp-${index + 1}`);
-      if (nextInput) nextInput.focus();
+    if (value && advanceFocus) {
+      focusNextTotpInput(index);
     }
   };
 
+  const handleTotpCompositionEnd = (index: number, input: HTMLInputElement) => {
+    handleTotpChange(index, input.value, false);
+    // Keep the final composition/input events on this box before moving focus.
+    requestAnimationFrame(() => {
+      isTotpComposing.current = false;
+      if (document.activeElement === input && /^\d$/.test(input.value)) {
+        focusNextTotpInput(index);
+      }
+    });
+  };
+
   const handleTotpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isTotpComposing.current || e.nativeEvent.isComposing) return;
     if (e.key === 'Backspace' && !totpDigits[index] && index > 0) {
       const prevInput = document.getElementById(`totp-${index - 1}`);
       if (prevInput) prevInput.focus();
@@ -494,7 +512,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     maxLength={1}
                     value={digit}
                     disabled={isLoading}
-                    onChange={(e) => handleTotpChange(idx, e.target.value)}
+                    onChange={(e) => handleTotpChange(
+                      idx,
+                      e.target.value,
+                      !isTotpComposing.current && !(e.nativeEvent as InputEvent).isComposing
+                    )}
+                    onCompositionStart={() => { isTotpComposing.current = true; }}
+                    onCompositionEnd={(e) => handleTotpCompositionEnd(idx, e.currentTarget)}
                     onKeyDown={(e) => handleTotpKeyDown(idx, e)}
                   />
                 ))}

@@ -373,6 +373,62 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('Stage 2 輸入法組字期間保持焦點，不將同次輸入帶到下一格', async () => {
+    vi.spyOn(sessionClient, 'issuePasswordChallenge').mockResolvedValue(
+      createStage1Envelope().data
+    );
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
+    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    await screen.findByRole('heading', { name: /雙重身分驗證/ });
+
+    const input = screen.getByLabelText('驗證碼第 2 位');
+    input.focus();
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: 'Backspace', isComposing: true });
+    expect(input).toHaveFocus();
+    fireEvent.input(input, {
+      target: { value: '1' },
+      data: '1',
+      inputType: 'insertCompositionText',
+      isComposing: true,
+    });
+    expect(input).toHaveFocus();
+    fireEvent.compositionEnd(input, { data: '1' });
+    fireEvent.input(input, {
+      target: { value: '1' },
+      data: '1',
+      inputType: 'insertText',
+    });
+    expect(input).toHaveFocus();
+    expect(screen.getAllByRole('textbox', { name: /^驗證碼/ })
+      .map(element => (element as HTMLInputElement).value).join('')).toBe('1');
+    await waitFor(() => expect(screen.getByLabelText('驗證碼第 3 位')).toHaveFocus());
+    expect(screen.getByLabelText('驗證碼第 3 位')).toHaveValue('');
+  });
+
+  it('Stage 2 數字鍵盤連續輸入相同數字時，每次輸入只前進一格', async () => {
+    vi.spyOn(sessionClient, 'issuePasswordChallenge').mockResolvedValue(
+      createStage1Envelope().data
+    );
+    render(<LoginPage />);
+    fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
+    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
+    await screen.findByRole('heading', { name: /雙重身分驗證/ });
+
+    const inputs = screen.getAllByRole('textbox', { name: /^驗證碼/ });
+    inputs[0].focus();
+    for (let index = 0; index < 2; index++) {
+      const input = document.activeElement!;
+      fireEvent.keyDown(input, { key: '1', code: 'Numpad1', location: 3 });
+      fireEvent.input(input, { target: { value: '1' }, data: '1', inputType: 'insertText' });
+      fireEvent.keyUp(document.activeElement!, { key: '1', code: 'Numpad1', location: 3 });
+      expect(inputs[index + 1]).toHaveFocus();
+      expect(inputs.map(element => (element as HTMLInputElement).value).join(''))
+        .toBe('1'.repeat(index + 1));
+    }
+  });
+
   it('Stage 2 TOTP 輸入行為：單格輸入過濾非數字字元', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
