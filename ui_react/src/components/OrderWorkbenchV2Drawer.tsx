@@ -619,13 +619,15 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 {!terminalStatus && currentBranch !== 'cancelled' && operation !== 'actual-start' && (currentBranch === 'historical' || (assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0 && serviceView !== 'dates')) && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('actual-start')}>{actualStartActionLabel}</button>}
                 {currentBranch === 'cancelled' && <button type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>補登取消服務事實</button>}
               </div>
-              {operationBusy && <p role="status">操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。</p>}
+              {operationBusy && <p role="status">{operation === 'actual-start'
+                ? '操作結果或正式回讀尚未確認，請依下方指引處理。'
+                : '操作結果或正式回讀尚未確認，暫時不能關閉或切換操作。'}</p>}
               {!terminalStatus && operation === 'actual-start' && (currentBranch === 'historical' || (assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0)) && <OrderActualStartPanel key={caseNo} caseNo={caseNo} autoLoad onObserved={(actualStartOperation) => {
                 setServiceView(actualStartOperation === 'reschedule' ? 'assignment' : 'dates');
                 openGroup('service');
                 if (actualStartOperation === 'date_only') setServiceDatesCalculationRevision((revision) => revision + 1);
                 refreshFacts();
-              }} onBusyChange={onOperationBusyChange} onOpenServiceDates={() => { setServiceView('dates'); openGroup('service'); }} />}
+              }} onBusyChange={onOperationBusyChange} onLeavePending={() => requestLeave(onClose)} onOpenServiceDates={() => { setServiceView('dates'); openGroup('service'); }} />}
               {!showCompletion && <OrderAutomaticCompletionStatus caseNo={caseNo} revision={refreshRevision} onObserved={refreshFacts} />}
               {currentBranch === 'normal' && !terminalStatus && assignmentPlan.status === 'ready' && assignmentPlan.data.service_started
                 ? <div className="order-case-action-row">

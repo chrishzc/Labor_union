@@ -15,6 +15,7 @@ interface Props {
   onObserved?: (operation: 'date_only' | 'reschedule') => void;
   onBusyChange?: (busy: boolean) => void;
   onOpenServiceDates?: () => void;
+  onLeavePending?: () => void;
   autoLoad?: boolean;
   staffNames?: Readonly<Record<number, string>>;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
@@ -33,7 +34,7 @@ const actualStartErrorMessage = (caught: unknown, fallback: string) => {
   return caught instanceof Error ? caught.message : fallback;
 };
 
-export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates, autoLoad = false, staffNames = {}, onEditStateChange }) => {
+export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange, onOpenServiceDates, onLeavePending, autoLoad = false, staffNames = {}, onEditStateChange }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
@@ -54,6 +55,8 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const unresolved = flowPhase === 'applying' || flowPhase === 'outcome_unknown' || flowPhase === 'observation_failed' || flowPhase === 'observing'
     || phase === 'applying' || phase === 'outcome_unknown' || phase === 'observation_failed';
   const busy = unresolved || phase === 'loading' || phase === 'previewing';
+  const requestPending = flowPhase === 'applying' || flowPhase === 'observing'
+    || phase === 'loading' || phase === 'previewing' || phase === 'applying';
   useEffect(() => { onBusyChange?.(unresolved); }, [unresolved, onBusyChange]);
   useEffect(() => {
     const previousCaseNo = activeCaseNo.current;
@@ -177,7 +180,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     orderMutationFlowStore.setActualStart(caseNo, { ...saved, status: 'observed', error: null });
     if (!isActive(request, caseNo)) return;
-    setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date);
+    setQuery(data); setDate(data.current_actual_start_date ?? data.planned_start_date); setReason('');
     setPreview(null); setPhase('observed');
     onBusyChange?.(false); onObserved?.(receipt.operation);
   };
@@ -193,7 +196,9 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     } catch (caught) {
       const rejected = (caught instanceof ApiHttpError || caught instanceof OrderMutationError)
         && caught.status >= 400 && caught.status < 500 && caught.status !== 408 && caught.status !== 429;
-      if (rejected && !recoveringUnknown) {
+      const rolledBack = (caught instanceof ApiHttpError || caught instanceof OrderMutationError)
+        && caught.code === 'actual_start_persistence_constraint_violation';
+      if (rejected && (!recoveringUnknown || rolledBack)) {
         orderMutationFlowStore.clearActualStart(caseNo);
         if (isActive(request, caseNo)) {
           setPreview(null); setQuery(null); setPhase('idle'); onBusyChange?.(false);
@@ -240,7 +245,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       if (data.current_actual_start_date === existing.command.payload.new_actual_start_date
         && data.order_version > existing.command.payload.expected_order_version) {
         orderMutationFlowStore.setActualStart(caseNo, { ...existing, status: 'observed', error: null });
-        setQuery(data); setDate(data.current_actual_start_date); setPhase('observed'); setError(null);
+        setQuery(data); setDate(data.current_actual_start_date); setReason(''); setPhase('observed'); setError(null);
         onBusyChange?.(false); onObserved?.('date_only');
         return;
       }
@@ -268,11 +273,16 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     finally { inFlight.current.delete(caseNo); }
   };
-  useUnsavedDraft('實際開始日期', { '實際開始日期': date, '原因': reason }, { enabled: !!query, baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '' }, busy });
+  const draftRef = useUnsavedDraft('實際開始日期', { '實際開始日期': date, '原因': reason }, {
+    enabled: !!query,
+    baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '', '原因': '' },
+    busy: requestPending,
+    save: query && !unresolved && !query.service_data_locked ? confirm : undefined,
+  });
 
 
   return (
-    <section aria-label={`案件 ${caseNo} 實際開始日`}>
+    <section ref={draftRef} aria-label={`案件 ${caseNo} 實際開始日`}>
       <h4>確認／更正實際開始日</h4>
       <p>尚未排班時只保存日期；已有正式安排時才由後端預覽並重排服務日期及必要下游影響。</p>
       {(!autoLoad || error) && <button type="button" disabled={busy} onClick={() => void load()}>讀取實際開始日</button>}
@@ -315,6 +325,10 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       {(flowPhase === 'applying' || flowPhase === 'observing' || phase === 'applying') && <p role="status">實際開始日套用／回讀中…</p>}
       {(flowPhase === 'outcome_unknown' || phase === 'outcome_unknown') && <button type="button" onClick={() => void retryApply()}>以原操作重新確認實際開始日</button>}
       {(flowPhase === 'observation_failed' || phase === 'observation_failed') && <button type="button" onClick={() => void retryObservation()}>只重新讀取實際開始日結果</button>}
+      {unresolved && !requestPending && onLeavePending && <>
+        <p>原操作已保留於本次工作階段。可先返回待辦看板，再次開啟案件後繼續確認；確認前請勿重新整理或關閉分頁。</p>
+        <button type="button" onClick={onLeavePending}>保留原操作並返回待辦看板</button>
+      </>}
       {(flowPhase === 'observed' || phase === 'observed') && <p role="status">實際開始日已完成正式回讀{query?.current_actual_start_date ? `：${query.current_actual_start_date}` : '。'}</p>}
       {(flow?.error ?? error) && <p role="alert">{flow?.error ?? error}</p>}
       {missingAssignments && onOpenServiceDates && (

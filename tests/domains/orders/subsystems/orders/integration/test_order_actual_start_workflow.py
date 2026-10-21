@@ -6,11 +6,12 @@ Description: 驗證實際開工 command 契約及非 AutoComplete workflow 的 l
 from dataclasses import replace
 from datetime import date, datetime, time
 from types import SimpleNamespace
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
-from pymysql.err import IntegrityError
+from pymysql.err import IntegrityError, OperationalError
 
 from shared_kernel.identities import (
     ActorContext,
@@ -30,10 +31,12 @@ from domains.orders.lifecycle import (
 from domains.orders.actual_start import (
     ActualStartBlocker,
     ActualStartCandidateError,
+    ActualStartCandidateKind,
     ActualStartAssignmentFacts,
     ActualStartOrderFacts,
     ActualStartReconfirmationFacts,
     ActualStartReconfirmationState,
+    ActualStartReconfirmationAction,
     ActualStartSchedulingFacts,
     build_actual_start_candidate,
     calculate_progressive_segment_service_dates,
@@ -57,6 +60,7 @@ from infrastructure.mysql.order_actual_start_repository import (
     _stored_receipt,
 )
 from infrastructure.mysql.order_terms_read_model import _service_started
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.payroll_terms_writer import (
     load_actual_start_source_rate_snapshots,
     persist_actual_start_rate_snapshot_carry,
@@ -65,7 +69,7 @@ from infrastructure.mysql.scheduling_replacement_writer import (
     _preserve_previous_leave_occupancy,
 )
 from api.dependencies.order_actual_start import ActualStartApplication
-from api.routes.order_actual_start import _raise_value_error
+from api.routes.order_actual_start import _call_endpoint, _raise_mysql_error, _raise_value_error
 
 
 def _request(*, reason: str = "confirm service start") -> ActualStartApplyRequest:
@@ -92,6 +96,54 @@ def test_actual_start_request_uses_direct_canonical_source_contract() -> None:
 def test_actual_start_request_rejects_blank_change_reason() -> None:
     with pytest.raises(ValueError, match="change reason"):
         _request(reason=" ")
+
+
+@pytest.mark.parametrize("reason", ["", "confirm service start"])
+def test_optional_reason_persists_nonempty_audit_without_changing_replay_identity(reason) -> None:
+    request = _request(reason=reason)
+    fingerprint = PreviewFingerprint("b" * 64)
+    repository = Mock()
+    repository.replace_scheduling_generation.return_value = SimpleNamespace(scheduling_receipt_id=2)
+    preview = SimpleNamespace(
+        unpersisted_source_assignment_ids=(), scheduling=SimpleNamespace(),
+        order_version=1, fingerprint=fingerprint,
+        reconfirmation=SimpleNamespace(action=ActualStartReconfirmationAction.NO_OP),
+        lifecycle_impact=SimpleNamespace(after_status=OrderLifecycleStatus.IN_SERVICE),
+        client_settlement=SimpleNamespace(fingerprint=fingerprint),
+        actual_start=SimpleNamespace(kind=ActualStartCandidateKind.FIRST_CONFIRMATION, actual_end_date=date(2026, 8, 4)),
+    )
+    receipt = SimpleNamespace(order_version=2)
+    workflow = ActualStartWorkflow(repository, Mock(), Mock())
+    workflow._persist(request, preview, fingerprint, receipt)
+
+    persisted_request = repository.append_actual_start_event.call_args.args[0]
+    audit_reason = persisted_request.reason
+    assert audit_reason == (reason or "確認／更正實際開始日（未填寫原因）")
+    assert repository.replace_scheduling_generation.call_args.args[0].reason == audit_reason
+    assert repository.persist_lifecycle_impact.call_args.args[0].reason == audit_reason
+    stored = repository.save_actual_start_receipt.call_args.args[0].stored_receipt
+    assert stored.command_fingerprint == fingerprint
+    assert request.reason == reason
+
+
+def test_check_constraint_failure_is_a_definite_rejection_not_unknown_outcome() -> None:
+    connection = Mock()
+    workflow = ActualStartWorkflow(Mock(), lambda: MySqlUnitOfWork(connection), Mock())
+    workflow.apply_in_current_unit_of_work = Mock(side_effect=OperationalError(3819, "check constraint failed"))
+    with pytest.raises(HTTPException) as caught:
+        _call_endpoint(lambda: workflow.apply(_request()), "saved", CorrelationId("constraint-test"))
+    assert caught.value.status_code == 422
+    assert caught.value.detail["error"]["code"] == "actual_start_persistence_constraint_violation"
+    connection.rollback.assert_called_once()
+    connection.commit.assert_not_called()
+
+
+@pytest.mark.parametrize("mysql_code,status", [(1205, 503), (1213, 503), (2013, 500)])
+def test_connection_or_lock_errors_are_not_misreported_as_rolled_back(mysql_code, status) -> None:
+    with pytest.raises(HTTPException) as caught:
+        _raise_mysql_error(OperationalError(mysql_code, "transaction unavailable"), CorrelationId("db-test"))
+    assert caught.value.status_code == status
+    assert caught.value.detail["error"]["code"] != "actual_start_persistence_constraint_violation"
 
 
 def test_restarted_historical_tombstone_uses_date_only_route() -> None:

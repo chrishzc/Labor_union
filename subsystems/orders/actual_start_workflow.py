@@ -587,6 +587,10 @@ class ActualStartWorkflow:
         )
 
     def _persist(self, request, preview, command_fingerprint, receipt):
+        # Keep the original command fingerprint for replay; persistence needs
+        # a nonempty audit description even when the optional reason is blank.
+        if not request.reason:
+            request = replace(request, reason="確認／更正實際開始日（未填寫原因）")
         event_id = self._repository.append_actual_start_event(request, preview)
         scheduling_result = _persist_scheduling(self._repository, request, preview, command_fingerprint)
         control_event_id = _confirm_reconfirmation(self._repository, request, preview, event_id)

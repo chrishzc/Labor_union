@@ -310,6 +310,14 @@ def _raise_typed_error(error: TypedError) -> None:
 
 def _raise_mysql_error(error, correlation_id):
     mysql_code = int(error.args[0]) if error.args else 0
+    if mysql_code == 3819:
+        typed = TypedError(
+            ErrorCategory.VALIDATION,
+            "actual_start_persistence_constraint_violation",
+            "實際開始日資料未通過寫入檢查，本次未套用，請重新讀取並確認。",
+            correlation_id,
+        )
+        raise _http_error(422, typed) from error
     if mysql_code in _RETRYABLE_MYSQL_CODES:
         typed = TypedError(
             ErrorCategory.UNAVAILABLE,
