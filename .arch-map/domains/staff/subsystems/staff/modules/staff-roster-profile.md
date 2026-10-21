@@ -42,6 +42,8 @@
 ## Contracts
 - 名冊先循既有 bounded Staff id cursor 讀取全部頁面，再以公會編號自然升冪呈現；未設定排最後、相同比較以 id 穩定排序。`staff_directory_adapter.ts` 共用排序與「公會編號 姓名」顯示，排班與候選呈現借用此規則，不改 Staff identity 或 writer。
 - `StaffIdentityProvider` 在 authenticated 管理頁共用 bounded 摘要全頁讀取，只保留 id／姓名／公會編號，以 canonical id 提供標籤與選單排序；離頁中止讀取，錯誤可重讀，不以姓名比對或保存跨 session 快取。案件、財務、歷史帳務與 LINE 管理借用此唯讀 presentation，不改人員或段落命令。
+- 名冊主頁預設「現役月嫂」，以「已退役月嫂」分頁分開呈現；`/roster` optional `lifecycle_state=active|retired` 在 cursor／limit 前依 Staff-owned lifecycle 篩選，省略維持原查詢，不增加回應欄位或逐人查詢。退役／復職的正式 readback 同步移除原分頁清單列；搜尋與排序沿用目前分頁。
+- `/summaries` 同樣支援 optional `lifecycle_state=active|retired`，供排班及代班的新選項使用 active；省略仍保留全部人員，`StaffIdentityProvider` 不套用篩選，以保留歷史案件的退役人員名稱與公會編號。
 - 履歷維持既有 staging／Preview／Apply／版本及 authenticated download。`StaffRegistryEditor` 同頁提供所選 PDF 與目前履歷 Blob 預覽、下載及獨立 loading／error／empty 狀態；`staff_resume_client.ts` 讀 controlled-files runtime settings，檔案操作使用專用 timeout，離頁釋放預覽 URL。
 - 規格 33 §3.2：Staff Profile 擁有 nullable `union_no`，以完整 binary 字串唯一性提供人工公會編號；不取代 Staff id／cursor。主頁使用表格列選取與公會編號搜尋，成功 Profile readback 同步清單。重複與 MySQL 編號更新死結分別為 typed `staff_union_no_collision`／`staff_profile_concurrent_conflict`，沿用既有 version／event／receipt／UoW。
 - `document/架構重整/01_規格基線/24A_Staff_Roster_Case_Preference_Read_Model正式補充契約.md` §2.1

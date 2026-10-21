@@ -139,6 +139,8 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
 
 ## 5.1 Staff 退役對 Matching 的約束（2026-08-15，WP91 已人工確認）
 
+- 退役生效時間代表月嫂停止接案的時間，不是按下儲存的時間。管理端提供生效日期選擇，轉為該日台北時間 00:00 的既有 `effective_at` 格式，不要求手填完整時間或時區；原因以中文選單對應既有合法代碼，維持選填。
+- 月嫂仍有未結束案件時不得直接退役；Preview 與 Apply 均須檢查，失敗應明確說明未結束案件的阻擋原因。既有 version、fingerprint、idempotency 與交易邊界維持不變。
 - Staff 退役是獨立 `staff_lifecycle_states` 的 `active -> retired` 根事實；既有 `staff.status`
   保留 legacy `active/inactive` 語意。Matching、Scheduling 或 UI 不得自行寫入、推測或反轉 lifecycle。
 - 退役於 business time 生效後，所有新候選、重算、邀請、媒合與新 assignment 必須排除該 Staff，

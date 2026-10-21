@@ -18,6 +18,7 @@ export interface StaffDirectoryQueryParams {
   afterId?: number;
   staffId?: number;
   includeProfile?: boolean;
+  lifecycleState?: 'active' | 'retired';
 }
 
 export interface StaffDirectoryQueryOptions {
@@ -34,7 +35,7 @@ export interface StaffDirectoryClient {
 
 export async function loadAllStaffDirectoryPages(
   query: (params?: StaffDirectoryQueryParams, options?: StaffDirectoryQueryOptions) => Promise<StaffDirectoryPage>,
-  params: Pick<StaffDirectoryQueryParams, 'pageSize' | 'includeProfile'> = {},
+  params: Pick<StaffDirectoryQueryParams, 'pageSize' | 'includeProfile' | 'lifecycleState'> = {},
   options?: StaffDirectoryQueryOptions,
 ): Promise<StaffDirectoryPage> {
   const items: StaffDirectoryPage['items'] = [];
@@ -61,6 +62,9 @@ function validatePositiveInteger(value: number, field: string): void {
 }
 
 function validateParams(params: StaffDirectoryQueryParams): void {
+  if (params.lifecycleState !== undefined && !['active', 'retired'].includes(params.lifecycleState)) {
+    throw new StaffDirectoryValidationError('任職狀態篩選不正確。');
+  }
   const pageSize = params.pageSize ?? 200;
   if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 200) {
     throw new StaffDirectoryValidationError('pageSize 必須是 1 至 200 之間的整數。');
@@ -107,17 +111,20 @@ function decodePage(raw: unknown, includeProfile = false): StaffDirectoryPage {
   return decoded.data.data;
 }
 
+const newPagination = () => ({
+  requestedCursors: new Set<number>(),
+  pendingCursors: new Set<number>(),
+  returnedCursors: new Set<number>(),
+  loadedIds: new Set<number>(),
+});
+
 class DefaultStaffDirectoryClient implements StaffDirectoryClient {
-  private readonly requestedCursors = new Set<number>();
-  private readonly pendingCursors = new Set<number>();
-  private readonly returnedCursors = new Set<number>();
-  private readonly loadedIds = new Set<number>();
+  private pagination = newPagination();
+  private paginationBySignal = new WeakMap<AbortSignal, ReturnType<typeof newPagination>>();
 
   public resetPagination(): void {
-    this.requestedCursors.clear();
-    this.pendingCursors.clear();
-    this.returnedCursors.clear();
-    this.loadedIds.clear();
+    this.pagination = newPagination();
+    this.paginationBySignal = new WeakMap();
   }
 
   public async queryPage(
@@ -125,17 +132,23 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
     options?: StaffDirectoryQueryOptions
   ): Promise<StaffDirectoryPage> {
     validateParams(params);
-    if (params.afterId === undefined && params.staffId === undefined) this.resetPagination();
+    const signal = options?.signal;
+    const pagination = params.afterId === undefined && params.staffId === undefined
+      ? newPagination()
+      : (signal ? this.paginationBySignal.get(signal) : this.pagination) ?? newPagination();
+    if (signal) this.paginationBySignal.set(signal, pagination);
+    else this.pagination = pagination;
     if (
       params.afterId !== undefined
-      && (this.requestedCursors.has(params.afterId) || this.pendingCursors.has(params.afterId))
+      && (pagination.requestedCursors.has(params.afterId) || pagination.pendingCursors.has(params.afterId))
     ) {
       throw new StaffDirectoryValidationError(`cursor ${params.afterId} 已查詢過。`);
     }
-    if (params.afterId !== undefined) this.pendingCursors.add(params.afterId);
-    const query: Record<string, number> = { page_size: params.pageSize ?? 200 };
+    if (params.afterId !== undefined) pagination.pendingCursors.add(params.afterId);
+    const query: Record<string, number | string> = { page_size: params.pageSize ?? 200 };
     if (params.afterId !== undefined) query.after_id = params.afterId;
     if (params.staffId !== undefined) query.staff_id = params.staffId;
+    if (params.lifecycleState !== undefined) query.lifecycle_state = params.lifecycleState;
 
     try {
       const raw = await transport.get<unknown>(params.includeProfile ? '/api/v1/staff/roster' : '/api/v1/staff/summaries', {
@@ -148,7 +161,7 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
         if (params.includeProfile && item.profile?.staff_id !== item.id) {
           throw new StaffDirectoryValidationError('月嫂主檔與清單對象不一致。');
         }
-        if (pageIds.has(item.id) || this.loadedIds.has(item.id)) {
+        if (pageIds.has(item.id) || pagination.loadedIds.has(item.id)) {
           throw new StaffDirectoryValidationError(`服務人員摘要包含重複 identity：${item.id}。`);
         }
         pageIds.add(item.id);
@@ -157,19 +170,19 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
         if (params.afterId !== undefined && page.next_cursor <= params.afterId) {
           throw new StaffDirectoryValidationError('next_cursor 必須向前推進。');
         }
-        if (this.returnedCursors.has(page.next_cursor)) {
+        if (pagination.returnedCursors.has(page.next_cursor)) {
           throw new StaffDirectoryValidationError(`next_cursor ${page.next_cursor} 已出現過。`);
         }
       }
-      if (page.next_cursor !== null) this.returnedCursors.add(page.next_cursor);
-      for (const id of pageIds) this.loadedIds.add(id);
+      if (page.next_cursor !== null) pagination.returnedCursors.add(page.next_cursor);
+      for (const id of pageIds) pagination.loadedIds.add(id);
       if (params.afterId !== undefined) {
-        this.pendingCursors.delete(params.afterId);
-        this.requestedCursors.add(params.afterId);
+        pagination.pendingCursors.delete(params.afterId);
+        pagination.requestedCursors.add(params.afterId);
       }
       return page;
     } catch (error) {
-      if (params.afterId !== undefined) this.pendingCursors.delete(params.afterId);
+      if (params.afterId !== undefined) pagination.pendingCursors.delete(params.afterId);
       throw mapStaffDirectoryError(error);
     }
   }
@@ -177,6 +190,12 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
 
 export function createStaffDirectoryClient(): StaffDirectoryClient {
   return new DefaultStaffDirectoryClient();
+}
+
+export async function loadActiveStaffIds(options?: StaffDirectoryQueryOptions): Promise<ReadonlySet<number>> {
+  const client = createStaffDirectoryClient();
+  const page = await loadAllStaffDirectoryPages(client.queryPage.bind(client), { pageSize: 200, lifecycleState: 'active' }, options);
+  return new Set(page.items.map((person) => person.id));
 }
 
 export const staffDirectoryClient: StaffDirectoryClient = createStaffDirectoryClient();

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
+from domains.staff.retirement import StaffLifecycleState
 
 from subsystems.staff.summary_query import StaffSummaryQueryRequest
 from subsystems.staff.qualification_master_query import StaffRosterServiceProfile
@@ -62,7 +63,7 @@ class StaffProfileRepository(Protocol):
 
     def fetch_bank_accounts(self, staff_id: int) -> tuple[Mapping[str, object], ...]: ...
 
-    def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None) -> tuple[Mapping[str, object], ...]: ...
+    def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None, lifecycle_state: StaffLifecycleState | None = None) -> tuple[Mapping[str, object], ...]: ...
 
     def fetch_bank_accounts_for_staff(self, staff_ids: tuple[int, ...]) -> Mapping[int, tuple[Mapping[str, object], ...]]: ...
 
@@ -103,8 +104,8 @@ class StaffProfileQueryApplication:
             raise StaffProfileContractError("staff profile bank accounts exceed bounded maximum")
         return _profile(row, bank_rows, staff_id)
 
-    def query_page(self, request: StaffSummaryQueryRequest) -> StaffRosterPage:
-        rows = self._repository.fetch_page(after_id=request.after_id, page_size=request.page_size, staff_id=request.staff_id)
+    def query_page(self, request: StaffSummaryQueryRequest, *, lifecycle_state: StaffLifecycleState | None = None) -> StaffRosterPage:
+        rows = self._repository.fetch_page(after_id=request.after_id, page_size=request.page_size, staff_id=request.staff_id, lifecycle_state=lifecycle_state)
         if not isinstance(rows, tuple) or len(rows) > request.page_size + 1:
             raise StaffProfileContractError("staff roster page exceeds bounded maximum")
         selected = rows[:request.page_size]

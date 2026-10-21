@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   sendCustomerConfirmation: vi.fn(), previewCustomerConfirmation: vi.fn(), recordFormalPlanWillingness: vi.fn(),
   coreTimelines: vi.fn(), getTerms: vi.fn(), replacementQuery: vi.fn(), replacementPreview: vi.fn(), replacementApply: vi.fn(),
 }));
+vi.mock('../../../../../../../api/staff_directory/staff_directory_client', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../../../../../api/staff_directory/staff_directory_client')>(),
+  loadActiveStaffIds: vi.fn(async () => new Set([8892, 8893, 8894])),
+}));
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({ orderCoreStageProjectionClient: { getCoreStageTimelines: mocks.coreTimelines } }));
 vi.mock('../../../../../../../components/OrderServiceDatesPanel', () => ({ OrderServiceDatesPanel: () => <p>服務日期工作區</p> }));
 vi.mock('../../../../../../../components/OrderAssignmentPlanPanel', () => ({ OrderAssignmentPlanPanel: () => <p>排班工作區</p> }));

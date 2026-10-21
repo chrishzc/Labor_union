@@ -3,6 +3,8 @@
 from datetime import date, datetime
 
 import pytest
+import sqlite3
+from domains.staff.retirement import StaffLifecycleState
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -67,6 +69,7 @@ class _Repository:
 
     def fetch_page(self, **_):
         self.page_reads += 1
+        self.selected_lifecycle = _.get('lifecycle_state')
         return (_row(), {**_row(), 'id':8, 'union_no':'B008'})
 
     def fetch_bank_accounts_for_staff(self, staff_ids):
@@ -112,6 +115,64 @@ def _client():
         StaffProfileQueryApplication(_Repository())
     )
     return TestClient(app)
+
+
+@pytest.mark.parametrize('state', ['active', 'retired'])
+def test_roster_filters_are_typed_and_forwarded_without_adding_response_fields(state):
+    repository = _Repository()
+    client = _client()
+    client.app.dependency_overrides[get_staff_profile_application] = lambda: StaffProfileQueryApplication(repository)
+    response = client.get('/api/v1/staff/roster', params={'lifecycle_state': state})
+    assert response.status_code == 200
+    assert repository.selected_lifecycle is StaffLifecycleState(state)
+    assert set(response.json()['data']['items'][0]) == {'id', 'union_no', 'name', 'phone', 'education', 'profile', 'service_profile'}
+    reads = repository.page_reads
+    assert client.get('/api/v1/staff/roster?lifecycle_state=unknown').status_code == 422
+    assert repository.page_reads == reads
+
+
+def test_mysql_roster_filter_separates_canonical_retired_state_before_cursor_limit():
+    db = sqlite3.connect(':memory:')
+    db.row_factory = sqlite3.Row
+    columns = ','.join(f'"{field}"' for field in _row() if field != 'bank_accounts_version')
+    db.execute(f'CREATE TABLE staff ({columns})')
+    db.execute('CREATE TABLE staff_bank_account_states (staff_id INTEGER, aggregate_version INTEGER)')
+    db.execute('CREATE TABLE staff_lifecycle_states (staff_id INTEGER PRIMARY KEY, lifecycle_state TEXT)')
+    db.executemany('INSERT INTO staff(id,name) VALUES (?,?)', [(i, f'synthetic-{i}') for i in range(1, 5)])
+    db.executemany('INSERT INTO staff_lifecycle_states VALUES (?,?)', [(2, 'active'), (3, 'retired')])
+
+    class Cursor:
+        def __enter__(self):
+            self.cursor = db.cursor()
+            return self
+
+        def __exit__(self, *_):
+            self.cursor.close()
+
+        def execute(self, sql, params):
+            assert sql.lstrip().startswith('SELECT ')
+            self.cursor.execute(sql.replace('%s', '?'), params)
+
+        def fetchall(self):
+            return [dict(row) for row in self.cursor.fetchall()]
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    repository = MySqlStaffProfileQueryRepository(Connection())
+    def ids(state=None, *, after=None, size=200, staff=None):
+        return [r['id'] for r in repository.fetch_page(after_id=after, page_size=size, staff_id=staff, lifecycle_state=state)]
+    try:
+        assert ids() == [1, 2, 3, 4]
+        assert ids(StaffLifecycleState.ACTIVE) == [1, 2, 4]
+        assert ids(StaffLifecycleState.RETIRED) == [3]
+        assert ids(StaffLifecycleState.ACTIVE, after=2, size=1) == [4]
+        assert ids(StaffLifecycleState.RETIRED, after=3) == []
+        assert ids(StaffLifecycleState.ACTIVE, staff=3) == []
+        assert ids(StaffLifecycleState.RETIRED, staff=3) == [3]
+    finally:
+        db.close()
 
 
 def test_staff_profile_returns_complete_internal_admin_fields():

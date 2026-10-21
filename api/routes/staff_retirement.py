@@ -170,7 +170,20 @@ def _raise(error: Exception, correlation: CorrelationId) -> None:
     else:
         status = 422
         category = ErrorCategory.VALIDATION
-    typed = TypedError(category, code or "staff_lifecycle_validation_error", "Staff lifecycle 操作被拒絕。", correlation)
+    messages = {
+        "staff_not_found": "找不到這位月嫂，請重新開啟名冊。",
+        "stale_version": "任職狀態已更新，請重新查詢後再儲存。",
+        "stale_preview": "任職狀態已更新，請重新查詢後再儲存。",
+        "staff_lifecycle_state_unsupported": "月嫂的人事資料狀態異常，請先確認名冊資料。",
+        "staff_retirement_reason_invalid": "異動原因不符合此操作的選項。",
+        "staff_retirement_effective_at_invalid": "請選擇有效的生效日期。",
+        "staff_retirement_open_assignments": "此月嫂仍有未結束案件，請先完成案件或辦理改派，再辦理退役。",
+        "staff_retirement_future_effective_at_unsupported": "生效時間不能晚於目前時間，請重新辦理。",
+        "line_identity_default_menu_not_published": "LINE 預設選單尚未發布，無法完成退役所需的身分解除；請先完成 LINE 選單設定。",
+        "line_identity_revocation_in_progress": "LINE 身分解除正在處理，請完成後重新辦理退役。",
+        "line_identity_staff_retirement_revocation_blocked": "LINE 身分解除目前受阻，請先確認該月嫂的 LINE 綁定狀態。",
+    }
+    typed = TypedError(category, code or "staff_lifecycle_validation_error", messages.get(code, "任職狀態儲存失敗，請重新查詢後再試。"), correlation)
     raise HTTPException(status_code=status, detail={"error": _materialize(typed)}) from error
 
 

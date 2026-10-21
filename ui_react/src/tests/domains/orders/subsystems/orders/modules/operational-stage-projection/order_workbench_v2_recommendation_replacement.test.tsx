@@ -7,6 +7,10 @@ import { sessionClient } from '../../../../../../../api/auth/session_client';
 import type { FormalPlanContactState } from '../../../../../../../api/scheduling/matching_plan_communication_client';
 
 const mocks = vi.hoisted(() => ({ assignment: vi.fn(), pool: vi.fn(), queryPlan: vi.fn(), contact: vi.fn(), previewRelease: vi.fn(), release: vi.fn(), cancel: vi.fn(), create: vi.fn(), receipt: vi.fn() }));
+vi.mock('../../../../../../../api/staff_directory/staff_directory_client', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../../../../../api/staff_directory/staff_directory_client')>(),
+  loadActiveStaffIds: vi.fn(async () => new Set([1, 2, 3])),
+}));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getAssignmentPlan: mocks.assignment } }));
 vi.mock('../../../../../../../api/scheduling/candidate_contact_pool_client', () => ({ candidateContactPoolClient: { query: mocks.pool } }));
 vi.mock('../../../../../../../api/scheduling/waiting_deposit_lock_client', () => ({ waitingDepositLockClient: { queryPlan: mocks.queryPlan, previewRelease: mocks.previewRelease, release: mocks.release } }));

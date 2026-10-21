@@ -186,6 +186,11 @@
   box-shadow: 0 2px 8px rgba(255, 127, 80, 0.25);
 }
 
+.staff-roster-tabs { margin-bottom: 16px; }
+.staff-roster-tabs .staff-filter-pill { min-height: 40px; }
+.staff-roster-tabs .staff-filter-pill.active { background: #9a3412; border-color: #9a3412; }
+.staff-roster-tabs .staff-filter-pill:focus-visible { outline: 3px solid #9a3412; outline-offset: 3px; }
+
 .staff-query-selector {
   display: flex;
   align-items: center;

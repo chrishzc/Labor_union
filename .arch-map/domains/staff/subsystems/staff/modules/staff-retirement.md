@@ -12,6 +12,7 @@
 - `subsystems/staff/retirement_workflow.py`
 - `infrastructure/mysql/staff_retirement_repository.py`
 - `api/dependencies/staff_retirement.py` — composition only.
+- `api/routes/staff_retirement.py` — authenticated lifecycle Query／Preview／Apply transport and typed Chinese error presentation.
 
 ## Dependencies
 - outbound: `external-integration/line/module:line-identity-management` — `subsystems/line/staff_retirement_effect.py` adapter、existing revocation application contract 與 current notification registry projection；缺少有效 staff binding 時不造 recipient／task。

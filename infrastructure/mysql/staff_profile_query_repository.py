@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from domains.staff.retirement import StaffLifecycleState
 
 from shared_kernel.performance import MAXIMUM_PAGE_SIZE
 from infrastructure.mysql.staff_qualification_master_repository import MySqlStaffQualificationMasterRepository
@@ -43,16 +44,21 @@ class MySqlStaffProfileQueryRepository:
             )
             return tuple(cursor.fetchall())
 
-    def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None) -> tuple[Mapping[str, object], ...]:
+    def fetch_page(self, *, after_id: int | None, page_size: int, staff_id: int | None, lifecycle_state: StaffLifecycleState | None = None) -> tuple[Mapping[str, object], ...]:
         if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= MAXIMUM_PAGE_SIZE:
             raise ValueError("staff roster page_size is outside bounded policy")
         predicate = "id=%s" if staff_id is not None else "id > %s"
+        parameters: list[object] = [staff_id if staff_id is not None else (after_id or 0)]
+        if lifecycle_state is not None:
+            predicate += " AND COALESCE((SELECT lifecycle_state FROM staff_lifecycle_states WHERE staff_id=staff.id),'active')=%s"
+            parameters.append(lifecycle_state.value)
+        parameters.append(1 if staff_id is not None else page_size + 1)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 f"SELECT {_PROFILE_COLUMNS},CAST(COALESCE((SELECT aggregate_version FROM staff_bank_account_states "
                 "WHERE staff_id=staff.id),0) AS UNSIGNED) AS bank_accounts_version "
                 f"FROM staff WHERE {predicate} ORDER BY id LIMIT %s",
-                (staff_id if staff_id is not None else (after_id or 0), 1 if staff_id is not None else page_size + 1),
+                tuple(parameters),
             )
             return tuple(cursor.fetchall())
 

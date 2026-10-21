@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pytest
+import sqlite3
+from domains.staff.retirement import StaffLifecycleState
 
 from api.schemas.staff_summary import StaffSummaryView
 from infrastructure.mysql.staff_summary_query_repository import (
@@ -27,9 +29,50 @@ class _SummaryRepository:
         after_id: int | None,
         page_size: int,
         staff_id: int | None,
+        lifecycle_state=None,
     ) -> tuple[Mapping[str, object], ...]:
         del after_id, page_size, staff_id
         return self._rows
+
+
+def test_selector_filter_excludes_retired_before_paging_but_unfiltered_history_keeps_identity():
+    db = sqlite3.connect(':memory:')
+    db.row_factory = sqlite3.Row
+    db.execute('CREATE TABLE staff(id INTEGER PRIMARY KEY,name TEXT,phone TEXT,education TEXT,union_no TEXT)')
+    db.execute('CREATE TABLE staff_lifecycle_states(staff_id INTEGER PRIMARY KEY,lifecycle_state TEXT)')
+    db.executemany('INSERT INTO staff(id,name) VALUES (?,?)', [(1, 'active-default'), (2, 'retired-history'), (3, 'active-explicit')])
+    db.executemany('INSERT INTO staff_lifecycle_states VALUES (?,?)', [(2, 'retired'), (3, 'active')])
+
+    class Cursor:
+        def __enter__(self):
+            self.cursor = db.cursor()
+            return self
+
+        def __exit__(self, *_):
+            self.cursor.close()
+
+        def execute(self, sql, params):
+            assert sql.startswith('SELECT ')
+            self.cursor.execute(sql.replace('%s', '?'), params)
+
+        def fetchall(self):
+            return [dict(row) for row in self.cursor.fetchall()]
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    service = StaffSummaryQueryService(MySqlStaffSummaryQueryRepository(Connection()))
+    try:
+        active = service.query(StaffSummaryQueryRequest(1, after_id=1, lifecycle_state=StaffLifecycleState.ACTIVE))
+        assert [person.id for person in active.items] == [3]
+        assert active.next_cursor is None
+        assert service.query(StaffSummaryQueryRequest(200, staff_id=2, lifecycle_state=StaffLifecycleState.ACTIVE)).items == ()
+        historical = service.query(StaffSummaryQueryRequest(200, staff_id=2))
+        assert historical.items[0].name == 'retired-history'
+        assert [person.id for person in service.query(StaffSummaryQueryRequest(200)).items] == [1, 2, 3]
+    finally:
+        db.close()
 
 
 class _Cursor:

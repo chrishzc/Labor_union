@@ -56,6 +56,19 @@ def _query_application(connection):
     )
 
 
+def test_summary_route_accepts_active_filter_and_rejects_unknown_before_reading():
+    connection = _Connection([])
+    client = TestClient(_app(authenticated=True, query_application=_query_application(connection)))
+    result = client.get('/api/v1/staff/summaries?lifecycle_state=active')
+    assert result.status_code == 200
+    sql, params = connection.cursor_instance.executed
+    assert 'staff_lifecycle_states' in sql
+    assert params == (0, 'active', 201)
+    connection.cursor_instance.executed = None
+    assert client.get('/api/v1/staff/summaries?lifecycle_state=unknown').status_code == 422
+    assert connection.cursor_instance.executed is None
+
+
 def _app(*, authenticated: bool, query_application=None, query_connection=None) -> FastAPI:
     app = FastAPI()
     app.include_router(staff_routes.router)

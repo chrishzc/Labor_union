@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
+from domains.staff.retirement import StaffLifecycleState
 
 from shared_kernel.performance import MAXIMUM_PAGE_SIZE
 from shared_kernel.validation import require_positive_integer
@@ -19,8 +20,11 @@ class StaffSummaryQueryRequest:
     page_size: int
     after_id: int | None = None
     staff_id: int | None = None
+    lifecycle_state: StaffLifecycleState | None = None
 
     def __post_init__(self) -> None:
+        if self.lifecycle_state is not None and not isinstance(self.lifecycle_state, StaffLifecycleState):
+            raise ValueError('staff summary lifecycle_state is invalid')
         require_positive_integer(self.page_size, "staff summary page_size")
         if self.page_size > MAXIMUM_PAGE_SIZE:
             raise ValueError("staff summary page_size must not exceed 200")
@@ -54,6 +58,7 @@ class StaffSummaryRepository(Protocol):
         after_id: int | None,
         page_size: int,
         staff_id: int | None,
+        lifecycle_state: StaffLifecycleState | None = None,
     ) -> tuple[Mapping[str, object], ...]: ...
 
 
@@ -68,6 +73,7 @@ class StaffSummaryQueryService:
             after_id=request.after_id,
             page_size=request.page_size,
             staff_id=request.staff_id,
+            lifecycle_state=request.lifecycle_state,
         )
         if not isinstance(rows, tuple):
             raise StaffSummaryContractError("repository page must be a tuple")

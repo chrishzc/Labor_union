@@ -72,6 +72,14 @@ describe('staff directory client', () => {
     expect(result.items[0].profile?.bank_accounts).toEqual(STAFF_PROFILE.bank_accounts);
   });
 
+  it.each(['active', 'retired'] as const)('requests the %s roster without changing response fields', async (lifecycleState) => {
+    const body = { ...STAFF_RESPONSE_ONE, data: { items: [{ ...STAFF_RESPONSE_ONE.data.items[0], profile: STAFF_PROFILE, service_profile: { ...STAFF_QUALIFICATION_MASTER.service_profile, cooking_skills: [] } }], next_cursor: null } };
+    globalThis.fetch = vi.fn().mockResolvedValue(response(body));
+    const result = await createStaffDirectoryClient().queryPage({ includeProfile: true, lifecycleState });
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(`/api/v1/staff/roster?page_size=200&lifecycle_state=${lifecycleState}`);
+    expect(result).toEqual(body.data);
+  });
+
   it('rejects missing or misbound full profiles instead of presenting incomplete master data', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(response(STAFF_RESPONSE_ONE));
     await expect(createStaffDirectoryClient().queryPage({includeProfile:true})).rejects.toThrow();
@@ -99,6 +107,14 @@ describe('staff directory client', () => {
     expect(vi.mocked(globalThis.fetch).mock.calls[1][1]?.headers).toMatchObject({
       Authorization: 'Bearer staff-token-2',
     });
+  });
+
+  it('filters selectable summaries while leaving the historical label lookup unfiltered', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(response(STAFF_RESPONSE_ONE));
+    await createStaffDirectoryClient().queryPage({ lifecycleState: 'active' });
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/v1/staff/summaries?page_size=200&lifecycle_state=active');
+    await createStaffDirectoryClient().queryPage();
+    expect(vi.mocked(globalThis.fetch).mock.calls[1][0]).toBe('/api/v1/staff/summaries?page_size=200');
   });
 
   it('fails before fetch without a memory session', async () => {
@@ -161,6 +177,26 @@ describe('staff directory client', () => {
     expect(page.items).toEqual([...STAFF_RESPONSE_ONE.data.items, ...STAFF_RESPONSE_TWO.data.items]);
     expect(page.next_cursor).toBeNull();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates concurrent list and search cursors while retaining duplicate protection per query', async () => {
+    let finishFirst!: (value: ReturnType<typeof response>) => void;
+    const delayed = new Promise<ReturnType<typeof response>>((resolve) => { finishFirst = resolve; });
+    globalThis.fetch = vi.fn().mockReturnValueOnce(delayed)
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_ONE))
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_TWO))
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_TWO));
+    const client = createStaffDirectoryClient();
+    const list = { signal: new AbortController().signal };
+    const search = { signal: new AbortController().signal };
+    const listRequest = client.queryPage({}, list);
+    await expect(client.queryPage({}, search)).resolves.toEqual(STAFF_RESPONSE_ONE.data);
+    finishFirst(response(STAFF_RESPONSE_ONE));
+    await expect(listRequest).resolves.toEqual(STAFF_RESPONSE_ONE.data);
+    await expect(client.queryPage({ afterId: 12 }, list)).resolves.toEqual(STAFF_RESPONSE_TWO.data);
+    await expect(client.queryPage({ afterId: 12 }, search)).resolves.toEqual(STAFF_RESPONSE_TWO.data);
+    await expect(client.queryPage({ afterId: 12 }, list)).rejects.toBeInstanceOf(StaffDirectoryValidationError);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(4);
   });
 
   it('validates bounds and supports an empty page', async () => {

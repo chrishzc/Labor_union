@@ -1,6 +1,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { compareStaffUnionNumbers } from '../adapters/staff/staff_directory_adapter';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
+import { loadActiveStaffIds } from '../api/staff_directory/staff_directory_client';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { candidateContactPoolClient, type CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
@@ -41,11 +42,11 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
   useEffect(() => {
     const controller = new AbortController();
     setSource(null); setError(null);
-    void Promise.all([ordersQueryClient.getAssignmentPlan(caseNo, { signal: controller.signal }), candidateContactPoolClient.query(caseNo, { signal: controller.signal })])
-      .then(([assignment, pool]) => {
+    void Promise.all([ordersQueryClient.getAssignmentPlan(caseNo, { signal: controller.signal }), candidateContactPoolClient.query(caseNo, { signal: controller.signal }), loadActiveStaffIds({ signal: controller.signal })])
+      .then(([assignment, pool, activeStaffIds]) => {
         if (controller.signal.aborted) return;
         if (assignment.case_no !== caseNo || pool.case_no !== caseNo) throw new Error('換人查詢案件識別不一致。');
-        setSource({ pool, assigned: assignment.assignments.length > 0, started: assignment.service_started });
+        setSource({ pool: { ...pool, candidates: pool.candidates.filter((candidate) => activeStaffIds.has(candidate.staff_id)) }, assigned: assignment.assignments.length > 0, started: assignment.service_started });
       }).catch(caught => { if (!controller.signal.aborted) setError(failure(caught)); });
     return () => controller.abort();
   }, [caseNo, retry]);

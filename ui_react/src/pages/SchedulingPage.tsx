@@ -6,6 +6,7 @@ import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChan
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './SchedulingPage.css';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
@@ -636,6 +637,7 @@ function LeaveSubstitutionWorkspace({
   suggestedCaseNo: string | null;
   staffList: readonly StaffDirectoryCardViewModel[];
 }) {
+  const staffIdentity = useStaffIdentityLabels();
   const [caseNo, setCaseNo] = useState(() => suggestedCaseNo || '');
   const [caseOptions, setCaseOptions] = useState<readonly { caseNo: string; clientName: string }[]>([]);
   const [caseOptionsLoading, setCaseOptionsLoading] = useState(true);
@@ -702,7 +704,7 @@ function LeaveSubstitutionWorkspace({
           request_status: receipt.status,
           aggregate_version: receipt.version,
         };
-        setInboxReceipt(`已受理 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
+        setInboxReceipt(`已受理 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
         await loadInbox();
       }
       setSelectedInboxItem(selectedItem);
@@ -726,7 +728,7 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     try {
       await staffLeaveInboxClient.review(item, 'reject', rejectReason);
-      setInboxReceipt(`已退回 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；待辦狀態已更新。`);
+      setInboxReceipt(`已退回 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；待辦狀態已更新。`);
       if (selectedInboxItem?.id === item.id) {
         setSelectedInboxItem(null);
       }
@@ -744,7 +746,7 @@ function LeaveSubstitutionWorkspace({
     setInboxError(null);
     try {
       await staffLeaveInboxClient.review(item, 'cancel', cancelReason);
-      setInboxReceipt(`已取消 ${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} 的請假待辦；待辦狀態已更新。`);
+      setInboxReceipt(`已取消 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；待辦狀態已更新。`);
       if (selectedInboxItem?.id === item.id) {
         setSelectedInboxItem(null);
       }
@@ -1159,7 +1161,7 @@ function LeaveSubstitutionWorkspace({
       {selectedInboxItem && (
         <div style={{ padding: '12px 18px', background: '#ffedd5', border: '1.5px solid #fdba74', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <span style={{ fontSize: '0.9rem', color: '#9a3412', fontWeight: 700 }}>
-            🚨 目前已連動 LINE 請假待辦（{staffDisplayLabel(staffList.find(staff => staff.id === selectedInboxItem.staff_id)?.unionNo, selectedInboxItem.staff_name)} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
+            🚨 目前已連動 LINE 請假待辦（{staffIdentity.label(selectedInboxItem.staff_id, selectedInboxItem.staff_name, staffList.find(staff => staff.id === selectedInboxItem.staff_id)?.unionNo)} ｜ {selectedInboxItem.leave_start_date}～{selectedInboxItem.leave_end_date}）
           </span>
           <button
             type="button"
@@ -1287,13 +1289,13 @@ function LeaveSubstitutionWorkspace({
             >
               {assignments.map((assignment) => (
                 <option key={assignment.assignment_id} value={assignment.assignment_id}>
-                  #{assignment.assignment_id} ｜ {staffDisplayLabel(staffList.find((s) => s.id === assignment.staff_id)?.unionNo, staffList.find((s) => s.id === assignment.staff_id)?.displayName ?? '姓名未設定')} ｜ {assignment.assigned_start_date}～{assignment.assigned_end_date}
+                  #{assignment.assignment_id} ｜ {staffIdentity.label(assignment.staff_id, staffList.find((s) => s.id === assignment.staff_id)?.displayName, staffList.find((s) => s.id === assignment.staff_id)?.unionNo)} ｜ {assignment.assigned_start_date}～{assignment.assigned_end_date}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            請假之服務日
+            原服務日（請假／調整日期）
             <select
               aria-label="服務日"
               value={scheduleId ?? ''}
@@ -1453,7 +1455,7 @@ function LeaveSubstitutionWorkspace({
             const evidence = item.payables_evidence;
             const staffId = evidence?.staff_id ?? item.resulting_staff_id;
             const person = staffList.find((staff) => staff.id === staffId);
-            const staffName = staffDisplayLabel(person?.unionNo, person?.displayName ?? '姓名未設定');
+            const staffName = staffIdentity.label(staffId, person?.displayName, person?.unionNo);
             const payoutStatus = evidence?.projection_status === 'payable'
               ? '待付款'
               : evidence?.projection_status === 'completed'
@@ -2001,7 +2003,7 @@ export const SchedulingPage: React.FC = () => {
       const page = adaptStaffDirectoryPage(
         await loadAllStaffDirectoryPages(
           staffDirectoryClient.queryPage.bind(staffDirectoryClient),
-          { pageSize: STAFF_PAGE_SIZE },
+          { pageSize: STAFF_PAGE_SIZE, lifecycleState: 'active' },
           { signal: controller.signal }
         )
       );
@@ -2034,7 +2036,7 @@ export const SchedulingPage: React.FC = () => {
     try {
       const page = adaptStaffDirectoryPage(
         await staffDirectoryClient.queryPage(
-          { pageSize: STAFF_PAGE_SIZE, afterId: cursor },
+          { pageSize: STAFF_PAGE_SIZE, afterId: cursor, lifecycleState: 'active' },
           { signal: controller.signal }
         )
       );

@@ -412,6 +412,8 @@ function isEligibleEndPauseBlock(
 export const StaffPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
+  const [rosterLifecycle, setRosterLifecycle] = useState<'active' | 'retired'>('active');
+  const rosterTabsId = useId();
   const [directorySearch, setDirectorySearch] = useState<DirectorySearchState>({ status: 'idle', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
   const drawerStaffId = selectedStaff?.id ?? null;
@@ -441,7 +443,6 @@ export const StaffPage: React.FC = () => {
   const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
   const mountedRef = useRef(false);
-  const initialRequestedRef = useRef(false);
   const requestGenerationRef = useRef(0);
   const activeControllerRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
@@ -487,6 +488,7 @@ export const StaffPage: React.FC = () => {
   );
 
   const loadInitialDirectory = useCallback(async () => {
+    activeControllerRef.current?.abort();
     const generation = requestGenerationRef.current + 1;
     requestGenerationRef.current = generation;
     const controller = new AbortController();
@@ -495,7 +497,7 @@ export const StaffPage: React.FC = () => {
     try {
       const response = await loadAllStaffDirectoryPages(
         staffDirectoryClient.queryPage.bind(staffDirectoryClient),
-        { pageSize: 200, includeProfile: true },
+        { pageSize: 200, includeProfile: true, lifecycleState: rosterLifecycle },
         { signal: controller.signal }
       );
       if (!mountedRef.current || generation !== requestGenerationRef.current) return;
@@ -514,14 +516,11 @@ export const StaffPage: React.FC = () => {
         retryCursor: null,
       });
     }
-  }, []);
+  }, [rosterLifecycle]);
 
   useEffect(() => {
     mountedRef.current = true;
-    if (!initialRequestedRef.current) {
-      initialRequestedRef.current = true;
-      void loadInitialDirectory();
-    }
+    void loadInitialDirectory();
     return () => {
       mountedRef.current = false;
       sliceGenerationRef.current += 1;
@@ -546,7 +545,6 @@ export const StaffPage: React.FC = () => {
     searchGenerationRef.current = generation;
     searchControllerRef.current?.abort();
     if (!query) {
-      staffDirectoryClient.resetPagination();
       setDirectorySearch({ status: 'idle', items: [] });
       return undefined;
     }
@@ -557,7 +555,7 @@ export const StaffPage: React.FC = () => {
     const timer = window.setTimeout(() => {
       void loadAllStaffDirectoryPages(
         staffDirectoryClient.queryPage.bind(staffDirectoryClient),
-        { pageSize: 200, includeProfile: true },
+        { pageSize: 200, includeProfile: true, lifecycleState: rosterLifecycle },
         { signal: controller.signal },
       ).then((page) => {
         if (!mountedRef.current || controller.signal.aborted || generation !== searchGenerationRef.current) return;
@@ -572,7 +570,7 @@ export const StaffPage: React.FC = () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [searchQuery]);
+  }, [searchQuery, rosterLifecycle]);
 
   const refreshProfile = async (staffId: number, generation: number, signal?: AbortSignal): Promise<void> => {
     const value = await staffProfileClient.query(staffId, { signal });
@@ -815,13 +813,14 @@ export const StaffPage: React.FC = () => {
     const { generation, controller } = beginSliceRequest();
     setLifecycleAction((current) => ({ ...current, action, phase: 'preview_loading', payload: null, idempotencyKey: null, message: null }));
     try {
+      const effectiveAt = `${lifecycleEffectiveAt}T00:00:00+08:00`;
       const preview = await staffLifecycleClient.preview(currentStaffId, action, {
-        effective_at: lifecycleEffectiveAt,
+        effective_at: effectiveAt,
         reason_code: lifecycleReasonCode.trim(),
       }, { signal: controller.signal });
       if (!isCurrentSlice(generation, controller.signal)) return;
       const payload: StaffLifecycleApplyPayload = {
-        effective_at: lifecycleEffectiveAt,
+        effective_at: effectiveAt,
         reason_code: lifecycleReasonCode.trim(),
         expected_version: lifecycle.data.version,
         preview_fingerprint: preview.preview_fingerprint,
@@ -840,6 +839,11 @@ export const StaffPage: React.FC = () => {
     if (generation !== undefined && !isCurrentSlice(generation, signal)) return false;
     if (!mountedRef.current || signal?.aborted === true) return false;
     setLifecycle({ status: 'ready', data: adaptStaffLifecycleView(view) });
+    if (view.state !== rosterLifecycle) {
+      setDirectory((current) => ({ ...current, items: current.items.filter((staff) => staff.id !== staffId) }));
+      setDirectorySearch((current) => ({ ...current, items: current.items.filter((staff) => staff.id !== staffId) }));
+    }
+    setLifecycleReasonCode('');
     return true;
   };
 
@@ -907,7 +911,7 @@ export const StaffPage: React.FC = () => {
     setDirectory({ status: 'loading-more', items: existingItems, nextCursor: cursor });
     try {
       const response = await staffDirectoryClient.queryPage(
-        { pageSize: 200, afterId: cursor, includeProfile: true },
+        { pageSize: 200, afterId: cursor, includeProfile: true, lifecycleState: rosterLifecycle },
         { signal: controller.signal }
       );
       if (!mountedRef.current || generation !== requestGenerationRef.current) return;
@@ -1122,6 +1126,29 @@ export const StaffPage: React.FC = () => {
 
 
       <div className="staff-toolbar-card" data-surface-id="staff.toolbar">
+        <div className="staff-filter-pills staff-roster-tabs" role="tablist" aria-label="月嫂任職名冊">
+          {(['active', 'retired'] as const).map((state, index) => (
+            <button
+              key={state}
+              id={`${rosterTabsId}-${state}`}
+              type="button"
+              role="tab"
+              aria-selected={rosterLifecycle === state}
+              aria-controls={`${rosterTabsId}-panel`}
+              tabIndex={rosterLifecycle === state ? 0 : -1}
+              className={`staff-filter-pill ${rosterLifecycle === state ? 'active' : ''}`}
+              disabled={interactionLocked}
+              onClick={() => setRosterLifecycle(state)}
+              onKeyDown={(event) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index;
+                setRosterLifecycle(next === 0 ? 'active' : 'retired');
+                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+              }}
+            >{state === 'active' ? '現役月嫂' : '已退役月嫂'}</button>
+          ))}
+        </div>
         <div className="staff-search-input-row">
           <div className="staff-search-input-box">
             <span className="search-icon" aria-hidden="true">🔍</span>
@@ -1172,7 +1199,7 @@ export const StaffPage: React.FC = () => {
         </div>
       </div>
 
-        <section data-surface-id="staff.directory">
+        <section data-surface-id="staff.directory" role="tabpanel" id={`${rosterTabsId}-panel`} aria-labelledby={`${rosterTabsId}-${rosterLifecycle}`}>
           {selectedStaffId !== null && qualification.status === 'error' && (
             <div role="alert" className="staff-directory-message error">
               資格主檔查詢失敗：{qualification.message}
@@ -1220,7 +1247,7 @@ export const StaffPage: React.FC = () => {
             </div>
           )}
           {directory.status === 'ready' && staffItems.length === 0 && (
-            <div className="staff-directory-message" role="status">目前沒有可顯示的服務人員摘要。</div>
+            <div className="staff-directory-message" role="status">{rosterLifecycle === 'active' ? '目前沒有現役月嫂。' : '目前沒有已退役月嫂。'}</div>
           )}
 
           {searchQuery.trim() && directorySearch.status === 'loading' && (
@@ -1487,7 +1514,7 @@ export const StaffPage: React.FC = () => {
                               onClick={() => {
                                 invalidateSlice();
                                 setLifecycleAction({ ...initialActionState(), action: 'retirement' });
-                                setShowLifecycleForm((prev) => !prev);
+                                setShowLifecycleForm(!showLifecycleForm || lifecycleAction.action !== 'retirement');
                               }}
                             >
                               {showLifecycleForm && lifecycleAction.action === 'retirement' ? '✕ 收合設定' : '✏️ 辦理退役登記'}
@@ -1500,7 +1527,7 @@ export const StaffPage: React.FC = () => {
                               onClick={() => {
                                 invalidateSlice();
                                 setLifecycleAction({ ...initialActionState(), action: 'reactivation' });
-                                setShowLifecycleForm((prev) => !prev);
+                                setShowLifecycleForm(!showLifecycleForm || lifecycleAction.action !== 'reactivation');
                               }}
                             >
                               {showLifecycleForm && lifecycleAction.action === 'reactivation' ? '✕ 收合設定' : '✏️ 辦理復職登記'}
@@ -1526,12 +1553,11 @@ export const StaffPage: React.FC = () => {
                         </select>
                       </label>
                       <label className="staff-op-field">
-                        生效時間
+                        生效日期
                         <input
-                          type="text"
+                          type="date"
                           disabled={interactionLocked || lifecycleAction.phase === 'stale'}
                           value={lifecycleEffectiveAt}
-                          placeholder="2026-08-20T12:00:00+08:00"
                           onChange={(event) => {
                             invalidateSlice();
                             setLifecycleEffectiveAt(event.target.value);
@@ -1541,22 +1567,29 @@ export const StaffPage: React.FC = () => {
                       </label>
                       <label className="staff-op-field">
                         異動原因（選填）
-                        <input
-                          type="text"
+                        <select
                           disabled={interactionLocked || lifecycleAction.phase === 'stale'}
                           value={lifecycleReasonCode}
-                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '復職原因（選填）' : '退役原因（選填）'}
                           onChange={(event) => {
                             invalidateSlice();
                             setLifecycleReasonCode(event.target.value);
                             setLifecycleAction((prev) => ({ ...prev, phase: 'idle', preview: null, message: null }));
                           }}
-                        />
+                        >
+                          <option value="">不填寫</option>
+                          {lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? (
+                            <option value="returned_to_service">恢復服務</option>
+                          ) : <>
+                            <option value="left_union">離會</option>
+                            <option value="no_longer_available">不再接案</option>
+                            <option value="qualification_changed">資格異動</option>
+                          </>}
+                        </select>
                       </label>
                     </div>
 
                     <p id="staff-lifecycle-guidance" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-error)', margin: '2px 0 6px' }}>
-                      在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間後即可辦理；原因可選填。
+                      退役生效日期是停止接案的日期；仍有未結束案件時，須先完成案件或辦理改派。已退役者可辦理復職；原因可選填。
                     </p>
 
                     <div className="staff-op-actions">

@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { staffQualificationMasterClient } from '../api/staff/qualification_master_client';
 import { staffLifecycleClient } from '../api/staff_lifecycle/staff_lifecycle_client';
-import { StaffLifecycleUnavailableError } from '../api/staff_lifecycle/staff_lifecycle_errors';
+import { StaffLifecycleConflictError, StaffLifecycleUnavailableError } from '../api/staff_lifecycle/staff_lifecycle_errors';
+import { StaffLifecycleApplyPayloadSchema, StaffLifecycleTransitionInputSchema } from '../api/staff_lifecycle/staff_lifecycle_schemas';
 import { StaffPage } from '../pages/StaffPage';
 import {
   STAFF_LIFECYCLE_APPLY_PAYLOAD,
@@ -34,8 +35,14 @@ describe('Staff lifecycle flow', () => {
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
-    vi.spyOn(staffLifecycleClient, 'preview').mockResolvedValue(STAFF_LIFECYCLE_PREVIEW);
-    vi.spyOn(staffLifecycleClient, 'apply').mockResolvedValue(STAFF_LIFECYCLE_RECEIPT);
+    vi.spyOn(staffLifecycleClient, 'preview').mockImplementation(async (_id, _action, payload) => {
+      StaffLifecycleTransitionInputSchema.parse(payload);
+      return STAFF_LIFECYCLE_PREVIEW;
+    });
+    vi.spyOn(staffLifecycleClient, 'apply').mockImplementation(async (_id, _action, payload) => {
+      StaffLifecycleApplyPayloadSchema.parse(payload);
+      return STAFF_LIFECYCLE_RECEIPT;
+    });
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
   });
 
@@ -54,14 +61,14 @@ describe('Staff lifecycle flow', () => {
       .mockResolvedValueOnce(STAFF_LIFECYCLE_VIEW)
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_VIEW, state: 'retired', version: 3, effective_at: '2026-08-15T09:00:00+08:00' });
     await openDrawer();
-    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
+    fireEvent.change(screen.getAllByLabelText('生效日期').at(-1)!, { target: { value: '2026-08-15' } });
     fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
     fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
 
     await waitFor(() => expect(staffLifecycleClient.preview).toHaveBeenCalledWith(
       11,
       'retirement',
-      STAFF_LIFECYCLE_PREVIEW_PAYLOAD,
+      { ...STAFF_LIFECYCLE_PREVIEW_PAYLOAD, effective_at: '2026-08-15T00:00:00+08:00' },
       expect.anything(),
     ));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
@@ -70,6 +77,7 @@ describe('Staff lifecycle flow', () => {
       'retirement',
       expect.objectContaining({
         ...STAFF_LIFECYCLE_APPLY_PAYLOAD,
+        effective_at: '2026-08-15T00:00:00+08:00',
         expected_version: 2,
       }),
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
@@ -92,10 +100,14 @@ describe('Staff lifecycle flow', () => {
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_RECEIPT, state: 'active' });
     await openDrawer();
     expect(screen.queryByRole('button', { name: /^辦理退役$/ })).toBeNull();
-    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: 'return_active' } });
+    fireEvent.change(screen.getAllByLabelText('生效日期').at(-1)!, { target: { value: '2026-08-15' } });
+    fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: 'returned_to_service' } });
     fireEvent.click(screen.getByRole('button', { name: /^辦理復職$/ }));
     await waitFor(() => expect(screen.getByText(/結果未知/)).toBeInTheDocument());
+    expect(staffLifecycleClient.preview).toHaveBeenCalledWith(11, 'reactivation', {
+      effective_at: '2026-08-15T00:00:00+08:00',
+      reason_code: 'returned_to_service',
+    }, expect.anything());
     fireEvent.click(screen.getByRole('button', { name: '以相同內容重試' }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(2));
     const first = vi.mocked(staffLifecycleClient.apply).mock.calls[0];
@@ -109,7 +121,7 @@ describe('Staff lifecycle flow', () => {
     const pendingApply = deferred<typeof STAFF_LIFECYCLE_RECEIPT>();
     vi.mocked(staffLifecycleClient.apply).mockReturnValueOnce(pendingApply.promise);
     await openDrawer();
-    fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
+    fireEvent.change(screen.getAllByLabelText('生效日期').at(-1)!, { target: { value: '2026-08-15' } });
     fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
     fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
@@ -118,7 +130,7 @@ describe('Staff lifecycle flow', () => {
       expect(screen.queryByRole('tablist', { name: '月嫂個人檔案分頁' })).not.toBeInTheDocument();
       expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
-      expect(screen.getAllByLabelText('生效時間').at(-1)).toBeDisabled();
+      expect(screen.getAllByLabelText('生效日期').at(-1)).toBeDisabled();
       expect(screen.getAllByLabelText('異動原因（選填）').at(-1)).toBeDisabled();
     };
 
@@ -130,5 +142,30 @@ describe('Staff lifecycle flow', () => {
     }));
     await waitFor(() => expect(screen.getByText(/結果未知/)).toBeInTheDocument());
     expectLocked();
+  });
+
+  it('可不填原因，日期選擇後送出含台北時區的既有契約', async () => {
+    await openDrawer();
+    const date = screen.getByLabelText('生效日期');
+    expect(date).toHaveAttribute('type', 'date');
+    expect(screen.getByLabelText('異動原因（選填）').tagName).toBe('SELECT');
+    fireEvent.change(date, { target: { value: '2026-08-15' } });
+    fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
+    await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
+    expect(staffLifecycleClient.preview).toHaveBeenCalledWith(11, 'retirement', {
+      effective_at: '2026-08-15T00:00:00+08:00', reason_code: '',
+    }, expect.anything());
+  });
+
+  it('未結束案件阻擋時顯示原因且不送出 Apply', async () => {
+    const message = '此月嫂仍有未結束案件，請先完成案件或辦理改派，再辦理退役。';
+    vi.mocked(staffLifecycleClient.preview).mockRejectedValueOnce(new StaffLifecycleConflictError({
+      code: 'staff_retirement_open_assignments', message,
+    }));
+    await openDrawer();
+    fireEvent.change(screen.getByLabelText('生效日期'), { target: { value: '2026-08-15' } });
+    fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(staffLifecycleClient.apply).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel
+from domains.staff.retirement import StaffLifecycleState
 from pymysql.err import OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import require_admin, require_registry_reader
@@ -62,13 +63,14 @@ def get_staff_roster(
     page_size: int = Query(default=200, ge=1, le=200),
     after_id: int | None = Query(default=None, ge=1),
     staff_id: int | None = Query(default=None, ge=1),
+    lifecycle_state: StaffLifecycleState | None = Query(default=None),
     principal: AdminPrincipal = Depends(require_registry_reader),
     application: StaffProfileQueryApplication = Depends(get_staff_profile_application),
 ) -> BaseResponse[StaffRosterPageView]:
     del principal
     correlation = uuid4().hex
     try:
-        page = application.query_page(StaffSummaryQueryRequest(page_size, after_id, staff_id))
+        page = application.query_page(StaffSummaryQueryRequest(page_size, after_id, staff_id), lifecycle_state=lifecycle_state)
     except StaffProfileContractError as error:
         raise internal_query_error("staff_roster_projection_invalid", "月嫂完整主檔清單目前無法讀取。", correlation) from error
     except ValueError as error:
@@ -156,6 +158,7 @@ def get_staff_summaries(
     page_size: int = Query(default=200, ge=1, le=200),
     after_id: int | None = Query(default=None, ge=1),
     staff_id: int | None = Query(default=None, ge=1),
+    lifecycle_state: StaffLifecycleState | None = Query(default=None),
     correlation_id: Annotated[
         str | None,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
@@ -180,6 +183,7 @@ def get_staff_summaries(
                 page_size=page_size,
                 after_id=after_id,
                 staff_id=staff_id,
+                lifecycle_state=lifecycle_state,
             )
         )
     except (OperationalError, ProgrammingError) as error:

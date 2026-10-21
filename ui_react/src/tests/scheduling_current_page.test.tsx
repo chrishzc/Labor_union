@@ -323,7 +323,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(expectedDays);
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       1,
-      { pageSize: 20 },
+      { pageSize: 20, lifecycleState: 'active' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
@@ -331,7 +331,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.queryByText('STF-011')).not.toBeInTheDocument();
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       2,
-      { pageSize: 20, afterId: 11 },
+      { pageSize: 20, afterId: 11, lifecycleState: 'active' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(screen.queryByRole('button', { name: '載入更多服務人員' })).not.toBeInTheDocument();

@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from api.routes.staff_retirement import _raise_line_effect_error
+from api.routes.staff_retirement import _raise, _raise_line_effect_error
+from api.schemas.staff_retirement import StaffLifecycleTransitionInput
 from domains.line.identities import LineUserId
 from domains.line.identity_binding import (
     LineBindingSubjectType,
@@ -264,6 +265,53 @@ def test_retirement_preview_fails_closed_when_staff_has_open_assignment() -> Non
         assert str(error) == "staff_retirement_open_assignments"
     else:
         raise AssertionError("retirement preview must reject open assignments")
+
+
+def test_retirement_apply_rechecks_open_assignments_after_preview() -> None:
+    repository = _LifecycleRepository()
+    unit_of_work = _LifecycleUnitOfWork()
+    effect = _Effect()
+    workflow = StaffLifecycleWorkflow(repository, lambda: unit_of_work, FixedBusinessClock(NOW), effect)
+    effective_at = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    preview = workflow.preview(7, StaffLifecycleTransition.RETIRE, effective_at, "")
+
+    def block_assignment(_staff_id, *, lock):
+        assert lock is True
+        raise ValueError("staff_retirement_open_assignments")
+
+    repository.ensure_no_open_assignments = block_assignment
+    request = StaffLifecycleApplyRequest(
+        7, StaffLifecycleTransition.RETIRE, effective_at, "", ExpectedVersion(0),
+        preview.fingerprint, IdempotencyKey("staff-open-case"), ActorContext("admin:7"),
+        CorrelationId("staff-open-case"),
+    )
+    with pytest.raises(ValueError, match="staff_retirement_open_assignments"):
+        workflow.apply(request)
+    assert repository.fact.state is StaffLifecycleState.ACTIVE
+    assert repository.receipt is None
+    assert effect.unit_of_work is None
+    assert unit_of_work.committed is False
+
+
+def test_open_assignments_error_has_actionable_message_and_conflict_category() -> None:
+    with pytest.raises(HTTPException) as captured:
+        _raise(ValueError("staff_retirement_open_assignments"), CorrelationId("staff-open-case"))
+    assert captured.value.status_code == 409
+    error = captured.value.detail["error"]
+    assert error["category"] == "conflict"
+    assert error["code"] == "staff_retirement_open_assignments"
+    assert "未結束案件" in error["message"]
+
+
+@pytest.mark.parametrize("reason", ["", "left_union", "no_longer_available", "qualification_changed"])
+def test_date_picker_payload_passes_backend_schema_and_retirement_rules(reason: str) -> None:
+    body = StaffLifecycleTransitionInput.model_validate({
+        "effective_at": "2026-08-15T00:00:00+08:00", "reason_code": reason,
+    })
+    workflow = StaffLifecycleWorkflow(_LifecycleRepository(), lambda: _LifecycleUnitOfWork(), FixedBusinessClock(NOW))
+    preview = workflow.preview(7, StaffLifecycleTransition.RETIRE, body.effective_at, body.reason_code)
+    assert preview.candidate.effective_at.isoformat() == "2026-08-15T00:00:00+08:00"
+    assert preview.candidate.after.state is StaffLifecycleState.RETIRED
 
 
 @pytest.mark.parametrize(

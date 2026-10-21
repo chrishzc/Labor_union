@@ -1,6 +1,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
+import { loadActiveStaffIds } from '../api/staff_directory/staff_directory_client';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { candidateContactPoolClient, type CandidateContactPool } from '../api/scheduling/candidate_contact_pool_client';
 import { matchingCandidateWorkflowClient, defaultMatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
@@ -222,9 +223,12 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     const request = sequence.current;
     setCandidates({ status: 'loading' });
     try {
-      const data = await candidateContactPoolClient.query(caseNo, { signal: controller.signal });
+      const [data, activeStaffIds] = await Promise.all([
+        candidateContactPoolClient.query(caseNo, { signal: controller.signal }),
+        loadActiveStaffIds({ signal: controller.signal }),
+      ]);
       if (data.case_no !== caseNo) throw new Error('候選池案件識別不一致。');
-      if (!controller.signal.aborted && sequence.current === request) setCandidates({ status: 'ready', data });
+      if (!controller.signal.aborted && sequence.current === request) setCandidates({ status: 'ready', data: { ...data, candidates: data.candidates.filter((candidate) => activeStaffIds.has(candidate.staff_id)) } });
     } catch (caught) {
       if (!controller.signal.aborted && sequence.current === request) setCandidates({ status: 'error', message: errorMessage(caught) });
     } finally {
