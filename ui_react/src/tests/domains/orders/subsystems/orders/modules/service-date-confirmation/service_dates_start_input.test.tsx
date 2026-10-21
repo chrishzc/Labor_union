@@ -7,7 +7,8 @@ import { serviceDatesNeedCompletion } from '../../../../../../../adapters/orders
 import type { ActualStartPreview } from '../../../../../../../api/orders/order_actual_start_client';
 
 const mocks = vi.hoisted(() => ({ getStart: vi.fn(), getCalendar: vi.fn(), getDates: vi.fn(), calculate: vi.fn(),
-  previewStart: vi.fn(), applyStart: vi.fn(), previewDates: vi.fn(), applyDates: vi.fn() }));
+  previewStart: vi.fn(), applyStart: vi.fn(), previewDates: vi.fn(), applyDates: vi.fn(), holidayQuery: vi.fn() }));
+vi.mock('../../../../../../../api/scheduling/holiday_client', () => ({ holidayClient: { query: mocks.holidayQuery } }));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getActualStart: mocks.getStart, getOrderCalendarDetail: mocks.getCalendar } }));
 vi.mock('../../../../../../../api/orders/order_actual_start_client', () => ({ orderActualStartClient: { preview: mocks.previewStart, apply: mocks.applyStart } }));
 vi.mock('../../../../../../../api/orders/order_mutation_client', () => ({ ordersMutationClient: { getServiceDates: mocks.getDates, previewServiceDates: mocks.previewDates, applyServiceDates: mocks.applyDates } }));
@@ -35,6 +36,7 @@ const result = (start: string) => ({ actual_start_date: start, actual_end_date: 
 
 beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset());
+  mocks.holidayQuery.mockResolvedValue({ holidays: [] });
   orderMutationFlowStore.clearAll(); actual = null; orderVersion = 1; confirmedVersion = null; confirmedDates = []; serviceMode = '連續服務';
   mocks.getStart.mockImplementation(async () => startQuery());
   mocks.getCalendar.mockImplementation(async () => ({ case_no: CASE, service_mode: serviceMode }));
@@ -60,10 +62,35 @@ beforeEach(() => {
   });
 });
 
+it('排班前建議跳過假日，人工選假日上班後可保存並保留到重新開啟', async () => {
+  actual = '2026-10-01';
+  mocks.holidayQuery.mockResolvedValue({ holidays: [{ holiday_date: '2026-10-02', holiday_name: '測試國定假日', is_double_pay_default: false }] });
+  mocks.calculate.mockImplementation(async ({ actual_start_date }) => ({ ...result(actual_start_date), actual_end_date: '2026-10-04',
+    day_by_day: days('2026-10-01', 4).map((date, index) => ({ date, day_num: index + 1, is_work_day: date !== '2026-10-02', is_rest_day: date === '2026-10-02', holiday_name: date === '2026-10-02' ? '測試國定假日' : null })) }));
+  const view = render(<OrderServiceDatesPanel caseNo={CASE} />);
+  await waitFor(() => expect(screen.getByLabelText('此次選定服務日期摘要')).toHaveTextContent('3 / 3 天'));
+  await screen.findByText('測試國定假日');
+  const holiday = screen.getByRole('button', { name: '服務日期 2026-10-02' });
+  expect(holiday).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(holiday);
+  fireEvent.click(screen.getByRole('button', { name: '服務日期 2026-10-04' }));
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '儲存服務日期' })); });
+  await screen.findByText('服務日期已確認並回讀版本 #1。');
+  expect(confirmedDates).toEqual(['2026-10-01', '2026-10-02', '2026-10-03']);
+  const calculationCount = mocks.calculate.mock.calls.length;
+  view.unmount();
+  render(<OrderServiceDatesPanel caseNo={CASE} />);
+  await screen.findByLabelText('已確認服務日期回讀');
+  await screen.findByText('測試國定假日');
+  expect(screen.getByRole('button', { name: '服務日期 2026-10-02' })).toHaveAttribute('aria-pressed', 'true');
+  expect(mocks.calculate).toHaveBeenCalledTimes(calculationCount);
+});
+
 async function input(date: string) {
   await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
   fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: date } });
-  await screen.findByLabelText('建議服務日期摘要');
+  await waitFor(() => expect(mocks.calculate).toHaveBeenLastCalledWith(expect.objectContaining({ actual_start_date: date })));
+  await waitFor(() => expect(screen.getByLabelText('建議服務日期摘要')).toHaveTextContent(date));
 }
 
 it('calculates an empty calendar without writing and saves the unchanged default start through the owner flow', async () => {

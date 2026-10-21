@@ -5,6 +5,7 @@ import { orderMutationFlowStore } from '../../../../../../../adapters/orders/ord
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 import type { ServiceDateConfirmationQueryView, ServiceDateConfirmationPreviewView } from '../../../../../../../api/orders/order_mutation_schemas';
 import type { ordersMutationClient } from '../../../../../../../api/orders/order_mutation_client';
+vi.mock('../../../../../../../api/scheduling/holiday_client', () => ({ holidayClient: { query: vi.fn(async () => ({ holidays: [] })) } }));
 
 const mocks = vi.hoisted(() => ({
   getActualStart: vi.fn(), getOrderCalendarDetail: vi.fn(), calculate: vi.fn(),
@@ -110,7 +111,7 @@ describe('服務日期自動讀取與單次儲存流程', () => {
     expect(mocks.previewServiceDates).toHaveBeenCalledWith(CASE, { service_dates: revisedDates }, undefined);
     expect(mocks.applyServiceDates).toHaveBeenCalledWith(CASE, {
       service_dates: revisedDates, expected_order_version: 11, expected_scheduling_version: 7,
-      preview_fingerprint: 'a'.repeat(64), reason: '確認服務日期',
+      preview_fingerprint: 'a'.repeat(64), reason: '',
     }, expect.objectContaining({ idempotencyKey: expect.any(String) }));
     expect(mocks.previewServiceDates.mock.invocationCallOrder[0]).toBeLessThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
     expect(mocks.getServiceDates.mock.invocationCallOrder.at(-1)).toBeGreaterThan(mocks.applyServiceDates.mock.invocationCallOrder[0]);
