@@ -1,6 +1,4 @@
 import { useUnsavedChanges } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useState } from 'react';
 import { paymentDestinationClient, type PaymentDestination, type PaymentDestinationPreview } from '../api/client_finance/payment_destination_client';
 
@@ -8,10 +6,7 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
   const [current, setCurrent] = useState<PaymentDestination | null>(null);
   const [account, setAccount] = useState('');
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PaymentDestinationPreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading');
   const [message, setMessage] = useState('');
 
@@ -20,27 +15,22 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
     setStatus('loading');
     paymentDestinationClient.query().then((value) => {
       if (!active) return;
-      setCurrent(value); setAccount(value.account_display ?? ''); setPreview(null); setConfirmed(false); setStatus('ready');
+      setCurrent(value); setAccount(value.account_display ?? ''); setPreview(null); setStatus('ready');
     }).catch(() => { if (active) { setStatus('error'); setMessage('收款帳戶設定載入失敗，請重新整理。'); } });
     return () => { active = false; };
   }, [reload]);
 
   useUnsavedChanges('工會／代收付帳戶', current && (account !== (current.account_display ?? '') || reason !== '') ? [{ label: '帳戶設定', before: '既有設定（不顯示帳號）', after: '已修改，請核對原畫面的設定' }] : [], { busy: status === 'saving' });
-  const runPreview = async () => {
-    if (!current || !account.trim()) return;
-    setStatus('saving'); setMessage('');
-    try { setPreview(await paymentDestinationClient.preview(account.trim(), current.revision)); setConfirmed(false); setStatus('ready'); }
-    catch { setStatus('error'); setMessage('無法完成預覽；資料可能已變更，請重新載入。'); }
-  };
   const apply = async () => {
-    if (!preview || !confirmed || status === 'saving') return;
-    if (!saveValidation.validate([{ value: reason, label: '更新原因', ref: saveFieldRef }])) return;
+    if (!current || !account.trim() || status === 'saving') return;
     setStatus('saving'); setMessage('');
     try {
-      await paymentDestinationClient.apply(preview, reason.trim());
+      const approved = preview ?? await paymentDestinationClient.preview(account.trim(), current.revision);
+      setPreview(approved);
+      await paymentDestinationClient.apply(approved, reason.trim());
       const refreshed = await paymentDestinationClient.query();
-      setCurrent(refreshed); setAccount(refreshed.account_display ?? ''); setPreview(null); setConfirmed(false); setReason(''); setStatus('ready'); setMessage('工會／代收付帳戶已更新，契約會使用這筆 current 設定。');
-    } catch { setStatus('error'); setMessage('帳戶設定未完成，請重新載入後再次預覽。'); }
+      setCurrent(refreshed); setAccount(refreshed.account_display ?? ''); setPreview(null); setReason(''); setStatus('ready'); setMessage('工會／代收付帳戶已更新，契約會使用這筆 current 設定。');
+    } catch { setStatus('error'); setMessage('帳戶設定未完成，請重新查詢目前設定。'); }
   };
 
   return <section className="finance-workspace" data-surface-id="finance.payment-destination.configuration">
@@ -49,13 +39,9 @@ export function PaymentDestinationConfigurationPanel({ reload }: { reload: numbe
     {message && <div className={`finance-state ${status === 'error' ? 'error' : ''}`} role={status === 'error' ? 'alert' : 'status'}>{message}</div>}
     {current && <div className="finance-detail-block">
       <div className="finance-meta"><span>目前版本：{current.revision}</span><span>{current.configured ? '已設定' : '尚未設定；客戶契約將阻擋列印'}</span></div>
-      <label className="finance-field"><span>工會／代收付帳戶</span><input value={account} maxLength={255} autoComplete="off" onChange={(event) => { setAccount(event.target.value); setPreview(null); setConfirmed(false); }} placeholder="例如：銀行代碼－帳號" /></label>
-      <button type="button" className="finance-btn-secondary" disabled={status === 'saving' || !account.trim()} onClick={() => void runPreview()}>檢查設定影響</button>
-      {preview && <div className="finance-meta" data-control-id="finance.payment-destination.preview"><span>契約將顯示：{preview.candidate_account_display}</span>
-        <><label className="finance-field"><span>更新原因</span><input ref={saveFieldRef} aria-required="true" value={reason} maxLength={255} onChange={(event) => setReason(event.target.value)} /></label>{saveValidation.feedback}</>
-        <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對帳戶內容，確認套用</label>
-        <button type="button" className="finance-btn-primary" disabled={!confirmed || status === 'saving'} onClick={() => void apply()}>確認更新帳戶</button>
-      </div>}
+      <label className="finance-field"><span>工會／代收付帳戶</span><input value={account} maxLength={255} autoComplete="off" onChange={(event) => { setAccount(event.target.value); setPreview(null); }} placeholder="例如：銀行代碼－帳號" /></label>
+      <label className="finance-field"><span>備註（選填）</span><input value={reason} maxLength={255} disabled={status === 'saving'} onChange={(event) => setReason(event.target.value)} /></label>
+      <button type="button" className="finance-btn-primary" disabled={status === 'saving' || !account.trim()} onClick={() => void apply()}>{status === 'saving' ? '正在儲存…' : '儲存帳戶'}</button>
     </div>}
   </section>;
 }

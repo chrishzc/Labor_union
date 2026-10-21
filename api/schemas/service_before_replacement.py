@@ -342,7 +342,7 @@ class ServiceBeforeReplacementPreviewView(_ReplacementFactsView):
     superseded_roots: list[ReplacementRootView]
     created_roots: list[ReplacementRootView]
     preview_fingerprint: _Fingerprint = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(max_length=500)
     evidence: list[str]
     projection_kind: _Projection
 
@@ -422,7 +422,7 @@ class ServiceBeforeReplacementPreviewView(_ReplacementFactsView):
 
 class ServiceBeforeReplacementPreviewBody(_StrictModel):
     scenario: _Scenario
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")

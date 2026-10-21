@@ -40,7 +40,7 @@ class AlertAdminTargetRequest(BaseModel):
 
     admin_user_id: int = Field(gt=0)
     minimum_status: str = Field(pattern="^(warning|critical)$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
@@ -53,7 +53,7 @@ class ResetLineAlertGroupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     expected_version: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
@@ -67,7 +67,7 @@ class AlertTargetEnabledRequest(BaseModel):
 
     expected_version: str = Field(min_length=1, max_length=191)
     enabled: bool
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
@@ -148,7 +148,7 @@ class SafeReviewLinkRedeemRequest(BaseModel):
 class SafeReviewLinkRevokeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 

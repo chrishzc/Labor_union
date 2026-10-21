@@ -39,7 +39,7 @@ class RetentionPreviewRequest(BaseModel):
 
     source_id: str = Field(min_length=1, max_length=100)
     mode: Literal["expired", "capacity"] = "expired"
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     batch_size: int = Field(default=250, ge=1, le=500)
 
 

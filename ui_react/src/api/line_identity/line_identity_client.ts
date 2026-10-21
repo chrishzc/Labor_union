@@ -305,7 +305,7 @@ export async function applyLineIdentityReplacement(
         '更正對象識別值',
         191
       ),
-      reason: requiredText(payload.reason, '更正原因', 1000),
+      reason: typeof payload.reason === 'string' ? payload.reason.trim() : payload.reason,
     });
     const raw = await transport.post(
       `${bindingPath(lineUserId)}/replacement/apply`,
@@ -363,7 +363,7 @@ async function submitRevocationAction(
 ): Promise<LineIdentityRevocationRequestView> {
   try {
     const normalizedPayload = LineIdentityRevocationActionRequestSchema.parse({
-      reason: requiredText(payload.reason, '維護原因', 1000),
+      reason: typeof payload.reason === 'string' ? payload.reason.trim() : payload.reason,
     });
     const raw = await transport.post(
       `${revocationRequestPath(requestId)}/${action}`,
@@ -444,7 +444,7 @@ export async function previewLineIdentityReviewDecision(
     const normalizedDecision = LineIdentityReviewDecisionSchema.parse(decision);
     const normalizedPayload = LineIdentityReviewPreviewRequestSchema.parse({
       ...payload,
-      reason: requiredText(payload.reason, '審核原因', 1000),
+      reason: typeof payload.reason === 'string' ? payload.reason.trim() : payload.reason,
     });
     const raw = await transport.post(
       `${reviewPath(requestId)}/${normalizedDecision}/preview`,
@@ -467,7 +467,7 @@ export async function applyLineIdentityReviewDecision(
     const normalizedDecision = LineIdentityReviewDecisionSchema.parse(decision);
     const normalizedPayload = LineIdentityReviewApplyRequestSchema.parse({
       ...payload,
-      reason: requiredText(payload.reason, '審核原因', 1000),
+      reason: typeof payload.reason === 'string' ? payload.reason.trim() : payload.reason,
     });
     const raw = await transport.post(
       `${reviewPath(requestId)}/${normalizedDecision}/apply`,

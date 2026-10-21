@@ -67,7 +67,7 @@ class MySqlLineNotificationRepository:
     ) -> LineNotificationCancellationLineage:
         """Lock and cancel intents; delivery-task state belongs to its own repository."""
         require_canonical_text(rule_id, "LINE notification rule ID", 191)
-        require_canonical_text(reason, "LINE notification cancellation reason", 191)
+        require_canonical_text(reason, "LINE notification cancellation reason", 191, allow_empty=True)
         with self._connection.cursor() as cursor:
             cursor.execute(_LOCK_RULE_INTENTS_SQL, (rule_id,))
             rows = tuple(cursor.fetchall() or ())

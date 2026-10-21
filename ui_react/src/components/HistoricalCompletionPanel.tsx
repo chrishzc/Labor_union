@@ -3,6 +3,7 @@
  * Description: 顯示 Step 11 fresh owner roots、active alerts 與 owner referral，不推斷完成狀態。
  */
 import { useEffect, useState } from 'react';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import {
   HistoricalCompletionContractError,
   historicalCompletionClient,
@@ -37,12 +38,11 @@ type QueryState =
 type CompletionActionState =
   | { kind: 'idle' }
   | { kind: 'previewing' }
-  | { kind: 'preview'; preview: HistoricalCompletionPreview; confirmed: boolean }
   | { kind: 'applying'; preview: HistoricalCompletionPreview }
   | { kind: 'success'; receipt: HistoricalCompletionReceipt }
+  | { kind: 'outcome_unknown'; message: string }
   | { kind: 'error'; message: string };
 
-const COMPLETION_REASON = '確認歷史訂單客戶款項及月嫂款項皆已結清';
 
 export interface HistoricalCompletionPanelProps {
   caseNo: string;
@@ -56,6 +56,7 @@ export function HistoricalCompletionPanel({
   onCompleted,
 }: HistoricalCompletionPanelProps) {
   const [state, setState] = useState<QueryState>({ kind: 'loading' });
+  const [reason, setReason] = useState('');
   const [action, setAction] = useState<CompletionActionState>({ kind: 'idle' });
 
   useEffect(() => {
@@ -88,7 +89,7 @@ export function HistoricalCompletionPanel({
     setAction({ kind: 'previewing' });
     try {
       const preview = await client.preview(caseNo);
-      setAction({ kind: 'preview', preview, confirmed: false });
+      await applyCompletion(preview);
     } catch (error: unknown) {
       setAction({
         kind: 'error',
@@ -101,15 +102,13 @@ export function HistoricalCompletionPanel({
   const applyCompletion = async (preview: HistoricalCompletionPreview) => {
     setAction({ kind: 'applying', preview });
     try {
-      const receipt = await client.apply(preview, COMPLETION_REASON);
+      const receipt = await client.apply(preview, reason.trim());
       setAction({ kind: 'success', receipt });
     } catch (error: unknown) {
-      setAction({
-        kind: 'error',
-        message: error instanceof HistoricalCompletionContractError
-          ? error.message
-          : '帳務完成套用失敗，請重新預覽後再試一次。',
-      });
+      const rejected = (error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) || (error instanceof HistoricalCompletionContractError && error.code === 'historical_completion_unauthenticated');
+      setAction(rejected
+        ? { kind: 'error', message: error.message }
+        : { kind: 'outcome_unknown', message: '帳務完成結果尚未確認；請重新查詢目前資料，勿重複送出。' });
       return;
     }
     onCompleted?.();
@@ -137,46 +136,23 @@ export function HistoricalCompletionPanel({
           ))}
         </ul>
       )}
-      {projection.step_11_completed && action.kind === 'idle' && (
+      {projection.step_11_completed && action.kind === 'idle' && (<><label>完成原因（選填）<input value={reason} maxLength={500} onChange={event => setReason(event.target.value)} /></label>
         <button type="button" onClick={() => void loadPreview()}>
-          預覽並確認帳務完成
-        </button>
+          儲存帳務完成
+        </button></>
       )}
-      {action.kind === 'previewing' && <p role="status">正在建立帳務完成預覽…</p>}
-      {action.kind === 'preview' && (
-        <fieldset>
-          <legend>確認歷史訂單帳務完成</legend>
-          <p>{action.preview.before_status} → {action.preview.after_status}</p>
-          <p>帳務基準日：{action.preview.business_date}</p>
-          <label>
-            <input
-              type="checkbox"
-              checked={action.confirmed}
-              onChange={(event) => setAction({
-                kind: 'preview',
-                preview: action.preview,
-                confirmed: event.currentTarget.checked,
-              })}
-            />
-            我已確認客戶款項及所有月嫂款項均已結清
-          </label>
-          <button
-            type="button"
-            disabled={!action.confirmed}
-            onClick={() => void applyCompletion(action.preview)}
-          >
-            確認推進至帳務完成
-          </button>
-        </fieldset>
-      )}
+      {action.kind === 'previewing' && <p role="status">正在檢核帳務完成資料…</p>}
       {action.kind === 'applying' && <p role="status">正在推進至帳務完成…</p>}
       {action.kind === 'success' && (
         <p role="status">已推進至{action.receipt.after_status}（訂單版本 {action.receipt.resulting_order_version}）。</p>
       )}
+      {action.kind === 'outcome_unknown' && <p role="alert">{action.message}<button type="button" onClick={() => {
+        void client.query(caseNo).then(projection => setState({ kind: 'ready', projection })).catch(() => setAction({ kind: 'outcome_unknown', message: '帳務完成結果查詢失敗；請再次重新查詢。' }));
+      }}>重新查詢帳務完成結果</button></p>}
       {action.kind === 'error' && (
         <p role="alert">
           {action.message}
-          <button type="button" onClick={() => setAction({ kind: 'idle' })}>重新預覽</button>
+          <button type="button" onClick={() => setAction({ kind: 'idle' })}>重新操作</button>
         </p>
       )}
 

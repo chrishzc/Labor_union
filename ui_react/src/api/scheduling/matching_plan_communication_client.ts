@@ -44,7 +44,7 @@ const FormalPlanContactStateSchema = z.strictObject({
   customer_profiles_manual_confirmation: z.strictObject({
     event_ids: z.array(z.number().int().positive()).min(1).max(4),
     confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
-    reason: z.string().min(1).max(500),
+    reason: z.string().max(500),
     actor_id: z.string().min(1).max(191),
     preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   }).nullable().optional().default(null),
@@ -160,7 +160,7 @@ const ManualCustomerProfilesPreviewSchema = z.strictObject({
   expected_version: z.number().int().nonnegative(),
   segment_ids: z.array(z.number().int().positive()).min(1).max(4),
   confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
-  reason: z.string().min(1).max(500),
+  reason: z.string().max(500),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   apply_allowed: z.boolean(),
 });
@@ -341,7 +341,7 @@ export const matchingPlanCommunicationClient = {
     const token = sessionClient.getToken();
     const canonicalReason = reason.trim();
     if (!actor || !token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
-    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的人工送達依據。');
+    if (canonicalReason.length > 500) throw new Error('人工送達依據最多 500 字。');
     const decoded = decodePayload(
       ManualCustomerProfilesPreviewEnvelopeSchema,
       await transport.post(
@@ -411,7 +411,7 @@ export const matchingPlanCommunicationClient = {
     if (expectedActor !== undefined && expectedActor.trim() !== actor) {
       throw new ApiHttpError(409, 'FORMAL_MANUAL_RESPONSE_ACTOR_CHANGED', '目前登入帳號與原正式人工回覆不一致。');
     }
-    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的月嫂確認依據。');
+    if (canonicalReason.length > 500) throw new Error('月嫂確認依據最多 500 字。');
     if (canonicalEventKey.length > 100) throw new Error('月嫂意願操作識別無效，請重新載入。');
     const decoded = decodePayload(
       WillingnessEnvelopeSchema,
@@ -463,7 +463,7 @@ export const matchingPlanCommunicationClient = {
     if (expectedActor !== undefined && expectedActor.trim() !== actor) {
       throw new ApiHttpError(409, 'FORMAL_MANUAL_RESPONSE_ACTOR_CHANGED', '目前登入帳號與原正式人工回覆不一致。');
     }
-    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的客戶決策依據。');
+    if (canonicalReason.length > 500) throw new Error('客戶決策依據最多 500 字。');
     if (canonicalEventKey.length > 100) throw new Error('客戶決策操作識別無效，請重新載入。');
 
     const decoded = decodePayload(

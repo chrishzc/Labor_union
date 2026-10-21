@@ -48,7 +48,6 @@ const ServiceCompletionForCase: React.FC<Props> = ({
   const receipt = flow?.receipt ?? null;
   const [preview, setPreview] = useState<OrderServiceCompletionPreview | null>(null);
   const [reason, setReason] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [localError, setError] = useState<string | null>(null);
   const error = flow?.error ?? localError;
   const working = useRef(false);
@@ -74,12 +73,13 @@ const ServiceCompletionForCase: React.FC<Props> = ({
     setStatus('previewing');
     setError(null);
     setPreview(null);
-    setConfirmed(false);
     try {
       const result = await orderServiceCompletionClient.preview(caseNo);
       if (!mounted.current) return;
       setPreview(result);
       setStatus('previewed');
+      working.current = false;
+      await sendCompletion({ preview: result, reason: reason.trim(), key: `ui-order-service-completion-${crypto.randomUUID()}` });
     } catch (caught) {
       if (!mounted.current) return;
       setError(completionErrorMessage(caught));
@@ -130,8 +130,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
       });
       if (!mounted.current) return;
       setPreview(null);
-      setConfirmed(false);
-      await observeCompletion();
+        await observeCompletion();
     } catch (caught) {
       const rejected = caught instanceof ApiHttpError && caught.status >= 400 && caught.status < 500
         && caught.status !== 408 && caught.status !== 429 && !caught.retryable;
@@ -155,11 +154,6 @@ const ServiceCompletionForCase: React.FC<Props> = ({
     }
   };
 
-  const applyCompletion = async () => {
-    if (!preview || !confirmed || !reason.trim() || status !== 'previewed' || working.current) return;
-    const command = { preview, reason: reason.trim(), key: `ui-order-service-completion-${crypto.randomUUID()}` };
-    await sendCompletion(command);
-  };
 
   const retryObservation = async () => {
     if (!receipt || working.current || status !== 'observation_failed') return;
@@ -167,7 +161,7 @@ const ServiceCompletionForCase: React.FC<Props> = ({
     setError(null);
     try { await observeCompletion(); } finally { working.current = false; }
   };
-  useUnsavedDraft('服務完成確認', { '原因': reason, '已確認': confirmed }, { resetKey: status === 'completed', busy: ['applying', 'outcome_unknown', 'observation_failed', 'observing'].includes(status) });
+  useUnsavedDraft('服務完成確認', { '原因': reason }, { resetKey: status === 'completed', busy: ['applying', 'outcome_unknown', 'observation_failed', 'observing'].includes(status) });
 
 
   return (
@@ -185,20 +179,32 @@ const ServiceCompletionForCase: React.FC<Props> = ({
         </div>
       ) : orderStatus !== '服務中' ? (
         <div role="status" style={{ color: '#92400e' }}>
-          目前狀態為「{orderStatus}」；只有已確認實際開工且進入服務中的案件，才能預覽服務完成。
+          目前狀態為「{orderStatus}」；只有已確認實際開工且進入服務中的案件，才能儲存服務完成。
         </div>
       ) : (
         <>
           <p style={{ margin: '0 0 10px', color: '#57423b', fontSize: '0.86rem' }}>
             系統會重新核對排班、完整服務日、服務結束時刻與可完成條件；不接受手動指定目標狀態。
           </p>
+              <label style={{ display: 'block', marginTop: '10px', fontWeight: 700 }}>
+                完工原因（選填）
+                <textarea
+                  aria-label="完工原因（選填）"
+                  rows={2}
+                  maxLength={500}
+                  value={reason}
+                  disabled={status === 'applying' || status === 'outcome_unknown'}
+                  onChange={(event) => setReason(event.target.value)}
+                  style={{ width: '100%', marginTop: '6px' }}
+                />
+              </label>
           <button
             type="button"
             className="btn-secondary-action"
             disabled={status === 'previewing' || status === 'applying' || status === 'outcome_unknown' || receipt !== null}
             onClick={() => void previewCompletion()}
           >
-            {status === 'previewing' ? '正在檢查完成影響…' : '檢查服務完成影響'}
+            {status === 'previewing' ? '正在儲存服務完成…' : '儲存服務完成'}
           </button>
 
           {preview && (
@@ -208,39 +214,9 @@ const ServiceCompletionForCase: React.FC<Props> = ({
               <div>完成時刻：{new Date(preview.completion_instant).toLocaleString('zh-TW')}</div>
               <div>服務日：{preview.official_service_dates.join('、')}</div>
               <div>確認後訂單會進入服務完成狀態。</div>
-              <label style={{ display: 'block', marginTop: '10px', fontWeight: 700 }}>
-                完工確認原因
-                <textarea
-                  aria-label="完工確認原因"
-                  rows={2}
-                  maxLength={500}
-                  value={reason}
-                  disabled={status === 'applying' || status === 'outcome_unknown'}
-                  onChange={(event) => {
-                    setReason(event.target.value);
-                    setConfirmed(false);
-                  }}
-                  style={{ width: '100%', marginTop: '6px' }}
-                />
-              </label>
-              <label style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  disabled={status === 'applying' || status === 'outcome_unknown'}
-                  onChange={(event) => setConfirmed(event.target.checked)}
-                />
-                我已核對服務日與完成時刻，確認將訂單標記為服務完成。
-              </label>
-              <button
-                type="button"
-                className="btn-primary-action"
-                style={{ marginTop: '10px' }}
-                disabled={!confirmed || !reason.trim() || status !== 'previewed'}
-                onClick={() => void applyCompletion()}
-              >
-                {status === 'applying' ? '服務完成套用中…' : '確認套用服務完成'}
-              </button>
+
+
+
             </div>
           )}
         </>

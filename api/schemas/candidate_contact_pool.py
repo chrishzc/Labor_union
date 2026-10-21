@@ -118,7 +118,7 @@ class ManualCandidateInformationPreviewRequest(BaseModel):
 
     info_type: Literal[1, 2]
     confirmation_method: Literal["phone", "in_person", "paper", "other"]
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     actor: str = Field(min_length=1, max_length=100)
 
 
@@ -241,7 +241,7 @@ class ManualCandidateInformationPreview(BaseModel):
     staff_id: int = Field(gt=0)
     info_type: Literal[1, 2]
     confirmation_method: Literal["phone", "in_person", "paper", "other"]
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     actor: str = Field(min_length=1, max_length=100)
     expected_version: int = Field(ge=0)
     current_status: str | None = Field(default=None, max_length=50)

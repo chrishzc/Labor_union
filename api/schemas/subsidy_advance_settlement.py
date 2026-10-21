@@ -40,7 +40,7 @@ class AdvanceSettlementApplyBody(StrictModel):
     expected_account_version: int = Field(ge=0)
     expected_batch_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
-    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
 
 
 class AdvanceSettlementReceiptView(StrictModel):

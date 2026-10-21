@@ -1,6 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 /**
  * File: OrderTermsMutationPanel.tsx
@@ -187,8 +185,6 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
   const [receipt, setReceipt] = useState<OrderTermsReceipt | null>(null);
   const [readback, setReadback] = useState<OrderTerms | null>(null);
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [ordinaryApplied, setOrdinaryApplied] = useState(false);
   const [replacementDates, setReplacementDates] = useState<string[] | null>(null);
   const [serviceMode, setServiceMode] = useState<SchedulePrecisionRequest['service_mode'] | ''>('');
@@ -309,9 +305,9 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     onEditStateChange?.({ dirty: termsDirty, busy: status !== 'idle' || outcomeUnknown || Boolean(receipt && !readback) });
   }, [termsDirty, status, outcomeUnknown, receipt, readback, onEditStateChange]);
 
-  const proposedTermsPayload = () => ({
-    ...(needsReplacement && replacementDates ? {
-      replacement_service_dates: replacementDates,
+  const proposedTermsPayload = (dates = replacementDates) => ({
+    ...(needsReplacement && dates ? {
+      replacement_service_dates: dates,
       replacement_allocations: (currentQuery.assignments ?? []).map((assignment) => ({
         assignment_id: assignment.assignment_id,
         service_days: Number(allocations[assignment.assignment_id] ?? ''),
@@ -345,7 +341,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     && ((!draft.startTime && !draft.endTime)
       || (/^\d{2}:\d{2}$/.test(draft.startTime) && /^\d{2}:\d{2}$/.test(draft.endTime)))
     && timeValidationError === null;
-  const replacementReady = !needsReplacement || (replacementDates?.length === Number(draft.serviceDays)
+  const replacementReady = !needsReplacement || (serviceMode !== ''
     && (currentQuery.assignments?.length ? currentQuery.assignments.every((a) => Number.isInteger(Number(allocations[a.assignment_id])) && Number(allocations[a.assignment_id]) > 0)
       && currentQuery.assignments.reduce((sum, a) => sum + Number(allocations[a.assignment_id]), 0) === Number(draft.serviceDays) : true));
   const locked = currentQuery.service_data_locked || status !== 'idle' || (receipt !== null && readback === null) || outcomeUnknown;
@@ -409,13 +405,21 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     setReceipt(null);
     setOrdinaryApplied(false);
     try {
-      const nextPreview = await orderTermsMutationClient.preview(
-        caseNo,
-        proposedTermsPayload(),
-        { signal: controller.signal },
-      );
+      let dates = replacementDates;
+      if (needsReplacement && !dates) {
+        if (!serviceMode) throw new Error('請選擇替代日期排休方式。');
+        const calculation = await schedulePrecisionClient.calculate({ case_no: caseNo,
+          actual_start_date: draft.plannedStartDate, target_service_days: Number(draft.serviceDays), service_mode: serviceMode });
+        if (!isCurrentPreview()) return;
+        dates = calculation.day_by_day.filter(day => day.is_work_day).map(day => day.date);
+        if (dates.length !== Number(draft.serviceDays)) throw new Error('替代日期未達約定服務天數，請調整條件。');
+        setReplacementDates(dates);
+      }
+      const proposedPayload = proposedTermsPayload(dates);
+      const nextPreview = await orderTermsMutationClient.preview(caseNo, proposedPayload, { signal: controller.signal });
       if (!isCurrentPreview()) return;
       setPreview(nextPreview);
+      await applyTerms(nextPreview, proposedPayload);
     } catch (caught) {
       if (!isCurrentPreview() || controller.signal.aborted) return;
       setPreview(null);
@@ -428,16 +432,16 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
     }
   };
 
-  const applyTerms = async () => {
+  const applyTerms = async (calculatedPreview = preview, proposedPayload = proposedTermsPayload()) => {
+    const preview = calculatedPreview;
     if (!preview || currentQuery.service_data_locked) return;
-    if (preview.requires_formal_apply && !saveValidation.validate([{ value: reason, label: '條款變更原因', ref: saveFieldRef }])) return;
     setStatus('applying');
     setError(null);
     setReadback(null);
     try {
       if (pendingCommand.current === null) {
         const payload: OrderTermsApplyPayload = {
-          ...proposedTermsPayload(),
+          ...proposedPayload,
           expected_order_version: preview.order_version,
           expected_scheduling_version: preview.scheduling_version,
           expected_client_finance_version: preview.client_finance_version,
@@ -619,7 +623,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           <option value="">請選擇排休方式</option>
           {(['休周六', '休周日', '週休2日', '連續服務'] as const).map((mode) => <option key={mode}>{mode}</option>)}
         </select></label>
-        <button type="button" disabled={!serviceMode || !draftReady} onClick={() => void calculateReplacement()}>精算替代日期</button>
+        <button type="button" disabled={!serviceMode || !draftReady} onClick={() => void calculateReplacement()}>試算替代日期（選用）</button>
         {replacementDates && <p>替代服務日期（{replacementDates.length} 天）：{replacementDates.join('、')}</p>}
         {(currentQuery.assignments ?? []).map((assignment) => <label key={assignment.assignment_id}>{staffIdentity.label(assignment.staff_id)}（原 {assignment.service_days} 天）的新服務天數
           <input aria-label={`指派 ${assignment.assignment_id} 新服務天數`} type="number" min="1" value={allocations[assignment.assignment_id] ?? ''} onChange={(event) => { setAllocations((current) => ({ ...current, [assignment.assignment_id]: event.target.value })); setPreview(null); }} />
@@ -631,9 +635,12 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
         <p className="order-v2-drawer-error" role="status" style={{ marginTop: '6px' }}>{timeValidationError}</p>
       )}
 
+          <><label>變更原因（選填）
+            <textarea aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
+          </label></>
       <div className="order-v2-drawer-actions" style={{ marginTop: '12px' }}>
         <button type="button" disabled={locked || !draftReady || !replacementReady} onClick={() => void previewTerms()}>
-          {status === 'previewing' ? '正在預覽服務條件變更…' : '預覽服務條件變更'}
+          {status === 'previewing' ? '正在儲存服務條件…' : '儲存服務條件'}
         </button>
       </div>
 
@@ -646,14 +653,7 @@ export const OrderTermsMutationPanel: FC<OrderTermsMutationPanelProps> = ({ case
           )}
           <p>時段：{preview.before.service_time.start_time}～{preview.before.service_time.end_time} → {preview.after.service_time.start_time}～{preview.after.service_time.end_time}</p>
           <details><summary>技術資訊</summary><p>版本：Order {preview.order_version} · Scheduling {preview.scheduling_version} · Client Finance {preview.client_finance_version ?? '未讀取'} · Payroll {preview.payroll_version ?? '未讀取'}</p></details>
-          {preview.requires_formal_apply && <><label>變更原因（正式影響必填）
-            <textarea ref={saveFieldRef} aria-required="true" aria-label="條款變更原因" rows={2} maxLength={500} value={reason} disabled={locked} onChange={(event) => setReason(event.target.value)} />
-          </label>{saveValidation.feedback}</>}
-          <div className="order-v2-drawer-actions" style={{ marginTop: '8px' }}>
-            <button type="button" disabled={locked} onClick={() => void applyTerms()}>
-              {status === 'applying' ? '正在儲存服務條件…' : '確認儲存服務條件'}
-            </button>
-          </div>
+
         </div>
       )}
 

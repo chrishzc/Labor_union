@@ -52,7 +52,7 @@ class ApplyHistoricalReviewRemediation:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.prior_review_identity, "prior review identity", 191)
-        require_canonical_text(self.reason, "remediation reason", 500)
+        require_canonical_text(self.reason, "remediation reason", 500, allow_empty=True)
         if not self.evidence:
             raise ValueError("historical_order_remediation_evidence_required")
         normalized = tuple(require_canonical_text(item, "remediation evidence", 500) for item in self.evidence)
@@ -237,7 +237,7 @@ def _check_preview_inputs(
             correlation_id,
             current_version=ExpectedVersion(context.remediation_version),
         )
-    if not reason.strip() or not evidence:
+    if not evidence:
         raise _error(
             ErrorCategory.VALIDATION,
             "historical_order_remediation_evidence_required",
@@ -249,7 +249,7 @@ def _check_preview_inputs(
 def _check_versions(command, context):
     if command.expected_review_version.value != context.review_version or command.expected_remediation_version.value != context.remediation_version:
         raise _error(ErrorCategory.CONFLICT, "historical_order_remediation_stale", "歷史 review 已變更，請重新查詢與 Preview。", command.correlation_id, current_version=ExpectedVersion(context.remediation_version))
-    if not command.reason.strip() or not command.evidence:
+    if not command.evidence:
         raise _error(ErrorCategory.VALIDATION, "historical_order_remediation_evidence_required", "人工更正必須提供理由與佐證。", command.correlation_id)
 
 

@@ -92,7 +92,7 @@ def build_review_decision_candidate(
     reason: str,
 ) -> LineReviewDecisionCandidate:
     _validate_review_decision(snapshot, decision, expected_version)
-    require_canonical_text(reason, "LINE review decision reason", _DECISION_REASON_MAXIMUM_LENGTH)
+    require_canonical_text(reason, "LINE review decision reason", _DECISION_REASON_MAXIMUM_LENGTH, allow_empty=True)
     return LineReviewDecisionCandidate(
         snapshot.request_id,
         snapshot.review_type,

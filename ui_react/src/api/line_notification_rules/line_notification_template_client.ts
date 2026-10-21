@@ -87,7 +87,7 @@ export class DefaultLineNotificationTemplateClient implements LineNotificationTe
       {
         content: payload.content,
         expected_revision: payload.expected_revision,
-        reason: payload.reason ?? '更新通知規則訊息內容',
+        reason: payload.reason ?? '',
       },
       requestOptions(options),
     );

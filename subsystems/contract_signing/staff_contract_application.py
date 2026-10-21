@@ -695,8 +695,6 @@ _MANUAL_CONFIRMATION_METHODS = frozenset({"phone", "paper", "in_person", "verifi
 def _require_manual_confirmation(confirmation_method: str, reason: str) -> None:
     if confirmation_method not in _MANUAL_CONFIRMATION_METHODS:
         raise ValueError("manual_contract_confirmation_method_invalid")
-    if not reason.strip():
-        raise ValueError("manual_contract_reason_missing")
 
 
 def _manual_staff_snapshot(connection, case_no: str, segment_id: int, *, lock: bool) -> dict[str, object]:

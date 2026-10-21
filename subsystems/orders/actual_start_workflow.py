@@ -169,7 +169,7 @@ class ActualStartApplyRequest:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
-        require_canonical_text(self.reason, "change reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "change reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         if not isinstance(self.new_actual_start_date, date):
             raise TypeError("new actual start date must be a date")
 

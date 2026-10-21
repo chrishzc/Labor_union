@@ -125,7 +125,6 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   const [rowIdsText, setRowIdsText] = useState('');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<StaffPayoutPreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [job, setJob] = useState<StaffPayoutJob | null>(null);
   const [accepted, setAccepted] = useState<StaffPayoutJobAccepted | null>(null);
   const [busy, setBusy] = useState<Busy>('query');
@@ -164,7 +163,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
 
   useEffect(() => {
     generation.current += 1;
-    setQuery(null); setPreview(null); setConfirmed(false); setJob(null); setAccepted(null);
+    setQuery(null); setPreview(null); setJob(null); setAccepted(null);
     setRowIdsText(''); setReason(''); setError(null); setNotice(null); setUnknownOutcome(false); command.current = null;
     const current = generation.current;
     void client.query(target.staffId, requestOptions).then((fresh) => {
@@ -177,7 +176,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     return () => { generation.current += 1; };
   }, [client, requestOptions, target]);
 
-  const invalidatePreview = () => { setPreview(null); setConfirmed(false); setNotice(null); command.current = null; };
+  const invalidatePreview = () => { setPreview(null); setNotice(null); command.current = null; };
   const obligation = activeObligation(query, target);
   const active = obligation !== null && obligation.balance_ntd > 0 && obligation.payout_status !== 'completed';
   const payoutCandidate = preview && 'allocations' in preview.candidate ? preview.candidate : null;
@@ -189,11 +188,12 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   const runPreview = async () => {
     const selected = selection();
     if (!selected || !query || busy !== null || unknownOutcome) return;
-    setBusy('preview'); setError(null); setNotice(null); setPreview(null); setConfirmed(false);
+    setBusy('preview'); setError(null); setNotice(null); setPreview(null);
     try {
       const value = await client.preview(selected, requestOptions);
       if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', 'Preview 未回傳同一 Staff 與原義務。');
       setPreview(value);
+      await runApply(value);
     } catch (caught) { setError(displayError(caught)); }
     finally { if (mounted.current) setBusy(null); }
   };
@@ -229,7 +229,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       throw new StaffPayoutRemediationError('STAFF_PAYOUT_JOB_TIMEOUT', 'Job 在期限內沒有 terminal 結果。', true);
     }
     if (latest.status !== 'succeeded') {
-      setPreview(null); setConfirmed(false); setAccepted(null); command.current = null; setNotice(terminalMessage(latest));
+      setPreview(null); setAccepted(null); command.current = null; setNotice(terminalMessage(latest));
       return;
     }
     if (latest.outcome?.kind !== 'success' || latest.outcome.result_reference !== `staff_payout:${target.staffId}`) {
@@ -238,9 +238,10 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     await readbackAfterSuccess();
   };
 
-  const runApply = async () => {
+  const runApply = async (checked: StaffPayoutPreview | null = preview) => {
+    const preview = checked;
     const selected = selection();
-    if (!selected || !preview || !confirmed || !reason.trim() || busy !== null || (unknownOutcome && accepted !== null)) return;
+    if (!selected || !preview || (unknownOutcome && accepted !== null)) return;
     setBusy('apply'); setError(null); setNotice(null);
     const fingerprint = preview.preview_fingerprint;
     if (!command.current || command.current.fingerprint !== fingerprint) command.current = { fingerprint, value: createStaffPayoutRemediationCommand() };
@@ -252,7 +253,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
         setUnknownOutcome(true);
         setError(displayError(caught));
       } else {
-        setUnknownOutcome(false); setPreview(null); setConfirmed(false); setJob(null); setAccepted(null); command.current = null;
+        setUnknownOutcome(false); setPreview(null); setJob(null); setAccepted(null); command.current = null;
         if (isStaleApplyError(caught)) {
           try {
             await loadQuery(false);
@@ -292,8 +293,8 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     <p><strong>解除條件：</strong>只核對既有銀行入帳資料，不會發動銀行匯款。核銷處理完成後，系統仍會重新確認此筆應付款已結清。</p>
     {obligation && <div data-surface-id="staff-payout-obligation"><strong>原逾期應付款</strong><p>到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {payoutStatusLabel(obligation.payout_status)}</p></div>}
     {error && <div role="alert">{error}</div>}{notice && <div role="status">{notice}</div>}
-    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label><label>人工核對理由<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection() || !reason.trim()} onClick={() => void runPreview()}>檢查核銷影響</button></fieldset>
-    {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>核銷影響已確認，尚未寫入</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p><label><input type="checkbox" aria-label="確認核銷影響" checked={confirmed} disabled={busy !== null || accepted !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對規則、原應付款與銀行入帳資料，確認套用。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null || accepted !== null} onClick={() => void runApply()}>確認並提交核銷</button></div>}
+    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label><label>人工核對理由（選填）<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection()} onClick={() => void runPreview()}>儲存核銷</button></fieldset>
+    {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>本次核銷資料</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p></div>}
     {accepted && <div data-surface-id="staff-payout-job"><p>核銷已受理，正在處理並重新確認應付款狀態。</p>{job && <p>處理狀態：{jobStatusLabel(job.status)}</p>}{(unknownOutcome || (job !== null && (job.status === 'queued' || job.status === 'running' || job.status === 'succeeded'))) && <button type="button" disabled={busy !== null} onClick={() => void reconcile()}>重新查詢核銷結果</button>}</div>}
     {unknownOutcome && !accepted && <div role="alert">核銷結果目前無法安全確認，禁止產生新操作。<button type="button" disabled={busy !== null} onClick={() => void runApply()}>使用原操作安全重試</button></div>}
     {!active && !accepted && <div role="status">目前應付款已非逾期待處理；系統會依最新應付款資料判斷是否解除異常。</div>}

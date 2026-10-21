@@ -618,7 +618,7 @@ def test_draft_query_fails_closed_on_non_exact_publication_revision() -> None:
         LineConfigurationApplication(lambda: unit_of_work).get_rich_menu_draft_query(_actor())
 
 
-def test_draft_optional_note_does_not_relax_publication_reason_contract():
+def test_draft_and_publication_notes_are_optional_but_length_bounded():
     from api.schemas.line_rich_menu_drafts import RichMenuDraftApplyRequest
     from api.schemas.line_rich_menus import RichMenuPublishRequest, RichMenuPublicationRetryRequest
     from pydantic import ValidationError
@@ -629,6 +629,11 @@ def test_draft_optional_note_does_not_relax_publication_reason_contract():
     with pytest.raises(ValidationError):
         RichMenuDraftApplyRequest(**body, reason='字' * 1001)
     for model in (RichMenuPublishRequest, RichMenuPublicationRetryRequest):
-        assert model.model_fields['reason'].is_required()
+        assert not model.model_fields['reason'].is_required()
+        command = dict(idempotency_key='publish', correlation_id='publish')
+        if model is RichMenuPublishRequest:
+            command['preview_id'] = 1
+        assert model(**command).reason == ''
+        assert model(**command, reason='').reason == ''
         with pytest.raises(ValidationError):
-            model(preview_id=1, reason='', idempotency_key='publish', correlation_id='publish')
+            model(**command, reason='x' * 501)

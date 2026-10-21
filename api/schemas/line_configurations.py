@@ -19,7 +19,7 @@ class PreviewLineConfigurationRequest(BaseModel):
 
 
 class ApplyLineConfigurationRequest(PreviewLineConfigurationRequest):
-    reason: str = Field(min_length=1, max_length=1_000)
+    reason: str = Field(default="", max_length=1_000)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 

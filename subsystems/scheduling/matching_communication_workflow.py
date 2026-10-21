@@ -48,8 +48,8 @@ def _positive_int(value: Any, field: str) -> int:
     return value
 
 
-def _text(value: Any, field: str, maximum: int) -> str:
-    if not isinstance(value, str) or not value.strip():
+def _text(value: Any, field: str, maximum: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value.strip() and not allow_empty):
         raise ValueError(f"{field} is required")
     normalized = value.strip()
     if len(normalized) > maximum:
@@ -416,7 +416,7 @@ def cancel_matching_plan(
     plan_id = _positive_int(plan_id, "plan_id")
     event_key = _text(event_key, "event_key", 100)
     actor = _text(actor, "actor", 100)
-    reason = _text(reason, "reason", 255)
+    reason = _text(reason, "reason", 255, allow_empty=True)
     return _run_in_application_uow(
         lambda connection, cursor: _cancel_matching_plan_in_transaction(
             connection, cursor, case_no, plan_id, event_key, actor, reason, expected_version

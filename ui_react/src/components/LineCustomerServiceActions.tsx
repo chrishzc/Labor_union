@@ -64,18 +64,15 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
   const [internalNote, setInternalNote] = useState(externalDetail.ticket.internalNote ?? '');
   const [replyText, setReplyText] = useState('');
   const [resolveAfterReply, setResolveAfterReply] = useState(false);
-  const [updatePreview, setUpdatePreview] = useState<CustomerServiceResolvePreviewModel | null>(null);
-  const [updateOperation, setUpdateOperation] = useState<UpdateOperation | null>(null);
-  const [updateConfirmed, setUpdateConfirmed] = useState(false);
   const [updateReceipt, setUpdateReceipt] = useState<CustomerServiceUpdateReceiptModel | null>(null);
-  const [replyPreview, setReplyPreview] = useState<CustomerServiceReplyPreviewModel | null>(null);
-  const [replyOperation, setReplyOperation] = useState<ReplyOperation | null>(null);
-  const [replyConfirmed, setReplyConfirmed] = useState(false);
   const [replyReceipt, setReplyReceipt] = useState<CustomerServiceReplyReceiptModel | null>(null);
   const [mutationState, setMutationState] = useState<MutationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const committedReadbackRef = useRef<string | null>(null);
+  const updateIntent = useRef<{ signature: string; operation: UpdateOperation; preview: CustomerServiceResolvePreviewModel | null } | null>(null);
+  const replyIntent = useRef<{ signature: string; operation: ReplyOperation; preview: CustomerServiceReplyPreviewModel | null } | null>(null);
+  const submitting = useRef(false);
 
   useEffect(() => {
     controllerRef.current?.abort();
@@ -88,13 +85,7 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
     }
     setReplyText('');
     setResolveAfterReply(false);
-    setUpdatePreview(null);
-    setUpdateOperation(null);
-    setUpdateConfirmed(false);
     setUpdateReceipt(null);
-    setReplyPreview(null);
-    setReplyOperation(null);
-    setReplyConfirmed(false);
     setReplyReceipt(null);
     setMutationState('idle');
     setMessage(null);
@@ -112,31 +103,31 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
   };
 
   const invalidateUpdatePreview = (): void => {
-    setUpdatePreview(null);
-    setUpdateOperation(null);
-    setUpdateConfirmed(false);
     setUpdateReceipt(null);
   };
 
   const invalidateReplyPreview = (): void => {
-    setReplyPreview(null);
-    setReplyOperation(null);
-    setReplyConfirmed(false);
     setReplyReceipt(null);
   };
 
   const previewUpdate = async (status: CustomerServiceStatus, successMessage: string): Promise<void> => {
+    if (submitting.current) return;
+    submitting.current = true;
     const controller = new AbortController();
     controllerRef.current = controller;
     setMutationState('loading');
     setMessage(null);
     try {
-      const operation: UpdateOperation = {
+      const signature = JSON.stringify([detail.ticket.ticketId, detail.ticket.version, status, internalNote.trim()]);
+      if (updateIntent.current?.signature !== signature) updateIntent.current = { signature, preview: null, operation: {
         status,
         successMessage,
         correlationId: operationIdentity(`line-ticket-${status}-preview`),
         idempotencyKey: operationIdentity(`line-ticket-${status}-apply`),
-      };
+      } };
+      const intent = updateIntent.current;
+      const operation = intent.operation;
+      if (!intent.preview) {
       const result = await client.previewUpdate(
         detail.ticket.ticketId,
         {
@@ -146,20 +137,19 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         },
         { signal: controller.signal, correlationId: operation.correlationId }
       );
-      setUpdatePreview(adaptCustomerServiceResolvePreview(result));
-      setUpdateOperation(operation);
-      setUpdateConfirmed(false);
+            if (controller.signal.aborted) return;
+      intent.preview = adaptCustomerServiceResolvePreview(result);
+      }
       setUpdateReceipt(null);
-      setMutationState('idle');
+      if (!controller.signal.aborted) await applyUpdate(intent.preview, operation);
     } catch (error) {
       if (controller.signal.aborted) return;
       setMutationState('error');
       setMessage(displayError(error));
-    }
+    } finally { submitting.current = false; }
   };
 
-  const applyUpdate = async (): Promise<void> => {
-    if (!updatePreview || !updateOperation || !updateConfirmed) return;
+  const applyUpdate = async (updatePreview: CustomerServiceResolvePreviewModel, updateOperation: UpdateOperation): Promise<void> => {
     const controller = new AbortController();
     controllerRef.current = controller;
     setMutationState('loading');
@@ -180,11 +170,9 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         }
       );
       const receipt = adaptCustomerServiceUpdateReceipt(result);
+      updateIntent.current = null;
       setUpdateReceipt(receipt);
-      setUpdatePreview(null);
-      setUpdateOperation(null);
-      setUpdateConfirmed(false);
-      commitDetail(receipt.readback, updateOperation.successMessage);
+            commitDetail(receipt.readback, updateOperation.successMessage);
     } catch (error) {
       if (controller.signal.aborted) return;
       setMutationState('error');
@@ -193,15 +181,21 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
   };
 
   const previewReply = async (): Promise<void> => {
+    if (submitting.current) return;
+    submitting.current = true;
     const controller = new AbortController();
     controllerRef.current = controller;
     setMutationState('loading');
     setMessage(null);
     try {
-      const operation: ReplyOperation = {
+      const signature = JSON.stringify([detail.ticket.ticketId, detail.ticket.version, replyText.trim(), resolveAfterReply, internalNote.trim()]);
+      if (replyIntent.current?.signature !== signature) replyIntent.current = { signature, preview: null, operation: {
         correlationId: operationIdentity('line-ticket-reply-preview'),
         idempotencyKey: operationIdentity('line-ticket-reply-apply'),
-      };
+      } };
+      const intent = replyIntent.current;
+      const operation = intent.operation;
+      if (!intent.preview) {
       const result = await client.previewReply(
         detail.ticket.ticketId,
         {
@@ -212,20 +206,19 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         },
         { signal: controller.signal, correlationId: operation.correlationId }
       );
-      setReplyPreview(adaptCustomerServiceReplyPreview(result));
-      setReplyOperation(operation);
-      setReplyConfirmed(false);
+            if (controller.signal.aborted) return;
+      intent.preview = adaptCustomerServiceReplyPreview(result);
+      }
       setReplyReceipt(null);
-      setMutationState('idle');
+      if (!controller.signal.aborted) await applyReply(intent.preview, operation);
     } catch (error) {
       if (controller.signal.aborted) return;
       setMutationState('error');
       setMessage(displayError(error));
-    }
+    } finally { submitting.current = false; }
   };
 
-  const applyReply = async (): Promise<void> => {
-    if (!replyPreview || !replyOperation || !replyConfirmed) return;
+  const applyReply = async (replyPreview: CustomerServiceReplyPreviewModel, replyOperation: ReplyOperation): Promise<void> => {
     const controller = new AbortController();
     controllerRef.current = controller;
     setMutationState('loading');
@@ -244,11 +237,9 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         { signal: controller.signal, correlationId: replyOperation.correlationId }
       );
       const receipt = adaptCustomerServiceReplyReceipt(result);
+      replyIntent.current = null;
       setReplyReceipt(receipt);
-      setReplyPreview(null);
-      setReplyOperation(null);
-      setReplyConfirmed(false);
-      setReplyText('');
+            setReplyText('');
       setResolveAfterReply(false);
       commitDetail(
         receipt.readback,
@@ -277,7 +268,7 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
           disabled={busy}
           onClick={() => void previewUpdate('handling', '工單已進入處理中。')}
         >
-          預覽開始處理
+          開始處理
         </button>
       )}
 
@@ -301,27 +292,9 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         disabled={busy || noteUnchanged}
         onClick={() => void previewUpdate(detail.ticket.status, '內部備註已更新。')}
       >
-        預覽更新內部備註
+        儲存內部備註
       </button>
 
-      {updatePreview && updateOperation && (
-        <div className="line-preview-result">
-          <strong>{updatePreview.beforeStatusLabel} → {updatePreview.afterStatusLabel}</strong>
-          <p>確認後會重新核對並讀回最新工單狀態。</p>
-          <label>
-            <input
-              type="checkbox"
-              checked={updateConfirmed}
-              disabled={busy}
-              onChange={(event) => setUpdateConfirmed(event.target.checked)}
-            />
-            我已確認狀態與備註內容
-          </label>
-          <button type="button" disabled={busy || !updateConfirmed} onClick={() => void applyUpdate()}>
-            確認套用客服操作
-          </button>
-        </div>
-      )}
       {updateReceipt && (
         <div className="line-success" role="status">
           客服工單已更新為「{updateReceipt.resultingStatusLabel}」。
@@ -359,28 +332,10 @@ export const LineCustomerServiceActions: React.FC<LineCustomerServiceActionsProp
         disabled={busy || replyText.trim().length === 0}
         onClick={() => void previewReply()}
       >
-        預覽 LINE 回覆
+        送出 LINE 回覆
       </button>
-      <p>預覽不會送出；確認後只排入 LINE 發送佇列，尚不代表客戶已收到。</p>
+      <p>送出後會排入 LINE 發送佇列，尚不代表客戶已收到。</p>
 
-      {replyPreview && replyOperation && (
-        <div className="line-preview-result">
-          <strong>{replyPreview.beforeStatusLabel} → {replyPreview.afterStatusLabel}</strong>
-          <p>{replyPreview.replyCharacterCount} 字；確認後將排入發送佇列，尚未送達 LINE。</p>
-          <label>
-            <input
-              type="checkbox"
-              checked={replyConfirmed}
-              disabled={busy}
-              onChange={(event) => setReplyConfirmed(event.target.checked)}
-            />
-            我已確認回覆內容與工單狀態
-          </label>
-          <button type="button" disabled={busy || !replyConfirmed} onClick={() => void applyReply()}>
-            確認建立 LINE 回覆任務
-          </button>
-        </div>
-      )}
       {replyReceipt && (
         <div className="line-success" role="status">
           LINE 回覆已排入發送佇列，尚未送達。

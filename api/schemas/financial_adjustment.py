@@ -26,7 +26,7 @@ class FinancialAdjustmentPreviewBody(_StrictModel):
     scope: Literal["client_only", "client_and_staff"] = "client_and_staff"
     source_event_identity: str = Field(min_length=1, max_length=191)
     amount_delta_ntd: int
-    reason: str = Field(min_length=1, max_length=255)
+    reason: str = Field(default="", max_length=255)
     reversal_of_adjustment_identity: str | None = Field(
         default=None,
         min_length=1,

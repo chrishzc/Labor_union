@@ -9,6 +9,7 @@ import type {
   HolidayPreviewRequest,
   HolidayReceipt,
 } from './holiday_flow_adapter';
+import { holidayFlowStore } from './holiday_flow_adapter';
 
 const REQUIRED_HEADERS = ['西元日期', '星期', '是否放假', '備註'] as const;
 const VALID_WEEKDAYS = new Set(['一', '二', '三', '四', '五', '六', '日']);
@@ -225,6 +226,7 @@ export async function importOfficialHolidayCandidates(
   year: number,
   existingSkipCount: number,
   operations: OfficialHolidayImportOperations,
+  reason = '',
 ): Promise<OfficialHolidayImportSummary> {
   const horizon = yearHorizon(year);
   let successCount = 0;
@@ -248,11 +250,13 @@ export async function importOfficialHolidayCandidates(
         ...previewRequest,
         expected_calendar_version: preview.command.expected_calendar_version,
         preview_fingerprint: preview.preview_fingerprint,
-        reason: `匯入政府官方 ${year} 年辦公日曆 CSV`,
+        reason: reason.trim(),
       });
       if (receipt.changed) successCount += 1;
       else skipCount += 1;
     } catch (cause) {
+      const status = holidayFlowStore.get()?.status;
+      if (status === 'outcome_unknown' || status === 'observation_failed') throw cause;
       failures.push({ holiday_date: candidate.holiday_date, reason: failureReason(cause) });
       try {
         await operations.query(horizon);

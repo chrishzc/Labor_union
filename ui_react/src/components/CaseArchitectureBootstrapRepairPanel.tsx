@@ -17,8 +17,8 @@ import {
   type IntakeTermsPreview,
 } from '../api/orders/order_intake_completion_client';
 
-const reason = '建立既有案件缺少的客戶帳務、月嫂薪資與排班資料';
-const termsReason = '補齊既有歷史案件的約定服務開始日與服務天數';
+const reason = '';
+const termsReason = '';
 const key = () => `case-bootstrap-repair-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
 
 const blockerMessage = (code: string) => ({
@@ -79,9 +79,9 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     setMessage(null);
     setTermsPreview(null);
     try {
-      setTermsPreview(await orderIntakeCompletionClient.previewTerms(
-        caseNo, startDate, Number(serviceDays),
-      ));
+      const next = await orderIntakeCompletionClient.previewTerms(caseNo, startDate, Number(serviceDays));
+      setTermsPreview(next);
+      if (next.apply_allowed) await applyTerms(next);
     } catch (error) {
       setMessage(intakeRepairErrorMessage(error));
     } finally {
@@ -93,7 +93,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     isTermsRepairBlocker,
   ) ?? [];
 
-  const applyTerms = async () => {
+  const applyTerms = async (termsPreview: IntakeTermsPreview) => {
     if (!termsPreview) return;
     setBusy('terms-apply');
     setMessage(null);
@@ -118,7 +118,9 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     setBusy('preview');
     setMessage(null);
     try {
-      setPreview(await caseArchitectureBootstrapClient.preview(caseNo, status.recommendation));
+      const next = await caseArchitectureBootstrapClient.preview(caseNo, status.recommendation);
+      setPreview(next);
+      await apply(next);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '案件初始資料預覽失敗。');
     } finally {
@@ -126,7 +128,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     }
   };
 
-  const apply = async () => {
+  const apply = async (preview: CaseArchitectureBootstrapPreview) => {
     if (!status?.recommendation || !preview) return;
     setBusy('apply');
     setMessage(null);
@@ -147,7 +149,7 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
 
   return <div className="registry-bootstrap-repair" aria-label="案件初始資料修復" style={{ borderTop: '1px solid #fed7aa', marginTop: '12px', paddingTop: '12px', display: 'grid', gap: '8px' }}>
     <strong>{status?.ready ? '帳務與排班資料已建立' : '建立帳務與排班資料'}</strong>
-    {status && !status.ready && <p style={{ margin: 0 }}>客戶帳務、月嫂薪資或排班資料尚未齊全，請先核對下列欄位與預覽內容。</p>}
+    {status && !status.ready && <p style={{ margin: 0 }}>客戶帳務、月嫂薪資或排班資料尚未齊全，請先填寫下列欄位。</p>}
     {busy === 'status' && <p role="status">正在檢查可補建資料…</p>}
     {status?.ready && <p role="status">初始資料已存在，請重新讀取案件。</p>}
     {status && status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).length > 0 && <ul>{status.domain_blockers.filter((blocker) => !isTermsRepairBlocker(blocker)).map((blocker) => <li key={blocker}>{blockerMessage(blocker)}</li>)}</ul>}
@@ -156,25 +158,21 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
       {termsRepairBlockers.includes('missing_start_date') && <label>約定服務開始日<input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); setTermsPreview(null); setDirty(true); }} /></label>}
       {termsRepairBlockers.includes('missing_service_days') && <label>服務天數<input type="number" min="1" step="1" value={serviceDays} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); setDirty(true); }} /></label>}
       <button type="button" disabled={busy !== null || !startDate || Number(serviceDays) <= 0} onClick={() => void runTermsPreview()}>
-        {busy === 'terms-preview' ? '正在預覽約定服務資料…' : '預覽約定服務資料'}
+        {busy === 'terms-preview' ? '正在儲存約定服務資料…' : '儲存約定服務資料'}
       </button>
       {termsPreview && <div style={{ display: 'grid', gap: '6px' }}>
         <span>將設定約定服務開始日 {termsPreview.after_start_date}，服務天數 {termsPreview.after_service_days} 天。</span>
         {termsPreview.blockers.length > 0 && <ul>{termsPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}</ul>}
-        <button type="button" disabled={busy !== null || !termsPreview.apply_allowed} onClick={() => void applyTerms()}>
-          {busy === 'terms-apply' ? '正在儲存約定服務資料…' : '確認儲存約定服務資料'}
-        </button>
+
       </div>}
     </div>}
-    {status?.recommendation && status.domain_blockers.length === 0 && !preview && <button type="button" disabled={busy !== null} onClick={() => void runPreview()}>
-      {busy === 'preview' ? '正在產生補建預覽…' : '預覽帳務與排班資料'}
+    {status?.recommendation && status.domain_blockers.length === 0 && <button type="button" disabled={busy !== null} onClick={() => void runPreview()}>
+      {busy === 'preview' ? '正在建立初始資料…' : '建立帳務與排班資料'}
     </button>}
     {preview && <div style={{ display: 'grid', gap: '6px' }}>
       <span>客戶時薪：{preview.client_hourly_rate_ntd} 元；月嫂時薪：{preview.payroll_hourly_rate_ntd} 元。</span>
       <details><summary>技術資訊</summary>薪資政策：{preview.payroll_policy_kind}</details>
-      <button type="button" disabled={busy !== null} onClick={() => void apply()}>
-        {busy === 'apply' ? '正在建立初始資料…' : '建立帳務與排班資料'}
-      </button>
+
     </div>}
     {message && <p role="status">{message}</p>}
   </div>;

@@ -70,7 +70,7 @@ class ActualStartApplyBody(ActualStartPreviewBody):
         exclude=True,
     )
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str | None = Field(default=None, min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def validate_operation_shape(self):
@@ -86,7 +86,7 @@ class ActualStartApplyBody(ActualStartPreviewBody):
             ):
                 raise ValueError("date_only_actual_start_has_downstream_fields")
             return self
-        if any(value is None for value in downstream) or self.reason is None:
+        if any(value is None for value in downstream):
             raise ValueError("reschedule_actual_start_fields_required")
         return self
 
@@ -184,7 +184,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(actor_id),
-        body.reason,
+        body.reason or "",
         CorrelationId(correlation),
     )
 

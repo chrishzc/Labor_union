@@ -53,7 +53,7 @@ class HistoricalOwnerSelection:
         require_canonical_text(self.row_identity, "bank row identity", 191)
         require_canonical_text(self.case_no, "owner case number", 50)
         require_canonical_text(self.obligation_identity, "owner obligation identity", 191)
-        require_canonical_text(self.reason, "owner selection reason", 500)
+        require_canonical_text(self.reason, "owner selection reason", 500, allow_empty=True)
         if not self.evidence_references:
             raise ValueError("historical_owner_evidence_required")
         for reference in self.evidence_references:
@@ -102,7 +102,7 @@ class HistoricalReprocessApplyRequest:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.batch_identity, "reprocess batch identity", 191)
-        require_canonical_text(self.reason, "reprocess reason", 500)
+        require_canonical_text(self.reason, "reprocess reason", 500, allow_empty=True)
         identities = tuple(item.row_identity for item in self.owner_selections)
         if identities != tuple(sorted(set(identities))):
             raise ValueError("historical owner selections must be sorted and unique")

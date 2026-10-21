@@ -30,7 +30,7 @@ type UiState =
   | { type: 'querying' }
   | { type: 'ready' }
   | { type: 'previewing' }
-  | { type: 'preview_ready'; preview: ServiceBeforeReplacementPreview; confirmed: boolean }
+  | { type: 'preview_ready'; preview: ServiceBeforeReplacementPreview }
   | { type: 'applying' }
   | { type: 'outcome_unknown'; request: ServiceBeforeReplacementApplyRequest; identity: ServiceBeforeReplacementCommandIdentity; message: string }
   | { type: 'observed'; result: ServiceBeforeReplacementApplyResult }
@@ -163,10 +163,6 @@ export function ServiceBeforeReplacementActions({
   const preview = async () => {
     const trimmedReason = reason.trim();
     const evidence: string[] = [];
-    if (!trimmedReason) {
-      setUiState({ type: 'error', message: '請填寫換人原因。' });
-      return;
-    }
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
@@ -184,7 +180,12 @@ export function ServiceBeforeReplacementActions({
       }, controller.signal);
       if (operationGeneration.current !== generation || requestedCaseNo !== caseNo || requestedScenario !== scenario) return;
       setQuery(next);
-      setUiState({ type: 'preview_ready', preview: next, confirmed: false });
+      setUiState({ type: 'preview_ready', preview: next });
+      if (next.outcome === 'ready') {
+        const command = buildApplyRequest(next);
+        if (command === null) throw new Error('更換資料尚未完整，請重新查詢。');
+        await apply(command, createServiceBeforeReplacementCommandIdentity());
+      }
     } catch (error) {
       if (operationGeneration.current !== generation || requestedCaseNo !== caseNo || requestedScenario !== scenario) return;
       setUiState({ type: 'error', message: errorMessage(error, '服務前換人預覽失敗。') });
@@ -232,15 +233,6 @@ export function ServiceBeforeReplacementActions({
     }
   };
 
-  const startApply = async () => {
-    if (uiState.type !== 'preview_ready' || !uiState.confirmed) return;
-    const request = buildApplyRequest(uiState.preview);
-    if (request === null) {
-      setUiState({ type: 'error', message: '更換資料尚未完整，請重新查詢後再預覽。' });
-      return;
-    }
-    await apply(request, createServiceBeforeReplacementCommandIdentity());
-  };
   useUnsavedDraft('服務前更換月嫂', { '情境': scenario, '原因': reason }, {
     enabled: expanded && uiState.type !== 'observed',
     baseline: { '情境': initialScenario ?? '', '原因': '' },
@@ -310,38 +302,25 @@ export function ServiceBeforeReplacementActions({
       {query?.outcome === 'ready' && !['observed', 'outcome_unknown'].includes(uiState.type) && (
         <section aria-label="服務前換人操作資料" style={{ display: 'grid', gap: '8px' }}>
           <label style={{ display: 'grid', gap: '4px' }}>
-            換人原因
+            換人原因（選填）
             <textarea value={reason} maxLength={500} disabled={busy} onChange={(event) => {
               setReason(event.target.value);
               if (uiState.type === 'preview_ready') setUiState({ type: 'ready' });
             }} />
           </label>
-          <button type="button" disabled={busy || !reason.trim()} onClick={() => void preview()}>
-            預覽換人影響
+          <button type="button" disabled={busy} onClick={() => void preview()}>
+            儲存更換
           </button>
         </section>
       )}
 
       {uiState.type === 'preview_ready' && (
         <section aria-label="服務前換人預覽" style={{ border: '1px solid #f2a27b', borderRadius: '10px', padding: '12px' }}>
-          <strong>{uiState.preview.outcome === 'ready' ? '預覽完成，尚未寫入' : '此預覽不可套用'}</strong>
+          <strong>{uiState.preview.outcome === 'ready' ? '更換資料已檢查' : '此預覽不可套用'}</strong>
           <p>更換後下一步：{stepLabels[uiState.preview.resume_step]}</p>
           <p>確認後將依目前進度更新月嫂安排，原有紀錄保留供查閱。</p>
           {uiState.preview.blockers.length > 0 && <ul>{[...new Set(uiState.preview.blockers.map(blockerLabel))].map((message) => <li key={message}>{message}</li>)}</ul>}
-          {uiState.preview.outcome === 'ready' && (
-            <>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={uiState.confirmed}
-                  disabled={busy}
-                  onChange={(event) => setUiState({ ...uiState, confirmed: event.target.checked })}
-                />
-                我已確認換人原因及影響
-              </label>
-              <button type="button" disabled={!uiState.confirmed} onClick={() => void startApply()}>確認更換</button>
-            </>
-          )}
+
         </section>
       )}
 

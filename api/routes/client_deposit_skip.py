@@ -32,7 +32,7 @@ class ApplyBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     expected_account_version:int=Field(ge=0)
     preview_fingerprint:str=Field(pattern=r"^[0-9a-f]{64}$")
-    reason:str=Field(min_length=1,max_length=500)
+    reason:str=Field(default="", max_length=500)
 def _payload(c):return {"case_no":c.case_no,"expected_account_version":c.expected_account_version,"resulting_account_version":c.resulting_account_version,"deposit_required_ntd":c.deposit_required_ntd,"deposit_net_received_ntd":c.deposit_net_received_ntd,"unpaid_progression_allowed":c.override_active,"mutates":c.mutates,"blockers":list(c.blockers),"preview_fingerprint":c.fingerprint.value}
 @router.post("/preview")
 def preview(case_no:str=Path(...),_:AdminPrincipal=Depends(require_system_admin),application:Application=Depends(get_client_deposit_skip_application)):

@@ -134,7 +134,7 @@ class ResetLineAlertGroupCommand:
 
     def __post_init__(self) -> None:
         _text(self.expected_version, "expected version", _MAX_TOKEN)
-        _text(self.reason, "reason", _MAX_REASON)
+        _text(self.reason, "reason", _MAX_REASON, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +151,7 @@ class SetLineAlertTargetEnabledCommand:
     def __post_init__(self) -> None:
         require_positive_integer(self.target_id, "target ID")
         _text(self.expected_version, "expected version", _MAX_TOKEN)
-        _text(self.reason, "reason", _MAX_REASON)
+        _text(self.reason, "reason", _MAX_REASON, allow_empty=True)
         if not isinstance(self.enabled, bool):
             raise TypeError("enabled must be boolean")
 
@@ -169,7 +169,7 @@ class AddLineAlertAdminTargetCommand:
     def __post_init__(self) -> None:
         require_positive_integer(self.admin_user_id, "admin user ID")
         _text(self.minimum_status, "minimum status", 20)
-        _text(self.reason, "reason", _MAX_REASON)
+        _text(self.reason, "reason", _MAX_REASON, allow_empty=True)
         if self.minimum_status not in {"warning", "critical"}:
             raise ValueError("minimum status is invalid")
 
@@ -201,8 +201,8 @@ def command_fingerprint(command: object) -> PreviewFingerprint:
     return fingerprint_payload(payload)
 
 
-def _text(value: str, field: str, maximum: int) -> None:
-    require_canonical_text(value, field, maximum)
+def _text(value: str, field: str, maximum: int, *, allow_empty: bool = False) -> None:
+    require_canonical_text(value, field, maximum, allow_empty=allow_empty)
 
 
 def _utc(value: datetime, field: str) -> None:

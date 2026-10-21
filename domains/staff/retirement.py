@@ -101,5 +101,5 @@ def _validate_reason(transition: StaffLifecycleTransition, reason_code: str) -> 
         StaffLifecycleTransition.RETIRE: {"left_union", "no_longer_available", "qualification_changed"},
         StaffLifecycleTransition.REACTIVATE: {"returned_to_service"},
     }
-    if reason_code not in allowed[transition]:
+    if reason_code and reason_code not in allowed[transition]:
         raise ValueError("staff_retirement_reason_invalid")

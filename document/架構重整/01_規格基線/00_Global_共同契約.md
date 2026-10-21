@@ -32,7 +32,7 @@ Global 只定義跨 Domain 不得被破壞的不變量與共用技術契約，�
 12. Alert／Anomalies 不是 Domain mutation gate；它只投影 owner predicate。
 13. 無法從 current root facts 唯一判定原因或修復方式時，停止自動更正，不得猜測 adjustment／reversal／target status。
 14. `#anomalies` 只處理 current issue；一般 owner review／work item 留在 owning page。兩者都只能呼叫 owning typed command，不直接寫 Domain root。
-15. 人工正式操作遵守 actor／authorization、必要 reason/evidence、fresh owner concurrency token、idempotency、receipt/readback；只有該 workflow 真正包含 human Preview 時才要求 Preview fingerprint。
+15. 人工正式操作遵守 actor／authorization、必要業務 evidence、fresh owner concurrency token、idempotency、receipt/readback；管理端人工原因依 §2.4 為選填。
 16. UI 可顯示 draft／loading／pending，但只有 server receipt／owner readback 可表示正式 Apply 成功。
 17. Cache、read model、HTTP conditional response、background notification 都不是 SSOT；cache unavailable 只影響速度，不改 current fact。
 18. 長任務可回 `202 Accepted`＋durable job identity，但 worker 仍執行同一正式 command semantics；不得把一個原子 owner mutation拆成多個不受控 commit。
@@ -80,6 +80,16 @@ Global 只定義跨 Domain 不得被破壞的不變量與共用技術契約，�
 11. 不得以 blind retry 修 false-stale。先區分 external stale、self-induced state advance、idempotent replay、deterministic derived drift、data-integrity conflict。
 12. 新增 fingerprint／digest／snapshot token 前，必須能回答：保護哪個 race、owner version 為何不足、與 idempotency／content digest 的差異、唯一 failure meaning。無法回答就不新增。
 13. 本裁決不要求全 repository cleanup；只在 current slice 已證明 false-stale、duplicate protection 或 deterministic drift 時做 bounded simplification。
+
+### 2.4 管理端一次點擊送出與選填原因（2026-10-21 人工裁決）
+
+管理端既有儲存、套用、匯入、帳務處理、案件／排班／人員狀態異動、LINE 設定與發布及營運清理，一律由人員填妥必要業務輸入後一次點擊送出。移除作為防操作失誤用途的獨立預覽步驟、已核對勾選與純確認對話框，不因未按預覽或未勾選而阻擋送出。本裁決取代個別 owner 舊有的管理端 human Preview／Confirm 與必填人工原因要求；不擴張公開 LINE／LIFF 使用者端行為。
+
+- 人工自由文字原因／備註均為選填；未提供或留空保存空字串，不代填虛構理由。人事異動的既有原因分類可不選，填寫時仍須屬合法分類。系統產生的機器錯誤碼、拒絕分類、來源可用性與必要業務 evidence 保持各 owner 語意。
+- 同一次點擊可以先呼叫既有零寫入檢查／試算，再將同一 intent 與回傳的 typed candidate 交給正式 Apply；不把中間結果變成下一道人員確認。既有傳輸 fingerprint 僅沿用既有命令一致性檢查，不新增第二層 token、retry 或 fallback。
+- 保留欄位型別／合法值、業務 blocker、actor／authorization、owner version／必要 snapshot、fresh-read／lock、冪等命令識別、receipt 與正式 readback。資料競爭仍回 typed conflict；結果未明仍查回或重送同一原命令，不重新產生另一筆 mutation。
+- 不改 Domain owner、根事實、交易邊界、DB schema、帳務守恆、簽署證據或實際 provider 成功判定。畫面視覺／文件預覽可以保留為查看功能，不得成為儲存前置條件。
+- 此裁決授權本機實作與驗證，不包含實際業務資料寫入、provider 發送、部署或切換入口。
 
 ## 3. 依賴方向
 

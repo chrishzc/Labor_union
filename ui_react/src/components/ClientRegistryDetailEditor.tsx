@@ -39,7 +39,6 @@ const display = (value: Scalar | undefined) => value === null || value === undef
 const diff = (draft: Draft, values: Draft, section: Section): Draft => Object.fromEntries(Object.keys(labels[section])
   .filter((field) => (draft[field] === '' ? null : draft[field] ?? null) !== (values[field] === '' ? null : values[field] ?? null))
   .map((field) => [field, draft[field] === '' ? null : draft[field] ?? null]));
-const reason = (section: Section) => section === 'profile' ? '後台客戶名冊主檔更新' : section === 'care' ? '後台客戶名冊照護與獎金協調紀錄更新' : '後台客戶名冊 報名問卷資料（BeClass）更新';
 const errorText = (error: unknown) => error instanceof ApiHttpError ? `${error.message}（${error.code}）` : error instanceof Error ? error.message : '操作失敗，請重新確認。';
 
 const ClientChangeHistory: React.FC<{ detail: ClientRegistryDetail }> = ({ detail }) => {
@@ -150,22 +149,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, loading: false, message: `已儲存，但最新資料讀取失敗：${errorText(error)}` } }));
     }
   };
-  const preview = async (section: Section) => {
-    if (!Object.keys(changes[section]).length) {
-      setActions((current) => ({ ...current, [section]: { ...idle(), message: '沒有需要儲存的變更。' } })); return;
-    }
-    const sequence = ++request.current;
-    const submitted = changes[section];
-    setActions((current) => ({ ...current, [section]: { ...idle(), loading: true, message: '正在產生預覽…' } }));
-    try {
-      const result = await clientRegistryClient.preview(detail.case_no, owner(section), submitted as ClientProfileChanges | BeClassChanges, section === 'profile' ? detail.client.version : detail.beclass.version ?? 0);
-      if (!alive.current || sequence !== request.current) return;
-      setActions((current) => ({ ...current, [section]: { ...idle(), preview: result, changes: submitted, key: `client-${owner(section)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`, message: '請核對修改前後的資料，再確認儲存。' } }));
-    } catch (error) {
-      if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...idle(), message: errorText(error) } }));
-    }
-  };
-  const apply = async (section: Section, preparePreview = false, currentDetail = detail) => {
+  const apply = async (section: Section, preparePreview = true, currentDetail = detail) => {
     let approved = actions[section];
     const expectedVersion = section === 'profile' ? currentDetail.client.version : currentDetail.beclass.version ?? 0;
     if (preparePreview && approved.preview?.current_version !== expectedVersion) approved = idle();
@@ -183,7 +167,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       }
       if (!approved.preview || !approved.key) return;
       applyStarted = true;
-      await clientRegistryClient.apply(detail.case_no, owner(section), approved.changes as ClientProfileChanges | BeClassChanges, approved.preview.current_version, approved.preview.preview_fingerprint, reason(section), approved.key);
+      await clientRegistryClient.apply(detail.case_no, owner(section), approved.changes as ClientProfileChanges | BeClassChanges, approved.preview.current_version, approved.preview.preview_fingerprint, '', approved.key);
       if (!alive.current || sequence !== request.current) return;
       setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, unknown: false, message: '已儲存，正在讀取最新資料…' } }));
       return await refresh(section, sequence);
@@ -218,8 +202,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
         })}</div>
         <div className="registry-actions">
           <button type="button" disabled={pending || termsState.busy} onClick={() => { setDrafts((current) => ({ ...current, [section]: { ...source(detail, section) } })); setActions((current) => ({ ...current, [section]: idle() })); }}>取消變更</button>
-          <button type="button" disabled={pending || termsState.busy} onClick={() => void preview(section)}>預覽變更</button>
-          <button type="button" disabled={pending || termsState.busy || !action.preview} onClick={() => void apply(section)}>確認儲存</button>
+          <button type="button" disabled={pending || termsState.busy} onClick={() => void apply(section)}>儲存</button>
           {action.applied && !action.loading && <button type="button" onClick={() => { const sequence = ++request.current; setActions((current) => ({ ...current, [section]: { ...current[section], loading: true } })); void refresh(section, sequence); }}>重新讀取已儲存資料</button>}
           {action.unknown && !action.loading && <button type="button" onClick={() => void apply(section)}>確認同一筆儲存結果</button>}
         </div>

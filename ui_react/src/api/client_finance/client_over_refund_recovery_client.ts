@@ -75,7 +75,8 @@ function validate<T>(schema: z.ZodType<T>, input: unknown, label: string): T {
   return parsed.data;
 }
 function commandBody(request: CommandRequest): CommandRequest {
-  const body = { ...request, reason: text(request.reason, 'reason', 500), evidence_reference: text(request.evidence_reference, 'evidence_reference', 500) };
+  if (request.reason.trim().length > 500) throw new ClientOverRefundRecoveryError('CLIENT_RECOVERY_INPUT_INVALID', 'reason不得超過500字。');
+  const body = { ...request, reason: request.reason.trim(), evidence_reference: text(request.evidence_reference, 'evidence_reference', 500) };
   if (!Number.isInteger(body.expected_recovery_version) || body.expected_recovery_version < 0 || !Number.isInteger(body.expected_account_version) || body.expected_account_version < 0 || !/^[0-9a-f]{64}$/.test(body.preview_fingerprint)) throw new ClientOverRefundRecoveryError('CLIENT_RECOVERY_INPUT_INVALID', 'Apply 的 version、fingerprint 或 reason 不完整。');
   return body;
 }

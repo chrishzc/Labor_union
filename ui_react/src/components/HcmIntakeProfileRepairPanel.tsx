@@ -84,7 +84,9 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
         || Object.keys(value.after).some((field) => !Object.hasOwn(changes, field))) {
         throw new Error('補件預覽與本次資料不一致，請重新讀取案件。');
       }
-      setApproved({ preview: value, changes, key: `hcm-intake-profile-${crypto.randomUUID()}` });
+      const change = { preview: value, changes, key: `hcm-intake-profile-${crypto.randomUUID()}` };
+      setApproved(change);
+      await apply(change);
     } catch (error) {
       if (mounted.current) setMessage(error instanceof Error ? error.message : '缺件修正預覽失敗。');
     } finally {
@@ -106,8 +108,8 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
     }
   };
 
-  const apply = async () => {
-    if (!approved || locked) return;
+  const apply = async (approved: ApprovedChange) => {
+    if (disabled || unconfirmed) return;
     setBusy(true); onBusyChange(true); setMessage(null);
     let submitted = false;
     try {
@@ -170,12 +172,12 @@ export function HcmIntakeProfileRepairPanel({ caseNo, fields, disabled, onSaved,
       <><label style={{ display: 'grid', gap: 4, minWidth: 0 }}>備註（選填）
         <input  value={reason} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} maxLength={500} disabled={locked} onChange={(event) => setReason(event.target.value)} />
       </label></>
-      <button type="button" className="btn-secondary-action" disabled={locked || !Object.keys(changes).length} onClick={() => void preview()}>預覽欄位修正</button>
+      <button type="button" className="btn-secondary-action" disabled={locked || !Object.keys(changes).length} onClick={() => void preview()}>儲存缺件資料</button>
       {approved && <div aria-label="欄位修正前後" style={{ display: 'grid', gap: 6 }}>
         {Object.entries(approved.preview.after).map(([field, value]) => <div key={field}>
           {profileFields.find((source) => PROFILE_FIELDS[source] === field)}：{approved.preview.before[field] || '未填寫'} → {value}
         </div>)}
-        <button type="button" className="btn-primary-action" disabled={locked} onClick={() => void apply()}>確認儲存缺件資料</button>
+
       </div>}
     </>}
     {unconfirmed && <button type="button" disabled={busy} onClick={() => void readback()}>重新讀取修正結果</button>}

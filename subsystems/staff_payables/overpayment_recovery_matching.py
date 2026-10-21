@@ -59,7 +59,7 @@ class StaffOverpaymentRecoveryMatchingApplyRequest:
     correlation_id: CorrelationId
     evidence_reference: str | None = None
     def __post_init__(self):
-        require_canonical_text(self.reason, "reason", 500)
+        require_canonical_text(self.reason, "reason", 500, allow_empty=True)
         if self.evidence_reference is not None:
             require_canonical_text(self.evidence_reference, "evidence reference", 191)
 

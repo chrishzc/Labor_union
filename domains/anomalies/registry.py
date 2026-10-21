@@ -323,7 +323,7 @@ def resolve_alert_workflow(
     reason: str,
 ) -> CurrentAlertProjection:
     _require_workflow_version(current, expected_version)
-    require_canonical_text(reason, "resolution reason", 500)
+    require_canonical_text(reason, "resolution reason", 500, allow_empty=True)
     return replace(
         current,
         workflow_status=AlertWorkflowStatus.RESOLVED,

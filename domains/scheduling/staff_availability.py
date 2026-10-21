@@ -87,7 +87,7 @@ class StaffUnavailabilityBlock:
         require_positive_integer(self.staff_id, "availability block staff id")
         _require_date(self.start_date, "availability block start date")
         _require_optional_date(self.end_date, "availability block end date")
-        require_canonical_text(self.reason, "availability block reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "availability block reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         _validate_block_dates(self.kind, self.start_date, self.end_date)
 
 
@@ -167,7 +167,7 @@ def _validate_intent_identity(intent: StaffAvailabilityIntent) -> None:
     if not isinstance(intent.action, StaffAvailabilityAction):
         raise TypeError("staff availability action is invalid")
     require_positive_integer(intent.staff_id, "staff availability staff id")
-    require_canonical_text(intent.reason, "staff availability reason", _REASON_MAXIMUM_LENGTH)
+    require_canonical_text(intent.reason, "staff availability reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
 
 
 def _validate_intent_shape(intent: StaffAvailabilityIntent) -> None:

@@ -312,7 +312,7 @@ def _validate_allocation_intents(scope, allocations) -> None:
 
 def _validate_reason(source_type, reason) -> None:
     if source_type is FinancialAdjustmentSource.MANUAL_EXTRA:
-        require_canonical_text(reason, "financial adjustment reason", 255)
+        require_canonical_text(reason, "financial adjustment reason", 255, allow_empty=True)
         return
     if reason is not None:
         raise ValueError("preview_recalculation_reason_forbidden")

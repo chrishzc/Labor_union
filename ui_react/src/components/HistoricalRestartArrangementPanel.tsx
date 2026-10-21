@@ -1,6 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -43,9 +41,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
   const staffIdentity = useStaffIdentityLabels();
   const [allocation, setAllocation] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<HistoricalArrangementPreviewView | null>(null);
-  const [reason, setReason] = useState('依已確認服務日期建立歷史案件正式安排');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
+  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -70,9 +66,8 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
       if (result.case_no !== caseNo || result.confirmed_version !== dates.current_version) {
         throw new Error('正式日期或案件版本已變更，請重新讀取。');
       }
-      operationKey.current = null;
       setPreview(result);
-      setStatus('正式安排已預覽；請核對月嫂、區間與日期後建立。');
+      await applyArrangement(result);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '正式安排預覽失敗。');
     } finally {
@@ -80,9 +75,7 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
     }
   };
 
-  const applyArrangement = async () => {
-    if (busy || preview === null) return;
-    if (operationKey.current === null && !saveValidation.validate([{ value: reason, label: '安排原因', ref: saveFieldRef }])) return;
+  const applyArrangement = async (preview: HistoricalArrangementPreviewView) => {
     setBusy(true); setError(null); setStatus(null);
     try {
       const segments = explicitSegments(dates, allocation);
@@ -145,21 +138,10 @@ export function HistoricalRestartArrangementPanel({ caseNo, dates, onObserved, o
         </select>
       </label>)}
     </div>}
-    <button type="button" disabled={busy || operationKey.current !== null} onClick={() => void previewArrangement()}>預覽正式安排</button>
-    {preview && <div>
-      <p>預覽結果：</p>
-      <ul>{preview.segments.map((segment) => <li key={segment.staff_id}>
-        {staffIdentity.label(segment.staff_id, dates.bound_staff.find((staff) => staff.staff_id === segment.staff_id)?.staff_name)}
-        ：{segment.assigned_start_date} 至 {segment.assigned_end_date}，{segment.service_dates.length} 個服務日
-      </li>)}</ul>
-      <><label>建立原因
-        <input ref={saveFieldRef} aria-required="true" value={reason} maxLength={500} disabled={busy || operationKey.current !== null}
-          onChange={(event) => setReason(event.target.value)} />
-      </label>{saveValidation.feedback}</>
-      <button type="button" disabled={busy} onClick={() => void applyArrangement()}>
-        {operationKey.current ? '以原操作確認結果' : '建立正式安排'}
-      </button>
-    </div>}
+    <label>建立原因（選填）<input value={reason} maxLength={500} disabled={busy || operationKey.current !== null} onChange={event => setReason(event.target.value)} /></label>
+    <button type="button" disabled={busy} onClick={() => void (operationKey.current && preview ? applyArrangement(preview) : previewArrangement())}>
+      {operationKey.current ? '以原操作確認結果' : '建立正式安排'}
+    </button>
     {error && <p role="alert">{error}</p>}
     {status && <p role="status">{status}</p>}
   </section>;

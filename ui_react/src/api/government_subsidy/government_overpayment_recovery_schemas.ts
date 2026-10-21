@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 const FingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const IdentitySchema = z.string().trim().min(1).max(191);
-const ReasonSchema = z.string().trim().min(1).max(500);
+const ReasonSchema = z.string().trim().max(500);
 const EvidenceSchema = z.string().trim().min(1).max(500);
 
 export const GovernmentOverpaymentStatusSchema = z.enum([
@@ -59,7 +59,7 @@ export const GovernmentOverpaymentDispositionPreviewRequestSchema = z.strictObje
 export const GovernmentOverpaymentDispositionApplyRequestSchema = GovernmentOverpaymentDispositionPreviewRequestSchema.extend({
   expected_overpayment_version: z.number().int().nonnegative(),
   preview_fingerprint: FingerprintSchema,
-  reason: ReasonSchema,
+  reason: ReasonSchema.default(''),
 }).strict();
 
 export const GovernmentOverpaymentPreviewSchema = z.strictObject({

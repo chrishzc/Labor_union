@@ -154,10 +154,6 @@ class HistoricalCalendarAssignmentRemediationApplication:
             raise HistoricalCalendarAssignmentRemediationError(
                 "historical_calendar_assignment_actor_required"
             )
-        if not reason.strip():
-            raise HistoricalCalendarAssignmentRemediationError(
-                "historical_calendar_assignment_reason_required"
-            )
         workbook = load_historical_order_workbook(source_path)
         row = _row_for_case(workbook.rows, case_no)
         with self._unit_of_work_factory() as unit_of_work:

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AccountDirectoryItemSchema } from './account_directory_schemas';
 
 const commandBase = {
-  reason: z.string().min(1).max(500),
+  reason: z.string().max(500),
   idempotency_key: z.string().min(1).max(191),
 };
 

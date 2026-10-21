@@ -108,18 +108,12 @@ class OrderTermsApplyBody(OrderTermsPreviewRequest):
         pattern=r"^[0-9a-f]{64}$",
     )
     requires_formal_apply: bool
-    reason: str | None = Field(default=None, min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
 
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, value: str | None) -> str | None:
-        return None if value is None else require_canonical_text(value, "terms change reason", 500)
-
-    @model_validator(mode="after")
-    def validate_formal_reason(self):
-        if self.requires_formal_apply and self.reason is None:
-            raise ValueError("formal terms Apply requires a reason")
-        return self
+        return None if value is None else require_canonical_text(value, "terms change reason", 500, allow_empty=True)
 
 
 @router.get(
@@ -219,7 +213,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key) if key is not None else None,
         ActorContext(actor_id),
-        body.reason,
+        body.reason or "",
         CorrelationId(correlation),
         requires_formal_apply=body.requires_formal_apply,
         **body.replacement_arguments(),

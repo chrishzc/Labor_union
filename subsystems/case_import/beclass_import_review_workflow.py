@@ -57,7 +57,7 @@ class ApplyBeClassImportReview:
             self.reason,
             "BeClass import review reason",
             _REASON_MAXIMUM_LENGTH,
-        )
+        allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

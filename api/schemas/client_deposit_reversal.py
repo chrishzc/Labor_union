@@ -20,7 +20,7 @@ class DepositReversalPreviewBody(_StrictModel):
 class DepositReversalApplyBody(DepositReversalPreviewBody):
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class DepositReversalPreviewView(_StrictModel):

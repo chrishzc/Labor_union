@@ -1,6 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 /** Government receipts recover an existing union advance; no customer payout. */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -25,7 +23,7 @@ function errorText(error: unknown) {
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return '請先登入後再操作。';
     if (error.status === 403) return '目前帳號沒有處理墊款銷帳的權限。';
-    if (error.status === 409) return '資料已變更或不符合銷帳條件，請重新查詢並再次預覽。';
+    if (error.status === 409) return '資料已變更或不符合銷帳條件，請重新查詢並再次儲存。';
   }
   return '銷帳資料暫時無法取得，請重新查詢。';
 }
@@ -43,19 +41,14 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
   const [result, setResult] = useState<Result>({ kind: 'loading' });
   const [preview, setPreview] = useState<AdvanceSettlementPreview | null>(null);
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const command = useRef<Command | null>(null);
   const action = useRef<AbortController | null>(null);
-  const previewHeading = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => () => action.current?.abort(), []);
-  useEffect(() => { if (preview) previewHeading.current?.focus(); }, [preview]);
   useEffect(() => {
     const controller = new AbortController();
     setResult({ kind: 'loading' });
@@ -64,13 +57,13 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
       .catch(caught => { if (!controller.signal.aborted) { setResult({ kind: 'error' }); setError(errorText(caught)); } });
     return () => controller.abort();
   }, [search, reload, compact, initialCaseNo]);
-  useEffect(() => { onLockedChange?.(busy || unknown); }, [busy, unknown, onLockedChange]);
+  useEffect(() => { onLockedChange?.(busy || unknown || command.current !== null); }, [busy, unknown, onLockedChange]);
 
-  const resetPreview = () => { action.current?.abort(); setPreview(null); setConfirmed(false); setReason(''); command.current = null; setNotice(null); setError(null); };
+  const resetPreview = () => { action.current?.abort(); setPreview(null); command.current = null; setNotice(null); setError(null); };
   const openPreview = async (row: AdvanceSettlementRow) => {
     resetPreview(); setError(null); setBusy(true);
     const controller = new AbortController(); action.current = controller;
-    try { const value = await client.preview(row.advance_id, controller.signal); if (!controller.signal.aborted) setPreview(value); }
+    try { const value = await client.preview(row.advance_id, controller.signal); if (!controller.signal.aborted) { setPreview(value); await apply(value); } }
     catch (caught) { if (!controller.signal.aborted) setError(errorText(caught)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
@@ -79,7 +72,7 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
     const fresh = rows.find(row => row.advance_id === submitted.advanceId);
     if (signal.aborted) return;
     if (fresh?.status === 'recovered' && fresh.recovered_amount_ntd === submitted.amount) {
-      setUnknown(false); setPreview(null); setConfirmed(false); command.current = null;
+      setUnknown(false); setPreview(null); command.current = null;
       setNotice(`${submitted.caseNo} 已銷帳 ${money(fresh.recovered_amount_ntd)}，已重新查詢確認。`);
       setReload(value => value + 1);
       onSettled?.();
@@ -89,9 +82,9 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
       setUnknown(true); setError('尚無法確認本次銷帳結果，請重新查詢銷帳結果；資料不一致時須先核對。');
     }
   };
-  const apply = async () => {
-    if (!preview || !confirmed || busy || unknown) return;
-    if (!saveValidation.validate([{ value: reason, label: '核對說明', ref: saveFieldRef }])) return;
+  const apply = async (preview: AdvanceSettlementPreview) => {
+    if (unknown) return;
+
     const submitted = command.current ?? {
       advanceId: preview.row.advance_id, caseNo: preview.row.case_no, amount: preview.row.advance_amount_ntd,
       key: `advance-settlement:${crypto.randomUUID()}`,
@@ -108,7 +101,7 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
     } catch (caught) {
       if (controller.signal.aborted) return;
       if (caught instanceof ApiHttpError && [401, 403, 404, 409, 422].includes(caught.status)) {
-        setError(errorText(caught)); setPreview(null); setConfirmed(false); command.current = null; setReload(value => value + 1);
+        setError(errorText(caught)); setPreview(null); command.current = null; setReload(value => value + 1);
       } else {
         setUnknown(true); setError('本次銷帳結果尚未確認，請先重新查詢銷帳結果。');
       }
@@ -123,8 +116,8 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
   const rows = result.kind === 'ready' ? result.rows.filter(row => status === 'all' || row.status === status) : [];
-  const locked = busy || unknown;
-  useUnsavedDraft('補助墊款結清', { '原因': reason, '已核對': confirmed }, { busy: busy || unknown, resetKey: reload });
+  const locked = busy || unknown || command.current !== null;
+  useUnsavedDraft('補助墊款結清', { '原因': reason }, { busy: busy || unknown, resetKey: reload });
 
 
   return <section className={compact ? 'finance-advance-detail' : 'finance-workspace subsidy-refund-panel'} aria-labelledby="advance-settlement-heading">
@@ -144,6 +137,8 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
     {unknown && <button type="button" className="finance-btn-primary" disabled={busy} onClick={() => void checkOutcome()}>重新查詢銷帳結果</button>}
     {busy && <p role="status">正在核對銷帳資料…</p>}
     {result.kind === 'loading' && <div className="finance-state" role="status">正在查詢工會墊款與政府入款…</div>}
+    <label className="advance-settlement-field">核對說明（選填）<textarea className="finance-input" disabled={locked || command.current !== null} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label>
+    {command.current && !unknown && <button type="button" disabled={busy} onClick={() => void (preview && apply(preview))}>以原操作確認銷帳結果</button>}
     {result.kind === 'ready' && <>
       {!compact && <div className="finance-kpi-grid" role="group" aria-label="墊款銷帳摘要">
         <div className="finance-kpi-item"><span className="finance-kpi-label">原墊款合計</span><strong className="finance-kpi-value">{money(rows.reduce((total, row) => total + row.advance_amount_ntd, 0))}</strong></div>
@@ -153,7 +148,7 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
       {compact ? <div className="finance-advance-timeline">{!rows.length && <p className="subsidy-refund-note">尚無正式工會墊款紀錄。</p>}{rows.map(row => <article key={row.advance_id}>
         <strong>{labels[row.status]}</strong><p>{row.advanced_on} 墊付 {money(row.advance_amount_ntd)}</p><p>政府已分配 {money(row.government_received_ntd)}{row.received_on ? `（${row.received_on}）` : ''}；已回收 {money(row.recovered_amount_ntd)}</p>
         {row.review_reason && <p>{reasons[row.review_reason] ?? '來源資料待人工核對。'}</p>}
-        {row.status === 'ready' && <button type="button" className="finance-btn-primary" disabled={locked} aria-label={`預覽 ${row.case_no} 銷帳`} onClick={() => void openPreview(row)}>預覽銷帳</button>}
+        {row.status === 'ready' && <button type="button" className="finance-btn-primary" disabled={locked} aria-label={`儲存 ${row.case_no} 銷帳`} onClick={() => void openPreview(row)}>儲存銷帳</button>}
       </article>)}</div> : !rows.length ? <div className="finance-state">沒有符合條件的正式墊款。尚未付款或只有預估退款的案件不會列入。</div> : <div className="finance-table-container"><table className="finance-table">
         <caption className="subsidy-refund-caption">依正式墊款、政府入款分配與回收紀錄核對。</caption>
         <thead><tr><th scope="col">客戶／案件</th><th scope="col">墊款日期</th><th scope="col">原墊款</th><th scope="col">政府入款分配</th><th scope="col">已回收</th><th scope="col">狀態／核對事項</th><th scope="col">操作</th></tr></thead>
@@ -162,17 +157,9 @@ export function SubsidyAdvanceSettlementPanel({ initialCaseNo = '', onOpenImport
           <td className="subsidy-refund-money">{money(row.advance_amount_ntd)}</td>
           <td>{money(row.government_received_ntd)}<br />{row.received_on ?? '日期待確認'}</td>
           <td>{money(row.recovered_amount_ntd)}</td><td>{labels[row.status]}{row.review_reason && <p className="advance-settlement-reason">{reasons[row.review_reason] ?? '來源資料待人工核對。'}</p>}</td>
-          <td>{row.status === 'ready' && <button type="button" className="subsidy-refund-case-button" disabled={locked || result.kind !== 'ready'} aria-label={`預覽 ${row.case_no} 銷帳`} onClick={() => void openPreview(row)}>預覽銷帳</button>}</td>
+          <td>{row.status === 'ready' && <button type="button" className="subsidy-refund-case-button" disabled={locked || result.kind !== 'ready'} aria-label={`儲存 ${row.case_no} 銷帳`} onClick={() => void openPreview(row)}>儲存銷帳</button>}</td>
         </tr>)}</tbody>
       </table></div>}
     </>}
-    {preview && <section className="advance-settlement-preview" aria-label="墊款銷帳預覽">
-      <h3 ref={previewHeading} tabIndex={-1}>確認墊款回收</h3><p>{preview.row.client_name}｜{preview.row.case_no}</p>
-      <p>原墊款：<strong>{money(preview.row.advance_amount_ntd)}</strong>｜政府入款分配：<strong>{money(preview.row.government_received_ntd)}</strong></p>
-      <p>本次銷帳：<strong>{money(preview.row.advance_amount_ntd)}</strong>。完成後建立正式回收關聯，客戶退款紀錄維持原結果。</p>
-      <><label className="advance-settlement-field">核對說明<textarea ref={saveFieldRef} aria-required="true" className="finance-input" disabled={locked || command.current !== null} maxLength={500} value={reason} onChange={event => { setReason(event.target.value); setConfirmed(false); }} /></label>{saveValidation.feedback}</>
-      <label className="advance-settlement-confirm"><input type="checkbox" disabled={locked} checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />我已核對原墊款與政府入款，確認建立回收銷帳。</label>
-      <div className="subsidy-refund-period"><button type="button" className="finance-btn-primary" disabled={locked || !confirmed} onClick={() => void apply()}>{busy ? '處理中…' : '確認銷帳'}</button><button type="button" className="finance-reload-btn" disabled={locked} onClick={resetPreview}>取消</button></div>
-    </section>}
   </section>;
 }

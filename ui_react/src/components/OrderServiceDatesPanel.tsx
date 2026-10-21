@@ -52,7 +52,6 @@ type ServiceDatesRecovery =
   | { caseNo: string; kind: 'observation_failed'; confirmedVersion: number }
   | { caseNo: string; kind: 'superseded'; confirmedVersion: number; currentVersion: number }
   | { caseNo: string; kind: 'observation_in_progress' };
-const AUTOMATIC_CONFIRMATION_REASON = '確認服務日期';
 const REST_WEEKDAYS = [
   { value: 0, label: '星期一' }, { value: 1, label: '星期二' }, { value: 2, label: '星期三' },
   { value: 3, label: '星期四' }, { value: 4, label: '星期五' }, { value: 5, label: '星期六' },
@@ -110,6 +109,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   const [originalServiceType, setOriginalServiceType] = useState<string | null>(null);
   const [restWeekdays, setRestWeekdays] = useState<number[] | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [basisNotice, setBasisNotice] = useState<string | null>(null);
@@ -348,7 +348,8 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
       const nextSuggestions = mode === 'read' ? retainedCalculation?.suggestedDates ?? recommendation : recommendation;
       orderMutationFlowStore.setServiceDatesCalculation(caseNo, basis ? { startDate: basis.date, startPreview: nextStartPreview, needsManualReview: reviewNeeded, suggestedDates: nextSuggestions } : retainedCalculation);
       selectServiceDates(caseNo, dates);
-      updateServiceDatesReason(caseNo, AUTOMATIC_CONFIRMATION_REASON);
+      updateServiceDatesReason(caseNo, '');
+      setReason('');
       setQueryView({ ...serviceDates, selectable_dates: range }); setSelectedDates(dates);
       setActualStart(currentStart);
       setStartDate(basis?.date ?? retainedCalculation?.startDate ?? currentStart.current_actual_start_date ?? currentStart.planned_start_date);
@@ -519,6 +520,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
         if (!stillCurrent()) return;
       }
       if (!saveDates) { setSuccess('實際開始日已儲存。'); return; }
+      updateServiceDatesReason(caseNo, reason.trim());
       const freshPreview = await previewServiceDatesFlow(caseNo);
       if (!stillCurrent()) return;
       if (freshPreview.case_no !== caseNo || !sameServiceDates(freshPreview.service_dates, selectedDates)) {
@@ -633,7 +635,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
     // Only the first empty date table is calculated; saved dates and manual drafts are preserved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseNo, queryView, selectedDates.length, serviceMode, actualStart, working, isRecoveryActive, startUnresolved, needsBasisUpdate, startDate]);
-  useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
+  useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
 
 
   return (
@@ -784,6 +786,7 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
 
           </div>
 
+          {effectiveServiceDates === null && <label>原因（選填）<textarea maxLength={500} value={reason} disabled={working !== null || saving || isRecoveryActive} onChange={event => setReason(event.target.value)} /></label>}
           <div className="service-date-footer">
             <small>{effectiveServiceDates ? '現行班表已保存。' : queryView.current_dates.length > 0 ? '服務日期表已保存；雙方確認後會依條件自動排班。' : '目前尚未保存服務日期。'}</small>
             {effectiveServiceDates ? onOpenArrangement && <button type="button" onClick={onOpenArrangement}>查看日期確認紀錄 →</button> : <button type="button" className="order-v2-open-drawer service-date-primary" disabled={!canSave} onClick={() => void runApply(true)}>

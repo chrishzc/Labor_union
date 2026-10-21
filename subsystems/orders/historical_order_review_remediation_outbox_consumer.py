@@ -203,7 +203,7 @@ def _validate_disposition(
             raise ValueError("historical_order_remediation_fingerprint_invalid")
     if not isinstance(disposition.get("actor"), str) or not disposition["actor"].strip():
         raise ValueError("historical_order_remediation_actor_missing")
-    if not isinstance(disposition.get("reason"), str) or not disposition["reason"].strip():
+    if not isinstance(disposition.get("reason"), str):
         raise ValueError("historical_order_remediation_reason_missing")
     if not isinstance(disposition.get("correlation_id"), str) or not disposition["correlation_id"].strip():
         raise ValueError("historical_order_remediation_correlation_missing")

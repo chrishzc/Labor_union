@@ -3,7 +3,7 @@ import { useUnsavedDraft } from '../../components/UnsavedChanges';
  * File: AlertGroupSecurity.tsx
  * Description: 以 typed LINE runtime target 契約完成查詢、Preview、確認、Apply、receipt 與 readback。
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Bell,
   BellOff,
@@ -13,7 +13,6 @@ import {
   Eye,
   RefreshCw,
   RotateCcw,
-  SearchCheck,
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
@@ -215,13 +214,12 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
   runtimeTargetClient,
 }) => {
   const targetClient = client ?? runtimeTargetClient ?? lineRuntimeTargetClient;
+  const intentIdentity = useRef<{ signature: string; correlation_id: string; idempotency_key: string } | null>(null);
   const [targets, setTargets] = useState<LineRuntimeTarget[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [busy, setBusy] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [reason, setReason] = useState<string>('管理員透過後台調整異常通知設定');
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [confirmed, setConfirmed] = useState<boolean>(false);
+  const [reason, setReason] = useState<string>('');
   const [receipt, setReceipt] = useState<LineRuntimeTargetReceipt | null>(null);
   const [readbackMessage, setReadbackMessage] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
@@ -303,27 +301,24 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     return () => controller.abort();
   }, [loadTargets, reloadKey]);
 
-  const clearCandidate = () => {
-    setPending(null);
-    setConfirmed(false);
-  };
-
   const previewToggle = async (target: LineRuntimeTarget) => {
-    const normalizedReason = reason.trim() || `管理員透過後台${target.state === 'active' ? '暫停' : '恢復'}通知`;
+    const normalizedReason = reason.trim();
+    const signature = JSON.stringify([target.target_id, target.current_version, target.state, normalizedReason, 'toggle']);
+    if (intentIdentity.current?.signature !== signature) intentIdentity.current = { signature, ...commandIdentity('toggle') };
+    const identity = { correlation_id: intentIdentity.current.correlation_id, idempotency_key: intentIdentity.current.idempotency_key };
     setBusy(true);
     setErrorMessage(null);
     setReceipt(null);
     setReadbackMessage(null);
-    clearCandidate();
     try {
       const request: LineRuntimeTargetEnabledRequest = {
         expected_version: target.current_version,
         enabled: target.state !== 'active',
         reason: normalizedReason,
-        ...commandIdentity('toggle'),
+        ...identity,
       };
       const preview = await targetClient.previewSetEnabled(target.target_id, request);
-      setPending({ kind: 'toggle', target, request, preview });
+      await applyPending({ kind: 'toggle', target, request, preview });
     } catch (error) {
       setErrorMessage(publicFailureMessage(error));
     } finally {
@@ -332,20 +327,22 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
   };
 
   const previewGroupReset = async (target: LineRuntimeTarget) => {
-    const normalizedReason = reason.trim() || '工會人員調整異常通知群組';
+    const normalizedReason = reason.trim();
+    const signature = JSON.stringify([target.target_id, target.current_version, normalizedReason, 'group-reset']);
+    if (intentIdentity.current?.signature !== signature) intentIdentity.current = { signature, ...commandIdentity('group-reset') };
+    const identity = { correlation_id: intentIdentity.current.correlation_id, idempotency_key: intentIdentity.current.idempotency_key };
     setBusy(true);
     setErrorMessage(null);
     setReceipt(null);
     setReadbackMessage(null);
-    clearCandidate();
     try {
       const request: LineRuntimeGroupResetRequest = {
         expected_version: target.current_version,
         reason: normalizedReason,
-        ...commandIdentity('group-reset'),
+        ...identity,
       };
       const preview = await targetClient.previewResetGroup(request);
-      setPending({ kind: 'group_reset', target, request, preview });
+      await applyPending({ kind: 'group_reset', target, request, preview });
     } catch (error) {
       setErrorMessage(publicFailureMessage(error));
     } finally {
@@ -353,8 +350,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
     }
   };
 
-  const applyPending = async () => {
-    if (!pending || !confirmed) return;
+  const applyPending = async (pending: PendingAction) => {
     setBusy(true);
     setErrorMessage(null);
     try {
@@ -367,9 +363,8 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
             ...pending.request,
             preview_fingerprint: pending.preview.preview_fingerprint,
           });
+      intentIdentity.current = null;
       setReceipt(applied);
-      setPending(null);
-      setConfirmed(false);
       try {
         const readback = await targetClient.listTargets({ correlationId: `line-security-readback:${identityPart()}` });
         setTargets(readback);
@@ -383,7 +378,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
       setBusy(false);
     }
   };
-  useUnsavedDraft('群組通知設定', { '原因': reason, '有待確認設定': !!pending }, { busy, resetKey: receipt });
+  useUnsavedDraft('群組通知設定', { '原因': reason }, { busy, resetKey: receipt });
 
 
   return (
@@ -724,11 +719,11 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
         <div className="line-section-heading">
           <div>
             <h2 id="alert-change-title">群組異動與安全解除</h2>
-            <p>更換幹部群組前，必須先檢查影響，確認後才允許重新配對。</p>
+            <p>解除目前群組後，可在新的 LINE 群組執行正式登錄。</p>
           </div>
         </div>
 
-        <label htmlFor="line-security-reason">異動原因（系統操作稽核紀錄）</label>
+        <label htmlFor="line-security-reason">異動原因（選填）</label>
         <textarea
           id="line-security-reason"
           className="line-textarea"
@@ -737,13 +732,12 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
-            clearCandidate();
-          }}
+                  }}
           disabled={busy}
           aria-describedby="line-security-reason-help"
         />
         <div id="line-security-reason-help" className="field-hint alert-security-reason-help">
-          <span>修改原因後必須重新檢查變更影響。</span>
+          <span>送出時會核對最新版本並重新查詢結果。</span>
           <span>{reason.length} / 240</span>
         </div>
 
@@ -752,7 +746,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
             <div>
               <strong>解除目前異常通知群組</strong>
               <p className="field-hint">
-                會保留歷史紀錄，將目前唯一有效群組解除為停用；固定先檢查影響、明確確認、套用，再重新查詢結果。
+                會保留歷史紀錄，將目前唯一有效群組解除為停用；送出時檢查影響、套用並重新查詢結果。
               </p>
             </div>
             <button
@@ -761,7 +755,7 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
               onClick={() => void previewGroupReset(groupTarget)}
               disabled={busy || groupTarget.state !== 'active'}
             >
-              <RotateCcw aria-hidden="true" />預覽解除群組
+              <RotateCcw aria-hidden="true" />解除群組
             </button>
           </div>
         )}
@@ -769,38 +763,6 @@ export const AlertGroupSecurity: React.FC<AlertGroupSecurityProps> = ({
           <p className="field-hint">此群組已解除；請在新的 LINE 群組走正式登錄流程。</p>
         )}
       </section>
-
-      {/* 異動影響確認 Modal */}
-      {pending && (
-        <div className="line-workspace-card alert-security-preview-card">
-          <h3 className="alert-security-preview-title"><SearchCheck aria-hidden="true" />異動影響確認</h3>
-          <div className="line-detail-grid alert-security-detail-grid">
-            <div><span>操作</span><strong>{pending.kind === 'group_reset' ? '解除目前群組' : '變更通知啟用狀態'}</strong></div>
-            <div><span>對象</span><strong>{pending.target.display_label}</strong></div>
-            <div><span>目前狀態</span><strong>{stateLabel(pending.preview.previous_state)}</strong></div>
-            <div><span>變更後狀態</span><strong>{stateLabel(pending.preview.resulting_state)}</strong></div>
-          </div>
-          <label className="checkbox-item line-block-spacing">
-            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-            {pending.kind === 'group_reset'
-              ? '我已核對目前群組將從有效通知群組解除，確認套用此異動。'
-              : '我已核對目前狀態、變更後狀態與影響範圍，確認套用此異動。'}
-          </label>
-          <div className="line-actions line-block-spacing">
-            <button
-              type="button"
-              className="mock-primary-btn"
-              onClick={() => void applyPending()}
-              disabled={!confirmed || busy}
-            >
-              {busy ? '套用中…' : pending.kind === 'group_reset' ? '確認解除群組' : '確認套用'}
-            </button>
-            <button type="button" className="line-secondary-btn" onClick={clearCandidate} disabled={busy}>
-              取消
-            </button>
-          </div>
-        </div>
-      )}
 
       {receipt && (
         <div className="line-success" role="status">

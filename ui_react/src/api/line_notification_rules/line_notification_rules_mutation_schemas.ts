@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { LineNotificationRuleSchema } from '../line_configuration/line_configuration_query_schemas';
 
 const OperationIdentitySchema = z.string().trim().min(1).max(191);
-const ReasonSchema = z.string().trim().min(1).max(1_000);
+const ReasonSchema = z.string().trim().max(1_000);
 const FingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 export const LineNotificationRulesMutationDefinitionSchema = z

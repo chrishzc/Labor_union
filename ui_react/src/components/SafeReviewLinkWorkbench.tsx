@@ -65,7 +65,7 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
   };
 
   const revoke = async () => {
-    if (!linkId.trim() || !revokeReason.trim()) return;
+    if (!linkId.trim()) return;
     setBusy(true); setError(null);
     try {
       const next = await client.revoke(linkId.trim(), {
@@ -96,12 +96,12 @@ export function SafeReviewLinkWorkbench({ client = safeReviewLinkClient }: Props
       </div>
       <div className="line-detail-grid" style={{ marginTop: '10px' }}>
         <label>一次性 token（僅本次記憶體操作） <input className="line-search-input" type="password" value={rawToken} onChange={(event) => setRawToken(event.target.value)} autoComplete="off" /></label>
-        <label>撤銷原因 <input className="line-search-input" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} maxLength={500} /></label>
+        <label>撤銷原因（選填） <input className="line-search-input" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} maxLength={500} /></label>
       </div>
       <div className="line-row-actions" style={{ marginTop: '12px' }}>
         <button type="button" className="line-secondary-btn" onClick={() => void query()} disabled={busy || !linkId.trim()}>查詢去敏狀態</button>
-        <button type="button" className="line-primary-btn" onClick={() => void redeem()} disabled={busy || !linkId.trim() || !rawToken.trim() || !target.trim()}>確認使用審核連結</button>
-        <button type="button" className="line-secondary-btn" onClick={() => void revoke()} disabled={busy || !linkId.trim() || !revokeReason.trim()}>撤銷審核連結</button>
+        <button type="button" className="line-primary-btn" onClick={() => void redeem()} disabled={busy || !linkId.trim() || !rawToken.trim() || !target.trim()}>使用審核連結</button>
+        <button type="button" className="line-secondary-btn" onClick={() => void revoke()} disabled={busy || !linkId.trim()}>撤銷審核連結</button>
       </div>
       {error && <p className="line-error" role="alert">{error}</p>}
       {receipt && <p className="line-success" role="status">已收到 {receipt.outcome} readback；receipt：{receipt.receipt_id}{receipt.replayed ? '（重播）' : ''}</p>}

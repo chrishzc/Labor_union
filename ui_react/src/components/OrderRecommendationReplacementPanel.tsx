@@ -27,8 +27,7 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
   const [segmentIndex, setSegmentIndex] = useState(0);
   const [staffId, setStaffId] = useState(0);
   const [reason, setReason] = useState('');
-  const [preview, setPreview] = useState<RecommendationReplacementFlowState['command'] | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [replacementReceipt, setReplacementReceipt] = useState<ServiceBeforeReplacementApplyResult | null>(null);
@@ -54,8 +53,8 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
   useEffect(() => () => onEditStateChange({ dirty: false, busy: false }), [onEditStateChange]);
 
   const inspect = async () => {
-    if (running.current || !eligible.some(candidate => candidate.staff_id === staffId) || !reason.trim()) return;
-    running.current = true; setBusy(true); setError(null); setPreview(null);
+    if (running.current || !eligible.some(candidate => candidate.staff_id === staffId)) return;
+    running.current = true; setBusy(true); setError(null);
     try {
       const [freshPlan, freshContact, assignment, pool] = await Promise.all([
         waitingDepositLockClient.queryPlan(caseNo), matchingPlanCommunicationClient.queryContactState(caseNo, plan.planId),
@@ -71,11 +70,13 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
       if (release && (!release.apply_allowed || release.case_no !== caseNo || release.plan_id !== plan.planId || release.lock_id !== freshPlan.activeLockId)) throw new Error('目前不能釋放檔期，請先確認訂金、正式服務與檔期狀態。');
       const actor = sessionClient.getUser()?.username.trim();
       if (!actor) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
-      setPreview({ caseNo, planId: plan.planId, expectedVersion: freshContact.plan.communication_version, actor, reason: reason.trim(), lockId: freshPlan.activeLockId, originalPlan: freshPlan, originalContact: freshContact,
+      const command: RecommendationReplacementFlowState['command'] = { caseNo, planId: plan.planId, expectedVersion: freshContact.plan.communication_version, actor, reason: reason.trim(), lockId: freshPlan.activeLockId, originalPlan: freshPlan, originalContact: freshContact,
         releaseFingerprint: release?.preview_fingerprint ?? null,
         releaseKey: `recommendation-release-${crypto.randomUUID()}`, cancelKey: `recommendation-cancel-${crypto.randomUUID()}`, createKey: `recommendation-create-${crypto.randomUUID()}`,
-        asOf: new Date().toISOString().slice(0, 10), segments: freshSegments.map((segment, index) => ({ staff_id: index === segmentIndex ? staffId : segment.staffId, start_date: segment.assignedStartDate, end_date: segment.assignedEndDate })) });
-      setConfirmed(false);
+        asOf: new Date().toISOString().slice(0, 10), segments: freshSegments.map((segment, index) => ({ staff_id: index === segmentIndex ? staffId : segment.staffId, start_date: segment.assignedStartDate, end_date: segment.assignedEndDate })) };
+      running.current = false;
+      await cancelOriginal({ command, stage: command.lockId === null ? 'cancel' : 'release', released: false, cancelled: false, cancellationEventId: null, receipt: null, error: null });
+
     } catch (caught) { setError(failure(caught)); }
     finally { running.current = false; setBusy(false); }
   };
@@ -101,11 +102,13 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
         await waitingDepositLockClient.queryPlan(caseNo);
         throw new Error('目前又有其他有效推薦方案，請確認原操作結果後再接續。');
       } catch (caught) { if (!(caught instanceof ApiHttpError && caught.status === 404)) throw caught; }
-      persist({ ...current, stage: 'ready', error: null });
+      const ready = persist({ ...current, stage: 'ready', error: null });
+      running.current = false;
+      await createSuccessor(ready);
     } catch (caught) {
       const message = failure(caught); setError(message);
       if (!current.released && !current.cancelled && caught instanceof ApiHttpError && caught.status >= 400 && caught.status < 500 && ![408, 429].includes(caught.status)) {
-        orderMutationFlowStore.clearRecommendationReplacement(caseNo); setPreview(null); setConfirmed(false);
+        orderMutationFlowStore.clearRecommendationReplacement(caseNo);
       } else persist({ ...current, error: message });
     } finally { running.current = false; setBusy(false); }
   };
@@ -181,11 +184,10 @@ export function OrderRecommendationReplacementPanel({ caseNo, plan, contact, onC
         : flow.stage === 'ready' && !flow.error ? <><p>換人已啟動，原推薦與回覆紀錄已保留。請接續建立新推薦，再交由客戶確認。</p><button className="formal-recommendation-primary" type="button" disabled={busy} onClick={() => void createSuccessor(flow)}>建立新推薦並交客戶確認</button></>
         : <><p>原操作結果尚需確認；保留原人員、日期及操作編號，不重複建立新操作。</p><button type="button" disabled={busy} onClick={() => void (flow.cancelled && flow.stage !== 'ready' ? createSuccessor(flow) : cancelOriginal(flow))}>{flow.stage === 'observe' ? '重新讀取新推薦結果' : '重新確認原換人操作'}</button></>}
     </> : source && <>
-      {preview ? <><h4>確認換人影響</h4><p>只更換選定段落的人員，其餘服務日期保留。</p><ul><li>原推薦、意願及客戶回覆紀錄保留。</li><li>新推薦需重新取得客戶確認。</li>{preview.lockId !== null && <li>先依正式流程釋放原檔期，再重新確認契約與服務安排。</li>}</ul><label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />我已確認換人原因及影響</label><div className="formal-recommendation-actions"><button className="formal-recommendation-primary" type="button" disabled={busy || !confirmed} onClick={() => void cancelOriginal({ command: preview, stage: preview.lockId === null ? 'cancel' : 'release', released: false, cancelled: false, cancellationEventId: null, receipt: null, error: null })}>確認啟動換人</button><button type="button" disabled={busy} onClick={() => setPreview(null)}>返回修改</button></div></>
-        : <>
+      {<>
           {segments.length > 1 && <label>要更換的服務段落<select value={segmentIndex} disabled={busy} onChange={event => { setSegmentIndex(Number(event.target.value)); setStaffId(0); }}>{segments.map((segment, index) => ({ segment, index })).sort((a, b) => staffIdentity.compare(a.segment.staffId, b.segment.staffId)).map(({ segment, index }) => <option key={segment.segmentId} value={index}>第 {index + 1} 段・{staffIdentity.label(segment.staffId, contact.segments.find(item => item.segment_id === segment.segmentId)?.staff_name, contact.segments.find(item => item.segment_id === segment.segmentId)?.staff_union_no)}</option>)}</select></label>}
           <fieldset aria-label="選擇新月嫂"><legend>選擇新月嫂</legend>{[...eligible].sort((a, b) => compareStaffUnionNumbers({ id: a.staff_id, unionNo: a.staff_union_no }, { id: b.staff_id, unionNo: b.staff_union_no })).map(candidate => <label key={candidate.id} className="formal-recommendation-replacement-option"><input type="radio" name={`replacement-${caseNo}`} value={candidate.staff_id} checked={staffId === candidate.staff_id} disabled={busy} onChange={() => setStaffId(candidate.staff_id)} /><span><strong>{staffIdentity.label(candidate.staff_id, candidate.staff_name, candidate.staff_union_no)}</strong><small>{candidate.service_start_date} ～ {candidate.service_end_date}</small></span><span>已願意承接</span></label>)}{eligible.length === 0 && <p>目前沒有符合此段期間、且已願意承接的新月嫂。請先到「尋找月嫂與詢問意願」新增並確認人選。{onOpenCandidates && <button type="button" disabled={busy} onClick={onOpenCandidates}>前往尋找月嫂與詢問意願</button>}</p>}</fieldset>
-          <label>換人原因（必填）<textarea value={reason} maxLength={255} disabled={busy} onChange={event => setReason(event.target.value)} placeholder="請填寫客戶要求或月嫂通知內容" /></label><button className="formal-recommendation-primary" type="button" disabled={busy || !staffId || !reason.trim()} onClick={() => void inspect()}>檢查換人影響</button>
+          <label>換人原因（選填）<textarea value={reason} maxLength={255} disabled={busy} onChange={event => setReason(event.target.value)} placeholder="請填寫客戶要求或月嫂通知內容" /></label><button className="formal-recommendation-primary" type="button" disabled={busy || !staffId} onClick={() => void inspect()}>儲存更換</button>
         </>}
     </>}
   </section>;

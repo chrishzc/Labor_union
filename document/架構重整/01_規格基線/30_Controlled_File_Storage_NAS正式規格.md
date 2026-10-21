@@ -1,5 +1,7 @@
 # Controlled File Storage／NAS 正式規格
 
+2026-10-21 管理端互動裁決：依 `00_Global_共同契約.md` §2.4，檔案容量／等待時間設定及營運清理改為一次點擊送出、人工原因選填。保留受控根目錄、候選合法性、權限、版本／digest、正式執行與 readback 邊界，不以查看預覽或核對勾選作為前置條件。
+
 ## 1. 文件狀態與 Authority
 
 - 狀態：`consolidated-current-baseline`

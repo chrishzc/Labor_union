@@ -8,7 +8,7 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const isoDateTime = z.string().datetime({ offset: true });
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const identity = z.string().min(1).max(191);
-const reason = z.string().min(1).max(500);
+const reason = z.string().max(500);
 const positiveInt = z.number().int().positive();
 const nonnegativeInt = z.number().int().nonnegative();
 

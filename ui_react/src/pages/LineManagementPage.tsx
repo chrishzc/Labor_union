@@ -18,7 +18,6 @@ import {
   Menu,
   PackageSearch,
   RefreshCw,
-  Send,
   ShieldCheck,
   Sparkles,
   Star,
@@ -96,7 +95,6 @@ import type {
   CustomerServiceEscalationPreview,
   CustomerServiceEscalationResolveRequest,
 } from '../api/customer_service_escalations/customer_service_escalation_schemas';
-import { Drawer } from '../components/Drawer';
 import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
@@ -317,22 +315,19 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [runtimeTargets, setRuntimeTargets] = useState<QueryState<LineRuntimeTargetModel[]>>(idleState);
   const [runtimeCandidates, setRuntimeCandidates] = useState<QueryState<LineRuntimeAdminCandidateModel[]>>(idleState);
   const [runtimeReload, setRuntimeReload] = useState(0);
-  const [runtimeReason, setRuntimeReason] = useState('管理員確認調整 LINE 異常通知對象');
+  const [runtimeReason, setRuntimeReason] = useState('');
   const [selectedRuntimeCandidate, setSelectedRuntimeCandidate] = useState<number | null>(null);
   const [runtimeReceipt, setRuntimeReceipt] = useState<LineRuntimeTargetReceiptModel | null>(null);
-  const [runtimePending, setRuntimePending] = useState<RuntimePendingOperation | null>(null);
-  const [runtimeConfirmed, setRuntimeConfirmed] = useState(false);
   const [runtimeMutation, setRuntimeMutation] = useState<MutationStatus>('idle');
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const runtimePreviewController = useRef<AbortController | null>(null);
   const runtimePreviewGeneration = useRef(0);
+  const runtimeIdentity = useRef<{ signature: string; correlationId: string; idempotencyKey: string } | null>(null);
 
   const [escalationIdInput, setEscalationIdInput] = useState('');
   const [escalationTicketVersion, setEscalationTicketVersion] = useState('0');
   const [escalationDetail, setEscalationDetail] = useState<QueryState<CustomerServiceEscalationModel>>(idleState);
   const [escalationReceipt, setEscalationReceipt] = useState<CustomerServiceEscalationReceiptModel | null>(null);
-  const [escalationPending, setEscalationPending] = useState<EscalationPendingOperation | null>(null);
-  const [escalationConfirmed, setEscalationConfirmed] = useState(false);
   const [escalationMutation, setEscalationMutation] = useState<MutationStatus>('idle');
   const [escalationError, setEscalationError] = useState<string | null>(null);
   const [escalationResolutionDigest, setEscalationResolutionDigest] = useState('');
@@ -344,6 +339,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [escalationCategory, setEscalationCategory] = useState<CustomerServiceEscalationCreateRequest['ticket_category']>('contact_union');
   const escalationPreviewController = useRef<AbortController | null>(null);
   const escalationPreviewGeneration = useRef(0);
+  const escalationIdentity = useRef<{ signature: string; correlation_id: string; idempotency_key: string } | null>(null);
 
   const [richMenuConfiguration, setRichMenuConfiguration] = useState<QueryState<LineRichMenuConfigurationModel>>(idleState);
   const [richMenuDraftSnapshot, setRichMenuDraftSnapshot] = useState<RichMenuDraft | null>(null);
@@ -373,7 +369,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   >([]);
   const [richMenuEditorTab, setRichMenuEditorTab] = useState<'appearance' | 'actions'>('appearance');
   const [richMenuBusy, setRichMenuBusy] = useState(false);
-  const [richMenuPublishOpen, setRichMenuPublishOpen] = useState(false);
   const [richMenuReloadRequired, setRichMenuReloadRequired] = useState(false);
 
   useEffect(() => {
@@ -517,11 +512,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       escalationPreviewController.current = null;
       runtimePreviewGeneration.current += 1;
       escalationPreviewGeneration.current += 1;
-      setRuntimePending(null);
-      setRuntimeConfirmed(false);
-      setEscalationPending(null);
-      setEscalationConfirmed(false);
-    }
+      }
   }, [activeTab]);
 
   useEffect(() => () => {
@@ -534,7 +525,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const refreshRuntime = () => setRuntimeReload((value) => value + 1);
 
   const previewRuntimeMutation = async (operation: 'add' | 'reset' | 'toggle', target?: LineRuntimeTargetModel) => {
-    if (!runtimeReason.trim()) return;
     if (operation === 'add' && selectedRuntimeCandidate === null) return;
     if (operation !== 'add' && !target) return;
     runtimePreviewController.current?.abort();
@@ -542,8 +532,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     runtimePreviewController.current = controller;
     const generation = runtimePreviewGeneration.current + 1;
     runtimePreviewGeneration.current = generation;
-    const correlationId = operationIdentity(`line-runtime-${operation}`);
-    const idempotencyKey = operationIdentity(`line-runtime-${operation}-apply`);
+    const signature = JSON.stringify([operation, target?.targetId, target?.currentVersion, target?.state, selectedRuntimeCandidate, runtimeReason.trim()]);
+    if (runtimeIdentity.current?.signature !== signature) runtimeIdentity.current = {
+      signature, correlationId: operationIdentity(`line-runtime-${operation}`), idempotencyKey: operationIdentity(`line-runtime-${operation}-apply`),
+    };
+    const { correlationId, idempotencyKey } = runtimeIdentity.current;
     setRuntimeMutation('loading');
     setRuntimeError(null);
     setRuntimeReceipt(null);
@@ -566,9 +559,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         pending = { kind: 'toggle', targetId: target.targetId, request, preview };
       }
       if (controller.signal.aborted || generation !== runtimePreviewGeneration.current) return;
-      setRuntimePending(pending);
-      setRuntimeConfirmed(false);
-      setRuntimeMutation('idle');
+      await applyRuntimeMutation(pending);
     } catch (error: unknown) {
       if (controller.signal.aborted || generation !== runtimePreviewGeneration.current) return;
       setRuntimeMutation('error');
@@ -576,8 +567,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   };
 
-  const applyRuntimeMutation = async () => {
-    if (!runtimePending || !runtimeConfirmed) return;
+  const applyRuntimeMutation = async (runtimePending: RuntimePendingOperation) => {
     setRuntimeMutation('loading');
     setRuntimeError(null);
     try {
@@ -598,9 +588,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           preview_fingerprint: runtimePending.preview.preview_fingerprint,
         });
       }
+      runtimeIdentity.current = null;
       setRuntimeReceipt(adaptLineRuntimeTargetReceipt(receipt));
-      setRuntimePending(null);
-      setRuntimeConfirmed(false);
       setRuntimeMutation('success');
       refreshRuntime();
     } catch (error: unknown) {
@@ -624,7 +613,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
   const previewCreateEscalation = async () => {
     if (!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim()) return;
-    const correlationId = operationIdentity('line-escalation-create');
+    const signature = JSON.stringify(['create', escalationSourceIdentity.trim(), escalationSourceFingerprint, escalationSourceKind, escalationTrigger, escalationCategory, escalationHoldScope.trim()]);
+    if (escalationIdentity.current?.signature !== signature) escalationIdentity.current = {
+      signature, correlation_id: operationIdentity('line-escalation-create'), idempotency_key: operationIdentity('line-escalation-create-apply'),
+    };
+    const identity = escalationIdentity.current;
     escalationPreviewController.current?.abort();
     const controller = new AbortController();
     escalationPreviewController.current = controller;
@@ -642,15 +635,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         ticket_category: escalationCategory,
         context: { summary_code: escalationTrigger, policy_version: 'ui-react-v1', category: escalationCategory, redaction_version: 'v1' },
         hold_scope: escalationHoldScope.trim(),
-        correlation_id: correlationId,
-        idempotency_key: operationIdentity('line-escalation-create-apply'),
+        correlation_id: identity.correlation_id,
+        idempotency_key: identity.idempotency_key,
       };
       const preview = await escalation.previewCreate(request, { signal: controller.signal });
       if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationPending({ kind: 'create', request, preview });
-      setEscalationConfirmed(false);
       setEscalationReceipt(null);
-      setEscalationMutation('idle');
+      await applyEscalation({ kind: 'create', request, preview });
     } catch (error: unknown) {
       if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
       setEscalationMutation('error');
@@ -668,8 +659,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     escalationPreviewController.current = controller;
     const generation = escalationPreviewGeneration.current + 1;
     escalationPreviewGeneration.current = generation;
-    const correlationId = operationIdentity(`line-escalation-${operation}`);
-    const identity = { correlation_id: correlationId, idempotency_key: operationIdentity(`line-escalation-${operation}-apply`) };
+    const signature = JSON.stringify([operation, detail.escalationId, detail.workflowVersion, ticketVersion, escalationResolutionDigest]);
+    if (escalationIdentity.current?.signature !== signature) escalationIdentity.current = {
+      signature, correlation_id: operationIdentity(`line-escalation-${operation}`), idempotency_key: operationIdentity(`line-escalation-${operation}-apply`),
+    };
+    const identity = { correlation_id: escalationIdentity.current.correlation_id, idempotency_key: escalationIdentity.current.idempotency_key };
     setEscalationMutation('loading');
     setEscalationError(null);
     try {
@@ -689,10 +683,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         pending = { kind: 'resolve', escalationId: detail.escalationId, request, preview };
       }
       if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
-      setEscalationPending(pending);
-      setEscalationConfirmed(false);
       setEscalationReceipt(null);
-      setEscalationMutation('idle');
+      await applyEscalation(pending);
     } catch (error: unknown) {
       if (controller.signal.aborted || generation !== escalationPreviewGeneration.current) return;
       setEscalationMutation('error');
@@ -700,8 +692,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     }
   };
 
-  const applyEscalation = async () => {
-    if (!escalationPending || !escalationConfirmed) return;
+  const applyEscalation = async (escalationPending: EscalationPendingOperation) => {
     setEscalationMutation('loading');
     setEscalationError(null);
     try {
@@ -727,10 +718,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           preview_fingerprint: escalationPending.preview.preview_fingerprint,
         });
       }
+      escalationIdentity.current = null;
       const model = adaptCustomerServiceEscalationReceipt(receipt);
       setEscalationReceipt(model);
-      setEscalationPending(null);
-      setEscalationConfirmed(false);
       setEscalationMutation('success');
       await loadEscalation(model.escalationId);
     } catch (error: unknown) {
@@ -1060,15 +1050,15 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       : <LineRichMenuDraftActionEditor draft={richMenuDraftSnapshot} menuId={activeMenu.id}
                         definition={localDefinition} onDefinitionChange={setRichMenuLocalDefinition} />}
                   </fieldset>
-                  <p className="richmenu-edit-help">修改會即時顯示在手機預覽。確認儲存後，點選下方「發布」。</p>
+                  <p className="richmenu-edit-help">修改會即時顯示在手機預覽。儲存後，點選下方「發布至 LINE」。</p>
                 </>}
               </div>
             </div>
             )}
 
-            <Drawer isOpen={richMenuPublishOpen} onClose={() => setRichMenuPublishOpen(false)} title="發布圖文選單" closeLabel="關閉發布確認" className="richmenu-publish-drawer">
+            <div className="richmenu-publish-panel">
             {/* 本機幾何初檢；正式路由與發布資格只由 server Preview 裁決。 */}
-            {activeMenu && richMenuPublishOpen && (() => {
+            {activeMenu && (() => {
               const targetW = activeMenu.width;
               const targetH = activeMenu.height;
               let totalArea = 0;
@@ -1131,10 +1121,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               );
             })()}
 
-                {richMenuPublishOpen && (richMenuDirty || richMenuReloadRequired) && <div className="line-scope-note" role="status">{richMenuReloadRequired ? '尚未確認儲存後的最新內容；請返回編輯，取消本機修改並重新整理後再發布。' : '還有未儲存的修改，請先返回編輯並儲存草稿。'}<button type="button" className="line-secondary-btn" onClick={() => setRichMenuPublishOpen(false)}>返回編輯</button></div>}
                 {/* Card C: 發布操作 */}
-                {richMenuPublishOpen
-                  && !richMenuDirty && !richMenuReloadRequired
+                {!richMenuDirty && !richMenuReloadRequired
                   && !activePublicationTracking
                   && activePublicationLock?.state === 'editable' && (
                   <LineRichMenuPublicationActions
@@ -1154,8 +1142,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     }}
                   />
                 )}
-                {richMenuPublishOpen
-                  && (activePublicationTracking || activePublicationLock?.state !== 'editable') && (
+                {(activePublicationTracking || activePublicationLock?.state !== 'editable') && (
                   <section className="richmenu-publish-card" aria-label="圖文選單 發布狀態">
                     {activePublicationTracking ? (
                       <>
@@ -1167,7 +1154,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               : '發布未完成'}
                         </h4>
                         {activePublicationTracking.status === 'published' ? (
-                          <p>LINE 平台已完成發布。如需再次發布，請先關閉此視窗並儲存變更，建立下一版草稿。</p>
+                          <p>LINE 平台已完成發布。如需再次發布，請先儲存變更，建立下一版草稿。</p>
                         ) : ['queued', 'publishing'].includes(activePublicationTracking.status) ? (
                           <p role="status">
                             {activePublicationTracking.timedOut
@@ -1204,14 +1191,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                     )}
                   </section>
                 )}
-            </Drawer>
+            </div>
 
             {activeMenu && richMenuDraftSnapshot && localDefinition
               && (activePublicationLock?.state === 'editable' || activePublicationLock?.state === 'published') && <LineRichMenuDraftSaveActions
-                publicationAction={<button type="button" className="line-primary-btn" data-control-id="line.richmenu.publish"
-                  disabled={richMenuDirty || richMenuBusy || richMenuReloadRequired}
-                  title={richMenuReloadRequired ? '請先重新載入並確認最新草稿' : richMenuDirty ? '請先儲存草稿再發布' : '檢查並確認發布'}
-                  onClick={() => setRichMenuPublishOpen(true)}><Send aria-hidden="true" />發布</button>}
+                publicationAction={null}
                 draft={richMenuDraftSnapshot} definition={localDefinition} client={richMenuDraft} onBusyChange={setRichMenuBusy} onReloadRequired={() => setRichMenuReloadRequired(true)}
                 onCancel={() => { setRichMenuLocalDefinition(null); setActiveSimLiff(null); setSimChatMessages([]); }} onApplied={(readback) => {
                   setRichMenuLocalDefinition(null); setRichMenuReloadRequired(false); setRichMenuDraftSnapshot(readback); setRichMenuConfiguration(loadedState(adaptLineRichMenuDraft(readback)));
@@ -1219,7 +1203,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
             {activeMenu && activePublicationLock?.state === 'processing' && <div className="richmenu-save-footer">
               <span className="richmenu-save-state">發布處理中，選單暫時唯讀</span>
-              <button type="button" className="line-secondary-btn" onClick={() => setRichMenuPublishOpen(true)}>查看發布狀態</button>
             </div>}
 
           </section>
@@ -1290,7 +1273,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
             <div className="line-field-stack line-section-bottom">
               <label htmlFor="runtime-reason" className="line-field-label">
-                調整原因說明
+                調整原因說明（選填）
               </label>
               <input
                 id="runtime-reason"
@@ -1298,8 +1281,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 value={runtimeReason}
                 onChange={(event) => {
                   setRuntimeReason(event.target.value);
-                  setRuntimePending(null);
-                  setRuntimeConfirmed(false);
                   setRuntimeReceipt(null);
                 }}
                 maxLength={500}
@@ -1347,19 +1328,19 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               <button
                                 type="button"
                                 className="line-secondary-btn line-compact-button"
-                                disabled={runtimeMutation === 'loading' || !runtimeReason.trim()}
+                                disabled={runtimeMutation === 'loading'}
                                 onClick={() => void previewRuntimeMutation('toggle', target)}
                               >
-                                預覽{target.state === 'active' ? '停用' : '啟用'}
+                                {target.state === 'active' ? '停用' : '啟用'}
                               </button>
                               {target.targetKind === 'group' && (
                                 <button
                                   type="button"
                                   className="line-secondary-btn line-compact-button"
-                                  disabled={runtimeMutation === 'loading' || !runtimeReason.trim()}
+                                  disabled={runtimeMutation === 'loading'}
                                   onClick={() => void previewRuntimeMutation('reset', target)}
                                 >
-                                  預覽重設群組
+                                  重設群組
                                 </button>
                               )}
                             </div>
@@ -1386,8 +1367,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   value={selectedRuntimeCandidate ?? ''}
                   onChange={(event) => {
                     setSelectedRuntimeCandidate(event.target.value ? Number(event.target.value) : null);
-                    setRuntimePending(null);
-                    setRuntimeConfirmed(false);
                     setRuntimeReceipt(null);
                   }}
                 >
@@ -1401,10 +1380,10 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <button
                   type="button"
                   className="line-primary-btn line-compact-button"
-                  disabled={selectedRuntimeCandidate === null || !runtimeReason.trim() || runtimeMutation === 'loading'}
+                  disabled={selectedRuntimeCandidate === null || runtimeMutation === 'loading'}
                   onClick={() => void previewRuntimeMutation('add')}
                 >
-                  預覽新增通知對象
+                  新增通知對象
                 </button>
               </div>
               ) : (
@@ -1412,34 +1391,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   目前沒有已連結 LINE 且可加入的管理員。
                 </div>
               )
-            )}
-
-            {runtimePending && (
-              <div className="line-preview-result line-block-spacing-12">
-                <strong>
-                  {runtimePending.preview.previous_state === 'absent' ? '尚未建立' : runtimePending.preview.previous_state === 'active' ? '啟用' : '停用'}
-                  {' → '}
-                  {runtimePending.preview.resulting_state === 'active' ? '啟用' : '停用'}
-                </strong>
-                <p>影響檢查已完成；尚未寫入變更。</p>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={runtimeConfirmed}
-                    disabled={runtimeMutation === 'loading'}
-                    onChange={(event) => setRuntimeConfirmed(event.target.checked)}
-                  />
-                  我已確認通知對象、目標狀態與調整原因
-                </label>
-                <button
-                  type="button"
-                  className="line-primary-btn"
-                  disabled={!runtimeConfirmed || runtimeMutation === 'loading'}
-                  onClick={() => void applyRuntimeMutation()}
-                >
-                  確認套用 LINE 異常通知設定
-                </button>
-              </div>
             )}
 
             {runtimeReceipt && <div className="line-success line-block-spacing-12" role="status">{runtimeReceipt.operationLabel}已完成並回讀最新狀態。</div>}
@@ -1463,7 +1414,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <select
                   className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationSourceKind}
-                  onChange={(event) => { setEscalationSourceKind(event.target.value as CustomerServiceEscalationCreateRequest['source_kind']); setEscalationPending(null); setEscalationConfirmed(false); }}
+                  onChange={(event) => { setEscalationSourceKind(event.target.value as CustomerServiceEscalationCreateRequest['source_kind']); }}
                 >
                   <option value="ticket_referral">客服工單轉介</option>
                   <option value="line_inbox">LINE inbox</option>
@@ -1476,7 +1427,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <select
                   className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationTrigger}
-                  onChange={(event) => { setEscalationTrigger(event.target.value as CustomerServiceEscalationCreateRequest['trigger_code']); setEscalationPending(null); setEscalationConfirmed(false); }}
+                  onChange={(event) => { setEscalationTrigger(event.target.value as CustomerServiceEscalationCreateRequest['trigger_code']); }}
                 >
                   <option value="explicit_human_request">明確要求人工</option>
                   <option value="explicit_wrong_answer">明確回覆錯誤</option>
@@ -1490,7 +1441,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <select
                   className="line-filter-select line-full-width line-field-top-spacing"
                   value={escalationCategory}
-                  onChange={(event) => { setEscalationCategory(event.target.value as CustomerServiceEscalationCreateRequest['ticket_category']); setEscalationPending(null); setEscalationConfirmed(false); }}
+                  onChange={(event) => { setEscalationCategory(event.target.value as CustomerServiceEscalationCreateRequest['ticket_category']); }}
                 >
                   <option value="service_flow">服務流程</option>
                   <option value="payment_subsidy">收費與補助</option>
@@ -1502,7 +1453,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
               </label>
               <label>
                 來源案件／事件參考
-                <input className="line-search-input" value={escalationSourceIdentity} onChange={(event) => { setEscalationSourceIdentity(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }} />
+                <input className="line-search-input" value={escalationSourceIdentity} onChange={(event) => { setEscalationSourceIdentity(event.target.value); }} />
               </label>
               <details className="line-details-full">
                 <summary>進階來源資料</summary>
@@ -1512,18 +1463,18 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <div className="line-detail-grid">
                   <label>
                     來源資料校驗碼
-                    <input className="line-search-input" value={escalationSourceFingerprint} onChange={(event) => { setEscalationSourceFingerprint(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }} />
+                    <input className="line-search-input" value={escalationSourceFingerprint} onChange={(event) => { setEscalationSourceFingerprint(event.target.value); }} />
                   </label>
                   <label>
                     自動化暫停範圍
-                    <input className="line-search-input" value={escalationHoldScope} onChange={(event) => { setEscalationHoldScope(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }} />
+                    <input className="line-search-input" value={escalationHoldScope} onChange={(event) => { setEscalationHoldScope(event.target.value); }} />
                   </label>
                 </div>
               </details>
               <div className="line-grid-full">
                 {escalationSourceIdentity.trim() && !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) && (
                   <div className="line-scope-note line-bottom-spacing" role="status">
-                    需先完成來源事件核對並補齊進階來源資料，才能預覽建立。
+                    需先完成來源事件核對並補齊進階來源資料，才能建立。
                   </div>
                 )}
                 <button
@@ -1532,7 +1483,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                   disabled={!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || escalationMutation === 'loading'}
                   onClick={() => void previewCreateEscalation()}
                 >
-                  預覽建立人工客服升級
+                  建立人工客服升級
                 </button>
               </div>
             </div>
@@ -1586,7 +1537,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         inputMode="numeric"
                         className="line-search-input"
                         value={escalationTicketVersion}
-                        onChange={(event) => { setEscalationTicketVersion(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }}
+                        onChange={(event) => { setEscalationTicketVersion(event.target.value); }}
                       />
                     </label>
                     <label htmlFor="escalation-resolution-digest">
@@ -1595,7 +1546,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                         id="escalation-resolution-digest"
                         className="line-search-input"
                         value={escalationResolutionDigest}
-                        onChange={(event) => { setEscalationResolutionDigest(event.target.value); setEscalationPending(null); setEscalationConfirmed(false); }}
+                        onChange={(event) => { setEscalationResolutionDigest(event.target.value); }}
                       />
                     </label>
                   </div>
@@ -1609,7 +1560,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       disabled={escalationMutation === 'loading'}
                       onClick={() => void previewAdvanceEscalation('claim')}
                     >
-                      預覽接手
+                      接手
                     </button>
                   )}
                   {escalationDetail.value.availableActions.includes('handling') && (
@@ -1619,7 +1570,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       disabled={escalationMutation === 'loading'}
                       onClick={() => void previewAdvanceEscalation('handling')}
                     >
-                      預覽開始處理
+                      開始處理
                     </button>
                   )}
                   {escalationDetail.value.availableActions.includes('resolve') && (
@@ -1629,43 +1580,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                       disabled={escalationMutation === 'loading' || !/^[0-9a-f]{64}$/.test(escalationResolutionDigest)}
                       onClick={() => void previewAdvanceEscalation('resolve')}
                     >
-                      預覽解決並解除暫停
+                      解決並解除暫停
                     </button>
                   )}
                 </div>
               </>
-            )}
-
-            {escalationPending && (
-              <div className="line-preview-result line-block-spacing-12">
-                <strong>
-                  {escalationPending.preview.before_workflow_status === 'absent' ? '尚未建立' : escalationPending.preview.before_workflow_status}
-                  {' → '}
-                  {escalationPending.preview.resulting_workflow_status}
-                </strong>
-                <p>
-                  自動化暫停：{escalationPending.preview.before_hold_state === 'absent' ? '尚未建立' : escalationPending.preview.before_hold_state}
-                  {' → '}
-                  {escalationPending.preview.resulting_hold_state}；影響檢查已完成，尚未寫入。
-                </p>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={escalationConfirmed}
-                    disabled={escalationMutation === 'loading'}
-                    onChange={(event) => setEscalationConfirmed(event.target.checked)}
-                  />
-                  我已確認升級來源、狀態與自動化暫停影響
-                </label>
-                <button
-                  type="button"
-                  className="line-primary-btn"
-                  disabled={!escalationConfirmed || escalationMutation === 'loading'}
-                  onClick={() => void applyEscalation()}
-                >
-                  確認套用人工客服升級操作
-                </button>
-              </div>
             )}
 
             {escalationReceipt && <div className="line-success line-block-spacing-12" role="status">人工客服升級操作已完成；目前狀態：{escalationReceipt.workflowStatus}。</div>}

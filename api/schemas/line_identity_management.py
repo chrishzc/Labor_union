@@ -108,19 +108,19 @@ class LineIdentityCandidatePageView(_StrictModel):
 
 class LineIdentityRevocationApplyRequest(_StrictModel):
     expected_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
 
 class LineIdentityRevocationActionRequest(_StrictModel):
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
 
 
 class LineIdentityReplacementRequest(_StrictModel):
     expected_version: int = Field(ge=0)
     target_subject_reference: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
@@ -151,7 +151,7 @@ class UnboundPairingCandidatesResponseView(_StrictModel):
 class PairProvisionalRegistrationRequest(_StrictModel):
     provisional_registration_id: int = Field(gt=0)
     target_case_no: str = Field(min_length=1, max_length=50)
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 

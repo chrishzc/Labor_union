@@ -71,7 +71,7 @@ export type RetentionMode = 'expired' | 'capacity';
 export interface PreviewInput {
   source_id: string;
   mode: RetentionMode;
-  reason: string;
+  reason?: string;
   batch_size: number;
 }
 
@@ -95,7 +95,7 @@ export const operationalRetentionClient = {
   ): Promise<RetentionPreview> {
     const raw = await transport.post(
       '/api/v1/system/storage-retention/preview',
-      input,
+      { ...input, reason: input.reason?.trim() ?? '' },
       authenticatedOptions(options),
     );
     return decodeEnvelope(PreviewSchema, raw);

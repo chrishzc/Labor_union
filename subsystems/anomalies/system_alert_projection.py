@@ -66,8 +66,8 @@ def _decode_row(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _required_text(value: Any, field: str, max_length: int) -> str:
-    if not isinstance(value, str) or not value.strip():
+def _required_text(value: Any, field: str, max_length: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value.strip() and not allow_empty):
         raise ValueError(f"{field} is required")
     value = value.strip()
     if len(value) > max_length:
@@ -220,7 +220,7 @@ def upsert_system_alert(
     alert_code = _required_text(alert_code, "alert_code", 50)
     source_domain = _required_text(source_domain, "source_domain", 50)
     case_key = _required_text(case_key, "case_key", 100)
-    reason = _required_text(reason, "reason", 500)
+    reason = _required_text(reason, "reason", 500, allow_empty=True)
     details_json = _encode_details(details)
     cursor.execute(
         """SELECT id, source_domain, reason, details, status FROM system_alerts

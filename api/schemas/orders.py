@@ -30,7 +30,7 @@ class ClientNamePreviewRequest(BaseModel):
 
 class ClientNameApplyRequest(ClientNamePreviewRequest):
     preview_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientNamePreviewView(BaseModel):
@@ -63,7 +63,7 @@ class OrderLockCancellationRequest(BaseModel):
 
     event_key: str = Field(..., description="本次取消冪等鍵")
     actor: str = Field(..., description="操作人員識別")
-    cancel_reason: str = Field(..., description="取消原因")
+    cancel_reason: str = Field(default="", description="取消原因")
 
     @field_validator("event_key", "actor", "cancel_reason")
     @classmethod
@@ -109,7 +109,7 @@ class _OrderLifecycleCommandRequest(BaseModel):
     expected_version: StrictInt = Field(..., ge=0)
     idempotency_key: str = Field(..., min_length=1, max_length=191)
     actor: str = Field(..., min_length=1, max_length=100)
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
     @field_validator("idempotency_key", "actor", "reason")
     @classmethod
@@ -311,7 +311,7 @@ class AssignmentLeaveResolutionApplyRequest(
     )
     event_key: str = Field(..., description="本次套用操作的冪等鍵")
     actor: str = Field(..., description="操作人員識別")
-    reason: str = Field(..., description="休假、順延或代班原因")
+    reason: str = Field(default="", description="休假、順延或代班原因")
 
     @field_validator("event_key", "actor", "reason")
     @classmethod
@@ -392,7 +392,7 @@ class AssignmentLeaveResolutionBatchApplyRequest(
     )
     batch_key: str = Field(..., min_length=1, max_length=100)
     actor: str = Field(..., min_length=1, max_length=100)
-    reason: str = Field(..., min_length=1, max_length=255)
+    reason: str = Field(default="", max_length=255)
 
     @field_validator("batch_key", "actor", "reason")
     @classmethod

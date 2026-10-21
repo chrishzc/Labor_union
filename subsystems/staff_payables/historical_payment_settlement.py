@@ -43,7 +43,7 @@ class ApplyHistoricalStaffPayout:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "reason", 500)
+        require_canonical_text(self.reason, "reason", 500, allow_empty=True)
         if self.expected_adoption_receipt_id <= 0:
             raise ValueError("historical_staff_adoption_receipt_invalid")
 

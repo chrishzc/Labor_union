@@ -116,9 +116,9 @@ class OrderTermsApplyRequest:
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
         if self.reason is not None:
-            require_canonical_text(self.reason, "terms change reason", 500)
-        if self.requires_formal_apply and (self.idempotency_key is None or self.reason is None):
-            raise ValueError("formal terms Apply requires idempotency key and reason")
+            require_canonical_text(self.reason, "terms change reason", 500, allow_empty=True)
+        if self.requires_formal_apply and self.idempotency_key is None:
+            raise ValueError("formal terms Apply requires idempotency key")
 
 
 @dataclass(frozen=True, slots=True)

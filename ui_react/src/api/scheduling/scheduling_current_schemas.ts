@@ -49,7 +49,7 @@ export const SchedulingCurrentDayEntrySchema = z
     segment_id: z.number().int().positive().nullable(),
     availability_block_id: z.number().int().positive().nullable(),
     unavailability_kind: z.string().min(1).nullable(),
-    unavailability_reason: z.string().min(1).max(500).nullable(),
+    unavailability_reason: z.string().max(500).nullable(),
   })
   .strict()
   .superRefine((entry, context) => {

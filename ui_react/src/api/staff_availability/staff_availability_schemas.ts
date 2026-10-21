@@ -39,7 +39,7 @@ export const StaffAvailabilityBlockStatusSchema = z.enum(['effective', 'cancelle
 export const StaffAvailabilityIntentSchema = z
   .strictObject({
     action: StaffAvailabilityActionSchema,
-    reason: z.string().min(1).max(500),
+    reason: z.string().max(500),
     start_date: StaffAvailabilityDateSchema.nullable().optional(),
     end_date: StaffAvailabilityDateSchema.nullable().optional(),
     block_id: z.number().int().positive().nullable().optional(),
@@ -49,7 +49,7 @@ export const StaffAvailabilityIntentSchema = z
 export const StaffAvailabilityApplyPayloadSchema = z
   .strictObject({
     action: StaffAvailabilityActionSchema,
-    reason: z.string().min(1).max(500),
+    reason: z.string().max(500),
     start_date: StaffAvailabilityDateSchema.nullable().optional(),
     end_date: StaffAvailabilityDateSchema.nullable().optional(),
     block_id: z.number().int().positive().nullable().optional(),

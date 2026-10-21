@@ -23,7 +23,7 @@ class ClaimAnomalyBody(_StrictModel):
 
 class ResolveAnomalyBody(_StrictModel):
     expected_workflow_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class _AnomalyEvidenceBase(_StrictModel):
@@ -197,7 +197,7 @@ class AnomalyTimelineEventView(_StrictModel):
     expected_workflow_version: int = Field(ge=0)
     resulting_workflow_version: int = Field(ge=0)
     actor: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=191)
+    reason: str = Field(max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
     created_at: datetime
 

@@ -98,7 +98,9 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
     setError(null);
     setNotice(null);
     try {
-      setClientPreview(await orderIntakeCompletionClient.previewClientName(item.case_no, clientName));
+      const next = await orderIntakeCompletionClient.previewClientName(item.case_no, clientName);
+      setClientPreview(next);
+      if (next.apply_allowed) await applyClientName(next);
     } catch (caught) {
       setClientPreview(null);
       setError(intakeRepairErrorMessage(caught));
@@ -107,7 +109,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
     }
   };
 
-  const applyClientName = async () => {
+  const applyClientName = async (clientPreview: IntakeClientNamePreview) => {
     if (!clientPreview || !clientPreview.apply_allowed) return;
     setBusy('client-apply');
     setError(null);
@@ -135,11 +137,9 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
     setError(null);
     setNotice(null);
     try {
-      setTermsPreview(await orderIntakeCompletionClient.previewTerms(
-        item.case_no,
-        startDate,
-        Number(serviceDays),
-      ));
+      const next = await orderIntakeCompletionClient.previewTerms(item.case_no, startDate, Number(serviceDays));
+      setTermsPreview(next);
+      if (next.apply_allowed) await applyTerms(next);
     } catch (caught) {
       setTermsPreview(null);
       setError(intakeRepairErrorMessage(caught));
@@ -148,7 +148,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
     }
   };
 
-  const applyTerms = async () => {
+  const applyTerms = async (termsPreview: IntakeTermsPreview) => {
     if (!termsPreview || !termsPreview.apply_allowed) return;
     setBusy('terms-apply');
     setError(null);
@@ -251,7 +251,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
             placeholder="輸入正式客戶姓名"
           />
           <button type="button" disabled={busy !== null || clientName.trim().length === 0} onClick={() => void previewClientName()}>
-            {busy === 'client-preview' ? '檢查中…' : '檢查姓名補件'}
+            {busy === 'client-preview' ? '儲存中…' : '儲存姓名補件'}
           </button>
           {clientPreview && (
             <div style={{ display: 'grid', gap: 6 }}>
@@ -264,9 +264,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
                   {clientPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
                 </ul>
               )}
-              <button type="button" disabled={busy !== null || !clientPreview.apply_allowed} onClick={() => void applyClientName()}>
-                {busy === 'client-apply' ? '套用中…' : '確認補齊客戶姓名'}
-              </button>
+
             </div>
           )}
         </section>
@@ -309,7 +307,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
             disabled={busy !== null || !validTermsDraft || !termsProtectionReady}
             onClick={() => void previewTerms()}
           >
-            {busy === 'terms-preview' ? '檢查中…' : '檢查服務資料補件'}
+            {busy === 'terms-preview' ? '儲存中…' : '儲存服務資料補件'}
           </button>
           {termsPreview && (
             <div style={{ display: 'grid', gap: 6 }}>
@@ -323,13 +321,7 @@ export const OrdersIntakeRepairCard: React.FC<OrdersIntakeRepairCardProps> = ({ 
                   {termsPreview.blockers.map((blocker) => <li key={blocker}>{intakeBlockerMessage(blocker)}</li>)}
                 </ul>
               )}
-              <button
-                type="button"
-                disabled={busy !== null || !termsPreview.apply_allowed}
-                onClick={() => void applyTerms()}
-              >
-                {busy === 'terms-apply' ? '套用中…' : '確認補齊服務資料'}
-              </button>
+
             </div>
           )}
         </section>

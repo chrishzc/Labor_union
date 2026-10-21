@@ -46,28 +46,19 @@ function CandidateInformationSend({ caseNo, candidateId, kind, recipientLabel, o
   useEffect(() => {
     const controller = new AbortController();
     candidateContactPoolClient.previewInformation(caseNo, candidateId, kind, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) { setPreview(data); setStatus('ready'); } })
+      .then((data) => { if (!controller.signal.aborted) {
+        setPreview(data); setStatus('ready');
+        onSubmit(createCandidateInformationSendCommand(caseNo, candidateId, kind, data.preview_fingerprint));
+        onClose();
+      } })
       .catch((error) => { if (!controller.signal.aborted) { setMessage(errorMessage(error)); setStatus('error'); } });
     return () => controller.abort();
   }, [caseNo, candidateId, kind]);
-  const send = async () => {
-    if (!preview || status !== 'ready') return;
-    try {
-      onSubmit(createCandidateInformationSendCommand(
-        caseNo, candidateId, kind, preview.preview_fingerprint,
-      ));
-      onClose();
-    } catch (error) {
-      setStatus('error');
-      setMessage(errorMessage(error));
-    }
-  };
   return <section className="order-case-review-note" aria-label="寄送前確認">
     <h4>寄送訂單資訊－{kind}</h4>
     {status === 'loading' && <p role="status">正在讀取寄送內容…</p>}
     {preview && <><p>收件月嫂：{recipientLabel}；案件：{preview.case_no}</p><pre style={{ whiteSpace: 'pre-wrap', font: 'inherit' }}>{preview.text}</pre></>}
     {message && <p role={status === 'error' ? 'alert' : 'status'}>{message}</p>}
-    <button type="button" disabled={status !== 'ready'} onClick={() => void send()}>確認寄送</button>
     <button type="button" onClick={onClose}>關閉</button>
   </section>;
 }
@@ -567,7 +558,6 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                     event.preventDefault();
                     if (protectedOperation || !saveValidation.validate([
                       { value: responseChoice, label: '初步接案意願', ref: responseChoiceRef },
-                      ...(responseChoice === 'unwilling' ? [{ value: reasonDrafts[candidate.id], label: '無意願原因', ref: responseReasonRef }] : []),
                     ]) || !responseChoice) return;
                     void submitWillingness(candidate.id, responseChoice, reasonDrafts[candidate.id] ?? '').then(saved => { if (saved) setResponseTarget(null); });
                   }}>
@@ -575,9 +565,9 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                   <fieldset disabled={protectedOperation}><legend>初步接案意願</legend>
                     <label><input ref={responseChoiceRef} type="radio" name="candidate-response" value="willing" required checked={responseChoice === 'willing'} onChange={() => setResponseChoice('willing')} />願意承接</label>
                     <label><input type="radio" name="candidate-response" value="unwilling" required checked={responseChoice === 'unwilling'} onChange={() => setResponseChoice('unwilling')} />無意願</label>
-                    <label className="candidate-willingness-note">詢問結果備註<textarea ref={responseReasonRef} rows={3} maxLength={500} required={responseChoice === 'unwilling'} value={reasonDrafts[candidate.id] ?? ''}
+                    <label className="candidate-willingness-note">詢問結果備註<textarea ref={responseReasonRef} rows={3} maxLength={500} value={reasonDrafts[candidate.id] ?? ''}
                       onChange={event => setReasonDrafts(drafts => ({ ...drafts, [candidate.id]: event.target.value }))} /></label>
-                    <p>願意承接可留空；無意願需填寫原因。只記錄初步意願，尚未形成正式指派。</p>
+                    <p>備註選填。只記錄初步意願，尚未形成正式指派。</p>
                   </fieldset>
                   {saveValidation.feedback}
                   {mutationError && <p role="alert">{mutationError}</p>}
@@ -618,7 +608,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                         ...current,
                         [candidate.id]: event.target.value,
                       }))}
-                      placeholder="無意願時必填；願意可留空"
+                      placeholder="詢問結果備註（選填）"
                     />
                     <div className="order-case-action-row">
                       <button

@@ -553,10 +553,10 @@ export async function applyServiceDatesFlow(
   }
 
   const trimmedReason = draft.reason.trim();
-  if (trimmedReason.length < 1 || trimmedReason.length > 500) {
+  if (trimmedReason.length > 500) {
     const err = new OrderMutationValidationError({
       code: 'invalid_reason',
-      message: '確認原因必須為 1 至 500 字元且不可為純空白',
+      message: '備註最多 500 字元',
     });
     orderMutationFlowStore.setServiceDatesTypedError(caseNo, err);
     throw err;
@@ -723,10 +723,10 @@ export async function applyReopenFlow(
   }
 
   const trimmedReason = draft.reason.trim();
-  if (trimmedReason.length < 1 || trimmedReason.length > 500) {
+  if (trimmedReason.length > 500) {
     const err = new OrderMutationValidationError({
       code: 'invalid_reason',
-      message: '重開原因必須為 1 至 500 字元且不可為純空白',
+      message: '備註最多 500 字元',
     });
     orderMutationFlowStore.setReopenTypedError(caseNo, err);
     throw err;

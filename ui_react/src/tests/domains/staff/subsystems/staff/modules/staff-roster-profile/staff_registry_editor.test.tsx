@@ -65,34 +65,26 @@ describe('Staff registry owner editing', () => {
     expect(screen.getByLabelText('公會編號')).toHaveValue('Ab0007');
   });
 
-  it.each(['', '   ', '設定公會編號'])('saves the profile with optional notes %j', async (note) => {
+  it.each(['', '   ', '設定公會編號'])('saves the profile in one click with optional notes %j', async (note) => {
     mocks.previewProfile.mockResolvedValue({ staff_id: 11, current_version: 2, before: { union_no: 'A001' }, after: { union_no: 'Ab0007' }, preview_fingerprint: 'a'.repeat(64) });
     mocks.applyProfile.mockResolvedValue({});
     const onUpdated = vi.fn();
     render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={onUpdated} />);
     const section = screen.getByRole('heading', { name: /編輯個人與聯絡資料/ }).closest('section')!;
-    const input = within(section).getByLabelText('公會編號');
-    const save = within(section).getByRole('button', { name: '確認儲存' });
+    const save = within(section).getByRole('button', { name: '儲存' });
     expect(save).toBeDisabled();
-    expect(save).toHaveAccessibleDescription('請先修改要儲存的資料，再按「預覽變更」。');
-    expect(input).toHaveValue('A001');
-    fireEvent.change(input, { target: { value: 'Ab0007' } });
-    expect(save).toHaveAccessibleDescription('尚未預覽：請先按「預覽變更」。');
-    expect(within(section).getByRole('button', { name: '預覽變更' })).toBeEnabled();
-    fireEvent.click(within(section).getByRole('button', { name: '預覽變更' }));
-    await within(section).findByText('預覽完成，請核對後確認儲存。');
-    expect(mocks.previewProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2);
-    expect(save).toBeEnabled();
-    expect(save).toHaveAccessibleDescription('預覽完成，可直接確認儲存；備註可留白。');
+    fireEvent.change(within(section).getByLabelText('公會編號'), { target: { value: 'Ab0007' } });
     const notes = within(section).getByLabelText('個人資料備註（選填）');
     expect(notes).not.toHaveAttribute('aria-required');
     fireEvent.change(notes, { target: { value: note } });
-    fireEvent.click(within(section).getByRole('button', { name: '確認儲存' }));
+    expect(within(section).queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
+    expect(mocks.applyProfile).not.toHaveBeenCalled();
+    fireEvent.click(save);
     await within(section).findByText('個人資料已儲存。');
+    expect(mocks.previewProfile).toHaveBeenCalledOnce();
     expect(mocks.applyProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2, 'a'.repeat(64), note.trim(), expect.any(String));
     expect(window.alert).not.toHaveBeenCalled();
     expect(onUpdated).toHaveBeenCalledOnce();
-    expect(mocks.previewProfile).toHaveBeenCalledOnce();
   });
 
   it('keeps the draft and prevents apply when the union number is duplicated', async () => {
@@ -100,41 +92,33 @@ describe('Staff registry owner editing', () => {
     render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} />);
     const section = screen.getByRole('heading', { name: /編輯個人與聯絡資料/ }).closest('section')!;
     fireEvent.change(within(section).getByLabelText('公會編號'), { target: { value: 'B002' } });
-    fireEvent.click(within(section).getByRole('button', { name: '預覽變更' }));
+    fireEvent.click(within(section).getByRole('button', { name: '儲存' }));
     await within(section).findByText('此公會編號已被使用，請輸入其他編號。');
     expect(within(section).getByLabelText('公會編號')).toHaveValue('B002');
-    expect(within(section).getByRole('button', { name: '確認儲存' })).toBeDisabled();
+    expect(within(section).getByRole('button', { name: '儲存' })).toBeEnabled();
     expect(mocks.applyProfile).not.toHaveBeenCalled();
   });
 
-  it('keeps bank preview available and explains missing fields without sending an invalid request', async () => {
-    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={vi.fn()} showResume={false} />);
+  it.each(['', '   ', '本人提供新帳戶'])('saves the bank in one click with optional notes %j and keeps business fields required', async (note) => {
+    mocks.applyBank.mockResolvedValue({});
+    const updated = vi.fn();
+    render(<StaffRegistryEditor profile={STAFF_PROFILE} onUpdated={updated} showResume={false} />);
     const bank = screen.getByRole('heading', { name: /管理銀行帳戶/ }).closest('section')!;
-    const preview = within(bank).getByRole('button', { name: '預覽變更' });
-    expect(preview).toBeEnabled();
-    expect(within(bank).getByRole('list', { name: '銀行帳戶' })).toHaveTextContent('主要帳戶｜有效');
-    fireEvent.click(preview);
-    expect(within(bank).getByRole('alert')).toHaveTextContent('請填寫或選擇銀行代碼、分行代碼、完整新帳號，再預覽變更。');
+    const save = within(bank).getByRole('button', { name: '儲存' });
+    expect(save).toBeDisabled();
     expect(mocks.previewBank).not.toHaveBeenCalled();
     fireEvent.change(within(bank).getByLabelText('銀行代碼'), { target: { value: '812' } });
     fireEvent.change(within(bank).getByLabelText('分行代碼'), { target: { value: '0012' } });
     fireEvent.change(within(bank).getByLabelText('完整新帳號'), { target: { value: '1234567890' } });
-    expect(within(bank).getByText('資料已填齊，可按「預覽變更」；預覽不會儲存資料。')).toBeInTheDocument();
-    fireEvent.click(preview);
-    await within(bank).findByText('只顯示帳號末四碼；請核對後確認儲存。');
-    expect(within(bank).getByText('預覽完成，請填寫異動原因後確認儲存。')).toBeInTheDocument();
-    const save = within(bank).getByRole('button', { name: '確認儲存' });
+    fireEvent.change(within(bank).getByLabelText('備註（選填）'), { target: { value: note } });
     expect(save).toBeEnabled();
+    expect(within(bank).queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
     fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalledWith('請填寫「異動原因」後再儲存。');
-    expect(within(bank).getByRole('alert')).toHaveTextContent('請填寫「異動原因」後再儲存。');
-    expect(within(bank).getByLabelText('異動原因')).toHaveFocus();
-    expect(mocks.applyBank).not.toHaveBeenCalled();
-    fireEvent.change(within(bank).getByLabelText('異動原因'), { target: { value: '   ' } });
-    fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalledTimes(2);
-    expect(mocks.applyBank).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.applyBank).toHaveBeenCalledOnce());
+    expect(mocks.applyBank.mock.calls[0][4]).toBe(note.trim());
     expect(mocks.previewBank).toHaveBeenCalledOnce();
+    expect(updated).toHaveBeenCalledOnce();
+    expect(window.alert).not.toHaveBeenCalled();
     expect(mocks.currentResume).not.toHaveBeenCalled();
   });
 
@@ -149,10 +133,8 @@ describe('Staff registry owner editing', () => {
     fireEvent.change(within(bank).getByLabelText('分行代碼'), { target: { value: '0012' } });
     const account = within(bank).getByLabelText('完整新帳號');
     fireEvent.change(account, { target: { value: '1234567890' } });
-    fireEvent.click(within(bank).getByRole('button', { name: '預覽變更' }));
-    await within(bank).findByText(/末四碼 7890/);
-    fireEvent.change(within(bank).getByLabelText('異動原因'), { target: { value: '本人提供新帳戶' } });
-    const apply = within(bank).getByRole('button', { name: '確認儲存' });
+    fireEvent.change(within(bank).getByLabelText('備註（選填）'), { target: { value: '本人提供新帳戶' } });
+    const apply = within(bank).getByRole('button', { name: '儲存' });
     fireEvent.click(apply);
     fireEvent.click(apply);
     await waitFor(() => expect(mocks.applyBank).toHaveBeenCalledTimes(1));

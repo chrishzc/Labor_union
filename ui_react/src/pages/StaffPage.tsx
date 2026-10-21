@@ -245,37 +245,9 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       requestControllerRef.current = null;
     };
   }, [load]);
-  const doPreview = async () => {
-    if (!snapshot || (phase !== 'editing' && phase !== 'preview_ready')) return;
-    if (MANUAL_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) {
-      setStatusError(true);
-      setStatus('請選擇新增條件，或移除尚未選擇的項目。');
-      return;
-    }
-    const epoch = loadEpoch.current;
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-    setPhase('previewing');
-    setStatusError(false);
-    setPreview(null);
-    setStatus('');
-    try {
-      const next = await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft), { signal: controller.signal });
-      if (epoch !== loadEpoch.current) return;
-      setPreview(next);
-      setPhase('preview_ready');
-      setStatus('預覽已完成，尚未寫入。');
-    } catch (error) {
-      if (epoch === loadEpoch.current) {
-        setPhase('editing');
-        setStatusError(true);
-        setStatus(error instanceof Error ? error.message : '預覽失敗。');
-      }
-    }
-  };
   const doApply = async () => {
-    if (!snapshot || !preview?.preview_fingerprint || phase !== 'preview_ready') return;
+    if (!snapshot || !['editing', 'preview_ready'].includes(phase)) return;
+    if (MANUAL_RELATION_KEYS.some(key => draft[key].some(item => !item.value.trim()))) { setStatusError(true); setStatus('請選擇新增條件，或移除尚未選擇的項目。'); return; }
     setStatusError(false);
     const epoch = loadEpoch.current;
     requestControllerRef.current?.abort();
@@ -285,10 +257,12 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setApplying(true);
     setStatus('');
     try {
+      const approved = preview ?? await staffCasePreferenceManualClient.preview(staffId, requestRelations(draft), { signal: controller.signal });
+      if (epoch !== loadEpoch.current) return;
       await staffCasePreferenceManualClient.apply(staffId, {
         ...requestRelations(draft),
         expected_snapshot_fingerprint: snapshot.snapshot_fingerprint,
-        preview_fingerprint: preview.preview_fingerprint,
+        preview_fingerprint: approved.preview_fingerprint!,
         reason: reason.trim(),
       }, { idempotencyKey: nextIntentKey('staff-case-preference-manual'), signal: controller.signal });
       if (epoch !== loadEpoch.current) return;
@@ -317,7 +291,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
 
   return <section data-surface-id={surfaceId}>
     <h3>服務能力與接案條件</h3>
-    <p>從選單選擇條件，需要時再新增條件，服務時段可自訂起迄時間，預覽後確認儲存。</p>
+    <p>從選單選擇條件，需要時再新增條件，服務時段可自訂起迄時間，填妥後直接儲存。</p>
     {phase === 'loading' && <p role="status">正在載入六大接案能力…</p>}
     {phase === 'ready' && snapshot && <button type="button" className="staff-next-btn" onClick={() => { setDraft(snapshot.after); setStatus(''); setPhase('editing'); }}>編輯六項偏好</button>}
     {snapshot && options && <div className="staff-qual-grid">
@@ -347,11 +321,10 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
       </div>)}
     </div>}
     {editing && <label className="staff-op-field">備註（選填）<input aria-label="接案條件備註（選填）" placeholder="有需要補充的內容再填寫" disabled={locked} value={reason} onChange={(event) => { setReason(event.target.value); if (statusError) { setStatusError(false); setStatus(''); } }} /></label>}
-    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : phase !== 'preview_ready' || !preview?.preview_fingerprint ? '尚未預覽：請先按「預覽變更」。' : '預覽完成，可直接確認儲存；備註可留白。'}</p>}
+    {editing && <p id={saveGuidanceId} className="staff-op-hint">{locked ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>}
     <div className="staff-op-actions">
       {editing && <button type="button" className="staff-secondary-btn" disabled={locked} onClick={() => { if (snapshot) setDraft(snapshot.after); setPreview(null); setReason(''); setStatus('已取消變更。'); setStatusError(false); setPhase(directEditing ? 'editing' : 'ready'); }}>取消變更</button>}
-      {editing && <button type="button" className="staff-primary-btn" disabled={locked} onClick={() => void doPreview()}>預覽變更</button>}
-      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked || phase !== 'preview_ready' || !preview?.preview_fingerprint} onClick={() => void doApply()}>確認儲存</button>}
+      {editing && <button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={locked} onClick={() => void doApply()}>儲存</button>}
       {phase === 'error' && <button type="button" className="staff-secondary-btn" onClick={() => void load()}>重新查詢</button>}
     </div>
     {preview && <StaffCasePreferenceManualPreview preview={preview} />}
@@ -764,19 +737,21 @@ export const StaffPage: React.FC = () => {
         expected_version: preview.source_version,
         preview_fingerprint: preview.preview_fingerprint,
       };
-      setAvailabilityAction({ phase: 'preview_ready', preview, receipt: null, payload, idempotencyKey: null, message: null });
+      const prepared = { phase: 'preview_ready' as const, preview, receipt: null, payload, idempotencyKey: null, message: null };
+      setAvailabilityAction(prepared);
+      await submitAvailability(false, prepared);
     } catch (error) {
       if (error instanceof StaffAvailabilityAbortedError || !isCurrentSlice(generation, controller.signal)) return;
       setAvailabilityAction({ ...initialActionState(), phase: error instanceof StaffAvailabilityConflictError ? 'stale' : 'error', message: errorMessage(error, '不可服務期間預覽失敗。') });
     }
   };
 
-  const submitAvailability = async (retry = false) => {
-    if (selectedStaffId === null || availabilityAction.payload === null) return;
+  const submitAvailability = async (retry = false, prepared = availabilityAction) => {
+    if (selectedStaffId === null || prepared.payload === null) return;
     const currentStaffId = selectedStaffId;
     const actionGeneration = sliceGenerationRef.current;
-    const payload = availabilityAction.payload;
-    const idempotencyKey = retry ? availabilityAction.idempotencyKey : nextIntentKey('staff-availability');
+    const payload = prepared.payload;
+    const idempotencyKey = retry ? prepared.idempotencyKey : nextIntentKey('staff-availability');
     if (idempotencyKey === null) return;
     setAvailabilityAction((current) => ({ ...current, phase: 'apply_pending', idempotencyKey, message: null }));
     try {
@@ -831,7 +806,6 @@ export const StaffPage: React.FC = () => {
       selectedStaffId === null
       || lifecycle.status !== 'ready'
       || !lifecycleEffectiveAt
-      || !lifecycleReasonCode.trim()
       || lifecycleAction.phase === 'preview_loading'
     ) return;
     const currentStaffId = selectedStaffId;
@@ -849,7 +823,9 @@ export const StaffPage: React.FC = () => {
         expected_version: lifecycle.data.version,
         preview_fingerprint: preview.preview_fingerprint,
       };
-      setLifecycleAction({ action, phase: 'preview_ready', preview, receipt: null, payload, idempotencyKey: null, message: null });
+      const prepared = { action, phase: 'preview_ready' as const, preview, receipt: null, payload, idempotencyKey: null, message: null };
+      setLifecycleAction(prepared);
+      await submitLifecycle(false, prepared);
     } catch (error) {
       if (error instanceof StaffLifecycleAbortedError || !isCurrentSlice(generation, controller.signal)) return;
       setLifecycleAction({ ...initialActionState(), action, phase: error instanceof StaffLifecycleConflictError ? 'stale' : 'error', message: errorMessage(error, '任職異動預覽失敗。') });
@@ -879,13 +855,13 @@ export const StaffPage: React.FC = () => {
     }
   };
 
-  const submitLifecycle = async (retry = false) => {
-    if (selectedStaffId === null || lifecycleAction.action === null || lifecycleAction.payload === null) return;
+  const submitLifecycle = async (retry = false, prepared = lifecycleAction) => {
+    if (selectedStaffId === null || prepared.action === null || prepared.payload === null) return;
     const currentStaffId = selectedStaffId;
     const actionGeneration = sliceGenerationRef.current;
-    const action = lifecycleAction.action;
-    const payload = lifecycleAction.payload;
-    const idempotencyKey = retry ? lifecycleAction.idempotencyKey : nextIntentKey('staff-lifecycle');
+    const action = prepared.action;
+    const payload = prepared.payload;
+    const idempotencyKey = retry ? prepared.idempotencyKey : nextIntentKey('staff-lifecycle');
     if (idempotencyKey === null) return;
     setLifecycleAction((current) => ({ ...current, phase: 'apply_pending', idempotencyKey, message: null }));
     try {
@@ -970,9 +946,7 @@ export const StaffPage: React.FC = () => {
         ? '請先選擇要結束的暫停接案紀錄。'
         : !endPauseResumeDate
           ? '請填寫恢復接案日期。'
-          : !endPauseReason.trim()
-            ? '請填寫結束暫停原因。'
-            : interactionLocked
+          : interactionLocked
               ? '目前有其他操作進行中，請稍候。'
               : null;
 
@@ -1016,17 +990,16 @@ export const StaffPage: React.FC = () => {
   const renderAvailabilityWorkbench = () => (
         <section className="staff-workbench" data-surface-id="staff.unavailability">
           <div className="staff-section-header">
-            <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>查詢後預覽變更，確認無衝突再套用。</p></div>
+            <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>填妥資料後直接儲存。</p></div>
             <div className="staff-action-pair">
-              <button type="button" data-control-id="staff.availability.create.preview" className="staff-next-btn" disabled={selectedStaffId === null || !rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || !availabilityReason.trim() || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}>預覽新增</button>
-              <button type="button" data-control-id="staff.availability.create.apply" className="staff-next-btn" disabled={availabilityAction.phase !== 'preview_ready' || !['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '')} onClick={() => void submitAvailability()}>套用新增</button>
+              <button type="button" data-control-id="staff.availability.create.preview" className="staff-next-btn" disabled={selectedStaffId === null || !rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}>儲存新增</button>
             </div>
           </div>
           <div className="staff-range-query">
             <label>新增類型<select aria-label="新增類型" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={availabilityKind} onChange={(event) => { invalidateSlice(); setAvailabilityKind(event.target.value as 'create_long_leave' | 'create_pause'); setAvailabilityAction(initialActionState()); }}><option value="create_pause">暫停接案</option><option value="create_long_leave">長假</option></select></label>
             <label>開始日期<input type="date" data-control-id="staff.availability.range-start" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={rangeStart} onInput={(event) => setRangeStart(event.currentTarget.value)} onChange={(event) => { invalidateSlice(); setRangeStart(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
             <label>結束日期<input type="date" data-control-id="staff.availability.range-end" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={rangeEnd} onInput={(event) => setRangeEnd(event.currentTarget.value)} onChange={(event) => { invalidateSlice(); setRangeEnd(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-            <label>新增原因<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={availabilityReason} onChange={(event) => { invalidateSlice(); setAvailabilityReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
+            <label>備註（選填）<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={availabilityReason} onChange={(event) => { invalidateSlice(); setAvailabilityReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
             <button type="button" className="staff-next-btn" data-control-id="staff.availability.query" disabled={selectedStaffId === null || !rangeStart || !rangeEnd || availability.status === 'loading' || interactionLocked} onClick={() => void queryAvailability()}>
               {availability.status === 'loading' ? '查詢中…' : '查詢不可服務期間'}
             </button>
@@ -1043,17 +1016,16 @@ export const StaffPage: React.FC = () => {
               return (
               <div className="staff-unavailability-row" role="row" key={block.blockId}>
                 <span role="cell">{person ? staffDisplayLabel(person.unionNo, person.displayName) : '月嫂資料待確認'}</span><span role="cell">{block.kindLabel}</span><span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
-                <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>預覽取消</button>{block.status === 'cancelled' && <small>此紀錄已取消，不可再次取消。</small>}</span>
+                <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>取消此期間</button>{block.status === 'cancelled' && <small>此紀錄已取消，不可再次取消。</small>}</span>
               </div>
             );})}
             {availability.status === 'idle' && <div className="staff-unavailability-row" role="row"><span role="cell">請先設定日期範圍並查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">查詢後顯示可用操作</span></div>}
             {availability.status === 'loading' && <div className="staff-unavailability-row" role="row"><span role="cell">正在查詢不可服務期間…</span><span role="cell">—</span><span role="cell">—</span><span role="cell">請稍候</span></div>}
           </div>
           <div className="staff-range-query">
-            <label>取消原因<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={cancelReason} onChange={(event) => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-            <button type="button" data-control-id="staff.availability.cancel.apply" className="staff-next-btn" disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'cancel'} onClick={() => void submitAvailability()}>套用取消</button>
+            <label>備註（選填）<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={cancelReason} onChange={(event) => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
           </div>
-          {availabilityAction.preview && <div className="staff-action-status">預覽已完成：不可服務期間變更已通過檢查，請確認後套用。</div>}
+          {availabilityAction.preview && <div className="staff-action-status">不可服務期間變更已通過檢查，正在儲存或回讀結果。</div>}
           {availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">不可服務期間已更新：{availabilityAction.receipt.block.start_date} ～ {availabilityAction.receipt.block.end_date ?? '持續中'}</div>}
           {availabilityAction.message && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
           {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>重新查詢不可服務期間</button>}
@@ -1098,10 +1070,10 @@ export const StaffPage: React.FC = () => {
                 />
               </label>
               <label>
-                結束暫停原因
+                備註（選填）
                 <input
                   type="text"
-                  aria-label="結束暫停原因"
+                  aria-label="備註（選填）"
                   aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
                   disabled={selectedEndPauseBlock === null || interactionLocked || availabilityAction.phase === 'stale'}
                   value={endPauseReason}
@@ -1117,7 +1089,7 @@ export const StaffPage: React.FC = () => {
                 data-control-id="staff.availability.end-pause"
                 className="staff-next-btn"
                 aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
-                disabled={selectedEndPauseBlock === null || !endPauseResumeDate || !endPauseReason.trim() || interactionLocked || availabilityAction.phase === 'stale' || availabilityAction.phase === 'preview_loading'}
+                disabled={selectedEndPauseBlock === null || !endPauseResumeDate || interactionLocked || availabilityAction.phase === 'stale' || availabilityAction.phase === 'preview_loading'}
                 onClick={() => {
                   if (!selectedEndPauseBlock) return;
                   void previewAvailability({
@@ -1127,19 +1099,12 @@ export const StaffPage: React.FC = () => {
                     reason: endPauseReason.trim(),
                   });
                 }}
-              >預覽結束暫停</button>
-              <button
-                type="button"
-                data-control-id="staff.availability.end-pause.apply"
-                className="staff-next-btn"
-                disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'end_pause'}
-                onClick={() => void submitAvailability()}
-              >套用結束暫停</button>
+              >儲存結束暫停</button>
             </div>
           </section>
         </section>
   );
-  useUnsavedDraft('月嫂請假與暫停', { '開始日期': availabilityReason.trim() || availabilityAction.preview ? rangeStart : undefined, '結束日期': availabilityReason.trim() || availabilityAction.preview ? rangeEnd : undefined, '請假類型': availabilityKind, '請假原因': availabilityReason, '取消原因': cancelReason, '恢復日期': endPauseResumeDate, '結束暫停原因': endPauseReason }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: availabilityAction.phase === 'observed' ? availabilityAction.receipt : null, discard: () => { setAvailabilityReason(''); setCancelReason(''); setEndPauseReason(''); setEndPauseResumeDate(''); } });
+  useUnsavedDraft('月嫂請假與暫停', { '開始日期': availabilityReason.trim() || availabilityAction.preview ? rangeStart : undefined, '結束日期': availabilityReason.trim() || availabilityAction.preview ? rangeEnd : undefined, '請假類型': availabilityKind, '請假原因': availabilityReason, '取消原因': cancelReason, '恢復日期': endPauseResumeDate, '備註（選填）': endPauseReason }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: availabilityAction.phase === 'observed' ? availabilityAction.receipt : null, discard: () => { setAvailabilityReason(''); setCancelReason(''); setEndPauseReason(''); setEndPauseResumeDate(''); } });
   useUnsavedDraft('月嫂任職狀態', { '狀態生效日': lifecycleEffectiveAt, '狀態原因': lifecycleReasonCode }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: lifecycleAction.phase === 'observed' ? lifecycleAction.receipt : null, discard: () => { setLifecycleEffectiveAt(''); setLifecycleReasonCode(''); } });
 
 
@@ -1369,7 +1334,7 @@ export const StaffPage: React.FC = () => {
             {/* 完整資格主檔：個資、履歷、銀行與接案條件 */}
               <section className="staff-drawer-section" data-surface-id="staff.qualification-master" aria-label="完整資格主檔">
                 <h2 className="staff-management-title">📋 完整資格主檔</h2>
-                <p>各區分別預覽與儲存。請先儲存本區變更，再修改下一區。</p>
+                <p>各區分別儲存。請先儲存本區變更，再修改下一區。</p>
                 {/* 基本資料摘要卡片 */}
                 <div style={{ background: '#fffdfc', border: '1px solid #dec0b6', borderRadius: '12px', padding: '16px', marginBottom: '18px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1472,7 +1437,7 @@ export const StaffPage: React.FC = () => {
                 <div className="staff-holiday-workbench" data-surface-id="staff.lifecycle">
                   <header className="staff-workbench-header">
                     <div>
-                      <p className="staff-workbench-kicker">查詢 → 預覽 → 確認套用</p>
+                      <p className="staff-workbench-kicker">查詢 → 儲存</p>
                       <h2 className="staff-workbench-title">📇 人事任職狀態與異動辦理</h2>
                       <p className="staff-workbench-desc">任職狀態與生效時間以正式人事資料為準，點擊「辦理異動」進行退役或復職登記。</p>
                     </div>
@@ -1576,12 +1541,12 @@ export const StaffPage: React.FC = () => {
                         />
                       </label>
                       <label className="staff-op-field">
-                        異動原因
+                        異動原因（選填）
                         <input
                           type="text"
                           disabled={interactionLocked || lifecycleAction.phase === 'stale'}
                           value={lifecycleReasonCode}
-                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '請填寫復職原因' : '請填寫退役原因'}
+                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '復職原因（選填）' : '退役原因（選填）'}
                           onChange={(event) => {
                             invalidateSlice();
                             setLifecycleReasonCode(event.target.value);
@@ -1592,7 +1557,7 @@ export const StaffPage: React.FC = () => {
                     </div>
 
                     <p id="staff-lifecycle-guidance" style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-error)', margin: '2px 0 6px' }}>
-                      在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後，點擊「預覽影響」進行檢查，檢查通過後即可確認套用。
+                      在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間後即可辦理；原因可選填。
                     </p>
 
                     <div className="staff-op-actions">
@@ -1605,22 +1570,10 @@ export const StaffPage: React.FC = () => {
                             data-control-id="staff.lifecycle.retirement.preview"
                             className="staff-secondary-btn"
                             style={{ flex: 1 }}
-                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canRetire || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
+                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canRetire || !lifecycleEffectiveAt || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
                             onClick={() => void previewLifecycle('retirement')}
                           >
-                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'retirement' ? '⏳ 預覽檢查中…' : '🔍 預覽退役影響'}
-                          </button>
-                          <button
-                            type="button"
-                            aria-describedby="staff-lifecycle-guidance"
-                            data-control-id="staff.lifecycle.retirement.apply"
-                            className="staff-primary-btn"
-                            style={{ flex: 1 }}
-                            hidden={lifecycleAction.action !== 'retirement'}
-                            disabled={lifecycleAction.phase !== 'preview_ready'}
-                            onClick={() => void submitLifecycle()}
-                          >
-                            {lifecycleAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用退役'}
+                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'retirement' ? '⏳ 處理中…' : '辦理退役'}
                           </button>
                         </>
                       )}
@@ -1634,22 +1587,10 @@ export const StaffPage: React.FC = () => {
                             data-control-id="staff.lifecycle.reactivation.preview"
                             className="staff-secondary-btn"
                             style={{ flex: 1 }}
-                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canReactivate || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
+                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canReactivate || !lifecycleEffectiveAt || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
                             onClick={() => void previewLifecycle('reactivation')}
                           >
-                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'reactivation' ? '⏳ 預覽檢查中…' : '🔍 預覽復職影響'}
-                          </button>
-                          <button
-                            type="button"
-                            aria-describedby="staff-lifecycle-guidance"
-                            data-control-id="staff.lifecycle.reactivation.apply"
-                            className="staff-primary-btn"
-                            style={{ flex: 1 }}
-                            hidden={lifecycleAction.action !== 'reactivation'}
-                            disabled={lifecycleAction.phase !== 'preview_ready'}
-                            onClick={() => void submitLifecycle()}
-                          >
-                            {lifecycleAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用復職'}
+                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'reactivation' ? '⏳ 處理中…' : '辦理復職'}
                           </button>
                         </>
                       )}
@@ -1668,7 +1609,7 @@ export const StaffPage: React.FC = () => {
 
                     {lifecycleAction.preview && (
                       <div className="staff-action-status" style={{ marginTop: '6px' }}>
-                        ✅ <strong>預覽已產生：</strong>{lifecycleAction.action === 'retirement' ? '辦理退役' : '辦理復職'} ｜ 生效時間：{lifecycleEffectiveAt} ｜ 變更後狀態：<strong>{lifecycleAction.preview.after_state === 'retired' ? '已退役' : '在職'}</strong>
+                        ✅ <strong>變更檢查結果：</strong>{lifecycleAction.action === 'retirement' ? '辦理退役' : '辦理復職'} ｜ 生效時間：{lifecycleEffectiveAt} ｜ 變更後狀態：<strong>{lifecycleAction.preview.after_state === 'retired' ? '已退役' : '在職'}</strong>
                       </div>
                     )}
                     {lifecycleAction.message && (

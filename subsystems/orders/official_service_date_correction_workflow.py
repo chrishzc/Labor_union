@@ -125,8 +125,6 @@ class OfficialServiceDateCorrectionWorkflow:
               expected_order_version: int, expected_scheduling_version: int,
               preview_fingerprint: str, actor: str, reason: str,
               idempotency_key: str, correlation_id: str) -> OfficialDateReceipt:
-        if not reason.strip():
-            raise ValueError("official_date_reason_required")
         command_fingerprint = fingerprint_payload({
             "case_no": case_no,
             "selections": _selection_payload(selections),

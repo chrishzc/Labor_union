@@ -28,7 +28,6 @@ describe('Account Management mutation boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: /建立工作人員帳號/ }));
     fireEvent.change(screen.getByLabelText('新帳號'), { target: { value: 'mock-user' } });
     fireEvent.change(screen.getByLabelText('顯示名稱'), { target: { value: 'Mock' } });
-    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: 'mock 驗收' } });
     fireEvent.change(screen.getByLabelText('新密碼'), { target: { value: 'x'.repeat(9) } });
     fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
     expect(create).not.toHaveBeenCalled();
@@ -39,7 +38,6 @@ describe('Account Management mutation boundary', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '確認執行' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '關閉帳號操作' }));
     fireEvent.click(screen.getAllByRole('button', { name: '重設密碼' })[0]);
-    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: 'mock 驗收' } });
     fireEvent.change(screen.getByLabelText('重設密碼'), { target: { value: 'x'.repeat(9) } });
     fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
     expect(reset).not.toHaveBeenCalled();
@@ -49,31 +47,29 @@ describe('Account Management mutation boundary', () => {
     await waitFor(() => expect(reset).toHaveBeenCalledOnce());
   });
 
-  it('opens target-specific forms without mutations and rejects confirmation without a reason', async () => {
+  it('dispatches security actions directly with blank notes and still requires password input', async () => {
     vi.spyOn(accountDirectoryClient, 'query').mockResolvedValue(ACCOUNT_DIRECTORY_FIXTURE.map(user => ({...user, is_root: false})));
     const calls = [vi.spyOn(accountCenterClient, 'create'), vi.spyOn(accountCenterClient, 'resetPassword'), vi.spyOn(accountCenterClient, 'resetMfa'), vi.spyOn(accountCenterClient, 'revokeSessions'), vi.spyOn(accountCenterClient, 'setEnabled')].map(call => call.mockRejectedValue(new Error('unexpected mutation')));
     render(<AccountManagementPage />);
     await waitFor(() => expect(screen.getByText('root-user')).toBeInTheDocument());
-    for (const pattern of [
-      /建立工作人員帳號/,
-      /重設 MFA/,
-      /強制登出/,
-      /停權/,
-    ]) {
+    for (const [pattern, call] of [
+      [/重設 MFA/, calls[2]],
+      [/強制登出/, calls[3]],
+      [/停權/, calls[4]],
+    ] as const) {
       fireEvent.click(screen.getAllByRole('button', { name: pattern })[0]);
-      fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
-      calls.forEach(call => expect(call).not.toHaveBeenCalled());
-      expect(screen.getByLabelText('操作原因')).toHaveValue('');
-      fireEvent.click(screen.getByRole('button', { name: '關閉帳號操作' }));
+      await waitFor(() => expect(call).toHaveBeenCalledOnce());
+      expect(call).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ reason: '', expected_version: expect.any(Number), idempotency_key: expect.any(String) }));
+      expect(screen.queryByRole('button', { name: '確認執行' })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getAllByRole('button', { name: /重設密碼/ })[0]).toBeEnabled());
     }
     fireEvent.click(screen.getAllByRole('button', { name: '重設密碼' })[0]);
     expect(screen.queryByLabelText('新帳號')).not.toBeInTheDocument();
     expect(screen.getByLabelText('重設密碼')).toHaveValue('');
-    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: '本人要求重設' } });
     fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
     expect(accountCenterClient.resetPassword).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '關閉帳號操作' }));
-    calls.forEach((call) => expect(call).not.toHaveBeenCalled());
+    expect(accountCenterClient.create).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('tab', { name: /驗證器動態碼/ }));
     expect(document.querySelector('[data-control-id="account.mfa.enroll"]')).toBeNull();
     expect(screen.queryByRole('tab', { name: /背景工作狀態/ })).not.toBeInTheDocument();

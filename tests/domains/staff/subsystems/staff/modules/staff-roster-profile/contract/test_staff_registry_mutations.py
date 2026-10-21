@@ -314,7 +314,7 @@ def test_profile_optional_notes_preserve_actor_and_replay(note):
                        key, actor, "不同備註", correlation)
 
 
-def test_profile_api_notes_can_be_omitted_without_weakening_bank_reason():
+def test_profile_and_bank_api_notes_can_be_omitted_with_length_limits():
     from api.schemas.staff_registry_mutation import StaffProfileMutationApplyRequest, StaffBankAccountApplyRequest
     from pydantic import ValidationError
     body = {"changes": {"education": "大學"}, "expected_version": 0, "preview_fingerprint": "a" * 64}
@@ -322,6 +322,7 @@ def test_profile_api_notes_can_be_omitted_without_weakening_bank_reason():
     assert StaffProfileMutationApplyRequest.model_validate({**body, "reason": ""}).reason == ""
     with pytest.raises(ValidationError):
         StaffProfileMutationApplyRequest.model_validate({**body, "reason": "x" * 501})
+    bank = {"command": {"operation": "set_primary", "account_id": 3}, "expected_version": 0, "preview_fingerprint": "a" * 64}
+    assert StaffBankAccountApplyRequest.model_validate(bank).reason == ""
     with pytest.raises(ValidationError):
-        StaffBankAccountApplyRequest.model_validate({"command": {"operation": "set_primary", "account_id": 3},
-                                                    "expected_version": 0, "preview_fingerprint": "a" * 64})
+        StaffBankAccountApplyRequest.model_validate({**bank, "reason": "x" * 501})

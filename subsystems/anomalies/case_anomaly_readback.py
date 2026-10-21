@@ -107,7 +107,7 @@ class CaseAnomalyReadback:
             raise ValueError("unresolved definitions must be sorted")
         for code, reason in self.unresolved_definitions:
             require_canonical_text(code, "unresolved definition code", _IDENTITY_MAXIMUM_LENGTH)
-            require_canonical_text(reason, "unresolved definition reason", 191)
+            require_canonical_text(reason, "unresolved definition reason", 191, allow_empty=True)
         if self.source_versions != tuple(sorted(self.source_versions)):
             raise ValueError("source versions must be sorted")
         if self.read_at.tzinfo is None:

@@ -24,7 +24,7 @@ class RefundReturnReviewSelection:
             "client-ledger-entry:",
         )
         require_canonical_text(self.case_no, "case number", 50)
-        require_canonical_text(self.reason, "review reason", 500)
+        require_canonical_text(self.reason, "review reason", 500, allow_empty=True)
         _require_evidence(self.evidence)
 
 

@@ -30,11 +30,11 @@ const dashboard = {
 describe('儲存空間管理', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('顯示 denylist 說明，且必須 Preview 與確認後才 Apply', async () => {
+  it('顯示既有來源邊界，設定完成後一次點擊清理且原因選填', async () => {
     vi.spyOn(operationalRetentionClient, 'dashboard').mockResolvedValue(dashboard);
     vi.spyOn(operationalRetentionClient, 'preview').mockResolvedValue({
       policy_revision: 'operational-retention.v1', source_id: 'knowledge-observations',
-      mode: 'expired', reason: '清理到期技術與營運觀測紀錄',
+      mode: 'expired', reason: '',
       previewed_at_utc: '2026-09-09T08:00:00Z', cutoff_at_utc: '2026-08-10T08:00:00Z',
       batch_size: 250, candidate_count: 1, estimated_reclaimable_bytes: 500,
       current_logical_bytes: 10_000, target_low_water_bytes: null,
@@ -53,19 +53,15 @@ describe('儲存空間管理', () => {
 
     expect(await screen.findByText('AI 客服技術觀測與舊索引')).toBeInTheDocument();
     expect(screen.getByText(/會員、訂單、財務、合約及正式稽核證據不會被刪除/)).toBeInTheDocument();
-    const sourceButtons = screen.getAllByRole('button', { name: '建立清理預覽' });
+    const sourceButtons = screen.getAllByRole('button', { name: '設定清理' });
     expect(sourceButtons[0]).toBeEnabled();
     expect(sourceButtons[1]).toBeDisabled();
 
     fireEvent.click(sourceButtons[0]);
-    fireEvent.click(screen.getByRole('button', { name: '零寫入預覽' }));
-    expect(await screen.findByText(/候選：1 筆／檔/)).toBeInTheDocument();
     expect(apply).not.toHaveBeenCalled();
-
-    const applyButton = screen.getByRole('button', { name: '確認清理' });
-    expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(applyButton);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('操作原因（選填）')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '清理資料' }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/刪除 1，失敗 0/)).toBeInTheDocument();

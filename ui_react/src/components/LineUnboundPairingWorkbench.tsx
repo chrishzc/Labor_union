@@ -60,7 +60,6 @@ export function LineUnboundPairingWorkbench({
   const [selectedOrder, setSelectedOrder] = useState<UnboundOrderCandidate | null>(null);
   const [selectedProvisional, setSelectedProvisional] = useState<UnboundProvisionalCandidate | null>(null);
   const [reason, setReason] = useState('管理員手動配對市府訂單與狀態 C 產婦');
-  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -103,12 +102,8 @@ export function LineUnboundPairingWorkbench({
   }, []);
 
   const handlePair = async () => {
-    if (!selectedOrder || !selectedProvisional || !confirmed) return;
+    if (!selectedOrder || !selectedProvisional) return;
     const trimmedReason = reason.trim();
-    if (!trimmedReason) {
-      setActionError('請填寫配對原因。');
-      return;
-    }
 
     setSubmitting(true);
     setActionError(null);
@@ -131,7 +126,6 @@ export function LineUnboundPairingWorkbench({
       );
       setSelectedOrder(null);
       setSelectedProvisional(null);
-      setConfirmed(false);
 
       // Refresh candidate list and trigger parent refresh
       await loadCandidates();
@@ -248,7 +242,6 @@ export function LineUnboundPairingWorkbench({
                         aria-selected={isSelected}
                         onClick={() => {
                           setSelectedOrder(isSelected ? null : o);
-                          setConfirmed(false);
                         }}
                       >
                         <td>
@@ -268,7 +261,6 @@ export function LineUnboundPairingWorkbench({
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedOrder(isSelected ? null : o);
-                              setConfirmed(false);
                             }}
                           >
                             {isSelected ? '取消' : '選取'}
@@ -325,7 +317,6 @@ export function LineUnboundPairingWorkbench({
                         aria-selected={isSelected}
                         onClick={() => {
                           setSelectedProvisional(isSelected ? null : p);
-                          setConfirmed(false);
                         }}
                       >
                         <td>
@@ -350,7 +341,6 @@ export function LineUnboundPairingWorkbench({
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedProvisional(isSelected ? null : p);
-                              setConfirmed(false);
                             }}
                           >
                             {isSelected ? '取消' : '選取'}
@@ -397,7 +387,7 @@ export function LineUnboundPairingWorkbench({
           <div className="line-pairing-action-area">
             <div className="line-pairing-reason-field">
               <label htmlFor="line-pairing-reason">
-                配對審核原因備註
+                配對審核原因備註（選填）
               </label>
               <input
                 id="line-pairing-reason"
@@ -405,24 +395,19 @@ export function LineUnboundPairingWorkbench({
                 value={reason}
                 onChange={(e) => {
                   setReason(e.target.value);
-                  setConfirmed(false);
                 }}
                 maxLength={1000}
                 className="richmenu-form-input"
               />
             </div>
-            <label className="line-pairing-confirm-check">
-              <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-              我已核對兩側姓名、遮罩電話與案件資訊，確認執行手動配對。
-            </label>
             <div className="line-pairing-submit-row">
               <button
                 type="button"
                 className="line-primary-btn"
-                disabled={submitting || !reason.trim() || !confirmed}
+                disabled={submitting}
                 onClick={() => void handlePair()}
               >
-                <Link aria-hidden="true" />{submitting ? '正在執行配對…' : '確認手動配對並綁定'}
+                <Link aria-hidden="true" />{submitting ? '正在執行配對…' : '手動配對並綁定'}
               </button>
             </div>
           </div>

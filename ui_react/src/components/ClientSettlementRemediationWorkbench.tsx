@@ -44,8 +44,8 @@ function settlementErrorMessage(error: unknown): string {
   if (typed?.status === 401 || code.includes('UNAUTHENTICATED')) return '登入狀態已失效，請重新登入後再操作。';
   if (typed?.status === 403 || code.includes('FORBIDDEN')) return '目前帳號沒有處理這筆客戶帳務的權限。';
   if (typed?.status === 404 || code.includes('NOT_FOUND')) return '找不到這筆客戶帳務資料，請返回清單重新查詢。';
-  if (typed?.status === 409 || code.includes('STALE') || code.includes('CONFLICT')) return '案件資料已變更，請重新查詢並再次預覽。';
-  if (typed?.status === 422 || code.includes('INVALID') || code.includes('BLOCK')) return '所選義務或銀行流水未通過檢核，請調整選擇後再預覽。';
+  if (typed?.status === 409 || code.includes('STALE') || code.includes('CONFLICT')) return '案件資料已變更，請重新查詢並再次儲存。';
+  if (typed?.status === 422 || code.includes('INVALID') || code.includes('BLOCK')) return '所選義務或銀行流水未通過檢核，請調整選擇後再儲存。';
   if (typed?.retryable) return '結果尚未確認；請先重新查詢，再安全重試原操作。';
   return '客戶帳務目前無法完成，請稍後再試。';
 }
@@ -59,7 +59,6 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
   const [bankIds, setBankIds] = useState<number[]>([]);
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState<'query' | 'preview' | 'apply' | null>('query');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,7 +79,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
     ? obligations.filter((item) => 'payment_stage' in item && item.payment_stage === stage)
     : obligations;
 
-  const invalidate = () => { setPreview(null); setConfirmed(false); setNotice(null); setUnknownOutcome(false); command.current = null; };
+  const invalidate = () => { setPreview(null); setNotice(null); setUnknownOutcome(false); command.current = null; };
   const reload = async (enforceBoundVersion = false) => {
     setBusy('query'); setError(null);
     try {
@@ -106,17 +105,18 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       if (target.kind === 'receivable') {
         const value = await client.previewReceipt(target.caseNo, { payment_stage: stage, finance_import_row_ids: bankIds, obligation_identities: obligationIds }, requestOptions);
         if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
-        setPreview({ kind: 'receivable', value });
+        const checked: Preview = { kind: 'receivable', value }; setPreview(checked); await applyAction(checked);
       } else {
         const value = await client.previewPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: false }, requestOptions);
         if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
-        setPreview({ kind: 'payable', value });
+        const checked: Preview = { kind: 'payable', value }; setPreview(checked); await applyAction(checked);
       }
     } catch (caught) { setError(settlementErrorMessage(caught)); setPreview(null); }
     finally { setBusy(null); }
   };
-  const applyAction = async () => {
-    if (!query || !preview || !confirmed || !reason.trim()) return;
+  const applyAction = async (checked: Preview | null = preview) => {
+    const preview = checked;
+    if (!query || !preview) return;
     setBusy('apply'); setError(null); setNotice(null);
     const fingerprint = preview.value.preview_fingerprint;
     if (!command.current || command.current.fingerprint !== fingerprint) command.current = { fingerprint, idempotencyKey: commandId('client-settlement-apply'), correlationId: commandId('client-settlement-command') };
@@ -126,7 +126,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       } else if (target.kind !== 'receivable' && preview.kind === 'payable') {
         await client.applyPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: false, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
       } else throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_BRANCH_MISMATCH', '異常分支與 Preview 不一致。');
-      setUnknownOutcome(false); setObligationIds([]); setBankIds([]); setPreview(null); setConfirmed(false);
+      setUnknownOutcome(false); setObligationIds([]); setBankIds([]); setPreview(null);
       await reload(false);
       setNotice((current) => current ?? '本次核銷已重新查詢確認；若仍有其他同類逾期義務，提醒會保留。');
     } catch (caught) {
@@ -137,17 +137,17 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
   useUnsavedDraft('客戶款項核銷', { '期別': stage, '款項項目': obligationIds, '銀行交易資料列': bankIds, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: query });
 
 
-  if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取客戶帳務資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void reload(true)}>重新查詢</button></section>;
+  if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取客戶帳務資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null || unknownOutcome} onClick={() => void reload(true)}>重新查詢</button></section>;
   return <section aria-label={`${title(target.kind)}人工處理`} data-surface-id="client-settlement-remediation" style={{ border: '1px solid #fed7aa', borderRadius: 12, padding: 16, marginTop: 12 }}>
     <h3>{title(target.kind)}人工處理</h3><p>案件：{query.case_no}｜帳務資料日期：{query.as_of}</p>
     <p><strong>解除條件：</strong>這類逾期義務餘額全部歸零；電話、LINE 或追蹤狀態都不能代替正式核銷。</p>
 
-    {target.kind === 'receivable' && <label>核銷期別 <select value={stage} disabled={busy !== null} onChange={(event) => { setStage(event.target.value as ClientPaymentStage); setObligationIds([]); invalidate(); }}><option value="deposit">訂金</option><option value="first">第一期</option><option value="second">第二期</option><option value="adjustment">調整款</option></select></label>}
-    <fieldset disabled={busy !== null}><legend>具體逾期義務</legend>{visibleObligations.map((item, index) => <div key={item.obligation_identity}><label style={{ display: 'block' }}><input type="checkbox" checked={obligationIds.includes(item.obligation_identity)} onChange={() => toggleObligation(item.obligation_identity)} /> 第 {index + 1} 筆｜{'payment_stage' in item ? paymentStageLabel(item.payment_stage) : obligationTypeLabel(item.obligation_type)}｜到期 {item.due_date}｜NT$ {item.amount_due_ntd.toLocaleString('zh-TW')}</label></div>)}{!visibleObligations.length && <p>目前沒有此分支的逾期義務。</p>}</fieldset>
-    <fieldset disabled={busy !== null}><legend>可核對的銀行流水</legend>{banks.map((item, index) => <div key={item.finance_import_row_id}><label style={{ display: 'block' }}><input type="checkbox" checked={bankIds.includes(item.finance_import_row_id)} onChange={() => toggleBank(item.finance_import_row_id)} /> 第 {index + 1} 筆｜{item.transaction_date}｜NT$ {item.amount_ntd.toLocaleString('zh-TW')}</label></div>)}{!banks.length && <p role="alert">尚無符合方向、分類、對方帳戶與未核銷條件的銀行流水；提醒保留。</p>}</fieldset>
-    <label style={{ display: 'block' }}>人工核對理由<textarea value={reason} disabled={busy !== null} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidate(); }} /></label>
-    <button type="button" disabled={busy !== null || !obligationIds.length || !bankIds.length} onClick={() => void previewAction()}>{busy === 'preview' ? '檢查中…' : '檢查核銷影響'}</button>
-    {preview && <div data-surface-id="client-settlement-preview"><p>預覽核銷金額：NT$ {previewAmount(preview).toLocaleString('zh-TW')}</p><label><input type="checkbox" checked={confirmed} disabled={busy !== null} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對案件、逾期義務、銀行流水與預覽結果，確認套用此核銷。</label><button type="button" disabled={!confirmed || !reason.trim() || busy !== null} onClick={() => void applyAction()}>確認並套用</button></div>}
+    {target.kind === 'receivable' && <label>核銷期別 <select value={stage} disabled={busy !== null || unknownOutcome} onChange={(event) => { setStage(event.target.value as ClientPaymentStage); setObligationIds([]); invalidate(); }}><option value="deposit">訂金</option><option value="first">第一期</option><option value="second">第二期</option><option value="adjustment">調整款</option></select></label>}
+    <fieldset disabled={busy !== null || unknownOutcome}><legend>具體逾期義務</legend>{visibleObligations.map((item, index) => <div key={item.obligation_identity}><label style={{ display: 'block' }}><input type="checkbox" checked={obligationIds.includes(item.obligation_identity)} onChange={() => toggleObligation(item.obligation_identity)} /> 第 {index + 1} 筆｜{'payment_stage' in item ? paymentStageLabel(item.payment_stage) : obligationTypeLabel(item.obligation_type)}｜到期 {item.due_date}｜NT$ {item.amount_due_ntd.toLocaleString('zh-TW')}</label></div>)}{!visibleObligations.length && <p>目前沒有此分支的逾期義務。</p>}</fieldset>
+    <fieldset disabled={busy !== null || unknownOutcome}><legend>可核對的銀行流水</legend>{banks.map((item, index) => <div key={item.finance_import_row_id}><label style={{ display: 'block' }}><input type="checkbox" checked={bankIds.includes(item.finance_import_row_id)} onChange={() => toggleBank(item.finance_import_row_id)} /> 第 {index + 1} 筆｜{item.transaction_date}｜NT$ {item.amount_ntd.toLocaleString('zh-TW')}</label></div>)}{!banks.length && <p role="alert">尚無符合方向、分類、對方帳戶與未核銷條件的銀行流水；提醒保留。</p>}</fieldset>
+    <label style={{ display: 'block' }}>人工核對理由（選填）<textarea value={reason} disabled={busy !== null || unknownOutcome} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidate(); }} /></label>
+    <button type="button" disabled={busy !== null || unknownOutcome || !obligationIds.length || !bankIds.length} onClick={() => void previewAction()}>{busy === 'preview' ? '檢查中…' : '儲存核銷'}</button>
+    {preview && <div data-surface-id="client-settlement-preview"><p>本次核銷金額：NT$ {previewAmount(preview).toLocaleString('zh-TW')}</p></div>}
     {unknownOutcome && <div role="alert">套用結果尚未確認；原操作已保留，不會建立第二筆操作。<button type="button" disabled={busy !== null} onClick={() => void reload(false)}>重新查詢結果</button>{preview && <button type="button" disabled={busy !== null} onClick={() => void applyAction()}>安全重試原操作</button>}</div>}
     {notice && <div role="status">{notice}</div>}{error && <div role="alert">{error}</div>}
   </section>;

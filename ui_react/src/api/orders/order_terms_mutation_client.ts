@@ -103,16 +103,8 @@ export const OrderTermsApplyPayloadSchema = OrderTermsPreviewPayloadSchema.exten
   expected_payroll_version: VersionSchema.nullable(),
   preview_fingerprint: FingerprintSchema,
   requires_formal_apply: z.boolean(),
-  reason: z.string().trim().min(1).max(500).optional(),
-}).strict().superRefine((value, context) => {
-  if (value.requires_formal_apply && value.reason === undefined) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['reason'],
-      message: '正式條款異動必須提供原因。',
-    });
-  }
-});
+  reason: z.string().trim().max(500).optional(),
+}).strict();
 
 export type OrderTermsQuery = z.infer<typeof OrderTermsQuerySchema>;
 export type OrderTermsPreview = z.infer<typeof OrderTermsPreviewSchema>;

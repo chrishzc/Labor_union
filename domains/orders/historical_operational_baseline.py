@@ -618,7 +618,7 @@ class HistoricalOperationalBaselineRequest:
         ):
             raise TypeError("expected owner binding fingerprint is invalid")
         object.__setattr__(self, "evidence_mode", _evidence_mode(self.evidence_mode))
-        require_canonical_text(self.reason, "baseline reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "baseline reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         require_canonical_text(
             self.evidence_reference,
             "baseline evidence reference",
@@ -680,7 +680,7 @@ class HistoricalOperationalBaselineCandidate:
         if not isinstance(self.current_owner_binding_fingerprint, PreviewFingerprint):
             raise TypeError("current owner binding fingerprint is invalid")
         object.__setattr__(self, "evidence_mode", _evidence_mode(self.evidence_mode))
-        require_canonical_text(self.reason, "baseline reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "baseline reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         require_canonical_text(
             self.evidence_reference,
             "baseline evidence reference",

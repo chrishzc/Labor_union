@@ -43,8 +43,8 @@ class OrderLifecycleCommandEnvelope:
     existing_lifecycle_event: Mapping[str, object] | None
 
 
-def _required_text(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value or value.strip() != value:
+def _required_text(value: object, field: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value and not allow_empty) or value.strip() != value:
         raise ValueError(f"{field} must be a non-empty canonical string")
     return value
 
@@ -84,7 +84,7 @@ def _validate_control_state(row: Mapping[str, object]) -> None:
     if scope not in _CONTROL_SCOPES: raise ValueError("control state has unsupported scope")
     if state not in _CONTROL_STATES: raise ValueError("control state has unsupported state")
     _positive_int(row["current_event_id"], "current_event_id")
-    _required_text(row["reason"], "control state reason")
+    _required_text(row["reason"], "control state reason", allow_empty=True)
     _required_text(row["changed_by"], "control state changed_by")
     policy, expires, confirmed, settlement = (row[key] for key in ("release_policy", "expires_at_utc", "confirmed_start_date", "deposit_settlement_identity_hash"))
     if settlement is not None and (not isinstance(settlement, str) or not _HASH_PATTERN.fullmatch(settlement)):

@@ -3,11 +3,14 @@ import { useUnsavedDraft } from '../UnsavedChanges';
  * File: OfficialHolidayCsvImport.tsx
  * Description: Manual upload UI for the official government office-calendar CSV.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   applyHolidayFlow,
+  holidayFlowStore,
   previewHolidayFlow,
   queryHolidayFlow,
+  retryHolidayApplyFlow,
+  retryHolidayObservationFlow,
   setHolidayDraft,
 } from '../../adapters/scheduling/holiday_flow_adapter';
 import {
@@ -15,18 +18,17 @@ import {
   parseOfficialHolidayCsv,
   planOfficialHolidayImport,
   type OfficialHolidayCsvSuccess,
-  type OfficialHolidayImportPlan,
   type OfficialHolidayImportSummary,
 } from '../../adapters/scheduling/official_holiday_csv';
 
 interface OfficialHolidayCsvImportProps {
   readonly disabled?: boolean;
+  readonly onImported?: (year: number) => void;
 }
 
 interface PreparedImport {
   readonly fileName: string;
   readonly parsed: OfficialHolidayCsvSuccess;
-  readonly plan: OfficialHolidayImportPlan;
 }
 
 const importOperations = {
@@ -38,14 +40,20 @@ const importOperations = {
   },
 };
 
-export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCsvImportProps) {
+export function OfficialHolidayCsvImport({ disabled = false, onImported }: OfficialHolidayCsvImportProps) {
   const [prepared, setPrepared] = useState<PreparedImport | null>(null);
   const [summary, setSummary] = useState<OfficialHolidayImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [reason, setReason] = useState('');
+  const submittingRef = useRef(false);
+  const [, setStoreRevision] = useState(0);
+  useEffect(() => holidayFlowStore.subscribe(() => setStoreRevision(value => value + 1)), []);
+  const flowStatus = holidayFlowStore.get()?.status;
+  const unresolved = flowStatus === 'outcome_unknown' || flowStatus === 'observation_failed';
 
-  useUnsavedDraft('官方假日匯入', { '待匯入檔案': prepared?.fileName ?? '' }, { baseline: { '待匯入檔案': '' }, enabled: !summary, busy: importing });
+  useUnsavedDraft('官方假日匯入', { '待匯入檔案': prepared?.fileName ?? '', '原因': reason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: !summary, busy: importing });
   const selectFile = async (file: File | null) => {
     setPrepared(null);
     setSummary(null);
@@ -63,15 +71,9 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
         setError(parsed.error);
         return;
       }
-      const horizon = {
-        from_date: `${parsed.year}-01-01`,
-        to_date: `${parsed.year}-12-31`,
-      };
-      const calendar = await queryHolidayFlow(horizon);
       setPrepared({
         fileName: file.name,
         parsed,
-        plan: planOfficialHolidayImport(parsed, calendar),
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '無法讀取或查詢國定假日資料。');
@@ -80,22 +82,47 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
     }
   };
 
-  const confirmImport = async () => {
-    if (!prepared || importing || prepared.plan.pending.length === 0) return;
+  const saveImport = async () => {
+    if (!prepared || importing || unresolved || submittingRef.current) return;
+    submittingRef.current = true;
     setImporting(true);
     setSummary(null);
     setError(null);
     try {
+      const calendar = await importOperations.query({
+        from_date: `${prepared.parsed.year}-01-01`,
+        to_date: `${prepared.parsed.year}-12-31`,
+      });
+      const plan = planOfficialHolidayImport(prepared.parsed, calendar);
       const result = await importOfficialHolidayCandidates(
-        prepared.plan.pending,
+        plan.pending,
         prepared.parsed.year,
-        prepared.plan.existingSkipCount,
+        plan.existingSkipCount,
         importOperations,
+        reason.trim(),
       );
       setSummary(result);
+      onImported?.(prepared.parsed.year);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '匯入後無法完成最終查詢。');
     } finally {
+      submittingRef.current = false;
+      setImporting(false);
+    }
+  };
+
+  const retryResult = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setImporting(true);
+    setError(null);
+    try {
+      if (flowStatus === 'outcome_unknown') await retryHolidayApplyFlow();
+      else if (flowStatus === 'observation_failed') await retryHolidayObservationFlow();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '匯入結果尚待確認。');
+    } finally {
+      submittingRef.current = false;
       setImporting(false);
     }
   };
@@ -137,44 +164,45 @@ export function OfficialHolidayCsvImport({ disabled = false }: OfficialHolidayCs
           aria-label="選擇政府官方國定假日 CSV"
           type="file"
           accept=".csv,text/csv"
-          disabled={disabled || loadingFile || importing}
+          disabled={disabled || loadingFile || importing || unresolved}
           onChange={(event) => {
             void selectFile(event.target.files?.[0] ?? null);
           }}
         />
       </label>
 
-      {loadingFile && <p role="status">正在解析 CSV 並查詢既有國定假日…</p>}
+      {loadingFile && <p role="status">正在解析 CSV…</p>}
       {error && <p role="alert" style={{ color: '#b91c1c' }}>{error}</p>}
 
       {prepared && (
-        <section aria-label="國定假日 CSV 匯入預覽" style={{ display: 'grid', gap: '8px' }}>
+        <section aria-label="國定假日 CSV 匯入設定" style={{ display: 'grid', gap: '8px' }}>
           <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
             <span>檔案：{prepared.fileName}</span>
             <span>年度：{prepared.parsed.year}</span>
-            <span>可匯入：{prepared.plan.pending.length}</span>
-            <span>已存在略過：{prepared.plan.existingSkipCount}</span>
+            <span>假日：{prepared.parsed.holidays.length}</span>
           </div>
-          {prepared.plan.pending.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: '22px' }}>
-              {prepared.plan.pending.map((holiday) => (
-                <li key={`${holiday.holiday_date}-${holiday.holiday_name}`}>
-                  {holiday.holiday_date}　{holiday.holiday_name}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p style={{ margin: 0 }}>此 CSV 沒有需要新增的國定假日。</p>
-          )}
+          <label>
+            匯入原因（選填）
+            <input aria-label="國定假日 CSV 匯入原因" value={reason} maxLength={500} disabled={disabled || importing || unresolved} onChange={event => setReason(event.target.value)} />
+          </label>
           <button
             type="button"
-            data-control-id="scheduling.holiday.official-csv-import.confirm"
-            disabled={disabled || importing || prepared.plan.pending.length === 0}
-            onClick={() => { void confirmImport(); }}
+            data-control-id="scheduling.holiday.official-csv-import.apply"
+            disabled={disabled || importing || unresolved || prepared.parsed.holidays.length === 0}
+            onClick={() => { void saveImport(); }}
           >
-            {importing ? '匯入中…' : '確認匯入'}
+            {importing ? '匯入中…' : '匯入國定假日'}
           </button>
         </section>
+      )}
+
+      {unresolved && (
+        <div role="status">
+          <p>本次變更結果尚待確認；確認後可繼續匯入剩餘日期。</p>
+          <button type="button" disabled={importing} onClick={() => void retryResult()}>
+            {flowStatus === 'observation_failed' ? '重新查詢匯入結果' : '再次確認匯入結果'}
+          </button>
+        </div>
       )}
 
       {summary && (

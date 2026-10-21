@@ -65,7 +65,7 @@
 - test_root: `tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 - test_root: `ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/`
 
-- Client Profile 管理端一般維護／HCM 補件使用選填備註；reason 可空白，變更歷程保留空白及操作人員／時間。申請審核的必填原因不變。
+- Client Profile 管理端一般維護／HCM 補件與申請審核皆依 Global §2.4 一次點擊送出；reason 可空白，變更歷程保留空白及操作人員／時間，內部仍使用既有 Preview／Apply。
 
 ## Change triggers
 - Reconcile when allowlist、binding evidence、profile/request version、event／receipt／outbox、public route or LIFF readback changes.

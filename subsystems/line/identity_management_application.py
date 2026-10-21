@@ -672,8 +672,8 @@ def _require_same_request(request, command) -> None:
 
 
 def _require_reason(reason: str) -> None:
-    if not reason.strip():
-        raise ValueError("line_identity_revocation_reason_required")
+    if not isinstance(reason, str) or len(reason) > 1000:
+        raise ValueError("line_identity_revocation_reason_invalid")
 
 
 def _audit(action: str, actor_id: str, request) -> LineAuditIntent:

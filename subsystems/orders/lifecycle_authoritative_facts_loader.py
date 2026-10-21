@@ -29,8 +29,8 @@ def _mapping(value: object, field: str) -> Mapping[str, Any]:
     return value
 
 
-def _required_text(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
+def _required_text(value: object, field: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value and not allow_empty) or value != value.strip():
         raise ValueError(f"{field} must be a non-empty canonical string")
     return value
 
@@ -125,7 +125,7 @@ def _control_facts(rows: list[Mapping[str, Any]], *, current_status: str, actual
         if scope in blockers:
             blockers[scope].append(f"{scope}.{row.get('control_key')}_active")
         if control_type == "cancellation":
-            cancellation, reason = True, _required_text(row.get("reason"), "cancellation reason")
+            cancellation, reason = True, _required_text(row.get("reason"), "cancellation reason", allow_empty=True)
         if control_type == "actual_start_reconfirmation":
             required = row.get("confirmed_start_date")
             reconfirmed = actual_start_date is not None and deposit_reconciled and settlement_identity is not None and settlement_date is not None and required == actual_start_date

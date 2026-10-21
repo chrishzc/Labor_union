@@ -24,7 +24,7 @@ class ClientRefundPreviewBody(_StrictModel):
 class ClientRefundApplyBody(ClientRefundPreviewBody):
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientReversalPreviewBody(_StrictModel):
@@ -35,7 +35,7 @@ class ClientReversalPreviewBody(_StrictModel):
 class ClientReversalApplyBody(ClientReversalPreviewBody):
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientRefundReturnPreviewBody(_StrictModel):
@@ -46,7 +46,7 @@ class ClientRefundReturnPreviewBody(_StrictModel):
 class ClientRefundReturnApplyBody(ClientRefundReturnPreviewBody):
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientOverRefundRecoveryPreviewBody(_StrictModel):
@@ -58,7 +58,7 @@ class ClientOverRefundRecoveryApplyBody(ClientOverRefundRecoveryPreviewBody):
     expected_recovery_version: int = Field(ge=0)
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientOverRefundRecoveryMatchedPreviewBody(ClientOverRefundRecoveryPreviewBody):
@@ -73,7 +73,7 @@ class ClientOverRefundRecoveryMatchedApplyBody(
     expected_recovery_version: int = Field(ge=0)
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientOverRefundRecoveryAdjustmentPreviewBody(_StrictModel):
@@ -88,7 +88,7 @@ class ClientOverRefundRecoveryAdjustmentApplyBody(
     expected_recovery_version: int = Field(ge=0)
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientOverRefundRecoveryMatchingPreviewBody(_StrictModel):
@@ -103,7 +103,7 @@ class ClientOverRefundRecoveryMatchingApplyBody(
     expected_recovery_version: int = Field(ge=0)
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientOverRefundRecoveryPreviewView(_StrictModel):

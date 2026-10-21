@@ -147,7 +147,7 @@ class ApplyHistoricalServiceAccounting:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "reason", 500)
+        require_canonical_text(self.reason, "reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

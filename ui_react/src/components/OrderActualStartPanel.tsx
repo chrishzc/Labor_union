@@ -37,6 +37,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
   const staffIdentity = useStaffIdentityLabels();
   const [query, setQuery] = useState<ActualStart | null>(null);
   const [date, setDate] = useState('');
+  const [reason, setReason] = useState('');
   const saveValidation = useSaveValidation();
   const saveFieldRef = useValidationRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ActualStartPreview | null>(null);
@@ -68,7 +69,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     activeCaseNo.current = caseNo;
     sequence.current += 1;
-    setQuery(null); setDate(''); setPreview(null); setPhase('idle'); setError(null); setMissingAssignments(false);
+    setQuery(null); setDate(''); setReason(''); setPreview(null); setPhase('idle'); setError(null); setMissingAssignments(false);
   }, [caseNo]);
   useEffect(() => {
     mounted.current = true;
@@ -120,7 +121,14 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
       if (!isActive(request, caseNo)) return;
       if (data.operation === 'reschedule') {
         setPreview(data);
-        setPhase('idle');
+        await execute({
+          payload: {
+            operation: 'reschedule', new_actual_start_date: data.after_actual_start_date,
+            expected_order_version: data.order_version, expected_scheduling_version: data.scheduling_version,
+            preview_fingerprint: data.preview_fingerprint, reason: reason.trim(),
+          },
+          idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
+        }, request, false);
         return;
       }
       await execute({
@@ -217,24 +225,6 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     } finally { inFlight.current.delete(caseNo); }
   };
 
-  const applyPreview = async () => {
-    if (!preview || preview.operation !== 'reschedule' || preview.after_actual_start_date !== date || busy) return;
-    const request = ++sequence.current;
-    setPreview(null);
-    await execute({
-      payload: {
-        operation: 'reschedule',
-        new_actual_start_date: preview.after_actual_start_date,
-        expected_order_version: preview.order_version,
-        expected_scheduling_version: preview.scheduling_version,
-        preview_fingerprint: preview.preview_fingerprint,
-        reason: preview.before_actual_start_date === null
-          ? `確認實際開始日：${preview.after_actual_start_date}`
-          : `更正實際開始日：${preview.before_actual_start_date} → ${preview.after_actual_start_date}`,
-      },
-      idempotencyKey: `beta-actual-start-${crypto.randomUUID()}`,
-    }, request, false);
-  };
 
   const retryApply = async () => {
     const existing = orderMutationFlowStore.getActualStart(caseNo);
@@ -278,7 +268,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
     }
     finally { inFlight.current.delete(caseNo); }
   };
-  useUnsavedDraft('實際開始日期', { '實際開始日期': date }, { enabled: !!query, baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '' }, busy });
+  useUnsavedDraft('實際開始日期', { '實際開始日期': date, '原因': reason }, { enabled: !!query, baseline: { '實際開始日期': query?.current_actual_start_date ?? query?.planned_start_date ?? '' }, busy });
 
 
   return (
@@ -295,8 +285,9 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
             <input ref={saveFieldRef} aria-required="true" aria-label="更正實際開始日期" type="date" value={date} disabled={busy || query.service_data_locked}
               onChange={(event) => { sequence.current += 1; setDate(event.target.value); setPreview(null); setError(null); setMissingAssignments(false); setPhase('idle'); }} />
           </label>{saveValidation.feedback}</>
+          <label>原因（選填）<textarea maxLength={500} value={reason} disabled={busy || query.service_data_locked} onChange={event => setReason(event.target.value)} /></label>
           <button type="button" disabled={busy || query.service_data_locked} onClick={() => void confirm()}>
-            {query.has_formal_assignments ? '預覽日期與排班調整' : '儲存實際開始日'}
+            儲存實際開始日
           </button>
         </>
       )}
@@ -306,7 +297,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
           {preview.operation === 'date_only'
             ? <p>目前尚無排班；本次只保存日期，不建立排班、帳務、薪資或服務完成資料。</p>
             : <>
-              <p>以下為尚未儲存的新排班，請逐段核對後再確認。</p>
+              <p>正在儲存日期與排班調整。</p>
               <ol className="service-arrangement-correction-segments">
                 {preview.scheduling.assignments.map((assignment) => (
                   <li key={assignment.candidate_key}>
@@ -316,8 +307,7 @@ export const OrderActualStartPanel: FC<Props> = ({ caseNo, onObserved, onBusyCha
                 ))}
               </ol>
               <p>正式結束：{preview.actual_end_date}；狀態：{preview.lifecycle_impact.before_status} → {preview.lifecycle_impact.after_status}</p>
-              <button type="button" disabled={busy} onClick={() => void applyPreview()}>儲存日期與排班調整</button>
-              <button type="button" disabled={busy} onClick={() => setPreview(null)}>取消本次預覽</button>
+
             </>}
         </>
       )}

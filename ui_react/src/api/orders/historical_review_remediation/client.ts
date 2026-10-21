@@ -99,7 +99,6 @@ function validateIdentity(identity: string): string {
 }
 
 function validateOperatorInput(input: HistoricalReviewRemediationPreviewInput): void {
-  if (!input.reason.trim()) throw new HistoricalReviewRemediationContractError('historical_review_reason_required', '處理原因為必填。');
   if (!input.evidence.trim()) throw new HistoricalReviewRemediationContractError('historical_review_evidence_required', '處理佐證為必填。');
   if (!Number.isInteger(input.expected_review_version) || input.expected_review_version < 0) throw new HistoricalReviewRemediationContractError('historical_review_expected_version_invalid', 'review 版本無效。');
   if (!Number.isInteger(input.expected_remediation_version) || input.expected_remediation_version < 0) throw new HistoricalReviewRemediationContractError('historical_review_expected_remediation_version_invalid', 'remediation 版本無效。');

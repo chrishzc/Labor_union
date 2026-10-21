@@ -1,12 +1,10 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineNotificationRulesMutationPanel.tsx
- * Description: 提供通知規則欄位編輯、零寫入 Preview、人工確認 Save 與安全 Delete 操作。
+ * Description: 提供通知規則欄位編輯、零寫入檢查、一次點擊 Save 與安全 Delete 操作。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, FilePenLine, Info, Save, Settings, Trash2, TriangleAlert } from 'lucide-react';
+import { FilePenLine, Info, Save, Settings, Trash2, TriangleAlert } from 'lucide-react';
 import {
   LINE_FLEX_DESIGN_SOURCES,
   type LineFlexDesignSource,
@@ -200,14 +198,11 @@ export const LineNotificationRulesMutationPanel: React.FC<
   const [activeRuleId, setActiveRuleId] = useState<string | null>(
     selectedRuleId ?? initial.definition.rules[0]?.id ?? null
   );
-  const [previewIntent, setPreviewIntent] = useState<PreviewIntent | null>(null);
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [state, setState] = useState<OperationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const commandIdentity = useRef<{ signature: string; idempotency_key: string; correlation_id: string } | null>(null);
 
   useEffect(() => {
     controllerRef.current?.abort();
@@ -219,9 +214,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
         ? selectedRuleId
         : initial.definition.rules[0]?.id ?? null
     );
-    setPreviewIntent(null);
     setReason('');
-    setConfirmed(false);
     setState('idle');
     setMessage(null);
   }, [initial, selectedRuleId]);
@@ -241,9 +234,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
 
   const invalidatePreview = (): void => {
     controllerRef.current?.abort();
-    setPreviewIntent(null);
-    setReason('');
-    setConfirmed(false);
     setState('idle');
     setMessage(null);
   };
@@ -266,9 +256,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
     controllerRef.current?.abort();
     controllerRef.current = controller;
     setState('loading');
-    setPreviewIntent(null);
-    setReason('');
-    setConfirmed(false);
     setMessage(null);
     try {
       const result = await client.preview(
@@ -277,12 +264,9 @@ export const LineNotificationRulesMutationPanel: React.FC<
       );
       if (controller.signal.aborted) return;
       const preview = adaptLineNotificationRulesPreview(result);
-      setPreviewIntent(
-        kind === 'save'
-          ? { kind: 'save', preview }
-          : { kind: 'delete', ruleId: activeRuleId as string, preview }
-      );
-      setState('success');
+      await applyPreview(kind === 'save'
+        ? { kind: 'save', preview }
+        : { kind: 'delete', ruleId: activeRuleId as string, preview }, controller);
     } catch (error) {
       if (controller.signal.aborted) return;
       setState('error');
@@ -290,19 +274,22 @@ export const LineNotificationRulesMutationPanel: React.FC<
     }
   };
 
-  const applyPreview = async (): Promise<void> => {
-    if (!previewIntent || !confirmed || busy) return;
-    if (!saveValidation.validate([{ value: reason, label: '變更原因', ref: saveFieldRef }])) return;
-    const controller = new AbortController();
+  const applyPreview = async (previewIntent: PreviewIntent, controller: AbortController): Promise<void> => {
     controllerRef.current = controller;
     setState('loading');
     setMessage(null);
+    const signature = JSON.stringify([previewIntent, reason.trim()]);
+    if (commandIdentity.current?.signature !== signature) commandIdentity.current = {
+      signature,
+      idempotency_key: operationIdentity(`line-notification-${previewIntent.kind}-idem`),
+      correlation_id: operationIdentity(`line-notification-${previewIntent.kind}-corr`),
+    };
     const common = {
       expected_revision: previewIntent.preview.beforeRevision,
       preview_fingerprint: previewIntent.preview.fingerprint,
       reason: reason.trim(),
-      idempotency_key: operationIdentity(`line-notification-${previewIntent.kind}-idem`),
-      correlation_id: operationIdentity(`line-notification-${previewIntent.kind}-corr`),
+      idempotency_key: commandIdentity.current.idempotency_key,
+      correlation_id: commandIdentity.current.correlation_id,
     };
     try {
       const receipt = previewIntent.kind === 'save'
@@ -316,6 +303,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
           { signal: controller.signal }
         ));
       if (controller.signal.aborted) return;
+      commandIdentity.current = null;
       const committedDefinition = previewIntent.preview.definition;
       setRevision(receipt.revision);
       setBaseline(committedDefinition);
@@ -325,9 +313,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
           ? committedDefinition.rules[0]?.id ?? null
           : activeRuleId
       );
-      setPreviewIntent(null);
       setReason('');
-      setConfirmed(false);
       setState('success');
       setMessage(
         `${receipt.operation === 'save' ? '通知規則已儲存' : `規則 ${receipt.ruleId} 已刪除`}；`
@@ -336,8 +322,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
       onCommitted?.(receipt);
     } catch (error) {
       if (controller.signal.aborted) return;
-      setPreviewIntent(null);
-      setConfirmed(false);
       setState('error');
       setMessage(displayError(error));
     }
@@ -577,6 +561,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
         </p>
       )}
 
+      {!ownerManagedNotification && <label className="richmenu-drawer-field">操作原因（選填）<textarea value={reason} rows={2} maxLength={1000} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>}
       {!ownerManagedNotification && (
         <div className="line-action-row notification-rule-action-row">
           <button
@@ -585,7 +570,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
             disabled={busy || !draftChanged}
             onClick={() => void runPreview('save')}
           >
-            <Eye aria-hidden="true" />預覽儲存變更
+            <Save aria-hidden="true" />儲存變更
           </button>
           {activeRule && baselineHasActiveRule && (
             <button
@@ -594,7 +579,7 @@ export const LineNotificationRulesMutationPanel: React.FC<
               disabled={busy || draftChanged}
               onClick={() => void runPreview('delete')}
             >
-              <Trash2 aria-hidden="true" />預覽刪除規則
+              <Trash2 aria-hidden="true" />刪除規則
             </button>
           )}
         </div>
@@ -607,54 +592,6 @@ export const LineNotificationRulesMutationPanel: React.FC<
       )}
 
       {state === 'loading' && <div className="line-loading line-block-spacing-12" role="status">正在執行通知規則操作…</div>}
-
-      {previewIntent && (
-        <div className="richmenu-drawer-panel notification-rule-preview-panel">
-          <strong className="notification-rule-preview-title">
-            {previewIntent.kind === 'save' ? '儲存預覽已就緒' : '刪除預覽已就緒'}
-          </strong>
-          <p>套用後規則數：{previewIntent.preview.ruleCount}</p>
-          <p>通知規則已通過預覽檢查，請核對啟用狀態與通知對象後套用。</p>
-
-          <div className="richmenu-drawer-field line-block-spacing-compact">
-            <label htmlFor="line-notification-mutation-reason">操作原因</label>
-            <textarea ref={saveFieldRef} aria-required="true"
-              id="line-notification-mutation-reason"
-              className="richmenu-drawer-input notification-rule-reason-input"
-              value={reason}
-              rows={3}
-              maxLength={1_000}
-              disabled={busy}
-              onChange={(event) => {
-                setReason(event.target.value);
-                setConfirmed(false);
-              }}
-              placeholder="請輸入本次變更之業務原因…"
-            />
-          </div>
-
-          <div className="notification-rule-confirm-row">
-            <><label className="notification-rule-check-label">
-              <input
-                type="checkbox"
-                checked={confirmed}
-                disabled={busy}
-                onChange={(event) => setConfirmed(event.target.checked)}
-              />
-              我已確認通知規則與影響範圍
-            </label>{saveValidation.feedback}</>
-          </div>
-
-          <button
-            type="button"
-            className={previewIntent.kind === 'delete' ? 'line-danger-btn' : 'line-primary-btn'}
-            disabled={busy || !confirmed}
-            onClick={() => void applyPreview()}
-          >
-            {previewIntent.kind === 'save' ? <><Save aria-hidden="true" />確認儲存通知規則</> : <><Trash2 aria-hidden="true" />確認刪除通知規則</>}
-          </button>
-        </div>
-      )}
 
       {state === 'success' && message && <div className="line-success line-block-spacing-12" role="status">{message}</div>}
       {state === 'error' && message && <div className="line-error line-block-spacing-12" role="alert">{message}</div>}

@@ -133,19 +133,6 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
       setResult(`${receiptText(receipt)} 重新載入結果失敗，可再按查詢確認；不需重複送出：${message(error)}`);
     }
   };
-  const previewManual = async (operation: () => Promise<ManualAttestationPreview>, onPreview: (preview: ManualAttestationPreview) => void) => {
-    setState('working');
-    setResult(null);
-    try {
-      const preview = await operation();
-      onPreview(preview);
-      setState('success');
-      setResult(`人工簽約證據已完成送出前檢查（${preview.confirmation_method}）；未建立 LINE 寄送任務。請確認後再套用。`);
-    } catch (error) {
-      setState('error');
-      setResult(message(error));
-    }
-  };
   useUnsavedChanges('契約寄送網址', downloadUrl !== submittedDownloadUrl ? [{ label: '受控下載網址', before: submittedDownloadUrl ? '原下載網址（不顯示內容）' : '未填寫', after: downloadUrl ? '已輸入或修改下載網址（不顯示內容）' : '清空' }] : [], { busy: state === 'working' });
   useUnsavedDraft('契約簽署文件', { '客戶文件': clientFile?.name ?? '', '月嫂文件': Object.values(staffFiles).map(file => file?.name ?? '').filter(Boolean), '客戶人工證據檔': clientManualDraft.file?.name ?? '', '客戶人工確認方式': clientManualDraft.confirmationMethod, '客戶人工確認原因': clientManualDraft.reason, '月嫂人工證據': Object.values(staffManualDrafts).map(draft => ({ '檔案': draft.file?.name ?? '', '方式': draft.confirmationMethod, '原因': draft.reason })) }, { busy: state === 'working' });
 
@@ -155,7 +142,7 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
       <div className="contract-signing-header">
         <h3 className="contract-signing-title">📦 契約寄送與簽回文件操作</h3>
         <p className="contract-signing-desc">
-          寄送前會核對目前契約狀態。確認後只建立待寄送工作，並不代表 LINE 已送達。人工簽約證據必須先檢查內容、由人員確認後才可補登，且不會建立 LINE 寄送工作。
+          寄送前會核對目前契約狀態。確認後只建立待寄送工作，並不代表 LINE 已送達。人工簽約證據選檔後可直接補登，且不會建立 LINE 寄送工作。
         </p>
         <div className="contract-signing-url-box">
           <label htmlFor="contract-signing-download-url">受控 HTTPS 文件下載網址</label>
@@ -326,12 +313,12 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                         </select>
                       </div>
                       <div className="contract-signing-field" style={{ gridColumn: '1 / -1' }}>
-                        <label htmlFor={`contract-signing-staff-manual-reason-${segment.segment_id}`}>月嫂人工確認依據</label>
+                        <label htmlFor={`contract-signing-staff-manual-reason-${segment.segment_id}`}>月嫂備註（選填）</label>
                         <input
                           id={`contract-signing-staff-manual-reason-${segment.segment_id}`}
                           value={manual.reason}
                           disabled={state === 'working'}
-                          placeholder="請輸入人工確認之完整依據與電話/紙本記錄"
+                          placeholder="有需要補充的內容再填寫"
                           onChange={(event) => {
                             updateManual({ reason: event.target.value });
                             resetIntent(`staff-manual-${segment.segment_id}`);
@@ -342,21 +329,14 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
                       <button
                         type="button"
-                        className="contract-btn-secondary"
-                        disabled={state === 'working' || !manual.file || !manual.reason.trim()}
-                        onClick={() => void previewManual(
-                          () => contractSigningMutationClient.previewManualStaffAttestation(caseNo, segment.segment_id, manual.confirmationMethod, manual.reason, currentIntent(`staff-manual-${segment.segment_id}`)),
-                          (preview) => updateManual({ preview }),
-                        )}
-                      >
-                        🔍 預覽人工月嫂簽約證據
-                      </button>
-                      <button
-                        type="button"
                         className="contract-btn-primary"
-                        disabled={state === 'working' || !manual.file || manual.preview === null}
-                        onClick={() => void run(() =>
-                          contractSigningMutationClient.recordManualStaffAttestation(caseNo, segment.segment_id, manual.file!, manual.confirmationMethod, manual.reason, manual.preview!.preview_fingerprint, currentIntent(`staff-manual-${segment.segment_id}`))
+                        disabled={state === 'working' || !manual.file}
+                        onClick={() => void run(async () => {
+                          const intent = currentIntent(`staff-manual-${segment.segment_id}`);
+                          const checked = manual.preview ?? await contractSigningMutationClient.previewManualStaffAttestation(caseNo, segment.segment_id, manual.confirmationMethod, manual.reason.trim(), intent);
+                          updateManual({ preview: checked });
+                          return contractSigningMutationClient.recordManualStaffAttestation(caseNo, segment.segment_id, manual.file!, manual.confirmationMethod, manual.reason.trim(), checked.preview_fingerprint, intent);
+                        }
                         , () => setStaffManualDrafts(current => { const next = { ...current }; delete next[segment.segment_id]; return next; }))}
                       >
                         ✅ 確認記錄人工月嫂簽約
@@ -481,12 +461,12 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                       </select>
                     </div>
                     <div className="contract-signing-field" style={{ gridColumn: '1 / -1' }}>
-                      <label htmlFor="contract-signing-client-manual-reason">客戶人工確認依據</label>
+                      <label htmlFor="contract-signing-client-manual-reason">客戶備註（選填）</label>
                       <input
                         id="contract-signing-client-manual-reason"
                         value={clientManualDraft.reason}
                         disabled={state === 'working'}
-                        placeholder="請輸入人工確認之完整依據與電話/紙本記錄"
+                        placeholder="有需要補充的內容再填寫"
                         onChange={(event) => {
                           updateClientManual({ reason: event.target.value });
                           resetIntent('client-manual');
@@ -497,21 +477,14 @@ export function ContractSigningActions({ caseNo, signing, onCommitted }: Contrac
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
                     <button
                       type="button"
-                      className="contract-btn-secondary"
-                      disabled={state === 'working' || !clientManualDraft.file || !clientManualDraft.reason.trim()}
-                      onClick={() => void previewManual(
-                        () => contractSigningMutationClient.previewManualClientAttestation(caseNo, clientManualDraft.confirmationMethod, clientManualDraft.reason, currentIntent('client-manual')),
-                        (preview) => updateClientManual({ preview }),
-                      )}
-                    >
-                      🔍 預覽人工客戶簽約證據
-                    </button>
-                    <button
-                      type="button"
                       className="contract-btn-primary"
-                      disabled={state === 'working' || !clientManualDraft.file || clientManualDraft.preview === null}
-                      onClick={() => void run(() =>
-                        contractSigningMutationClient.recordManualClientAttestation(caseNo, clientManualDraft.file!, clientManualDraft.confirmationMethod, clientManualDraft.reason, clientManualDraft.preview!.preview_fingerprint, currentIntent('client-manual'))
+                      disabled={state === 'working' || !clientManualDraft.file}
+                      onClick={() => void run(async () => {
+                        const intent = currentIntent('client-manual');
+                        const checked = clientManualDraft.preview ?? await contractSigningMutationClient.previewManualClientAttestation(caseNo, clientManualDraft.confirmationMethod, clientManualDraft.reason.trim(), intent);
+                        updateClientManual({ preview: checked });
+                        return contractSigningMutationClient.recordManualClientAttestation(caseNo, clientManualDraft.file!, clientManualDraft.confirmationMethod, clientManualDraft.reason.trim(), checked.preview_fingerprint, intent);
+                      }
                       , () => setClientManualDraft(defaultManualAttestationDraft()))}
                     >
                       ✅ 確認記錄人工客戶簽約並完成契約

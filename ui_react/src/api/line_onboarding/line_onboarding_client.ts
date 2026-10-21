@@ -113,7 +113,7 @@ export class DefaultLineOnboardingClient implements LineOnboardingClient {
       {
         content: payload.content,
         expected_revision: payload.expected_revision,
-        reason: payload.reason ?? '更新新好友歡迎訊息',
+        reason: payload.reason ?? '',
       },
       requestOptions(options)
     );

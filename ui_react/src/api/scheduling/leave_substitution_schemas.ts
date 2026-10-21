@@ -135,7 +135,7 @@ export const LeaveSubstitutionApplyRequestSchema = z
     expected_client_finance_version: z.number().int().nonnegative(),
     expected_payroll_version: z.number().int().nonnegative(),
     preview_fingerprint: LeaveSubstitutionFingerprintSchema,
-    reason: z.string().trim().min(1).max(500),
+    reason: z.string().trim().max(500),
   })
   .superRefine(validateLinkedRequestIdentity);
 

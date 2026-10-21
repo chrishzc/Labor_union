@@ -56,7 +56,7 @@ class ServiceBeforeReplacementQueryRequest:
             return
         if self.reason is None or self.evidence is None:
             raise ValueError("replacement preview reason/evidence must be supplied together")
-        require_canonical_text(self.reason, "replacement reason", 500)
+        require_canonical_text(self.reason, "replacement reason", 500, allow_empty=True)
         if not isinstance(self.evidence, tuple):
             raise TypeError("replacement evidence must be a tuple")
         for value in self.evidence:

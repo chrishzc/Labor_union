@@ -147,8 +147,8 @@ def validate_order_lifecycle_facts(current_status: str, trigger_event: str, auth
             raise TypeError(f"{key} must be bool")
     reason = authoritative_facts["cancellation_reason"]
     if authoritative_facts["cancellation"]:
-        if not isinstance(reason, str) or not reason.strip() or reason != reason.strip():
-            raise ValueError("cancellation_reason must be a non-empty canonical string when cancellation is active")
+        if not isinstance(reason, str) or reason != reason.strip():
+            raise ValueError("cancellation_reason must be a canonical string when cancellation is active")
     elif reason is not None:
         raise ValueError("cancellation_reason must be None when cancellation is inactive")
     correction_target = authoritative_facts["manual_correction_target"]

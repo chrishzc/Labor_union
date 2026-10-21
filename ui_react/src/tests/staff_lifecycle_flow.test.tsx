@@ -55,8 +55,8 @@ describe('Staff lifecycle flow', () => {
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_VIEW, state: 'retired', version: 3, effective_at: '2026-08-15T09:00:00+08:00' });
     await openDrawer();
     fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽退役/ }));
+    fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
+    fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
 
     await waitFor(() => expect(staffLifecycleClient.preview).toHaveBeenCalledWith(
       11,
@@ -64,8 +64,6 @@ describe('Staff lifecycle flow', () => {
       STAFF_LIFECYCLE_PREVIEW_PAYLOAD,
       expect.anything(),
     ));
-    expect(screen.getByRole('button', { name: /確認套用退役/ })).not.toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /確認套用退役/ }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
     expect(staffLifecycleClient.apply).toHaveBeenCalledWith(
       11,
@@ -93,12 +91,10 @@ describe('Staff lifecycle flow', () => {
       .mockRejectedValueOnce(new StaffLifecycleUnavailableError({ code: 'STAFF_LIFECYCLE_TIMEOUT', message: '請求逾時', retryable: true }))
       .mockResolvedValueOnce({ ...STAFF_LIFECYCLE_RECEIPT, state: 'active' });
     await openDrawer();
-    expect(screen.queryByRole('button', { name: /預覽退役/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^辦理退役$/ })).toBeNull();
     fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: 'return_active' } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽復職/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /確認套用復職/ })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /確認套用復職/ }));
+    fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: 'return_active' } });
+    fireEvent.click(screen.getByRole('button', { name: /^辦理復職$/ }));
     await waitFor(() => expect(screen.getByText(/結果未知/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '以相同內容重試' }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(2));
@@ -114,10 +110,8 @@ describe('Staff lifecycle flow', () => {
     vi.mocked(staffLifecycleClient.apply).mockReturnValueOnce(pendingApply.promise);
     await openDrawer();
     fireEvent.change(screen.getAllByLabelText('生效時間').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.effective_at } });
-    fireEvent.change(screen.getAllByLabelText('異動原因').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽退役/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /確認套用退役/ })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /確認套用退役/ }));
+    fireEvent.change(screen.getAllByLabelText('異動原因（選填）').at(-1)!, { target: { value: STAFF_LIFECYCLE_PREVIEW_PAYLOAD.reason_code } });
+    fireEvent.click(screen.getByRole('button', { name: /^辦理退役$/ }));
     await waitFor(() => expect(staffLifecycleClient.apply).toHaveBeenCalledTimes(1));
 
     const expectLocked = () => {
@@ -125,7 +119,7 @@ describe('Staff lifecycle flow', () => {
       expect(screen.getByLabelText('查詢服務人員')).toBeDisabled();
       expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
       expect(screen.getAllByLabelText('生效時間').at(-1)).toBeDisabled();
-      expect(screen.getAllByLabelText('異動原因').at(-1)).toBeDisabled();
+      expect(screen.getAllByLabelText('異動原因（選填）').at(-1)).toBeDisabled();
     };
 
     expectLocked();

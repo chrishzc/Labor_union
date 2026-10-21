@@ -1,7 +1,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: LineIdentityMaintenanceActions.tsx
- * Description: 提供 LINE 身分對象更正與解除失敗維護操作，強制 Preview、確認與安全錯誤呈現。
+ * Description: 提供 LINE 身分對象更正與解除失敗維護操作，一次點擊驗證、提交與安全錯誤呈現。
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -72,7 +72,6 @@ export function LineIdentityMaintenanceActions({
   } | null>(null);
   const [targetReference, setTargetReference] = useState('');
   const [replacementReason, setReplacementReason] = useState('');
-  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [replacementPreview, setReplacementPreview] = useState<LineIdentityReplacementPreviewViewModel | null>(null);
   const [replacementState, setReplacementState] = useState<OperationState>('idle');
   const [replacementError, setReplacementError] = useState<string | null>(null);
@@ -89,7 +88,6 @@ export function LineIdentityMaintenanceActions({
     controller.current = null;
     replacementIntent.current = null;
     setReplacementPreview(null);
-    setReplacementConfirmed(false);
     setReplacementState('idle');
     setReplacementError(null);
     setReplacementResult(null);
@@ -108,14 +106,15 @@ export function LineIdentityMaintenanceActions({
     setReplacementState('loading');
     setReplacementError(null);
     setReplacementResult(null);
-    setReplacementConfirmed(false);
     try {
       const preview = await client.previewReplacement(lineUserId, target, {
         signal: nextController.signal,
       });
       if (nextController.signal.aborted) return;
-      setReplacementPreview(adaptLineIdentityReplacementPreview(preview));
-      setReplacementState('idle');
+      const checked = adaptLineIdentityReplacementPreview(preview);
+      setReplacementPreview(checked);
+      if (checked.hasBlockers) setReplacementState('idle');
+      else await applyReplacement(checked);
     } catch (error: unknown) {
       if (nextController.signal.aborted) return;
       replacementIntent.current = null;
@@ -125,12 +124,11 @@ export function LineIdentityMaintenanceActions({
     }
   };
 
-  const applyReplacement = async () => {
-    const preview = replacementPreview;
+  const applyReplacement = async (preview: LineIdentityReplacementPreviewViewModel) => {
     const intent = replacementIntent.current;
     const target = targetReference.trim();
     const reason = replacementReason.trim();
-    if (!preview || preview.hasBlockers || !intent || !target || !reason || !replacementConfirmed) return;
+    if (!preview || preview.hasBlockers || !intent || !target) return;
     controller.current?.abort();
     const nextController = new AbortController();
     controller.current = nextController;
@@ -165,7 +163,7 @@ export function LineIdentityMaintenanceActions({
     const reason = maintenanceReason.trim();
     const retryableStatus = binding.revocation_status === 'menu_reset_failed'
       || binding.revocation_status === 'manual_completed';
-    if (!requestId || !retryableStatus || !reason) return;
+    if (!requestId || !retryableStatus) return;
     controller.current?.abort();
     const nextController = new AbortController();
     controller.current = nextController;
@@ -192,7 +190,7 @@ export function LineIdentityMaintenanceActions({
       {binding.status === 'bound' && (
         <section aria-labelledby="line-identity-replacement-title">
           <h4 id="line-identity-replacement-title">更正綁定對象</h4>
-          <p>只允許更正為相同角色的既有對象；先預覽，確認後才會提交。</p>
+          <p>只允許更正為相同角色的既有對象；送出時會驗證最新資料。</p>
           <label htmlFor="line-identity-target-reference">更正對象識別值</label>
           <input
             id="line-identity-target-reference"
@@ -203,49 +201,20 @@ export function LineIdentityMaintenanceActions({
               resetReplacementPreview();
             }}
           />
+          <label htmlFor="line-identity-replacement-reason">更正原因（選填）</label>
+          <textarea id="line-identity-replacement-reason" value={replacementReason} rows={3} maxLength={1000} disabled={replacementState === 'loading'} onChange={(event) => setReplacementReason(event.target.value)} />
           <button
             type="button"
             disabled={!targetReference.trim() || replacementState === 'loading'}
             onClick={() => void previewReplacement()}
           >
-            預覽對象更正
+            儲存對象更正
           </button>
           {replacementState === 'loading' && <p>正在驗證更正條件…</p>}
           {replacementPreview && (
             <div>
               <p>目標對象：<strong>{replacementPreview.targetSubjectName}</strong></p>
-              {replacementPreview.hasBlockers ? (
-                <ul>{replacementPreview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
-              ) : (
-                <>
-                  <label htmlFor="line-identity-replacement-reason">更正原因</label>
-                  <textarea
-                    id="line-identity-replacement-reason"
-                    value={replacementReason}
-                    rows={3}
-                    maxLength={1000}
-                    onChange={(event) => {
-                      setReplacementReason(event.target.value);
-                      setReplacementConfirmed(false);
-                    }}
-                  />
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={replacementConfirmed}
-                      onChange={(event) => setReplacementConfirmed(event.target.checked)}
-                    />
-                    我已核對目前綁定與更正對象
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!replacementReason.trim() || !replacementConfirmed || replacementState === 'loading'}
-                    onClick={() => void applyReplacement()}
-                  >
-                    提交對象更正
-                  </button>
-                </>
-              )}
+              {replacementPreview.hasBlockers && <ul>{replacementPreview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
             </div>
           )}
           {replacementError && <div className="line-error" role="alert">{replacementError}</div>}
@@ -264,7 +233,7 @@ export function LineIdentityMaintenanceActions({
         <section aria-labelledby="line-identity-maintenance-title">
           <h4 id="line-identity-maintenance-title">解除失敗維護</h4>
           <p>身分授權已停止，系統仍需將 LINE 圖文選單自動回復成訪客模式。請先確認「訪客／預設選單」已重新發布，再重新排入回復流程。</p>
-          <label htmlFor="line-identity-maintenance-reason">維護原因</label>
+          <label htmlFor="line-identity-maintenance-reason">維護原因（選填）</label>
           <textarea
             id="line-identity-maintenance-reason"
             value={maintenanceReason}
@@ -274,7 +243,7 @@ export function LineIdentityMaintenanceActions({
           />
           <button
             type="button"
-            disabled={!maintenanceReason.trim() || maintenanceState === 'loading'}
+            disabled={maintenanceState === 'loading'}
             onClick={() => void retryMenuRestore()}
           >
             重新排入訪客選單回復
@@ -294,7 +263,7 @@ export function LineIdentityMaintenanceActions({
         <section aria-labelledby="line-identity-menu-repair-title">
           <h4 id="line-identity-menu-repair-title">修復 LINE 訪客選單</h4>
           <p>系統授權已人工解除，但 LINE 圖文選單尚未確認回復。請先重新發布「訪客／預設選單」，再執行修復。</p>
-          <label htmlFor="line-identity-menu-repair-reason">修復原因</label>
+          <label htmlFor="line-identity-menu-repair-reason">修復原因（選填）</label>
           <textarea
             id="line-identity-menu-repair-reason"
             value={maintenanceReason}
@@ -304,7 +273,7 @@ export function LineIdentityMaintenanceActions({
           />
           <button
             type="button"
-            disabled={!maintenanceReason.trim() || maintenanceState === 'loading'}
+            disabled={maintenanceState === 'loading'}
             onClick={() => void retryMenuRestore()}
           >
             重新排入訪客選單回復

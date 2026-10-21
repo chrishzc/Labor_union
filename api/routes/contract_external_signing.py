@@ -94,7 +94,7 @@ class CompletionReportBody(BaseModel):
     expected_status_version: int = Field(ge=0)
     expected_document_version_id: int = Field(ge=1)
     confirmation_method: ManualAttestationMethod
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
 
 
 class ClientCompletionReportBody(CompletionReportBody):
@@ -110,7 +110,7 @@ class LegacyRecoveryPreviewBody(BaseModel):
     signing_event_id: int = Field(ge=1)
     command_receipt_id: int = Field(ge=1)
     confirmation_method: ManualAttestationMethod
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
 
     @model_validator(mode="after")
     def require_scope_target(self):

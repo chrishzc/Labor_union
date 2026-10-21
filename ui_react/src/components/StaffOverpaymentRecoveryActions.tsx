@@ -131,7 +131,7 @@ export function StaffOverpaymentRecoveryActions({
     setNotice(null);
   };
 
-  const inputReady = reason.trim().length > 0 && evidenceReference.trim().length > 0;
+  const inputReady = evidenceReference.trim().length > 0;
   const active = query !== null && (query.status === 'open' || query.status === 'partially_recovered') && query.remaining_amount_ntd > 0;
   const uniqueMatching = query?.matchings.length === 1 ? query.matchings[0] : null;
   const multipleMatchings = (query?.matchings.length ?? 0) > 1;
@@ -151,14 +151,14 @@ export function StaffOverpaymentRecoveryActions({
         const id = positiveRowId(rowIdText);
         if (query.matchings.length !== 0 || id === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_BANK_ROW_INVALID', '請提供正確的銀行流水編號。');
         const input: StaffOverpaymentRecoveryMatchingInput = { recovery_identity: recoveryIdentity, finance_import_row_id: id, evidence_reference: evidenceReference };
-        setPreview({ kind, value: await staffOverpaymentRecoveryClient.previewMatching(input) });
+        const checked: PreviewState = { kind, value: await staffOverpaymentRecoveryClient.previewMatching(input) }; setPreview(checked); await runApply(checked);
       } else if (kind === 'collection') {
         if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', 'current matching 不唯一或缺少 owner bank binding，已停止操作。');
         const input: StaffOverpaymentRecoveryCollectionInput = { recovery_identity: recoveryIdentity, finance_import_row_id: collectionRowId, matching_identity: uniqueMatching.matching_identity, matching_version: uniqueMatching.matching_version, evidence_reference: evidenceReference };
-        setPreview({ kind, value: await staffOverpaymentRecoveryClient.previewCollection(input) });
+        const checked: PreviewState = { kind, value: await staffOverpaymentRecoveryClient.previewCollection(input) }; setPreview(checked); await runApply(checked);
       } else {
         const input: StaffOverpaymentRecoveryAdjustmentInput = { recovery_identity: recoveryIdentity, adjustment_amount_ntd: query.remaining_amount_ntd, evidence_reference: evidenceReference };
-        setPreview({ kind, value: await staffOverpaymentRecoveryClient.previewAdjustment(input) });
+        const checked: PreviewState = { kind, value: await staffOverpaymentRecoveryClient.previewAdjustment(input) }; setPreview(checked); await runApply(checked);
       }
     } catch (cause) {
       setPreview(null);
@@ -168,8 +168,8 @@ export function StaffOverpaymentRecoveryActions({
     }
   };
 
-  const runApply = async () => {
-    if (!query || !preview || !inputReady || busy) return;
+  const runApply = async (preview: PreviewState) => {
+    if (!query || !inputReady) return;
     setError(null);
     setNotice(null);
     setOperation('apply');
@@ -177,7 +177,7 @@ export function StaffOverpaymentRecoveryActions({
       let terminal = false;
       if (preview.kind === 'matching') {
         const id = positiveRowId(rowIdText);
-        if (id === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_BANK_ROW_INVALID', '銀行流水編號已失效，請重新 Preview。');
+        if (id === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_BANK_ROW_INVALID', '銀行流水編號已失效，請重新查詢。');
         await staffOverpaymentRecoveryClient.applyMatching(preview.value, { recovery_identity: recoveryIdentity, finance_import_row_id: id, evidence_reference: evidenceReference, reason }, commandFor(identities.current, 'matching-apply'));
       } else if (preview.kind === 'collection') {
         if (multipleMatchings || uniqueMatching === null || collectionRowId === null) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_MATCHING_AMBIGUOUS', 'current matching 已不唯一，請重新查詢。');
@@ -219,6 +219,7 @@ export function StaffOverpaymentRecoveryActions({
         setOutcomeUnknown(false);
         await onCommitted?.();
       } else {
+        setOutcomeUnknown(true);
         setNotice('最新追償資料仍未完成；系統不會重複送出操作，異常仍會保留。');
       }
     } catch (cause) {
@@ -248,12 +249,12 @@ export function StaffOverpaymentRecoveryActions({
           <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
             <legend>配對退回入款（配對不會解除異常）</legend>
             <label>銀行流水編號<input aria-label="銀行流水編號" inputMode="numeric" value={rowIdText} onChange={(event) => { setRowIdText(event.target.value); invalidatePreview(); }} /></label>
-            <button type="button" disabled={!matchingReady} onClick={() => void runPreview('matching')}>Preview 配對（零寫入）</button>
+            <button type="button" disabled={!matchingReady} onClick={() => void runPreview('matching')}>儲存入款配對</button>
           </fieldset>
           <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
             <legend>人工調整（一次精確結清）</legend>
             <p>依正式應付款規則，調整金額固定為目前剩餘追償額：NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}，不可自行輸入部分金額。</p>
-            <button type="button" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>檢查精確調整影響</button>
+            <button type="button" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>儲存精確調整</button>
           </fieldset>
         </>
       )}
@@ -263,21 +264,20 @@ export function StaffOverpaymentRecoveryActions({
           <details><summary>技術操作欄位</summary><p>配對識別值：{uniqueMatching.matching_identity}（資料版本 {uniqueMatching.matching_version}）</p></details>
           {collectionRowId === null && <p role="alert">目前配對缺少可提交的銀行流水編號，已停止操作。</p>}
           {collectionRowId !== null && <p>銀行流水編號：{collectionRowId}</p>}
-          <button type="button" disabled={!collectionReady} onClick={() => void runPreview('collection')}>檢查收款核銷影響</button>
+          <button type="button" disabled={!collectionReady} onClick={() => void runPreview('collection')}>儲存收款核銷</button>
         </fieldset>
       )}
       {query && active && (
         <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
           <legend>人工操作說明與獨立佐證</legend>
-          <label>處理理由<textarea aria-label="處理理由" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label>
+          <label>處理理由（選填）<textarea aria-label="處理理由" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label>
           <label>佐證紀錄<textarea aria-label="佐證紀錄" value={evidenceReference} maxLength={191} onChange={(event) => { setEvidenceReference(event.target.value); invalidatePreview(); }} /></label>
         </fieldset>
       )}
       {preview && (
         <div data-surface-id="staff-payables.overpayment-recovery.preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}>
-          <strong>處理影響已確認（尚未寫入）</strong>
+          <strong>本次處理資料</strong>
           <div>{preview.kind === 'matching' ? '只建立入款配對，不會解除異常' : preview.kind === 'collection' ? `收款後剩餘 NT$ ${preview.value.remaining_after_ntd.toLocaleString('en-US')}` : `精確調整 NT$ ${preview.value.adjustment_amount_ntd.toLocaleString('en-US')} 後結清`}</div>
-          <button type="button" disabled={busy || outcomeUnknown || !inputReady} onClick={() => void runApply()}>確認並提交</button>
         </div>
       )}
     </section>

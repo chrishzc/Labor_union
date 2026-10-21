@@ -31,7 +31,7 @@ const context: HistoricalReviewContext = {
   review_version: 2,
   remediation_version: 0,
   workbook_contract: { contract_key: 'orders.historical-review-correction', contract_version: 1, required_columns: ['case_no', 'status'], single_row_only: true, file_extension: 'xlsx' },
-  reason_required: true,
+  reason_required: false,
   evidence_required: true,
   completion_condition: 'prior review disposition recorded',
   prior_alert_active: true,

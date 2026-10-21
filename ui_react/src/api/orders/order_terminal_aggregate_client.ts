@@ -12,7 +12,7 @@ const TerminalCompletionComponentSchema = z.strictObject({
   code: z.string().min(1),
   owner: z.string().min(1),
   completed: z.boolean(),
-  reason: z.string().min(1).nullable(),
+  reason: z.string().nullable(),
 });
 
 const OrderTerminalAggregateSchema = z.strictObject({

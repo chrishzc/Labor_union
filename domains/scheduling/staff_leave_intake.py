@@ -60,14 +60,10 @@ def transition_request(
         )
         if current not in allowed:
             raise StaffLeaveRequestDomainError(StaffLeaveRequestIssue.INVALID_TRANSITION)
-        if not normalized_reason:
-            raise StaffLeaveRequestDomainError(StaffLeaveRequestIssue.REASON_REQUIRED)
         return StaffLeaveRequestStatus.CANCELLED
     if action in {"accept", "reject"} and actor_is_staff:
         raise StaffLeaveRequestDomainError(StaffLeaveRequestIssue.INVALID_TRANSITION)
     source_target = transitions.get(action)
     if source_target is None or current is not source_target[0]:
         raise StaffLeaveRequestDomainError(StaffLeaveRequestIssue.INVALID_TRANSITION)
-    if action == "reject" and not normalized_reason:
-        raise StaffLeaveRequestDomainError(StaffLeaveRequestIssue.REASON_REQUIRED)
     return source_target[1]

@@ -52,12 +52,13 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff }:
       if (result.candidate.row_identity !== rowIdentity || result.candidate.classification_type !== kind) throw new Error('更正預覽對象不一致。');
       if (!result.candidate.allocations.length || result.candidate.allocations.some((item) => !selected.includes(item.obligation_identity))) throw new Error('更正預覽包含未選取的款項。');
       setSelection(request); setPreview(result);
+      await apply({ preview: result, selection: request, identity });
     } catch (error) { setMessage(error instanceof Error ? error.message : '更正預覽失敗。'); }
     finally { setBusy(false); }
   };
-  const apply = async () => {
-    if (!preview || !selection || submitted) return;
-    const command = retryCommand ?? { preview, selection, identity };
+  const apply = async (checked?: CorrectionCommand) => {
+    const command = retryCommand ?? checked ?? (preview && selection ? { preview, selection, identity } : null);
+    if (!command || submitted) return;
     setBusy(true); setSubmitted(true);
     try {
       const job = await financeImportCorrectionClient.apply(command.preview, command.selection, command.identity);
@@ -96,10 +97,11 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff }:
       {kind === 'client_receipt' ? <label>案件編號<input value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }} /></label> : <label>月嫂<select value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label>}
       <button type="button" disabled={!target.trim()} onClick={() => void load()}>查詢待核銷款項</button>
       {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
-      <label>更正原因<input maxLength={500} value={reason} onChange={(event) => { if (retryCommand) return; setReason(event.target.value); invalidate(); }} /></label>
-      <button type="button" disabled={!selected.length || !reason.trim()} onClick={() => void review()}>預覽更正</button>
+      <label>更正原因（選填）<input maxLength={500} value={reason} onChange={(event) => { if (retryCommand) return; setReason(event.target.value); invalidate(); }} /></label>
+      <button type="button" disabled={!selected.length} onClick={() => void review()}>儲存更正並核銷</button>
     </fieldset>
-    {preview && <div><p>銀行金額 NT$ {preview.candidate.bank_amount_ntd.toLocaleString()}，將核銷 {preview.candidate.allocations.length} 筆款項。</p><ul>{preview.candidate.allocations.map((item) => <li key={item.obligation_identity}>{options.find((option) => option.id === item.obligation_identity)?.label ?? '待確認款項'}：本次核銷 NT$ {item.amount_ntd.toLocaleString()}</li>)}</ul><button type="button" disabled={busy || submitted} onClick={() => void apply()}>確認更正並核銷</button></div>}
+    {preview && <div><p>銀行金額 NT$ {preview.candidate.bank_amount_ntd.toLocaleString()}，將核銷 {preview.candidate.allocations.length} 筆款項。</p><ul>{preview.candidate.allocations.map((item) => <li key={item.obligation_identity}>{options.find((option) => option.id === item.obligation_identity)?.label ?? '待確認款項'}：本次核銷 NT$ {item.amount_ntd.toLocaleString()}</li>)}</ul></div>}
+    {retryCommand && <button type="button" disabled={busy || submitted} onClick={() => void apply()}>以原操作確認更正結果</button>}
     {jobId && <button type="button" disabled={busy} onClick={() => void readOutcome()}>重新查詢更正結果</button>}
     {message && <p role="status">{message}</p>}
   </section>;

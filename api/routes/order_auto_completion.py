@@ -58,7 +58,7 @@ class OrderAutoCompletionApplyBody(BaseModel):
 
     expected_order_version: int = Field(ge=0)
     evaluation_at: datetime
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     preview_fingerprint: str | None = Field(
         default=None,
         pattern=r"^[0-9a-f]{64}$",

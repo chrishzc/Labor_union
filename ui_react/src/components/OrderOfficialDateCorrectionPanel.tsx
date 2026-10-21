@@ -1,6 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useEffect, useRef, useState, type FC } from 'react';
 import {
@@ -21,15 +19,13 @@ interface Props {
   onOpenDates?: () => void;
 }
 
-export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, onObserved, onBusyChange, view, onOpenArrangement, onOpenDates }) => {
+export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, onObserved, onBusyChange, view, onOpenDates }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [facts, setFacts] = useState<OfficialDateQuery | null>(null);
   const [selections, setSelections] = useState<OfficialDateSelection[]>([]);
   const [preview, setPreview] = useState<OfficialDatePreview | null>(null);
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLInputElement>(null);
-  const [key, setKey] = useState('');
+  const [, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [reload, setReload] = useState(0);
@@ -86,9 +82,9 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
         service_dates: [...item.service_dates].sort(),
       })));
       setPreview(result);
-      setKey(crypto.randomUUID());
-      setLocalView('arrangement');
-      onOpenArrangement?.();
+      const operationKey = crypto.randomUUID();
+      setKey(operationKey);
+      await apply(result, operationKey);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '更正預覽失敗');
     } finally {
@@ -96,9 +92,8 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
     }
   };
 
-  const apply = async () => {
-    if (!preview || !key || busy) return;
-    if (!saveValidation.validate([{ value: reason, label: '更正原因', ref: saveFieldRef }])) return;
+  const apply = async (preview: OfficialDatePreview, key: string) => {
+    if (!key) return;
     setBusy(true);
     setMessage('');
     try {
@@ -156,20 +151,20 @@ export const OrderOfficialDateCorrectionPanel: FC<Props> = ({ caseNo, revision, 
       {month && <OrderServiceDateCalendar month={month} onMonthChange={setMonth} selectedDates={activeDates}
         isDateDisabled={() => busy || blocked} onToggle={changeDate}
         hint={`${activeAssignment ? staffIdentity.label(activeAssignment.staff_id, activeAssignment.staff_name) : ''}：點選日期可取消或補選，需保留原本 ${activeAssignment?.service_dates.length ?? 0} 天。`} />}
-      <div className="service-date-footer"><small>{countsValid ? '原紀錄會保留；預覽通過後仍需填寫更正原因並確認儲存。' : '每段服務天數必須與原紀錄相同，請在月曆取消或補選日期。'}</small>
-        <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy || blocked || !countsValid} onClick={() => void createPreview()}>預覽更正</button>
+      <label>更正原因（選填）<input value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>
+      <div className="service-date-footer"><small>{countsValid ? '原紀錄會保留，儲存後自動重新讀取排班。' : '每段服務天數必須與原紀錄相同，請在月曆取消或補選日期。'}</small>
+        <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy || blocked || !countsValid} onClick={() => void createPreview()}>儲存更正</button>
       </div>
     </>}
-    {facts && !datesView && !preview && <div className="service-date-footer"><p role="status">請先在「設定服務日期」核對月曆並預覽更正，再確認儲存。</p>
+    {facts && !datesView && !preview && <div className="service-date-footer"><p role="status">請先在「設定服務日期」核對月曆並儲存更正。</p>
       <button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); }}>返回設定服務日期</button>
     </div>}
     {preview && !datesView && <>
       {preview.proposed_assignments.map(item => <p key={item.assignment_id}>{staffIdentity.label(facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_id, facts?.assignments.find(original => original.assignment_id === item.assignment_id)?.staff_name)}：{item.service_dates.join('、')}</p>)}
       <p>客戶與月嫂金額義務：維持原狀。</p>
-      <><label>更正原因<input ref={saveFieldRef} aria-required="true" value={reason} maxLength={500} disabled={busy} onChange={event => setReason(event.target.value)} /></label>{saveValidation.feedback}</>
       <div className="service-date-footer">
         <button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); }}>返回設定服務日期</button>
-        <button type="button" className="order-v2-open-drawer service-date-primary" disabled={busy} onClick={() => void apply()}>確認更正完工服務日期</button>
+
       </div>
     </>}
     {message && <div><p role="status">{message}</p><button type="button" disabled={busy} onClick={() => { setLocalView('dates'); onOpenDates?.(); setReload(value => value + 1); }}>重新讀取排班日期</button><p>重新讀取會還原尚未儲存的日期。</p></div>}

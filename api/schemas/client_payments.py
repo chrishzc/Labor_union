@@ -68,7 +68,7 @@ class HistoricalClientPaymentIntentBody(_StrictModel):
     confirmation_kind: Literal["paid", "settled"]
     obligation_identities: list[str] = Field(min_length=1)
     payment_date: date | None = None
-    payment_date_unknown_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    payment_date_unknown_reason: str | None = Field(default=None, max_length=500)
     source_availability: Literal["missing", "ambiguous", "unrecoverable"]
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
@@ -77,7 +77,7 @@ class HistoricalClientPaymentApplyBody(HistoricalClientPaymentIntentBody):
     expected_account_version: int = Field(ge=0)
     expected_adoption_receipt_id: int = Field(gt=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class HistoricalClientObligationView(_StrictModel):

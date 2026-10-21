@@ -107,7 +107,7 @@ const ManualInformationPreviewSchema = z.strictObject({
   staff_id: z.number().int().positive(),
   info_type: z.union([z.literal(1), z.literal(2)]),
   confirmation_method: z.enum(['phone', 'in_person', 'paper', 'other']),
-  reason: z.string().min(1).max(500),
+  reason: z.string().max(500),
   actor: z.string().min(1).max(100),
   expected_version: z.number().int().nonnegative(),
   current_status: z.string().max(50).nullable(),
@@ -308,14 +308,14 @@ function canonicalCandidateWillingnessCommand(
     throw new Error('候選意願備註必須是文字。');
   }
   const reason = command.reason.trim();
-  if (reason.length > 500 || (command.willingness === 'unwilling' && !reason)) {
-    throw new Error('無意願時必須填寫 500 字內拒絕理由。');
+  if (reason.length > 500) {
+    throw new Error('詢問結果備註最多 500 字。');
   }
   return {
     caseNo: canonicalCaseNo(command.caseNo),
     candidateId: command.candidateId,
     willingness: command.willingness,
-    reason: reason || '人工補登願意',
+    reason,
     actor,
     eventKey,
   };
@@ -541,7 +541,7 @@ export const candidateContactPoolClient = {
     const { actor, token } = mutationIdentity();
     const canonicalReason = reason.trim();
     if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('候選聯繫識別必須是正整數。');
-    if (!canonicalReason || canonicalReason.length > 500) throw new Error('請填寫 1 至 500 字的人工確認依據。');
+    if (canonicalReason.length > 500) throw new Error('人工確認依據最多 500 字。');
     const decoded = decodePayload(
       mutationEnvelope(ManualInformationPreviewSchema),
       await transport.post(

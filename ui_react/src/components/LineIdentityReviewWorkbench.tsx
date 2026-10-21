@@ -228,15 +228,12 @@ interface ReviewDetailPanelProps {
   decision: LineIdentityReviewDecision;
   reason: string;
   preview: LineIdentityReviewPreviewViewModel | null;
-  confirmed: boolean;
   mutationStatus: MutationStatus;
   mutationError: string | null;
   receipt: LineIdentityReviewReceiptViewModel | null;
   onDecisionChange: (value: LineIdentityReviewDecision) => void;
   onReasonChange: (value: string) => void;
-  onConfirm: (value: boolean) => void;
   onPreview: () => void;
-  onApply: () => void;
   onReadBack: () => void;
 }
 
@@ -259,9 +256,9 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
           <select id="line-identity-review-decision" value={props.decision} onChange={(event) => props.onDecisionChange(event.target.value as LineIdentityReviewDecision)}>
             <option value="approve">核准</option><option value="reject">拒絕</option>
           </select>
-          <label htmlFor="line-identity-review-reason">審核原因</label>
+          <label htmlFor="line-identity-review-reason">審核原因（選填）</label>
           <textarea id="line-identity-review-reason" rows={3} maxLength={1000} value={props.reason} onChange={(event) => props.onReasonChange(event.target.value)} />
-          <button type="button" disabled={!props.reason.trim() || props.mutationStatus === 'loading'} onClick={props.onPreview}>預覽審核決定</button>
+          <button type="button" disabled={props.mutationStatus === 'loading' || Boolean(receipt)} onClick={props.onPreview}>提交審核決定</button>
         </>
       )}
       {preview && (
@@ -269,8 +266,6 @@ function ReviewDetailPanel(props: ReviewDetailPanelProps) {
           <h4>預覽：{preview.decisionLabel}</h4>
           <p>{preview.beforeStatusLabel} → {preview.afterStatusLabel}</p>
           <p>{preview.subjectTypeLabel}｜{preview.subjectReference ?? '尚未連結'}｜<code>{preview.lineUserId}</code></p>
-          <label><input type="checkbox" checked={props.confirmed} onChange={(event) => props.onConfirm(event.target.checked)} />我已確認審核對象與決定</label>
-          {!receipt && <button type="button" disabled={!props.confirmed || props.mutationStatus === 'loading'} onClick={props.onApply}>提交審核決定</button>}
         </div>
       )}
       {props.mutationStatus === 'loading' && <div className="line-loading">正在處理審核操作…</div>}
@@ -292,7 +287,6 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
   const [decision, setDecision] = useState<LineIdentityReviewDecision>('approve');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<LineIdentityReviewPreviewViewModel | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [mutationStatus, setMutationStatus] = useState<MutationStatus>('idle');
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<LineIdentityReviewReceiptViewModel | null>(null);
@@ -309,7 +303,6 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
     setReason('');
     setDecision('approve');
     setPreview(null);
-    setConfirmed(false);
     setMutationStatus('idle');
     setMutationError(null);
     setReceipt(null);
@@ -324,7 +317,6 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
     mutationController.current?.abort();
     idempotencyKey.current = null;
     setPreview(null);
-    setConfirmed(false);
     setMutationStatus('idle');
     setMutationError(null);
     setReceipt(null);
@@ -333,7 +325,7 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
   const runPreview = async () => {
     const current = detailQuery.state.value;
     const normalizedReason = reason.trim();
-    if (!current || current.status !== 'pending' || !normalizedReason) return;
+    if (!current || current.status !== 'pending') return;
     mutationController.current?.abort();
     const controller = new AbortController();
     mutationController.current = controller;
@@ -347,9 +339,9 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
         reason: normalizedReason,
       }, { signal: controller.signal });
       if (!controller.signal.aborted) {
-        setPreview(adaptLineIdentityReviewPreview(value));
-        setConfirmed(false);
-        setMutationStatus('idle');
+        const candidate = adaptLineIdentityReviewPreview(value);
+        setPreview(candidate);
+        await runApply(candidate);
       }
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
@@ -361,10 +353,9 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
     }
   };
 
-  const runApply = async () => {
-    const candidate = preview;
+  const runApply = async (candidate: LineIdentityReviewPreviewViewModel) => {
     const key = idempotencyKey.current;
-    if (!candidate || !key || !confirmed || !reason.trim()) return;
+    if (!candidate || !key) return;
     mutationController.current?.abort();
     const controller = new AbortController();
     mutationController.current = controller;
@@ -416,7 +407,6 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
         decision={decision}
         reason={reason}
         preview={preview}
-        confirmed={confirmed}
         mutationStatus={mutationStatus}
         mutationError={mutationError}
         receipt={receipt}
@@ -428,9 +418,7 @@ export function LineIdentityReviewWorkbench({ client }: LineIdentityReviewWorkbe
           setReason(value);
           invalidatePreview();
         }}
-        onConfirm={setConfirmed}
         onPreview={() => void runPreview()}
-        onApply={() => void runApply()}
         onReadBack={() => void readBack()}
       />
     </section>

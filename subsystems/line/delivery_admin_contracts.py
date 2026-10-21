@@ -117,7 +117,7 @@ class ControlLineDeliveryTaskCommand:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "LINE delivery control reason", 500)
+        require_canonical_text(self.reason, "LINE delivery control reason", 500, allow_empty=True)
 
 
 __all__ = [

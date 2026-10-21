@@ -170,7 +170,6 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
   }), '已送出問答搜尋資料更新工作；更新完成後才會供 AI 客服使用。');
 
   const importBuiltinCatalog = async () => {
-    if (!window.confirm('將補齊系統內建的 54 題，不會覆寫既有編修。確定繼續？')) return;
     setBusy(true); setNotice(null);
     const identity = operationIdentity('qa-builtin-import');
     try {
@@ -335,11 +334,11 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
         ))}
         {readStatus === 'ready' && filteredItems.length === 0 && items.length > 0 && <div className="studio-empty" role="status">目前沒有符合條件的問答。</div>}
       </div>
-      <p className="studio-list-footer">修改會先儲存為草稿，確認後再發布。</p>
+      <p className="studio-list-footer">修改會先儲存為草稿，再發布已儲存內容。</p>
 
       <Drawer isOpen={isCreating || editingItem !== null} onClose={closeEditor} title={isCreating ? '新增問答草稿' : `編輯問答（${editingItem?.qa.id}）`} size="normal" className="studio-qa-drawer" closeDisabled={busy} closeLabel="關閉問答編輯器" footer={<div className="line-drawer-footer">
-        {editingItem && (editingItem.lifecycle_status === 'draft' || editingItem.lifecycle_status === 'reviewed') && <button type="button" disabled={busy || !editingItem.qa.answer} className="line-secondary-btn" onClick={() => { if (window.confirm('發布目前已儲存的草稿？尚未儲存的編輯內容不會納入；搜尋資料更新完成後才生效。')) void transition(editingItem, 'publish').then((ok) => { if (ok) closeEditor(); }); }}>發布已儲存草稿</button>}
-        {editingItem?.lifecycle_status === 'published' && <button type="button" disabled={busy} className="line-danger-btn" onClick={() => { if (window.confirm('停用目前已發布的問答？歷程將保留。')) void transition(editingItem, 'retire').then((ok) => { if (ok) closeEditor(); }); }}>停用這則問答</button>}
+        {editingItem && (editingItem.lifecycle_status === 'draft' || editingItem.lifecycle_status === 'reviewed') && <button type="button" disabled={busy || !editingItem.qa.answer} className="line-secondary-btn" onClick={() => { void transition(editingItem, 'publish').then((ok) => { if (ok) closeEditor(); }); }}>發布已儲存草稿</button>}
+        {editingItem?.lifecycle_status === 'published' && <button type="button" disabled={busy} className="line-danger-btn" onClick={() => { void transition(editingItem, 'retire').then((ok) => { if (ok) closeEditor(); }); }}>停用這則問答</button>}
         <button type="button" disabled={busy} className="line-secondary-btn" onClick={closeEditor}>取消</button><button type="button" disabled={busy} className="line-primary-btn" onClick={save}>{busy ? '儲存中…' : '儲存為草稿'}</button>
       </div>}>
         <p className="studio-description">編輯後會先建立草稿，確認答案後再發布。</p>

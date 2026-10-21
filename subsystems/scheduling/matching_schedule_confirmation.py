@@ -30,8 +30,6 @@ class MatchingScheduleConfirmationWorkflow:
         actor = require_canonical_text(actor, "actor", 100)
         key = require_canonical_text(key, "idempotency key", 191)
         normalized_reason = reason.strip()
-        if not normalized_reason:
-            raise ValueError("manual_schedule_confirmation_reason_required")
         with self._unit_of_work_factory() as unit_of_work:
             result = self._repository.prepare_manual(
                 case_no, plan_id, actor, normalized_reason, expected_version, fingerprint, key
@@ -43,8 +41,6 @@ class MatchingScheduleConfirmationWorkflow:
         actor = require_canonical_text(actor, "actor", 100)
         key = require_canonical_text(key, "idempotency key", 191)
         normalized_reason = reason.strip()
-        if value in {"rejected", "manually_confirmed", "manually_revoked"} and not normalized_reason:
-            raise ValueError("schedule_confirmation_reason_required")
         with self._unit_of_work_factory() as unit_of_work:
             result = self._repository.confirm(recipient_id, value, actor, normalized_reason, key)
             unit_of_work.commit()

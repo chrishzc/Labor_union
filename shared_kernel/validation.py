@@ -9,8 +9,8 @@ import math
 _SHA256_HEX_LENGTH = 64
 
 
-def require_canonical_text(value: Any, field_name: str, maximum_length: int) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
+def require_canonical_text(value: Any, field_name: str, maximum_length: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value and not allow_empty) or value != value.strip():
         raise ValueError(f"{field_name} must be canonical non-empty text")
     if len(value) > maximum_length:
         raise ValueError(f"{field_name} exceeds maximum length")

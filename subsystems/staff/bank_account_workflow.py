@@ -105,8 +105,6 @@ class StaffBankAccountWorkflow:
         identity = _staff_id(staff_id)
         command = normalize_bank_command(raw_command)
         clean_reason = reason.strip()
-        if not clean_reason:
-            raise ValueError("staff_bank_reason_required")
         command_fingerprint = fingerprint_payload({
             "family": _COMMAND_FAMILY,
             "staff_id": identity,

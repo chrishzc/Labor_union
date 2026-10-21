@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { LineRichMenuPublicationStatusSchema } from '../line_configuration/line_configuration_query_schemas';
 
 const OperationIdentitySchema = z.string().trim().min(1).max(191);
-const ReasonSchema = z.string().trim().min(1).max(500);
+const ReasonSchema = z.string().trim().max(500);
 
 export const LineRichMenuPublishPreviewSchema = z
   .object({

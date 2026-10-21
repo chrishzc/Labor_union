@@ -37,7 +37,7 @@ export const SafeReviewLinkRedeemRequestSchema = z.strictObject({
 });
 
 export const SafeReviewLinkRevokeRequestSchema = z.strictObject({
-  reason: z.string().trim().min(1).max(500),
+  reason: z.string().trim().max(500),
   idempotency_key: z.string().trim().min(1).max(191),
   correlation_id: z.string().trim().min(1).max(191),
 });

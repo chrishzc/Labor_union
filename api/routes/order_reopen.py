@@ -49,14 +49,14 @@ class OrderReopenApplyBody(BaseModel):
     expected_client_finance_version: int | None = Field(ge=0)
     expected_payroll_version: int | None = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, value: str) -> str:
         trimmed = value.strip()
-        if not (1 <= len(trimmed) <= 500):
-            raise ValueError("reason must be 1 to 500 non-whitespace characters")
+        if len(trimmed) > 500:
+            raise ValueError("reason must be at most 500 characters")
         return trimmed
 
 

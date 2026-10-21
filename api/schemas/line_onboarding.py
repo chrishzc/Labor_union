@@ -32,7 +32,7 @@ class PreviewLineOnboardingView(_StrictModel):
 class UpdateLineOnboardingRequest(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
     expected_revision: int = Field(ge=0)
-    reason: str = Field(default="更新新好友歡迎訊息", min_length=1, max_length=200)
+    reason: str = Field(default="", max_length=200)
 
 
 __all__ = [

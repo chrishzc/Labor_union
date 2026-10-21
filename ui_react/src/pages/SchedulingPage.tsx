@@ -1,6 +1,4 @@
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from '../components/useSaveValidation';
 /**
  * File: SchedulingPage.tsx
  * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
@@ -239,22 +237,6 @@ async function loadStaffQueries<T, R>(items: readonly T[], signal: AbortSignal, 
   return results;
 }
 
-function holidayPreviewRequestsMatch(
-  current: HolidayPreviewRequest | null,
-  previewed: HolidayPreviewRequest | null,
-): boolean {
-  return Boolean(
-    current
-      && previewed
-      && current.action === previewed.action
-      && current.holiday_date === previewed.holiday_date
-      && current.holiday_name === previewed.holiday_name
-      && current.is_double_pay_default === previewed.is_double_pay_default
-      && current.from_date === previewed.from_date
-      && current.to_date === previewed.to_date,
-  );
-}
-
 function flowStateLabel(state: string): string {
   const labels: Record<string, string> = {
     idle: '尚未查詢',
@@ -273,14 +255,6 @@ function flowStateLabel(state: string): string {
     observation_failed: '最新結果待確認',
   };
   return labels[state] ?? '狀態待確認';
-}
-
-function holidayActionLabel(action: HolidayAction): string {
-  return action === 'delete' ? '刪除國定假日' : '新增或更新國定假日';
-}
-
-function holidayImpactLabel(impact: string): string {
-  return impact === 'none' ? '無影響' : impact;
 }
 
 function leaveInboxStatusLabel(status: LeaveInboxStatus): string {
@@ -302,9 +276,8 @@ function HolidayPolicyWorkspace() {
   const [holidayDate, setHolidayDate] = useState(todayIsoDate());
   const [holidayName, setHolidayName] = useState('');
   const [doublePay, setDoublePay] = useState(false);
-  const [reason, setReason] = useState('依核准政策維護國定假日');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
+  const [reason, setReason] = useState('');
+  const submittingRef = useRef(false);
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false);
   const [, setStoreRevision] = useState(0);
 
@@ -321,7 +294,7 @@ function HolidayPolicyWorkspace() {
   const calendar = draft?.calendar ?? null;
   const calendarMatchesHorizon = calendar?.planning_horizon.from_date === fromDate
     && calendar.planning_horizon.to_date === toDate;
-  const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading']
+  const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
     .includes(machine.type);
 
   const buildPreviewRequest = (
@@ -354,29 +327,12 @@ function HolidayPolicyWorkspace() {
     void queryHolidayFlow({ from_date: fromDate, to_date: toDate }).catch(() => undefined);
   };
 
-  const preview = () => {
-    const request = buildPreviewRequest();
-    if (!request || !calendarMatchesHorizon || busy) return;
-    setHolidayDraft(request);
-    void previewHolidayFlow(request).catch(() => undefined);
-  };
-
   const handleOpenEditDrawer = (holiday: HolidayRow) => {
     setAction('upsert');
     setHolidayDate(holiday.holiday_date);
     setHolidayName(holiday.holiday_name);
     setDoublePay(holiday.is_double_pay_default);
-    setReason(`調整 ${holiday.holiday_date} ${holiday.holiday_name} 國定假日政策`);
-    const request: HolidayPreviewRequest = {
-      action: 'upsert',
-      holiday_date: holiday.holiday_date,
-      holiday_name: holiday.holiday_name,
-      is_double_pay_default: holiday.is_double_pay_default,
-      from_date: fromDate,
-      to_date: toDate,
-    };
-    setHolidayDraft(request);
-    void previewHolidayFlow(request).catch(() => undefined);
+    setReason('');
     setHolidayDrawerOpen(true);
   };
 
@@ -385,31 +341,30 @@ function HolidayPolicyWorkspace() {
     setHolidayDate(todayIsoDate());
     setHolidayName('');
     setDoublePay(false);
-    setReason('新增國定假日政策');
+    setReason('');
     setHolidayDrawerOpen(true);
   };
 
-  const currentPreviewRequest = buildPreviewRequest();
-  const previewMatchesCurrentInputs = holidayPreviewRequestsMatch(
-    currentPreviewRequest,
-    draft?.previewRequest ?? null,
-  );
-  const previewNeedsRefresh = Boolean(
-    draft?.previewRequest && !draft.preview && machine.type === 'query_ready',
-  );
-
-  const apply = () => {
-    const previewResult = draft?.preview;
-    const previewRequest = draft?.previewRequest;
-    if (!previewResult || !previewRequest || !previewMatchesCurrentInputs || !calendarMatchesHorizon || busy) return;
-    if (!saveValidation.validate([{ value: reason, label: '國定假日維護原因', ref: saveFieldRef }])) return;
-    const request: HolidayApplyRequest = {
-      ...previewRequest,
-      expected_calendar_version: previewResult.command.expected_calendar_version,
-      preview_fingerprint: previewResult.preview_fingerprint,
-      reason: reason.trim(),
-    };
-    void applyHolidayFlow(request).catch(() => undefined);
+  const apply = async () => {
+    const previewRequest = buildPreviewRequest();
+    if (!previewRequest || busy || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      await queryHolidayFlow({ from_date: previewRequest.from_date!, to_date: previewRequest.to_date! });
+      setHolidayDraft(previewRequest);
+      const prepared = await previewHolidayFlow(previewRequest);
+      const request: HolidayApplyRequest = {
+        ...previewRequest,
+        expected_calendar_version: prepared.command.expected_calendar_version,
+        preview_fingerprint: prepared.preview_fingerprint,
+        reason: reason.trim(),
+      };
+      await applyHolidayFlow(request);
+    } catch {
+      // The flow store retains typed failures and the original command for safe retry.
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   const error = draft?.error;
@@ -421,7 +376,7 @@ function HolidayPolicyWorkspace() {
     <section className="holiday-policy-workspace" data-surface-id="scheduling.holiday-policy">
       <header className="holiday-policy-header">
         <div>
-          <p className="holiday-policy-kicker">查詢政策 → 檢查影響 → 確認套用 → 回讀結果</p>
+          <p className="holiday-policy-kicker">編輯政策 → 儲存 → 回讀結果</p>
           <h2>🗓️ 國定假日與預設政策管理</h2>
           <p>雙薪預設與變更結果採用正式政策資料，點擊「編輯」開啟抽屜進行修改或刪除。</p>
         </div>
@@ -604,9 +559,9 @@ function HolidayPolicyWorkspace() {
               設為預設雙薪（200% 薪資計算）
             </label>
 
-            <><label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-              變更原因與審核註記
-              <textarea ref={saveFieldRef} aria-required="true"
+            <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
+              變更原因與審核註記（選填）
+              <textarea
                 aria-label="套用原因"
                 value={reason}
                 maxLength={500}
@@ -614,56 +569,25 @@ function HolidayPolicyWorkspace() {
                 onChange={(event) => setReason(event.target.value)}
                 style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.88rem', minHeight: '68px' }}
               />
-            </label>{saveValidation.feedback}</>
+            </label>
           </div>
 
-          {/* 預覽與套用控制列 */}
+          {/* 儲存控制列 */}
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="scheduling-action"
-              data-control-id="scheduling.holiday.preview"
-              disabled={!calendarMatchesHorizon || !buildPreviewRequest() || busy}
-              onClick={preview}
-              style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', border: '1px solid', fontWeight: 700, cursor: 'pointer' }}
-            >
-              {machine.type === 'preview_loading' ? '⏳ 預覽中…' : '預覽國定假日變更'}
-            </button>
             <button
               type="button"
               className={action === 'delete' ? 'scheduling-danger' : 'scheduling-action'}
               data-control-id="scheduling.holiday.apply"
-              aria-describedby={previewNeedsRefresh || !calendarMatchesHorizon ? 'scheduling-holiday-apply-guidance' : undefined}
-              disabled={!draft?.preview || !previewMatchesCurrentInputs || !calendarMatchesHorizon || busy}
-              onClick={apply}
+              disabled={!buildPreviewRequest() || busy}
+              onClick={() => void apply()}
               style={{ flex: 1, padding: '10px 16px', fontSize: '0.92rem', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)' }}
             >
-              {machine.type === 'apply_pending' || machine.type === 'requery_loading' ? '⏳ 套用中…' : '套用國定假日變更'}
+              {busy ? '⏳ 處理中…' : action === 'delete' ? '刪除國定假日' : '儲存國定假日變更'}
             </button>
           </div>
 
           {calendar && !calendarMatchesHorizon && (
-            <small className="holiday-policy-notice">查詢區間已變更，請重新查詢政策後再檢查變更影響。</small>
-          )}
-          {(previewNeedsRefresh || !calendarMatchesHorizon) && (
-            <small id="scheduling-holiday-apply-guidance" className="holiday-policy-notice">
-              查詢區間或變更內容已調整；請重新查詢並檢查最新影響，才能套用。
-            </small>
-          )}
-
-          {/* 預覽結果卡片 */}
-          {draft?.preview && (
-            <section className="holiday-policy-preview" aria-label="國定假日變更預覽" style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '14px 16px', color: '#166534' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '0.95rem', fontWeight: 700, color: '#15803d' }}>
-                預覽已產生
-              </h3>
-              <p style={{ margin: '0 0 4px 0', fontSize: '0.86rem' }}>
-                <strong>變更：</strong>{holidayActionLabel(draft.preview.command.action)} ｜ <strong>日期：</strong>{draft.preview.command.holiday_date}
-              </p>
-              <p style={{ margin: 0, fontSize: '0.86rem' }}>
-                <strong>排班影響：</strong>{holidayImpactLabel(draft.preview.schedule_impact)} ｜ <strong>薪資影響：</strong>{holidayImpactLabel(draft.preview.payroll_impact)}
-              </p>
-            </section>
+            <small className="holiday-policy-notice">顯示的政策屬於先前查詢區間；儲存時會查詢目前區間的最新政策。</small>
           )}
 
           {/* Receipt 結果提示 */}
@@ -723,10 +647,8 @@ function LeaveSubstitutionWorkspace({
   const [substituteStaffId, setSubstituteStaffId] = useState<number | null>(null);
   const [isDoublePay, setIsDoublePay] = useState(false);
   const [replacementWorkDate, setReplacementWorkDate] = useState('');
-  const [reason, setReason] = useState('正式處理請假代班');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [reason, setReason] = useState('');
+  const submittingRef = useRef(false);
   const [, setStoreRevision] = useState(0);
 
   // LINE 請假待辦收件匣狀態
@@ -774,7 +696,7 @@ function LeaveSubstitutionWorkspace({
     try {
       let selectedItem = item;
       if (item.request_status === 'pending') {
-        const receipt = await staffLeaveInboxClient.review(item, 'accept', '調度員已受理，正在安排代班');
+        const receipt = await staffLeaveInboxClient.review(item, 'accept', inboxReasonById[item.id]?.trim() ?? '');
         selectedItem = {
           ...item,
           request_status: receipt.status,
@@ -784,7 +706,7 @@ function LeaveSubstitutionWorkspace({
         await loadInbox();
       }
       setSelectedInboxItem(selectedItem);
-      setReason(`依 LINE 請假待辦（${staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)} ${item.leave_start_date}～${item.leave_end_date}）安排代班`);
+      setReason('');
       // 若當前案件指派中有該月嫂，自動選中該 assignment
       const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
       if (matchedAssignment) {
@@ -799,11 +721,7 @@ function LeaveSubstitutionWorkspace({
   };
 
   const handleRejectInbox = async (item: LeaveInboxItem) => {
-    const rejectReason = inboxReasonById[item.id]?.trim();
-    if (!rejectReason) {
-      setInboxError('退回申請請先填寫審核原因。');
-      return;
-    }
+    const rejectReason = inboxReasonById[item.id]?.trim() ?? '';
     setInboxBusy(true);
     setInboxError(null);
     try {
@@ -821,11 +739,7 @@ function LeaveSubstitutionWorkspace({
   };
 
   const handleCancelInbox = async (item: LeaveInboxItem) => {
-    const cancelReason = inboxReasonById[item.id]?.trim();
-    if (!cancelReason) {
-      setInboxError('取消待辦請先填寫原因。');
-      return;
-    }
+    const cancelReason = inboxReasonById[item.id]?.trim() ?? '';
     setInboxBusy(true);
     setInboxError(null);
     try {
@@ -1027,7 +941,6 @@ function LeaveSubstitutionWorkspace({
   };
 
   const invalidatePreview = () => {
-    setConfirmed(false);
     const request = buildPreviewRequest();
     if (request && normalizedCaseNo && draft?.assignments) {
       setLeaveSubstitutionDraft(normalizedCaseNo, request);
@@ -1036,38 +949,39 @@ function LeaveSubstitutionWorkspace({
 
   const query = () => {
     if (!normalizedCaseNo || busy) return;
-    setConfirmed(false);
     void loadInbox();
     void queryLeaveSubstitutionFlow(normalizedCaseNo).catch(() => undefined);
   };
 
-  const preview = () => {
-    const request = buildPreviewRequest();
-    if (!request || !normalizedCaseNo || busy) return;
-    setConfirmed(false);
-    setLeaveSubstitutionDraft(normalizedCaseNo, request);
-    void previewLeaveSubstitutionFlow(normalizedCaseNo).catch(() => undefined);
-  };
-
-  const apply = () => {
-    if (!draft?.preview || !draft.previewRequest || !confirmed || busy) return;
-    if (!saveValidation.validate([{ value: reason, label: '請假代班處理原因', ref: saveFieldRef }])) return;
-    const request: LeaveSubstitutionApplyRequest = {
-      ...draft.previewRequest,
-      expected_order_version: draft.preview.order_version,
-      expected_scheduling_version: draft.preview.scheduling_version,
-      expected_client_finance_version: draft.preview.client_finance_version,
-      expected_payroll_version: draft.preview.payroll_version,
-      preview_fingerprint: draft.preview.preview_fingerprint,
-      reason: reason.trim(),
-    };
-    void applyLeaveSubstitutionFlow(normalizedCaseNo, request).catch(() => undefined);
+  const apply = async () => {
+    const previewRequest = buildPreviewRequest();
+    if (!previewRequest || !normalizedCaseNo || busy || submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      setLeaveSubstitutionDraft(normalizedCaseNo, previewRequest);
+      const prepared = await previewLeaveSubstitutionFlow(normalizedCaseNo);
+      if (prepared.apply_readiness.status !== 'ready') return;
+      const request: LeaveSubstitutionApplyRequest = {
+        ...previewRequest,
+        expected_order_version: prepared.order_version,
+        expected_scheduling_version: prepared.scheduling_version,
+        expected_client_finance_version: prepared.client_finance_version,
+        expected_payroll_version: prepared.payroll_version,
+        preview_fingerprint: prepared.preview_fingerprint,
+        reason: reason.trim(),
+      };
+      await applyLeaveSubstitutionFlow(normalizedCaseNo, request);
+    } catch {
+      // The flow store retains typed failures and the original command for safe retry.
+    } finally {
+      submittingRef.current = false;
+    }
   };
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
   const defaultScheduleId = (selectedAssignment ?? assignments[0])?.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null;
-  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason, '已核對': confirmed }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '雙倍薪資': false, '補班日': '', '原因': '正式處理請假代班', '已核對': false }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '雙倍薪資': false, '補班日': '', '原因': '' }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
   useUnsavedDraft('LINE 請假申請處理', Object.fromEntries(inboxItems.filter(item => item.request_status === 'pending').map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, inboxReasonById[item.id] ?? ''])), { baseline: Object.fromEntries(inboxItems.map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, ''])), busy: inboxBusy });
 
 
@@ -1075,9 +989,9 @@ function LeaveSubstitutionWorkspace({
     <section className="leave-substitution-workspace" data-surface-id="scheduling.leave-substitution">
       <header className="leave-substitution-header">
         <div>
-          <p className="leave-substitution-kicker">查詢排班 → 檢查代班影響 → 人工確認 → 回讀結果</p>
+          <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 回讀結果</p>
           <h2>🚑 服務中請假與緊急代班調度工作台</h2>
-          <p>整合 LINE 待辦與電話／口頭請假；先檢查排班及相關影響，再由管理員確認代班安排。</p>
+          <p>整合 LINE 待辦與電話／口頭請假；選好代班安排後即可儲存，系統會檢查排班及相關條件。</p>
         </div>
         <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
       </header>
@@ -1177,7 +1091,10 @@ function LeaveSubstitutionWorkspace({
                   {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') && (
                     <>
                       <input
-                        placeholder="退回／取消原因說明…"
+                        placeholder="處理原因（選填）"
+                        aria-label="請假待辦處理原因（選填）"
+                        maxLength={500}
+                        disabled={inboxBusy}
                         value={inboxReasonById[item.id] ?? ''}
                         onChange={(e) => setInboxReasonById((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         style={{ padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #dec0b6', width: '130px' }}
@@ -1249,7 +1166,7 @@ function LeaveSubstitutionWorkspace({
             className="scheduling-action"
             onClick={() => {
               setSelectedInboxItem(null);
-              setReason('正式處理請假代班');
+              setReason('');
             }}
             style={{ padding: '5px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
           >
@@ -1273,9 +1190,8 @@ function LeaveSubstitutionWorkspace({
                 setCaseNo(event.target.value);
                 setAssignmentId(null);
                 setScheduleId(null);
-                setConfirmed(false);
                 setSelectedInboxItem(null);
-                setReason('正式處理請假代班');
+                setReason('');
               }}
               style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
             >
@@ -1469,61 +1385,31 @@ function LeaveSubstitutionWorkspace({
 
       {assignments.length > 0 && (
         <div className="leave-substitution-actions">
-          <button
-            type="button"
-            data-control-id="scheduling.leave.preview"
-            disabled={!buildPreviewRequest() || busy}
-            onClick={preview}
-          >
-            {machine.type === 'preview_loading' ? '⏳ 正在檢查影響…' : '🔍 檢查代班影響'}
-          </button>
-          {!draft?.preview && (
-            <small data-control-id="scheduling.leave.apply-gate" style={{ color: '#74593f' }}>
-              完成影響檢查後，才會顯示人工確認與套用按鈕。
-            </small>
-          )}
-        </div>
-      )}
-
-      {draft?.preview && (
-        <section className="leave-substitution-preview" aria-label="請假代班預覽">
-          <h3>代班影響檢查結果</h3>
-          <dl>
-            <div><dt>檢核結果</dt><dd>{draft.preview.apply_readiness.status === 'ready' ? '可以執行' : '目前無法執行'}</dd></div>
-            <div><dt>取消指派</dt><dd>{draft.preview.cancelled_assignment_ids.join('、') || '無'}</dd></div>
-            <div><dt>結果日</dt><dd>{draft.preview.outcomes.map((item) => item.resulting_service_date).join('、')}</dd></div>
-            {draft.preview.linked_request && (
-              <div>
-                <dt>LINE 請假待辦</dt>
-                <dd>已關聯請假待辦｜已受理處理</dd>
-              </div>
-            )}
-          </dl>
-          {draft.preview.apply_readiness.blockers.length > 0 && (
-            <p className="leave-substitution-notice error">{draft.preview.apply_readiness.blockers.join('、')}</p>
-          )}
-          <><label>
-            處理原因
-            <textarea ref={saveFieldRef} aria-required="true"
+          <label>
+            處理原因（選填）
+            <textarea
               aria-label="請假代班處理原因"
               value={reason}
               maxLength={500}
               disabled={busy}
               onChange={(event) => setReason(event.target.value)}
             />
-          </label>{saveValidation.feedback}</>
-          <label className="leave-substitution-check confirm">
-            <input type="checkbox" checked={confirmed} disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />
-            我已核對上述代班影響，確認執行此變更
           </label>
           <button
             type="button"
             data-control-id="scheduling.leave.apply"
-            disabled={busy || !confirmed || draft.preview.apply_readiness.status !== 'ready'}
-            onClick={apply}
+            disabled={!buildPreviewRequest() || busy}
+            onClick={() => void apply()}
           >
-            {machine.type === 'apply_pending' || machine.type === 'requery_loading' ? '⏳ 套用並確認中…' : '🔒 確認套用代班變更'}
+            {busy ? '⏳ 處理中…' : '儲存代班變更'}
           </button>
+        </div>
+      )}
+
+      {draft?.preview && draft.preview.apply_readiness.status !== 'ready' && (
+        <section className="leave-substitution-notice error" aria-label="請假代班檢核結果" role="alert">
+          <h3>目前無法儲存代班變更</h3>
+          <p>{draft.preview.apply_readiness.blockers.join('、')}</p>
         </section>
       )}
 

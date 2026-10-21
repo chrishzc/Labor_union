@@ -112,8 +112,6 @@ class HistoricalRestartArrangementWorkflow:
         reason: str,
         correlation_id: str,
     ) -> HistoricalRestartArrangementReceipt:
-        if not reason.strip():
-            raise ValueError("historical_arrangement_reason_required")
         command_fingerprint = fingerprint_payload({
             "case_no": case_no,
             "segments": _segment_payload(segments),

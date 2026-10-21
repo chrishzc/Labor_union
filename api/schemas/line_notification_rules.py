@@ -161,11 +161,11 @@ class ApplyLineNotificationManualReplayView(_ClosedModel):
 class _MutationRequest(_ClosedModel):
     expected_revision: StrictInt = Field(ge=0)
     preview_fingerprint: Sha256Hex
-    reason: StrictStr = Field(min_length=1, max_length=1_000)
+    reason: StrictStr = Field(default="", max_length=1_000)
     idempotency_key: StrictStr = Field(min_length=1, max_length=191)
     correlation_id: StrictStr = Field(min_length=1, max_length=191)
 
-    @field_validator("reason", "idempotency_key", "correlation_id")
+    @field_validator("idempotency_key", "correlation_id")
     @classmethod
     def reject_blank_text(cls, value: str) -> str:
         if not value.strip():
@@ -218,12 +218,11 @@ class UpdateLineNotificationMessageTemplateRequest(_ClosedModel):
     content: StrictStr = Field(min_length=1, max_length=5_000)
     expected_revision: StrictInt = Field(ge=0)
     reason: StrictStr = Field(
-        default="更新通知規則訊息內容",
-        min_length=1,
+        default="",
         max_length=200,
     )
 
-    @field_validator("content", "reason")
+    @field_validator("content")
     @classmethod
     def reject_blank_template_text(cls, value: str) -> str:
         if not value.strip():
@@ -232,11 +231,11 @@ class UpdateLineNotificationMessageTemplateRequest(_ClosedModel):
 
 
 class ApplyLineNotificationManualReplayRequest(BaseModel):
-    reason: str = Field(min_length=1, max_length=1_000)
+    reason: str = Field(default="", max_length=1_000)
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
 
-    @field_validator("reason", "idempotency_key", "correlation_id")
+    @field_validator("idempotency_key", "correlation_id")
     @classmethod
     def reject_blank_text(cls, value: str) -> str:
         if not value.strip():

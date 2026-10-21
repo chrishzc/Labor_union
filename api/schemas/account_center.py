@@ -19,26 +19,26 @@ class AccountCreateRequest(_ClosedModel):
     password: str = Field(min_length=10, max_length=256)
     display_name: str = Field(min_length=1, max_length=100)
     linked_line_user_id: str | None = Field(default=None, max_length=100)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=191)
 
 
 class AccountEnabledRequest(_ClosedModel):
     enabled: bool
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_version: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1, max_length=191)
 
 
 class AccountPasswordResetRequest(_ClosedModel):
     password: str = Field(min_length=10, max_length=256)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_version: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1, max_length=191)
 
 
 class AccountSecurityActionRequest(_ClosedModel):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_version: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1, max_length=191)
 

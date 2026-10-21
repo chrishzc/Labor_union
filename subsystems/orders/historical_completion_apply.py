@@ -75,7 +75,7 @@ class ApplyHistoricalCompletion:
         require_nonnegative_integer(
             self.expected_client_finance_version, "expected client finance version"
         )
-        require_canonical_text(self.reason, "historical completion reason", 500)
+        require_canonical_text(self.reason, "historical completion reason", 500, allow_empty=True)
         if not isinstance(self.expected_source_versions, tuple):
             raise TypeError("expected source versions must be a tuple")
         if any(
@@ -225,7 +225,7 @@ class ApplyHistoricalServiceCompletion:
         require_nonnegative_integer(self.expected_order_version, "expected order version")
         if type(self.evaluation_date) is not date:
             raise TypeError("historical completion evaluation date is invalid")
-        require_canonical_text(self.reason, "historical service completion reason", 500)
+        require_canonical_text(self.reason, "historical service completion reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

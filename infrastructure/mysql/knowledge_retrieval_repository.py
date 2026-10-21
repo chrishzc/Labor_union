@@ -129,7 +129,7 @@ def _validate_compatibility_command(
     }[command.action]
     if not any(has_required_capability(actor, item) for item in capabilities):
         raise KnowledgeCommandError("insufficient_capability")
-    if not all((command.reason.strip(), command.idempotency_key.strip(), command.correlation_id.strip())):
+    if not all((command.idempotency_key.strip(), command.correlation_id.strip())):
         raise KnowledgeCommandError("knowledge_command_invalid")
     if command.action == "ingest":
         if command.expected_version != 0:

@@ -34,7 +34,7 @@ class FinanceImportApplyRequest:
     idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; correlation_id: CorrelationId
     def __post_init__(self):
         require_canonical_text(self.batch_identity, "finance import batch identity", _IDENTITY_MAXIMUM_LENGTH)
-        require_canonical_text(self.reason, "finance import apply reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "finance import apply reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

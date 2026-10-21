@@ -83,7 +83,7 @@ class ReplacementReasonEvidence:
     evidence_references: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "replacement reason", _REASON_MAX)
+        require_canonical_text(self.reason, "replacement reason", _REASON_MAX, allow_empty=True)
         _validate_text_tuple(self.evidence_references, "replacement evidence reference", _IDENTITY_MAX)
 
     @property
@@ -373,7 +373,7 @@ class ServiceBeforeReplacementFacts:
         require_canonical_text(self.prior_case_no, "prior case number", _CASE_MAX)
         if self.prior_case_no != self.case_no:
             raise ServiceBeforeReplacementError("replacement_prior_case_mismatch")
-        require_canonical_text(self.replacement_reason, "replacement reason", _REASON_MAX)
+        require_canonical_text(self.replacement_reason, "replacement reason", _REASON_MAX, allow_empty=True)
         _validate_text_tuple(self.reason_evidence, "replacement evidence reference", _IDENTITY_MAX)
         if self.successor_round is not None:
             if not isinstance(self.successor_round, SuccessorRoundFact):

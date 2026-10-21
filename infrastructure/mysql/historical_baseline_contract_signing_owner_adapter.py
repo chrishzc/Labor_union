@@ -685,7 +685,7 @@ def _validate_legacy_manual(rows, case_no, kind):
             or payload is None
             or payload.get("command") != expected_command
             or payload.get("confirmation_method") not in _MANUAL_CONFIRMATION_METHODS
-            or not _text(payload.get("reason"))
+            or not isinstance(payload.get("reason"), str)
             or not _text(payload.get("correlation_id"))
             or payload.get("correlation_id") != row.get("correlation_id")
             or not _text(row.get("actor"))

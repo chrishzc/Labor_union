@@ -67,7 +67,6 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, kind, re
   onSubmit: (command: CandidateInformationSendCommand) => Promise<boolean | undefined>; onClose: () => void;
   onBusyChange: (busy: boolean) => void; onViewInformation: (kind: CandidateInformationKind) => void; sendError?: string | null;
 }) {
-  const [command, setCommand] = useState<CandidateInformationSendCommand | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsDates, setNeedsDates] = useState(false);
@@ -79,7 +78,7 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, kind, re
   useEffect(() => { heading.current?.focus(); heading.current?.scrollIntoView({ block: 'nearest' }); }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setCommand(null); setError(null); setNeedsDates(false); setBusy(true);
+    setError(null); setNeedsDates(false); setBusy(true);
     void (async () => {
       try {
         const [preview, fresh] = await Promise.all([
@@ -93,27 +92,20 @@ export function OrderCandidateInformationSendPanel({ caseNo, candidate, kind, re
         const bound = await candidateContactPoolClient.previewInformation(caseNo, candidate.id, kind, { signal: controller.signal });
         if (controller.signal.aborted) return;
         if (JSON.stringify(bound.line_sections) !== JSON.stringify(preview.line_sections)) throw new Error('訂單內容已更新，請重新查看這份資訊後再寄送。');
-        setCommand(createCandidateInformationSendCommand(caseNo, candidate.id, kind, bound.preview_fingerprint));
+        const command = createCandidateInformationSendCommand(caseNo, candidate.id, kind, bound.preview_fingerprint);
+        if (await onSubmit(command)) onClose();
       } catch (reason) { if (!controller.signal.aborted) setError(errorText(reason)); }
       finally { if (!controller.signal.aborted) setBusy(false); }
     })();
     return () => controller.abort();
   }, [caseNo, candidate.id, kind, revision]);
-  const send = async () => {
-    if (!command || busy || blocked) return;
-    setBusy(true); setError(null);
-    try { if (await onSubmit(command)) onClose(); }
-    catch (reason) { if (mounted.current) setError(errorText(reason)); }
-    finally { if (mounted.current) setBusy(false); }
-  };
-  return <section className="candidate-information-send" aria-label="寄送前確認">
+  return <section className="candidate-information-send" aria-label="寄送資訊">
     <h4 ref={heading} tabIndex={-1}>寄送{CANDIDATE_INFORMATION_LABELS[kind]}</h4>
     <p>收件月嫂：{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}；案件：{caseNo}。本次只寄送這一份資訊。</p>
     {busy && <p role="status">正在處理寄送資訊…</p>}
     {needsDates && <p role="status">請先在「查看這份內容」完成並保存預計日期，才能寄送每週服務說明。</p>}
     {error && <p role="alert">{error}</p>}{sendError && <p role="alert">{sendError}</p>}
     <div className="order-case-action-row">
-      <button type="button" className="btn-primary-action" disabled={busy || blocked || !command} onClick={() => void send()}>確認寄送{CANDIDATE_INFORMATION_LABELS[kind]}</button>
       <button type="button" disabled={busy || blocked} onClick={() => onViewInformation(kind)}>查看這份內容</button>
       <button type="button" disabled={busy} onClick={onClose}>取消寄送</button>
     </div>

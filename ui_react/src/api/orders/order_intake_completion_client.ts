@@ -340,7 +340,7 @@ export function intakeRepairErrorMessage(error: unknown): string {
       return '訂單資料版本已變更，請重新檢查缺件後再套用。';
     }
     if (error.status === 422) {
-      return '補件資料不合法，請確認日期、服務天數、姓名與必填原因。';
+      return '補件資料不合法，請確認日期、服務天數、姓名。';
     }
     const blockers = domainBlockers(error);
     if (blockers.length > 0) {

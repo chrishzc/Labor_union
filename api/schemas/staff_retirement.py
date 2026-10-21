@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class StaffLifecycleTransitionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     effective_at: datetime
-    reason_code: str = Field(min_length=1, max_length=64)
+    reason_code: str = Field(default="", max_length=64)
 
     @field_validator("effective_at")
     @classmethod

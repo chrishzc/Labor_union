@@ -31,10 +31,10 @@ export const ReasonSchema = z
   .refine(
     (val) => {
       const trimmed = val.trim();
-      return trimmed.length >= 1 && trimmed.length <= 500 && val.length <= 500;
+      return trimmed.length <= 500 && val.length <= 500;
     },
     {
-      message: '原因必須為 1 至 500 字元且不可為純空白字串',
+      message: '原因最多 500 字元',
     }
   );
 

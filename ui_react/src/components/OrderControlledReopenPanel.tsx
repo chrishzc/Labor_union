@@ -1,5 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useSaveValidation } from './useSaveValidation';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
@@ -16,6 +15,7 @@ interface Props {
 
 export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
   const [, setRevision] = useState(0);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const previewController = useRef<AbortController | null>(null);
   const actionInFlight = useRef(false);
@@ -42,6 +42,9 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
     try {
       const result = await previewReopenFlow(caseNo, { signal: controller.signal });
       if (result.case_no !== caseNo) throw new Error('受控重開預覽案件識別不一致。');
+      if (controller.signal.aborted || !mounted.current) return;
+      updateReopenReason(caseNo, reason.trim());
+      await apply();
     } catch (caught) {
       if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : '受控重開預覽失敗。');
     }
@@ -59,17 +62,15 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
     }
   };
 
-  const saveValidation = useSaveValidation();
-  const reasonRef = useRef<HTMLTextAreaElement>(null);
 
   const apply = async (retry: 'apply' | 'observation' | null = null) => {
     if (actionInFlight.current || inFlight) return;
-    if (retry !== 'observation' && draft?.previewView?.case_no !== caseNo) {
+    const current = orderMutationFlowStore.getReopenDraft(caseNo);
+    if (retry !== 'observation' && current?.previewView?.case_no !== caseNo) {
       setError('請先取得同一案件的有效重開預覽。');
       return;
     }
-    if (retry === null && status !== 'preview_ready') return;
-    if (retry === null && !saveValidation.validate([{ value: draft?.reason, label: '受控重開原因', ref: reasonRef }])) return;
+    if (retry === null && current?.status !== 'preview_ready') return;
     actionInFlight.current = true;
     setError(null);
     onBusyChange?.(true);
@@ -88,26 +89,21 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
       }
     }
   };
-  useUnsavedDraft('受控重開案件', { '重開原因': draft?.reason ?? '' }, { baseline: { '重開原因': '' }, enabled: status !== 'observed', busy: unresolved });
+  useUnsavedDraft('受控重開案件', { '重開原因': reason }, { baseline: { '重開原因': '' }, enabled: status !== 'observed', busy: unresolved });
 
 
   return (
     <section aria-label={`案件 ${caseNo} 受控重開`}>
       <h4>受控重開取消案件</h4>
       <p>只重開正式案件狀態；不恢復舊指派、舊排班或舊檔期鎖，必須重新完成 Scheduling 預覽。</p>
-      <button type="button" disabled={unresolved || status === 'preview_loading'} onClick={() => void preview()}>檢查受控重開影響</button>
+      <label>重開原因（選填）<textarea aria-label="Beta 受控重開原因" maxLength={500} value={reason} disabled={unresolved || status === 'preview_loading'} onChange={event => setReason(event.target.value)} /></label>
+      <button type="button" disabled={unresolved || status === 'preview_loading'} onClick={() => void preview()}>重開訂單</button>
       {status === 'preview_loading' && <p role="status">檢查受控重開中…</p>}
       {draft?.previewView && (
         <>
           <p>{draft.previewView.before_status} → {draft.previewView.after_status}</p>
           <p>取消事件：#{draft.previewView.cancellation_event_id}</p>
-          <><label>重開原因
-            <textarea ref={reasonRef} aria-required="true" aria-label="Beta 受控重開原因" maxLength={500} value={draft.reason} disabled={unresolved}
-              onChange={(event) => updateReopenReason(caseNo, event.target.value)} />
-          </label>{saveValidation.feedback}</>
-          {status === 'preview_ready' && (
-            <button type="button" disabled={draft.previewView.case_no !== caseNo} onClick={() => void apply()}>確認受控重開</button>
-          )}
+
         </>
       )}
       {inFlight && <p role="status">受控重開／正式回讀中，請勿切換操作。</p>}

@@ -103,7 +103,7 @@ class ConfirmedServiceDay:
         if self.reason is not None:
             require_canonical_text(
                 self.reason, "service-day reason", _REASON_MAXIMUM_LENGTH
-            )
+            , allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,10 +228,6 @@ def _validate_confirmed_day(order, cancellation_date, item, existing_owners):
         )
     if existing_owners.get(item.service_date) == item.staff_id:
         return
-    if item.reason is None:
-        raise CancellationCandidateError(
-            CancellationBlocker.SERVICE_DAY_REASON_REQUIRED
-        )
 
 
 def _validate_existing_assignments(assignments) -> None:

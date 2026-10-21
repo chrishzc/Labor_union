@@ -13,7 +13,7 @@ const PreviewSchema = z.strictObject({
 });
 
 const ApplyRequestSchema = z.strictObject({
-  reason: z.string().trim().min(1).max(1_000),
+  reason: z.string().trim().max(1_000),
   idempotency_key: z.string().trim().min(1).max(191),
   correlation_id: z.string().trim().min(1).max(191),
 });

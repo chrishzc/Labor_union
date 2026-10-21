@@ -465,6 +465,9 @@ export function OrderIntakeRepairPanel({
       if (controller.signal.aborted) return;
       if (preview.case_no !== caseNo) throw new Error('姓名補件預覽案件識別不一致。');
       setNamePreview(preview);
+      if (preview.apply_allowed) await runApply({
+        operation: 'client_name', preview, reason: reason.trim(), idempotencyKey: operationKey(caseNo, 'client-name'),
+      });
     } catch (caught) {
       if (controller.signal.aborted) return;
       setNamePreview(null);
@@ -474,13 +477,6 @@ export function OrderIntakeRepairPanel({
     }
   };
 
-  const applyName = async () => {
-    if (!namePreview) return;
-    await runApply({
-      operation: 'client_name', preview: namePreview, reason: reason.trim(),
-      idempotencyKey: operationKey(caseNo, 'client-name'),
-    });
-  };
 
   const previewTerms = async () => {
     if (protectedFlow) return;
@@ -516,6 +512,9 @@ export function OrderIntakeRepairPanel({
       if (controller.signal.aborted) return;
       if (preview.case_no !== caseNo) throw new Error('日期／天數補件預覽案件識別不一致。');
       setTermsPreview(preview);
+      if (preview.apply_allowed) await runApply({
+        operation: 'terms', preview, reason: reason.trim(), idempotencyKey: operationKey(caseNo, 'terms'),
+      });
     } catch (caught) {
       if (controller.signal.aborted) return;
       setTermsPreview(null);
@@ -525,13 +524,6 @@ export function OrderIntakeRepairPanel({
     }
   };
 
-  const applyTerms = async () => {
-    if (!termsPreview) return;
-    await runApply({
-      operation: 'terms', preview: termsPreview, reason: reason.trim(),
-      idempotencyKey: operationKey(caseNo, 'terms'),
-    });
-  };
 
   const applyCompletion = async () => {
     if (!completion || !completion.apply_allowed || completion.missing_fields.length > 0) return;
@@ -690,21 +682,14 @@ export function OrderIntakeRepairPanel({
                 />
               </label>
               <button type="button" className="btn-secondary-action" disabled={controlsLocked || !clientName.trim()} onClick={() => void previewName()}>
-                {operation === 'name-preview' ? '正在檢查姓名補件…' : '檢查姓名補件影響'}
+                {operation === 'name-preview' ? '正在儲存姓名…' : '儲存姓名'}
               </button>
               {namePreview && (
                 <div style={{ display: 'grid', gap: '6px' }}>
                   {namePreview.blockers.length > 0
                     ? <div role="status" style={{ color: '#991b1b' }}>{namePreview.blockers.map(intakeBlockerMessage).join('；')}</div>
                     : <div role="status">姓名：{namePreview.before_client_name || '未登錄'} → {namePreview.after_client_name}</div>}
-                  <button
-                    type="button"
-                    className="btn-primary-action"
-                    disabled={controlsLocked || !namePreview.apply_allowed}
-                    onClick={() => void applyName()}
-                  >
-                    {operation === 'name-apply' ? '正在儲存姓名…' : '確認儲存姓名'}
-                  </button>
+
                 </div>
               )}
             </div>
@@ -716,7 +701,7 @@ export function OrderIntakeRepairPanel({
           )}
           {termsRepairAllowed && (
             <div style={{ borderTop: '1px solid #fed7aa', paddingTop: '10px', display: 'grid', gap: '6px' }}>
-              {missingServiceTime && <div hidden={registry && termsPreview !== null}>
+              {missingServiceTime && <div >
                 <strong>補齊服務時間</strong>
                 <div className="order-intake-time-fields" style={registry ? undefined : { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '8px' }}>
                   <label>每日開始時間<input data-intake-field="service_time" type="time" step="1800" value={startTime} disabled={controlsLocked} onChange={(event) => {
@@ -748,8 +733,8 @@ export function OrderIntakeRepairPanel({
                   <input data-intake-field="service_days" type="number" min="1" value={serviceDays} style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} disabled={controlsLocked} onChange={(event) => { setServiceDays(event.target.value); setTermsPreview(null); }} />
                 </label>}
               </div>
-              {(!registry || !termsPreview) && <button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
-                {operation === 'terms-preview' ? '正在預覽服務資料變更…' : missingServiceTime ? '預覽服務資料變更' : '預覽日期與天數變更'}
+              {<button type="button" className="btn-secondary-action" disabled={controlsLocked || !startDate || Number(serviceDays) <= 0} onClick={() => void previewTerms()}>
+                {operation === 'terms-preview' ? '正在儲存服務資料…' : missingServiceTime ? '儲存服務資料' : '儲存日期與天數'}
               </button>}
               {termsPreview && (
                 <div style={{ display: 'grid', gap: '6px' }}>
@@ -766,14 +751,7 @@ export function OrderIntakeRepairPanel({
                   </dl><p>儲存後重新檢查案件狀態與目前待辦。</p></div>}
                   {!registry && termsPreview.after_service_time && <p role="status">服務時間：{termsPreview.before_service_time?.start_time?.slice(0, 5) ?? '未填'}～{termsPreview.before_service_time?.end_time?.slice(0, 5) ?? '未填'}（{termsPreview.before_service_time?.service_hours_per_day ?? '未填'} 小時） → {termsPreview.after_service_time.start_time.slice(0, 5)}～{termsPreview.after_service_time.end_time.slice(0, 5)}（{termsPreview.after_service_time.end_day_offset === 1 ? '隔日，' : ''}{termsPreview.after_service_time.service_hours_per_day} 小時）</p>}
                   {registry && <button type="button" className="btn-secondary-action" disabled={controlsLocked} onClick={() => setTermsPreview(null)}>返回修改</button>}
-                  <button
-                    type="button"
-                    className="btn-primary-action"
-                    disabled={controlsLocked || !termsPreview.apply_allowed}
-                    onClick={() => void applyTerms()}
-                  >
-                    {operation === 'terms-apply' ? '正在儲存服務資料…' : termsPreview.after_service_time ? '確認儲存服務資料' : '確認儲存日期與天數'}
-                  </button>
+
                 </div>
               )}
             </div>

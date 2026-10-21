@@ -127,14 +127,14 @@ class FinanceImportJobAcceptedView(_StrictModel):
 class FinanceImportBatchApplyBody(FinanceImportBatchPreviewBody):
     expected_batch_version: StrictInt = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class HistoricalOwnerSelectionBody(_StrictModel):
     row_identity: str = Field(min_length=1, max_length=191)
     case_no: str = Field(min_length=1, max_length=50)
     obligation_identity: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_references: list[str] = Field(min_length=1)
 
 
@@ -148,7 +148,7 @@ class FinanceImportHistoricalReprocessApplyBody(
 ):
     expected_batch_version: StrictInt = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class FinanceImportHistoricalReprocessPlanView(_StrictModel):
@@ -248,7 +248,7 @@ class FinanceImportCorrectionSelectionBody(_StrictModel):
     allow_partial_refund_recovery: bool = False
     allow_refund_overage_recovery: bool = False
     allow_client_receipt_overage: bool = False
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence: list[str] = Field(min_length=1)
 
 
@@ -315,7 +315,7 @@ class RefundReturnReviewPreviewBody(_StrictModel):
     finance_import_row_id: StrictInt = Field(gt=0)
     original_refund_ledger_entry_id: StrictInt = Field(gt=0)
     case_no: str = Field(min_length=1, max_length=50)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence: list[str] = Field(min_length=1)
 
 

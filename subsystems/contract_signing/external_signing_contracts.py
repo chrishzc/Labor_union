@@ -157,7 +157,7 @@ class PreviewLegacyManualRecoveryReport:
         require_positive_integer(self.command_receipt_id, "legacy command receipt ID")
         if not isinstance(self.confirmation_method, ManualAttestationMethod):
             raise TypeError("legacy recovery confirmation method is invalid")
-        require_canonical_text(self.reason, "legacy recovery reason", 1000)
+        require_canonical_text(self.reason, "legacy recovery reason", 1000, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +216,7 @@ class LegacyManualRecoverySnapshot:
             raise ValueError("client legacy recovery requires a commitment ID")
         if not isinstance(self.confirmation_method, ManualAttestationMethod):
             raise TypeError("legacy recovery confirmation method is invalid")
-        require_canonical_text(self.reason, "legacy recovery reason", 1000)
+        require_canonical_text(self.reason, "legacy recovery reason", 1000, allow_empty=True)
         if self.kind != _LEGACY_RECOVERY_KIND:
             raise ValueError("legacy recovery snapshot kind is invalid")
 
@@ -325,7 +325,7 @@ class ManualAttestationEvidence:
     def __post_init__(self) -> None:
         if not isinstance(self.method, ManualAttestationMethod):
             raise TypeError("manual attestation method is invalid")
-        require_canonical_text(self.reason, "manual attestation reason", 1000)
+        require_canonical_text(self.reason, "manual attestation reason", 1000, allow_empty=True)
         require_canonical_text(
             self.evidence_reference, "manual evidence reference", 191
         )

@@ -150,7 +150,7 @@ export const HolidayApplyRequestSchema = z
     to_date: HolidayDateSchema.optional(),
     expected_calendar_version: HolidayFingerprintSchema,
     preview_fingerprint: HolidayFingerprintSchema,
-    reason: z.string().trim().min(1).max(500),
+    reason: z.string().trim().max(500),
   })
   .superRefine((request, context) => {
     if (request.action === 'upsert' && !request.holiday_name) {

@@ -1,5 +1,4 @@
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
-import { useSaveValidation } from '../components/useSaveValidation';
 import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
@@ -118,10 +117,8 @@ export const FinancePage: React.FC = () => {
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
   const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
-  const [applyReason, setApplyReason] = useState('已核對銀行交易明細預覽，確認匯入');
-  const [applyConfirmed, setApplyConfirmed] = useState(false);
-  const saveValidation = useSaveValidation();
-  const applyReasonRef = useRef<HTMLInputElement>(null);
+  const [applyReason, setApplyReason] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
@@ -304,42 +301,46 @@ export const FinancePage: React.FC = () => {
   };
 
   const ingestWorkbook = async () => {
+    if (importBusy) return;
     if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行交易明細工作簿。' }); return; }
-    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setImportBusy(true);
+    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
       const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${snapshot.sha256}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
       setIngestion({ kind: 'ready', data: receipt });
+      await previewImportedBatch(receipt);
     } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請重新選擇檔案。') }); }
+    finally { setImportBusy(false); }
   };
-  const previewImportedBatch = async () => {
-    if (ingestion.kind !== 'ready') return;
+  const previewImportedBatch = async (ingested: FinanceWorkbookIngestionReceipt) => {
     const request = start('batch-preview');
     controllers.current.get('source-review')?.abort();
-    setBatchPreview({ kind: 'loading' }); setSourceReview({ kind: 'idle' }); setApplyConfirmed(false); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setBatchPreview({ kind: 'loading' }); setSourceReview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const preview = await financeImportMutationClient.preview(ingestion.data.batch_identity, request.controller.signal);
+      const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
       await loadSourceReview(preview.batch_identity);
+      if (!current('batch-preview', request.sequence, request.controller)) return;
+      await applyImportedBatch(preview);
     }
     catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
   };
-  const applyImportedBatch = async () => {
-    if (batchPreview.kind !== 'ready' || !applyConfirmed || !batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0) return;
+  const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
+    if (!checked.apply_allowed || checked.counts.ready_dispatch <= 0) return;
     if (applyJob.kind === 'loading' || batchOutcome.kind === 'loading') return;
-    if (!saveValidation.validate([{ value: displayedApplyReason, label: '正式入帳原因', ref: applyReasonRef }])) return;
     setApplyJob({ kind: 'loading' }); setBatchOutcome({ kind: 'idle' });
     try {
-      const previewFingerprint = batchPreview.data.preview_fingerprint;
+      const previewFingerprint = checked.preview_fingerprint;
       const command = financeApplyCommandByPreview.current.get(previewFingerprint)
         ?? { correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
       financeApplyCommandByPreview.current.set(previewFingerprint, command);
-      const accepted = await financeImportMutationClient.apply(batchPreview.data, command.reason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId: command.correlationId });
+      const accepted = await financeImportMutationClient.apply(checked, command.reason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId: command.correlationId });
       setApplyJob({ kind: 'ready', data: accepted });
       await observeApplyOutcome(accepted.job_id, {
-        batchIdentity: batchPreview.data.batch_identity,
-        previewFingerprint: batchPreview.data.preview_fingerprint,
+        batchIdentity: checked.batch_identity,
+        previewFingerprint: checked.preview_fingerprint,
       });
     } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '正式匯入未受理，請重新預覽後再試。') }); }
   };
@@ -367,7 +368,7 @@ export const FinancePage: React.FC = () => {
           }
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);
-          if (batchPreview.kind === 'ready') await loadSourceReview(batchPreview.data.batch_identity);
+          if (expected) await loadSourceReview(expected.batchIdentity);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
@@ -379,7 +380,7 @@ export const FinancePage: React.FC = () => {
       if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
     }
   };
-  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '已核對銀行交易明細預覽，確認匯入' }, enabled: batchOutcome.kind !== 'ready', busy: applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason('已核對銀行交易明細預覽，確認匯入'); setApplyConfirmed(false); } });
+  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: batchOutcome.kind !== 'ready', busy: importBusy || applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); } });
 
 
   return (
@@ -619,7 +620,7 @@ export const FinancePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 一般操作固定為上傳、預覽、匯入完成三步。 */}
+          {/* 匯入時自動上傳、核對與完成正式入帳。 */}
           <div className="finance-stepper">
             <div className={`finance-step-item ${ingestion.kind === 'loading' || financeWorkbook ? 'active' : ''}`}>
               <div className="finance-step-num">1</div>
@@ -631,8 +632,8 @@ export const FinancePage: React.FC = () => {
             <div className={`finance-step-item ${batchPreview.kind === 'ready' || batchPreview.kind === 'loading' ? 'active' : ''}`}>
               <div className="finance-step-num">2</div>
               <div>
-                <div className="finance-step-title">預覽</div>
-                <div className="finance-step-desc">核對配對結果與需處理的問題</div>
+                <div className="finance-step-title">自動核對</div>
+                <div className="finance-step-desc">系統核對配對結果與待處理問題</div>
               </div>
             </div>
             <div className={`finance-step-item ${applyJob.kind === 'ready' || applyJob.kind === 'loading' || batchOutcome.kind === 'ready' ? 'active' : ''}`}>
@@ -647,7 +648,7 @@ export const FinancePage: React.FC = () => {
           <section className="finance-detail-block finance-dropzone" data-surface-id="finance.finance-import.workflow">
             <div style={{ fontSize: '2rem' }}>📥</div>
             <h3>選擇銀行交易明細工作簿</h3>
-            <p>上傳後先核對筆數與配對結果，再確認正式匯入。</p>
+            <p>選擇工作簿後，按一次匯入即可完成上傳、核對與正式入帳。</p>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
               <input
@@ -655,11 +656,12 @@ export const FinancePage: React.FC = () => {
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 aria-label="選擇銀行交易明細工作簿"
                 className="finance-input"
+                disabled={importBusy || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready')}
                 onChange={(event) => {
                   controllers.current.get('batch-preview')?.abort();
                   controllers.current.get('source-review')?.abort();
                   controllers.current.get('batch-outcome')?.abort();
-                  setApplyConfirmed(false);
+
                   setFinanceWorkbook(event.target.files?.[0] ?? null);
                   setIngestion({ kind: 'idle' });
                   setBatchPreview({ kind: 'idle' });
@@ -669,21 +671,14 @@ export const FinancePage: React.FC = () => {
                   setBatchOutcome({ kind: 'idle' });
                 }}
               />
+              <label>正式入帳原因（選填）<input className="finance-input" value={displayedApplyReason} maxLength={500} disabled={importBusy || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || submittedFinanceCommand !== undefined} onChange={event => setApplyReason(event.target.value)} /></label>
               <button
                 className="finance-btn-primary"
                 data-control-id="finance.finance-import.upload"
-                disabled={financeWorkbook === null || ingestion.kind === 'loading'}
+                disabled={importBusy || financeWorkbook === null || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || submittedFinanceCommand !== undefined}
                 onClick={() => void ingestWorkbook()}
               >
-                {ingestion.kind === 'loading' ? '上傳中…' : '上傳檔案'}
-              </button>
-              <button
-                className="finance-btn-secondary"
-                data-control-id="finance.finance-import.preview"
-                disabled={ingestion.kind !== 'ready' || batchPreview.kind === 'loading'}
-                onClick={() => void previewImportedBatch()}
-              >
-                {batchPreview.kind === 'loading' ? '預覽中…' : '預覽匯入結果'}
+                {ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '匯入中…' : '匯入銀行交易明細'}
               </button>
             </div>
 
@@ -692,7 +687,7 @@ export const FinancePage: React.FC = () => {
             {ingestion.kind === 'ready' && (
               <div className="finance-meta" style={{ marginTop: '14px', textAlign: 'left' }}>
                 <span>
-                  {ingestion.data.replayed ? '同一工作簿已上傳過，將沿用原上傳結果。' : '檔案上傳完成，可以執行預覽。'}
+                  {ingestion.data.replayed ? '同一工作簿已上傳過，將沿用原上傳結果。' : '檔案上傳完成，系統自動核對並入帳。'}
                   {' '}共讀取 {ingestion.data.source_row_count} 列，其中 {ingestion.data.canonical_created_count} 列已建立待處理資料。
                 </span>
               </div>
@@ -705,7 +700,7 @@ export const FinancePage: React.FC = () => {
                 <div className="finance-scope-note">
                   可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜需人工處理 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
                   {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0
-                    ? '可進入匯入確認。'
+                    ? '系統已自動提交可入帳款項。'
                     : batchPreview.data.apply_allowed
                       ? '目前沒有可自動入帳的筆數；請先從帳務異常處理完成配對。'
                     : `目前不可匯入：${financeImportBlockerMessage(batchPreview.data.blocking_codes)}`}
@@ -783,39 +778,8 @@ export const FinancePage: React.FC = () => {
                   </button>
                 )}
 
-                {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
-                    <><label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.84rem', fontWeight: 700 }}>
-                      正式入帳原因
-                      <input
-                        className="finance-input"
-                        ref={applyReasonRef} aria-required="true" value={displayedApplyReason}
-                        disabled={submittedFinanceCommand !== undefined}
-                        maxLength={500}
-                        onChange={(event) => {
-                          setApplyReason(event.target.value);
-                          setApplyConfirmed(false);
-                        }}
-                      />
-                    </label>{saveValidation.feedback}</>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.84rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={applyConfirmed}
-                        onChange={(event) => setApplyConfirmed(event.target.checked)}
-                      />
-                      我已核對預覽結果，理解系統會在匯入後自動顯示正式結果。
-                    </label>
-                    <button
-                      className="finance-btn-primary"
-                      style={{ alignSelf: 'flex-start' }}
-                      data-control-id="finance.finance-import.apply"
-                      disabled={!applyConfirmed || applyJob.kind === 'loading' || batchOutcome.kind === 'loading'}
-                      onClick={() => void applyImportedBatch()}
-                    >
-                      {applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '正式匯入中…' : '確認匯入'}
-                    </button>
-                  </div>
+                {applyJob.kind === 'error' && submittedFinanceCommand && (
+                  <button type="button" className="finance-btn-primary" disabled={batchOutcome.kind === 'loading'} onClick={() => void applyImportedBatch(batchPreview.data)}>以原操作確認匯入結果</button>
                 )}
               </div>
             )}

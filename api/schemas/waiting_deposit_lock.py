@@ -85,15 +85,13 @@ class WaitingDepositLockReleaseApplyBody(_StrictModel):
         max_length=64,
         pattern=r"^[0-9a-f]{64}$",
     )
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
     @field_validator("reason")
     @classmethod
     def _require_trimmed_reason(cls, value: str) -> str:
         if value.strip() != value:
             raise ValueError("reason must not contain surrounding whitespace")
-        if not value:
-            raise ValueError("reason must be non-empty")
         return value
 
 

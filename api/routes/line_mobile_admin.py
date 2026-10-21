@@ -236,7 +236,7 @@ class _ReviewListRequest(_LiffAuthRequest):
 class _ReviewDecisionPreviewRequest(_LiffAuthRequest):
     decision: LineReviewDecision
     expected_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(default="", max_length=1000)
 
 
 class _ReviewDecisionRequest(_ReviewDecisionPreviewRequest):
@@ -296,7 +296,7 @@ class _SchedulingReviewApplyRequest(_SchedulingReviewPreviewRequest):
     expected_payroll_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     idempotency_key: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class _SchedulingReviewApplyView(BaseModel):
@@ -483,7 +483,7 @@ class _MobileMatchingTermsApplyRequest(_MobileMatchingTermsPreviewRequest):
     expected_payroll_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     idempotency_key: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class _MobileMatchingTermsPreviewView(OrderTermsPreviewView):

@@ -105,7 +105,7 @@ class PreviewLineReviewDecisionCommand:
             self.reason,
             "LINE review reason",
             _REVIEW_REASON_MAXIMUM_LENGTH,
-        )
+        allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +130,7 @@ class DecideLineReviewCommand:
             self.reason,
             "LINE review reason",
             _REVIEW_REASON_MAXIMUM_LENGTH,
-        )
+        allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

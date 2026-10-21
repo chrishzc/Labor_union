@@ -19,7 +19,7 @@ class ClientProfileQueryRequest(ClientProfileLiffIdentity):
 class ClientProfileChangeRequest(ClientProfileLiffIdentity):
     changes: dict[str, str] = Field(min_length=1)
     expected_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientProfileChangeApplyRequest(ClientProfileChangeRequest):
@@ -85,7 +85,7 @@ class ClientProfileApprovalApplyRequest(ClientProfileApprovalPreviewRequest):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class ClientProfileApprovalReceiptView(BaseModel):
@@ -100,7 +100,7 @@ class ClientProfileApprovalReceiptView(BaseModel):
 class ClientProfileRejectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     expected_request_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     idempotency_key: str = Field(min_length=1, max_length=191)
     correlation_id: str = Field(min_length=1, max_length=191)
@@ -109,4 +109,4 @@ class ClientProfileRejectRequest(BaseModel):
 class ClientProfileRejectPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     expected_request_version: int = Field(ge=0)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)

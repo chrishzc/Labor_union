@@ -27,7 +27,7 @@ class DepositSkipApplyRequest:
     actor: ActorContext
     reason: str
     correlation_id: CorrelationId
-    def __post_init__(self): require_canonical_text(self.reason, "deposit override reason", 500)
+    def __post_init__(self): require_canonical_text(self.reason, "deposit override reason", 500, allow_empty=True)
 @dataclass(frozen=True, slots=True)
 class DepositSkipReceipt:
     case_no: str; account_version: int; unpaid_progression_allowed: bool; replayed: bool=False

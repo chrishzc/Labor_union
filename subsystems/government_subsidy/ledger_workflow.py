@@ -433,7 +433,7 @@ def _validate_apply_request(
         request.reason,
         "government subsidy reason",
         _REASON_MAXIMUM_LENGTH,
-    )
+    allow_empty=True)
 
 
 def _workflow_error(

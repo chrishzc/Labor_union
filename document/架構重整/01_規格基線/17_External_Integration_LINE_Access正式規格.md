@@ -1,5 +1,7 @@
 # LINE、Access Control、Case Import 與 Knowledge 正式規格
 
+2026-10-21 管理端互動裁決：依 `00_Global_共同契約.md` §2.4，人工操作改為一次點擊送出、原因選填；本文件原管理端 human Preview／再次確認要求由該節取代。既有 LINE writer、revision、授權、冪等、outbox／task 與 provider terminal readback 邊界保持；公開 LINE／LIFF 使用者流程不變。
+
 ## 1. 文件狀態
 
 - 狀態：`approved-architecture-baseline`

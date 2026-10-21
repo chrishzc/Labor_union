@@ -108,7 +108,7 @@ export const AnomalyTimelineEventSchema = z.strictObject({
   expected_workflow_version: z.number().int().nonnegative(),
   resulting_workflow_version: z.number().int().nonnegative(),
   actor: z.string().trim().min(1).max(191),
-  reason: z.string().trim().min(1).max(191),
+  reason: z.string().trim().max(191),
   correlation_id: identitySchema,
   created_at: dateTimeSchema,
 });

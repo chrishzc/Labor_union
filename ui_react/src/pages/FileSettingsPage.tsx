@@ -101,12 +101,8 @@ export function FileSettingsPage() {
           {draft.noTimeout && <p className="file-settings-hint">瀏覽器或網路入口仍可能中斷連線。</p>}
         </section>
       </div><aside className="file-settings-card file-settings-current" aria-label="目前儲存的設定"><h2>目前儲存的設定</h2><dl><div><dt>照片單檔</dt><dd>{sizeLabel(current.photo_max_bytes)}</dd></div><div><dt>履歷單檔</dt><dd>{sizeLabel(current.resume_max_bytes)}</dd></div><div><dt>等待時間</dt><dd>{timeLabel(current.timeout_seconds)}</dd></div></dl></aside></div>
-      <div className="file-settings-actions"><button type="button" className="file-settings-button" disabled={disabled} onClick={() => { setDraft(draftOf(current)); setPreview(null); setError(null); setFieldErrors({}); setMessage(null); }}>取消變更</button><button type="button" className="file-settings-button primary" disabled={disabled} onClick={createPreview}>預覽變更</button></div>
-      {preview && <section className="file-settings-card file-settings-preview" aria-labelledby="file-change-title"><h2 id="file-change-title">變更內容預覽</h2><p className="file-settings-hint">核對後按「儲存設定」，容量與等待時間即時生效。</p><div className="file-settings-table-wrap"><table><thead><tr><th scope="col">項目</th><th scope="col">目前設定</th><th scope="col">調整為</th></tr></thead><tbody>{[
-        ['照片單檔上限', sizeLabel(current.photo_max_bytes), sizeLabel(preview.photo_max_bytes)],
-        ['履歷單檔上限', sizeLabel(current.resume_max_bytes), sizeLabel(preview.resume_max_bytes)],
-        ['等待時間', timeLabel(current.timeout_seconds), timeLabel(preview.timeout_seconds)],
-      ].map(row => <tr key={row[0]}>{row.map((cell, index) => <td key={index}>{cell}</td>)}</tr>)}</tbody></table></div><div className="file-settings-actions"><button type="button" className="file-settings-button primary" disabled={saving} onClick={() => void save()}>{saving ? '正在儲存…' : '儲存設定'}</button></div></section>}
+      <div className="file-settings-actions"><button type="button" className="file-settings-button" disabled={disabled} onClick={() => { setDraft(draftOf(current)); setPreview(null); setError(null); setFieldErrors({}); setMessage(null); }}>取消變更</button><button type="button" className="file-settings-button primary" disabled={disabled} onClick={() => void save(createPreview())}>{saving ? '正在儲存…' : '儲存設定'}</button></div>
+
     </>}
   </main>;
 }

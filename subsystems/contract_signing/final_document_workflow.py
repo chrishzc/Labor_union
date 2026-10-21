@@ -101,7 +101,7 @@ class ApplyFinalSignedContractUpload:
     testing_skip_confirmed: bool = False
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "final contract completion reason", 500)
+        require_canonical_text(self.reason, "final contract completion reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

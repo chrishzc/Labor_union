@@ -1,6 +1,4 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useRef as useValidationRef } from 'react';
-import { useSaveValidation } from './useSaveValidation';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
@@ -20,8 +18,6 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
   const [query, setQuery] = useState<OrderCancellationQuery | null>(null);
   const [days, setDays] = useState<DayDraft[]>([]);
   const [reason, setReason] = useState('');
-  const saveValidation = useSaveValidation();
-  const saveFieldRef = useValidationRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState<OrderCancellationPreview | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +110,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
 
   useEffect(() => { void load(); }, [load]);
 
-  const check = useCallback(async () => {
+  const check = async () => {
     const historicalRepair = query?.lifecycle_status === '訂單取消' && query.historical_mid_service_confirmation_available;
     const supportsServiceDays = query?.service_started === true || historicalRepair;
     const current = orderMutationFlowStore.getCancellation(caseNo);
@@ -129,10 +125,6 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     if (new Set(typed.map((day) => day.service_date)).size !== typed.length) { setError('實際服務日期不可重複。'); return; }
     if (!supportsServiceDays && typed.length !== 0) { setError('服務尚未開始，實際服務日必須為 0 天。'); return; }
     if (supportsServiceDays && typed.length === 0) { setError('服務已開始或歷史取消補登，至少保留一日實際服務事實。'); return; }
-    const baseline = new Set(query.confirmed_service_days.map((day) => `${day.service_date}:${day.staff_id}`));
-    if (typed.some((day) => !baseline.has(`${day.service_date}:${day.staff_id}`) && day.reason === null)) {
-      setError('新增或變更實際服務日／月嫂，必須填寫該日人工原因。'); return;
-    }
     const request = ++sequence.current;
     previewController.current?.abort();
     const controller = new AbortController();
@@ -142,18 +134,14 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
       const data = await orderCancellationClient.preview(caseNo, typed.sort((left, right) => left.service_date.localeCompare(right.service_date)), controller.signal);
       if (data.lifecycle_impact.case_no !== caseNo || (data.scheduling !== null && data.scheduling.case_no !== caseNo)
         || (data.client_finance_impact !== null && data.client_finance_impact.case_no !== caseNo) || (data.payroll_impact !== null && data.payroll_impact.case_no !== caseNo)) throw new Error('取消預覽案件識別不一致。');
-      if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); }
+      if (isActive(request, caseNo)) { setPreview(data); setPhase('idle'); await apply(false, data); }
     } catch (caught) {
       if (isActive(request, caseNo)) { setError(caught instanceof Error ? caught.message : '取消預覽失敗。'); setPhase('idle'); }
     } finally {
       if (previewController.current === controller) previewController.current = null;
     }
-  }, [caseNo, query, days, isActive]);
+  };
 
-  useEffect(() => {
-    const timer = setTimeout(() => void check(), 250);
-    return () => { clearTimeout(timer); previewController.current?.abort(); };
-  }, [check]);
 
   const observe = async (command: CancellationCommand, request: number) => {
     const saved = orderMutationFlowStore.getCancellation(command.caseNo);
@@ -176,11 +164,11 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     onBusyChange?.(false); onObserved?.();
   };
 
-  const apply = async (retry = false) => {
+  const apply = async (retry = false, calculatedPreview = preview) => {
+    const preview = calculatedPreview;
     if (inFlight.current.has(caseNo)) return;
     if (!retry && (!preview || busy
       || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0))) return;
-    if (!retry && !saveValidation.validate([{ value: reason, label: '取消原因', ref: saveFieldRef }])) return;
     const existing = orderMutationFlowStore.getCancellation(caseNo);
     if (retry && existing?.status !== 'outcome_unknown') return;
     if (existing?.status === 'applying' || existing?.status === 'observing' || existing?.receipt) return;
@@ -306,8 +294,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
               <button type="button" onClick={() => { setDays((current) => [...current, { service_date: '', staff_id: '', reason: '' }]); invalidate(); }}>新增實際服務日</button>
             </fieldset>
           )}
-          {!alreadyCancelled && <><label>取消原因<textarea ref={saveFieldRef} aria-required="true" aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>{saveValidation.feedback}</>}
-          {!alreadyCancelled && !preview && phase === 'idle' && error && <button type="button" onClick={() => void check()}>重新檢查取消影響</button>}
+          {!alreadyCancelled && <><label>取消原因（選填）<textarea aria-label="取消原因" value={reason} disabled={busy} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label></>}
+          {!alreadyCancelled && <button type="button" className="order-v2-danger" disabled={busy} onClick={() => void check()}>{historicalRepair ? '儲存實際服務事實' : '取消訂單'}</button>}
         </>
       )}
       {preview && (
@@ -321,8 +309,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
             {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{action.direction} NT$ {action.amount.amount}</p>)}
             {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
-          <p>請核對以上服務日與帳務影響。確認後將{historicalRepair ? '保存實際服務事實' : '取消訂單'}。</p>
-          <button type="button" className="order-v2-danger" disabled={busy || (preview.client_finance_impact !== null && preview.client_finance_impact.blockers.length > 0) || (preview.payroll_impact !== null && preview.payroll_impact.blockers.length > 0)} onClick={() => void apply()}>{historicalRepair ? '確認補登' : '確認取消訂單'}</button>
+
+
         </>
       )}
       {phase === 'previewing' && <p role="status">檢查取消影響中…</p>}

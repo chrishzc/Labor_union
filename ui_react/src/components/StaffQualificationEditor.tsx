@@ -34,17 +34,17 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
   useEffect(() => { void load(); return () => { ++epoch.current; controller.current?.abort(); }; }, [staffId]);
   const unsavedRef = useUnsavedDraft('專業資格與服務資料', { '專業技能': lists.special_skills, '一般證照': lists.certifications, '交通方式': lists.transportation, '按摩證書': massage, '最多照顧寶寶數': care, '備註': reason }, { enabled: !!snapshot, busy: busy && (!!snapshot || !!preview), baseline: snapshot ? { '專業技能': snapshot.after.special_skills.join('\n'), '一般證照': snapshot.after.certifications.join('\n'), '交通方式': snapshot.after.transportation.join('\n'), '按摩證書': snapshot.after.has_massage_cert === null ? '' : String(snapshot.after.has_massage_cert), '最多照顧寶寶數': snapshot.after.care_babies === null ? '' : String(snapshot.after.care_babies), '備註': '' } : null });
   const facts = (): QualificationFacts => ({ special_skills: lists.special_skills.split('\n').map(v => v.trim()).filter(Boolean), certifications: lists.certifications.split('\n').map(v => v.trim()).filter(Boolean), transportation: lists.transportation.split('\n').map(v => v.trim()).filter(Boolean), has_massage_cert: massage === '' ? null : massage === 'true', care_babies: care === '' ? null : Number(care) });
-  const doPreview = async () => {
-    const current = epoch.current; setBusy(true); invalidate();
-    try { const value = await staffQualificationEditingClient.preview(staffId, facts(), controller.current?.signal); if (current !== epoch.current) return; setPreview(value); setKey(`staff-qualification-${crypto.randomUUID()}`); setMessage('預覽完成，請核對變更後確認儲存。'); }
-    catch (error) { if (current === epoch.current) { setMessageError(true); setMessage(error instanceof Error ? error.message : '預覽失敗。'); } }
-    finally { if (current === epoch.current) setBusy(false); }
-  };
   const doApply = async () => {
-    if (busy || !preview || !key) return;
+    if (busy || !snapshot) return;
     setMessageError(false);
     const current = epoch.current; setBusy(true);
-    try { await staffQualificationEditingClient.apply(staffId, facts(), preview, reason.trim(), key, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存並重新查詢。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
+    try {
+      const submitted = facts();
+      const approved = preview ?? await staffQualificationEditingClient.preview(staffId, submitted, controller.current?.signal);
+      if (current !== epoch.current) return;
+      const intent = key ?? `staff-qualification-${crypto.randomUUID()}`;
+      setPreview(approved); setKey(intent);
+      await staffQualificationEditingClient.apply(staffId, submitted, approved, reason.trim(), intent, controller.current?.signal); if (current !== epoch.current) return; const refreshed = await load(); if (current + 1 !== epoch.current) return; setMessage(refreshed ? '專業資格與服務資料已儲存並重新查詢。' : '資料已儲存，但重新查詢失敗，請重試查詢。'); await onUpdated(); }
     catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };
@@ -57,8 +57,8 @@ export function StaffQualificationEditor({ staffId, onUpdated }: { staffId: numb
       <label className="staff-op-field">最多照顧寶寶數<input type="number" min={1} step={1} max={2147483647} disabled={busy} value={care} onChange={event => { setCare(event.target.value); invalidate(); }} /></label>
     </div><label className="staff-op-field">備註（選填）<input aria-label="專業資格備註（選填）" placeholder="有需要補充的內容再填寫" maxLength={500} disabled={busy} value={reason} onChange={event => { setReason(event.target.value); if (messageError) { setMessageError(false); setMessage(''); } }} /></label>
     {preview && <div aria-label="專業資格變更預覽">{(Object.keys(labels) as Array<keyof QualificationFacts>).filter(field => JSON.stringify(preview.before[field]) !== JSON.stringify(preview.after[field])).map(field => <p key={field}><strong>{labels[field]}</strong>：{display(preview.before[field])} → {display(preview.after[field])}</p>)}</div>}
-    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : !preview ? '尚未預覽：請先按「預覽變更」。' : '預覽完成，可直接確認儲存；備註可留白。'}</p>
-    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessageError(false); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" disabled={busy} onClick={() => void doPreview()}>預覽變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy || !preview} onClick={() => void doApply()}>確認儲存</button></div></>}
+    <p id={saveGuidanceId} className="staff-op-hint">{busy ? '正在處理，請稍候。' : '可直接儲存；備註可留白。'}</p>
+    <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => { reset(snapshot); setMessageError(false); setMessage('已取消變更。'); }}>取消變更</button><button type="button" className="staff-primary-btn" aria-describedby={saveGuidanceId} disabled={busy} onClick={() => void doApply()}>儲存</button></div></>}
     {needsRequery && <button type="button" className="staff-secondary-btn" disabled={busy} onClick={() => void load()}>重試讀取專業資格</button>}
     {message && <p role={messageError ? "alert" : "status"} className={messageError ? "staff-op-error" : undefined}>{message}</p>}
   </section>;

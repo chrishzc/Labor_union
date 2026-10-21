@@ -44,7 +44,7 @@
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_rich_menu_local_preview.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/rich-menu-management.md`
 
-- Rich Menu 草稿 reason 為選填備註，空白可保存；確認、版本與 Preview／Apply／回讀 gate 保留。其他設定種類、發布及重試原因仍必填。
+- Rich Menu 草稿、設定、發布與重試依 Global §2.4 一次點擊送出；reason 為選填備註，空白可保存。人工預覽／確認門檻移除，保留內部 Preview／Apply、版本、冪等與正式回讀；版面效果預覽仍可使用。
 
 ## Change triggers
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.

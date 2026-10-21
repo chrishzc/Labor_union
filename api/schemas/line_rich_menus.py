@@ -68,10 +68,9 @@ class RichMenuPublicationPageView(_StrictModel):
 
 class RichMenuPublishRequest(_StrictModel):
     preview_id: StrictInt = Field(ge=1)
-    reason: StrictStr = Field(
-        min_length=1,
+    reason: StrictStr = Field(default="",
         max_length=500,
-        pattern=r"^\S(?:.*\S)?$",
+        pattern=r"^(?:\S(?:.*\S)?)?$",
     )
     idempotency_key: StrictStr = Field(
         min_length=1,
@@ -86,10 +85,9 @@ class RichMenuPublishRequest(_StrictModel):
 
 
 class RichMenuPublicationRetryRequest(_StrictModel):
-    reason: StrictStr = Field(
-        min_length=1,
+    reason: StrictStr = Field(default="",
         max_length=500,
-        pattern=r"^\S(?:.*\S)?$",
+        pattern=r"^(?:\S(?:.*\S)?)?$",
     )
     idempotency_key: StrictStr = Field(
         min_length=1,

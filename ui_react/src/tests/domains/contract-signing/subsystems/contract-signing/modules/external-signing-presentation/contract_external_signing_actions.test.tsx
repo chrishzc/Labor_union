@@ -1,13 +1,12 @@
 /**
  * File: contract_external_signing_actions.test.tsx
- * Description: 驗證外部簽約 closed-state UI、最終 PDF 明確確認、receipt reconciliation 與隱私不變量。
+ * Description: 驗證外部簽約 closed-state UI、單擊儲存最終 PDF、receipt reconciliation 與隱私不變量。
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiHttpError, ApiTimeoutError } from '../../../../../../../api/shared/typed_errors';
 import { ContractExternalSigningActions } from '../../../../../../../components/ContractExternalSigningActions';
 import { contractExternalSigningClient, type ContractPreparationQuery } from '../../../../../../../api/orders/contract_external_signing_client';
-import { contractSigningClient } from '../../../../../../../api/orders/contract_signing_client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { openContractPrintView, previewContractFields } from '../../../../../../../api/orders/contract_full_preview_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
@@ -183,14 +182,13 @@ async function prepareSignedReturns() {
     fireEvent.click(within(row).getByRole('button', { name: '檢查簽署文件' }));
     await waitFor(() => { const alert = screen.queryByRole('alert'); if (alert) throw new Error(alert.textContent || '文件檢查失敗'); expect(within(row).getByText('檢查通過')).toBeInTheDocument(); });
   }
-  await waitFor(() => expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled());
 }
 
 async function confirmHandoff() {
   const start = await screen.findByRole('button', { name: '記錄已送交簽署平台' });
   await waitFor(() => expect(start).toBeEnabled());
   fireEvent.click(start);
-  fireEvent.click(screen.getByRole('button', { name: '確認已送交' }));
 }
 
 const fileList = (file: File) => ({ 0: file, length: 1, item: (index: number) => index === 0 ? file : null });
@@ -299,7 +297,6 @@ describe('ContractExternalSigningActions', () => {
     const record = await screen.findByRole('button', { name: '記錄已送交簽署平台' });
     expect(screen.getByRole('button', { name: '發送簽署提醒' })).toBeDisabled();
     fireEvent.click(record);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '確認已送交' })); });
     expect(await screen.findByText('交接已記錄')).toBeVisible();
     expect(screen.getByText('尚未發送')).toBeVisible();
     expect(contractExternalSigningClient.sendSigningReminders).not.toHaveBeenCalled();
@@ -599,11 +596,6 @@ describe('ContractExternalSigningActions', () => {
     fireEvent.click(screen.getByText('測試模式 · 跳過文件回收'));
     const skip = await screen.findByRole('button', { name: '測試用：跳過文件回收' });
     await act(async () => { fireEvent.click(skip); });
-    const complete = await screen.findByRole('button', { name: '確認跳過並完成測試簽約' });
-    expect(complete).toBeDisabled();
-    expect(contractExternalSigningClient.applyFinalDocument).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(screen.getByRole('checkbox', { name: '我確認本案為測試案件，跳過真實簽署文件回收，並繼續測試後續收款。' })); });
-    await act(async () => { fireEvent.click(complete); });
     await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(1));
     expect(contractExternalSigningClient.applyFinalDocument).toHaveBeenCalledWith('CASE-001', expect.objectContaining({ signatures_confirmed: false, testing_skip_confirmed: true }), expect.any(Object));
     expect(contractExternalSigningClient.stageFinalDocument).not.toHaveBeenCalled();
@@ -626,8 +618,6 @@ describe('ContractExternalSigningActions', () => {
     const skip = await screen.findByRole('button', { name: '測試用：跳過文件回收' });
     await act(async () => { fireEvent.click(skip); });
     expect(screen.getAllByText('檢查通過')).toHaveLength(2);
-    await act(async () => { fireEvent.click(screen.getByRole('checkbox', { name: '我確認本案為測試案件，跳過真實簽署文件回收，並繼續測試後續收款。' })); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '確認跳過並完成測試簽約' })); });
     expect(await screen.findByRole('alert')).toHaveTextContent(reason);
     expect(screen.getAllByText('檢查通過')).toHaveLength(2);
     expect(onCommitted).not.toHaveBeenCalled();
@@ -657,7 +647,7 @@ describe('ContractExternalSigningActions', () => {
     expect(contractExternalSigningClient.applyFinalDocument).not.toHaveBeenCalled();
   });
 
-  it('requires final PDF staging and Preview plus explicit confirmation before Apply/readback', async () => {
+  it('stages and checks all selected files in one save click before Apply/readback', async () => {
     const onCommitted = vi.fn();
     vi.mocked(contractExternalSigningClient.query)
       .mockResolvedValueOnce(query)
@@ -668,14 +658,14 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" onCommitted={onCommitted} />);
     await screen.findByRole('region', { name: '回收簽署文件' });
 
-    await prepareSignedReturns();
-
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeEnabled());
-    const apply = screen.getByRole('button', { name: '確認完成簽署' });
-    expect(apply).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/我已核對本案與文件版本/));
-    expect(apply).toBeEnabled();
-    fireEvent.click(apply);
+    const rows = screen.getAllByRole('article').filter(row => row.getAttribute('aria-label')?.includes('簽回'));
+    for (const row of rows) {
+      const input = row.querySelector<HTMLInputElement>('input[type=file]')!;
+      fireEvent.change(input, { target: { files: fileList(new File(['%PDF-1.7\ncontract\n%%EOF'], 'signed.pdf', { type: 'application/pdf' })) } });
+    }
+    expect(contractExternalSigningClient.stageFinalDocument).not.toHaveBeenCalled();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
 
     await screen.findByText(/契約完成，最終 PDF 第 1 版已確認/);
     expect(contractExternalSigningClient.applyFinalDocument).toHaveBeenCalledWith(
@@ -742,9 +732,8 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByRole('region', { name: '回收簽署文件' });
     await prepareSignedReturns();
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeEnabled());
-    fireEvent.click(screen.getByLabelText(/我已核對本案與文件版本/));
-    fireEvent.click(screen.getByRole('button', { name: '確認完成簽署' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
 
     expect(await screen.findByText(/完成結果尚未確認/)).toBeInTheDocument();
     expect(screen.queryByText(/契約完成，最終 PDF 第 1 版已確認/)).not.toBeInTheDocument();
@@ -756,8 +745,8 @@ describe('ContractExternalSigningActions', () => {
     await prepareSignedReturns();
     const client = screen.getByRole('article', { name: '客戶服務契約簽回 測試客戶' });
     fireEvent.click(within(client).getByRole('button', { name: '重新選擇檔案' }));
-    expect(screen.getByRole('button', { name: '確認完成簽署' })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: /我已核對本案與文件版本/ })).not.toBeInTheDocument();
     expect(screen.getByRole('article', { name: '月嫂委任契約簽回 未設定 月嫂41' })).toHaveTextContent('檢查通過');
   });
 
@@ -773,9 +762,8 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByRole('region', { name: '回收簽署文件' });
     await prepareSignedReturns();
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeEnabled());
-    fireEvent.click(screen.getByLabelText(/我已核對本案與文件版本/));
-    fireEvent.click(screen.getByRole('button', { name: '確認完成簽署' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
 
     await screen.findByText(/結果未明/);
     fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
@@ -798,9 +786,8 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     await screen.findByRole('region', { name: '回收簽署文件' });
     await prepareSignedReturns();
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: /我已核對本案與文件版本/ })).toBeEnabled());
-    fireEvent.click(screen.getByLabelText(/我已核對本案與文件版本/));
-    fireEvent.click(screen.getByRole('button', { name: '確認完成簽署' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存簽署文件' }));
 
     await screen.findByText(/結果未明/);
     fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
@@ -954,13 +941,7 @@ describe('ContractExternalSigningActions', () => {
     render(<ContractExternalSigningActions caseNo="CASE-001" />);
     const send = await screen.findByRole('button', { name: '發送簽署提醒' });
     fireEvent.click(send);
-    const dialog = await screen.findByRole('dialog', { name: '確認發送簽署提醒' });
-    expect(dialog).toHaveTextContent('測試客戶 · 客戶');
-    expect(dialog).toHaveTextContent('月嫂41 · 月嫂');
-    expect(dialog).toHaveTextContent('月嫂42 · 月嫂');
-    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(contractExternalSigningClient.sendSigningReminders).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '確認發送提醒' })); });
+    expect(screen.queryByRole('dialog', { name: '確認發送簽署提醒' })).not.toBeInTheDocument();
     expect(await screen.findByText('提醒工作已建立')).toBeVisible();
     expect(contractExternalSigningClient.sendSigningReminders).toHaveBeenCalledTimes(1);
     expect(contractExternalSigningClient.sendSigningReminders).toHaveBeenCalledWith('CASE-001', { session_id: sessionId, expected_status_version: 5 }, expect.any(Object));
@@ -981,7 +962,6 @@ describe('ContractExternalSigningActions', () => {
     vi.mocked(contractExternalSigningClient.sendSigningReminders).mockRejectedValueOnce(new ApiTimeoutError(10000)).mockImplementation(async (_caseNo, input, identity) => ({ receipt_id: identity.receiptId, session_id: input.session_id, status_version: input.expected_status_version, replayed: true, manual_notification_targets: [] }));
     const first = render(<ContractExternalSigningActions caseNo="CASE-001" />);
     fireEvent.click(await screen.findByRole('button', { name: '發送簽署提醒' }));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '確認發送提醒' })); });
     expect(await screen.findByRole('button', { name: '重新確認原提醒結果' })).toBeEnabled();
     const identity = vi.mocked(contractExternalSigningClient.sendSigningReminders).mock.calls[0]![2];
     first.unmount();
@@ -998,9 +978,8 @@ describe('ContractExternalSigningActions', () => {
     await screen.findByRole('region', { name: '回收簽署文件' });
     await prepareSignedReturns();
     fireEvent.click(screen.getByRole('button', { name: '發送簽署提醒' }));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '確認發送提醒' })); });
     expect(await screen.findByText('提醒工作已建立')).toBeVisible();
-    expect(screen.getByRole('checkbox')).toBeEnabled();
+    expect(screen.getByRole('button', { name: '儲存簽署文件' })).toBeEnabled();
     expect(contractExternalSigningClient.applyFinalDocument).not.toHaveBeenCalled();
   });
 });

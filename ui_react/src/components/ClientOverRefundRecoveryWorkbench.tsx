@@ -99,6 +99,7 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
 
   useEffect(() => { void readOwner(); return () => { requestSequence.current += 1; }; }, [readOwner]);
   useEffect(() => {
+    if (applyCommand.current !== null) return;
     const first = query?.current_matchings[0];
     if (query && first) {
       setAction('collection');
@@ -113,7 +114,7 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
   const amountNumber = Number(amount);
   const validRow = Number.isInteger(rowNumber) && rowNumber > 0;
   const validAmount = Number.isInteger(amountNumber) && amountNumber > 0;
-  const canPreview = !busy && !!query && !terminal(query) && !!reason.trim() && !!evidence.trim() && (action === 'adjustment' ? validAmount : validRow) && (action !== 'collection' || (!!matchingIdentity.trim() && Number.isInteger(Number(matchingVersion)) && Number(matchingVersion) > 0));
+  const canPreview = !busy && applyCommand.current === null && !!query && !terminal(query) && !!evidence.trim() && (action === 'adjustment' ? validAmount : validRow) && (action !== 'collection' || (!!matchingIdentity.trim() && Number.isInteger(Number(matchingVersion)) && Number(matchingVersion) > 0));
 
   const previewAction = async () => {
     if (!canPreview || !query) return;
@@ -130,12 +131,14 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
         next = await client.previewAdjustment(caseNo, { recovery_identity: recoveryIdentity, adjustment_amount_ntd: amountNumber, evidence_reference: evidence.trim() });
       }
       setPreview(next); setPreviewKey(key);
+      await applyAction(next);
     } catch (caught) { setError(displayError(caught)); }
     finally { setBusy(false); }
   };
 
-  const applyAction = async () => {
-    if (!previewCurrent || !query || busy) return;
+  const applyAction = async (checked: Preview | null = preview) => {
+    const preview = checked;
+    if (!preview || !query) return;
     setBusy(true); setError(null); setNotice(null);
     const fingerprint = (preview as { preview_fingerprint: string }).preview_fingerprint;
     if (applyCommand.current?.previewFingerprint !== fingerprint) {
@@ -161,6 +164,10 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
       setPreview(null); setPreviewKey(null);
       applyCommand.current = null;
     } catch (caught) {
+      const typed = mapClientOverRefundRecoveryError(caught);
+      if (typed.status !== undefined && typed.status >= 400 && typed.status < 500 && typed.status !== 408 && typed.status !== 429) {
+        applyCommand.current = null; setPreview(null); setPreviewKey(null);
+      }
       const fresh = await readOwner();
       if (fresh && terminal(fresh)) setNotice('結果已由最新追償資料確認完成，異常可解除。');
       else setError(displayError(caught));
@@ -181,17 +188,17 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
     <p>目前餘額：{query.remaining_amount_ntd.toLocaleString()} 元｜狀態：{recoveryStatusLabel(query.status)}</p>
     <p>完成條件：追償餘額歸零，且款項已收回或授權調整已完成；只有建立配對不會解除異常。</p>
     <div role="group" aria-label="處置方式">
-      <button type="button" aria-pressed={action === 'matching'} onClick={() => { setAction('matching'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>建立入款配對</button>
-      {query.current_matchings.length > 0 && <button type="button" aria-pressed={action === 'collection'} onClick={() => { setAction('collection'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>核銷已配對入款</button>}
-      <button type="button" aria-pressed={action === 'adjustment'} onClick={() => { setAction('adjustment'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>授權人工調整</button>
+      <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'matching'} onClick={() => { setAction('matching'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>建立入款配對</button>
+      {query.current_matchings.length > 0 && <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'collection'} onClick={() => { setAction('collection'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>核銷已配對入款</button>}
+      <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'adjustment'} onClick={() => { setAction('adjustment'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>授權人工調整</button>
     </div>
-    {action !== 'adjustment' && <label>入款流水紀錄編號<input inputMode="numeric" value={rowId} onChange={invalidate(setRowId)} /></label>}
-    {action === 'collection' && <details><summary>技術操作欄位</summary><label>配對識別值<input value={matchingIdentity} onChange={invalidate(setMatchingIdentity)} /></label><label>配對資料版本<input inputMode="numeric" value={matchingVersion} onChange={invalidate(setMatchingVersion)} /></label></details>}
-    {action === 'adjustment' && <label>調整金額（元）<input inputMode="numeric" value={amount} onChange={invalidate(setAmount)} /></label>}
-    <label>處理原因（必填）<textarea value={reason} onChange={invalidate(setReason)} /></label>
-    <label>佐證紀錄（必填，可填電話／紙本紀錄索引）<input value={evidence} onChange={invalidate(setEvidence)} /></label>
-    <div><button type="button" onClick={() => void previewAction()} disabled={!canPreview}>{busy ? '處理中…' : '預覽處理影響'}</button><button type="button" onClick={() => void applyAction()} disabled={!previewCurrent || busy}>確認套用</button></div>
-    {previewCurrent && <p role="status">處理影響已確認；正式套用前仍會重新讀取並鎖定最新追償資料。</p>}
+    {action !== 'adjustment' && <label>入款流水紀錄編號<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={rowId} onChange={invalidate(setRowId)} /></label>}
+    {action === 'collection' && <details><summary>技術操作欄位</summary><label>配對識別值<input disabled={busy || applyCommand.current !== null} value={matchingIdentity} onChange={invalidate(setMatchingIdentity)} /></label><label>配對資料版本<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={matchingVersion} onChange={invalidate(setMatchingVersion)} /></label></details>}
+    {action === 'adjustment' && <label>調整金額（元）<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={amount} onChange={invalidate(setAmount)} /></label>}
+    <label>處理原因（選填）<textarea disabled={busy || applyCommand.current !== null} value={reason} onChange={invalidate(setReason)} /></label>
+    <label>佐證紀錄（必填，可填電話／紙本紀錄索引）<input disabled={busy || applyCommand.current !== null} value={evidence} onChange={invalidate(setEvidence)} /></label>
+    <div>{applyCommand.current && preview && <button type="button" disabled={busy} onClick={() => void applyAction()}>以原操作確認結果</button>}<button type="button" onClick={() => void previewAction()} disabled={!canPreview}>{busy ? '處理中…' : '儲存處理'}</button></div>
+    {previewCurrent && <p role="status">本次處理已檢核，系統會重新讀取最新追償資料確認結果。</p>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{error}</p>}
     {queryError && <p role="alert">{queryError}</p>}

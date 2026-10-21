@@ -128,7 +128,7 @@ class ContactMatchingSegmentView(_ClosedModel):
 class ManualProfilesEvidenceView(_ClosedModel):
     event_ids: list[int] = Field(min_length=1, max_length=4)
     confirmation_method: Literal["phone", "in_person", "paper", "other"]
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(max_length=500)
     actor_id: str = Field(min_length=1, max_length=191)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -230,7 +230,7 @@ class ManualMatchingProfilesPreviewView(_ClosedModel):
     expected_version: int = Field(ge=0)
     segment_ids: list[PositiveInt] = Field(min_length=1, max_length=4)
     confirmation_method: Literal["phone", "in_person", "paper", "other"]
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(max_length=500)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     apply_allowed: bool
 

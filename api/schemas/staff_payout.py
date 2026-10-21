@@ -19,7 +19,7 @@ class StaffPayoutApplyFields(_StrictModel):
     expected_staff_payables_version: int = Field(ge=0)
     expected_bank_facts_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class PayoutPreviewBody(_StrictModel):
@@ -74,7 +74,7 @@ class StaffOverpaymentRecoveryApplyBody(StaffOverpaymentRecoveryPreviewBody):
     expected_recovery_version: int = Field(ge=0)
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
@@ -87,7 +87,7 @@ class StaffOverpaymentRecoveryMatchedApplyBody(StaffOverpaymentRecoveryMatchedPr
     expected_recovery_version: int = Field(ge=0)
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
@@ -109,7 +109,7 @@ class StaffOverpaymentRecoveryMatchingApplyBody(
     expected_recovery_version: int = Field(ge=0)
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
@@ -125,7 +125,7 @@ class StaffOverpaymentRecoveryAdjustmentApplyBody(
     expected_recovery_version: int = Field(ge=0)
     expected_staff_payables_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
 
@@ -334,7 +334,7 @@ class HistoricalStaffPayoutIntentBody(_StrictModel):
     confirmation_kind: Literal["paid", "settled"]
     obligation_identities: list[str] = Field(min_length=1)
     payment_date: date | None = None
-    payment_date_unknown_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    payment_date_unknown_reason: str | None = Field(default=None, max_length=500)
     source_availability: Literal["missing", "ambiguous", "unrecoverable"]
     evidence_reference: str | None = Field(default=None, min_length=1, max_length=191)
 
@@ -343,7 +343,7 @@ class HistoricalStaffPayoutApplyBody(HistoricalStaffPayoutIntentBody):
     expected_staff_payables_version: int = Field(ge=0)
     expected_adoption_receipt_id: int = Field(gt=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class HistoricalStaffObligationView(_StrictModel):

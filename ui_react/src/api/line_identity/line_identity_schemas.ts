@@ -95,7 +95,7 @@ export const LineIdentityReplacementPreviewViewSchema = z
 export const LineIdentityRevocationApplyRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
     idempotency_key: z.string().min(1).max(191),
     correlation_id: z.string().min(1).max(191),
   })
@@ -105,7 +105,7 @@ export const LineIdentityReplacementApplyRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
     target_subject_reference: z.string().min(1).max(191),
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
     idempotency_key: z.string().min(1).max(191),
     correlation_id: z.string().min(1).max(191),
   })
@@ -113,7 +113,7 @@ export const LineIdentityReplacementApplyRequestSchema = z
 
 export const LineIdentityRevocationActionRequestSchema = z
   .object({
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
   })
   .strict();
 
@@ -208,7 +208,7 @@ export const LineIdentityReviewListQuerySchema = z
 export const LineIdentityReviewPreviewRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
   })
   .strict();
 
@@ -231,7 +231,7 @@ export const LineIdentityReviewApplyRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
     idempotency_key: z.string().min(1).max(191),
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
     preview_fingerprint: z.string().min(1),
   })
   .strict();
@@ -352,7 +352,7 @@ export const PairProvisionalRegistrationRequestSchema = z
   .object({
     provisional_registration_id: z.number().int().positive(),
     target_case_no: z.string().min(1).max(50),
-    reason: z.string().min(1).max(1000),
+    reason: z.string().max(1000),
     idempotency_key: z.string().min(1).max(191),
     correlation_id: z.string().min(1).max(191),
   })

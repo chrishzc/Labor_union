@@ -33,7 +33,7 @@ export function ServiceArrangementDepositGate({ caseNo, revision, onCommitted, o
         command.current = { preview: fresh, key: `deposit-skip-${caseNo}-${crypto.randomUUID()}` };
       }
       const original = command.current;
-      const receipt = await depositSkipClient.apply(caseNo, original.preview, '服務安排：人工允許未付款繼續排班', original.key);
+      const receipt = await depositSkipClient.apply(caseNo, original.preview, '', original.key);
       if (receipt.case_no !== caseNo || !receipt.unpaid_progression_allowed) throw new Error('未付款放行結果尚未確認。');
       const current = await depositSkipClient.query(caseNo);
       if (current.case_no !== caseNo || !current.unpaid_progression_allowed || current.account_version < receipt.account_version) throw new Error('未付款放行尚未完成正式回讀。');

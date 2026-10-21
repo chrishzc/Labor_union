@@ -269,18 +269,18 @@ class MatchingCoordinationQueryRequest(MatchingCoordinationSchema):
 
 
 class PreviewInitialCriteriaRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView | None = None
 
 
 class ApplyInitialCriteriaRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     preview_fingerprint: Sha256
 
 
 class PreviewCriteriaDiffRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     before_snapshot_id: str = Field(min_length=1, max_length=191)
     after_snapshot_id: str = Field(min_length=1, max_length=191)
@@ -349,7 +349,7 @@ class CriteriaDiffTransportView(MatchingCoordinationSchema):
 
 
 class PreviewZeroCandidateRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     policy_id: str = Field(min_length=1, max_length=191)
@@ -395,7 +395,7 @@ class MatchingPackageSegmentSelection(MatchingCoordinationSchema):
 
 
 class PreviewMatchingPackageRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     required_service_dates: tuple[date, ...] = Field(min_length=1)
@@ -412,7 +412,7 @@ class PreviewMatchingPackageRequest(MatchingCoordinationSchema):
 
 
 class PreviewLeaveImpactRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     package_id: str = Field(min_length=1, max_length=191)
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
@@ -422,7 +422,7 @@ class PreviewLeaveImpactRequest(MatchingCoordinationSchema):
 
 
 class PreviewServiceDateRematchRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     package_id: str | None = Field(default=None, min_length=1, max_length=191)
@@ -542,7 +542,7 @@ class ServiceDateRematchPreviewResponse(MatchingCoordinationSchema):
 
 
 class PreviewRematchRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     package_id: str | None = Field(default=None, min_length=1, max_length=191)
@@ -567,7 +567,7 @@ class ApplyZeroCandidateRequest(PreviewZeroCandidateRequest):
 
 
 class PreviewZeroCandidateConfirmationRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence: tuple[str, ...] = Field(min_length=1)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
@@ -587,7 +587,7 @@ class ApplyZeroCandidateConfirmationRequest(PreviewZeroCandidateConfirmationRequ
 
 
 class ApplyCaregiverSelectionRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     package_id: str = Field(min_length=1, max_length=191)
@@ -624,7 +624,7 @@ class ApplyCaregiverSelectionRequest(MatchingCoordinationSchema):
 
 
 class ApplyCustomerDecisionRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     criteria_snapshot_id: str = Field(min_length=1, max_length=191)
     package_id: str = Field(min_length=1, max_length=191)
@@ -639,7 +639,7 @@ class ApplyRematchRequest(PreviewRematchRequest):
 
 
 class ApplyLeaveImpactRequest(MatchingCoordinationSchema):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_source_versions: MatchingSourceTupleView
     package_id: str = Field(min_length=1, max_length=191)
     leave_reference: str = Field(min_length=1, max_length=191)
@@ -663,7 +663,7 @@ class MatchingCrossDomainRequestTransportView(MatchingCoordinationSchema):
     candidate_id: str | None = Field(default=None, min_length=1, max_length=191)
     source_versions: MatchingSourceTupleView
     lineage_event_id: str = Field(min_length=1, max_length=191)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
     @field_validator("source_versions", mode="before")
     @classmethod

@@ -21,14 +21,14 @@ const selectionSchema = z.strictObject({
   allow_partial_refund_recovery: z.boolean(),
   allow_refund_overage_recovery: z.boolean(),
   allow_client_receipt_overage: z.boolean(),
-  reason: z.string().min(1).max(500),
+  reason: z.string().trim().max(500).default(''),
   evidence: z.array(z.string().min(1)).min(1),
 });
 const candidateSchema = z.strictObject({
   row_identity: z.string().min(1), batch_identity: z.string().min(1), classification_type: z.string().min(1),
   owning_domain: z.string().min(1), bank_amount_ntd: z.number().int().positive(),
   allocations: z.array(z.strictObject({ obligation_identity: z.string().min(1), amount_ntd: z.number().int().positive() })),
-  reason: z.string().min(1), evidence: z.array(z.string().min(1)), refund_ledger_entry_identity: z.string().min(1).nullable(),
+  reason: z.string(), evidence: z.array(z.string().min(1)), refund_ledger_entry_identity: z.string().min(1).nullable(),
   allow_partial_refund_recovery: z.boolean(), allow_refund_overage_recovery: z.boolean(), allow_client_receipt_overage: z.boolean(),
   candidate_fingerprint: sha256,
 });

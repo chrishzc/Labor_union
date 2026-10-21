@@ -12,7 +12,7 @@ const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const ServiceDaySchema = z.strictObject({
   service_date: DateOnlySchema,
   staff_id: z.number().int().positive(),
-  reason: z.string().min(1).max(500).nullable(),
+  reason: z.string().max(500).nullable(),
 });
 const MoneySchema = z.strictObject({ amount: z.number().int().nonnegative() });
 const SchedulingAssignmentSchema = z.strictObject({
@@ -220,7 +220,7 @@ export const OrderCancellationApplyPayloadSchema = z.strictObject({
   expected_client_finance_version: z.number().int().nonnegative().nullable(),
   expected_payroll_version: z.number().int().nonnegative().nullable(),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
-  reason: z.string().trim().min(1).max(500),
+  reason: z.string().trim().max(500),
 });
 
 const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({

@@ -221,7 +221,7 @@ def queue_publication(
     """在單一 LINE UoW 內建立 publication、receipt、audit 與首次 outbox。"""
 
     require_line_capability(command.actor, LineCapability.MENU_PUBLISH)
-    if not isinstance(reason, str) or reason.strip() != reason or not reason:
+    if not isinstance(reason, str) or reason.strip() != reason:
         raise ValueError("LINE Rich Menu publication reason is invalid")
     if len(reason) > 500:
         raise ValueError("LINE Rich Menu publication reason is too long")

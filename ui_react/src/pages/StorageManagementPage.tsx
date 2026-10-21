@@ -1,7 +1,6 @@
 import { useUnsavedDraft } from '../components/UnsavedChanges';
 import { useRef } from 'react';
-import { useSaveValidation } from '../components/useSaveValidation';
-/** Audit & System storage-management Query, Preview and confirmed Apply surface. */
+/** Audit & System storage-management surface with one-click cleanup and readback. */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   operationalRetentionClient,
@@ -39,7 +38,7 @@ function errorMessage(error: unknown): string {
   const code = String((error as { code?: unknown })?.code ?? '');
   if (status === 401) return '登入狀態已失效，請重新登入。';
   if (status === 403) return '僅限最高權限管理員使用。請以具此權限的帳號登入。';
-  if (code.includes('STALE')) return '資料已改變，請重新建立清理預覽。';
+  if (code.includes('STALE')) return '資料已改變，請重新送出清理。';
   if (code.includes('UNCONFIGURED')) return '此來源尚未設定容量上限，無法執行容量清理。';
   if (code.includes('UNCLASSIFIED')) return '此來源尚未完成安全分類，系統不會刪除。';
   return '儲存空間服務暫時無法使用，請稍後重試。';
@@ -52,16 +51,21 @@ function capacityLabel(source: RetentionSource): string {
   return '尚未設定容量上限';
 }
 
+interface PreparedCleanup {
+  readonly preview: RetentionPreview;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+}
+
 export const StorageManagementPage: React.FC = () => {
   const [dashboard, setDashboard] = useState<RetentionDashboard | null>(null);
   const [selected, setSelected] = useState<RetentionSource | null>(null);
   const [mode, setMode] = useState<RetentionMode>('expired');
-  const [reason, setReason] = useState('清理到期技術與營運觀測紀錄');
-  const saveValidation = useSaveValidation();
-  const reasonRef = useRef<HTMLInputElement>(null);
+  const [reason, setReason] = useState('');
+  const submittingRef = useRef(false);
   const [preview, setPreview] = useState<RetentionPreview | null>(null);
   const [receipt, setReceipt] = useState<RetentionReceipt | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [pendingCleanup, setPendingCleanup] = useState<PreparedCleanup | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,53 +92,74 @@ export const StorageManagementPage: React.FC = () => {
     setSelected(source);
     setPreview(null);
     setReceipt(null);
-    setConfirmed(false);
     setError(null);
   };
 
-  const createPreview = async () => {
-    if (!selected || working) return;
-    if (!saveValidation.validate([{ value: reason, label: '清理原因', ref: reasonRef }])) return;
+  const applyPrepared = async (prepared: PreparedCleanup) => {
+    try {
+      const result = await operationalRetentionClient.apply(
+        prepared.preview,
+        prepared.idempotencyKey,
+        prepared.correlationId,
+      );
+      setPendingCleanup(null);
+      setReceipt(result);
+      setPreview(null);
+      await load();
+    } catch (caught) {
+      const status = Number((caught as { status?: unknown })?.status ?? 0);
+      if (status === 0 || status >= 500) {
+        setPendingCleanup(prepared);
+        setError('清理結果尚待確認。請再次確認本次結果，系統會使用相同操作資料與識別碼。');
+      } else {
+        setPendingCleanup(null);
+        setError(errorMessage(caught));
+      }
+    }
+  };
+
+  const saveCleanup = async () => {
+    if (!selected || working || pendingCleanup || submittingRef.current) return;
+    submittingRef.current = true;
     setWorking(true);
     setError(null);
     setReceipt(null);
-    setConfirmed(false);
+    setPreview(null);
     try {
-      setPreview(await operationalRetentionClient.preview({
+      const prepared = await operationalRetentionClient.preview({
         source_id: selected.source_id,
         mode,
         reason: reason.trim(),
         batch_size: 250,
-      }));
+      });
+      setPreview(prepared);
+      if (prepared.candidate_count === 0) return;
+      await applyPrepared({
+        preview: prepared,
+        idempotencyKey: operationIdentity('retention-apply'),
+        correlationId: operationIdentity('retention-correlation'),
+      });
     } catch (caught) {
-      setPreview(null);
       setError(errorMessage(caught));
     } finally {
+      submittingRef.current = false;
       setWorking(false);
     }
   };
 
-  const applyPreview = async () => {
-    if (!preview || !confirmed || preview.candidate_count === 0) return;
+  const retryCleanup = async () => {
+    if (!pendingCleanup || working || submittingRef.current) return;
+    submittingRef.current = true;
     setWorking(true);
     setError(null);
     try {
-      const result = await operationalRetentionClient.apply(
-        preview,
-        operationIdentity('retention-apply'),
-        operationIdentity('retention-correlation'),
-      );
-      setReceipt(result);
-      setPreview(null);
-      setConfirmed(false);
-      await load();
-    } catch (caught) {
-      setError(errorMessage(caught));
+      await applyPrepared(pendingCleanup);
     } finally {
+      submittingRef.current = false;
       setWorking(false);
     }
   };
-  useUnsavedDraft('儲存空間清理', { '清理模式': mode, '原因': reason, '已核對': confirmed }, { enabled: !!selected, busy: working, resetKey: receipt });
+  useUnsavedDraft('儲存空間清理', { '清理模式': mode, '原因': reason }, { enabled: !!selected, busy: working, resetKey: receipt });
 
 
   return (
@@ -175,9 +200,9 @@ export const StorageManagementPage: React.FC = () => {
             <button
               type="button"
               onClick={() => chooseSource(source)}
-              disabled={source.classification !== 'eligible'}
+              disabled={source.classification !== 'eligible' || working || !!pendingCleanup}
             >
-              建立清理預覽
+              設定清理
             </button>
           </article>
         ))}
@@ -185,44 +210,31 @@ export const StorageManagementPage: React.FC = () => {
 
       {selected && (
         <section className="storage-cleanup-panel" aria-labelledby="storage-cleanup-title">
-          <h2 id="storage-cleanup-title">清理預覽：{selected.label}</h2>
+          <h2 id="storage-cleanup-title">清理：{selected.label}</h2>
           <div className="storage-form-grid">
             <label>
               清理模式
-              <select value={mode} onChange={(event) => { setMode(event.target.value as RetentionMode); setPreview(null); }}>
+              <select value={mode} disabled={working || !!pendingCleanup} onChange={(event) => { setMode(event.target.value as RetentionMode); setPreview(null); }}>
                 <option value="expired">清理已滿 30 天資料</option>
                 <option value="capacity">容量超標時優先清理最舊紀錄</option>
               </select>
             </label>
             <label>
-              操作原因
-              <input ref={reasonRef} aria-required="true" value={reason} maxLength={500} onChange={(event) => { setReason(event.target.value); setPreview(null); }} />
+              操作原因（選填）
+              <input value={reason} maxLength={500} disabled={working || !!pendingCleanup} onChange={(event) => { setReason(event.target.value); setPreview(null); }} />
             </label>
           </div>
-          {saveValidation.feedback}
-          <button type="button" onClick={() => void createPreview()} disabled={working}>
-            {working ? '正在檢查…' : '零寫入預覽'}
+          <button className="storage-danger" type="button" onClick={() => void saveCleanup()} disabled={working || !!pendingCleanup}>
+            {working ? '正在清理…' : '清理資料'}
           </button>
 
-          {preview && (
+          {preview?.candidate_count === 0 && (
             <div className="storage-preview" role="status">
-              <h3>預覽結果（尚未刪除）</h3>
-              <p>候選：{preview.candidate_count} 筆／檔，預估可回收 {formatBytes(preview.estimated_reclaimable_bytes)}</p>
-              <p>凍結時間：{formatTime(preview.previewed_at_utc)}；截止時間：{formatTime(preview.cutoff_at_utc)}</p>
-              {preview.candidate_count === 0 ? (
-                <p>目前沒有符合條件的資料。</p>
-              ) : (
-                <>
-                  <label className="storage-confirm">
-                    <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-                    我確認只刪除此預覽凍結的技術／營運觀測候選
-                  </label>
-                  <button className="storage-danger" type="button" onClick={() => void applyPreview()} disabled={!confirmed || working}>
-                    確認清理
-                  </button>
-                </>
-              )}
+              <p>目前沒有符合條件的資料。</p>
             </div>
+          )}
+          {pendingCleanup && (
+            <button type="button" onClick={() => void retryCleanup()} disabled={working}>再次確認清理結果</button>
           )}
         </section>
       )}

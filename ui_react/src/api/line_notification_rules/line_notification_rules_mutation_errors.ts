@@ -94,7 +94,7 @@ export function mapLineNotificationRulesMutationError(error: unknown): Error {
     if (error.status === 409) {
       return new LineNotificationRulesMutationError(
         error.code,
-        '通知規則版本或預覽已過期，請重新整理並再次預覽。',
+        '通知規則版本或預覽已過期，請重新整理後再儲存。',
         { status: 409 }
       );
     }

@@ -179,7 +179,7 @@ class PreviewManualCustomerProfilesCommand:
     expected_version: ExpectedVersion
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         _require_matching_version(self.plan, self.expected_version)
 
     @property
@@ -247,7 +247,7 @@ class RecordManualMatchingResponseCommand:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "manual matching reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "manual matching reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         _require_matching_version(self.plan, self.expected_version)
         if (
             self.caregiver_willingness is not None
@@ -329,7 +329,7 @@ class ManualCustomerProfilesEvidence:
     def __post_init__(self) -> None:
         if not self.event_ids or any(event_id <= 0 for event_id in self.event_ids):
             raise ValueError("manual customer profiles event IDs are invalid")
-        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "manual customer profiles reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         require_canonical_text(self.actor_id, "manual customer profiles actor", 191)
 
 

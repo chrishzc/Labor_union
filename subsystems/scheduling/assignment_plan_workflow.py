@@ -102,7 +102,7 @@ class AssignmentPlanApplyRequest:
 
     def __post_init__(self) -> None:
         _validate_case_number(self.case_no)
-        require_canonical_text(self.reason, "assignment plan reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "assignment plan reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

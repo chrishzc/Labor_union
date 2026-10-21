@@ -292,7 +292,7 @@ class MySqlLineDeliveryTaskRepository:
         reason: str,
     ) -> tuple[LineDeliveryTaskId, ...]:
         """Cancel only the task IDs handed off by the notification-intent owner."""
-        require_canonical_text(reason, "LINE notification task cancellation reason", 191)
+        require_canonical_text(reason, "LINE notification task cancellation reason", 191, allow_empty=True)
         if not isinstance(task_ids, tuple) or any(
             not isinstance(task_id, LineDeliveryTaskId) for task_id in task_ids
         ):

@@ -21,25 +21,17 @@ describe('PaymentDestinationConfigurationPanel', () => {
     vi.mocked(paymentDestinationClient.apply).mockResolvedValue({ account_display: '822-123456789', resulting_revision: 1, preview_fingerprint: 'a'.repeat(64) });
   });
 
-  it('requires preview and explicit confirmation before applying the union collection account', async () => {
+  it.each(['', '   ', '建立正式代收付帳戶'])('saves in one click with optional notes %j', async (note) => {
     render(<PaymentDestinationConfigurationPanel reload={0} />);
     const input = await screen.findByLabelText('工會／代收付帳戶');
     fireEvent.change(input, { target: { value: '822-123456789' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查設定影響' }));
-    await screen.findByText('契約將顯示：822-123456789');
+    fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: note } });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(paymentDestinationClient.apply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
-    const save = screen.getByRole('button', { name: '確認更新帳戶' });
-    expect(save).toBeEnabled();
-    fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalled();
-    expect(screen.getByLabelText('更新原因')).toHaveFocus();
-    expect(paymentDestinationClient.apply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
-    fireEvent.change(screen.getByLabelText('更新原因'), { target: { value: '建立正式代收付帳戶' } });
-    fireEvent.click(screen.getByLabelText('我已核對帳戶內容，確認套用'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更新帳戶' }));
-    await waitFor(() => expect(paymentDestinationClient.apply).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '儲存帳戶' }));
+    await waitFor(() => expect(paymentDestinationClient.apply).toHaveBeenCalledOnce());
+    expect(paymentDestinationClient.apply).toHaveBeenCalledWith(expect.objectContaining({ preview_fingerprint: 'a'.repeat(64) }), note.trim());
     expect(await screen.findByText(/已更新/)).toBeInTheDocument();
+    expect(window.alert).not.toHaveBeenCalled();
   });
 });

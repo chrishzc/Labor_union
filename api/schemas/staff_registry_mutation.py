@@ -75,7 +75,7 @@ class StaffBankAccountPreviewRequest(_StrictModel):
 
 class StaffBankAccountApplyRequest(StaffBankAccountPreviewRequest):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class SafeStaffBankAccountView(_StrictModel):

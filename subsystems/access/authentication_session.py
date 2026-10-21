@@ -426,7 +426,7 @@ def recover_local_root_credentials(
     if not re.fullmatch(r"lu_test_[a-z0-9_]+", target_database):
         raise ValueError("local_root_recovery_target_required")
     username = username.strip().lower()
-    if not username or not reason.strip() or expected_account_id <= 0:
+    if not username or expected_account_id <= 0:
         raise ValueError("local_root_recovery_input_required")
     password_hash = hash_admin_password(password)
     conn = connection_factory()
@@ -488,7 +488,7 @@ def reset_local_root_mfa(
         raise ValueError("local_root_recovery_environment_required")
     if not re.fullmatch(r"lu_test_[a-z0-9_]+", target_database):
         raise ValueError("local_root_recovery_target_required")
-    if not reason.strip() or expected_account_id <= 0:
+    if expected_account_id <= 0:
         raise ValueError("local_root_recovery_input_required")
     # Fail before revoking the existing factor if enrollment cannot encrypt a new one.
     totp_cipher_from_environment()
@@ -789,8 +789,6 @@ def _require_root_actor(actor: AdminPrincipal, reason: str) -> None:
     """Require the sole account-center operator and an accountable reason."""
     if not actor.is_root:
         raise PermissionError("僅 root 可管理帳號")
-    if not reason.strip():
-        raise ValueError("高風險帳號操作必須提供原因")
 
 
 def _lock_non_root_account(cursor: Any, account_id: int, expected_version: int) -> None:

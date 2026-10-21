@@ -90,7 +90,7 @@ class DefaultStaffPayoutRemediationClient implements StaffPayoutRemediationClien
   async apply(preview: StaffPayoutPreview, selection: StaffPayoutSelection, reason: string, command: StaffPayoutRemediationCommand, options?: StaffPayoutRemediationOptions): Promise<StaffPayoutJobAccepted> {
     const normalized = normalizeSelection(selection);
     const normalizedReason = reason.trim();
-    if (!normalizedReason || normalizedReason.length > 500) throw new StaffPayoutRemediationError('STAFF_PAYOUT_REASON_INVALID', '處理理由不可為空白且不得超過500字。');
+    if (normalizedReason.length > 500) throw new StaffPayoutRemediationError('STAFF_PAYOUT_REASON_INVALID', '處理理由不得超過500字。');
     if (!preview.preview_fingerprint || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_INVALID', 'Preview fingerprint 無效。');
     try {
       return decode(StaffPayoutJobAcceptedSchema, await transport.post('/api/v1/staff-payables/payout/apply', {

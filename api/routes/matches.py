@@ -110,7 +110,7 @@ class MatchingPlanInformationRequest(MatchingPlanEventIdentity):
 class MatchingPlanWillingnessRequest(MatchingPlanEventIdentity):
     willingness: Literal["willing", "unwilling"]
     expected_version: int = Field(..., ge=0)
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class MatchingPlanResumeRequest(MatchingPlanEventIdentity):
@@ -127,7 +127,7 @@ class ManualMatchingProfilesPreviewRequest(BaseModel):
 
     actor: str = Field(..., min_length=1, max_length=100)
     confirmation_method: Literal["phone", "in_person", "paper", "other"]
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     expected_version: int = Field(..., ge=0)
 
 
@@ -139,11 +139,11 @@ class ManualMatchingProfilesApplyRequest(ManualMatchingProfilesPreviewRequest):
 class MatchingPlanCustomerDecisionRequest(MatchingPlanEventIdentity):
     decision: Literal["accepted", "declined", "contact_requested"]
     expected_version: int = Field(..., ge=0)
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class MatchingPlanCancellationRequest(MatchingPlanEventIdentity):
-    reason: str = Field(..., min_length=1, max_length=255)
+    reason: str = Field(default="", max_length=255)
     expected_version: int | None = Field(default=None, ge=0)
 
 

@@ -148,18 +148,16 @@ class _ConfirmationEventConnection:
 
 
 @pytest.mark.parametrize("value", ["rejected", "manually_confirmed", "manually_revoked"])
-def test_manual_schedule_updates_require_a_reason(value):
+def test_manual_schedule_updates_accept_optional_reason(value):
     workflow = MatchingScheduleConfirmationWorkflow(_Repository(), _UnitOfWork)
 
-    with pytest.raises(ValueError, match="confirmation_reason_required"):
-        workflow.confirm(1, value, "admin", "", "key-68")
+    assert workflow.confirm(1, value, "admin", "", "key-68") == {"gate_passed": True}
 
 
-def test_manual_schedule_preparation_requires_a_reason():
+def test_manual_schedule_preparation_accepts_optional_reason():
     workflow = MatchingScheduleConfirmationWorkflow(_Repository(), _UnitOfWork)
 
-    with pytest.raises(ValueError, match="manual_schedule_confirmation_reason_required"):
-        workflow.prepare_manual("CASE-68", 18, "admin", " ", 1, "f" * 64, "key-68")
+    assert workflow.prepare_manual("CASE-68", 18, "admin", " ", 1, "f" * 64, "key-68") == {"snapshot_status": "manual_ready"}
 
 
 def test_schedule_send_and_manual_preparation_require_current_confirmed_dates():

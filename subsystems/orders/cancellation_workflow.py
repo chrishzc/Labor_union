@@ -102,7 +102,7 @@ class OrderCancellationApplyRequest:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
-        require_canonical_text(self.reason, "cancellation reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "cancellation reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
         if not isinstance(self.confirmed_service_days, tuple):
             raise TypeError("confirmed service days must be a tuple")
 

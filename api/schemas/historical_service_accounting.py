@@ -25,7 +25,7 @@ class HistoricalServiceAccountingApplyBody(HistoricalServiceAccountingPreviewBod
     expected_client_finance_version: StrictInt = Field(ge=0)
     expected_payroll_version: StrictInt = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class HistoricalServiceAccountingAssignmentView(BaseModel):
@@ -125,7 +125,7 @@ class HistoricalPrecisionRestartApplyBody(HistoricalPrecisionRestartPreviewBody)
     expected_historical_day_revision: StrictInt = Field(ge=0)
     expected_confirmed_service_date_version: StrictInt | None = Field(default=None, ge=1)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class HistoricalPrecisionRestartQueryView(BaseModel):

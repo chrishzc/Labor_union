@@ -342,7 +342,7 @@ const LegacyRecoveryPreviewInputSchema = z.strictObject({
   signing_event_id: z.number().int().positive(),
   command_receipt_id: z.number().int().positive(),
   confirmation_method: ExternalSigningConfirmationMethodSchema,
-  reason: z.string().min(1).max(1000),
+  reason: z.string().max(1000),
 }).superRefine((value, context) => {
   if ((value.scope === 'staff') !== (value.matching_segment_id !== null)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['matching_segment_id'], message: 'recovery input scope is invalid' });
@@ -415,7 +415,6 @@ function stagingCommandOptions(identity: ExternalSigningCommandIdentity, signal?
 
 function normalizedReport<T extends { reason: string }>(input: T): T {
   const reason = input.reason.trim();
-  if (!reason) throw new Error('請填寫外部簽署完成證據。');
   return { ...input, reason };
 }
 

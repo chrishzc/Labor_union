@@ -1,22 +1,20 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useSaveValidation } from './useSaveValidation';
 /**
  * File: LineRichMenuPublicationActions.tsx
- * Description: 提供 Rich Menu 發布 Preview、人工確認 queue 與可重試失敗的 durable retry 操作。
+ * Description: 提供 Rich Menu 發布檢查與一次點擊 queue 與可重試失敗的 durable retry 操作。
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, LockKeyhole, RefreshCw, Rocket, SearchCheck, TriangleAlert } from 'lucide-react';
+import { LockKeyhole, RefreshCw, Rocket, TriangleAlert } from 'lucide-react';
 import {
   adaptLineRichMenuPublicationReceipt,
-  adaptLineRichMenuPublishPreview,
   type LineRichMenuPublicationReceiptModel,
-  type LineRichMenuPublishPreviewModel,
 } from '../adapters/line_rich_menu_publication/line_rich_menu_publication_adapter';
 import {
   lineRichMenuPublicationClient,
   type LineRichMenuPublicationClient,
 } from '../api/line_rich_menu_publication/line_rich_menu_publication_client';
 import { LineRichMenuPublicationError } from '../api/line_rich_menu_publication/line_rich_menu_publication_errors';
+import type { LineRichMenuPublishRequest, LineRichMenuRetryRequest } from '../api/line_rich_menu_publication/line_rich_menu_publication_schemas';
 import { sessionClient } from '../api/auth/session_client';
 
 export interface LineRichMenuPublicationMenu {
@@ -61,7 +59,7 @@ function displayError(error: unknown): string {
       return '目前登入狀態不能排入發布工作；本機免驗證模式不可發布，其他情況請重新登入已啟用的內部使用者帳號。';
     }
     if (error.code === 'rich_menu_preview_stale') {
-      return '選單草稿或版本已變更，先前的發布預覽已過期；請重新檢查發布影響後，再勾選確認發布。';
+      return '選單草稿或版本已變更，先前的發布預覽已過期；請重新查詢後再發布。';
     }
     return `${error.code}：${error.message}`;
   }
@@ -74,101 +72,66 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   client = lineRichMenuPublicationClient,
   onQueued,
 }) => {
-  const [preview, setPreview] = useState<LineRichMenuPublishPreviewModel | null>(null);
-  const [previewState, setPreviewState] = useState<OperationState>('idle');
   const [publishReason, setPublishReason] = useState('');
-  const publishValidation = useSaveValidation();
-  const retryValidation = useSaveValidation();
-  const publishReasonRef = useRef<HTMLInputElement>(null);
-  const retryReasonRef = useRef<HTMLTextAreaElement>(null);
-  const [publishConfirmed, setPublishConfirmed] = useState(false);
   const [publishState, setPublishState] = useState<OperationState>('idle');
   const [retryReason, setRetryReason] = useState('');
-  const [retryConfirmed, setRetryConfirmed] = useState(false);
   const [retryState, setRetryState] = useState<OperationState>('idle');
   const [receipt, setReceipt] = useState<LineRichMenuPublicationReceiptModel | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const publicationAccess = publicationAccessMessage();
+  const publishIntent = useRef<{ signature: string; command: LineRichMenuPublishRequest } | null>(null);
+  const retryIntent = useRef<{ signature: string; command: LineRichMenuRetryRequest } | null>(null);
 
   useEffect(() => {
     controllerRef.current?.abort();
-    setPreview(null);
-    setPreviewState('idle');
+    publishIntent.current = null;
     setPublishReason('');
-    setPublishConfirmed(false);
     setPublishState('idle');
     setReceipt(null);
     setErrorMessage(null);
   }, [selectedMenu?.id]);
 
   useEffect(() => {
+    retryIntent.current = null;
     setRetryReason('');
-    setRetryConfirmed(false);
     setRetryState('idle');
     setErrorMessage(null);
   }, [selectedPublication?.id, selectedPublication?.status]);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  const runPreview = async (): Promise<void> => {
-    if (!selectedMenu) return;
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setPreviewState('loading');
-    setPreview(null);
-    setReceipt(null);
-    setErrorMessage(null);
-    try {
-      const result = await client.preview(selectedMenu.id, { signal: controller.signal });
-      if (controller.signal.aborted) return;
-      setPreview(adaptLineRichMenuPublishPreview(result));
-      setPublishConfirmed(false);
-      if (!publishReason.trim()) {
-        setPublishReason('工會人員更新圖文選單設定');
-      }
-      setPreviewState('success');
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      setPreviewState('error');
-      setErrorMessage(displayError(error));
-    }
-  };
-
   const queuePublication = async (): Promise<void> => {
-    if (!selectedMenu || !publishConfirmed || !preview || busy || publicationAccess) return;
-    if (!publishValidation.validate([{ value: publishReason, label: '發布原因', ref: publishReasonRef }])) return;
-    const effectiveReason = publishReason.trim() || '工會人員更新圖文選單設定';
+    if (!selectedMenu || busy || publicationAccess) return;
+    const effectiveReason = publishReason.trim();
     const controller = new AbortController();
     controllerRef.current = controller;
     setPublishState('loading');
     setReceipt(null);
     setErrorMessage(null);
     try {
-      const result = await client.publish(
-        selectedMenu.id,
-        {
-          preview_id: preview.previewId,
-          reason: effectiveReason,
+      const signature = JSON.stringify([selectedMenu.id, effectiveReason]);
+      if (publishIntent.current?.signature !== signature) {
+        const preview = await client.preview(selectedMenu.id, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        publishIntent.current = { signature, command: {
+          preview_id: preview.preview_id, reason: effectiveReason,
           idempotency_key: uniqueOperationIdentity('line-rich-menu-publish-idem'),
           correlation_id: uniqueOperationIdentity('line-rich-menu-publish-corr'),
-        },
-        { signal: controller.signal }
-      );
+        } };
+      }
+      const result = await client.publish(selectedMenu.id, publishIntent.current.command, { signal: controller.signal });
 
       if (controller.signal.aborted) return;
       const nextReceipt = adaptLineRichMenuPublicationReceipt(result);
       setReceipt(nextReceipt);
-      setPublishConfirmed(false);
+      publishIntent.current = null;
       setPublishState('success');
       onQueued?.(nextReceipt);
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (error instanceof LineRichMenuPublicationError && error.code === 'rich_menu_preview_stale') {
-        setPreview(null);
-        setPublishConfirmed(false);
-      }
+
+      if (error instanceof LineRichMenuPublicationError && error.category === 'conflict') publishIntent.current = null;
       setPublishState('error');
       setErrorMessage(displayError(error));
     }
@@ -177,29 +140,25 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
   const retryPublication = async (): Promise<void> => {
     if (
       selectedPublication?.status !== 'publish_retryable_failed'
-      || !retryConfirmed
       || busy || publicationAccess
     ) return;
-    if (!retryValidation.validate([{ value: retryReason, label: '重試原因', ref: retryReasonRef }])) return;
     const controller = new AbortController();
     controllerRef.current = controller;
     setRetryState('loading');
     setReceipt(null);
     setErrorMessage(null);
     try {
-      const result = await client.retry(
-        selectedPublication.id,
-        {
-          reason: retryReason.trim(),
-          idempotency_key: uniqueOperationIdentity('line-rich-menu-retry-idem'),
-          correlation_id: uniqueOperationIdentity('line-rich-menu-retry-corr'),
-        },
-        { signal: controller.signal }
-      );
+      const signature = JSON.stringify([selectedPublication.id, retryReason.trim()]);
+      if (retryIntent.current?.signature !== signature) retryIntent.current = { signature, command: {
+        reason: retryReason.trim(),
+        idempotency_key: uniqueOperationIdentity('line-rich-menu-retry-idem'),
+        correlation_id: uniqueOperationIdentity('line-rich-menu-retry-corr'),
+      } };
+      const result = await client.retry(selectedPublication.id, retryIntent.current.command, { signal: controller.signal });
       if (controller.signal.aborted) return;
       const nextReceipt = adaptLineRichMenuPublicationReceipt(result);
       setReceipt(nextReceipt);
-      setRetryConfirmed(false);
+      retryIntent.current = null;
       setRetryState('success');
       onQueued?.(nextReceipt);
     } catch (error) {
@@ -209,7 +168,7 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
     }
   };
 
-  const busy = previewState === 'loading' || publishState === 'loading' || retryState === 'loading';
+  const busy = publishState === 'loading' || retryState === 'loading';
   useUnsavedDraft('圖文選單發布', { '發布原因': publishReason, '重試原因': retryReason }, { busy, resetKey: receipt });
 
 
@@ -224,64 +183,12 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
              {selectedMenu ? `目前選單：${selectedMenu.name}` : '確認此筆失敗紀錄後重新排入發布。'}
           </p>
         </div>
-        {selectedMenu && (
-          <div className="richmenu-publish-actions">
-            <button
-              type="button"
-              className="line-secondary-btn"
-              disabled={busy}
-              onClick={() => void runPreview()}
-            >
-              <SearchCheck aria-hidden="true" />{previewState === 'loading' ? '檢查中…' : '檢查發布影響'}
-            </button>
-          </div>
-        )}
       </div>
-
-      {previewState === 'loading' && <div className="line-loading" role="status">正在檢查發布影響…</div>}
-      {preview && (
-        <div className="richmenu-preview-box">
-          <div className="richmenu-publish-preview-heading">
-            <strong><CheckCircle2 aria-hidden="true" />發布影響已確認</strong>
-          </div>
-          <p className="richmenu-publish-preview-description">
-             選單設定已通過檢查，請核對影響範圍後發布。
-          </p>
-
-          <label htmlFor="line-rich-menu-publish-reason" className="richmenu-publish-field-label">
-            發布原因
-          </label>
-          <input
-            id="line-rich-menu-publish-reason"
-            aria-label="發布原因"
-            ref={publishReasonRef} aria-required="true" value={publishReason}
-            maxLength={500}
-            disabled={busy}
-            placeholder="例如：工會人員更新圖文選單設定"
-            className="richmenu-form-input richmenu-publish-reason"
-            onChange={(event) => {
-              setPublishReason(event.target.value);
-            }}
-          />{publishValidation.feedback}
-          <label className="richmenu-confirm-checkbox-label richmenu-publish-confirm">
-            <input
-              type="checkbox"
-              checked={publishConfirmed}
-              disabled={busy}
-              onChange={(event) => setPublishConfirmed(event.target.checked)}
-            />
-            我已確認選單內容與影響範圍，同意排入發布序列
-          </label>
-          <button
-            type="button"
-            className="line-primary-btn richmenu-publish-submit"
-            disabled={busy || Boolean(publicationAccess) || !publishConfirmed}
-            onClick={() => void queuePublication()}
-          >
-            <Rocket aria-hidden="true" />確認發布至 LINE
-          </button>
-        </div>
-      )}
+      {selectedMenu && <div className="richmenu-preview-box">
+        <label htmlFor="line-rich-menu-publish-reason" className="richmenu-publish-field-label">發布原因（選填）</label>
+        <input id="line-rich-menu-publish-reason" aria-label="發布原因（選填）" value={publishReason} maxLength={500} disabled={busy} className="richmenu-form-input richmenu-publish-reason" onChange={(event) => setPublishReason(event.target.value)} />
+        <button type="button" className="line-primary-btn richmenu-publish-submit" data-control-id="line.richmenu.publish" disabled={busy || Boolean(publicationAccess)} onClick={() => void queuePublication()}><Rocket aria-hidden="true" />發布至 LINE</button>
+      </div>}
 
       {publicationAccess && (
         <div className="line-error richmenu-publish-message" role="note">
@@ -294,37 +201,27 @@ export const LineRichMenuPublicationActions: React.FC<LineRichMenuPublicationAct
           <strong className="richmenu-retry-title"><TriangleAlert aria-hidden="true" />此選單發布可重新排入</strong>
           <p className="richmenu-retry-status">目前狀態：{selectedPublication.statusLabel}</p>
           <label htmlFor={`line-rich-menu-retry-reason-${selectedPublication.id}`} className="richmenu-publish-field-label">
-            重試原因
+            重試原因（選填）
           </label>
           <textarea
             id={`line-rich-menu-retry-reason-${selectedPublication.id}`}
-            ref={retryReasonRef} aria-required="true" value={retryReason}
+            value={retryReason}
             rows={2}
             maxLength={500}
             disabled={busy}
             className="richmenu-form-textarea"
             onChange={(event) => {
               setRetryReason(event.target.value);
-              setRetryConfirmed(false);
               setRetryState('idle');
             }}
-          />{retryValidation.feedback}
-          <label className="richmenu-confirm-checkbox-label richmenu-publish-confirm">
-            <input
-              type="checkbox"
-              checked={retryConfirmed}
-              disabled={busy}
-              onChange={(event) => setRetryConfirmed(event.target.checked)}
-            />
-            我已確認此紀錄為發布可重試失敗
-          </label>
+          />
           <button
             type="button"
             className="line-warning-btn richmenu-publish-submit"
-            disabled={busy || Boolean(publicationAccess) || !retryConfirmed}
+            disabled={busy || Boolean(publicationAccess)}
             onClick={() => void retryPublication()}
           >
-            <RefreshCw aria-hidden="true" />確認重新排入發布
+            <RefreshCw aria-hidden="true" />重新排入發布
           </button>
         </div>
       )}

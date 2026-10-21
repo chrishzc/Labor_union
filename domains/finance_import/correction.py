@@ -76,7 +76,7 @@ class FinanceImportCorrectionSelection:
             self.reason,
             "correction reason",
             _EVIDENCE_MAXIMUM_LENGTH,
-        )
+        allow_empty=True)
         _validate_sorted_text(
             self.evidence,
             "correction evidence",

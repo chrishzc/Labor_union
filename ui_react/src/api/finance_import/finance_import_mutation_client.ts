@@ -74,7 +74,7 @@ export const financeImportMutationClient = {
     try { return decode(previewSchema, await transport.post('/api/v1/finance-import/batches/preview', { batch_identity: batch }, requestOptions(signal, { 'X-Correlation-ID': `finance-import-preview-${crypto.randomUUID()}` })), 'Finance Import Preview'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
   async apply(preview: FinanceImportBatchPreview, reason: string, command: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }): Promise<FinanceImportJobAccepted> {
-    const normalizedReason = reason.trim(); if (!normalizedReason) throw new FinanceImportQueryError('FINANCE_IMPORT_REASON_REQUIRED', '請填寫正式入帳原因。');
+    const normalizedReason = reason.trim(); if (normalizedReason.length > 500) throw new FinanceImportQueryError('FINANCE_IMPORT_REASON_INVALID', '正式入帳原因不得超過500字。');
     try { return decode(jobAcceptedSchema, await transport.post('/api/v1/finance-import/batches/apply', { batch_identity: preview.batch_identity, expected_batch_version: preview.batch_version, preview_fingerprint: preview.preview_fingerprint, reason: normalizedReason }, requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), 'Finance Import Apply'); } catch (error) { throw mapFinanceImportQueryError(error); }
   },
   async queryBatchOutcome(jobId: string, signal?: AbortSignal): Promise<FinanceImportBatchOutcome> {

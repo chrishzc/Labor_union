@@ -45,7 +45,7 @@ class OrderReopenApplyRequest:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
-        require_canonical_text(self.reason, "reopen reason", 500)
+        require_canonical_text(self.reason, "reopen reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

@@ -155,8 +155,8 @@ export const AccountManagementPage: React.FC = () => {
     }));
   }, [commandReason, createDisplayName, createPassword, createUsername, runAccountCommand]);
 
-  const mutateAccount = useCallback((user: AccountDirectoryRow, action: 'enabled' | 'password' | 'mfa' | 'sessions') => {
-    const reason = commandReason.trim();
+  const mutateAccount = useCallback((user: AccountDirectoryRow, action: 'enabled' | 'password' | 'mfa' | 'sessions', note = commandReason) => {
+    const reason = note.trim();
     const identity = `${action}:${user.id}:${user.accessControlVersion}:${reason}:${action === 'password' ? commandPassword : ''}`;
     return runAccountCommand(identity, (idempotencyKey) => {
       const common = { reason, expected_version: user.accessControlVersion, idempotency_key: idempotencyKey };
@@ -349,18 +349,18 @@ export const AccountManagementPage: React.FC = () => {
                 />
               </div>}
               <div className="account-field-item account-field-item-full">
-                <label htmlFor="account-command-reason">操作原因</label>
+                <label htmlFor="account-command-reason">備註（選填）</label>
                 <input
-                  id="account-command-reason" ref={commandReasonRef} aria-required="true"
+                  id="account-command-reason" ref={commandReasonRef}
                   value={commandReason}
                   onChange={(event) => setCommandReason(event.target.value)}
                   maxLength={500}
-                  placeholder="請輸入本次操作原因（例如：2026/08 督導人員職務建立與啟用）"
+                  placeholder="有需要補充的內容再填寫"
                 />
               </div>
             </fieldset>
             <p id="account-command-disabled-reason" className="account-query-state" style={{ color: 'var(--md-sys-color-error)' }}>
-              請填寫本次操作原因。建立或重設密碼至少需要 10 個字元；確認前請核對操作對象。
+              備註可留白；建立或重設密碼至少需要 10 個字元。
             </p>
             {saveValidation.feedback}
             {commandState.status === 'error' && <div role="alert">{commandState.error}</div>}
@@ -371,7 +371,6 @@ export const AccountManagementPage: React.FC = () => {
                   { value: createDisplayName, label: '顯示名稱', ref: displayNameRef },
                   { value: createPassword, label: '新密碼', ref: createPasswordRef, valid: createPassword.length >= 10, message: '請填寫至少 10 個字元的新密碼。' },
                 ] : commandTarget?.action === 'password' ? [{ value: commandPassword, label: '重設密碼', ref: commandPasswordRef, valid: commandPassword.length >= 10, message: '請填寫至少 10 個字元的重設密碼。' }] : []),
-                { value: commandReason, label: '操作原因', ref: commandReasonRef },
               ])) return;
               if (commandTarget === 'create') void createAccount(); else if (commandTarget) void mutateAccount(commandTarget.user, commandTarget.action);
             }}>確認執行</button>
@@ -430,7 +429,7 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id="account.mfa.reset"
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => openCommand({ user, action: 'mfa' })}
+                      onClick={() => void mutateAccount(user, 'mfa', '')}
                       disabled={commandState.status === 'loading'}
                     >
                       重設 MFA
@@ -439,7 +438,7 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id="account.user.session-revoke"
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => openCommand({ user, action: 'sessions' })}
+                      onClick={() => void mutateAccount(user, 'sessions', '')}
                       disabled={commandState.status === 'loading'}
                     >
                       🚪 強制登出
@@ -448,7 +447,7 @@ export const AccountManagementPage: React.FC = () => {
                       type="button"
                       data-control-id={user.enabled ? 'account.user.disable' : 'account.user.enable'}
                       aria-describedby="account-command-disabled-reason"
-                      onClick={() => openCommand({ user, action: 'enabled' })}
+                      onClick={() => void mutateAccount(user, 'enabled', '')}
                       disabled={commandState.status === 'loading'}
                     >
                       {user.enabled ? '🔒 停權' : '🔓 啟用'}

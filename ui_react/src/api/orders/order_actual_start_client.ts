@@ -132,8 +132,8 @@ const ActualStartRescheduleApplyPayloadSchema = z.strictObject({
   expected_scheduling_version: NonnegativeIntegerSchema,
   preview_fingerprint: FingerprintSchema,
   reason: z.string().refine(
-    (value) => value.trim().length >= 1 && value.length <= 500,
-    { message: '原因必須為 1 至 500 字元且不可為純空白' },
+    (value) => value.length <= 500,
+    { message: '原因最多 500 字元' },
   ),
 });
 

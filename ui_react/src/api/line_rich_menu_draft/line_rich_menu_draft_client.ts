@@ -49,7 +49,7 @@ async function mapped<T>(operation: () => Promise<T>): Promise<T> {
         line_rich_menu_draft_invalid: '按鈕動作內容不符合規則；請確認 LIFF 入口、HTTPS 網址格式，以及訊息、資料或選單代號長度。',
         line_rich_menu_draft_revision_stale: 'Rich Menu 草稿已被更新，請重新整理後再試。',
         line_configuration_revision_conflict: 'Rich Menu 草稿版本已變更，請重新整理後再試。',
-        line_rich_menu_draft_preview_fingerprint_mismatch: '預覽內容已過期或變更，請重新預覽並確認。',
+        line_rich_menu_draft_preview_fingerprint_mismatch: '預覽內容已過期或變更，請重新整理後再儲存。',
         line_rich_menu_media_asset_missing: '選取的背景圖已不存在，請重新選擇。',
         line_rich_menu_media_asset_owner_conflict: '選取的背景圖不屬於目前選單，請重新選擇。',
         line_rich_menu_media_asset_deleted: '選取的背景圖已刪除，請重新選擇。',

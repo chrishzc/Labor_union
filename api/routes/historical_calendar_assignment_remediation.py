@@ -95,7 +95,7 @@ def apply_historical_calendar_assignment_remediation(
     case_no: Annotated[str, Form(min_length=1, max_length=50)],
     expected_lifecycle_version: Annotated[int, Form(ge=0)],
     preview_fingerprint: Annotated[str, Form(pattern=r"^[0-9a-f]{64}$")],
-    reason: Annotated[str, Form(min_length=1, max_length=500)],
+    reason: Annotated[str, Form(max_length=500)] = "",
     caregiver_ordinal: Annotated[int, Form(ge=1)] = 1,
     workbook: UploadFile = File(...),
     idempotency_key: _IdempotencyHeader = ...,

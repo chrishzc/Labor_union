@@ -95,7 +95,6 @@ function signedDocumentBody(document: File, expectedDocumentVersionId: number): 
 
 function manualAttestationBody(document: File, confirmationMethod: ManualConfirmationMethod, reason: string, previewFingerprint: string): FormData {
   if (document.size <= 0) throw new Error('人工簽約證據檔不得為空。');
-  if (!reason.trim()) throw new Error('請填寫人工確認依據。');
   if (!/^[a-f0-9]{64}$/i.test(previewFingerprint)) throw new Error('人工簽約證據 Preview 已失效，請重新預覽。');
   const body = new FormData();
   body.append('document', document, document.name);

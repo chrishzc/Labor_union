@@ -26,13 +26,13 @@ export const StaffLifecycleActionSchema = z.enum(['retirement', 'reactivation'])
 export const StaffLifecycleTransitionInputSchema = z
   .strictObject({
     effective_at: StaffLifecycleAwareDateTimeSchema,
-    reason_code: z.string().min(1).max(64),
+    reason_code: z.string().max(64),
   });
 
 export const StaffLifecycleApplyPayloadSchema = z
   .strictObject({
     effective_at: StaffLifecycleAwareDateTimeSchema,
-    reason_code: z.string().min(1).max(64),
+    reason_code: z.string().max(64),
     expected_version: z.number().int().nonnegative(),
     preview_fingerprint: StaffLifecycleFingerprintSchema,
   });

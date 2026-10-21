@@ -130,7 +130,9 @@ function evidence(value: string): string {
 }
 
 function reason(value: string): string {
-  return text(value, 'reason', 500);
+  const normalized = value.trim();
+  if (normalized.length > 500) throw new StaffOverpaymentRecoveryError('STAFF_RECOVERY_INPUT_INVALID', 'reason不得超過500字。');
+  return normalized;
 }
 
 function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown, label: string): z.output<T> {

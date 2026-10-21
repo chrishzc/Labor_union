@@ -36,10 +36,10 @@ class HistoricalStaffPayoutIntent:
         require_canonical_text(self.case_no, "case number", 50)
         require_positive_integer(self.staff_id, "staff id")
         _identities(self.obligation_identities)
-        if (self.payment_date is None) == (self.payment_date_unknown_reason is None):
+        if self.payment_date is not None and self.payment_date_unknown_reason is not None:
             raise ValueError("historical_staff_payout_date_shape_invalid")
         if self.payment_date_unknown_reason is not None:
-            require_canonical_text(self.payment_date_unknown_reason, "payment date unknown reason", 500)
+            require_canonical_text(self.payment_date_unknown_reason, "payment date unknown reason", 500, allow_empty=True)
         if self.evidence_reference is not None:
             require_canonical_text(self.evidence_reference, "evidence reference", 191)
 

@@ -67,7 +67,7 @@ class AcquireAvailabilityLockRequest(_StrictRequest):
 
 
 class ReleaseAvailabilityLockRequest(AcquireAvailabilityLockRequest):
-    reason: str = Field(..., min_length=1)
+    reason: str = Field(default="", )
 
 
 class AssignmentTerm(_StrictRequest):

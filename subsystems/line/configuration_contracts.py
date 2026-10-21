@@ -131,7 +131,7 @@ class ApplyLineConfigurationCommand:
             self.reason,
             "LINE configuration change reason",
             _CONFIGURATION_REASON_MAXIMUM_LENGTH,
-        )
+        allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

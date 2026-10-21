@@ -22,7 +22,7 @@ class HistoricalReviewRemediationApplyBody(HistoricalReviewRemediationIntentBody
     expected_review_version: StrictInt = Field(ge=0)
     expected_remediation_version: StrictInt = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence: list[str] = Field(min_length=1, max_length=20)
 
 
@@ -52,7 +52,7 @@ class HistoricalReviewRemediationQueryView(_StrictModel):
     review_version: StrictInt = Field(ge=0)
     remediation_version: StrictInt = Field(ge=0)
     workbook_contract: HistoricalReviewWorkbookContractView
-    reason_required: bool = True
+    reason_required: bool = False
     evidence_required: bool = True
     completion_condition: str
     prior_alert_active: bool

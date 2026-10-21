@@ -265,7 +265,7 @@ def _matched_receipt(request, command_fingerprint, stored):
 def _validate_apply_request(request, intent_type) -> None:
     if not isinstance(request.intent, intent_type):
         raise TypeError("government subsidy claim intent is invalid")
-    require_canonical_text(request.reason, "government subsidy reason", _REASON_MAXIMUM_LENGTH)
+    require_canonical_text(request.reason, "government subsidy reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
 
 
 def _validate_page(cursor: int | None, limit: int) -> None:

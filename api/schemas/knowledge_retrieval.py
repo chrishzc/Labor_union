@@ -17,7 +17,7 @@ class KnowledgeIngestBody(BaseModel):
 class KnowledgeTransitionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_version: int = Field(ge=1)
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 class KnowledgeQuestionBody(BaseModel):

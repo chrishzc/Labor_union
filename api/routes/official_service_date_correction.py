@@ -40,7 +40,7 @@ class ApplyBody(PreviewBody):
     expected_order_version: int = Field(ge=0)
     expected_scheduling_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 @router.get("/{case_no}/official-service-dates", response_model=BaseResponse[dict[str, Any]])

@@ -136,8 +136,6 @@ class BeClassCorrectionWorkflow:
         identity = _case_no(case_no)
         normalized = normalize_beclass_changes(changes)
         clean_reason = reason.strip()
-        if not clean_reason:
-            raise ValueError("beclass_correction_reason_required")
         command_fingerprint = fingerprint_payload({
             "family": _COMMAND_FAMILY,
             "case_no": identity,

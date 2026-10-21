@@ -46,12 +46,12 @@ function commandFor(preview: ActualStartPreview): ActualStartCommand {
     } : {
       operation: 'reschedule', new_actual_start_date: preview.after_actual_start_date,
       expected_order_version: preview.order_version, expected_scheduling_version: preview.scheduling_version,
-      preview_fingerprint: preview.preview_fingerprint, reason: '核對服務日期並確認實際開始日',
+      preview_fingerprint: preview.preview_fingerprint, reason: '',
     },
   };
 }
 
-/** Called only after human confirmation. Reuses Actual Start recovery and never retries a known receipt. */
+/** Called by the explicit save action. Reuses Actual Start recovery and never retries a known receipt. */
 export async function saveServiceDatesStart(caseNo: string, preview: ActualStartPreview): Promise<void> {
   let flow = orderMutationFlowStore.getActualStart(caseNo);
   if (flow && flow.command.payload.preview_fingerprint !== preview.preview_fingerprint) {

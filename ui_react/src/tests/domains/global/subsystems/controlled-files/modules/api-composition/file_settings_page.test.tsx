@@ -60,42 +60,30 @@ describe('NAS file settings', () => {
     expect(leave).not.toHaveBeenCalled();
   });
 
-  it('shows the actual path read-only and saves only size and timeout after preview', async () => {
-    const save = vi.spyOn(fileSettingsClient, 'save').mockResolvedValue({ ...current, version: 3,
-      photo_max_bytes: 26214400, timeout_seconds: 120 });
+  it('shows the actual path read-only and saves size and timeout with one click', async () => {
+    const save = vi.spyOn(fileSettingsClient, 'save').mockResolvedValue({ ...current, version: 3, photo_max_bytes: 26214400, timeout_seconds: 120 });
     render(<FileSettingsPage />);
     expect(await screen.findByLabelText('照片單檔上限（MiB）')).toHaveValue(10);
-    expect(screen.queryByText('原設計的檔案分類')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.getByText('/data/controlled-files')).toBeInTheDocument();
-    expect(screen.queryByText('部署需求')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('照片單檔上限（MiB）'), { target: { value: '25' } });
     fireEvent.change(screen.getByLabelText('檔案操作等待時間（秒）'), { target: { value: '120' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     expect(save).not.toHaveBeenCalled();
-    const preview = screen.getByRole('region', { name: '變更內容預覽' });
-    expect(preview).toHaveTextContent('25 MiB');
-    expect(preview).not.toHaveTextContent('/data/controlled-files');
-    fireEvent.click(within(preview).getByRole('button', { name: '儲存設定' }));
+    expect(screen.queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存設定' }));
     await screen.findByText('檔案設定已儲存，容量與等待時間已生效。');
-    expect(save).toHaveBeenCalledWith({ photo_max_bytes: 26214400,
-      resume_max_bytes: 20971520, timeout_seconds: 120 }, 2);
-    expect(screen.getByLabelText('檔案操作等待時間（秒）')).toHaveValue(120);
-    expect(screen.getByText('/data/controlled-files')).toBeInTheDocument();
+    expect(save).toHaveBeenCalledExactlyOnceWith({ photo_max_bytes: 26214400, resume_max_bytes: 20971520, timeout_seconds: 120 }, 2);
   });
 
-  it('allows no timer, and editing after preview invalidates the saved candidate', async () => {
+  it('allows no timer and cancels unsaved changes without writing', async () => {
+    const save = vi.spyOn(fileSettingsClient, 'save');
     render(<FileSettingsPage />);
     await screen.findByLabelText('照片單檔上限（MiB）');
     fireEvent.click(screen.getByLabelText('不設定這一層的等待上限'));
     expect(screen.getByLabelText('檔案操作等待時間（秒）')).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
-    expect(screen.getByRole('region', { name: '變更內容預覽' })).toHaveTextContent('不設定這一層的等待上限');
     fireEvent.change(screen.getByLabelText('履歷 PDF 單檔上限（MiB）'), { target: { value: '40' } });
-    expect(screen.queryByRole('button', { name: '儲存設定' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '取消變更' }));
     expect(screen.getByLabelText('履歷 PDF 單檔上限（MiB）')).toHaveValue(20);
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('rejects invalid capacity with focus and no write', async () => {
@@ -103,7 +91,7 @@ describe('NAS file settings', () => {
     render(<FileSettingsPage />);
     const capacity = await screen.findByLabelText('照片單檔上限（MiB）');
     fireEvent.change(capacity, { target: { value: '0' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存設定' }));
     expect(screen.getByRole('alert')).toHaveTextContent('大於 0');
     expect(capacity).toHaveFocus(); expect(save).not.toHaveBeenCalled();
   });
@@ -111,19 +99,17 @@ describe('NAS file settings', () => {
   it('requires a requery after an unknown save result and never blindly retries', async () => {
     const save = vi.spyOn(fileSettingsClient, 'save').mockRejectedValue(new Error('network lost'));
     render(<FileSettingsPage />); await screen.findByLabelText('照片單檔上限（MiB）');
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     fireEvent.click(screen.getByRole('button', { name: '儲存設定' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('儲存結果尚未確認');
-    expect(screen.getByRole('button', { name: '預覽變更' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存設定' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '重新讀取設定' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '預覽變更' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存設定' })).toBeEnabled());
     expect(save).toHaveBeenCalledTimes(1);
   });
 
   it('reports a version conflict and reloads the current version', async () => {
     vi.spyOn(fileSettingsClient, 'save').mockRejectedValue(new ApiHttpError(409, 'file_settings_stale', 'stale', false, null));
     render(<FileSettingsPage />); await screen.findByLabelText('照片單檔上限（MiB）');
-    fireEvent.click(screen.getByRole('button', { name: '預覽變更' }));
     fireEvent.click(screen.getByRole('button', { name: '儲存設定' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('重新讀取');
     vi.mocked(fileSettingsClient.read).mockResolvedValue({ ...current, version: 3, timeout_seconds: 900 });

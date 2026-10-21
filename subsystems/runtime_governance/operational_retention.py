@@ -195,8 +195,6 @@ class OperationalRetentionApplication:
     ) -> RetentionPreview:
         source = self._source(source_id)
         normalized_reason = reason.strip()
-        if not normalized_reason:
-            raise RetentionError("retention_reason_required", "清理原因不可空白。")
         if mode not in {"expired", "capacity"}:
             raise RetentionError("retention_mode_invalid", "不支援的清理模式。")
         if not 1 <= batch_size <= MAX_BATCH_SIZE:

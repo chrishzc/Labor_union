@@ -36,7 +36,7 @@ export const HistoricalReviewContextSchema = z.strictObject({
   review_version: z.number().int().nonnegative(),
   remediation_version: z.number().int().nonnegative(),
   workbook_contract: HistoricalReviewWorkbookContractSchema,
-  reason_required: z.literal(true),
+  reason_required: z.literal(false),
   evidence_required: z.literal(true),
   completion_condition: z.string().trim().min(1),
   prior_alert_active: z.boolean(),

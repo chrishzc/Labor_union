@@ -42,8 +42,8 @@ class _NormalizedCommand:
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
-def _text(value: object, field: str, maximum: int = 500) -> str:
-    if not isinstance(value, str) or not value or value.strip() != value or len(value) > maximum: raise OrderLifecycleControlStateError(f"{field} must be a bounded canonical string")
+def _text(value: object, field: str, maximum: int = 500, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value and not allow_empty) or value.strip() != value or len(value) > maximum: raise OrderLifecycleControlStateError(f"{field} must be a bounded canonical string")
     return value
 def _nonnegative(value: object, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0: raise OrderLifecycleControlStateError(f"{field} must be a non-negative integer")
@@ -73,7 +73,7 @@ def _utc_expiry(value: object, policy: str) -> tuple[datetime | None, str | None
 
 def _normalize_command(command: OrderLifecycleControlCommand, actual_start: object, *, validate_current_actual_start_date: bool = True) -> _NormalizedCommand:
     if not isinstance(command, (CancellationControlCommand, ActualStartReconfirmationRequiredCommand, ActualStartReconfirmationConfirmedCommand, HumanHoldActivateCommand, HumanHoldReleaseCommand)): raise TypeError("command must be a typed order lifecycle control command")
-    actor, reason, version, key = _text(command.actor, "actor", 100), _text(command.reason, "reason", 1000), _nonnegative(command.expected_version, "expected_version"), _text(command.idempotency_key, "idempotency_key", 255)
+    actor, reason, version, key = _text(command.actor, "actor", 100), _text(command.reason, "reason", 1000, allow_empty=True), _nonnegative(command.expected_version, "expected_version"), _text(command.idempotency_key, "idempotency_key", 255)
     if isinstance(command, CancellationControlCommand):
         if command.action not in {"activate", "clear"}: raise OrderLifecycleControlStateError("cancellation action is unsupported")
         return _NormalizedCommand("cancellation", "order_cancelled", "order", command.action, actor, reason, version, key, {}, "active" if command.action == "activate" else "cleared", None, None, None, None)

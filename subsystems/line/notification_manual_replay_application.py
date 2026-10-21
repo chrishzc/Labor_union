@@ -106,8 +106,6 @@ class LineNotificationManualReplayApplication:
 
     def apply(self, source_event_id: int, actor: ActorContext, reason: str, idempotency_key: IdempotencyKey, correlation_id: CorrelationId) -> int:
         require_line_capability(actor, LineCapability.CONFIG_MANAGE)
-        if not reason.strip():
-            raise ValueError("manual replay reason is required")
         with self._unit_of_work_factory() as unit_of_work:
             replayed_source_id = unit_of_work.notification_rules.manual_replay_source(
                 source_event_id, f"manual-replay:{source_event_id}:{idempotency_key.value}", self._now()

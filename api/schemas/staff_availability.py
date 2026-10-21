@@ -18,7 +18,7 @@ class StaffAvailabilityIntentBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: StaffAvailabilityAction
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     start_date: date | None = None
     end_date: date | None = None
     block_id: int | None = Field(default=None, gt=0)

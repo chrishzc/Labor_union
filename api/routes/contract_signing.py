@@ -65,7 +65,7 @@ class ManualContractAttestationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmation_method: Literal["phone", "paper", "in_person", "verified_other"]
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
 
 @router.get("/{case_no}/contract-signing", response_model=BaseResponse[ContractSigningQueryView])
@@ -149,7 +149,7 @@ def preview_manual_staff_contract_attestation(
 def record_manual_staff_contract_attestation(
     document: UploadFile = File(...),
     confirmation_method: Literal["phone", "paper", "in_person", "verified_other"] = Form(...),
-    reason: str = Form(..., min_length=1, max_length=500),
+    reason: str = Form(default="", max_length=500),
     preview_fingerprint: str = Form(..., min_length=64, max_length=64),
     case_no: str = Path(..., min_length=1, max_length=50),
     segment_id: int = Path(..., gt=0),
@@ -221,7 +221,7 @@ def preview_manual_client_contract_attestation(
 def record_manual_client_contract_attestation(
     document: UploadFile = File(...),
     confirmation_method: Literal["phone", "paper", "in_person", "verified_other"] = Form(...),
-    reason: str = Form(..., min_length=1, max_length=500),
+    reason: str = Form(default="", max_length=500),
     preview_fingerprint: str = Form(..., min_length=64, max_length=64),
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,

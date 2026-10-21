@@ -66,7 +66,7 @@ class HistoricalOperationalBaselineIntentBody(_StrictModel):
         pattern=r"^[0-9a-f]{64}$"
     )
     evidence_mode: _EvidenceMode
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     evidence_reference: str = Field(min_length=1, max_length=191)
     document_kind: str | None = Field(default=None, min_length=1, max_length=191)
     affected_steps: list[StrictInt] | None = Field(

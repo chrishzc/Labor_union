@@ -181,7 +181,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   useEffect(() => { setEditingCompletedDates(false); }, [caseNo]);
   const operationDialogRef = useRef<HTMLDialogElement>(null);
   const headerActionRef = useRef<HTMLButtonElement>(null);
-  const caseOperation = operation === 'cancellation' || operation === 'reopen';
+  const caseOperation = operation === 'cancellation';
   useEffect(() => {
     if (!caseOperation) return;
     const dialog = operationDialogRef.current!;
@@ -423,7 +423,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
             {timeline.status === 'ready' && currentBranch === 'cancelled'
-              ? <button ref={headerActionRef} className="order-case-reopen" type="button" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('reopen')}>重開訂單</button>
+              ? <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />
               : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
           </div>
         </div>
@@ -639,12 +639,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         event.preventDefault();
         if (!operationBusyRef.current && !leavePending) requestLeave(() => setOperation(null));
       }}>
-        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{operation === 'reopen' ? '重開訂單' : currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
+        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
           <button type="button" disabled={operationBusy} onClick={() => requestLeave(() => setOperation(null))}>返回案件處理</button>
         </header>
         {operationBusy && <p role="status">操作結果或正式回讀尚未確認，請先完成確認再返回案件。</p>}
         {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
-        {operation === 'reopen' && <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
       </dialog>
     </div>
   );

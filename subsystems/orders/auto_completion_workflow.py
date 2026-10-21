@@ -46,7 +46,7 @@ class AutoCompletionApplyRequest:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
-        require_canonical_text(self.reason, "auto completion reason", 500)
+        require_canonical_text(self.reason, "auto completion reason", 500, allow_empty=True)
         if self.evaluation_at.tzinfo is None or self.evaluation_at.utcoffset() is None:
             raise ValueError("evaluation_at must be timezone-aware")
         object.__setattr__(

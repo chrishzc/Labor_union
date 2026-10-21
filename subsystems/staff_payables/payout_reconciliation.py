@@ -84,7 +84,7 @@ class StaffPayoutApplyRequest:
     correlation_id: CorrelationId
 
     def __post_init__(self) -> None:
-        require_canonical_text(self.reason, "reason", _REASON_MAXIMUM_LENGTH)
+        require_canonical_text(self.reason, "reason", _REASON_MAXIMUM_LENGTH, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

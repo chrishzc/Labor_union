@@ -118,12 +118,6 @@ export async function applyHistoricalCompletion(
   reason: string,
 ): Promise<HistoricalCompletionReceipt> {
   const normalizedReason = reason.trim();
-  if (!normalizedReason) {
-    throw new HistoricalCompletionContractError(
-      'historical_completion_reason_missing',
-      '請填寫確認原因。',
-    );
-  }
   const raw = await transport.post(
     `${historicalCompletionPath(preview.case_no)}/apply`,
     {

@@ -80,14 +80,12 @@ class HolidayPreviewRequest(BaseModel):
 class HolidayApplyRequest(HolidayPreviewRequest):
     expected_calendar_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
 
     @field_validator("reason")
     @classmethod
     def normalize_reason(cls, value: str) -> str:
         normalized = value.strip()
-        if not normalized:
-            raise ValueError("reason_required")
         return normalized
 
 

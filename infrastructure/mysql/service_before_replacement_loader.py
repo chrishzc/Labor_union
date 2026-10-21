@@ -1256,7 +1256,6 @@ def _recipient_delivery_identity_present(
         and isinstance(manual.get("actor"), str)
         and bool(manual["actor"].strip())
         and isinstance(manual.get("reason"), str)
-        and bool(manual["reason"].strip())
     )
 
 
@@ -1481,7 +1480,7 @@ def _validate_signback_row(
                 row.get("line_inbox_event_id") is not None
                 or row.get("verified_line_user_id") is not None
                 or not _required_text(row, "manual_confirmation_method")
-                or not _required_text(row, "manual_reason")
+                or not isinstance(row.get("manual_reason"), str)
                 or not _required_text(row, "manual_evidence_reference")
                 or not _digest(row.get("manual_evidence_sha256"))
             ):

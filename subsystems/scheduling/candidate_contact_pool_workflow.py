@@ -36,8 +36,8 @@ get_connection = unconfigured_connection_factory
 segmented_facts_port: Any | None = None
 
 
-def _required_text(value: Any, field: str, maximum: int = 191) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
+def _required_text(value: Any, field: str, maximum: int = 191, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value.strip() and not allow_empty) or len(value.strip()) > maximum:
         raise ValueError(f"{field}_invalid")
     return value.strip()
 
@@ -167,11 +167,7 @@ class CandidateContactEntryState:
         if self.willingness not in {"pending", "willing", "unwilling"}:
             raise ValueError("willingness_invalid")
         if self.reason is not None:
-            _required_text(self.reason, "reason", 500)
-        if self.willingness == "unwilling" and (
-            not isinstance(self.reason, str) or not self.reason.strip()
-        ):
-            raise ValueError("unwilling_reason_required")
+            _required_text(self.reason, "reason", 500, allow_empty=True)
         if not isinstance(self.information, CandidateInformationState):
             raise TypeError("information_invalid")
         if self.latest_willingness_event_id is not None:
@@ -510,7 +506,7 @@ def _manual_information_preview(
     )
     if confirmation_method not in _MANUAL_INFORMATION_METHODS:
         raise ValueError("confirmation_method_invalid")
-    reason = _required_text(reason, "reason", 500)
+    reason = _required_text(reason, "reason", 500, allow_empty=True)
     actor = _required_text(actor, "actor", 100)
     candidate = next(
         (item for item in state.candidates if item.id == candidate_id),
@@ -643,7 +639,7 @@ def _apply_manual_information_confirmation_in_transaction(
         )
         if confirmation_method not in _MANUAL_INFORMATION_METHODS:
             raise ValueError("confirmation_method_invalid")
-        reason = _required_text(reason, "reason", 500)
+        reason = _required_text(reason, "reason", 500, allow_empty=True)
         payload = {
             "delivery_status": "manually_confirmed",
             "confirmation_method": confirmation_method,
@@ -1077,7 +1073,7 @@ def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason
     actor = _required_text(actor, "actor", 100); event_key = _required_text(event_key, "event_key", 100)
     if willingness not in {"willing", "unwilling"}: raise ValueError("willingness_invalid")
     if not isinstance(reason, str): raise ValueError("reason_invalid")
-    reason = _required_text(reason, "reason", 500) if willingness == "unwilling" else (reason.strip() or "人工補登願意")
+    reason = _required_text(reason, "reason", 500, allow_empty=True)
     return _run_in_application_uow(
         lambda connection, cursor: _record_willingness_in_transaction(
             connection, cursor, case_no, candidate_id, willingness, reason, actor, event_key

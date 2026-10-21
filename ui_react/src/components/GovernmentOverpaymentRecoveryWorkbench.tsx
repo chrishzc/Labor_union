@@ -97,7 +97,6 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   const [reason, setReason] = useState('');
   const [evidence, setEvidence] = useState('');
   const [preview, setPreview] = useState<GovernmentOverpaymentPreview | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [receipt, setReceipt] = useState<GovernmentOverpaymentReceipt | null>(null);
   const [readback, setReadback] = useState<GovernmentOverpaymentQuery | null>(null);
   const [outcomeUnknown, setOutcomeUnknown] = useState(false);
@@ -113,7 +112,6 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     setStatus('loading');
     setError(null);
     setPreview(null);
-    setConfirmed(false);
     setReceipt(null);
     setReadback(null);
     setOutcomeUnknown(false);
@@ -161,7 +159,6 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
   const updateInput = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
     setter(value);
     setPreview(null);
-    setConfirmed(false);
     setReceipt(null);
     setReadback(null);
     setOutcomeUnknown(false);
@@ -174,12 +171,11 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     setStatus('previewing');
     setError(null);
     setPreview(null);
-    setConfirmed(false);
     try {
       const result = await client.preview(request, requestOptions);
       if (result.overpayment_version !== query.overpayment_version) throw new GovernmentOverpaymentRecoveryError('GOVERNMENT_OVERPAYMENT_PREVIEW_VERSION_MISMATCH', 'Preview 版本與 Query 不一致。');
       setPreview(result);
-      setStatus('ready');
+      await applyDisposition(result);
     } catch (caught) {
       setStatus('failed');
       setError(errorMessage(caught));
@@ -230,8 +226,8 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     return true;
   };
 
-  const applyDisposition = async () => {
-    if (!request || !preview || !confirmed || !reason.trim() || !query) return;
+  const applyDisposition = async (preview: GovernmentOverpaymentPreview) => {
+    if (!request || !query) return;
     setStatus('applying');
     setError(null);
     const identity = JSON.stringify({ ...request, reason: reason.trim(), preview: preview.preview_fingerprint });
@@ -257,8 +253,7 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
     } catch (caught) {
       if (staleApplyOutcome(caught)) {
         setPreview(null);
-        setConfirmed(false);
-        setReceipt(null);
+            setReceipt(null);
         setOutcomeUnknown(false);
         setReadbackUnavailable(false);
         setNeedsRecheck(false);
@@ -359,16 +354,14 @@ export const GovernmentOverpaymentRecoveryWorkbench: React.FC<Props> = ({
           <label style={{ display: 'block', marginTop: 12 }}>處置證據（獨立欄位）
             <input aria-label="處置證據" type="text" maxLength={500} value={evidence} disabled={busy || commandLocked} onChange={(event) => updateInput(setEvidence, event.target.value)} />
           </label>
-          <label style={{ display: 'block', marginTop: 8 }}>人工處置原因
+          <label style={{ display: 'block', marginTop: 8 }}>人工處置原因（選填）
             <textarea aria-label="人工處置原因" rows={2} maxLength={500} value={reason} disabled={busy || commandLocked} onChange={(event) => updateInput(setReason, event.target.value)} />
           </label>
-          <button type="button" style={{ marginTop: 12 }} disabled={!request || !reason.trim() || busy || commandLocked} onClick={() => void previewDisposition()}>{status === 'previewing' ? '正在檢查處置影響…' : '檢查處置影響'}</button>
+          <button type="button" style={{ marginTop: 12 }} disabled={!request || busy || commandLocked} onClick={() => void previewDisposition()}>{status === 'previewing' ? '正在檢查處置影響…' : '儲存處置'}</button>
 
           {preview && <div style={{ background: '#fff7ed', borderRadius: 8, padding: 12, marginTop: 12 }} data-surface-id="government-overpayment-recovery-preview">
             <div>預計處置：{dispositionLabel(preview.disposition_kind)}，{preview.disposition_amount_ntd.toLocaleString('zh-TW')} 元</div>
             <div>套用後狀態：{statusLabel(preview.resulting_status)}；剩餘 {preview.remaining_after_ntd.toLocaleString('zh-TW')} 元</div>
-            <label style={{ display: 'block', marginTop: 8 }}><input type="checkbox" checked={confirmed} disabled={busy || commandLocked} onChange={(event) => setConfirmed(event.target.checked)} /> 我已核對目前金額、合法標的、證據與預覽結果，確認執行此處置。</label>
-            <button type="button" style={{ marginTop: 8 }} disabled={!confirmed || !reason.trim() || busy || commandLocked} onClick={() => void applyDisposition()}>{status === 'applying' ? '處置套用中…' : '確認套用處置'}</button>
           </div>}
         </>
       )}

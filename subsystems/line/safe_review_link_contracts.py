@@ -28,8 +28,8 @@ class SafeReviewLinkError(RuntimeError):
         self.retryable = retryable
 
 
-def _text(value: str, name: str, maximum: int = 191) -> str:
-    return require_canonical_text(value, name, maximum)
+def _text(value: str, name: str, maximum: int = 191, *, allow_empty: bool = False) -> str:
+    return require_canonical_text(value, name, maximum, allow_empty=allow_empty)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +94,7 @@ class RevokeSafeReviewLink:
 
     def __post_init__(self) -> None:
         _text(self.link_id, "safe review link id")
-        _text(self.reason, "safe review revoke reason", 500)
+        _text(self.reason, "safe review revoke reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)
