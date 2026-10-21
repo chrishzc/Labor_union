@@ -1079,3 +1079,182 @@ p.staff-service-time-rule,
 @media (max-width: 640px) {
   .staff-preference-grid, .staff-imported-service-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Staff drawer: separate editing sections and keep controls aligned. */
+.staff-availability-workbench.staff-workbench {
+  display: grid;
+  gap: 20px;
+  margin-bottom: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.staff-availability-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.staff-availability-summary { padding: 18px 20px; border: 1px solid; border-radius: 12px; display: grid; gap: 8px; }
+.staff-availability-summary strong { font-size: 1.2rem; }
+.staff-availability-summary.is-clear { background: #f0fdf4; border-color: #a7d7b8; color: #166534; }
+.staff-availability-summary.is-paused { background: #fff7ed; border-color: #e8ad76; color: #9a3412; }
+.staff-drawer-section .staff-availability-summary p { margin: 0; color: inherit; }
+.staff-availability-summary small { color: #574b43; line-height: 1.6; }
+.staff-availability-badge { display: inline-block; padding: 5px 10px; border-radius: 6px; font-size: .875rem; font-weight: 700; }
+.staff-availability-badge.is-paused { background: #ffedd5; color: #9a3412; }
+.staff-availability-badge.is-upcoming { background: #eff6ff; color: #1e40af; }
+.staff-availability-badge.is-ended, .staff-availability-badge.is-cancelled { background: #f3f4f6; color: #4b5563; }
+.staff-availability-row.is-ended, .staff-availability-row.is-cancelled { color: #626262; background: #fafafa; }
+.staff-availability-record-group { display: grid; gap: 12px; }
+.staff-availability-record-group h3 { margin: 0; font-size: .95rem; }
+.staff-availability-history { border: 1px solid #ead9d3; border-radius: 10px; padding: 14px 16px; background: #fff; }
+.staff-availability-history > summary { cursor: pointer; font-weight: 700; color: #65554b; }
+.staff-availability-history > .staff-unavailability-table { margin-top: 14px; }
+.staff-drawer-section p.staff-availability-person { margin: 0; font-weight: 700; }
+.staff-drawer-section p.staff-availability-empty { margin: 0; padding: 18px; border: 1px solid #ead9d3; border-radius: 10px; background: #fff; }
+.staff-availability-row { display: grid; grid-template-columns: 1fr 1.5fr 2fr; gap: 16px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #ead9d3; }
+.staff-availability-row:last-child { border-bottom: 0; }
+.staff-availability-row.header { font-weight: 700; background: #fff8f6; }
+.staff-availability-row > span { min-width: 0; overflow-wrap: anywhere; }
+.staff-availability-cancel-note { color: #74593f; font-size: .875rem; }
+.staff-availability-cancel-note summary { cursor: pointer; }
+.staff-availability-cancel-note label { margin-top: 12px; }
+.staff-availability-form-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+@media (max-width: 640px) {
+  .staff-availability-row, .staff-availability-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .staff-availability-row.header { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
+}
+
+.staff-drawer-content .staff-registry-editors,
+.staff-drawer-content [data-surface-id="staff.qualification.preferences"] {
+  display: grid;
+  gap: 24px;
+}
+
+.staff-drawer-content [data-surface-id="staff.qualification.preferences"] {
+  margin-block: 24px;
+}
+
+.staff-drawer-content .staff-holiday-op-card {
+  padding: 20px;
+  gap: 16px;
+  min-width: 0;
+}
+
+.staff-drawer-content .staff-holiday-op-card > h3,
+.staff-drawer-content .staff-holiday-op-card p {
+  margin: 0;
+}
+
+.staff-drawer-content .staff-profile-fields {
+  display: grid;
+  gap: 20px;
+}
+
+.staff-drawer-content .staff-profile-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.staff-drawer-content .staff-profile-fieldset legend {
+  margin-bottom: 12px;
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #74593f;
+}
+
+.staff-drawer-content .staff-registry-editors .staff-op-grid,
+.staff-drawer-content .staff-qualification-list-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.staff-drawer-content .staff-qualification-details-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.staff-drawer-content [data-profile-field="address"],
+.staff-drawer-content [data-profile-field="admin_notes"] {
+  grid-column: 1 / -1;
+}
+
+.staff-drawer-content .staff-op-field {
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+}
+
+.staff-drawer-content .staff-op-field :where(input:not([type="checkbox"]):not([type="file"]), select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #9ca3af;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.staff-drawer-content .staff-op-field textarea {
+  height: 96px;
+  min-height: 96px;
+  resize: vertical;
+}
+
+.staff-drawer-content .staff-bank-summary,
+.staff-drawer-content .staff-bank-editor {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.staff-drawer-content .staff-bank-editor {
+  padding-top: 20px;
+  border-top: 1px solid #ead9d3;
+}
+
+.staff-drawer-content .staff-profile-subheading,
+.staff-drawer-content .staff-bank-list {
+  margin: 0;
+}
+
+.staff-drawer-content p.staff-op-hint,
+.staff-drawer-content p.staff-service-time-rule {
+  color: #74593f;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.staff-drawer-content p.staff-op-error,
+.staff-drawer-content [role="alert"] {
+  color: var(--md-sys-color-error);
+}
+
+.staff-drawer-content .staff-op-actions {
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+@media (max-width: 1000px) {
+  .staff-drawer-content .staff-registry-editors .staff-op-grid,
+  .staff-drawer-content .staff-qualification-list-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .staff-drawer-content .staff-holiday-op-card { padding: 16px; }
+
+  .staff-drawer-content .staff-registry-editors .staff-op-grid,
+  .staff-drawer-content .staff-qualification-list-grid,
+  .staff-drawer-content .staff-qualification-details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

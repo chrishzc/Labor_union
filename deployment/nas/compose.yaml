@@ -171,6 +171,7 @@ services:
     # DSM reaches this service through its fixed bridge address; no host port.
     environment:
       REACT_ADMIN_CURRENT_ARTIFACT_DIR: /opt/react-admin/current
+      NAS_TRUSTED_PROXY_IPS: ${NAS_TUNNEL_MANAGEMENT_PROXY_IP:-172.31.251.2}
       REACT_ADMIN_PREVIOUS_ARTIFACT_DIR: /opt/react-admin/previous
       REACT_ADMIN_ACTIVE_SELECTOR: current
       FILE_SETTINGS_PATH: /data/file-settings.json
@@ -184,6 +185,11 @@ services:
     volumes:
       - settings:/settings:ro
       - management-db:/run/db-management:ro
+      - type: bind
+        source: ${NAS_PROXY_RUNTIME_SCRIPT:-./nas_appliance.py}
+        target: /app/scripts/nas_appliance.py
+        read_only: true
+        bind: {create_host_path: false}
       - access-db:/run/db-access:ro
       - maintenance-db:/run/db-maintenance:ro
       - worker-verifiers:/run/worker-verifiers:ro
@@ -213,6 +219,8 @@ services:
       line-media-control: {}
       management-egress:
         ipv4_address: ${NAS_PROXY_API_IP:?請填專用 Docker 網段內的管理容器位址}
+      management-tunnel:
+        ipv4_address: ${NAS_TUNNEL_MANAGEMENT_API_IP:-172.31.251.3}
     depends_on:
       configure-security: {condition: service_completed_successfully}
     healthcheck:
@@ -228,6 +236,7 @@ services:
     command: ["python", "-m", "scripts.nas_security_runtime", "line-api"]
     mem_limit: ${NAS_LINE_MEMORY:-384m}
     environment:
+      NAS_TRUSTED_PROXY_IPS: ${NAS_TUNNEL_LINE_PROXY_IP:-172.31.252.2}
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:-}
@@ -238,6 +247,11 @@ services:
       FILE_TRANSFER_TIMEOUT_SECONDS: ${FILE_TRANSFER_TIMEOUT_SECONDS:-60}
     volumes:
       - line-settings:/line-settings:ro
+      - type: bind
+        source: ${NAS_PROXY_RUNTIME_SCRIPT:-./nas_appliance.py}
+        target: /app/scripts/nas_appliance.py
+        read_only: true
+        bind: {create_host_path: false}
       - line-db:/run/db-line:ro
       - worker-verifiers:/run/worker-verifiers:ro
       - line-tls:/run/api-tls:ro
@@ -249,7 +263,13 @@ services:
         target: /data/media
         bind: {create_host_path: false}
       - line-config:/run/line-config:ro
-    networks: [data, line-control, line-media-control, line-egress]
+    networks:
+      data: {}
+      line-control: {}
+      line-media-control: {}
+      line-egress: {}
+      line-tunnel:
+        ipv4_address: ${NAS_TUNNEL_LINE_API_IP:-172.31.252.3}
     depends_on:
       management-api: {condition: service_healthy}
     healthcheck:
@@ -303,24 +323,24 @@ services:
     image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.10.1}
     profiles: [tunnel]
     restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yaml", "run"]
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/cloudflare/token"]
     user: "65532:65532"
     read_only: true
     security_opt: ["no-new-privileges:true"]
     mem_limit: 128m
     volumes:
       - type: bind
-        source: ./tunnel/config.yaml
-        target: /etc/cloudflared/config.yaml
-        read_only: true
-        bind: {create_host_path: false}
-      - type: bind
-        source: ./tunnel/credentials.json
-        target: /etc/cloudflared/credentials.json
+        source: ${NAS_TUNNEL_TOKEN_FILE:-./tunnel/token}
+        target: /run/cloudflare/token
         read_only: true
         bind: {create_host_path: false}
       - private-ca:/run/private-ca:ro
-    networks: [line-control, tunnel-egress]
+    networks:
+      management-tunnel:
+        ipv4_address: ${NAS_TUNNEL_MANAGEMENT_PROXY_IP:-172.31.251.2}
+      line-tunnel:
+        ipv4_address: ${NAS_TUNNEL_LINE_PROXY_IP:-172.31.252.2}
+      tunnel-egress: {}
     depends_on:
       line-api: {condition: service_healthy}
 
@@ -331,6 +351,16 @@ networks:
     external: true
     name: "${COMPOSE_PROJECT_NAME:?請保留現有專案名稱}_data"
   management-control: {internal: true}
+  management-tunnel:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${NAS_TUNNEL_MANAGEMENT_SUBNET:-172.31.251.0/29}
+  line-tunnel:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${NAS_TUNNEL_LINE_SUBNET:-172.31.252.0/29}
   line-control: {internal: true}
   line-media-control: {internal: true}
   management-egress:

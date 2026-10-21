@@ -4,6 +4,7 @@ import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChan
  * Description: 顯示排班甘特、請假待辦與調度工作台，以業務語意呈現確認、鎖定與結果回讀。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import './SchedulingPage.css';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
@@ -12,6 +13,7 @@ import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_tim
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
@@ -70,6 +72,7 @@ import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { Drawer } from '../components/Drawer';
 import { OfficialHolidayCsvImport } from '../components/scheduling/OfficialHolidayCsvImport';
+import { ServiceHandoverPage } from './ServiceHandoverPage';
 
 type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
@@ -284,6 +287,7 @@ function HolidayPolicyWorkspace() {
 
   useEffect(() => {
     const unsubscribe = holidayFlowStore.subscribe(() => setStoreRevision((value) => value + 1));
+    void queryHolidayFlow({ from_date: `${year}-01-01`, to_date: `${year}-12-31` }).catch(() => undefined);
     return () => {
       unsubscribe();
       holidayFlowStore.clear();
@@ -370,7 +374,7 @@ function HolidayPolicyWorkspace() {
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
-  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '雙倍薪資': doublePay, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  useUnsavedDraft('國定假日', { '維護動作': action, '日期': holidayDate, '名稱': holidayName, '原因': reason }, { enabled: holidayDrawerOpen, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
 
 
   return (
@@ -378,8 +382,8 @@ function HolidayPolicyWorkspace() {
       <header className="holiday-policy-header">
         <div>
           <p className="holiday-policy-kicker">編輯政策 → 儲存 → 回讀結果</p>
-          <h2>🗓️ 國定假日與預設政策管理</h2>
-          <p>雙薪預設與變更結果採用正式政策資料，點擊「編輯」開啟抽屜進行修改或刪除。</p>
+          <h2>🗓️ 國定假日管理</h2>
+          <p>排班前的初始建議預設跳過國定假日；人工已選日期與正式排班維持原安排。</p>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
@@ -395,7 +399,10 @@ function HolidayPolicyWorkspace() {
         </div>
       </header>
 
-      <OfficialHolidayCsvImport disabled={busy} />
+      <OfficialHolidayCsvImport disabled={busy} onImported={importYear => {
+        setFromDate(`${importYear}-01-01`);
+        setToDate(`${importYear}-12-31`);
+      }} />
 
       <div className="holiday-policy-horizon">
         <label>
@@ -423,6 +430,7 @@ function HolidayPolicyWorkspace() {
         </button>
       </div>
 
+      {!holidayDrawerOpen && errorText && <p className="holiday-policy-notice error" role="alert">{errorText}</p>}
       {calendar && (
         <section className="holiday-policy-calendar" aria-label="國定假日日曆">
           <div className="holiday-policy-meta">
@@ -455,12 +463,6 @@ function HolidayPolicyWorkspace() {
                     <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>
                       {holiday.holiday_name}
                     </strong>
-                    <span
-                      className={`criteria-match-pill ${holiday.is_double_pay_default ? 'match' : 'partial'}`}
-                      style={{ fontSize: '0.8rem', padding: '3px 8px' }}
-                    >
-                      {holiday.is_double_pay_default ? '💰 預設雙薪 (200%)' : '💵 一般薪資 (100%)'}
-                    </span>
                   </div>
 
                   <div>
@@ -548,17 +550,6 @@ function HolidayPolicyWorkspace() {
                 />
               </label>
             </div>
-
-            <label className="holiday-policy-check" style={{ marginTop: '4px', fontSize: '0.88rem', fontWeight: 700, color: '#9a3412', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="checkbox"
-                checked={doublePay}
-                disabled={busy || action === 'delete'}
-                onChange={(event) => setDoublePay(event.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: '#ea580c' }}
-              />
-              設為預設雙薪（200% 薪資計算）
-            </label>
 
             <label style={{ display: 'grid', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
               變更原因與審核註記（選填）
@@ -770,12 +761,19 @@ function LeaveSubstitutionWorkspace({
     setCaseOptions([]);
     const loadCases = async () => {
       try {
-        const page = await loadAllOrderSummaries(
-          ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
-          { page_size: 200, lifecycle_scope: 'unfinished' },
-          { signal: controller.signal },
-        );
-        const candidates = page.items.filter((item) => item.order_status === '服務中');
+        const [page, coreStagePage] = await Promise.all([
+          loadAllOrderSummaries(
+            ordersQueryClient.getOrderSummaries.bind(ordersQueryClient),
+            { page_size: 200, lifecycle_scope: 'unfinished' },
+            { signal: controller.signal },
+          ),
+          loadAllCoreStageTimelines(
+            { workbench_scope: 'in_progress', page_size: 200 },
+            { signal: controller.signal },
+          ),
+        ]);
+        const inProgressCases = new Set(coreStagePage.items.map((item) => item.case_no));
+        const candidates = page.items.filter((item) => inProgressCases.has(item.case_no));
         const options = await Promise.all(candidates.map(async (item) => {
           const assignments = await leaveSubstitutionClient.listAssignments(
             item.case_no, { signal: controller.signal },
@@ -789,7 +787,7 @@ function LeaveSubstitutionWorkspace({
         }
       } catch {
         if (!controller.signal.aborted) {
-          setCaseOptionsError('服務中案件載入失敗，請重新載入。');
+          setCaseOptionsError('已排班案件載入失敗，請重新載入。');
         }
       } finally {
         if (!controller.signal.aborted) setCaseOptionsLoading(false);
@@ -992,7 +990,7 @@ function LeaveSubstitutionWorkspace({
       <header className="leave-substitution-header">
         <div>
           <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 回讀結果</p>
-          <h2>🚑 服務中請假與緊急代班調度工作台</h2>
+          <h2>🚑 請假與緊急代班調度工作台</h2>
           <p>整合 LINE 待辦與電話／口頭請假；選好代班安排後即可儲存，系統會檢查排班及相關條件。</p>
         </div>
         <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
@@ -1177,11 +1175,11 @@ function LeaveSubstitutionWorkspace({
         </div>
       )}
 
-      {/* 只提供服務中且具備有效排班服務日的案件 */}
+      {/* 由後端排除完成／取消案件，再確認目前有效的正式排班服務日 */}
       <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
         <div style={{ flex: '1 1 320px' }}>
           <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
-            📋 選擇服務中案件／訂單編號 (支援電話／口頭／LINE 請假調度)
+            📋 選擇已排班案件／訂單編號 (支援電話／口頭／LINE 請假調度)
           </label>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <select
@@ -1197,7 +1195,7 @@ function LeaveSubstitutionWorkspace({
               }}
               style={{ flex: 1, minWidth: '260px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.92rem' }}
             >
-              <option value="">{caseOptionsLoading ? '正在載入服務中案件…' : '請選擇服務中案件'}</option>
+              <option value="">{caseOptionsLoading ? '正在載入已排班案件…' : '請選擇已排班案件'}</option>
               {caseOptions.map((item) => (
                 <option key={item.caseNo} value={item.caseNo}>
                   {item.caseNo} ｜ {item.clientName}
@@ -1225,12 +1223,12 @@ function LeaveSubstitutionWorkspace({
           )}
           {!caseOptionsLoading && !caseOptionsError && caseOptions.length === 0 && (
             <small className="leave-substitution-notice" role="status">
-              目前沒有服務中且已有排班的案件。
+              目前沒有已正式排班且尚未服務完成的案件。
             </small>
           )}
           {!normalizedCaseNo && !caseOptionsLoading && !caseOptionsError && caseOptions.length > 0 && (
             <small className="leave-substitution-notice" data-control-id="scheduling.leave.query-guidance">
-              請先選擇服務中且已有排班的案件，才能查詢指派並檢查代班影響。
+              請先選擇已正式排班且尚未服務完成的案件，才能查詢指派並檢查代班影響。
             </small>
           )}
         </div>
@@ -1332,29 +1330,29 @@ function LeaveSubstitutionWorkspace({
               }}
             >
               <option value="substitute">安排合格代班月嫂</option>
-              <option value="defer_following_assignments">順延後續服務日期</option>
+              <option value="defer_following_assignments">原月嫂順延／指定補班</option>
             </select>
           </label>
-          <label>
+          {resolutionType === 'defer_following_assignments' && <label>
             指定補班日期
             <input
               type="date"
               aria-label="指定補班日期"
               value={replacementWorkDate}
-              disabled={busy || resolutionType !== 'defer_following_assignments'}
+              disabled={busy}
               onChange={(event) => {
                 setReplacementWorkDate(event.target.value);
                 invalidatePreview();
               }}
             />
-            <small>留空時依案件週休與假日條件自動順延；指定後不會無聲改成其他日期。</small>
-          </label>
-          <label>
+            <small>指定日期時，僅將原服務日移至補班日，其他服務日不變；留空則依案件週休與假日條件自動順延後續日期。</small>
+          </label>}
+          {resolutionType === 'substitute' && <label>
             指派代班月嫂
             <select
               aria-label="代班人員"
               value={substituteStaffId ?? ''}
-              disabled={busy || resolutionType !== 'substitute'}
+              disabled={busy}
               onChange={(event) => {
                 setSubstituteStaffId(event.target.value ? Number(event.target.value) : null);
                 invalidatePreview();
@@ -1365,19 +1363,19 @@ function LeaveSubstitutionWorkspace({
                 <option key={staff.id} value={staff.id}>{staffDisplayLabel(staff.unionNo, staff.displayName)}</option>
               ))}
             </select>
-          </label>
-          <label className="leave-substitution-check">
+          </label>}
+          {resolutionType === 'substitute' && <label className="leave-substitution-check">
             <input
               type="checkbox"
               checked={isDoublePay}
-              disabled={busy || resolutionType !== 'substitute'}
+              disabled={busy}
               onChange={(event) => {
                 setIsDoublePay(event.target.checked);
                 invalidatePreview();
               }}
             />
             此日代班列為假日／緊急雙薪補貼
-          </label>
+          </label>}
         </div>
       )}
 
@@ -1909,7 +1907,7 @@ function buildGanttSpans(
   return spans;
 }
 
-export const SchedulingPage: React.FC = () => {
+const SchedulingWorkbench: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
   const [activeTab, setActiveTab] = useState<SchedulingTab>(
     () => parseSchedulingDeepLink(window.location.hash).tab,
@@ -1923,6 +1921,10 @@ export const SchedulingPage: React.FC = () => {
 
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [month, setMonth] = useState<MonthSelection>(currentMonth);
+  const [monthHolidays, setMonthHolidays] = useState<readonly HolidayRow[]>([]);
+  const [holidayLoading, setHolidayLoading] = useState(true);
+  const [holidayError, setHolidayError] = useState<string | null>(null);
+  const [holidayReload, setHolidayReload] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
@@ -1932,6 +1934,7 @@ export const SchedulingPage: React.FC = () => {
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
   const [calendarError, setCalendarError] = useState<Error | null>(null);
   const [retryGeneration, setRetryGeneration] = useState<number>(0);
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [eligibilityCaseNo, setEligibilityCaseNo] = useState(
     () => parseSchedulingDeepLink(window.location.hash).caseNo,
   );
@@ -1963,6 +1966,18 @@ export const SchedulingPage: React.FC = () => {
   const calendarRetryStaffIdsRef = useRef<Set<number>>(new Set());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
   const caseEligibilityControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => subscribeStaffAvailabilityChanges(staffId => {
+    if (!staffList.some(staff => staff.id === staffId)) return;
+    calendarControllerRef.current?.abort();
+    calendarLoadedKeyRef.current.delete(staffId);
+    setCalendarRows(current => {
+      const next = { ...current };
+      delete next[staffId];
+      return next;
+    });
+    setAvailabilityRevision(revision => revision + 1);
+  }), [staffList]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2195,9 +2210,22 @@ export const SchedulingPage: React.FC = () => {
 
     queueMicrotask(() => void loadCaseEligibility());
     return () => controller.abort();
-  }, [selectedCaseNo, staffList]);
+  }, [selectedCaseNo, staffList, availabilityRevision]);
 
   const range = useMemo(() => monthRange(month), [month]);
+
+  useEffect(() => {
+    if (activeTab !== 'calendar') return;
+    const controller = new AbortController();
+    setMonthHolidays([]);
+    setHolidayLoading(true);
+    setHolidayError(null);
+    void holidayClient.query({ from_date: range.rangeStart, to_date: range.rangeEnd }, { signal: controller.signal })
+      .then(calendar => { if (!controller.signal.aborted) setMonthHolidays(calendar.holidays); })
+      .catch(error => { if (!controller.signal.aborted) setHolidayError(error instanceof Error ? error.message : '無法讀取國定假日。'); })
+      .finally(() => { if (!controller.signal.aborted) setHolidayLoading(false); });
+    return () => controller.abort();
+  }, [activeTab, range, holidayReload]);
 
   const prevMonthRef = useRef<MonthSelection | null>(null);
 
@@ -2225,6 +2253,7 @@ export const SchedulingPage: React.FC = () => {
     if (staffToLoad.length === 0) return undefined;
 
     staffToLoad.forEach((staff) => calendarLoadedKeyRef.current.set(staff.id, rangeKey));
+    const pendingStaffIds = new Set(staffToLoad.map(staff => staff.id));
 
     let cancelled = false;
     const controller = new AbortController();
@@ -2274,6 +2303,7 @@ export const SchedulingPage: React.FC = () => {
       const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
         const result = await loadStaffRow(staff);
         if (mountedRef.current && !controller.signal.aborted && !cancelled) {
+          pendingStaffIds.delete(result.staffId);
           calendarLoadedKeyRef.current.set(result.staffId, rangeKey);
           calendarRetryStaffIdsRef.current.delete(result.staffId);
           setCalendarRows(current => ({ ...current, [result.staffId]: result.state }));
@@ -2309,8 +2339,12 @@ export const SchedulingPage: React.FC = () => {
     return () => {
       cancelled = true;
       controller.abort();
+      // A change may interrupt other rows in this batch; they still need a fresh read.
+      for (const staffId of pendingStaffIds) {
+        if (calendarLoadedKeyRef.current.get(staffId) === rangeKey) calendarLoadedKeyRef.current.delete(staffId);
+      }
     };
-  }, [range, retryGeneration, staffList, month.year, month.month]);
+  }, [range, retryGeneration, staffList, month.year, month.month, availabilityRevision]);
 
   const queryEligibility = useCallback(async (overrideCaseNo?: string, overrideStaffId?: number | null) => {
     const caseNo = (overrideCaseNo ?? eligibilityCaseNo ?? selectedCaseNo).trim();
@@ -2339,7 +2373,7 @@ export const SchedulingPage: React.FC = () => {
     if (caseToInspect) {
       void queryEligibility(caseToInspect, selectedStaffId);
     }
-  }, [collisionDrawerOpen, selectedStaffId, eligibilityCaseNo, selectedCaseNo, queryEligibility]);
+  }, [collisionDrawerOpen, selectedStaffId, eligibilityCaseNo, selectedCaseNo, queryEligibility, availabilityRevision]);
 
   // 篩選與搜尋過濾
   const filteredStaff = useMemo(() => {
@@ -2366,7 +2400,8 @@ export const SchedulingPage: React.FC = () => {
   const daysList = useMemo(() => monthAxis(month).map((day) => ({
     ...day,
     isToday: day.dateStr === taipeiToday,
-  })), [month, taipeiToday]);
+    holidayName: monthHolidays.find(holiday => holiday.holiday_date === day.dateStr)?.holiday_name,
+  })), [month, taipeiToday, monthHolidays]);
 
   useEffect(() => {
     if (!pendingTodayScroll) return;
@@ -2736,6 +2771,9 @@ export const SchedulingPage: React.FC = () => {
               ⚠️ 該服務人員所屬訂單的每日服務時段尚未完整，請至本案客戶與訂單資料補齊。
             </div>
           )}
+          {holidayLoading && <p role="status">正在讀取當月國定假日…</p>}
+          {holidayError && <p role="alert">國定假日標示載入失敗：{holidayError} <button type="button" onClick={() => setHolidayReload(value => value + 1)}>重新讀取假日</button></p>}
+          {!holidayLoading && !holidayError && monthHolidays.length === 0 && <p className="scheduling-status">本月沒有已匯入的國定假日資料。</p>}
           {calendarError && (
             <div className="scheduling-status error" role="alert">
               {renderError(calendarError)}
@@ -2747,19 +2785,12 @@ export const SchedulingPage: React.FC = () => {
               </button>
             </div>
           )}
-          {!directoryLoading && filteredStaff.length === 0 && (
-            <div className="scheduling-status">
-              {staffList.length === 0 ? '目前沒有可顯示的服務人員摘要。' : '目前範圍沒有排班資料。'}
-            </div>
-          )}
-
           {/* Multi-Caregiver Gantt Chart Matrix Table */}
-          {filteredStaff.length > 0 && (
-            <>
+          <>
             <p className="gantt-scroll-guidance" id="gantt-scroll-guidance">
               左右滑動查看整月檔期；往下瀏覽時日期列會固定顯示，月嫂名冊會固定在左側。
             </p>
-            <div className="gantt-matrix-frame" data-surface-id="scheduling.calendar.grid">
+            <div className="gantt-matrix-frame" data-surface-id="scheduling.calendar.grid" style={{ '--gantt-day-count': daysList.length } as React.CSSProperties}>
               <div
                 ref={calendarHeaderScrollRef}
                 className="gantt-matrix-sticky-header"
@@ -2773,11 +2804,13 @@ export const SchedulingPage: React.FC = () => {
                     {daysList.map((d) => (
                       <div
                         key={d.dateStr}
-                        className={`gantt-day-header-col ${d.isWeekend ? 'weekend' : ''} ${d.isToday ? 'today' : ''}`}
+                        className={`gantt-day-header-col ${d.isWeekend ? 'weekend' : ''} ${d.isToday ? 'today' : ''} ${d.holidayName ? 'holiday' : ''}`}
                         data-date={d.dateStr}
+                        title={`${d.dateStr}${d.holidayName ? ` ${d.holidayName}` : ''}`}
                       >
                         <span className="day-number">{d.dayNumber}</span>
                         <span className="weekday-text">{d.weekday}</span>
+                        {d.holidayName && <span className="gantt-holiday-name">{d.holidayName}</span>}
                       </div>
                     ))}
                   </div>
@@ -2796,6 +2829,11 @@ export const SchedulingPage: React.FC = () => {
                 }}
               >
                 <div className="gantt-matrix-table">
+                {!directoryLoading && filteredStaff.length === 0 && (
+                  <div className="scheduling-status">
+                    {staffList.length === 0 ? '目前沒有可顯示的服務人員摘要。' : '目前範圍沒有排班資料。'}
+                  </div>
+                )}
                 {/* Staff Rows */}
                 {filteredStaff.map((staff) => {
                   const row = calendarRows[staff.id];
@@ -2863,7 +2901,7 @@ export const SchedulingPage: React.FC = () => {
                           {daysList.map((d) => (
                             <div
                               key={d.dateStr}
-                              className={`gantt-grid-col ${d.isWeekend ? 'weekend-col' : ''} ${d.isToday ? 'today-col' : ''}`}
+                              className={`gantt-grid-col ${d.isWeekend ? 'weekend-col' : ''} ${d.isToday ? 'today-col' : ''} ${d.holidayName ? 'holiday-col' : ''}`}
                             />
                           ))}
                         </div>
@@ -2908,8 +2946,7 @@ export const SchedulingPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            </>
-          )}
+          </>
           {!directoryLoading && directoryNextCursor !== null && (
             <div ref={directorySentinelRef} className="scheduling-status" data-control-id="scheduling.staff.next-page">
               {directoryNextPageError ? (
@@ -3219,6 +3256,17 @@ export const SchedulingPage: React.FC = () => {
       </Drawer>
     </div>
   );
+};
+
+export const SchedulingPage: React.FC = () => {
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const update = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  return new URLSearchParams(hash.split('?')[1] ?? '').get('tab') === 'handover'
+    ? <ServiceHandoverPage key={hash} /> : <SchedulingWorkbench />;
 };
 
 export default SchedulingPage;

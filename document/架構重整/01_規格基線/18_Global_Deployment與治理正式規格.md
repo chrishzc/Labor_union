@@ -38,6 +38,8 @@
 
 ## 3. Logical topology
 
+2026-10-21 人工授權的 NAS 外網雙入口補充：採一個網頁管理的 Cloudflare Tunnel，以不同 hostname 分別導向 management-api 與 line-api；工會 hostname 必須以 Access 全 hostname 保護、指定信箱驗證及 connector Access token 驗證，進站後仍使用原網站帳號／MFA／業務權限，不能信任任意 Cf-Access 身分標頭作網站登入。LINE 不套人員 Access 登入，保留簽章、綁定／本人服務範圍與申請／工會核准流程。原內網 DNS／DSM HTTPS／反向代理與資料保留。token 僅為管理者保護的 host 檔案、唯讀掛給 UID 65532，不進 .env／命令列／映像／ZIP。兩個 origin 網路分別只有 connector 與對應 API，不加入 data 網路；只信任明確 connector IP，保留原 DSM 來源。程式以唯讀掛載相容既有映像，不建置或上傳映像。完整啟用 Compose 只改兩個服務的啟動 profiles，保留原 .env，LINE Worker 最後只 --check。憑證維護及 03:00 線上 SQL 備份保留；真實 Access／token／DNS／NAS ACL／防火牆／寄信與容量仍需實機驗收，不由隔離測試或 ZIP 存在冒充已上線。
+
 2026-10-20 人工授權的每日 SQL 備份：DSM 03:00 以獨立 root 維護腳本將本專案資料庫匯出到未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務、不重建映像或變更 Compose／.env／DB GRANT。僅支援非空 InnoDB 資料庫的 single-transaction／quick 線上快照，包含結構、資料、view、routines、triggers、events；不包含實體檔案、金鑰或 MySQL 系統帳號。管理者不得同時執行 schema 變更。來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記須檢查，失敗非零通知 DSM 並保留舊備份；不冒充完整災難備份或每日還原驗證。DSM ACL／實際收信／容量與 NAS 負載仍須實機驗收。操作由 deployment/nas/SQL-BACKUPS.md 承接。
 
 ```text

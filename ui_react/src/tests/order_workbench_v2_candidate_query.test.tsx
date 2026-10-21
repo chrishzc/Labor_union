@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
+import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
 import { ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   sendInformation: vi.fn(),
   createAddCandidatesCommand: vi.fn(),
 }));
+
 
 vi.mock('../api/scheduling/matching_candidate_workflow_client', async (importOriginal) => {
   const original = await importOriginal<typeof import('../api/scheduling/matching_candidate_workflow_client')>();
@@ -147,6 +149,20 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(names).toEqual(['A2 第二位月嫂', 'A10 正式合格月嫂', '未設定 未編號月嫂']);
     fireEvent.click(screen.getByRole('checkbox', { name: '選擇正式候選 第二位月嫂' }));
     expect(mocks.addCandidates).not.toHaveBeenCalled();
+  });
+
+  it('automatically refreshes availability warnings after pause and restore changes', async () => {
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [eligible], conflicts: [] }));
+    render(<OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} />);
+    await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' });
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [partial], conflicts: [{ staff_id: partial.staff_id, work_date: '2026-09-01', reason_code: 'staff_unavailability' }] }));
+    act(() => publishStaffAvailabilityChange(partial.staff_id));
+    await screen.findByText(/有檔期衝突，待公會協調/);
+    mocks.searchInquiryCandidates.mockResolvedValue(availability({ candidate_options: [eligible], conflicts: [] }));
+    act(() => publishStaffAvailabilityChange(eligible.staff_id));
+    await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' });
+    expect(screen.queryByText(/有檔期衝突，待公會協調/)).not.toBeInTheDocument();
+    expect(mocks.searchInquiryCandidates).toHaveBeenCalledTimes(3);
   });
 
   it('查詢只有兩項提示，沒有偏好篩選勾選框', async () => {

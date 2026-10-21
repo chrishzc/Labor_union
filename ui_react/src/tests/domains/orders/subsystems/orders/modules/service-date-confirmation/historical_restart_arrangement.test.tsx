@@ -60,15 +60,17 @@ it('多月嫂必須明確逐日分段，正式回讀後才標示完成', async (
   calls.query.mockResolvedValue({ ...dates, scheduling_version: 8, arrangement_pending: false });
   render(<HistoricalRestartArrangementPanel caseNo={dates.case_no} dates={dates} onObserved={observed} />);
 
-  fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
+  fireEvent.click(screen.getByRole('button', { name: '建立正式安排' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('請明確指定');
+  expect(calls.preview).not.toHaveBeenCalled();
+  expect(calls.apply).not.toHaveBeenCalled();
   for (const day of dates.current_dates.slice(0, 2)) {
     fireEvent.change(screen.getByLabelText(`${day} 月嫂`), { target: { value: '12' } });
   }
   for (const day of dates.current_dates.slice(2)) {
     fireEvent.change(screen.getByLabelText(`${day} 月嫂`), { target: { value: '13' } });
   }
-  fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
+  fireEvent.click(screen.getByRole('button', { name: '建立正式安排' }));
   await waitFor(() => expect(calls.preview).toHaveBeenCalledWith(
     dates.case_no,
     [
@@ -76,7 +78,6 @@ it('多月嫂必須明確逐日分段，正式回讀後才標示完成', async (
       { staff_id: 13, service_dates: dates.current_dates.slice(2) },
     ],
   ));
-  fireEvent.click(await screen.findByRole('button', { name: '建立正式安排' }));
   await waitFor(() => expect(observed).toHaveBeenCalledWith({
     ...dates, scheduling_version: 8, arrangement_pending: false,
   }));
@@ -109,10 +110,10 @@ it('套用結果不明時保留原冪等鍵重試，不建立第二個安排命�
   });
   calls.query.mockResolvedValue({ ...single, scheduling_version: 8, arrangement_pending: false });
   render(<HistoricalRestartArrangementPanel caseNo={single.case_no} dates={single} onObserved={vi.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
-  fireEvent.click(await screen.findByRole('button', { name: '建立正式安排' }));
+  fireEvent.click(screen.getByRole('button', { name: '建立正式安排' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('網路中斷');
   fireEvent.click(screen.getByRole('button', { name: '以原操作確認結果' }));
   await waitFor(() => expect(calls.apply).toHaveBeenCalledTimes(2));
+  expect(calls.preview).toHaveBeenCalledTimes(1);
   expect(calls.apply.mock.calls[0][2].idempotencyKey).toBe(calls.apply.mock.calls[1][2].idempotencyKey);
 });

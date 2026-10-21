@@ -22,8 +22,9 @@ import {
   LEAVE_RECEIPT,
 } from './fixtures/scheduling/leave_substitution_contract_fixtures';
 
+const coreStageProjectionMocks = vi.hoisted(() => ({ loadAll: vi.fn() }));
 vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
-  loadAllCoreStageTimelines: vi.fn().mockResolvedValue({ items: [] }),
+  loadAllCoreStageTimelines: coreStageProjectionMocks.loadAll,
 }));
 
 function lineage(): SubstitutionPayablesLineage {
@@ -129,6 +130,7 @@ function renderLeaveWorkspace(): void {
 describe('Scheduling substitution Staff Payables readback', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [{ case_no: LEAVE_CASE_NO }] });
     leaveSubstitutionFlowStore.clearAll();
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [

@@ -26,6 +26,7 @@
 - layout_status: custom_current
 - tests: see the holiday-maintenance test module leaf.
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/`
+- test_root: `ui_react/src/tests/scheduling_holiday_flow.test.tsx` — 既有管理工作台的自動查詢、版本化儲存與結果回讀；保留 current legacy UI 路徑。
 - boundary: Subsystem
 - oracles: actual parser, transport call order, zero-write Preview, fresh per-date Apply version, preserve/skip/partial failure, awaited UI readback failure, and adapter state/retry transitions.
 

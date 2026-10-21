@@ -220,35 +220,44 @@ describe('M3 日期表 recipient 確認', () => {
     expect(screen.getByText('月嫂 #9').closest('article')).toHaveTextContent('尚未確認日期');
     expect(screen.getByText('等待客戶與所有月嫂確認目前日期表。')).toBeInTheDocument();
   });
-  it('one note creates a manual snapshot and confirms only the selected recipient without LINE delivery', async () => {
+  it.each([
+    { label: '未寄送、不填備註', initial: 'not_sent', note: '' },
+    { label: '未寄送、選填備註', initial: 'not_sent', note: '電話確認日期表' },
+    { label: '日期過期、不填備註', initial: 'sent_outdated', note: '' },
+    { label: '日期過期、選填備註', initial: 'sent_outdated', note: '已核對新版日期' },
+  ] as const)('新版單擊確認：$label，僅確認選定對象並完成回讀', async ({ initial, note }) => {
     vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
     const manual = { ...sent, snapshot_status: 'manual_ready' as const };
-    const confirmed = { ...manual, recipients: manual.recipients.map(recipient => recipient.audience_type === 'customer' ? { ...recipient, confirmation_status: 'manually_confirmed' as const, confirmation_reason: '電話確認日期表' } : recipient) };
-    let current = notSent;
+    const confirmed = { ...manual, recipients: manual.recipients.map(recipient => recipient.audience_type === 'customer'
+      ? { ...recipient, confirmation_status: 'manually_confirmed' as const, confirmation_reason: note } : recipient) };
+    let current: MatchingScheduleState = initial === 'not_sent' ? notSent : { ...sent, snapshot_status: 'sent_outdated' };
     vi.spyOn(matchingScheduleConfirmationClient, 'query').mockImplementation(async () => current);
     vi.spyOn(matchingScheduleConfirmationClient, 'previewManual').mockResolvedValue({ case_no: sent.case_no, plan_id: 12, confirmed_service_date_version: 3, schedule_preview: schedulePreview, preview_fingerprint: 'b'.repeat(64) });
     const prepare = vi.spyOn(matchingScheduleConfirmationClient, 'applyManual').mockImplementation(async () => { current = manual; return current; });
     const confirm = vi.spyOn(matchingScheduleConfirmationClient, 'confirmManual').mockImplementation(async () => { current = confirmed; return current; });
     const send = vi.spyOn(matchingScheduleConfirmationClient, 'send');
     render(<MatchingScheduleAndAssignmentActions caseNo={sent.case_no} planId={12} planSegments={[{ segmentId: 17, sequence: 1, staffId: 9, assignedStartDate: '2026-08-03', assignedEndDate: '2026-08-05' }]} waitingLockAcquired assignmentExists={false} onAssignmentCompleted={vi.fn()} />);
-    fireEvent.click((await screen.findAllByRole('button', { name: '手動記錄確認' }))[0]!);
+    const direct = (await screen.findAllByRole('button', { name: '手動記錄確認' }))[0]!;
+    await waitFor(() => expect(direct).toBeEnabled());
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    window.alert = vi.fn();
-    const save = screen.getByRole('button', { name: '儲存確認紀錄' });
-    expect(save).toBeEnabled();
-    fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalled();
-    expect(screen.getByLabelText('客戶確認紀錄')).toHaveFocus();
-    expect(prepare).not.toHaveBeenCalled();
-    expect(confirm).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('客戶確認紀錄'), { target: { value: '電話確認日期表' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存確認紀錄' }));
-    await waitFor(() => expect(screen.queryByLabelText('客戶確認紀錄')).not.toBeInTheDocument());
+    if (note) {
+      fireEvent.click(screen.getAllByRole('button', { name: '編輯選填備註' })[0]!);
+      fireEvent.change(screen.getByLabelText('客戶確認紀錄'), { target: { value: note } });
+      expect(prepare).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: '儲存確認紀錄' }));
+    } else {
+      fireEvent.click(direct);
+    }
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('1 / 2 位已確認目前日期表')).toBeInTheDocument());
     expect(prepare).toHaveBeenCalledTimes(1);
-    expect(confirm).toHaveBeenCalledWith(41, '電話確認日期表', expect.objectContaining({ expectedActor: 'operator-1' }));
+    expect(prepare).toHaveBeenCalledWith(sent.case_no, 12, expect.anything(), note, expect.objectContaining({ expectedActor: 'operator-1' }));
+    expect(confirm).toHaveBeenCalledWith(41, note, expect.objectContaining({ expectedActor: 'operator-1' }));
     expect(send).not.toHaveBeenCalled();
     expect(screen.getAllByText('尚未確認日期')).toHaveLength(1);
+    expect(screen.queryByLabelText('客戶確認紀錄')).not.toBeInTheDocument();
   });
 
 });

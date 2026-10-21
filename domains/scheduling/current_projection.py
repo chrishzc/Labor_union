@@ -212,7 +212,7 @@ class StaffUnavailabilityCurrentFact:
             _require_date(self.end_date, "availability end date")
             if self.end_date < self.start_date:
                 raise ValueError("staff unavailability interval is inverted")
-        require_canonical_text(self.reason, "staff unavailability reason", 500)
+        require_canonical_text(self.reason, "staff unavailability reason", 500, allow_empty=True)
 
 
 @dataclass(frozen=True, slots=True)

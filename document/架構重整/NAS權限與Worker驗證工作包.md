@@ -341,3 +341,22 @@ PASS：使用全新無秘密 env 解析全部 profiles，無 host ports／build�
 FAILED（全工作區架構 closure，非本次檔案）：`ui_react/src/tests/client_beclass_workbook_client.test.ts` 的 TEST_OUTSIDE_ARCHITECTURE_OWNER，以及 `tests/fixtures/case_import/hcm_ui_demo_20261020.xlsx` 的 TEST_OWNER_TOO_BROAD。這兩項不在本次 write set；未改寫其他成果。沒有把功能驗證 PASS 說成整個 workspace gate 通過。
 
 NOT_RUN：DSM 真正工作排程、郵件送達、NAS ACL、DSM timeout／flock 工具支援、2 GB 負載、實際 Cloudflare origin 重載、NAS 憑證切換及 Container Manager undefined 修復。通知只驗證結果與非零退出碼，未對外寄信。預備檔案保存於 `scratch/nas-cert-maintenance-20261020-delivery/`；真實 Docker 各次演練為 `scratch/nas-cert-docker-*/result.json`，全部只用新建資料，容器已停止。模型與 closure 分別為 `scratch/nas-cert-model-20261020/result.json`、`scratch/nas-cert-architecture-20261020.json`。使用者稍後仍須依教學完成 DSM 核取清單；檔案與映像存在不代表排程已啟用。
+
+
+### Cloudflare 雙入口、唯讀代理程式與整合 ZIP（2026-10-21 人工授權）
+
+Authority：使用者確認一條 Tunnel／兩個 hostname、工會 Access 指定信箱＋原網站登入 MFA、LINE 原驗證與業務權限、保留原內網；授權修改程式與 Compose，必要測試通過後更新 ZIP 與 Cloudflare／DSM 教學。保留實際 .env／既有資料，不包含 token，不建置或上傳映像，也不操作 NAS／Cloudflare 帳戶。
+
+Write set：scripts/nas_appliance.py 僅新增 literal proxy IP 信任並保留 DSM gateway；deployment/nas/compose.yaml 的兩個 internal origin 網路、token-file 與唯讀 runtime 掛載；scripts/package_nas_preview.py --operations-validation 的固定清單交付與完整 Tunnel 啟用版；DSM-SETUP／CLOUDFLARE／README／.env.example；runtime-supervision 專屬新測試、既有 Compose 測試對應新邊界及隔離 fixture 的明確未占用子網；正式規格 18 與 owning map 的最小更新。未修改其他工作中的業務程式、UI、DB schema 或 GRANT。
+
+PASS：Windows focused 46 passed；無網路、無 Docker socket 的 Linux 49 passed／1 Docker opt-in skipped（Windows 與 Linux 的 15 項重疊不重複計數）。Linux 涵蓋憑證完整／中斷回復、真實 UID／模式、DSM 協調器與備份失敗隔離／永久保留。既有兩項第三方非致命提示保持原狀，未放寬測試斷言或權限。
+
+PASS：新隔離 Tunnel origin 應用 1 個 Docker 測試／6 階段（207.18 秒），實際外網 Host 和原內網 Host 的原 root／工會帳密與 TOTP 登入、偽造 Access 身分無效、網站角色限制、LINE 管理路由不存在、簽章拒絕／合成空事件受理、專用網路分離、重建後原帳號／MFA／session／檔案保留；LINE Worker 最後只 --check。TOTP 等待新的 30 秒週期遵守防重播，不關閉驗證、不 blind retry。全部測試 egress 為 internal，不送正式 LINE 訊息。
+
+PASS：憑證 Docker 回歸 2 passed（309.95 秒），含 legacy 導入、MySQL reload、錯誤候選拒絕與回復、再次 CA 輪替、原帳號 MFA／機器認證；不停機 SQL Docker 1 passed（39.43 秒），交易並行與獨立還原程序／函式／view／trigger／event。所有本次測試容器已停止，測試資料保留，不 prune 或刪既有網路；本機歷史網路耗盡由本次 fixture 明確子網解決。
+
+PASS：合成 .env 的兩份完整 Compose，內網 5／Tunnel 7／全 profiles 13 個服務、23 個既有卷，無 host ports／build／NanoCPUS，原 external data 與 DSM bridge 位址保留。程式／教學 UTF-8、語法、固定 ZIP 清單與雜湊另由交付 validation.json 記錄；只在必要本機驗證通過後產生新交付檔，不覆寫先前 ZIP。
+
+FAILED（任務外）：全工作區 architecture closure 對 task base 25a590cc4e8bcb823b3f249caf85290614592b0c 有 47 項其他修改的 source／test 歸屬錯誤，本次 write set 無錯誤。結果保留於 scratch/nas-tunnel-20261021-architecture.json；不修補或收進本包、不將整個 workspace 宣稱全通過。
+
+NOT_RUN：實際 Cloudflare Access 寄信／政策、token 與 Tunnel 連線、實際域名 DNS／CA origin、DSM ACL／防火牆／排程／寄信、2 GB NAS 尖峰負載、Container Manager undefined。新唯讀 host 程式必須與對應 Compose／映像版本一起備份／回復；冷還原只明確啟動內網五個服務，不因 profiles 留空就誤啟動 Tunnel。正式資料或入口切換不在本次執行範圍。

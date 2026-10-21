@@ -8,6 +8,7 @@
 - layout_status: custom_current
 - test_file: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/holiday_csv.test.tsx`
 - test_file: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/holiday_adapter.test.ts`
+- test_file: `ui_react/src/tests/scheduling_holiday_flow.test.tsx` — 既有工作台查詢／儲存／回讀的 UI 契約。
 - canonical_basis: existing Holiday module test directory under the UI source tree, declared by the Scheduling production module leaf and confirmed by both current tests.
 
 ## Coverage

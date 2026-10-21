@@ -27,8 +27,9 @@ import {
   LEAVE_RECEIPT,
 } from './fixtures/scheduling/leave_substitution_contract_fixtures';
 
+const coreStageProjectionMocks = vi.hoisted(() => ({ loadAll: vi.fn() }));
 vi.mock('../api/orders/load_all_core_stage_timelines', () => ({
-  loadAllCoreStageTimelines: vi.fn().mockResolvedValue({ items: [] }),
+  loadAllCoreStageTimelines: coreStageProjectionMocks.loadAll,
 }));
 
 const PENDING_ITEM: LeaveInboxItem = {
@@ -79,6 +80,7 @@ function renderLeaveWorkspace(): void {
 describe('Scheduling staff leave inbox flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [{ case_no: LEAVE_CASE_NO }] });
     sessionClient.clearSession();
     leaveSubstitutionFlowStore.clearAll();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({
@@ -97,11 +99,14 @@ describe('Scheduling staff leave inbox flow', () => {
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
   });
 
-  it('下拉只列出服務中且有正式服務日的案件，選取後仍重新查詢正式指派', async () => {
+  it('下拉列出尚未服務完成且有正式服務日的案件，選取後仍重新查詢正式指派', async () => {
+    coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [
+      LEAVE_CASE_NO, 'CASE-READY', 'CASE-NO-ASSIGNMENT', 'CASE-NO-DAY', 'CASE-PLANNED',
+    ].map((case_no) => ({ case_no })) });
     vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
       items: [
         serviceCase(LEAVE_CASE_NO), serviceCase('CASE-READY'), serviceCase('CASE-NO-ASSIGNMENT'), serviceCase('CASE-NO-DAY'),
-        serviceCase('CASE-PLANNED', '已排定'), serviceCase('CASE-COMPLETED', '已結束'),
+        serviceCase('CASE-PLANNED', '訂單成立'), serviceCase('CASE-COMPLETED', '訂單完成'),
       ],
       next_cursor: null, etag: 'a'.repeat(64),
     });
@@ -116,8 +121,8 @@ describe('Scheduling staff leave inbox flow', () => {
     expect(screen.queryByRole('textbox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
     await waitFor(() => expect(select).toBeEnabled());
     await waitFor(() => expect(select).toHaveValue(LEAVE_CASE_NO));
-    expect([...((select as HTMLSelectElement).options)].map((option) => option.value)).toEqual(['', LEAVE_CASE_NO, 'CASE-READY']);
-    expect(leaveSubstitutionClient.listAssignments).not.toHaveBeenCalledWith('CASE-PLANNED', expect.anything());
+    expect([...((select as HTMLSelectElement).options)].map((option) => option.value)).toEqual(['', LEAVE_CASE_NO, 'CASE-PLANNED', 'CASE-READY']);
+    expect(leaveSubstitutionClient.listAssignments).toHaveBeenCalledWith('CASE-PLANNED', expect.anything());
     expect(leaveSubstitutionClient.listAssignments).not.toHaveBeenCalledWith('CASE-COMPLETED', expect.anything());
     fireEvent.change(select, { target: { value: 'CASE-READY' } });
     await waitFor(() => expect(select).toHaveValue('CASE-READY'));
@@ -126,7 +131,8 @@ describe('Scheduling staff leave inbox flow', () => {
     expect(leaveSubstitutionClient.listAssignments).toHaveBeenLastCalledWith('CASE-READY', undefined);
   });
 
-  it('取得跨頁的服務中案件，不受目前日曆載入人員範圍限制', async () => {
+  it('取得跨頁的已排班案件，不受目前日曆載入人員範圍限制', async () => {
+    coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [{ case_no: 'CASE-A' }, { case_no: 'CASE-Z' }] });
     vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ items: [], next_cursor: null });
     vi.mocked(ordersQueryClient.getOrderSummaries).mockImplementation(async (params) => ({
       items: [serviceCase(params?.after_case_no ? 'CASE-Z' : 'CASE-A')],
@@ -156,7 +162,7 @@ describe('Scheduling staff leave inbox flow', () => {
     vi.mocked(leaveSubstitutionClient.listAssignments).mockRejectedValue(new Error('query unavailable'));
     renderLeaveWorkspace();
     const select = screen.getByRole('combobox', { name: '請假代班訂單編號' });
-    expect(await screen.findByRole('alert')).toHaveTextContent('服務中案件載入失敗');
+    expect(await screen.findByRole('alert')).toHaveTextContent('已排班案件載入失敗');
     expect(select).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
     vi.mocked(leaveSubstitutionClient.listAssignments).mockResolvedValue([...LEAVE_ASSIGNMENTS]);
@@ -168,7 +174,7 @@ describe('Scheduling staff leave inbox flow', () => {
   it('沒有正式排班時顯示空清單提示並停用指派查詢', async () => {
     vi.mocked(leaveSubstitutionClient.listAssignments).mockResolvedValue([]);
     renderLeaveWorkspace();
-    expect(await screen.findByText('目前沒有服務中且已有排班的案件。')).toBeInTheDocument();
+    expect(await screen.findByText('目前沒有已正式排班且尚未服務完成的案件。')).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('');
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
   });
@@ -231,6 +237,26 @@ describe('Scheduling staff leave inbox flow', () => {
     releaseQuery(rows);
     await waitFor(() => expect(screen.getByRole('combobox', { name: '原服務指派' })).toHaveValue(String(LEAVE_ASSIGNMENTS[0].assignment_id)));
     expect(screen.getByRole('combobox', { name: '服務日' })).toHaveValue('301');
+  });
+
+  it('依處理方式只顯示適用欄位，切回代班時清除先前的補班日期', async () => {
+    seedQueryReady();
+    renderLeaveWorkspace();
+    const mode = await screen.findByRole('combobox', { name: '請假代班處理方式' });
+    expect(screen.queryByLabelText('指定補班日期')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '代班人員' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: '此日代班列為假日／緊急雙薪補貼' })).toBeInTheDocument();
+
+    fireEvent.change(mode, { target: { value: 'defer_following_assignments' } });
+    expect(screen.getByLabelText('指定補班日期')).toBeEnabled();
+    expect(screen.queryByRole('combobox', { name: '代班人員' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '此日代班列為假日／緊急雙薪補貼' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('指定補班日期'), { target: { value: '2026-08-11' } });
+
+    fireEvent.change(mode, { target: { value: 'substitute' } });
+    expect(screen.queryByLabelText('指定補班日期')).not.toBeInTheDocument();
+    fireEvent.change(mode, { target: { value: 'defer_following_assignments' } });
+    expect(screen.getByLabelText('指定補班日期')).toHaveValue('');
   });
 
   it('人工指定補班日期在儲存時原樣送入 Preview 與 Apply，並回讀新服務日', async () => {

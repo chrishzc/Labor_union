@@ -178,32 +178,9 @@
 }
 
 /* Stage 2: 2FA TOTP Styles */
-.totp-digits-container {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 20px 0 28px 0;
-}
-
-.totp-digit-box {
-  width: 48px;
-  height: 56px;
-  border: 1.5px solid #dec0b6;
-  border-radius: 12px;
-  text-align: center;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #1e1b19;
-  outline: none;
-  background-color: #fff8f6;
-  transition: all 0.2s ease;
-}
-
-.totp-digit-box:focus {
-  border-color: #ff7f50;
-  background-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
-}
+.totp-code-field { display: grid; gap: 8px; margin: 20px 0 28px; }
+.totp-code-field label { color: #57423b; font-size: .9rem; font-weight: 700; }
+.totp-code-input.login-text-input { width: 100%; box-sizing: border-box; text-align: center; letter-spacing: .4em; font-size: 1.5rem; }
 
 .back-to-stage1-btn {
   display: block;

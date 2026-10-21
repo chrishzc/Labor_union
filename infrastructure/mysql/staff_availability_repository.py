@@ -33,6 +33,7 @@ from subsystems.scheduling.staff_availability_workflow import (
     StaffAvailabilityReceiptRaceError,
     StaffAvailabilityApplyRequest,
     StaffAvailabilityQuery,
+    StaffAvailabilityRecordsQuery,
     StoredStaffAvailabilityReceipt,
 )
 
@@ -54,6 +55,12 @@ class MySqlStaffAvailabilityRepository:
             target = _load_target(cursor, intent, for_update)
             blocks, conflicts = _load_create_conflicts(cursor, intent, for_update)
             return StaffAvailabilityFacts(intent.staff_id, version, blocks, conflicts, target)
+
+    def list_records(self, query: StaffAvailabilityRecordsQuery) -> tuple[StaffUnavailabilityBlock, ...]:
+        with self._connection.cursor() as cursor:
+            _require_staff(cursor, query.staff_id, for_update=False)
+            cursor.execute(_BLOCK_RECORDS_SQL, (query.staff_id, query.after_id, query.limit))
+            return tuple(_block_from_row(row) for row in _mapping_rows(cursor.fetchall()))
 
     def load_matching_facts(
         self,
@@ -394,6 +401,10 @@ def _json_object(value):
 
 
 _BLOCK_COLUMNS = "id,staff_id,block_kind,start_date,end_date,status,reason"
+_BLOCK_RECORDS_SQL = (
+    f"SELECT {_BLOCK_COLUMNS} FROM scheduling_staff_unavailability_blocks "
+    "WHERE staff_id=%s AND id>%s ORDER BY id LIMIT %s"
+)
 _BLOCK_RANGE_SQL = (
     f"SELECT {_BLOCK_COLUMNS} FROM scheduling_staff_unavailability_blocks "
     "WHERE staff_id=%s AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) "

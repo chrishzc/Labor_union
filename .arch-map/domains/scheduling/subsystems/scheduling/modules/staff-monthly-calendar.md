@@ -19,6 +19,7 @@
   - `ui_react/src/pages/SchedulingPage.css`
 
 ## Dependencies
+- outbound: `scheduling/staff-availability` — React 訂閱成功異動通知，只失效受影響日曆列並重查當前案件資格；中斷中的批次列不得留下已載入快取。
 - outbound: `scheduling/current-service-projection` — 正式 assignment 與 daily schedule 是 current service 的主要投影。
 - outbound: `orders/operational-stage-projection` — 排查案件選項依十三核心階段的正式 current ordinal 限定在第 8「訂金」之前。
 - outbound: `orders/historical-precision-restart` — precision restart event 使舊歷史指派區段失效，不得再覆蓋 restarted case。

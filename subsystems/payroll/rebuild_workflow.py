@@ -50,6 +50,7 @@ class ExistingStaffObligation:
     amount_due: MoneyNTD
     payout_history_exists: bool
     due_date: date | None
+    handover_corrections_exist: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(self.assignment_identity, "assignment identity", _IDENTITY_MAXIMUM_LENGTH)
@@ -214,6 +215,8 @@ class PayrollRebuildWorkflow:
 
 
 def _build_preview(facts: PayrollRebuildFacts) -> PayrollRebuildPreview:
+    if any(item.handover_corrections_exist for item in facts.existing_obligations):
+        raise ValueError("payroll_handover_settlement_required")
     payroll = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
     return _preview_result(
         facts,
@@ -336,7 +339,7 @@ def _expected_version(current_version):
 
 def _request_validation_error(request, error):
     code = str(error) or "invalid_payroll_facts"
-    category = ErrorCategory.CONFLICT if code == "payroll_candidate_stale" else ErrorCategory.DOMAIN_BLOCKED if code == "staff_obligation_frozen" else ErrorCategory.VALIDATION
+    category = ErrorCategory.CONFLICT if code == "payroll_candidate_stale" else ErrorCategory.DOMAIN_BLOCKED if code in {"staff_obligation_frozen", "payroll_handover_settlement_required"} else ErrorCategory.VALIDATION
     return _error(request, category, code, "Payroll rebuild root facts or persistence state are invalid.")
 
 

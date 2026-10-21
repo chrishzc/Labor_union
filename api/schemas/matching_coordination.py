@@ -95,7 +95,7 @@ class MatchingCriteriaResultTransportView(MatchingCoordinationSchema):
     code: str = Field(min_length=1, max_length=80)
     status: Literal["matched", "not_matched", "source_not_ready", "not_consulted"]
     source_version: MatchingSourceVersionView
-    detail: str = Field(default="", max_length=500)
+    detail: str = Field(max_length=500)
 
 
 class MatchingCandidateResultTransportView(MatchingCoordinationSchema):

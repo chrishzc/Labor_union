@@ -2,7 +2,7 @@
  * @file LoginPage.tsx
  * @description 登入頁面元件，實作雙階段帳密挑戰與 TOTP 動態碼驗證流程、錯誤處理與機密安全防護。
  */
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import './LoginPage.css';
 import { sessionClient } from '../api/auth/session_client';
@@ -133,6 +133,9 @@ function getStage2ErrorMessage(
 }
 
 const REMEMBER_COOKIE_NAME = 'remember_admin_username';
+const normalizeTotpInput = (value: string) => value
+  .replace(/[０-９]/g, digit => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
+  .replace(/\s/g, '');
 
 function getRememberedUsername(): string | null {
   try {
@@ -186,8 +189,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [challengeExpiresAt, setChallengeExpiresAt] = useState<string | null>(null);
-  const [totpDigits, setTotpDigits] = useState(['', '', '', '', '', '']);
-  const isTotpComposing = useRef(false);
+  const [totpCode, setTotpCode] = useState('');
   const [provisioningUri, setProvisioningUri] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
@@ -235,55 +237,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const focusNextTotpInput = (index: number) => {
-    if (index < 5) {
-      document.getElementById(`totp-${index + 1}`)?.focus();
-    }
-  };
-
-  const handleTotpChange = (index: number, value: string, advanceFocus = true) => {
-    if (value.length > 1) {
-      value = value.charAt(value.length - 1);
-    }
-    // Allow only single digits or empty string
-    if (value && !/^\d$/.test(value)) {
-      return;
-    }
-    const newDigits = [...totpDigits];
-    newDigits[index] = value;
-    setTotpDigits(newDigits);
-
-    // Auto focus next input if digit entered
-    if (value && advanceFocus) {
-      focusNextTotpInput(index);
-    }
-  };
-
-  const handleTotpCompositionEnd = (index: number, input: HTMLInputElement) => {
-    handleTotpChange(index, input.value, false);
-    // Keep the final composition/input events on this box before moving focus.
-    requestAnimationFrame(() => {
-      isTotpComposing.current = false;
-      if (document.activeElement === input && /^\d$/.test(input.value)) {
-        focusNextTotpInput(index);
-      }
-    });
-  };
-
-  const handleTotpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (isTotpComposing.current || e.nativeEvent.isComposing) return;
-    if (e.key === 'Backspace' && !totpDigits[index] && index > 0) {
-      const prevInput = document.getElementById(`totp-${index - 1}`);
-      if (prevInput) prevInput.focus();
-    }
+  const handleTotpChange = (value: string) => {
+    const normalized = normalizeTotpInput(value);
+    if (/^\d*$/.test(normalized)) setTotpCode(normalized.slice(0, 6));
   };
 
   const handleStage2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    const fullCode = totpDigits.join('');
-    if (fullCode.length < 6) {
+    const fullCode = normalizeTotpInput(totpCode);
+    if (!/^\d{6}$/.test(fullCode)) {
       setErrorMessage('請完整輸入 6 位數 TOTP 動態安全碼');
       return;
     }
@@ -294,7 +258,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       : false;
 
     if (!challengeId || !challengeToken || isExpired) {
-      setTotpDigits(['', '', '', '', '', '']);
+      setTotpCode('');
       setChallengeId(null);
       setChallengeToken(null);
       setChallengeExpiresAt(null);
@@ -312,7 +276,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         setChallengeId(null);
         setChallengeToken(null);
         setChallengeExpiresAt(null);
-        setTotpDigits(['', '', '', '', '', '']);
+        setTotpCode('');
         return;
       }
       await sessionClient.verifyPasswordChallenge(
@@ -325,14 +289,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setChallengeId(null);
       setChallengeToken(null);
       setChallengeExpiresAt(null);
-      setTotpDigits(['', '', '', '', '', '']);
+      setTotpCode('');
 
       if (onLoginSuccess) {
         onLoginSuccess(username.trim());
       }
     } catch (err) {
       // On error: wipe TOTP digits
-      setTotpDigits(['', '', '', '', '', '']);
+      setTotpCode('');
       const { message, expired } = getStage2ErrorMessage(err, false);
 
       if (expired) {
@@ -354,7 +318,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setChallengeId(null);
     setChallengeToken(null);
     setChallengeExpiresAt(null);
-    setTotpDigits(['', '', '', '', '', '']);
+    setTotpCode('');
     setAuthStage('stage1');
   };
 
@@ -501,27 +465,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             )}
 
             <form onSubmit={handleStage2Submit}>
-              <div className="totp-digits-container">
-                {totpDigits.map((digit, idx) => (
-                  <input
-                    key={idx}
-                    id={`totp-${idx}`}
-                    aria-label={`驗證碼第 ${idx + 1} 位`}
-                    className="totp-digit-box"
-                    type="text"
-                    maxLength={1}
-                    value={digit}
-                    disabled={isLoading}
-                    onChange={(e) => handleTotpChange(
-                      idx,
-                      e.target.value,
-                      !isTotpComposing.current && !(e.nativeEvent as InputEvent).isComposing
-                    )}
-                    onCompositionStart={() => { isTotpComposing.current = true; }}
-                    onCompositionEnd={(e) => handleTotpCompositionEnd(idx, e.currentTarget)}
-                    onKeyDown={(e) => handleTotpKeyDown(idx, e)}
-                  />
-                ))}
+              <div className="totp-code-field">
+                <label htmlFor="totp-code">六位數驗證碼</label>
+                <input
+                  id="totp-code"
+                  className="login-text-input totp-code-input"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={totpCode}
+                  disabled={isLoading}
+                  onChange={event => {
+                    if ((event.nativeEvent as InputEvent).isComposing) setTotpCode(event.target.value);
+                    else handleTotpChange(event.target.value);
+                  }}
+                  onCompositionEnd={event => {
+                    const normalized = normalizeTotpInput(event.currentTarget.value);
+                    setTotpCode(/^\d*$/.test(normalized) ? normalized.slice(0, 6) : '');
+                  }}
+                  onPaste={event => {
+                    const normalized = normalizeTotpInput(event.clipboardData.getData('text'));
+                    if (/^\d+$/.test(normalized)) {
+                      event.preventDefault();
+                      setTotpCode(normalized.slice(0, 6));
+                    }
+                  }}
+                />
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>

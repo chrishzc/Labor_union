@@ -88,6 +88,23 @@ def _request(preview, *, version=4, key="payroll-rebuild-1"):
     )
 
 
+def test_generic_rebuild_blocks_handover_roots_instead_of_recreating_their_full_paid_amount():
+    from shared_kernel.fingerprints import PreviewFingerprint
+
+    existing = ExistingStaffObligation("assignment:8", "original", MoneyNTD(3400), True,
+                                       date(2026, 9, 15), handover_corrections_exist=True)
+    repository, uow = _Repository(_facts((existing,))), _UnitOfWork()
+    workflow = PayrollRebuildWorkflow(repository, lambda: uow)
+    with pytest.raises(ValueError, match="payroll_handover_settlement_required"):
+        workflow.preview("CASE-1")
+    request = _request(SimpleNamespace(fingerprint=PreviewFingerprint("a" * 64)))
+    with pytest.raises(PayrollRebuildError) as caught:
+        workflow.apply(request)
+    assert caught.value.error.category is ErrorCategory.DOMAIN_BLOCKED
+    assert repository.persisted == []
+    assert uow.committed is False
+
+
 def test_preview_classifies_create_replace_frozen_and_removed_actions():
     create = PayrollRebuildWorkflow(_Repository(_facts()), _UnitOfWork).preview("CASE-1")
     total = create.payroll.total_payable

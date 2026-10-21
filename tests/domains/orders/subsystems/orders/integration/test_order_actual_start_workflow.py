@@ -602,7 +602,7 @@ def test_actual_start_preserves_leave_occupancy_only_for_valid_successor() -> No
                 "resulting_service_date": date(2026, 9, 10),
             },)
 
-    valid = SimpleNamespace(candidate=SimpleNamespace(assignments=(
+    valid = SimpleNamespace(preserve_leave_occupancy=False, candidate=SimpleNamespace(assignments=(
         SimpleNamespace(staff_id=21, service_dates=(date(2026, 9, 9),)),
         SimpleNamespace(staff_id=22, service_dates=(date(2026, 9, 10),)),
     )))
@@ -613,7 +613,7 @@ def test_actual_start_preserves_leave_occupancy_only_for_valid_successor() -> No
         "WHERE generation_id=%s AND active_marker=1",
         (8, 7),
     )
-    invalid = SimpleNamespace(candidate=SimpleNamespace(assignments=(
+    invalid = SimpleNamespace(preserve_leave_occupancy=False, candidate=SimpleNamespace(assignments=(
         SimpleNamespace(staff_id=21, service_dates=(date(2026, 9, 8),)),
         SimpleNamespace(staff_id=22, service_dates=(date(2026, 9, 10),)),
     )))

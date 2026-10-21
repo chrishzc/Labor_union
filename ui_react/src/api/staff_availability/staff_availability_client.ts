@@ -3,6 +3,7 @@
  * Description: 以即時記憶體 Session 接線 Availability Query、Preview 與 Apply。
  */
 import { sessionClient } from '../auth/session_client';
+import { publishStaffAvailabilityChange } from './staff_availability_changes';
 import { transport, type RequestOptions } from '../shared/transport';
 import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 import {
@@ -37,6 +38,7 @@ export interface StaffAvailabilityApplyOptions extends StaffAvailabilityRequestO
 }
 
 export interface StaffAvailabilityClient {
+  getAllBlocks(staffId: number, options?: StaffAvailabilityRequestOptions): Promise<StaffUnavailabilityBlock[]>;
   getBlocks(
     staffId: number,
     rangeStart: string,
@@ -232,6 +234,30 @@ export async function getAvailabilityBlocks(
   }
 }
 
+export async function getAllAvailabilityBlocks(staffId: number, options?: StaffAvailabilityRequestOptions): Promise<StaffUnavailabilityBlock[]> {
+  requireStaffId(staffId);
+  const request = requestOptions(options, correlation(options));
+  const endpoint = `/api/v1/scheduling/staff/${encodeURIComponent(String(staffId))}/availability-blocks`;
+  const records: StaffUnavailabilityBlock[] = [];
+  const limit = 100;
+  let cursor = 0;
+  try {
+    while (true) {
+      const raw = await transport.get(endpoint, { ...request, params: { after_id: cursor, limit } });
+      const page = decodeBlocks(raw, staffId);
+      if (page.length > limit) throw new ApiDecodeError('不可服務紀錄超過單頁上限。', [], raw);
+      for (const record of page) {
+        if (record.block_id <= cursor) throw new ApiDecodeError('不可服務紀錄游標未依序前進。', [], raw);
+        cursor = record.block_id;
+        records.push(record);
+      }
+      if (page.length < limit) return records;
+    }
+  } catch (error) {
+    throw mapStaffAvailabilityError(error);
+  }
+}
+
 export async function previewStaffAvailabilityChange(
   staffId: number,
   payload: StaffAvailabilityIntent,
@@ -261,7 +287,9 @@ export async function applyStaffAvailabilityChange(
   const endpoint = `/api/v1/scheduling/staff/${encodeURIComponent(String(staffId))}/availability-blocks/apply`;
   try {
     const raw = await transport.post(endpoint, validated, request);
-    return decodeReceipt(raw, staffId);
+    const receipt = decodeReceipt(raw, staffId);
+    publishStaffAvailabilityChange(receipt.staff_id);
+    return receipt;
   } catch (error) {
     throw mapStaffAvailabilityError(error);
   }
@@ -294,6 +322,10 @@ export class DefaultStaffAvailabilityClient implements StaffAvailabilityClient {
 
   public getBlocks(staffId: number, rangeStart: string, rangeEnd: string, options?: StaffAvailabilityRequestOptions): Promise<StaffUnavailabilityBlock[]> {
     return getAvailabilityBlocks(staffId, rangeStart, rangeEnd, this.mergeOptions(options));
+  }
+
+  public getAllBlocks(staffId: number, options?: StaffAvailabilityRequestOptions): Promise<StaffUnavailabilityBlock[]> {
+    return getAllAvailabilityBlocks(staffId, this.mergeOptions(options));
   }
 
   public queryBlocks(staffId: number, rangeStart: string, rangeEnd: string, options?: StaffAvailabilityRequestOptions): Promise<StaffUnavailabilityBlock[]> {

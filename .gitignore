@@ -69,6 +69,7 @@ task-*.md
 PROJECT_SPEC.md
 scratch/
 certificate-maintenance/
+**/tunnel/token
 .pytest_tmp/
 .pytest_tmp_*
 

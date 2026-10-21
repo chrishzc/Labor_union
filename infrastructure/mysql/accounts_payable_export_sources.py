@@ -280,6 +280,7 @@ LEFT JOIN staff_bank_accounts bank_accounts
  AND bank_accounts.is_primary = 1
 WHERE obligations.due_date = %s
   AND obligations.direction = 'payable_to_staff'
+  AND obligations.obligation_identity NOT LIKE 'staff-handover:%%'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
   AND COALESCE(projection.status, 'payable') IN ('payable', 'partially_paid')
@@ -303,7 +304,7 @@ SELECT obligations.obligation_identity,
        obligations.staff_id,
        staff.name AS recipient_name,
        staff.identity_card,
-       obligations.amount_due_ntd,
+       COALESCE(projection.obligation_amount_ntd, obligations.amount_due_ntd) AS amount_due_ntd,
        COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS export_amount_ntd,
        obligations.due_date,
        COALESCE(orders.staff_payment_due_date, obligations.due_date) AS order_due_date,
@@ -326,6 +327,7 @@ LEFT JOIN staff_bank_accounts bank_accounts
  AND bank_accounts.is_primary = 1
 WHERE obligations.case_no = %s
   AND obligations.direction = 'payable_to_staff'
+  AND obligations.obligation_identity NOT LIKE 'staff-handover:%%'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
 GROUP BY obligations.obligation_identity,
@@ -334,6 +336,7 @@ GROUP BY obligations.obligation_identity,
          staff.name,
          staff.identity_card,
          obligations.amount_due_ntd,
+         projection.obligation_amount_ntd,
          obligations.due_date,
          orders.staff_payment_due_date,
          projection.balance_ntd,

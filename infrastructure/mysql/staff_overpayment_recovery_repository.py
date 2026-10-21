@@ -110,19 +110,18 @@ class MySqlStaffOverpaymentRecoveryRepository:
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "INSERT INTO staff_overpayment_recoveries "
-                "(recovery_identity,payroll_correction_identity,staff_id,"
+                "(recovery_identity,staff_id,"
                 "original_amount_ntd,remaining_amount_ntd,source_bank_fact_identities,"
                 "source_payout_event_ids,source_obligation_identities,actor,reason) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
                     receipt.recovery_identity,
-                    source.correction_identity,
                     source.staff_id,
                     receipt.original_amount_ntd,
                     receipt.original_amount_ntd,
                     "[]",
                     "[]",
-                    "[]",
+                    json.dumps(sorted({source.obligation_identity, source.correction_identity})),
                     request.actor.actor_id,
                     request.reason,
                 ),

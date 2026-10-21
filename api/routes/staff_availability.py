@@ -38,6 +38,7 @@ from subsystems.scheduling.staff_availability_workflow import (
     StaffAvailabilityApplyRequest,
     StaffAvailabilityPreviewRequest,
     StaffAvailabilityQuery,
+    StaffAvailabilityRecordsQuery,
 )
 
 router = APIRouter(
@@ -54,8 +55,10 @@ _SCHEMA_NOT_READY_MYSQL_CODES = frozenset({1054, 1146})
 )
 def query_staff_availability_blocks(
     staff_id: int = Path(..., gt=0),
-    range_start: date = Query(...),
-    range_end: date = Query(...),
+    range_start: Annotated[date | None, Query()] = None,
+    range_end: Annotated[date | None, Query()] = None,
+    after_id: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
     correlation_id: Annotated[
         str | None,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
@@ -67,9 +70,17 @@ def query_staff_availability_blocks(
 ):
     del principal
     correlation = CorrelationId(correlation_id or uuid4().hex)
+
+    def read_blocks():
+        if range_start is None and range_end is None:
+            return application.query_records(StaffAvailabilityRecordsQuery(staff_id, after_id, limit))
+        if range_start is None or range_end is None or after_id:
+            raise StaffAvailabilityDomainError(StaffAvailabilityErrorCode.INVALID_INTENT)
+        return application.query(StaffAvailabilityQuery(staff_id, range_start, range_end))
+
     return _call(
         lambda: BaseResponse(
-            data=[_block_payload(item) for item in application.query(StaffAvailabilityQuery(staff_id, range_start, range_end))],
+            data=[_block_payload(item) for item in read_blocks()],
             message="成功取得月嫂不可服務期間",
         ),
         correlation,

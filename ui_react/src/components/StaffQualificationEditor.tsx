@@ -49,11 +49,12 @@ export function StaffQualificationEditor({ staffId, onUpdated, importedServiceIn
     catch (error) { if (current === epoch.current) { setMessageError(true); setNeedsRequery(true); setMessage(error instanceof Error ? error.message : '儲存結果未確認，請重試或重新查詢。'); } }
     finally { if (current === epoch.current) setBusy(false); }
   };
-  return <section ref={unsavedRef} className="staff-holiday-op-card" aria-label="專業資格與服務資料編輯">
+  return <section ref={unsavedRef} className="staff-holiday-op-card staff-qualification-editor" aria-label="專業資格與服務資料編輯">
     <h3 className="staff-op-title">✏️ 專業資格與服務資料</h3>
     <p>技能、一般證照及交通方式每行填一項；刪除該行即可移除。按摩證書獨立登錄，與一般證照分開保存。</p>
-    {snapshot && <><div className="staff-op-grid">
+    {snapshot && <><div className="staff-op-grid staff-qualification-list-grid">
       {listKeys.map(field => <label className="staff-op-field" key={field}>{labels[field]}<textarea rows={3} disabled={busy} value={lists[field]} onChange={event => { setLists(value => ({ ...value, [field]: event.target.value })); invalidate(); }} /></label>)}
+    </div><div className="staff-op-grid staff-qualification-details-grid">
       <label className="staff-op-field">按摩證書<select disabled={busy} value={massage} onChange={event => { setMassage(event.target.value); invalidate(); }}><option value="">尚未登錄</option><option value="true">有</option><option value="false">無</option></select></label>
       <label className="staff-op-field">最多照顧寶寶數<input type="number" min={1} step={1} max={2147483647} disabled={busy} value={care} onChange={event => { setCare(event.target.value); invalidate(); }} /></label>
     </div><label className="staff-op-field">備註（選填）<input aria-label="專業資格備註（選填）" placeholder="有需要補充的內容再填寫" maxLength={500} disabled={busy} value={reason} onChange={event => { setReason(event.target.value); if (messageError) { setMessageError(false); setMessage(''); } }} /></label>

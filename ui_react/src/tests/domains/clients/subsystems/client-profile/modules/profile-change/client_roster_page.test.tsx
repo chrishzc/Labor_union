@@ -192,7 +192,8 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('客戶帳務（唯讀）');
     expect(detail).toHaveTextContent('客戶應付總額');
     expect(detail).toHaveTextContent('450');
-    expect(within(detail).getAllByRole('button', { name: '預覽變更' })).toHaveLength(3);
+    expect(within(detail).getAllByRole('button', { name: '儲存' })).toHaveLength(3);
+    expect(within(detail).queryByRole('button', { name: '預覽變更' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     expect(screen.queryByRole('dialog', { name: '案件 CASE-001 詳細資料' })).not.toBeInTheDocument();
@@ -208,7 +209,7 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
   });
 
-  it('offers the existing Preview and Apply repair when Client Finance bootstrap is missing', async () => {
+  it('creates missing Client Finance bootstrap with one click and waits for readback before unlocking the drawer', async () => {
     let finish: (() => void) | undefined;
     bootstrapMocks.apply.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
     const unavailable = {
@@ -223,11 +224,18 @@ describe('ClientRosterPage', () => {
 
     const repair = await screen.findByLabelText('案件初始資料修復');
     expect(await within(repair).findByText(/客戶帳務、月嫂薪資或排班資料尚未齊全/)).toBeInTheDocument();
-    fireEvent.click(await within(repair).findByRole('button', { name: '預覽帳務與排班資料' }));
+    expect(within(repair).queryByRole('button', { name: '預覽帳務與排班資料' })).not.toBeInTheDocument();
+    fireEvent.click(await within(repair).findByRole('button', { name: '建立帳務與排班資料' }));
     await waitFor(() => expect(bootstrapMocks.preview).toHaveBeenCalledTimes(1));
     expect(repair).toHaveTextContent('客戶時薪：350 元');
-    fireEvent.click(within(repair).getByRole('button', { name: '建立帳務與排班資料' }));
     await waitFor(() => expect(bootstrapMocks.apply).toHaveBeenCalledTimes(1));
+    expect(bootstrapMocks.apply).toHaveBeenCalledWith(
+      'CASE-001',
+      expect.objectContaining({ client_payment_policy_version: 'client-approved-v1', client_hourly_rate_ntd: 350 }),
+      expect.objectContaining({ case_no: 'CASE-001', preview_fingerprint: 'a'.repeat(64) }),
+      '',
+      expect.stringMatching(/^case-bootstrap-repair-/),
+    );
     expect(bootstrapMocks.apply.mock.calls[0][4]).toMatch(/^case-bootstrap-repair-/);
     expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
     await act(async () => { finish?.(); });
@@ -236,7 +244,7 @@ describe('ClientRosterPage', () => {
   });
 
   it.each(['client_finance_bootstrap_required', 'order_terms_start_date_required'])(
-    'lets an operator fill the missing contractual start date before bootstrap repair (%s)', async (code) => {
+    'saves the missing contractual start date with one click before bootstrap repair (%s)', async (code) => {
     const unavailable = {
       ...(await mocks.query()),
       order_terms: { status: 'not_ready', code, data: null, field_capabilities: {} },
@@ -265,12 +273,20 @@ describe('ClientRosterPage', () => {
     await waitFor(() => expect(intakeMocks.previewCompletion).toHaveBeenCalledWith('CASE-001'));
     expect(within(repair).queryByLabelText('服務天數')).not.toBeInTheDocument();
     fireEvent.change(within(repair).getByLabelText('約定服務開始日'), { target: { value: '2026-09-01' } });
-    fireEvent.click(within(repair).getByRole('button', { name: '預覽約定服務資料' }));
+    expect(within(repair).queryByRole('button', { name: '預覽約定服務資料' })).not.toBeInTheDocument();
+    fireEvent.click(within(repair).getByRole('button', { name: '儲存約定服務資料' }));
     await waitFor(() => expect(intakeMocks.previewTerms).toHaveBeenCalledWith('CASE-001', '2026-09-01', 26));
-    fireEvent.click(within(repair).getByRole('button', { name: '確認儲存約定服務資料' }));
     await waitFor(() => expect(intakeMocks.applyTerms).toHaveBeenCalledTimes(1));
+    expect(intakeMocks.applyTerms).toHaveBeenCalledWith(
+      'CASE-001',
+      expect.objectContaining({ after_start_date: '2026-09-01', after_service_days: 26, preview_fingerprint: 'c'.repeat(64) }),
+      '',
+      expect.stringMatching(/^historical-terms-repair-case-bootstrap-repair-/),
+    );
     expect(intakeMocks.applyTerms.mock.calls[0][3]).toMatch(/^historical-terms-repair-case-bootstrap-repair-/);
-    expect(await within(repair).findByRole('button', { name: '預覽帳務與排班資料' })).toBeInTheDocument();
+    expect(await within(repair).findByRole('button', { name: '建立帳務與排班資料' })).toBeEnabled();
+    expect(repair).toHaveTextContent('約定服務資料已補齊');
+    expect(bootstrapMocks.apply).not.toHaveBeenCalled();
   });
 
   it('asks for service days instead of sending an invalid bootstrap preview', async () => {

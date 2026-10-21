@@ -51,6 +51,20 @@ class StaffAvailabilityQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class StaffAvailabilityRecordsQuery:
+    staff_id: int
+    after_id: int = 0
+    limit: int = 100
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.staff_id, "staff availability query staff id")
+        if type(self.after_id) is not int or self.after_id < 0:
+            raise ValueError("staff availability cursor must be nonnegative")
+        if type(self.limit) is not int or not 1 <= self.limit <= 200:
+            raise ValueError("staff availability page limit must be between 1 and 200")
+
+
+@dataclass(frozen=True, slots=True)
 class StaffAvailabilityPreviewRequest:
     intent: StaffAvailabilityIntent
 
@@ -83,6 +97,8 @@ class StoredStaffAvailabilityReceipt:
 
 class StaffAvailabilityRepository(Protocol):
     def list_blocks(self, query: StaffAvailabilityQuery) -> tuple[StaffUnavailabilityBlock, ...]: ...
+
+    def list_records(self, query: StaffAvailabilityRecordsQuery) -> tuple[StaffUnavailabilityBlock, ...]: ...
 
     def load_facts(
         self,
@@ -154,6 +170,9 @@ class StaffAvailabilityWorkflow:
 
     def query(self, request: StaffAvailabilityQuery) -> tuple[StaffUnavailabilityBlock, ...]:
         return self._repository.list_blocks(request)
+
+    def query_records(self, request: StaffAvailabilityRecordsQuery) -> tuple[StaffUnavailabilityBlock, ...]:
+        return self._repository.list_records(request)
 
     def preview(self, request: StaffAvailabilityPreviewRequest) -> StaffAvailabilityPreview:
         facts = self._repository.load_facts(request.intent, for_update=False)

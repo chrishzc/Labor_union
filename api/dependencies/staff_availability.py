@@ -14,6 +14,7 @@ from subsystems.scheduling.staff_availability_workflow import (
     StaffAvailabilityApplyRequest,
     StaffAvailabilityPreviewRequest,
     StaffAvailabilityQuery,
+    StaffAvailabilityRecordsQuery,
     StaffAvailabilityWorkflow,
 )
 
@@ -24,6 +25,9 @@ class StaffAvailabilityApplication:
 
     def query(self, request: StaffAvailabilityQuery):
         return self.workflow.query(request)
+
+    def query_records(self, request: StaffAvailabilityRecordsQuery):
+        return self.workflow.query_records(request)
 
     def preview(self, request: StaffAvailabilityPreviewRequest):
         return self.workflow.preview(request)

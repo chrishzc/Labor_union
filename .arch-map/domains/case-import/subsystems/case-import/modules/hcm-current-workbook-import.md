@@ -54,6 +54,7 @@
 - layout_basis: Backend tests protect the workbook owner contract; the mirrored React root follows the existing project frontend test layout and verifies the HCM Preview/Apply UI and typed result adapters.
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
 - test_root: `ui_react/src/tests/domains/case-import/subsystems/case-import/modules/hcm-current-workbook-import/`
+- test_root: `tests/fixtures/case_import/hcm_ui_demo_20261020.xlsx` — 人工 UI 匯入驗收的合成 workbook，涵蓋正常、缺漏與格式錯誤列；沿用現有 fixture 路徑。
 
 ## Provenance
 - HCM Current workbook 與 Case Import ownership — `architecture_declared` — `17_External_Integration_LINE_Access正式規格.md`。

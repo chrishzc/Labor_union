@@ -47,6 +47,7 @@ from subsystems.payroll.terms_impact import (
     CasePayrollPolicyTerms,
     ExistingStaffObligationTermsFact,
     PayrollTermsSourceFacts,
+    PayrollRecoveryBalance,
     SourceAssignmentPayrollTerms,
     StaffObligationDirection,
     StaffObligationKind,
@@ -715,12 +716,16 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         required=not assignment_rows,
     )
     assignment_ids = tuple(int(row["id"]) for row in assignment_rows)
+    ancestry = _select_payroll_assignment_ancestry(cursor, case_no, assignment_rows, lock)
     rate_rows = _select_assignment_rates(cursor, assignment_ids, lock)
     special_dates = _select_special_pay_dates(cursor, assignment_ids, lock)
-    adjustments = _select_payroll_adjustments(cursor, assignment_ids, lock)
+    adjustment_ids = tuple(sorted(set(assignment_ids) | {
+        ancestor for same_staff in ancestry.values() for ancestor in same_staff
+    }))
+    adjustments = _select_payroll_adjustments(cursor, adjustment_ids, lock)
     obligations = _select_staff_obligations(cursor, case_no, lock)
     rate_override = load_explicit_case_service_rate(cursor, case_no, lock=lock)
-    return _payroll_source(
+    source = _payroll_source(
         order_row,
         account_row,
         assignment_rows,
@@ -730,7 +735,65 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         obligations,
         case_policy,
         rate_override,
+        ancestry,
     )
+    cursor.execute(
+        "SELECT recovery.staff_id,SUM(recovery.remaining_amount_ntd) AS remaining_ntd "
+        "FROM staff_overpayment_recoveries recovery "
+        "WHERE recovery.status IN ('open','partially_recovered') "
+        "AND EXISTS ("
+        "  SELECT 1 FROM staff_obligations o "
+        "  WHERE o.case_no=%s "
+        "  AND JSON_CONTAINS(recovery.source_obligation_identities, JSON_QUOTE(o.obligation_identity))"
+        ") "
+
+        "GROUP BY recovery.staff_id" + _lock_clause(lock), (case_no,),
+    )
+    return replace(source, recovery_balances=tuple(
+        PayrollRecoveryBalance(int(row["staff_id"]), MoneyNTD(_integer_ntd(row["remaining_ntd"])))
+        for row in cursor.fetchall()
+    ))
+
+
+def _select_payroll_assignment_ancestry(cursor, case_no, assignments, lock):
+    cursor.execute(
+        "SELECT lineage.new_assignment_id,lineage.old_assignment_identity,"
+        "old.staff_id AS old_staff_id FROM scheduling_rebuild_lineage lineage "
+        "JOIN case_staff_assignments current_assignment ON current_assignment.id=lineage.new_assignment_id "
+        "JOIN case_staff_assignments old ON lineage.old_assignment_identity=CONCAT('assignment:',old.id) "
+        "WHERE current_assignment.case_no=%s AND old.case_no=current_assignment.case_no "
+        "ORDER BY lineage.new_assignment_id,lineage.lineage_ordinal" + _lock_clause(lock),
+        (case_no,),
+    )
+    parents = {}
+    for row in cursor.fetchall():
+        parents.setdefault(int(row["new_assignment_id"]), []).append((
+            int(str(row["old_assignment_identity"]).removeprefix("assignment:")), int(row["old_staff_id"]),
+        ))
+    result = {}
+    for assignment in assignments:
+        visited, colors = set(), {}
+        pending = [(int(assignment["id"]), False)]
+        while pending:
+            current, completed = pending.pop()
+            if completed:
+                colors[current] = "complete"
+                continue
+            if colors.get(current) == "visiting":
+                raise ValueError("payroll_assignment_lineage_invalid")
+            if colors.get(current) == "complete":
+                continue
+            colors[current] = "visiting"
+            pending.append((current, True))
+            for ancestor, staff_id in parents.get(current, ()):
+                # A new caregiver starts a new payment family, even when that
+                # person served this case before an intervening replacement.
+                if staff_id != int(assignment["staff_id"]):
+                    continue
+                visited.add(ancestor)
+                pending.append((ancestor, False))
+        result[int(assignment["id"])] = tuple(sorted(visited))
+    return result
 
 
 def _select_payroll_account(cursor, case_no, lock):
@@ -747,7 +810,7 @@ def _select_payroll_account(cursor, case_no, lock):
 
 def _select_case_payroll_policy(cursor, case_no, lock, *, required):
     cursor.execute(
-        "SELECT policy_version,policy_kind "
+        "SELECT policy_version,policy_kind,hourly_rate_ntd "
         "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s"
         + _lock_clause(lock),
         (case_no,),
@@ -760,6 +823,7 @@ def _select_case_payroll_policy(cursor, case_no, lock, *, required):
     return CasePayrollPolicyTerms(
         str(row["policy_version"]),
         PayrollPolicyKind(str(row["policy_kind"])),
+        MoneyNTD(_integer_ntd(row["hourly_rate_ntd"])) if row.get("hourly_rate_ntd") is not None else None,
     )
 
 
@@ -831,11 +895,13 @@ def _payroll_source(
     obligations,
     case_policy,
     rate_override=None,
+    ancestry=None,
 ):
     effective_case_policy = (
         CasePayrollPolicyTerms(
             rate_override.policy_version,
             PayrollPolicyKind(rate_override.policy_kind),
+            MoneyNTD(rate_override.hourly_rate_ntd),
         )
         if rate_override is not None
         else case_policy
@@ -846,7 +912,7 @@ def _payroll_source(
         payroll_version=int(account_row["aggregate_version"]),
         source_terms=tuple(
             _source_assignment_terms(
-                row, rates, special_dates, adjustments, effective_case_policy
+                row, rates, special_dates, adjustments, effective_case_policy, ancestry
             )
             for row in assignment_rows
         ),
@@ -859,7 +925,7 @@ def _payroll_source(
 
 
 def _source_assignment_terms(
-    row, rates, special_dates, adjustments, rate_override=None
+    row, rates, special_dates, adjustments, rate_override=None, ancestry=None
 ):
     assignment_id = int(row["id"])
     rate = rates.get(assignment_id)
@@ -879,7 +945,12 @@ def _source_assignment_terms(
             else PayrollPolicyKind(str(rate["policy_kind"]))
         ),
         special_dates.get(assignment_id, ()),
-        adjustments.get(assignment_id, MoneyNTD(0)),
+        MoneyNTD(sum(adjustments.get(identity, MoneyNTD(0)).amount
+                     for identity in (assignment_id,) + (ancestry or {}).get(assignment_id, ()))),
+        (ancestry or {}).get(assignment_id, ()),
+        rate_override.hourly_rate if rate_override else (
+            MoneyNTD(_integer_ntd(rate["hourly_rate_ntd"])) if rate.get("hourly_rate_ntd") is not None else None
+        ),
     )
 
 
@@ -895,6 +966,8 @@ def _staff_obligation(row):
         paid_net_amount=MoneyNTD(_integer_ntd(row["paid_net_amount_ntd"])),
         payout_history_exists=bool(row["payout_history_exists"]),
         due_date=row["due_date"],
+        source_obligation_identity=row.get("source_obligation_identity"),
+        historically_settled=bool(row.get("historically_settled", False)),
     )
 
 
@@ -1136,15 +1209,21 @@ _CLIENT_OBLIGATIONS_SQL = (
 
 _STAFF_OBLIGATIONS_SQL = (
     "SELECT o.obligation_identity,o.assignment_id,o.staff_id,"
-    "o.obligation_kind,o.direction,o.amount_due_ntd,o.due_date,"
-    "o.payout_history_exists,e.after_amount_ntd AS contracted_amount_ntd,"
+    "o.obligation_kind,o.direction,o.amount_due_ntd,o.due_date,o.source_obligation_identity,"
+    "(o.payout_history_exists OR EXISTS(SELECT 1 FROM staff_payout_obligation_links history "
+    "WHERE history.obligation_identity=o.obligation_identity)) AS payout_history_exists,"
+    "e.after_amount_ntd AS contracted_amount_ntd,"
     "COALESCE((SELECT SUM(CASE p.event_type WHEN 'payout' "
     "THEN l.allocated_amount_ntd WHEN 'return' THEN -l.allocated_amount_ntd "
     "WHEN 'reversal' THEN -l.allocated_amount_ntd END) "
     "FROM staff_payout_obligation_links l "
     "JOIN staff_payout_events p ON p.id=l.payout_event_id "
     "WHERE l.obligation_identity=o.obligation_identity),0) "
-    "AS paid_net_amount_ntd "
+    "AS paid_net_amount_ntd,"
+    "EXISTS(SELECT 1 FROM historical_staff_payout_projections historical "
+    "WHERE historical.obligation_identity=o.obligation_identity "
+    "AND historical.amount_snapshot_ntd=o.amount_due_ntd "
+    "AND historical.obligation_payroll_version=o.payroll_version) AS historically_settled "
     "FROM staff_obligations o "
     "JOIN staff_obligation_events e ON e.id=o.current_event_id "
     "WHERE o.case_no=%s AND o.status<>'cancelled' "

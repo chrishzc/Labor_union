@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
+- `payout-reconciliation` — 既有銀行出款核銷、退匯／沖正 writer 與精確義務連結；path: `modules/payout-reconciliation.md`
 - `accounts-payable-export` — 每月應付帳款唯讀快照與同位元組下載／封存；path: `modules/accounts-payable-export.md`
 - `historical-payment-settlement` — adopted pre-system historical Staff payout evidence and exact obligation settlement overlay; path: `modules/historical-payment-settlement.md`
 - `historical-payment-settlement-presentation` — owner-page exact staff/case historical payout Q/P/A and fresh readback; path: `modules/historical-payment-settlement-presentation.md`

@@ -23,6 +23,9 @@ def persist_payroll_terms_impact(cursor, command) -> None:
         _persist_projection(cursor, command, action, event_id)
     _advance_payroll_version(cursor, command)
     _append_outbox(cursor, command)
+    if command.candidate.frozen_settlements:
+        from infrastructure.mysql.staff_payable_payroll_correction import persist_staff_payable_payroll_corrections
+        persist_staff_payable_payroll_corrections(cursor.connection, command)
 
 
 def persist_scheduling_assignment_rate_snapshots(cursor, scheduling_command, result) -> None:
@@ -423,11 +426,10 @@ def _resolved_assignment_id(command, candidate_key):
 
 
 def _source_assignment_id(command, candidate_key):
-    return next(
-        action.source_assignment_id
-        for action in command.candidate.actions
-        if action.candidate_assignment_key == candidate_key
-    )
+    sources = dict(command.candidate.rate_source_assignments)
+    if candidate_key not in sources:
+        raise ValueError("payroll_rate_snapshot_lineage_missing")
+    return sources[candidate_key]
 
 
 def _rate_source_identity(command, rate):

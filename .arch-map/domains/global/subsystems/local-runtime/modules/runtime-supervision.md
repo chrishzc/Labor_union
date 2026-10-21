@@ -34,6 +34,8 @@
 - NAS build context：`scripts/package_nas_preview.py --secure` 沿用秘密過濾與真實 previous React artifact，不上傳映像；`deployment/nas/compose.tunnel.yaml` 只連 public LINE origin，`cloudflared.example.yaml` 拒絕私人路徑；`deployment/nas/README.md` 記錄配置與部署驗收順序。
 
 ## Contracts
+- NAS Cloudflare 雙入口：`scripts/nas_appliance.py:_trusted_proxies` 保留 DSM gateway／loopback，只加明確 literal connector IP；`deployment/nas/compose.yaml` 使用 remote-managed token-file 與兩個專用 internal origin 網路。`scripts/package_nas_preview.py --operations-validation` 在必要本機驗證通過後產生無秘密的整合 ZIP、完整 Tunnel 啟用版 Compose 與唯讀 runtime 程式；原 .env 不讀不改，不建置映像。`deployment/nas/CLOUDFLARE.md`／`DSM-SETUP.md` 承接 Access whole-host、指定信箱、原網站 MFA、LINE 簽章／本人授權及實際上線驗收。`test_nas_cloudflare_tunnel.py`／`test_nas_tunnel_docker.py` 位於本 Module root；實際 Cloudflare token／Access 寄信不由本機模擬冒充通過。
+
 - NAS 線上 SQL 備份：`deployment/nas/backup-database.sh` 與 `deployment/nas/SQL-BACKUPS.md`，DSM 每日 03:00、獨立管理者備份資料夾、永久保存。僅匯出所屬非空 InnoDB 資料庫的一致性快照與 stored programs，不停止服務、不改 Compose／.env、不包含業務檔案／金鑰／MySQL 系統帳號。`test_nas_sql_backup.py` 位於下列 Module test root，驗證 host 失敗隔離及 opt-in MySQL 併發寫入／獨立還原。
 
 - session key 不寫入 `.env`、不輸出，且不透過 command argument 傳遞。

@@ -553,6 +553,7 @@
 }
 
 .gantt-matrix-frame {
+  --gantt-staff-width: 260px;
   border: 1.5px solid #e7d5cf;
   border-radius: 16px;
   background: #ffffff;
@@ -582,7 +583,7 @@
 }
 
 .gantt-matrix-table {
-  min-width: 1200px;
+  min-width: max(1200px, calc(var(--gantt-staff-width) + var(--gantt-day-count) * 34px));
   display: flex;
   flex-direction: column;
 }
@@ -590,7 +591,7 @@
 /* Header Row: Days 1 ~ 31 */
 .gantt-matrix-header-row {
   display: flex;
-  min-width: 1200px;
+  min-width: max(1200px, calc(var(--gantt-staff-width) + var(--gantt-day-count) * 34px));
   background: #fff8f6;
   border-bottom: 2px solid #fed9b8;
 }
@@ -645,12 +646,30 @@
   color: #ef4444;
 }
 
+.gantt-day-header-col.holiday {
+  background: #fff1e6;
+}
+
+.gantt-holiday-name {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #9a3412;
+}
+
 .gantt-day-header-col.today {
   background: #ea580c;
 }
 
 .gantt-day-header-col.today .day-number,
 .gantt-day-header-col.today .weekday-text {
+  color: #ffffff;
+}
+
+.gantt-day-header-col.today .gantt-holiday-name {
   color: #ffffff;
 }
 
@@ -780,6 +799,10 @@
 
 .gantt-grid-col.weekend-col {
   background: rgba(254, 242, 242, 0.4);
+}
+
+.gantt-grid-col.holiday-col {
+  background: rgba(255, 237, 213, 0.45);
 }
 
 .gantt-grid-col.today-col {
@@ -1406,6 +1429,7 @@
 }
 
 @media (max-width: 760px) {
+  .gantt-matrix-frame { --gantt-staff-width: 150px; }
   .leave-inbox-card { flex-direction: column; }
   .scheduling-gantt-page { min-width: 0; gap: 10px; }
   .scheduling-tab-bar { min-width: 0; max-width: 100%; gap: 6px; padding: 8px 0; margin-bottom: 0; }

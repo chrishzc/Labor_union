@@ -1,5 +1,6 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import {
   candidateContactPoolClient,
   createCandidateAddCommand,
@@ -121,6 +122,9 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   const [multiBusy, setMultiBusy] = useState(false);
   const flow = useSyncExternalStore(subscribeCandidatePoolAdd, () => orderMutationFlowStore.getCandidatePoolAdd(caseNo));
   const addInFlight = useRef(false);
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
+  const observedAvailabilityRevision = useRef(0);
+  useEffect(() => subscribeStaffAvailabilityChanges(() => setAvailabilityRevision(revision => revision + 1)), []);
 
   const queryCandidates = useCallback(() => {
     queryController.current?.abort();
@@ -149,6 +153,13 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   }, [caseNo, presentation]);
 
   useEffect(() => { queryCandidates(); }, [queryCandidates]);
+
+  useEffect(() => {
+    if (availabilityRevision === observedAvailabilityRevision.current || addInFlight.current || multiBusy
+      || (flow && ['applying', 'observing', 'outcome_unknown', 'observation_failed'].includes(flow.status))) return;
+    observedAvailabilityRevision.current = availabilityRevision;
+    queryCandidates();
+  }, [availabilityRevision, queryCandidates, multiBusy, addState.status, flow]);
 
   const candidates = queryState.status === 'ready' ? formalCandidates(queryState.data) : [];
 

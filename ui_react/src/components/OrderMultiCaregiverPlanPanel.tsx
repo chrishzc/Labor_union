@@ -1,6 +1,7 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { sessionClient } from '../api/auth/session_client';
 import { matchingCandidateWorkflowClient, type MatchingFilterPolicy, type MatchingPlanSegmentInput } from '../api/scheduling/matching_candidate_workflow_client';
@@ -64,6 +65,8 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
   ]);
   const [staffChoices, setStaffChoices] = useState<StaffChoicesState>({ status: 'idle' });
   const [choicesRetry, setChoicesRetry] = useState(0);
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
+  useEffect(() => subscribeStaffAvailabilityChanges(() => setAvailabilityRevision(revision => revision + 1)), []);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [attempted, setAttempted] = useState(false);
@@ -82,10 +85,10 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
     || formalPlanCreation?.status === 'observing';
 
   useEffect(() => {
+    if (saving || creationProtected) return;
     const controller = new AbortController();
     choicesController.current = controller;
     setStaffChoices({ status: 'loading' });
-    setSelectedStaffIds((current) => current.map(() => 0));
     void matchingCandidateWorkflowClient.searchSegmentedCaregivers(caseNo, 1, [], filters, { signal: controller.signal })
       .then((data) => {
         if (choicesController.current !== controller) return;
@@ -105,7 +108,9 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
       controller.abort();
       if (choicesController.current === controller) choicesController.current = null;
     };
-  }, [caseNo, filters, filterKey, choicesRetry]);
+  }, [caseNo, filters, filterKey, choicesRetry, availabilityRevision, saving, creationProtected]);
+
+  useEffect(() => { setSelectedStaffIds(current => current.map(() => 0)); }, [caseNo, filterKey]);
 
   useEffect(() => {
     setSegmentDates((current) => current.map(() => ({ start_date: '', end_date: '' })));

@@ -5,6 +5,7 @@ import { ApiHttpError, ApiNetworkError } from '../../../../../../../api/shared/t
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import type { MatchingAvailability, MatchingPlanSegmentInput } from '../../../../../../../api/scheduling/matching_candidate_workflow_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
+import { publishStaffAvailabilityChange } from '../../../../../../../api/staff_availability/staff_availability_changes';
 
 const mocks = vi.hoisted(() => ({ search: vi.fn(), create: vi.fn(), queryReceipt: vi.fn(), queryPlan: vi.fn(), detail: vi.fn() }));
 vi.mock('../../../../../../../api/scheduling/matching_candidate_workflow_client', () => ({ matchingCandidateWorkflowClient: {
@@ -15,6 +16,18 @@ vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQue
 const CASE = 'CASE-MULTI-BETA';
 const filters = { region: true, cooking: false, preferred_service_days: true, daily_service_hours: true };
 let created: MatchingPlanSegmentInput[] | null;
+
+it('refreshes choices after availability changes without discarding segment drafts', async () => {
+  mocks.search.mockResolvedValue(availability());
+  render(<OrderMultiCaregiverPlanPanel caseNo={CASE} filters={filters} />);
+  await selectStaff();
+  fillDates();
+  const before = mocks.search.mock.calls.length;
+  act(() => publishStaffAvailabilityChange(100));
+  await waitFor(() => expect(mocks.search).toHaveBeenCalledTimes(before + 1));
+  await waitFor(() => expect(screen.getByLabelText('第 1 段月嫂')).toHaveValue('100'));
+  expect(screen.getByLabelText('第 1 段服務開始日')).toHaveValue(segments()[0].start_date);
+});
 function availability(): MatchingAvailability {
   return { case_no: CASE, planned_start_date: '2026-09-01', planned_end_date: '2026-09-20', feasibility: 'partial',
     complete_combinations: [], segment_candidates: [], candidate_options: [100, 101, 102, 103].map((staffId) => ({

@@ -388,6 +388,7 @@ def _existing_obligations(rows):
             MoneyNTD(_integer_ntd(row["effective_contractual_amount_ntd"])),
             bool(row["payout_history_exists"]),
             row["due_date"],
+            bool(row.get("handover_corrections_exist", False)),
         )
         for row in rows
     )
@@ -880,7 +881,12 @@ _ADJUSTMENT_SELECT_SQL = (
 )
 _EXISTING_OBLIGATION_SELECT_SQL = (
     "SELECT base.assignment_id,base.obligation_identity,base.due_date,"
-    "base.payout_history_exists,"
+    "(base.payout_history_exists OR EXISTS(SELECT 1 FROM staff_payout_obligation_links history "
+    "WHERE history.obligation_identity=base.obligation_identity)) AS payout_history_exists,"
+    "EXISTS(SELECT 1 FROM staff_obligations handover_delta "
+    "WHERE handover_delta.source_obligation_identity=base.obligation_identity "
+    "AND handover_delta.obligation_identity LIKE 'staff-handover:%%' "
+    "AND handover_delta.status<>'cancelled') AS handover_corrections_exist,"
     "base_event.after_amount_ntd + COALESCE(("
     "SELECT SUM(CASE WHEN child.direction='payable_to_staff' "
     "THEN child_event.after_amount_ntd ELSE -child_event.after_amount_ntd END) "

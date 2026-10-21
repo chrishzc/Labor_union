@@ -34,13 +34,11 @@ describe('SchedulingPage holiday policy flow', () => {
     vi.spyOn(holidayClient, 'apply').mockResolvedValue(HOLIDAY_RECEIPT);
   });
 
-  it('查詢政策區間而不暴露來源識別或雜湊版本', async () => {
+  it('開啟國定假日頁自動查詢，並顯示政策區間而不暴露來源識別或雜湊版本', async () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
     expect(screen.getByText(/區間：/)).toHaveTextContent('2026-01-01 ～ 2026-12-31');
     expect(screen.queryByText(HOLIDAY_CALENDAR.source_identity)).not.toBeInTheDocument();
@@ -52,8 +50,6 @@ describe('SchedulingPage holiday policy flow', () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
 
     fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
@@ -86,8 +82,6 @@ describe('SchedulingPage holiday policy flow', () => {
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
     expect(screen.getByRole('button', { name: '儲存國定假日變更' })).toBeDisabled();
     expect(screen.queryByText(/雙倍薪金額|coverage|eligibility|結束日/)).not.toBeInTheDocument();
@@ -99,8 +93,6 @@ describe('SchedulingPage holiday policy flow', () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
     fireEvent.change(screen.getByLabelText('國定假日日期'), { target: { value: HOLIDAY_APPLY_REQUEST.holiday_date } });

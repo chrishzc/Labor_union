@@ -16,7 +16,7 @@ from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from domains.orders.lifecycle import build_terms_lifecycle_impact
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from subsystems.payroll.terms_impact import build_payroll_cancellation_impact
+from subsystems.payroll.terms_impact import build_payroll_cancellation_impact, build_payroll_handover_impact
 from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanWorkflowFacts,
     VersionedImpactCandidate,
@@ -62,8 +62,9 @@ def build_payroll_assignment_impact(
     facts: AssignmentPlanWorkflowFacts,
     scheduling: SchedulingGenerationCandidate,
     client_finance: VersionedImpactCandidate,
+    *, handover: bool = False,
 ) -> AssignmentPlanDomainImpact:
-    candidate = build_payroll_cancellation_impact(
+    candidate = (build_payroll_handover_impact if handover else build_payroll_cancellation_impact)(
         replace(facts.payroll, staff_payment_due_date=_staff_payment_due_date(
             facts, scheduling, client_finance,
         )),

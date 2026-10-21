@@ -135,7 +135,8 @@ def test_compose_separates_database_credentials_and_machine_tokens():
     assert services["line-worker"]["command"][-1] == "--check"
     assert services["line-worker"]["restart"] == "no"
     assert services['line-worker']['profiles'] == ['line-check']
-    assert services['cloudflared']['networks'] == ['line-control', 'tunnel-egress']
+    assert set(services['cloudflared']['networks']) == {'management-tunnel', 'line-tunnel', 'tunnel-egress'}
+    assert 'data' not in services['cloudflared']['networks']
     assert not services['cloudflared']['volumes'][-1].startswith('settings:')
 
 

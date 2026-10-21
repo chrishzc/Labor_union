@@ -200,26 +200,45 @@ describe('canonical holiday maintenance CSV', () => {
     expect(result.replayed).toBe(0);
   });
 
-  it('React UI 使用實際 parser，預覽顯示零寫入，Apply 後回讀失敗可觀察', async () => {
+  it('React UI 使用實際 parser，選檔零寫入，Apply 後回讀失敗不宣告匯入完成', async () => {
     let readbackFailure = false;
     const query = vi.spyOn(holidayClient, 'query').mockImplementation(async () => {
       if (readbackFailure) throw new Error('CSV readback unavailable');
       return HOLIDAY_CALENDAR;
     });
     const preview = vi.mocked(holidayFlow.previewHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_PREVIEW);
-    const apply = vi.mocked(holidayFlow.applyHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_RECEIPT);
-    render(<OfficialHolidayCsvImport />);
+    const apply = vi.mocked(holidayFlow.applyHolidayFlow).mockReset().mockImplementation(async () => {
+      readbackFailure = true;
+      return HOLIDAY_RECEIPT;
+    });
+    const imported = vi.fn();
+    render(<OfficialHolidayCsvImport onImported={imported} />);
     const file = new File([[CSV_HEADER, '2026-01-01,四,2,元旦'].join('\n')], 'official-2026.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByLabelText('選擇政府官方國定假日 CSV'), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByText('可匯入：1')).toBeInTheDocument());
-    expect(query).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText('假日：1')).toBeInTheDocument());
+    expect(query).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
-    readbackFailure = true;
-    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
+    fireEvent.click(screen.getByRole('button', { name: '匯入國定假日' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('CSV readback unavailable'));
     expect(preview).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('匯入完成')).not.toBeInTheDocument();
+    expect(imported).not.toHaveBeenCalled();
+  });
+
+  it('完成年度匯入回讀後才通知畫面切換至匯入年度', async () => {
+    vi.spyOn(holidayClient, 'query').mockResolvedValue(HOLIDAY_CALENDAR);
+    vi.mocked(holidayFlow.previewHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_PREVIEW);
+    vi.mocked(holidayFlow.applyHolidayFlow).mockReset().mockResolvedValue(HOLIDAY_RECEIPT);
+    const imported = vi.fn();
+    render(<OfficialHolidayCsvImport onImported={imported} />);
+    const file = new File([[CSV_HEADER, '2027-01-01,五,2,元旦'].join('\n')], 'official-2027.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByLabelText('選擇政府官方國定假日 CSV'), { target: { files: [file] } });
+    await screen.findByText('假日：1');
+    expect(imported).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '匯入國定假日' }));
+    await screen.findByText('匯入完成');
+    expect(imported).toHaveBeenCalledWith(2027);
   });
 });

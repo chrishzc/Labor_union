@@ -17,7 +17,7 @@ it('preserves enrollment data, binds via enrollment endpoint and shows recovery 
  expect(screen.getByRole('img',{name:'驗證器綁定 QR Code'}).tagName.toLowerCase()).toBe('svg');
  fireEvent.click(screen.getByText('無法掃描？手動輸入設定金鑰'));
  expect(screen.getByLabelText('設定金鑰（請勿分享）')).toHaveValue('JBSWY3DPEHPK3PXP');
- for(let i=1;i<=6;i++)fireEvent.change(screen.getByLabelText(`驗證碼第 ${i} 位`),{target:{value:String(i)}});
+ fireEvent.change(screen.getByLabelText('六位數驗證碼'),{target:{value:'123456'}});
  fireEvent.click(screen.getByRole('button',{name:'確認綁定驗證器'}));
  await screen.findByRole('heading',{name:'驗證器綁定完成'});
  expect(verify).toHaveBeenCalledWith('mock-id','m'.repeat(32),'123456');

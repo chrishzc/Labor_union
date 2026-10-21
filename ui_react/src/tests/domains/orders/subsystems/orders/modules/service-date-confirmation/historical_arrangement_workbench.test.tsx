@@ -93,7 +93,7 @@ beforeEach(() => {
 
 afterEach(() => sessionClient.clearSession());
 
-it('日期保存後聚焦下一步；正式排班沿用既定月嫂，明確確認才建立並刷新指派', async () => {
+it('日期保存後接續排班；正式排班沿用既定月嫂，明確確認才建立並刷新指派', async () => {
   const observed = vi.fn();
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} onObserved={observed} />);
   fireEvent.click(await screen.findByRole('button', { name: /設定服務日期/ }));
@@ -103,7 +103,7 @@ it('日期保存後聚焦下一步；正式排班沿用既定月嫂，明確確�
   await waitFor(() => expect(saveDates).toBeEnabled());
   fireEvent.click(saveDates);
   await waitFor(() => expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent('日期確認版本#3'));
-  expect(screen.getByLabelText('服務日期確認後下一步')).toHaveFocus();
+  expect(screen.getByRole('button', { name: /確認排班/ })).toHaveAttribute('aria-current', 'step');
   expect(calls.applyArrangement).not.toHaveBeenCalled();
   expect(calls.previewArrangement).not.toHaveBeenCalled();
 
@@ -117,7 +117,6 @@ it('日期保存後聚焦下一步；正式排班沿用既定月嫂，明確確�
   expect(screen.queryByText(/請至「推薦確認」確認人選/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
   const apply = await screen.findByRole('button', { name: '建立正式安排' });
   await waitFor(() => expect(apply).toBeEnabled());
   expect(calls.applyArrangement).not.toHaveBeenCalled();
@@ -142,7 +141,6 @@ it('建立安排期間鎖定案件導覽；切回日期再返回仍保留原操�
   render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={close} />);
   fireEvent.click(await screen.findByRole('button', { name: /設定服務日期/ }));
   fireEvent.click(await screen.findByRole('button', { name: '前往排班' }));
-  fireEvent.click(screen.getByRole('button', { name: '預覽正式安排' }));
   const apply = await screen.findByRole('button', { name: '建立正式安排' });
   await waitFor(() => expect(apply).toBeEnabled());
   fireEvent.click(apply);

@@ -1,357 +1,189 @@
-/**
- * File: staff_availability_flow.test.tsx
- * Description: 驗證不可服務期間自動查詢、新增、取消與 receipt 後重新觀察流程。
- */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+/** Verify automatic full-history records and on-demand pause commands. */
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffAvailabilityClient } from '../../../../../../../api/staff_availability/staff_availability_client';
 import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
 import { staffQualificationMasterClient } from '../../../../../../../api/staff/qualification_master_client';
 import { staffLifecycleClient } from '../../../../../../../api/staff_lifecycle/staff_lifecycle_client';
-import {
-  StaffAvailabilityConflictError,
-  StaffAvailabilityUnavailableError,
-} from '../../../../../../../api/staff_availability/staff_availability_errors';
+import { StaffAvailabilityConflictError, StaffAvailabilityUnavailableError } from '../../../../../../../api/staff_availability/staff_availability_errors';
+import type { StaffAvailabilityPreview, StaffUnavailabilityBlock } from '../../../../../../../api/staff_availability/staff_availability_schemas';
 import { StaffPage } from '../../../../../../../pages/StaffPage';
-import {
-  STAFF_AVAILABILITY_APPLY_PAYLOAD,
-  STAFF_AVAILABILITY_BLOCK,
-  STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK,
-  STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE,
-  STAFF_AVAILABILITY_END_PAUSE_RECEIPT_RESPONSE,
-  STAFF_AVAILABILITY_PREVIEW_RESPONSE,
-  STAFF_AVAILABILITY_RECEIPT_RESPONSE,
-  STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
-} from '../../../../../../fixtures/staff/staff_availability_contract_fixtures';
+import { STAFF_AVAILABILITY_BLOCK, STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK, STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK, STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE, STAFF_AVAILABILITY_END_PAUSE_RECEIPT_RESPONSE, STAFF_AVAILABILITY_PREVIEW_RESPONSE, STAFF_AVAILABILITY_RECEIPT_RESPONSE } from '../../../../../../fixtures/staff/staff_availability_contract_fixtures';
 import { STAFF_PAGE_ONE } from '../../../../../../fixtures/staff/staff_directory_contract_fixtures';
 import { STAFF_LIFECYCLE_VIEW } from '../../../../../../fixtures/staff/staff_lifecycle_contract_fixtures';
 import { STAFF_QUALIFICATION_MASTER } from '../../../../../../fixtures/staff/staff_qualification_contract_fixtures';
+import { staffQualificationEditingClient } from '../../../../../../../api/staff/qualification_editing_client';
+
+const finite: StaffUnavailabilityBlock = { ...STAFF_AVAILABILITY_BLOCK, staff_id: 11, start_date: '2026-10-01', end_date: '2026-10-31' };
+const pause = STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK;
+const area = () => within(screen.getByRole('region', { name: '接案狀態管理' }));
+async function open() {
+  render(<StaffPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看 去敏人員甲 的詳情' }));
+  await waitFor(() => expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalled());
+}
+async function add(unlimited = false) {
+  fireEvent.click(area().getByRole('button', { name: '新增' }));
+  if (unlimited) fireEvent.change(area().getByLabelText('新增類型'), { target: { value: 'create_pause' } });
+  fireEvent.change(area().getByLabelText('開始日期'), { target: { value: '2026-10-01' } });
+  if (!unlimited) fireEvent.change(area().getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
+}
+function mutation(action: StaffAvailabilityPreview['action'], result: StaffUnavailabilityBlock, target: StaffUnavailabilityBlock | null = null) {
+  vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue({ ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!, staff_id: 11, action, target_block: target });
+  vi.mocked(staffAvailabilityClient.applyChange).mockResolvedValue({ ...STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!, staff_id: 11, action, block: result });
+  vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([result]);
+}
 
 describe('Staff availability flow', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T04:00:00Z'));
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ ...STAFF_PAGE_ONE, next_cursor: null });
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
     vi.spyOn(staffQualificationMasterClient, 'query').mockResolvedValue(STAFF_QUALIFICATION_MASTER);
-    vi.spyOn(staffAvailabilityClient, 'getBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
-    vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
-    vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue(STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!);
+    const facts = { special_skills: [], certifications: [], transportation: [], has_massage_cert: null, care_babies: 1 };
+    vi.spyOn(staffQualificationEditingClient, 'query').mockResolvedValue({ staff_id: 11, before: facts, after: facts, snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null });
+    vi.spyOn(staffAvailabilityClient, 'getAllBlocks').mockResolvedValue([finite]);
+    vi.spyOn(staffAvailabilityClient, 'previewChange').mockResolvedValue({ ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!, staff_id: 11 });
+    vi.spyOn(staffAvailabilityClient, 'applyChange').mockResolvedValue({ ...STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!, staff_id: 11 });
   });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-  afterEach(() => vi.restoreAllMocks());
-
-  async function openAvailability(expectedRow = '2026-09-01 ～ 2026-09-30'): Promise<void> {
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-09-01' } });
-    fireEvent.change(screen.getByLabelText('結束日期'), { target: { value: '2026-10-31' } });
-    await waitFor(() => expect(screen.getByText(expectedRow)).toBeInTheDocument());
-  }
-
-  it('空的不可服務清單不推論為全時段可派工', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([]);
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-
-    expect(await screen.findByText(/是否可派工仍需依案件日期、既有排班與資格條件查詢/)).toBeInTheDocument();
-    expect(screen.queryByText(/全時段可供派工排班/)).not.toBeInTheDocument();
+  it('auto-loads records, shows 無 for empty data and hides settings until 新增', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([]);
+    await open();
+    expect(await area().findByText('無')).toBeVisible();
+    expect(area().queryByLabelText('開始日期')).not.toBeInTheDocument();
+    expect(area().queryByRole('button', { name: '查詢不可服務期間' })).not.toBeInTheDocument();
+    expect(area().queryByText(/可供派工|可接案/)).not.toBeInTheDocument();
+    fireEvent.click(area().getByRole('button', { name: '新增' }));
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    expect(area().getByLabelText('開始日期')).toHaveValue(today);
+    expect(area().getByLabelText('新增類型')).toHaveDisplayValue('暫停接案');
+    expect(area().getByLabelText('結束日期')).toBeVisible();
+    expect(area().queryByRole('option', { name: '無指定日期' })).not.toBeInTheDocument();
+    fireEvent.click(area().getByRole('button', { name: '取消新增' }));
+    expect(area().queryByLabelText('開始日期')).not.toBeInTheDocument();
   });
-
-  it('Drawer 開啟時自動查詢，日期刷新中的 GET 不會阻斷 Preview POST', async () => {
-    let resolveDateRefresh: ((blocks: typeof STAFF_AVAILABILITY_BLOCK[]) => void) | undefined;
-    vi.mocked(staffAvailabilityClient.applyChange).mockResolvedValueOnce({
-      ...STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!,
-      staff_id: 11,
-      block: {
-        ...STAFF_AVAILABILITY_BLOCK,
-        block_id: 93,
-        staff_id: 11,
-        kind: 'paused_service',
-        start_date: '2026-10-01',
-        end_date: null,
-        reason: '去敏日期刷新驗收',
-      },
-      idempotency_key: 'availability-drawer-11-01',
-    });
-    vi.mocked(staffAvailabilityClient.getBlocks)
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK])
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveDateRefresh = resolve;
-      }));
-
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '預覽新增' })).toBeVisible();
-    fireEvent.change(screen.getByLabelText('開始日期'), { target: { value: '2026-10-01' } });
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2));
-    const refreshSignal = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls[1][3]?.signal;
-
-    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏日期刷新驗收' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    const previewSignal = vi.mocked(staffAvailabilityClient.previewChange).mock.calls[0][2]?.signal;
-    expect(previewSignal).not.toBe(refreshSignal);
-    expect(refreshSignal?.aborted).toBe(false);
-    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(
-      11,
-      {
-        action: 'create_pause',
-        reason: '去敏日期刷新驗收',
-        start_date: '2026-10-01',
-      },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-
-    await act(async () => {
-      resolveDateRefresh?.([STAFF_AVAILABILITY_BLOCK]);
-    });
-    const applyButton = screen.getByRole('button', { name: '套用新增' });
-    expect(applyButton).not.toBeDisabled();
-    fireEvent.click(applyButton);
-
-    const receipt = await screen.findByRole('status', { name: '不可服務期間變更結果' });
-    expect(receipt).toHaveTextContent('2026-10-01');
-    expect(receipt).not.toHaveTextContent('Idempotency');
+  it('shows selected staff separately and includes both historical and future records', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([{ ...finite, start_date: '2020-01-01', end_date: '2020-01-31' }, { ...finite, block_id: 100, start_date: '2030-01-01', end_date: '2030-01-31' }]);
+    await open();
+    fireEvent.click(await area().findByText('歷史與已取消紀錄（1）'));
+    expect(area().getByText('2020-01-01 ～ 2020-01-31')).toBeVisible();
+    expect(area().getByText('2030-01-01 ～ 2030-01-31')).toBeVisible();
+    expect(area().getByText('A001 去敏人員甲')).toBeVisible();
+    expect(area().queryByRole('columnheader', { name: '月嫂姓名' })).not.toBeInTheDocument();
   });
-
-  it('Drawer 對已取消紀錄顯示不可再次取消的業務原因', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValueOnce([{
-      ...STAFF_AVAILABILITY_BLOCK,
-      staff_id: 11,
-      status: 'cancelled',
-    }]);
-
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-
-    const cancelButton = await screen.findByRole('button', { name: '預覽取消' });
-    expect(cancelButton).toBeDisabled();
-    expect(screen.getByText('此紀錄已取消，不可再次取消。')).toBeVisible();
+  it.each([false, true])('saves finite/unlimited pause (%s) once, then reloads records and hides the form', async unlimited => {
+    await open();
+    await add(unlimited);
+    const action = unlimited ? 'create_pause' : 'create_long_leave';
+    const result = unlimited ? pause : { ...finite, start_date: '2026-10-01', end_date: '2026-10-31' };
+    mutation(action, result);
+    fireEvent.change(area().getByLabelText('新增暫停備註（選填）'), { target: { value: '測試暫停' } });
+    expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(1);
+    if (unlimited) expect(area().queryByLabelText('結束日期')).not.toBeInTheDocument();
+    fireEvent.click(area().getByRole('button', { name: '儲存新增' }));
+    await area().findByRole('status', { name: '不可服務期間變更結果' });
+    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(11, { action, start_date: '2026-10-01', reason: '測試暫停', ...(unlimited ? {} : { end_date: '2026-10-31' }) }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(staffAvailabilityClient.applyChange).toHaveBeenCalledOnce();
+    expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(area().queryByLabelText('開始日期')).not.toBeInTheDocument());
   });
-
-  it('shows one error state with a direct retry instead of the idle placeholder', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks)
-      .mockRejectedValueOnce(new Error('不可服務期間暫時失敗'))
-      .mockResolvedValueOnce([STAFF_AVAILABILITY_BLOCK]);
-    render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '查看 去敏人員甲 的詳情' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '重試不可服務期間' })).toBeInTheDocument());
-    expect(screen.queryByText('請先設定日期範圍並查詢。')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '重試不可服務期間' }));
-    await waitFor(() => expect(screen.getByText('2026-09-01 ～ 2026-09-30')).toBeInTheDocument());
-    expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(2);
+  it('shows cancelled history without actions or a false paused summary', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([{ ...pause, status: 'cancelled' }]);
+    await open();
+    expect(await area().findByRole('status', { name: '目前暫停接案狀態' })).toHaveTextContent('目前：未暫停接案');
+    const history = area().getByText('歷史與已取消紀錄（1）').closest('details')!;
+    expect(history).not.toHaveAttribute('open');
+    fireEvent.click(area().getByText('歷史與已取消紀錄（1）'));
+    expect(area().getByText('已取消，不影響接案')).toBeVisible();
+    expect(area().queryByRole('button', { name: '取消此期間' })).not.toBeInTheDocument();
+    expect(area().queryByRole('button', { name: '恢復接案' })).not.toBeInTheDocument();
   });
-
-  it('完成 create preview、apply、receipt 與 blocks requery，不計算本地業務值', async () => {
-    await openAvailability();
-    const queriesBeforeApply = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls.length;
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([{ ...STAFF_AVAILABILITY_BLOCK, block_id: 93 }]);
-
-    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏暫停接案' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(
-      11,
-      {
-        action: 'create_pause',
-        reason: '去敏暫停接案',
-        start_date: '2026-09-01',
-      },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    expect(screen.getAllByText(/預覽已完成|預覽已產生/).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: '套用新增' })).not.toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: '套用新增' }));
-    await waitFor(() => expect(staffAvailabilityClient.applyChange).toHaveBeenCalledTimes(1));
-    expect(staffAvailabilityClient.applyChange).toHaveBeenCalledWith(
-      11,
-      expect.objectContaining({
-        action: 'create_pause',
-        start_date: '2026-09-01',
-        reason: '去敏暫停接案',
-        expected_version: 2,
-        preview_fingerprint: STAFF_AVAILABILITY_APPLY_PAYLOAD.preview_fingerprint,
-      }),
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
-    );
-    expect(vi.mocked(staffAvailabilityClient.applyChange).mock.calls[0][1]).not.toHaveProperty('end_date');
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(queriesBeforeApply + 1));
-    expect(screen.getByText('已觀察最新不可服務期間')).toBeInTheDocument();
+  it('retries failed automatic reads without showing a false empty result', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockRejectedValueOnce(new Error('讀取暫時失敗'));
+    await open();
+    fireEvent.click(await area().findByRole('button', { name: '重試不可服務期間' }));
+    expect(await area().findByText('2026-10-01 ～ 2026-10-31')).toBeVisible();
+    expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(2);
   });
-
-  it('server Preview blocker 必須直接顯示，且不得啟用 Apply', async () => {
-    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValueOnce({
-      ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!,
-      can_apply: false,
-      blockers: ['STAFF_AVAILABILITY_INTERVAL_CONFLICT'],
-    });
-    await openAvailability();
-
-    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏衝突驗收' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-
-    await waitFor(() => expect(screen.getByText(/STAFF_AVAILABILITY_INTERVAL_CONFLICT/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '套用新增' })).toBeDisabled();
+  it('cancels the chosen record through the existing writer and observes the result', async () => {
+    await open();
+    mutation('cancel', { ...finite, status: 'cancelled' }, finite);
+    fireEvent.click(await area().findByRole('button', { name: '取消此期間' }));
+    await waitFor(() => expect(staffAvailabilityClient.applyChange).toHaveBeenCalledOnce());
+    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(11, { action: 'cancel', block_id: finite.block_id, reason: '' }, expect.anything());
+    expect(await area().findByRole('status', { name: '目前暫停接案狀態' })).toHaveTextContent('目前：未暫停接案');
+    fireEvent.click(area().getByText('歷史與已取消紀錄（1）'));
+    expect(area().getByText('已取消，不影響接案')).toBeVisible();
+  });
+  it('expands restore only for the chosen open pause and confirms the canonical closed interval', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([pause]);
+    await open();
+    expect(area().queryByLabelText('恢復接案日期')).not.toBeInTheDocument();
+    fireEvent.click(await area().findByRole('button', { name: '恢復接案' }));
+    fireEvent.change(area().getByLabelText('恢復接案日期'), { target: { value: '2026-10-15' } });
+    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue(STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE.data!);
+    vi.mocked(staffAvailabilityClient.applyChange).mockResolvedValue(STAFF_AVAILABILITY_END_PAUSE_RECEIPT_RESPONSE.data!);
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK]);
+    fireEvent.click(area().getByRole('button', { name: '儲存恢復接案' }));
+    await area().findByRole('status', { name: '不可服務期間變更結果' });
+    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(11, { action: 'end_pause', block_id: pause.block_id, resume_date: '2026-10-15', reason: '' }, expect.anything());
+    expect(await area().findByRole('status', { name: '目前暫停接案狀態' })).toHaveTextContent('目前：未暫停接案');
+    fireEvent.click(area().getByText('歷史與已取消紀錄（1）'));
+    expect(area().getByText('2026-10-01 ～ 2026-10-14')).toBeVisible();
+    await waitFor(() => expect(area().queryByLabelText('恢復接案日期')).not.toBeInTheDocument());
+  });
+  it.each([
+    ['long_leave', '2026-10-22', '2026-10-22', '暫停接案中'],
+    ['paused_service', '2026-10-22', null, '暫停接案中'],
+    ['long_leave', '2026-10-23', '2026-10-31', '未暫停接案'],
+    ['long_leave', '2026-10-01', '2026-10-21', '未暫停接案'],
+  ] as const)('classifies %s %s–%s against Taipei today', async (kind, start_date, end_date, label) => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([{ ...finite, kind, start_date, end_date }]);
+    await open();
+    expect(await area().findByRole('status', { name: '目前暫停接案狀態' })).toHaveTextContent(`目前：${label}`);
+  });
+  it('does not show a clear status while loading or when the record query fails', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockRejectedValue(new Error('讀取失敗'));
+    await open();
+    await area().findByRole('alert');
+    expect(area().queryByRole('status', { name: '目前暫停接案狀態' })).not.toBeInTheDocument();
+  });
+  it('rejects an end-pause preview for a different staff or missing target', async () => {
+    vi.mocked(staffAvailabilityClient.getAllBlocks).mockResolvedValue([pause]);
+    await open();
+    fireEvent.click(await area().findByRole('button', { name: '恢復接案' }));
+    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue({ ...STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE.data!, target_block: null });
+    fireEvent.click(area().getByRole('button', { name: '儲存恢復接案' }));
+    expect(await area().findByText('預覽結果中沒有同一筆可結束的暫停接案期間。')).toBeVisible();
     expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });
-
-  it('cancel 使用 append-only block identity，requery 失敗仍保留 receipt 觀察狀態', async () => {
-    await openAvailability();
-    fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '恢復可服務' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽取消' }));
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(
-      11,
-      expect.objectContaining({ action: 'cancel', block_id: 91, reason: '恢復可服務' }),
-      expect.anything(),
-    ));
-    expect(screen.getByRole('button', { name: '套用取消' })).not.toBeDisabled();
-
-    vi.mocked(staffAvailabilityClient.getBlocks).mockRejectedValueOnce(
-      new StaffAvailabilityUnavailableError({ code: 'STAFF_AVAILABILITY_NETWORK', message: '觀察失敗', retryable: true }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: '套用取消' }));
-    await waitFor(() => expect(screen.getByText(/變更已受理，但重新查詢失敗/)).toBeInTheDocument());
+  it('does not apply a blocked preview', async () => {
+    await open(); await add();
+    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue({ ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!, can_apply: false, blockers: ['staff_unavailability_overlap'] });
+    fireEvent.click(area().getByRole('button', { name: '儲存新增' }));
+    expect(await area().findByText(/staff_unavailability_overlap/)).toBeVisible();
+    expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });
-
-  it('stale 後必須先重新查詢，才能再次建立 preview', async () => {
-    await openAvailability();
-    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValue(STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!);
-    vi.mocked(staffAvailabilityClient.applyChange).mockRejectedValueOnce(
-      new StaffAvailabilityConflictError({
-        code: 'STAFF_AVAILABILITY_STALE',
-        message: '版本已過期，請重新查詢。',
-        retryable: false,
-      }),
-    );
-    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏重試' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: '套用新增' }));
-    await waitFor(() => expect(screen.getByText(/版本已過期/)).toBeInTheDocument());
-
-    const previewButton = screen.getByRole('button', { name: '預覽新增' });
-    expect(previewButton).toBeDisabled();
-    fireEvent.click(previewButton);
-    expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1);
-
-    const queriesBeforeRefresh = vi.mocked(staffAvailabilityClient.getBlocks).mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢不可服務期間' }));
-    await waitFor(() => expect(staffAvailabilityClient.getBlocks).toHaveBeenCalledTimes(queriesBeforeRefresh + 1));
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(2));
+  it('keeps typed stale conflicts and requires a fresh record read', async () => {
+    await open(); await add();
+    vi.mocked(staffAvailabilityClient.previewChange).mockRejectedValue(new StaffAvailabilityConflictError({ code: 'staff_availability_stale', message: '資料版本已更新' }));
+    fireEvent.click(area().getByRole('button', { name: '儲存新增' }));
+    fireEvent.click(await area().findByRole('button', { name: '重新載入紀錄' }));
+    await waitFor(() => expect(staffAvailabilityClient.getAllBlocks).toHaveBeenCalledTimes(2));
+    expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });
-
-  it('outcome_unknown 只能以相同 payload 與 idempotency key 重試', async () => {
-    await openAvailability();
-    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏暫停接案' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledTimes(1));
-    vi.mocked(staffAvailabilityClient.applyChange)
-      .mockRejectedValueOnce(new StaffAvailabilityUnavailableError({
-        code: 'STAFF_AVAILABILITY_TIMEOUT',
-        message: '請求逾時',
-        retryable: true,
-      }))
-      .mockResolvedValueOnce(STAFF_AVAILABILITY_RECEIPT_RESPONSE.data!);
-
-    fireEvent.click(screen.getByRole('button', { name: '套用新增' }));
-    await waitFor(() => expect(screen.getByText(/結果未知/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '以相同內容重試' }));
+  it('retries an uncertain Apply with the same payload and idempotency key', async () => {
+    await open(); await add();
+    mutation('create_long_leave', finite);
+    vi.mocked(staffAvailabilityClient.applyChange).mockRejectedValueOnce(new StaffAvailabilityUnavailableError({ code: 'staff_availability_unavailable', message: '結果未確認' }));
+    fireEvent.click(area().getByRole('button', { name: '儲存新增' }));
+    fireEvent.click(await area().findByRole('button', { name: '以相同內容重試' }));
     await waitFor(() => expect(staffAvailabilityClient.applyChange).toHaveBeenCalledTimes(2));
-
-    const first = vi.mocked(staffAvailabilityClient.applyChange).mock.calls[0];
-    const second = vi.mocked(staffAvailabilityClient.applyChange).mock.calls[1];
-    expect(second[1]).toEqual(first[1]);
-    expect(second[2].idempotencyKey).toBe(first[2].idempotencyKey);
-  });
-
-  it('只對所選 Staff 的 active open-ended pause 執行 end_pause，receipt 後觀察 server 封閉區間', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK]);
-    vi.mocked(staffAvailabilityClient.previewChange)
-      .mockResolvedValueOnce(STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE.data!);
-    vi.mocked(staffAvailabilityClient.applyChange)
-      .mockResolvedValueOnce(STAFF_AVAILABILITY_END_PAUSE_RECEIPT_RESPONSE.data!);
-    await openAvailability('2026-10-01 ～ —');
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK]);
-
-    fireEvent.change(screen.getByLabelText('暫停接案紀錄'), { target: { value: '92' } });
-    fireEvent.change(screen.getByLabelText('恢復接案日期'), { target: { value: '2026-10-15' } });
-    fireEvent.change(screen.getByLabelText('結束暫停原因'), { target: { value: '恢復接受媒合' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽結束暫停' }));
-
-    await waitFor(() => expect(staffAvailabilityClient.previewChange).toHaveBeenCalledWith(
-      11,
-      {
-        action: 'end_pause',
-        block_id: 92,
-        resume_date: '2026-10-15',
-        reason: '恢復接受媒合',
-      },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    ));
-    expect(screen.getByRole('button', { name: '套用結束暫停' })).not.toBeDisabled();
-
-    fireEvent.click(screen.getByRole('button', { name: '套用結束暫停' }));
-    await waitFor(() => expect(staffAvailabilityClient.applyChange).toHaveBeenCalledWith(
-      11,
-      expect.objectContaining({
-        action: 'end_pause',
-        block_id: 92,
-        resume_date: '2026-10-15',
-        expected_version: 4,
-        preview_fingerprint: 'b'.repeat(64),
-      }),
-      expect.objectContaining({ idempotencyKey: expect.any(String) }),
-    ));
-    await waitFor(() => expect(screen.getByText('已觀察 server 封閉暫停期間')).toBeInTheDocument());
-  });
-
-  it('另一 Staff、已封閉或非 paused_service block 不得啟用 end_pause Preview', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([
-      { ...STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK, staff_id: 12 },
-      { ...STAFF_AVAILABILITY_CLOSED_PAUSE_BLOCK, block_id: 93 },
-      { ...STAFF_AVAILABILITY_BLOCK, staff_id: 11 },
-    ]);
-    await openAvailability();
-
-    expect(screen.getByLabelText('暫停接案紀錄')).toBeDisabled();
-    expect(screen.getByRole('button', { name: '預覽結束暫停' })).toBeDisabled();
-    expect(screen.getByText('目前查詢範圍沒有可結束的無期限暫停紀錄。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '預覽結束暫停' })).toHaveAttribute('aria-describedby', 'staff-end-pause-blocker');
-    expect(staffAvailabilityClient.previewChange).not.toHaveBeenCalled();
-  });
-
-  it('server Preview 若未回同一 Staff 與 block，固定 fail closed 且不可 Apply', async () => {
-    vi.mocked(staffAvailabilityClient.getBlocks).mockResolvedValue([
-      STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
-    ]);
-    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValueOnce({
-      ...STAFF_AVAILABILITY_END_PAUSE_PREVIEW_RESPONSE.data!,
-      staff_id: 12,
-      target_block: {
-        ...STAFF_AVAILABILITY_SELECTED_PAUSE_BLOCK,
-        staff_id: 12,
-      },
-    });
-    await openAvailability('2026-10-01 ～ —');
-
-    fireEvent.change(screen.getByLabelText('暫停接案紀錄'), { target: { value: '92' } });
-    fireEvent.change(screen.getByLabelText('恢復接案日期'), { target: { value: '2026-10-15' } });
-    fireEvent.change(screen.getByLabelText('結束暫停原因'), { target: { value: '恢復接受媒合' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽結束暫停' }));
-
-    await waitFor(() => expect(screen.getByText(/沒有同一筆可結束/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '套用結束暫停' })).toBeDisabled();
-    expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
+    const calls = vi.mocked(staffAvailabilityClient.applyChange).mock.calls;
+    expect(calls[1]).toEqual(calls[0]);
   });
 });

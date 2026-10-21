@@ -422,7 +422,10 @@ export const StaffPage: React.FC = () => {
   const [resumeContainer, setResumeContainer] = useState<HTMLElement | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [availability, setAvailability] = useState<QueryState<StaffAvailabilityBlockViewModel[]>>({ status: 'idle' });
-  const [availabilityKind, setAvailabilityKind] = useState<'create_long_leave' | 'create_pause'>('create_pause');
+  const [availabilityKind, setAvailabilityKind] = useState<'create_long_leave' | 'create_pause'>('create_long_leave');
+  const [showAvailabilityForm, setShowAvailabilityForm] = useState(false);
+  const [availabilityStart, setAvailabilityStart] = useState(todayIsoDate);
+  const [availabilityEnd, setAvailabilityEnd] = useState(todayIsoDate);
   const [availabilityReason, setAvailabilityReason] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [endPauseBlockId, setEndPauseBlockId] = useState<number | null>(null);
@@ -439,8 +442,6 @@ export const StaffPage: React.FC = () => {
     action: null,
   });
   const [showLifecycleForm, setShowLifecycleForm] = useState(false);
-  const [rangeStart, setRangeStart] = useState('2026-01-01');
-  const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
   const mountedRef = useRef(false);
   const requestGenerationRef = useRef(0);
@@ -639,12 +640,10 @@ export const StaffPage: React.FC = () => {
 
   useEffect(() => {
     if (selectedStaffId !== null && drawerStaffId === selectedStaffId) {
-      const from = rangeStart || '2026-01-01';
-      const to = rangeEnd || '2026-12-31';
       const { generation, controller } = beginAvailabilityQuery();
       setAvailability({ status: 'loading' });
       staffAvailabilityClient
-        .getBlocks(selectedStaffId, from, to, { signal: controller.signal })
+        .getAllBlocks(selectedStaffId, { signal: controller.signal })
         .then((blocks) => {
           if (isCurrentAvailabilityQuery(generation, controller.signal)) {
             setAvailability({ status: 'ready', data: adaptStaffAvailabilityBlocks(blocks) });
@@ -660,15 +659,15 @@ export const StaffPage: React.FC = () => {
         });
       return () => controller.abort();
     }
-  }, [selectedStaffId, drawerStaffId, rangeStart, rangeEnd]);
+  }, [selectedStaffId, drawerStaffId]);
 
   const queryAvailability = async () => {
-    if (selectedStaffId === null || !rangeStart || !rangeEnd) return;
+    if (selectedStaffId === null) return;
     const currentStaffId = selectedStaffId;
     const { generation, controller } = beginAvailabilityQuery();
     setAvailability({ status: 'loading' });
     try {
-      const blocks = await staffAvailabilityClient.getBlocks(currentStaffId, rangeStart, rangeEnd, { signal: controller.signal });
+      const blocks = await staffAvailabilityClient.getAllBlocks(currentStaffId, { signal: controller.signal });
       if (isCurrentAvailabilityQuery(generation, controller.signal)) {
         setAvailability({ status: 'ready', data: adaptStaffAvailabilityBlocks(blocks) });
         setAvailabilityAction(initialActionState());
@@ -685,7 +684,7 @@ export const StaffPage: React.FC = () => {
     signal?: AbortSignal,
     generation?: number
   ): Promise<StaffAvailabilityBlockViewModel[] | null> => {
-    const blocks = await staffAvailabilityClient.getBlocks(staffId, rangeStart, rangeEnd, { signal });
+    const blocks = await staffAvailabilityClient.getAllBlocks(staffId, { signal });
     if (generation !== undefined && !isCurrentSlice(generation, signal)) return null;
     if (!mountedRef.current || signal?.aborted === true) return null;
     const adapted = adaptStaffAvailabilityBlocks(blocks);
@@ -947,8 +946,8 @@ export const StaffPage: React.FC = () => {
     ? '資料已變更，請先重新查詢不可服務期間。'
     : eligibleEndPauseBlocks.length === 0
       ? (availability.status === 'ready'
-          ? '目前查詢範圍沒有可結束的無期限暫停紀錄。'
-          : '請先查詢包含目前暫停期間的日期範圍。')
+          ? '沒有可恢復的無期限暫停接案紀錄。'
+          : '正在載入暫停接案紀錄。')
       : selectedEndPauseBlock === null
         ? '請先選擇要結束的暫停接案紀錄。'
         : !endPauseResumeDate
@@ -994,124 +993,104 @@ export const StaffPage: React.FC = () => {
     }).sort(compareStaffUnionNumbers);
   }, [directorySearch, staffItems, searchQuery]);
 
-  const renderAvailabilityWorkbench = () => (
-        <section className="staff-workbench" data-surface-id="staff.unavailability">
-          <div className="staff-section-header">
-            <div><h2>🏖️ 月嫂長假與暫停接案期間維護</h2><p>填妥資料後直接儲存。</p></div>
-            <div className="staff-action-pair">
-              <button type="button" data-control-id="staff.availability.create.preview" className="staff-next-btn" disabled={selectedStaffId === null || !rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}>儲存新增</button>
-            </div>
-          </div>
-          <div className="staff-range-query">
-            <label>新增類型<select aria-label="新增類型" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={availabilityKind} onChange={(event) => { invalidateSlice(); setAvailabilityKind(event.target.value as 'create_long_leave' | 'create_pause'); setAvailabilityAction(initialActionState()); }}><option value="create_pause">暫停接案</option><option value="create_long_leave">長假</option></select></label>
-            <label>開始日期<input type="date" data-control-id="staff.availability.range-start" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={rangeStart} onInput={(event) => setRangeStart(event.currentTarget.value)} onChange={(event) => { invalidateSlice(); setRangeStart(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-            <label>結束日期<input type="date" data-control-id="staff.availability.range-end" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={rangeEnd} onInput={(event) => setRangeEnd(event.currentTarget.value)} onChange={(event) => { invalidateSlice(); setRangeEnd(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-            <label>備註（選填）<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={availabilityReason} onChange={(event) => { invalidateSlice(); setAvailabilityReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-            <button type="button" className="staff-next-btn" data-control-id="staff.availability.query" disabled={selectedStaffId === null || !rangeStart || !rangeEnd || availability.status === 'loading' || interactionLocked} onClick={() => void queryAvailability()}>
-              {availability.status === 'loading' ? '查詢中…' : '查詢不可服務期間'}
-            </button>
-          </div>
-          {selectedStaffId === null && <div className="staff-directory-message">請先選擇服務人員。</div>}
-          {availability.status === 'error' && <div className="staff-directory-message error" role="alert">{availability.message}<button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重試不可服務期間</button></div>}
-          <div className="staff-unavailability-table" role="table" aria-label="不可服務期間">
-            <div className="staff-unavailability-row header" role="row">
-              <span role="columnheader">月嫂姓名</span><span role="columnheader">類別</span><span role="columnheader">不可服務區間</span><span role="columnheader">狀態／操作</span>
-            </div>
-            {availability.status === 'ready' && availability.data.length === 0 && <div className="staff-unavailability-row" role="row"><span role="cell">此範圍沒有不可服務紀錄。是否可派工仍需依案件日期、既有排班與資格條件查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">無可取消紀錄</span></div>}
-            {availability.status === 'ready' && availability.data.map((block) => {
-              const person = staffItems.find(staff => staff.id === block.staffId);
-              return (
-              <div className="staff-unavailability-row" role="row" key={block.blockId}>
-                <span role="cell">{person ? staffDisplayLabel(person.unionNo, person.displayName) : '月嫂資料待確認'}</span><span role="cell">{block.kindLabel}</span><span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
-                <span role="cell" className="staff-action-pair"><span>{block.statusLabel}</span><button type="button" data-control-id="staff.availability.cancel.preview" className="staff-next-btn" disabled={block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>取消此期間</button>{block.status === 'cancelled' && <small>此紀錄已取消，不可再次取消。</small>}</span>
-              </div>
-            );})}
-            {availability.status === 'idle' && <div className="staff-unavailability-row" role="row"><span role="cell">請先設定日期範圍並查詢。</span><span role="cell">—</span><span role="cell">—</span><span role="cell">查詢後顯示可用操作</span></div>}
-            {availability.status === 'loading' && <div className="staff-unavailability-row" role="row"><span role="cell">正在查詢不可服務期間…</span><span role="cell">—</span><span role="cell">—</span><span role="cell">請稍候</span></div>}
-          </div>
-          <div className="staff-range-query">
-            <label>備註（選填）<input type="text" disabled={interactionLocked || availabilityAction.phase === 'stale'} value={cancelReason} onChange={(event) => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
-          </div>
-          {availabilityAction.preview && <div className="staff-action-status">不可服務期間變更已通過檢查，正在儲存或回讀結果。</div>}
-          {availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">不可服務期間已更新：{availabilityAction.receipt.block.start_date} ～ {availabilityAction.receipt.block.end_date ?? '持續中'}</div>}
-          {availabilityAction.message && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
-          {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>重新查詢不可服務期間</button>}
-          {availabilityAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitAvailability(true)}>以相同內容重試</button>}
-          <section className="staff-form-card wide" data-surface-id="staff.availability.end-pause">
-            <h3>結束無指定期限的暫停接案</h3>
-            <p>只列出本次查詢中屬於所選月嫂、仍生效且沒有結束日的暫停接案期間。</p>
-            {endPauseDisabledReason && <p id="staff-end-pause-blocker" className="staff-directory-message" role="status">{endPauseDisabledReason}</p>}
-            <div className="staff-range-query">
-              <label>
-                暫停接案紀錄
-                <select
-                  aria-label="暫停接案紀錄"
-                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
-                  disabled={eligibleEndPauseBlocks.length === 0 || interactionLocked || availabilityAction.phase === 'stale'}
-                  value={endPauseBlockId ?? ''}
-                  onChange={(event) => {
-                    invalidateSlice();
-                    setEndPauseBlockId(event.target.value ? Number(event.target.value) : null);
-                    setAvailabilityAction(initialActionState());
-                  }}
-                >
-                  <option value="">請選擇無指定結束日的暫停紀錄</option>
-                  {eligibleEndPauseBlocks.map((block) => (
-                    <option key={block.blockId} value={block.blockId}>{block.startDate} 起｜{block.reason}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                恢復接案日期
-                <input
-                  type="date"
-                  aria-label="恢復接案日期"
-                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
-                  disabled={selectedEndPauseBlock === null || interactionLocked || availabilityAction.phase === 'stale'}
-                  value={endPauseResumeDate}
-                  onChange={(event) => {
-                    invalidateSlice();
-                    setEndPauseResumeDate(event.target.value);
-                    setAvailabilityAction(initialActionState());
-                  }}
-                />
-              </label>
-              <label>
-                備註（選填）
-                <input
-                  type="text"
-                  aria-label="備註（選填）"
-                  aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
-                  disabled={selectedEndPauseBlock === null || interactionLocked || availabilityAction.phase === 'stale'}
-                  value={endPauseReason}
-                  onChange={(event) => {
-                    invalidateSlice();
-                    setEndPauseReason(event.target.value);
-                    setAvailabilityAction(initialActionState());
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                data-control-id="staff.availability.end-pause"
-                className="staff-next-btn"
-                aria-describedby={endPauseDisabledReason ? 'staff-end-pause-blocker' : undefined}
-                disabled={selectedEndPauseBlock === null || !endPauseResumeDate || interactionLocked || availabilityAction.phase === 'stale' || availabilityAction.phase === 'preview_loading'}
-                onClick={() => {
-                  if (!selectedEndPauseBlock) return;
-                  void previewAvailability({
-                    action: 'end_pause',
-                    block_id: selectedEndPauseBlock.blockId,
-                    resume_date: endPauseResumeDate,
-                    reason: endPauseReason.trim(),
-                  });
-                }}
-              >儲存結束暫停</button>
-            </div>
-          </section>
-        </section>
+  const resetAvailabilityForm = () => {
+    setShowAvailabilityForm(false);
+    setAvailabilityKind('create_long_leave');
+    setAvailabilityStart(todayIsoDate());
+    setAvailabilityEnd(todayIsoDate());
+    setAvailabilityReason('');
+  };
+
+  useEffect(() => {
+    resetAvailabilityForm();
+    setCancelReason('');
+  }, [drawerStaffId]);
+
+  useEffect(() => {
+    if (availabilityAction.phase === 'observed') {
+      resetAvailabilityForm();
+      setCancelReason('');
+      setEndPauseBlockId(null);
+      setEndPauseReason('');
+    }
+  }, [availabilityAction.phase]);
+
+  const availabilityToday = todayIsoDate();
+  const availabilityState = (block: StaffAvailabilityBlockViewModel) => block.status === 'cancelled'
+    ? 'cancelled' : block.startDate > availabilityToday ? 'upcoming'
+      : block.endDate !== null && block.endDate < availabilityToday ? 'ended' : 'paused';
+  const availabilityRecords = availability.status === 'ready' ? availability.data : [];
+  const currentPauses = availabilityRecords.filter(block => availabilityState(block) === 'paused');
+  const upcomingPauses = availabilityRecords.filter(block => availabilityState(block) === 'upcoming');
+  const historicalPauses = availabilityRecords.filter(block => ['ended', 'cancelled'].includes(availabilityState(block)));
+  const renderAvailabilityRecords = (blocks: StaffAvailabilityBlockViewModel[], label: string) => (
+    <div className="staff-unavailability-table" role="table" aria-label={label}>
+      <div className="staff-availability-row header" role="row"><span role="columnheader">類型</span><span role="columnheader">暫停期間</span><span role="columnheader">狀態／操作</span></div>
+      {blocks.map(block => {
+        const state = availabilityState(block);
+        return <div className={`staff-availability-row is-${state}`} role="row" key={block.blockId}>
+          <span role="cell">{block.kind === 'long_leave' ? '暫停接案' : '無期限暫停接案'}</span>
+          <span role="cell">{block.startDate} ～ {block.endDate ?? '無期限'}</span>
+          <span role="cell" className="staff-action-pair">
+            <span className={`staff-availability-badge is-${state}`}>{({ cancelled: '已取消，不影響接案', upcoming: '尚未開始', ended: '已結束', paused: '暫停中' })[state]}</span>
+            {(state === 'paused' || state === 'upcoming') && <button type="button" data-control-id="staff.availability.cancel.preview" className="staff-secondary-btn" disabled={interactionLocked || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}>取消此期間</button>}
+            {isEligibleEndPauseBlock(block, selectedStaffId) && <button type="button" className="staff-next-btn" aria-expanded={endPauseBlockId === block.blockId} disabled={interactionLocked || availabilityAction.phase === 'stale'} onClick={() => { setEndPauseBlockId(block.blockId); setEndPauseResumeDate(todayIsoDate()); setEndPauseReason(''); }}>{state === 'upcoming' ? '設定恢復日期' : '恢復接案'}</button>}
+          </span>
+        </div>;
+      })}
+    </div>
   );
-  useUnsavedDraft('月嫂請假與暫停', { '開始日期': availabilityReason.trim() || availabilityAction.preview ? rangeStart : undefined, '結束日期': availabilityReason.trim() || availabilityAction.preview ? rangeEnd : undefined, '請假類型': availabilityKind, '請假原因': availabilityReason, '取消原因': cancelReason, '恢復日期': endPauseResumeDate, '備註（選填）': endPauseReason }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: availabilityAction.phase === 'observed' ? availabilityAction.receipt : null, discard: () => { setAvailabilityReason(''); setCancelReason(''); setEndPauseReason(''); setEndPauseResumeDate(''); } });
+
+  const renderAvailabilityWorkbench = () => (
+    <section className="staff-workbench staff-availability-workbench" data-surface-id="staff.unavailability">
+      <div className="staff-availability-header">
+        <p className="staff-availability-person">{selectedStaff ? staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName) : '請先選擇月嫂'}</p>
+        {!showAvailabilityForm && <button type="button" className="staff-next-btn" aria-expanded={false} aria-controls="staff-availability-create-form" disabled={interactionLocked || availabilityAction.phase === 'stale'} onClick={() => { resetAvailabilityForm(); setShowAvailabilityForm(true); }}>新增</button>}
+      </div>
+      {availability.status === 'ready' && <div className={`staff-availability-summary ${currentPauses.length > 0 ? 'is-paused' : 'is-clear'}`} role="status" aria-label="目前暫停接案狀態">
+        <strong>目前：{currentPauses.length > 0 ? '暫停接案中' : '未暫停接案'}</strong>
+        <p>{currentPauses.length > 0 ? '目前位於暫停期間內，該期間不能安排新接案。' : '目前沒有生效中的暫停期間。'}{upcomingPauses.length > 0 ? ` 另有 ${upcomingPauses.length} 筆未來暫停。` : ''}</p>
+        <small>實際可派工仍依案件日期、既有排班與資格判定。</small>
+      </div>}
+      {showAvailabilityForm && <section id="staff-availability-create-form" className="staff-holiday-op-card" aria-label="新增暫停接案">
+        <h3 className="staff-op-title">新增暫停接案</h3>
+        <div className="staff-op-grid staff-availability-form-grid">
+          <label className="staff-op-field">類型<select aria-label="新增類型" value={availabilityKind} disabled={interactionLocked} onChange={event => { invalidateSlice(); setAvailabilityKind(event.target.value as typeof availabilityKind); setAvailabilityAction(initialActionState()); }}><option value="create_long_leave">暫停接案</option><option value="create_pause">無期限暫停接案</option></select></label>
+          <label className="staff-op-field">開始日期<input type="date" data-control-id="staff.availability.range-start" value={availabilityStart} disabled={interactionLocked} onChange={event => { invalidateSlice(); setAvailabilityStart(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
+          {availabilityKind === 'create_long_leave' && <label className="staff-op-field">結束日期<input type="date" data-control-id="staff.availability.range-end" value={availabilityEnd} disabled={interactionLocked} onChange={event => { invalidateSlice(); setAvailabilityEnd(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>}
+        </div>
+        {availabilityKind === 'create_pause' && <p className="staff-op-hint">從開始日期起暫停接案，直到另行設定恢復接案日期。</p>}
+        <label className="staff-op-field">備註（選填）<input aria-label="新增暫停備註（選填）" value={availabilityReason} maxLength={500} disabled={interactionLocked} onChange={event => { invalidateSlice(); setAvailabilityReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
+        <div className="staff-op-actions">
+          <button type="button" className="staff-secondary-btn" disabled={interactionLocked} onClick={resetAvailabilityForm}>取消新增</button>
+          <button type="button" data-control-id="staff.availability.create.preview" className="staff-primary-btn" disabled={selectedStaffId === null || !availabilityStart || (availabilityKind === 'create_long_leave' && !availabilityEnd) || interactionLocked || availabilityAction.phase === 'preview_loading' || availabilityAction.phase === 'stale'} onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: availabilityStart, ...(availabilityKind === 'create_long_leave' ? { end_date: availabilityEnd } : {}) })}>儲存新增</button>
+        </div>
+      </section>}
+      {(availability.status === 'idle' || availability.status === 'loading') && <p role="status">正在載入暫停接案紀錄…</p>}
+      {availability.status === 'error' && <div className="staff-directory-message error" role="alert">{availability.message}<button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重試不可服務期間</button></div>}
+      {availability.status === 'ready' && <>
+        {availabilityRecords.length === 0 && <p className="staff-availability-empty">無</p>}
+        {currentPauses.length > 0 && renderAvailabilityRecords(currentPauses, '目前暫停紀錄')}
+        {upcomingPauses.length > 0 && <section className="staff-availability-record-group" aria-label="未來暫停"><h3>未來暫停</h3>{renderAvailabilityRecords(upcomingPauses, '未來暫停紀錄')}</section>}
+        {historicalPauses.length > 0 && <details key={selectedStaffId} className="staff-availability-history"><summary>歷史與已取消紀錄（{historicalPauses.length}）</summary>{renderAvailabilityRecords(historicalPauses, '歷史與已取消紀錄')}</details>}
+        {(currentPauses.length > 0 || upcomingPauses.length > 0) && <details className="staff-availability-cancel-note"><summary>取消紀錄備註（選填）</summary><label className="staff-op-field">備註（選填）<input aria-label="取消暫停備註（選填）" value={cancelReason} maxLength={500} disabled={interactionLocked} onChange={event => { invalidateSlice(); setCancelReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label></details>}
+      </>}
+      {availabilityAction.preview && ['preview_ready', 'apply_pending', 'receipt_received', 'requery_loading'].includes(availabilityAction.phase) && <div className="staff-action-status">正在儲存並更新暫停紀錄…</div>}
+      {availabilityAction.receipt && <div className="staff-action-status" role="status" aria-label="不可服務期間變更結果">{availabilityAction.receipt.action === 'cancel' ? '這筆暫停紀錄已取消，不再影響接案。' : availabilityAction.receipt.action === 'end_pause' ? `已設定 ${availabilityAction.payload?.resume_date} 起恢復接案。` : '暫停紀錄已儲存。'}</div>}
+      {availabilityAction.message && availabilityAction.phase !== 'observed' && <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status">{availabilityAction.message}</div>}
+      {availabilityAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重新載入紀錄</button>}
+      {availabilityAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitAvailability(true)}>以相同內容重試</button>}
+      {selectedEndPauseBlock && <section className="staff-holiday-op-card" data-surface-id="staff.availability.end-pause" aria-label="恢復接案設定">
+        <h3 className="staff-op-title">恢復接案</h3>
+        <p>{selectedEndPauseBlock.startDate} 起的無期限暫停接案</p>
+        <label className="staff-op-field">恢復接案日期<input type="date" value={endPauseResumeDate} disabled={interactionLocked || availabilityAction.phase === 'stale'} onChange={event => { invalidateSlice(); setEndPauseResumeDate(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
+        <label className="staff-op-field">備註（選填）<input aria-label="恢復接案備註（選填）" value={endPauseReason} maxLength={500} disabled={interactionLocked} onChange={event => { invalidateSlice(); setEndPauseReason(event.target.value); setAvailabilityAction(initialActionState()); }} /></label>
+        {endPauseDisabledReason && <p role="status">{endPauseDisabledReason}</p>}
+        <div className="staff-op-actions"><button type="button" className="staff-secondary-btn" disabled={interactionLocked} onClick={() => { setEndPauseBlockId(null); setEndPauseReason(''); }}>取消設定</button><button type="button" data-control-id="staff.availability.end-pause" className="staff-primary-btn" disabled={!endPauseResumeDate || interactionLocked || availabilityAction.phase === 'stale' || availabilityAction.phase === 'preview_loading'} onClick={() => void previewAvailability({ action: 'end_pause', block_id: selectedEndPauseBlock.blockId, resume_date: endPauseResumeDate, reason: endPauseReason.trim() })}>儲存恢復接案</button></div>
+      </section>}
+    </section>
+  );
+  useUnsavedDraft('月嫂請假與暫停', { '開始日期': showAvailabilityForm ? availabilityStart : undefined, '結束日期': showAvailabilityForm && availabilityKind === 'create_long_leave' ? availabilityEnd : undefined, '類型': showAvailabilityForm ? availabilityKind : undefined, '新增備註': availabilityReason, '取消備註': cancelReason, '恢復日期': selectedEndPauseBlock ? endPauseResumeDate : undefined, '恢復備註': endPauseReason }, { enabled: selectedStaff !== null, busy: interactionLocked, baseline: { '開始日期': showAvailabilityForm ? todayIsoDate() : undefined, '結束日期': showAvailabilityForm && availabilityKind === 'create_long_leave' ? todayIsoDate() : undefined, '類型': showAvailabilityForm ? 'create_long_leave' : undefined, '新增備註': '', '取消備註': '', '恢復日期': selectedEndPauseBlock ? todayIsoDate() : undefined, '恢復備註': '' }, discard: () => { resetAvailabilityForm(); setCancelReason(''); setEndPauseBlockId(null); setEndPauseReason(''); } });
   useUnsavedDraft('月嫂任職狀態', { '狀態生效日': lifecycleEffectiveAt, '狀態原因': lifecycleReasonCode }, { enabled: selectedStaff !== null, busy: interactionLocked, resetKey: lifecycleAction.phase === 'observed' ? lifecycleAction.receipt : null, discard: () => { setLifecycleEffectiveAt(''); setLifecycleReasonCode(''); } });
 
 

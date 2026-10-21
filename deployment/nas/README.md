@@ -92,17 +92,13 @@ NAS_DATA_ROOT 的 app-data → /data；controlled-files → /data/controlled-fil
 
 ## Cloudflare Tunnel 與外部網址
 
-基本管理測試不需要這些檔案。要啟動 `tunnel` 階段時：
+目前採一條網頁管理 Tunnel、兩個獨立 hostname／Access 權限，完整步驟見 [CLOUDFLARE.md](CLOUDFLARE.md)。管理 hostname 先套 Access 指定信箱及 connector token 驗證，再進原網站帳號／MFA；LINE 依原簽章與本人授權，不套人員登入。
 
-1. 建立該專案專用的 locally-managed Tunnel，取得其 `credentials.json`；不要提供帳號層級 `cert.pem`。此操作需在 Cloudflare 端完成，並非 Compose 自動替你建立。
-2. 在專案資料夾建立 `tunnel`，把 `cloudflared.example.yaml` 的 Tunnel UUID 與兩個 `REPLACE_WITH_LINE_PUBLIC_HOSTNAME` 改成自己的值，存為 `tunnel/config.yaml`；憑證存為 `tunnel/credentials.json`。這個 YAML 不會自動展開 `.env`。
-3. 把相同公開網址填入 `.env` 的 `LINE_PUBLIC_BASE_URL`，並完成 Cloudflare DNS 及 LINE Developers 的 Webhook／LIFF URL 設定；Webhook 為 `https://你的LINE網域/webhook/line`。
-4. 專案及 `tunnel` 目錄只授權需要的 NAS 管理者；兩個單檔唯讀掛載須讓 cloudflared UID `65532` 能讀。不可把整個憑證目錄或 NAS 根目錄掛入。若 DSM ACL 拒絕服務讀取，先修正新專案的精確檔案權限再啟動，不使用 `777`。
-5. 本次已把 cloudflared 放進主 Compose；群暉不需要再套用 `compose.tunnel.yaml`，該舊 overlay 保留供既有記錄追溯。
+預設 compose.yaml 保持內網基本組。通過本機驗證後的整合 ZIP 另提供完整 compose.with-tunnel.yaml，準備 token／LINE 設定後複製成原專案 compose.yaml 即可，不改 COMPOSE_PROFILES。程式 nas_appliance.py 必須一併放原目錄，唯讀掛入現有映像；首次套用需重建相關 API 容器，但保留資料。
 
-Tunnel 只連 LINE API，先拒絕 `/internal`，不連管理 API／MySQL／Redis。來源 HTTPS 保留 CA 與 `line-api` 主機名驗證，不啟用 `noTLSVerify`。Cloudflare 只負責對外 LINE 入口，管理介面仍限內網。
+新的 cloudflared 使用 tunnel/token 檔案，不使用舊 config.yaml／credentials.json；舊 compose.tunnel.yaml／cloudflared.example.yaml 僅為歷史本機管理範例，不能疊加到新 remote-managed 配置。新版連接器只掛 token 與公開 CA，經兩個專用 internal origin 網路連 API，不連 MySQL／Redis，不掛業務檔案或 Docker socket。公開來源維持 TLS 與服務名稱／CA 驗證；原 DSM 內網入口保留。
 
-參考：[Compose 環境設定](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)、[COMPOSE_PROFILES](https://docs.docker.com/compose/how-tos/profiles/)、[Docker 埠與防火牆](https://docs.docker.com/engine/network/packet-filtering-firewalls/)、[Cloudflare locally-managed 設定](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/configuration-file/)。
+參考：[網頁管理 Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)、[Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)。外網 PDF／匯入／LINE 正式連結仍需實機驗收，不能由 --check 或 YAML 解析冒充完成。
 
 ## 服務與帳號
 
@@ -201,7 +197,7 @@ sudo docker compose -p labor-union-nas-dsm-20261020 -f compose.yaml up -d --forc
 
 ### 4. 普通換版失敗的回復
 
-僅適用上述「沒有 DB 變更」的更新：停止本專案、還原備份中的 compose.yaml／.env（NAS_IMAGE 回到舊 digest），再執行一般套用命令；資料卷與檔案保持原位。確認 root／MFA、資料與檔案回讀正常後才恢復使用。
+僅適用上述「沒有 DB 變更」的更新：停止本專案、還原備份中的 compose.yaml／.env（NAS_IMAGE 回到舊 digest），並還原同版 host 唯讀程式，再執行一般套用命令；資料卷與檔案保持原位。確認 root／MFA、資料與檔案回讀正常後才恢復使用。
 
 若有 schema 變更，舊映像未必相容，不能宣稱只換回 image 就能還原；應停止寫入，依該 migration 的備份／還原程序處理。備份缺失時停止操作，保留現場。
 
@@ -209,9 +205,10 @@ sudo docker compose -p labor-union-nas-dsm-20261020 -f compose.yaml up -d --forc
 
 備份必須在本專案所有 writer 停止、MySQL 正常停止後進行，保存：
 
-- 原 compose.yaml、原 .env、舊應用與 MySQL 的 image digest、profiles 與 data 網路的 internal／CIDR 資訊。
+- 原 compose.yaml、原 .env、同版 nas_appliance.py／憑證與備份程式、舊應用與 MySQL 的 image digest、profiles 與 data／新增代理網路的 internal／CIDR 資訊。映像 digest 不包含 host 唯讀掛載程式，必須一起保留對應版本。
 - 本專案全部 named volumes，包含 mysql-data、settings、各 DB 憑證、私人 CA／伺服器憑證、MFA keyring、各 Worker token、line-config；不能只備份資料庫而漏掉加密金鑰。
 - NAS_DATA_ROOT 下 app-data、controlled-files、line-media、knowledge 四個目錄，保留檔案權限與擁有者。
+- 已啟用憑證維護時，另依 CERTIFICATES.md 備份管理者保護的 certificate-maintenance 狀態／issuer 私鑰；下方卷／檔案冷備份命令不包含這個可能自訂的目錄。完整災難備份須配套保存，不能把公開 private-ca 卷當成已含簽發私鑰。還原至新專案時也使用新的 NAS_CERT_MAINTENANCE_ROOT，不與原專案共用此狀態。
 
 備份含帳密、MFA 金鑰與私人憑證，目的資料夾只允許管理者存取，不能放到會被應用掛載或公開下載的位置。容器／映像匯出不代表已包含資料卷。
 
@@ -234,7 +231,7 @@ BACKUP_DIR="$(pwd)/backups/$(date +%Y%m%d-%H%M%S)"
 case "$BACKUP_DIR/" in "$DATA_ROOT/app-data/"*|"$DATA_ROOT/controlled-files/"*|"$DATA_ROOT/line-media/"*|"$DATA_ROOT/knowledge/"*) exit 1;; esac
 mkdir -p "$(pwd)/backups"
 mkdir -m 700 "$BACKUP_DIR"
-cp compose.yaml .env "$BACKUP_DIR/"
+cp compose.yaml .env nas_appliance.py nas_certificate_maintenance.py maintain-certificates.sh backup-database.sh "$BACKUP_DIR/"
 printf '%s\n' "$PROJECT" > "$BACKUP_DIR/project-name.txt"
 docker network inspect "$PROJECT"_data --format 'internal={{.Internal}} {{range .IPAM.Config}}subnet={{.Subnet}} {{end}}' > "$BACKUP_DIR/network.txt"
 for SERVICE in db management-api; do
@@ -252,7 +249,7 @@ while IFS= read -r VOLUME; do
     "$IMAGE" -c 'import sys,tarfile; a=tarfile.open("/backup/"+sys.argv[1]+".tar.gz","w:gz"); a.add("/source",arcname="."); a.close()' "$SHORT"
 done < "$BACKUP_DIR/volume-names.txt"
 tar -czf "$BACKUP_DIR/files.tar.gz" -C "$DATA_ROOT" app-data controlled-files line-media knowledge
-(cd "$BACKUP_DIR" && sha256sum *.tar.gz > SHA256SUMS)
+(cd "$BACKUP_DIR" && sha256sum *.tar.gz compose.yaml .env nas_appliance.py nas_certificate_maintenance.py maintain-certificates.sh backup-database.sh > SHA256SUMS)
 printf 'Backup complete: %s\n' "$BACKUP_DIR"
 SH
 ```
@@ -264,10 +261,10 @@ SH
 獨立還原的操作順序：
 
 1. 在備份目錄執行 `sha256sum -c SHA256SUMS`；每個檔案都必須 OK。將備份 compose.yaml／.env 複製到新的還原專案目錄，保留來源備份不動。
-2. 只為這個還原專案另設新 COMPOSE_PROJECT_NAME、全新 NAS_DATA_ROOT、未重疊的 NAS_PROXY_SUBNET／NAS_PROXY_API_IP；NAS_IMAGE 與 MYSQL_IMAGE 必須使用備份對應的原 image digest／版本。COMPOSE_PROFILES 暫留空白，避免還原測試啟動 LINE、Tunnel 或對外 Worker。不要先啟動空白 DB。
+2. 只為這個還原專案另設新 COMPOSE_PROJECT_NAME、全新 NAS_DATA_ROOT、未重疊的 NAS_PROXY_SUBNET／NAS_PROXY_API_IP；NAS_IMAGE 與 MYSQL_IMAGE 必須使用備份對應的原 image digest／版本。COMPOSE_PROFILES 暫留空白，且之後必須明確只啟動內網五個服務；備份可能是 Tunnel 啟用版，不能以留空 profiles 就假設 LINE／Tunnel 不會啟動。還原的新副本另設定不重疊的 NAS_TUNNEL_MANAGEMENT_SUBNET／PROXY_IP／API_IP、NAS_TUNNEL_LINE_SUBNET／PROXY_IP／API_IP。不要複製正式 Tunnel token 或先啟動空白 DB。
 3. 準備新名稱的 internal data 網路；還原的新網段需另驗最小防火牆規則，不擴大原專案規則。來源網路、卷與入口保留。
 4. 依備份 `volume-names.txt` 的邏輯後綴（例如 mysql-data、settings、access-db）逐一建立 `新專案名稱_後綴` 空卷，帶上 `com.docker.compose.project=新專案名稱` 與 `com.docker.compose.volume=後綴` labels。只在這些新空卷中解開對應的 `後綴.tar.gz`，保留 UID/GID／檔案模式；不能解到舊卷。用同一舊映像的 `--entrypoint tar`，將備份唯讀掛到 `/backup`、新卷掛到 `/restore`，執行 `tar -xzpf /backup/後綴.tar.gz -C /restore`。任何新卷已存在或非空就停止確認。
-5. 將 files.tar.gz 解到新的 NAS_DATA_ROOT，使四個子目錄回到原結構，並確認 DSM ACL。所有卷、憑證與檔案還原完整後，才用新專案名執行 `up -d --no-build --pull never --wait --wait-timeout 180`。
+5. 將 files.tar.gz 解到新的 NAS_DATA_ROOT，使四個子目錄回到原結構，並確認 DSM ACL。所有卷、憑證與檔案還原完整後，先把備份中的同版 nas_appliance.py／憑證／備份程式複製到新專案目錄（或讓 NAS_PROXY_RUNTIME_SCRIPT 指向此備份版本），再用新專案名執行 `up -d --no-build --pull never --wait --wait-timeout 180 initialize db configure-security redis management-api`，不要啟動 cloudflared／line-api／對外 Worker。
 6. 驗證原 root／工會帳號、MFA、setup 關閉、資料與檔案回讀；來源與還原專案不共用卷／檔案目錄。通過後才安排 DSM 反向代理目的地切換，並確認只有單一正式 writer／對外 Worker 啟用。此入口切換不是本次隔離測試授權的一部分。
 
 ### 本機隔離演練與限制

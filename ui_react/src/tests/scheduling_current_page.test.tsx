@@ -2,11 +2,13 @@
  * File: scheduling_current_page.test.tsx
  * Description: 驗證 Scheduling 投影、typed controls 與 bounded deep-link 行為。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
+import { holidayClient } from '../api/scheduling/holiday_client';
 import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
@@ -33,6 +35,7 @@ describe('SchedulingPage query-only presentation', () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(holidayClient, 'query').mockImplementation(async query => ({ planning_horizon: 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate }, source_identity: 'test-holidays', calendar_version: 'a'.repeat(64), holidays: [] }));
     leaveSubstitutionFlowStore.clearAll();
     vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);
     coreStageProjectionMocks.loadAll.mockReset();
@@ -103,6 +106,70 @@ describe('SchedulingPage query-only presentation', () => {
     }));
   });
 
+  it('排班月曆讀取當月假日，返回分頁後更新標示且不改正式排班', async () => {
+    let holidayName = '測試國定假日';
+    vi.mocked(holidayClient.query).mockImplementation(async query => {
+      const horizon = 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate };
+      return { planning_horizon: horizon, source_identity: 'test', calendar_version: 'a'.repeat(64), holidays: [{ holiday_date: horizon.from_date, holiday_name: holidayName, is_double_pay_default: false }] };
+    });
+    const preview = vi.spyOn(holidayClient, 'preview');
+    const apply = vi.spyOn(holidayClient, 'apply');
+    render(<SchedulingPage />);
+    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('測試國定假日'));
+    await waitFor(() => expect(document.querySelector('.gantt-spans-layer .span-active')).toBeInTheDocument());
+    const spans = document.querySelector('.gantt-spans-layer')?.innerHTML;
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    await screen.findByRole('region', { name: '國定假日日曆' });
+    expect(screen.queryByText(/預設雙薪|一般薪資/)).not.toBeInTheDocument();
+    expect(holidayClient.query).toHaveBeenCalledTimes(2);
+    holidayName = '匯入後的假日';
+    fireEvent.click(screen.getByRole('button', { name: /排班月曆/ }));
+    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('匯入後的假日'));
+    expect(document.querySelector('.gantt-spans-layer')?.innerHTML).toBe(spans);
+    expect(preview).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('人員清單為空仍顯示完整日期列與國定假日', async () => {
+    vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue({ items: [], next_cursor: null });
+    vi.mocked(holidayClient.query).mockImplementation(async query => {
+      const horizon = 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate };
+      return { planning_horizon: horizon, source_identity: 'test', calendar_version: 'a'.repeat(64), holidays: [{ holiday_date: horizon.from_date, holiday_name: '國慶日及補假測試名稱', is_double_pay_default: false }] };
+    });
+    render(<SchedulingPage />);
+    await screen.findByText('目前沒有可顯示的服務人員摘要。');
+    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('國慶日及補假測試名稱'));
+    expect(document.querySelectorAll('.gantt-day-header-col').length).toBeGreaterThanOrEqual(28);
+  });
+
+  it('篩選找不到人員仍保留假日日期列', async () => {
+    vi.mocked(holidayClient.query).mockImplementation(async query => {
+      const horizon = 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate };
+      return { planning_horizon: horizon, source_identity: 'test', calendar_version: 'a'.repeat(64), holidays: [{ holiday_date: horizon.from_date, holiday_name: '測試國定假日', is_double_pay_default: false }] };
+    });
+    render(<SchedulingPage />);
+    await waitFor(() => expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('測試國定假日'));
+    fireEvent.change(screen.getByPlaceholderText('按月嫂姓名或編號...'), { target: { value: '不存在的人員' } });
+    expect(document.querySelector('.gantt-day-header-col.holiday')).toHaveTextContent('測試國定假日');
+    expect(document.querySelectorAll('.gantt-staff-matrix-row')).toHaveLength(0);
+  });
+
+  it('本月沒有匯入資料時明確提示，不冒稱查詢失敗', async () => {
+    render(<SchedulingPage />);
+    await screen.findByText('本月沒有已匯入的國定假日資料。');
+    expect(screen.queryByText(/國定假日標示載入失敗/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.gantt-day-header-col').length).toBeGreaterThanOrEqual(28);
+  });
+
+  it('月曆假日查詢失敗有明確提示，可只重新讀取假日', async () => {
+    vi.mocked(holidayClient.query).mockRejectedValueOnce(new Error('假日資料暫時無法讀取'));
+    render(<SchedulingPage />);
+    await screen.findByText(/國定假日標示載入失敗/);
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取假日' }));
+    await waitFor(() => expect(screen.queryByText(/國定假日標示載入失敗/)).not.toBeInTheDocument());
+    expect(holidayClient.query).toHaveBeenCalledTimes(2);
+  });
+
   it('從 allowlist deep-link 直接開啟請假代班並安全解碼合格案件編號', async () => {
     window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-SCH-001%20';
 
@@ -111,6 +178,57 @@ describe('SchedulingPage query-only presentation', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: '請假代班訂單編號' })).toHaveValue('CASE-SCH-001'));
     expect(document.querySelector('[data-surface-id="scheduling.tab.leave_sub"]')).toHaveClass('active');
     expect(document.querySelector('[data-surface-id="scheduling.calendar"]')).not.toBeInTheDocument();
+  });
+
+  it('代班納入所有已有正式排班的進行中案件，排除未排班、服務完成與取消案件', async () => {
+    const page = await ordersQueryClient.getOrderSummaries();
+    const base = page.items[0];
+    const cases = [
+      { case_no: 'CASE-PLANNED', order_status: '訂單成立', scheduled: true, inProgress: true },
+      { case_no: 'CASE-ACTIVE', order_status: '服務中', scheduled: true, inProgress: true },
+      { case_no: 'CASE-HIST-PLANNED', order_status: '歷史訂單－未服務', scheduled: true, inProgress: true },
+      { case_no: 'CASE-HIST-ACTIVE', order_status: '歷史訂單－服務中', scheduled: true, inProgress: true },
+      { case_no: 'CASE-NO-SCHEDULE', order_status: '訂單成立', scheduled: false, inProgress: true },
+      { case_no: 'CASE-NO-ASSIGNMENT', order_status: '服務中', scheduled: false, inProgress: true },
+      { case_no: 'CASE-COMPLETED', order_status: '訂單完成', scheduled: true, inProgress: false },
+      { case_no: 'CASE-HIST-COMPLETED', order_status: '歷史訂單－服務完成', scheduled: true, inProgress: false },
+      { case_no: 'CASE-HIST-SETTLED', order_status: '歷史訂單－帳務完成', scheduled: true, inProgress: false },
+      { case_no: 'CASE-CANCELLED', order_status: '訂單取消', scheduled: true, inProgress: false },
+    ];
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
+      ...page, items: cases.map((item) => ({ ...base, case_no: item.case_no, order_status: item.order_status })),
+    });
+    coreStageProjectionMocks.loadAll.mockResolvedValue({
+      items: cases.filter((item) => item.inProgress).map((item) => ({
+        case_no: item.case_no, current_core_stage_ordinal: 10,
+      })),
+    });
+    vi.mocked(leaveSubstitutionClient.listAssignments).mockImplementation(async (caseNo) => {
+      if (caseNo === 'CASE-NO-ASSIGNMENT') return [];
+      return LEAVE_ASSIGNMENTS.map((assignment) => ({
+        ...assignment,
+        official_schedules: caseNo === 'CASE-NO-SCHEDULE' ? [] : assignment.official_schedules,
+      }));
+    });
+    window.location.hash = '#scheduling?tab=leave_sub&case_no=CASE-PLANNED';
+
+    render(<SchedulingPage />);
+
+    const select = screen.getByRole('combobox', { name: '請假代班訂單編號' });
+    await waitFor(() => expect(select).toHaveValue('CASE-PLANNED'));
+    expect(Array.from(select.querySelectorAll('option')).map((option) => option.value)).toEqual([
+      '', 'CASE-ACTIVE', 'CASE-HIST-ACTIVE', 'CASE-HIST-PLANNED', 'CASE-PLANNED',
+    ]);
+    expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled();
+    expect(coreStageProjectionMocks.loadAll).toHaveBeenCalledWith(
+      { workbench_scope: 'in_progress', page_size: 200 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    for (const item of cases.filter((item) => !item.inProgress)) {
+      expect(leaveSubstitutionClient.listAssignments).not.toHaveBeenCalledWith(
+        item.case_no, expect.anything(),
+      );
+    }
   });
 
   it('未知 deep-link tab fail closed 回到 calendar 且不預填隱藏工作區', () => {
@@ -723,6 +841,35 @@ describe('SchedulingPage query-only presentation', () => {
     expect(staffSpan(12, '.span-free')).toHaveAttribute('data-end-day', '3');
   });
 
+  it('refreshes the changed staff calendar and case checks after availability changes', async () => {
+    vi.spyOn(schedulingEligibilityCollisionClient, 'query').mockRejectedValue(new Error('synthetic unavailable query'));
+    render(<SchedulingPage />);
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByRole('combobox', { name: '資格查詢案件編號' }), { target: { value: '115000003' } });
+    await waitFor(() => expect(schedulingEligibilityCollisionClient.query).toHaveBeenCalled());
+    const beforeCalendar = vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mock.calls.length;
+    const beforeEligibility = vi.mocked(schedulingEligibilityCollisionClient.query).mock.calls.length;
+    act(() => publishStaffAvailabilityChange(11));
+    await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(beforeCalendar + 1));
+    expect(vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mock.calls.at(-1)?.[0].staffId).toBe(11);
+    await waitFor(() => expect(vi.mocked(schedulingEligibilityCollisionClient.query).mock.calls.length).toBeGreaterThan(beforeEligibility));
+    act(() => publishStaffAvailabilityChange(999999));
+    expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(beforeCalendar + 1);
+  });
+
+  it('does not leave unfinished calendar rows cached when a change interrupts the batch', async () => {
+    const pending: Array<(value: typeof SCHEDULING_PROJECTION_READY) => void> = [];
+    vi.mocked(schedulingCurrentClient.queryCurrentCalendar).mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)))
+      .mockImplementationOnce(() => new Promise(resolve => pending.push(resolve)))
+      .mockImplementation(async query => ({ ...SCHEDULING_PROJECTION_EMPTY, staff_id: query.staffId, range_start: query.rangeStart, range_end: query.rangeEnd }));
+    render(<SchedulingPage />);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    act(() => publishStaffAvailabilityChange(11));
+    await waitFor(() => expect(schedulingCurrentClient.queryCurrentCalendar).toHaveBeenCalledTimes(4));
+    await act(async () => { pending.forEach(resolve => resolve(SCHEDULING_PROJECTION_READY)); });
+    await waitFor(() => expect(screen.getAllByText(/本月無排班占用/)).toHaveLength(2));
+  });
+
   it('只開放已具備業務輸入的排班與政策操作', async () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
@@ -740,7 +887,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(screen.getByText(/尚未查詢；不顯示推測/)).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.extension"]')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled();
+    await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());
     expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();

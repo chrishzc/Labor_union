@@ -103,6 +103,7 @@ LEFT JOIN staff_payable_projections projection
 WHERE obligations.staff_id = %s
   AND obligations.due_date BETWEEN %s AND %s
   AND obligations.direction = 'payable_to_staff'
+  AND obligations.obligation_identity NOT LIKE 'staff-handover:%%'
   AND obligations.status <> 'cancelled'
 GROUP BY obligations.assignment_id, obligations.case_no, obligations.staff_id, obligations.due_date
 ORDER BY obligations.due_date ASC, obligations.case_no ASC, obligations.assignment_id ASC

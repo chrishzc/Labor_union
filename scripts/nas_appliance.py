@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -76,6 +77,17 @@ def _trusted_proxies() -> str:
     # DSM connects from the host's bridge gateway. Do not trust forwarded
     # headers from every container or from arbitrary LAN clients.
     addresses = {"127.0.0.1"}
+    # Only explicit connector addresses; never trust a whole LAN or '*'.
+    configured = os.getenv("NAS_TRUSTED_PROXY_IPS", "").strip()
+    if configured:
+        for value in configured.split(","):
+            try:
+                address = ipaddress.ip_address(value.strip())
+            except ValueError:
+                raise ValueError("NAS_TRUSTED_PROXY_IPS requires literal proxy IP addresses") from None
+            if address.is_unspecified or address.is_multicast:
+                raise ValueError("NAS_TRUSTED_PROXY_IPS requires unicast proxy IP addresses")
+            addresses.add(str(address))
     for line in Path("/proc/net/route").read_text().splitlines()[1:]:
         fields = line.split()
         if fields[1] == "00000000" and fields[2] != "00000000":

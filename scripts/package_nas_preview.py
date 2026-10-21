@@ -137,9 +137,11 @@ def prepare(output: Path, *, secure: bool = False) -> dict:
             "[hidden]{display:none!important}\n", encoding="utf-8")
         for filename in ("compose.yaml", ".env.example", "compose.tunnel.yaml", "cloudflared.example.yaml", "README.md"):
             shutil.copyfile(ROOT / "deployment/nas" / filename, output / filename)
-        for filename in ("maintain-certificates.sh", "CERTIFICATES.md"):
+        for filename in ("maintain-certificates.sh", "CERTIFICATES.md", "DSM-SETUP.md", "CLOUDFLARE.md",
+                         "backup-database.sh", "SQL-BACKUPS.md"):
             shutil.copyfile(ROOT / "deployment/nas" / filename, output / filename)
         shutil.copyfile(ROOT / "scripts/nas_certificate_maintenance.py", output / "nas_certificate_maintenance.py")
+        shutil.copyfile(ROOT / "scripts/nas_appliance.py", output / "nas_appliance.py")
         metadata.update(image="chris23144638/cecec:nas-secure-20261019-r2", mode="nas-security/v1",
                         database_engine_qualification="not_run", image_build="not_run", image_published=False)
         (output / "bundle.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -301,17 +303,80 @@ def prepare_web_setup(output: Path, source_bundle: Path) -> dict:
     return metadata
 
 
+def prepare_operations(output: Path, validation: Path) -> dict:
+    """Save the GUI maintenance handoff only; never build or read a real .env."""
+    import yaml
+
+    report = json.loads(validation.read_text(encoding="utf-8"))
+    if report.get("local_required_status") != "passed" or report.get("required_failed") != 0:
+        raise ValueError("required local validation must pass before creating the delivery")
+    output = output.resolve()
+    archive_path = output.with_suffix(".zip")
+    if output.exists() or archive_path.exists():
+        raise ValueError("output exists; choose a new delivery directory")
+    output.mkdir(parents=True)
+    sources = {
+        "compose.yaml": "deployment/nas/compose.yaml",
+        "README.md": "deployment/nas/DSM-SETUP.md",
+        "CLOUDFLARE.md": "deployment/nas/CLOUDFLARE.md",
+        "CERTIFICATES.md": "deployment/nas/CERTIFICATES.md",
+        "SQL-BACKUPS.md": "deployment/nas/SQL-BACKUPS.md",
+        "OPERATIONS.md": "deployment/nas/README.md",
+        "maintain-certificates.sh": "deployment/nas/maintain-certificates.sh",
+        "backup-database.sh": "deployment/nas/backup-database.sh",
+        "nas_certificate_maintenance.py": "scripts/nas_certificate_maintenance.py",
+        "nas_appliance.py": "scripts/nas_appliance.py",
+    }
+    for target, source in sources.items():
+        shutil.copyfile(ROOT / source, output / target)
+    base = (output / "compose.yaml").read_text(encoding="utf-8")
+    active = base
+    for line in ("    profiles: [line, tunnel, line-check]\n", "    profiles: [tunnel]\n"):
+        if active.count(line) != 1:
+            raise ValueError("unexpected Tunnel profile layout")
+        active = active.replace(line, "", 1)
+    expected = yaml.safe_load(base)
+    actual = yaml.safe_load(active)
+    for service in ("cloudflared", "line-api"):
+        expected["services"][service].pop("profiles")
+    if actual != expected:
+        raise ValueError("Tunnel variant changed more than its two startup profiles")
+    (output / "compose.with-tunnel.yaml").write_text(active, encoding="utf-8", newline="\n")
+    for name in ("README.md", "OPERATIONS.md"):
+        path = output / name
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "[DSM-SETUP.md](DSM-SETUP.md)", "[統一設定步驟](README.md)"), encoding="utf-8", newline="\n")
+    optional = [line for line in (ROOT / "deployment/nas/.env.example").read_text(encoding="utf-8").splitlines()
+                if line.startswith(("NAS_CERT_", "NAS_TUNNEL_")) and "TOKEN" not in line]
+    (output / "env-additions.example").write_text(
+        "# Optional defaults only. Preserve the NAS .env; no token belongs here.\n" + "\n".join(optional) + "\n",
+        encoding="utf-8")
+    (output / "validation.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    sums = "".join(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n"
+                   for p in sorted(output.iterdir()))
+    (output / "SHA256SUMS").write_text(sums, encoding="utf-8")
+    with zipfile.ZipFile(archive_path, "x", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(output.iterdir()):
+            archive.write(path, path.name)
+    return {"archive": str(archive_path), "files": len(list(output.iterdir())),
+            "image_build": "not_run", "real_env_read": False, "token_included": False}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--secure", action="store_true", help="Prepare the separate, full NAS security image context")
+    mode.add_argument("--operations-validation", type=Path,
+                      help="Create only the GUI ZIP from a passing local validation report; no image build")
     mode.add_argument("--synology-from", type=Path,
                         help="Existing verified bundle whose image is already on Docker Hub")
     mode.add_argument("--web-setup-from", type=Path,
                       help="Verified GUI bundle whose initialization SQL will be baked into the image")
     args = parser.parse_args()
-    if args.web_setup_from:
+    if args.operations_validation:
+        result = prepare_operations(args.output, args.operations_validation)
+    elif args.web_setup_from:
         result = prepare_web_setup(args.output, args.web_setup_from)
     else:
         result = prepare_synology(args.output, args.synology_from) if args.synology_from else prepare(args.output, secure=args.secure)

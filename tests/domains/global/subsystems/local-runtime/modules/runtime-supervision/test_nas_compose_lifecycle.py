@@ -59,19 +59,39 @@ class IsolatedProject:
         existing = docker.run('ps', '-a', '--filter', f'label=com.docker.compose.project={project}', '--format', '{{.ID}}')
         if existing.strip() or docker.run('volume', 'ls', '--filter', f'label=com.docker.compose.project={project}', '--format', '{{.Name}}').strip():
             raise AssertionError('Lifecycle namespace is already in use')
-        docker.run('network', 'create', '--internal', '--label', 'labor-union.lifecycle=1', project + '_data')
-        self.network_id = docker.run('network', 'inspect', project + '_data', '--format', '{{.Id}}').strip()
         network_ids = docker.run('network', 'ls', '-q').split()
         networks = json.loads(docker.run('network', 'inspect', *network_ids))
         occupied = [ipaddress.ip_network(c['Subnet']) for n in networks
                     for c in (n['IPAM'].get('Config') or []) if c.get('Subnet')]
-        subnet = next(ipaddress.ip_network(f'172.31.{i}.0/29') for i in range(249, 199, -1)
-                      if not any(ipaddress.ip_network(f'172.31.{i}.0/29').overlaps(n)
-                                 for n in occupied if n.version == 4))
+        available = [ipaddress.ip_network(f'172.31.{i}.0/29') for i in range(249, 149, -1)
+                     if not any(ipaddress.ip_network(f'172.31.{i}.0/29').overlaps(n)
+                                for n in occupied if n.version == 4)]
+        subnet, management_tunnel, line_tunnel = available[:3]
+        # Old retained rehearsals may exhaust Docker's automatic /16 pools.
+        # Use fresh explicit subnets for this fixture only; never prune others.
+        private = [ipaddress.ip_network(f'10.241.{i}.0/24') for i in range(250, 99, -1)
+                   if not any(ipaddress.ip_network(f'10.241.{i}.0/24').overlaps(n)
+                              for n in occupied if n.version == 4)]
+        docker.run('network', 'create', '--internal', '--subnet', str(private.pop(0)),
+                   '--label', 'labor-union.lifecycle=1', project + '_data')
+        self.network_id = docker.run('network', 'inspect', project + '_data', '--format', '{{.Id}}').strip()
+        fixed = {'data', 'management-egress', 'management-tunnel', 'line-tunnel'}
+        model = yaml.safe_load(COMPOSE.read_text(encoding='utf-8'))
+        self.network_override = directory / 'isolated-networks.yaml'
+        self.network_override.write_text(yaml.safe_dump({'networks': {
+            name: {'ipam': {'config': [{'subnet': str(private.pop(0))}]}}
+            for name in model['networks'] if name not in fixed}}), encoding='utf-8')
         self.values = {'COMPOSE_PROJECT_NAME': project, 'NAS_IMAGE': IMAGE,
             'NAS_DATA_ROOT': self.data_root.as_posix(), 'NAS_BIND_IP': '127.0.0.1',
             'NAS_MANAGEMENT_HOSTNAME': 'lifecycle.invalid', 'NAS_PROXY_SUBNET': str(subnet),
             'NAS_PROXY_API_IP': str(subnet.network_address + 2), 'COMPOSE_PROFILES': '',
+            'NAS_PROXY_RUNTIME_SCRIPT': (ROOT / 'scripts/nas_appliance.py').as_posix(),
+            'NAS_TUNNEL_MANAGEMENT_SUBNET': str(management_tunnel),
+            'NAS_TUNNEL_MANAGEMENT_PROXY_IP': str(management_tunnel.network_address + 2),
+            'NAS_TUNNEL_MANAGEMENT_API_IP': str(management_tunnel.network_address + 3),
+            'NAS_TUNNEL_LINE_SUBNET': str(line_tunnel),
+            'NAS_TUNNEL_LINE_PROXY_IP': str(line_tunnel.network_address + 2),
+            'NAS_TUNNEL_LINE_API_IP': str(line_tunnel.network_address + 3),
             'MYSQL_IMAGE': 'mysql:8.0.46', 'REDIS_IMAGE': 'redis:7-alpine'}
         self.write_env()
 
@@ -80,7 +100,7 @@ class IsolatedProject:
 
     def compose(self, *args, override=None, success=True, timeout=210):
         cmd = ['compose', '--project-directory', str(COMPOSE.parent), '--env-file', str(self.env_file),
-               '-p', self.project, '-f', str(COMPOSE)]
+               '-p', self.project, '-f', str(COMPOSE), '-f', str(self.network_override)]
         if override:
             cmd += ['-f', str(override)]
         return self.docker.run(*cmd, *args, success=success, timeout=timeout)

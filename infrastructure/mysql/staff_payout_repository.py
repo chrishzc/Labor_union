@@ -29,6 +29,7 @@ from domains.staff_payables.reconciliation import (
     StaffPrimaryBankAccount,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount, selectable_staff_obligation
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
@@ -435,11 +436,13 @@ def _load_obligation_rows(cursor, identities, *, lock):
     placeholders = _placeholders(identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT obligation_identity,staff_id,amount_due_ntd "
-        "FROM staff_obligations "
-        f"WHERE obligation_identity IN ({placeholders}) "
-        "AND direction='payable_to_staff' AND status='open' "
-        f"ORDER BY staff_id,obligation_identity{suffix}",
+        "SELECT obligations.obligation_identity,obligations.staff_id,"
+        + effective_staff_obligation_amount() + " AS amount_due_ntd "
+        "FROM staff_obligations obligations "
+        f"WHERE obligations.obligation_identity IN ({placeholders}) "
+        "AND obligations.direction='payable_to_staff' AND obligations.status='open' "
+        "AND " + selectable_staff_obligation() + " "
+        f"ORDER BY obligations.staff_id,obligations.obligation_identity{suffix}",
         identities,
     )
     return tuple(cursor.fetchall())
@@ -953,7 +956,7 @@ def _projection_rows(cursor, obligation_identities):
     placeholders = _placeholders(obligation_identities)
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.staff_id,"
-        "obligations.amount_due_ntd AS obligation_amount_ntd,"
+        + effective_staff_obligation_amount() + " AS obligation_amount_ntd,"
         "SUM(CASE WHEN events.event_type='payout' "
         "THEN links.allocated_amount_ntd "
         "ELSE -links.allocated_amount_ntd END) AS net_paid_ntd,"
@@ -964,7 +967,7 @@ def _projection_rows(cursor, obligation_identities):
         "JOIN staff_payout_events events ON events.id=links.payout_event_id "
         f"WHERE obligations.obligation_identity IN ({placeholders}) "
         "GROUP BY obligations.obligation_identity,obligations.staff_id,"
-        "obligations.amount_due_ntd ORDER BY obligations.obligation_identity",
+        "obligations.amount_due_ntd,obligations.case_no ORDER BY obligations.obligation_identity",
         obligation_identities,
     )
     return tuple(cursor.fetchall())
@@ -996,6 +999,8 @@ def _projection_status(row) -> StaffPayableStatus:
         return StaffPayableStatus.PAYABLE
     if net_paid == obligation:
         return StaffPayableStatus.COMPLETED
+    if net_paid > obligation:
+        return StaffPayableStatus.ANOMALY
     return StaffPayableStatus.PARTIALLY_PAID
 
 
@@ -1121,7 +1126,7 @@ def _stored_receipt(row) -> StoredStaffPayoutReceipt:
 def _query_obligation_rows(cursor, staff_id):
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.case_no,"
-        "obligations.amount_due_ntd,obligations.due_date,"
+        + effective_staff_obligation_amount() + " AS amount_due_ntd,obligations.due_date,"
         "COALESCE(projection.net_paid_ntd,0) AS net_paid_ntd,"
         "COALESCE(projection.balance_ntd,obligations.amount_due_ntd) "
         "AS balance_ntd,"
@@ -1131,6 +1136,7 @@ def _query_obligation_rows(cursor, staff_id):
         "ON projection.obligation_identity=obligations.obligation_identity "
         "WHERE obligations.staff_id=%s "
         "AND obligations.direction='payable_to_staff' "
+        "AND " + selectable_staff_obligation() + " "
         "AND obligations.status<>'cancelled' "
         "AND obligations.amount_due_ntd>0 "
         "ORDER BY obligations.due_date,obligations.obligation_identity",

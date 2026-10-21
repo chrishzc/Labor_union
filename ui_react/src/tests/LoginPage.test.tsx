@@ -165,8 +165,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     });
 
     expect(screen.getByText('請開啟 Authenticator 隨身驗證器，輸入 6 位動態碼')).toBeInTheDocument();
-    expect(document.getElementById('totp-0')).toBeInTheDocument();
-    expect(document.getElementById('totp-5')).toBeInTheDocument();
+    expect(document.getElementById('totp-code')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /驗證並登入系統/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /返回重新輸入帳密/ })).toBeInTheDocument();
 
@@ -359,9 +358,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     });
 
     // Enter only 3 digits
-    fireEvent.change(document.getElementById('totp-0')!, { target: { value: '1' } });
-    fireEvent.change(document.getElementById('totp-1')!, { target: { value: '2' } });
-    fireEvent.change(document.getElementById('totp-2')!, { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123' } });
 
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy;
@@ -373,60 +370,25 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('Stage 2 輸入法組字期間保持焦點，不將同次輸入帶到下一格', async () => {
-    vi.spyOn(sessionClient, 'issuePasswordChallenge').mockResolvedValue(
-      createStage1Envelope().data
-    );
+  it.each(['typing', 'paste', 'autofill', 'ime'])('Stage 2 單一欄位 %s 保留六碼，輸入完成不自動送出', async method => {
+    vi.spyOn(sessionClient, 'issuePasswordChallenge').mockResolvedValue(createStage1Envelope().data);
+    const verify = vi.spyOn(sessionClient, 'verifyPasswordChallenge');
     render(<LoginPage />);
     fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
     fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
-    await screen.findByRole('heading', { name: /雙重身分驗證/ });
-
-    const input = screen.getByLabelText('驗證碼第 2 位');
+    const input = await screen.findByLabelText('六位數驗證碼');
+    expect(screen.getAllByRole('textbox', { name: '六位數驗證碼' })).toHaveLength(1);
     input.focus();
-    fireEvent.compositionStart(input);
-    fireEvent.keyDown(input, { key: 'Backspace', isComposing: true });
+    if (method === 'paste') fireEvent.paste(input, { clipboardData: { getData: () => '０１２ ３４５' } });
+    else if (method === 'ime') {
+      fireEvent.compositionStart(input);
+      fireEvent.input(input, { target: { value: '０１２３４５' }, isComposing: true });
+      expect(input).toHaveValue('０１２３４５');
+      fireEvent.compositionEnd(input, { data: '０１２３４５' });
+    } else fireEvent.input(input, { target: { value: '012345' }, data: '012345', inputType: method === 'autofill' ? 'insertReplacementText' : 'insertText' });
+    expect(input).toHaveValue('012345');
     expect(input).toHaveFocus();
-    fireEvent.input(input, {
-      target: { value: '1' },
-      data: '1',
-      inputType: 'insertCompositionText',
-      isComposing: true,
-    });
-    expect(input).toHaveFocus();
-    fireEvent.compositionEnd(input, { data: '1' });
-    fireEvent.input(input, {
-      target: { value: '1' },
-      data: '1',
-      inputType: 'insertText',
-    });
-    expect(input).toHaveFocus();
-    expect(screen.getAllByRole('textbox', { name: /^驗證碼/ })
-      .map(element => (element as HTMLInputElement).value).join('')).toBe('1');
-    await waitFor(() => expect(screen.getByLabelText('驗證碼第 3 位')).toHaveFocus());
-    expect(screen.getByLabelText('驗證碼第 3 位')).toHaveValue('');
-  });
-
-  it('Stage 2 數字鍵盤連續輸入相同數字時，每次輸入只前進一格', async () => {
-    vi.spyOn(sessionClient, 'issuePasswordChallenge').mockResolvedValue(
-      createStage1Envelope().data
-    );
-    render(<LoginPage />);
-    fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: 'pass' } });
-    fireEvent.click(screen.getByRole('button', { name: /下一步：進行雙重驗證/ }));
-    await screen.findByRole('heading', { name: /雙重身分驗證/ });
-
-    const inputs = screen.getAllByRole('textbox', { name: /^驗證碼/ });
-    inputs[0].focus();
-    for (let index = 0; index < 2; index++) {
-      const input = document.activeElement!;
-      fireEvent.keyDown(input, { key: '1', code: 'Numpad1', location: 3 });
-      fireEvent.input(input, { target: { value: '1' }, data: '1', inputType: 'insertText' });
-      fireEvent.keyUp(document.activeElement!, { key: '1', code: 'Numpad1', location: 3 });
-      expect(inputs[index + 1]).toHaveFocus();
-      expect(inputs.map(element => (element as HTMLInputElement).value).join(''))
-        .toBe('1'.repeat(index + 1));
-    }
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it('Stage 2 TOTP 輸入行為：單格輸入過濾非數字字元', async () => {
@@ -447,7 +409,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    const totp0 = document.getElementById('totp-0') as HTMLInputElement;
+    const totp0 = document.getElementById('totp-code') as HTMLInputElement;
     // Enter alphabetic character -> should be ignored
     fireEvent.change(totp0, { target: { value: 'a' } });
     expect(totp0.value).toBe('');
@@ -490,11 +452,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     });
 
     // Stage 2: Fill 6 digits
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: String(i + 1) },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
 
     const verifyBtn = screen.getByRole('button', { name: /驗證並登入系統/ });
     fireEvent.click(verifyBtn);
@@ -538,18 +496,13 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '1' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '111111' } });
 
     const verifyBtn = screen.getByRole('button', { name: /驗證並登入系統/ });
     fireEvent.click(verifyBtn);
 
     expect(screen.getByRole('button', { name: '驗證中...' })).toBeDisabled();
-    expect(document.getElementById('totp-0')).toBeDisabled();
-    expect(document.getElementById('totp-5')).toBeDisabled();
+    expect(document.getElementById('totp-code')).toBeDisabled();
 
     // Resolve
     resolveVerify!({
@@ -594,11 +547,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '8' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '888888' } });
 
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 
@@ -610,10 +559,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
 
     // All 6 TOTP inputs are wiped
-    for (let i = 0; i < 6; i++) {
-      const box = document.getElementById(`totp-${i}`) as HTMLInputElement;
-      expect(box.value).toBe('');
-    }
+    expect(screen.getByLabelText('六位數驗證碼')).toHaveValue('');
   });
 
   it('Stage 2 錯誤處理：Challenge 逾期應自動退回 Stage 1 並提示「驗證階段已過期，請重新輸入帳號密碼」', async () => {
@@ -652,11 +598,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '1' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '111111' } });
 
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 
@@ -697,11 +639,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '1' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '111111' } });
 
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy;
@@ -743,11 +681,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       expect(screen.getByRole('heading', { name: /雙重身分驗證/ })).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '5' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '555555' } });
 
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 
@@ -819,11 +753,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
     });
 
     // Stage 2
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: String(i + 1) },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
 
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 

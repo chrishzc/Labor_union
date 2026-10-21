@@ -176,6 +176,7 @@ class SchedulingReplacementCommand:
     actor: Any
     reason: str
     correlation_id: Any
+    preserve_leave_occupancy: bool = False
 
 
 @dataclass(frozen=True, slots=True)

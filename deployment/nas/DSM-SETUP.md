@@ -1,6 +1,6 @@
-# NAS 整合維護包：先保存，之後照這份設定
+# NAS 整合部署與維護包：先保存，之後照這份設定
 
-本包供既有 `labor-union-nas-dsm-20261020` 安裝使用，沿用 `chris23144638/cecec:nas-secure-20261020` 映像。包含完整 Compose、內部憑證維護及不停機 SQL 備份；不是 Docker 映像，也不是現有資料的備份。
+本包供既有 `labor-union-nas-dsm-20261020` 安裝使用，沿用 `chris23144638/cecec:nas-secure-20261020` 映像。包含內網版／Tunnel 啟用版完整 Compose、Cloudflare 雙入口、內部憑證維護及不停機 SQL 備份；不是 Docker 映像，也不是現有資料的備份。
 
 **保留 NAS 原本的 `.env`、專案名稱、資料卷、檔案路徑、網路、root／工會帳號和既有資料。** 包內沒有實際 `.env`、密碼、私鑰、SQL 資料或照片。放置程式／更新映像都不會自動建立 DSM 排程；以下工作要日後在 NAS 設定。此次交付沒有操作 NAS。
 
@@ -11,7 +11,7 @@
 | 憑證維護 | 每日 02:00 執行檢查；需要續期／CA 輪替才套用。真正換證時會短暫重啟原本執行中的相關 API／Tunnel，DB 只 reload TLS；不重建資料庫、不重設帳號。 |
 | SQL 備份 | 每日 **03:00**，不停止／重啟服務；使用 InnoDB 快照匯出本專案結構、資料、view、程序／函式、trigger 和 event，壓縮後永久保存。 |
 | 通知 | 兩個獨立 DSM 工作共用 DSM 電子郵件設定；異常結束才通知，回復成功的換證失敗也通知。 |
-| 管理入口 | 沿用目前的內網 DNS、DSM DDNS／Let’s Encrypt 及反向代理。這份內部憑證腳本不替 DSM 公開憑證續期，也不調整管理入口。 |
+| 管理入口 | 原內網 DNS、DSM DDNS／Let’s Encrypt、19443 反向代理保留。選用新外網管理／LINE 入口依 CLOUDFLARE.md 設定；此腳本不替 DSM 公開憑證續期。 |
 
 SQL 備份期間可以查詢／寫入，但會增加 CPU／磁碟負載，不保證速度完全不受影響；不要同時部署 migration 或修改資料表結構。它**不包含照片／履歷實體檔案、MFA 金鑰、CA 私鑰、Worker token 或 MySQL 系統帳號與 GRANT**，不能取代完整災難備份。
 
@@ -22,13 +22,16 @@ SQL 備份期間可以查詢／寫入，但會增加 CPU／磁碟負載，不保
 | 檔案 | 用途 |
 |---|---|
 | `README.md` | 本份統一設定步驟，先讀這份即可。 |
-| `compose.yaml` | 完整既有服務配置，已包含手動 `certificates` 維護服務；SQL 備份不需要額外容器。 |
+| `compose.yaml` | 完整內網預設版，包含選用 Tunnel 與手動 certificates 維護服務；SQL 備份不需要額外容器。 |
+| `compose.with-tunnel.yaml` | 完整外網啟用版，待 Cloudflare／token／LINE 設定完成後才複製成原專案的 compose.yaml；不用改 COMPOSE_PROFILES。 |
+| `nas_appliance.py` | 新代理來源信任程式，唯讀掛入既有映像，無需 image build。 |
+| `CLOUDFLARE.md` | Cloudflare Access、兩個外網 hostname、token、NAS 套用與回復步驟。 |
 | `maintain-certificates.sh`、`nas_certificate_maintenance.py` | DSM 憑證維護程式。 |
 | `backup-database.sh` | DSM 不停機 SQL 備份程式。 |
 | `env-additions.example` | 可選憑證政策，**接受預設值就不用加入原 `.env`，不要另存取代 `.env`**。 |
 | `CERTIFICATES.md`、`SQL-BACKUPS.md` | 個別功能、錯誤與回復的詳細說明。 |
 | `OPERATIONS.md` | 原部署／重啟／更新／完整冷備份與獨立還原參考；這次安裝維護程式不需要執行重建或冷備份命令。 |
-| `cloudflared.example.yaml` | 原有選用 Tunnel 的設定範例，不含實際憑證；本次保留原 Tunnel 設定，不啟動新 LINE 工作。 |
+| Tunnel token | 不在交付包內；由你稍後保存至原專案 tunnel/token，依 CLOUDFLARE.md 設定權限。 |
 | `validation.json`、`SHA256SUMS` | 驗證來源、限制及交付檔案檢查碼。 |
 
 後續指令採以下路徑，請先確認：
@@ -40,18 +43,18 @@ SQL 備份期間可以查詢／寫入，但會增加 CPU／磁碟負載，不保
 | **SQL 備份目的地〔需填〕** | 範例 `/volume1/backup/labor-union-sql`；請替換成你建立的 NAS 獨立資料夾。不能在專案內或任何容器掛載路徑內。 |
 | **通知收件人〔需填〕** | DSM 設定 NAS 維運管理者信箱；不寫進 `.env` 或程式。 |
 
-**沒有新增必填網域。** 原 `.env` 的 `COMPOSE_PROJECT_NAME`、`NAS_IMAGE`、`NAS_DATA_ROOT`、`NAS_BIND_IP`、`NAS_PROXY_SUBNET`、`NAS_PROXY_API_IP`、LINE／Tunnel 設定與 `COMPOSE_PROFILES` 沿用；不要新增 `certificates` 到一般啟動 profiles。每日時間使用 DSM 時區，確認為 Asia/Taipei。
+**內網不改網域。啟用外網時，兩個自有網域 hostname 填在 Cloudflare 後台，不是新增 .env 必填值。** 原 `.env` 的 `COMPOSE_PROJECT_NAME`、`NAS_IMAGE`、`NAS_DATA_ROOT`、`NAS_BIND_IP`、`NAS_PROXY_SUBNET`、`NAS_PROXY_API_IP`、LINE／Tunnel 設定與 `COMPOSE_PROFILES` 沿用；不要新增 `certificates` 到一般啟動 profiles。每日時間使用 DSM 時區，確認為 Asia/Taipei。
 
 ## 三、File Station 放置檔案，保留原部署
 
-1. 先保存目前 NAS 的 `compose.yaml`／`.env` 至管理者保護的位置，作為設定回復參考；不要寄出／公開 `.env`。原有資料備份保留不動。
-2. 將本包解壓到電腦，或先用 File Station 解壓到獨立暫存資料夾。**只把以下四個檔案放到原專案目錄**：`compose.yaml`、`maintain-certificates.sh`、`nas_certificate_maintenance.py`、`backup-database.sh`。教學可留在電腦保存。不要更動原 `.env`／`tunnel`／資料目錄。
+1. 先保存目前 NAS 的 `compose.yaml`／`.env` 及已存在的同版 .py／.sh 維護程式至管理者保護的位置，作為設定回復參考；不要寄出／公開 `.env`。原有資料備份保留不動。
+2. 將本包解壓到電腦，或先用 File Station 解壓到獨立暫存資料夾。**先把以下五個檔案放到原專案目錄**：`compose.yaml`、`maintain-certificates.sh`、`nas_certificate_maintenance.py`、`backup-database.sh`、`nas_appliance.py`。外網另外保存 compose.with-tunnel.yaml，照 CLOUDFLARE.md 完成後才套用。教學可留在電腦保存。不要更動原 `.env`／`tunnel`／資料目錄。
 3. Compose 已包含現有服務及新的 certificate-maintenance profile，沒有 NanoCPUS、沒有公開 MySQL／Redis 埠。它沿用原 `.env` 及原 `${COMPOSE_PROJECT_NAME}_data` 網路。若你之後曾另外客製 NAS 的 Compose，先比較那些變更，不能把客製設定當成可以直接覆蓋；目前包依本專案已驗證的正式版本產生。
 4. 在原專案下建立 `certificate-maintenance` 資料夾；若已存在維護狀態就保留，**不要清空或用別份 CA 狀態覆蓋**。
 5. 建立 SQL 獨立備份資料夾。範例的 `backup` 是 DSM「控制台 → 共用資料夾」建立或既有的備份分享，再於 File Station 建立 `labor-union-sql`。
 6. 兩個新增資料夾設定 DSM ACL，移除一般使用者／工會帳號／容器執行身分及不適當繼承授權；僅必要管理者／系統可存取。程式、Compose、`.env` 及排程內容也只能由可信管理者修改。POSIX 700 不代替 DSM ACL。
 
-這次不用在 Container Manager 建立新專案、重建或重新啟動現有容器。憑證腳本會直接讀取原目錄這份 Compose 執行一次性 profile；現有 DB／Redis／API 繼續使用，尚未啟用的 LINE／Worker／Tunnel 保持停用。不要使用「清除／刪除資料卷」來套用檔案，也不要為這次維護更改原專案名稱。
+單純放置維護檔案不用建立新專案或重建容器；啟用新的 Tunnel／代理設定時，依 CLOUDFLARE.md 在原專案重建相關 API 容器，不重設 DB。憑證腳本會直接讀取原目錄這份 Compose 執行一次性 profile；現有 DB／Redis／API 繼續使用，尚未啟用的 LINE／Worker／Tunnel 保持停用。不要使用「清除／刪除資料卷」來套用檔案，也不要為這次維護更改原專案名稱。
 
 ## 四、一次性 DSM 權限準備
 
@@ -69,9 +72,11 @@ test -d certificate-maintenance
 test ! -L certificate-maintenance
 test -d /volume1/backup/labor-union-sql
 test ! -L /volume1/backup/labor-union-sql
-chown 0:0 certificate-maintenance maintain-certificates.sh nas_certificate_maintenance.py backup-database.sh /volume1/backup/labor-union-sql
+test -f nas_appliance.py
+chown 0:0 certificate-maintenance maintain-certificates.sh nas_certificate_maintenance.py backup-database.sh nas_appliance.py /volume1/backup/labor-union-sql
 chmod 700 certificate-maintenance /volume1/backup/labor-union-sql
 chmod 600 maintain-certificates.sh nas_certificate_maintenance.py backup-database.sh
+chmod 644 nas_appliance.py
 command -v docker
 command -v timeout
 command -v flock
@@ -140,10 +145,14 @@ echo 'Maintenance permissions and Compose syntax checked; no certificates or dat
 
 備份需要的帳密／金鑰與業務檔案保留在原資料卷。憑證維護目錄也須納入管理者保護的完整備份，SQL 日備份不會包含它。完整冷備份及新環境還原參考 OPERATIONS.md；這次不要執行正式還原／切換。所有排程都在 NAS 上，NAS 關機或通知本身故障時，不能保證寄信。
 
-## 九、之後回來設定時的核取清單
+## 九、選用 Cloudflare 外網入口
+
+維護／備份排程先完成，再依 [CLOUDFLARE.md](CLOUDFLARE.md) 設定雙入口。先保護完整管理 hostname，再把啟用版 Compose 放回原專案；原內網和網站帳號保留。只要尚未備妥 token／LINE 設定，就維持內網版，不放寬權限來讓它啟動。LINE Worker 仍在最後只做 --check。
+
+## 十、之後回來設定時的核取清單
 
 - [ ] 已保存原 Compose／.env，原專案名稱、資料卷與路徑沒有改。
-- [ ] 四個程式／Compose 已放原目錄，未覆蓋 `.env`、未重建容器或下載新映像。
+- [ ] 維護程式／Compose 已放原目錄，原 .env／資料保留；外網套用與 API 重建另依 CLOUDFLARE.md 核對。
 - [ ] 維護目錄、SQL 獨立目的地、POSIX 權限與 DSM ACL 已確認。
 - [ ] 一次性準備工作成功；完成後保持停用。
 - [ ] DSM 時區、通知測試與容量告警已確認。
@@ -153,6 +162,6 @@ echo 'Maintenance permissions and Compose syntax checked; no certificates or dat
 
 ## 驗證範圍
 
-整合包沿用先前通過的憑證功能 63 個情境、SQL 備份 9 個情境；這次以檔案雜湊確認完整 Compose 與三個程式逐位元一致，再驗合成環境的全 profiles Compose、教學命令與 ZIP 清單／檢查碼。沒有重新宣稱已驗證實際 DSM。
+本版新增明確代理來源信任、兩個 origin 網路、remote token-file 與不改 .env 的完整啟用版 Compose；實際測試結果見 validation.json。先完成必要本機測試才建立交付 ZIP；既有資料與實際 .env 不讀不改。Cloudflare 實網 Access／token／寄信與 DSM 驗收分別列為 NOT_RUN，不以本機模擬冒充已安全上線。
 
-工作區仍有兩個非本任務的既有測試歸屬問題，見 validation.json；不將整個工作區標成全部通過。DSM 排程、實際寄信、ACL、2 GB NAS 負載、GUI undefined 與 NAS 實際套用仍未驗收。本包無實際 `.env`／秘密、未操作 NAS、未建置／上傳映像。
+全工作區架構檢查結果及任務外既有問題見 validation.json，不將整個工作區標成全部通過。DSM 排程、實際寄信、ACL、2 GB NAS 負載、GUI undefined 與 NAS 實際套用仍未驗收。本包無實際 `.env`／秘密、未操作 NAS、未建置／上傳映像。
