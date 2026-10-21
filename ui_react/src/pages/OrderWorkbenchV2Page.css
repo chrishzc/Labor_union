@@ -1,4 +1,4 @@
-/* Beta composes the existing Orders cards and Tracker navigation. */
+/* Workbench list and shared stage navigation. */
 .order-v2-page {
   display: flex;
   flex-direction: column;
@@ -10,7 +10,7 @@
 .order-v2-overview-details > summary { cursor: pointer; font-weight: 600; color: var(--md-sys-color-on-surface-variant); }
 .order-v2-overview-details[open] > summary { margin-bottom: 16px; }
 .order-v2-overview-details > summary:focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 4px; }
-.order-v2-stage-overview > h2 { margin: 0 0 16px; font-size: 1rem; font-weight: 600; color: var(--md-sys-color-on-surface-variant); }
+.order-v2-stage-overview > h2 { margin: 0 0 10px; font-size: 1rem; font-weight: 600; color: var(--md-sys-color-on-surface-variant); }
 
 .order-v2-page > .orders-page-header {
   margin-bottom: 0;
@@ -46,7 +46,7 @@
 
 .order-v2-stage-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   position: static;
   flex-wrap: wrap;
@@ -54,7 +54,10 @@
   overscroll-behavior-inline: contain;
   scrollbar-gutter: stable;
   margin-bottom: 0;
-  padding-bottom: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   min-width: 0;
 }
 
@@ -62,7 +65,8 @@
   flex: 0 0 auto;
   justify-content: center;
   min-width: 0;
-  padding: 10px 7px;
+  padding: 6px 7px;
+  min-height: 36px;
   font-size: .875rem;
 }
 
@@ -75,6 +79,8 @@
 .order-v2-stage-number {
   font-variant-numeric: tabular-nums;
 }
+
+.order-v2-stage-strip .pipeline-step-badge { padding: 0 3px; border: 0; background: transparent; color: inherit; }
 
 .order-v2-results {
   display: flex;
@@ -446,7 +452,7 @@ button.order-v2-lane {
 .order-v2-lane > b { color: var(--md-sys-color-on-primary-container); }
 
 @media (max-width: 1000px) {
-  .order-v2-stage-strip { position: static; }
+  .order-v2-stage-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -533,3 +539,37 @@ button.order-v2-lane {
 @media (max-width: 760px) {
   .workbench-statistics { padding: 10px; }
 }
+
+.order-v2-page .order-v2-search { flex: none; width: 100%; flex-wrap: wrap; }
+.order-v2-search .orders-search-input-box { flex: 1 1 280px; }
+.order-v2-page .order-v2-secondary-button { background: var(--md-sys-color-surface-container); color: var(--md-sys-color-primary); }
+.order-v2-page .order-v2-secondary-button:hover:not(:disabled) { background: var(--md-sys-color-primary-container); }
+.order-v2-page .order-v2-results { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.order-v2-results .pipeline-stage-header { padding-bottom: 0; border: 0; }
+.order-v2-results .pipeline-stage-title { font-size: 1.125rem; }
+.order-v2-results .pipeline-stage-desc { font-size: .8125rem; }
+.order-v2-result-count { padding: 0; background: transparent; color: var(--md-sys-color-on-surface-variant); }
+.order-v2-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #ead3c8; border-radius: 10px; background: var(--md-sys-color-surface-container); }
+.order-v2-table { width: 100%; min-width: 1050px; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: .875rem; }
+.order-v2-table th, .order-v2-table td { padding: 9px 12px; border-bottom: 1px solid #f1ddd5; vertical-align: middle; overflow-wrap: anywhere; }
+.order-v2-table th { background: #fff7ed; color: #7c2d12; font-weight: 600; white-space: nowrap; }
+.order-v2-table th:nth-child(1) { width: 13%; }
+.order-v2-table th:nth-child(2) { width: 9%; }
+.order-v2-table th:nth-child(3) { width: 22%; }
+.order-v2-table th:nth-child(4) { width: 13%; }
+.order-v2-table th:nth-child(5) { width: 13%; }
+.order-v2-table th:nth-child(7) { width: 82px; }
+.order-v2-table tbody tr:nth-child(even) { background: #fffcfa; }
+.order-v2-table tbody tr:last-child td { border-bottom: 0; }
+.order-v2-table .order-v2-case-entry { cursor: pointer; }
+.order-v2-table .order-v2-case-entry:hover:not([aria-disabled="true"]) { background: #fff0e6; }
+.order-v2-table .order-v2-case-entry:focus-visible { outline: 3px solid var(--md-sys-color-focus); outline-offset: -3px; }
+.order-v2-table .order-v2-case-entry[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.order-v2-case-number { font-variant-numeric: tabular-nums; }
+.order-v2-service-dates small, .order-v2-row-meta { display: block; color: var(--md-sys-color-on-surface-variant); font-size: .75rem; }
+.order-v2-reminders .order-v2-notice { padding: 0; border-radius: 0; background: transparent; font-size: .8125rem; }
+.order-v2-reminders .order-v2-notice + .order-v2-notice { margin-top: 6px; }
+.order-v2-reminders .order-v2-notice strong, .order-v2-reminders .order-v2-notice small { font-size: .75rem; font-weight: 400; }
+.order-v2-open-case { display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; min-height: 32px; border: 0; background: transparent; color: var(--md-sys-color-primary); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.order-v2-open-case:hover:not(:disabled) { color: var(--md-sys-color-primary-hover); text-decoration: underline; }
+.order-v2-table-wrap:focus-visible { outline: 3px solid var(--md-sys-color-focus); outline-offset: 2px; }

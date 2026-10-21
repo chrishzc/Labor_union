@@ -184,8 +184,8 @@ function summaryPage(items: unknown[]) {
 }
 
 function cardFor(caseNo: string): HTMLElement {
-  const card = screen.getByText(caseNo).closest('article');
-  if (!(card instanceof HTMLElement)) throw new Error(`找不到 ${caseNo} 案件卡`);
+  const card = screen.getByText(caseNo).closest('tr');
+  if (!(card instanceof HTMLElement)) throw new Error(`找不到 ${caseNo} 案件列`);
   return card;
 }
 
@@ -281,7 +281,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(within(cardFor('CASE-RESIDENCE')).queryByText('手機')).not.toBeInTheDocument();
   });
 
-  it('案件卡只顯示目前階段通知，不提前顯示未來客戶結算阻塞', async () => {
+  it('案件列只顯示目前階段通知，不提前顯示未來客戶結算阻塞', async () => {
     const current = timeline('CASE-CURRENT-NOTICE', 'confirmed_service_dates');
     const withFutureSettlementBlocker = {
       ...current,
@@ -307,12 +307,12 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
 
     await screen.findByText('CASE-CURRENT-NOTICE');
     const card = cardFor('CASE-CURRENT-NOTICE');
-    expect(within(card).getByText('服務日期確認')).toBeInTheDocument();
+    expect(within(card).getByTitle('服務日期確認')).toBeInTheDocument();
     expect(within(card).queryByText('Client Finance 子投影尚未完成。')).not.toBeInTheDocument();
     expect(within(card).queryByText(/阻塞 · 客戶端結算/)).not.toBeInTheDocument();
   });
 
-  it('移除阻塞篩選，搜尋清除後保留所有案件與卡片阻塞原因', async () => {
+  it('移除阻塞篩選，搜尋清除後保留所有案件與清單阻塞原因', async () => {
     clientMocks.loadSummaries.mockResolvedValue(summaryPage([]));
     clientMocks.getCoreStageTimelines.mockResolvedValue(corePage([
       timeline('CASE-BLOCKED', 'matching_pool', 'blocked', { blockers: [{ code: 'needs_data', message: '資料待補' }] }),
@@ -330,8 +330,9 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(within(cardFor('CASE-BLOCKED')).getByText('資料待補')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /有阻塞/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '全部案件' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '開啟案件 CASE-OPEN 案件處理' })).toBe(cardFor('CASE-OPEN'));
-    expect(within(cardFor('CASE-OPEN')).queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByRole('row', { name: '開啟案件 CASE-OPEN 案件處理' })).toBe(cardFor('CASE-OPEN'));
+    expect(screen.getByRole('table', { name: '待辦案件清單' })).toBeInTheDocument();
+    expect(within(cardFor('CASE-OPEN')).getByRole('button', { name: '開啟案件 CASE-OPEN 案件處理' })).toBeEnabled();
     expect(screen.queryByLabelText('案件顯示方式')).not.toBeInTheDocument();
   });
 

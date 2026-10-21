@@ -11,6 +11,7 @@ import {
   type ChangeEvent,
   type FC,
 } from 'react';
+import { ArrowRight, Search } from 'lucide-react';
 import './OrdersPage.css';
 import './OrderTrackerPage.css';
 import './OrderWorkbenchV2Page.css';
@@ -245,21 +246,6 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
           <h1 className="page-title">待辦看板</h1>
           <p className="page-subtitle">找到需要處理的案件，從目前步驟接著完成。</p>
         </div>
-        <div className="orders-search-wrapper">
-          <label className="orders-search-input-box">
-            <span className="orders-search-icon" aria-hidden="true">🔍</span>
-            <input
-              aria-label="搜尋案件編號或姓名"
-              value={search}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-              placeholder="搜尋案件編號或姓名"
-            />
-          </label>
-          {search && <button type="button" className="tracker-reload-button" onClick={() => setSearch('')}>清除搜尋</button>}
-          <button className="tracker-reload-button" type="button" disabled={loading || refreshing} onClick={refreshProjection}>
-            重新整理
-          </button>
-        </div>
       </header>
 
       <details className="order-v2-overview-details">
@@ -284,14 +270,31 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
         </section>
       </div>
 
+        <form className="orders-search-wrapper order-v2-search" onSubmit={(event) => event.preventDefault()} role="search" aria-label="搜尋待辦案件">
+          <label className="orders-search-input-box">
+            <Search className="orders-search-icon" size={18} aria-hidden="true" />
+            <input
+              aria-label="搜尋案件編號或姓名"
+              value={search}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+              placeholder="搜尋案件編號或姓名"
+            />
+          </label>
+          <button type="submit" className="tracker-reload-button">搜尋</button>
+          <button type="button" className="tracker-reload-button order-v2-secondary-button" onClick={clearFilters}>清除篩選</button>
+          <button className="tracker-reload-button order-v2-secondary-button" type="button" disabled={loading || refreshing} onClick={refreshProjection}>
+            重新整理
+          </button>
+        </form>
+
       <section className="pipeline-stage-section order-v2-results" aria-label="案件工作清單">
       <div className="pipeline-stage-header">
         <div>
           <h2 className="pipeline-stage-title">
-            {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : '進行中訂單'}
+            {selectedDefinition ? `${selectedDefinition.ordinal}. ${selectedDefinition.label}` : '進行中案件'}
           </h2>
           <p className="pipeline-stage-desc">
-            查看所有進行中案件，或依作業階段篩選待辦。
+            點選案件列，進入案件處理。
           </p>
         </div>
         <div className="order-v2-result-count" aria-live="polite">
@@ -300,11 +303,6 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
         </div>
       </div>
 
-      {(search || selectedStage) && (
-        <div className="order-v2-subfilters" aria-label="待辦篩選">
-          <button type="button" onClick={clearFilters}>清除篩選</button>
-        </div>
-      )}
       {summaryQueryFailed && !loading && !error && (
         <div className="order-v2-summary-warning" role="status">
           案件摘要查詢失敗；案件分類仍可查閱，但客戶、日期與月嫂摘要暫時不可用。
@@ -326,7 +324,18 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
       )}
       {!loading && displayedCount > 0 && (
         <fieldset disabled={refreshing || error !== null} style={{ border: 0, padding: 0, margin: 0 }}>
-        <div className="orders-grid order-v2-orders-grid">
+        <div className="order-v2-table-wrap" tabIndex={0} role="region" aria-label="待辦案件清單，可橫向捲動">
+        <table className="order-v2-table" aria-label="待辦案件清單">
+          <thead><tr>
+            <th scope="col">案件編號</th>
+            <th scope="col">客戶姓名</th>
+            <th scope="col">約定服務期間</th>
+            <th scope="col">指派月嫂</th>
+            <th scope="col">目前待辦</th>
+            <th scope="col">提醒</th>
+            <th scope="col">操作</th>
+          </tr></thead>
+          <tbody>
           {displayedItems.map((item) => {
             const summary = summaryIndex.get(item.id) ?? null;
             const stage = item.currentStage;
@@ -336,46 +345,38 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
               if (!entryDisabled) setSelectedDrawer({ caseNo: item.id, branchType: item.branchType });
             };
             return (
-              <article
-                className="order-card order-v2-case-entry"
+              <tr
+                className="order-v2-case-entry"
                 key={item.id}
-                role="button"
                 tabIndex={entryDisabled ? -1 : 0}
                 aria-label={`開啟案件 ${item.id} 案件處理`}
                 aria-disabled={entryDisabled}
                 onClick={openWork}
                 onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     openWork();
                   }
                 }}
               >
-                <div className="order-v2-card-primary">
-                  <div className="order-card-top">
-                    <strong className="order-id-badge">{item.id}</strong>
-                    <span className={`order-status-pill order-v2-status status-${stage?.status ?? item.branchType}`}>
-                      {item.statusLabel}
-                    </span>
-                  </div>
-                  {summary ? (
-                    <div className="order-card-body order-v2-card-summary">
-                      <div className="order-client-title"><span aria-hidden="true">👤 </span><span>{summary.clientName.trim() || '客戶姓名未登錄'}</span></div>
-                      <div>📅 約定服務：<span>{summary.serviceRange}</span>（{summary.serviceDaysLabel}）</div>
-                      {(summary.actualStartDate !== null || summary.actualEndDate !== null) && (
-                        <div>📅 實際服務：<span>{formatServiceRange(summary.actualStartDate, summary.actualEndDate)}</span></div>
-                      )}
-                      <div className="order-doula-box">👩‍🍼 指派月嫂：<strong>{summary.assignedDoulaDisplay}</strong></div>
-                    </div>
-                  ) : (
-                    <div className="order-v2-business-summary unavailable" role="note">
-                      <strong>案件摘要不可用</strong>
-                      <span>{summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="order-v2-card-task">
-                  <div className="order-v2-next-task"><small>目前待辦</small><strong>{stage?.label ?? item.statusLabel}</strong></div>
+                <td className="order-v2-case-number">{item.id}</td>
+                <td>{summary ? summary.clientName.trim() || '客戶姓名未登錄' : <span title={summaryUnavailableMessage(summaryLoading, summaryQueryFailed)}>案件摘要不可用</span>}</td>
+                <td className="order-v2-service-dates">
+                  {summary ? <>
+                    <span>{summary.serviceRange}</span>
+                    <small>{summary.serviceDaysLabel}</small>
+                    {(summary.actualStartDate !== null || summary.actualEndDate !== null) && (
+                      <small>實際服務：<span>{formatServiceRange(summary.actualStartDate, summary.actualEndDate)}</span></small>
+                    )}
+                  </> : '—'}
+                </td>
+                <td>{summary?.assignedDoulaDisplay ?? '—'}</td>
+                <td title={stage?.label ?? item.statusLabel}>
+                  <span>{stage ? coreStageDefinition(stage.code).shortLabel : item.statusLabel}</span>
+                  {stage && <small className="order-v2-row-meta">{item.statusLabel}</small>}
+                </td>
+                <td className="order-v2-reminders">
                   {intakeReviews.get(item.id) && (
                     <div className="order-v2-notice warning">
                       <strong>進件欄位待修正</strong>
@@ -393,11 +394,20 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
                       {item.blockers.length + item.warnings.length > 1 && <small>另有 {item.blockers.length + item.warnings.length - 1} 項，請在案件工作中查看。</small>}
                     </div>
                   )}
-                  <span className="order-v2-card-open-hint" aria-hidden="true">開啟案件處理 →</span>
-                </div>
-              </article>
+                  {!intakeReviews.get(item.id) && !(intakeReviewsError && item.lifecycleStatus === '待補件') && !primaryNotice && <span className="order-v2-row-meta">—</span>}
+                </td>
+                <td>
+                  <button type="button" className="order-v2-open-case" disabled={entryDisabled}
+                    aria-label={`開啟案件 ${item.id} 案件處理`}
+                    onClick={(event) => { event.stopPropagation(); openWork(); }}>
+                    處理 <ArrowRight size={15} aria-hidden="true" />
+                  </button>
+                </td>
+              </tr>
             );
           })}
+          </tbody>
+        </table>
         </div>
         </fieldset>
       )}
