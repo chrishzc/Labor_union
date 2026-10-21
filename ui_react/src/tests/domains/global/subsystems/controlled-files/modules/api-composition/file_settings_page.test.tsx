@@ -1,14 +1,64 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileSettingsPage } from '../../../../../../../pages/FileSettingsPage';
 import { fileSettingsClient, type FileSettings } from '../../../../../../../api/system/file_settings_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 
 const current: FileSettings = { version: 2, photo_max_bytes: 10485760, resume_max_bytes: 20971520,
   timeout_seconds: 60, container_root: '/data/controlled-files' };
 
 describe('NAS file settings', () => {
   beforeEach(() => { vi.restoreAllMocks(); vi.spyOn(fileSettingsClient, 'read').mockResolvedValue(current); });
+
+  function LeaveButton({ onLeave }: { onLeave: () => void }) {
+    const { requestLeave } = useUnsavedNavigation();
+    return <button onClick={() => requestLeave(onLeave)}>離開設定</button>;
+  }
+
+  it('提醒視窗呼叫原設定 API，等成功回應後才離開，重新掛載讀取已儲存值', async () => {
+    let acknowledge!: (value: FileSettings) => void;
+    const response = new Promise<FileSettings>(resolve => { acknowledge = resolve; });
+    const save = vi.spyOn(fileSettingsClient, 'save').mockReturnValue(response);
+    const leave = vi.fn();
+    const result = render(<UnsavedChangesProvider><FileSettingsPage /><LeaveButton onLeave={leave} /></UnsavedChangesProvider>);
+    const timeout = await screen.findByLabelText('檔案操作等待時間（秒）');
+    fireEvent.change(timeout, { target: { value: '120' } });
+    fireEvent.click(screen.getByRole('button', { name: '離開設定' }));
+    const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeEnabled();
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    expect(save).toHaveBeenCalledWith({ photo_max_bytes: current.photo_max_bytes,
+      resume_max_bytes: current.resume_max_bytes, timeout_seconds: 120 }, current.version);
+    expect(leave).not.toHaveBeenCalled();
+    expect(within(warning()).getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    const saved = { ...current, version: 3, timeout_seconds: 120 };
+    vi.mocked(fileSettingsClient.read).mockResolvedValue(saved);
+    await act(async () => { acknowledge(saved); await response; });
+    await waitFor(() => expect(leave).toHaveBeenCalledOnce());
+    result.unmount();
+    render(<FileSettingsPage />);
+    expect(await screen.findByLabelText('檔案操作等待時間（秒）')).toHaveValue(120);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['版本衝突', new ApiHttpError(409, 'file_settings_stale', 'stale', false, null)],
+    ['連線中斷', new Error('network lost')],
+  ])('提醒視窗儲存遇到%s時保留輸入且不離開', async (_label, failure) => {
+    const save = vi.spyOn(fileSettingsClient, 'save').mockRejectedValue(failure);
+    const leave = vi.fn();
+    render(<UnsavedChangesProvider><FileSettingsPage /><LeaveButton onLeave={leave} /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('檔案操作等待時間（秒）'), { target: { value: '120' } });
+    fireEvent.click(screen.getByRole('button', { name: '離開設定' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    fireEvent.click(within(warning).getByRole('button', { name: '儲存變更並離開' }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    await screen.findByText(/設定已變更或正在儲存|儲存結果尚未確認/);
+    expect(screen.getByLabelText('檔案操作等待時間（秒）')).toHaveValue(120);
+    expect(leave).not.toHaveBeenCalled();
+  });
 
   it('shows the actual path read-only and saves only size and timeout after preview', async () => {
     const save = vi.spyOn(fileSettingsClient, 'save').mockResolvedValue({ ...current, version: 3,

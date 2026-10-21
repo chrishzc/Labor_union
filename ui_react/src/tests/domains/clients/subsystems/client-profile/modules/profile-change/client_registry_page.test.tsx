@@ -732,22 +732,81 @@ describe('Client registry owner editing', () => {
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
-  it('saves an already previewed client change before completing drawer close', async () => {
-    let saved = false;
-    mocks.query.mockImplementation(async () => ({ ...detail, client: { ...detail.client,
-      version: saved ? 3 : 2, values: { ...detail.client.values, phone: saved ? '0933333333' : '0911111111' } } }));
-    mocks.apply.mockImplementation(async () => { saved = true; return {}; });
+  it.each([false, true])('saves a client change from the warning (previous preview: %s)', async (previewed) => {
+    let acknowledge!: () => void;
+    let finishReadback!: () => void;
+    const receipt = new Promise<void>(resolve => { acknowledge = resolve; });
+    const readback = new Promise<void>(resolve => { finishReadback = resolve; });
+    const savedDetail = { ...detail, client: { ...detail.client, version: 3,
+      values: { ...detail.client.values, phone: '0933333333' } } };
+    mocks.query.mockResolvedValueOnce(detail).mockImplementation(async () => { await readback; return savedDetail; });
+    mocks.apply.mockReturnValue(receipt);
     window.location.hash = '#clients?case=CASE-001';
     render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
     const phone = await screen.findByLabelText('電話（手機／市話）');
     fireEvent.change(phone, { target: { value: '0933333333' } });
-    fireEvent.click(within(phone.closest('section')!).getByRole('button', { name: '預覽變更' }));
-    await waitFor(() => expect(within(phone.closest('section')!).getByRole('button', { name: '確認儲存' })).toBeEnabled());
+    if (previewed) {
+      fireEvent.click(within(phone.closest('section')!).getByRole('button', { name: '預覽變更' }));
+      await waitFor(() => expect(within(phone.closest('section')!).getByRole('button', { name: '確認儲存' })).toBeEnabled());
+    }
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
-    fireEvent.click(within(screen.getByRole('dialog', { name: '尚有未儲存的變更' })).getByRole('button', { name: '儲存變更' }));
+    const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    expect(phone).toBeInTheDocument();
+    expect(mocks.query).toHaveBeenCalledOnce();
+    await act(async () => { acknowledge(); await receipt; });
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledTimes(2));
+    expect(phone).toBeInTheDocument();
+    expect(within(warning()).getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    await act(async () => { finishReadback(); await readback; });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(mocks.apply).toHaveBeenCalledOnce();
-    expect(saved).toBe(true);
+    expect(mocks.preview).toHaveBeenCalledOnce();
+    expect(mocks.apply.mock.calls[0].slice(0, 5)).toEqual(['CASE-001', 'profile', { phone: '0933333333' }, 2, 'a'.repeat(64)]);
+    fireEvent.click(screen.getByRole('row', { name: '開啟案件 CASE-001 詳細資料' }));
+    expect(await screen.findByLabelText('電話（手機／市話）')).toHaveValue('0933333333');
+  });
+
+  it('does not apply or leave when the warning-triggered backend preview rejects the changes', async () => {
+    mocks.preview.mockRejectedValue(new ApiHttpError(422, 'invalid_phone', '電話格式不符'));
+    window.location.hash = '#clients?case=CASE-001';
+    render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
+    const phone = await screen.findByLabelText('電話（手機／市話）');
+    fireEvent.change(phone, { target: { value: '0933333333' } });
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    fireEvent.click(within(warning).getByRole('button', { name: '儲存變更並離開' }));
+    await screen.findByText(/電話格式不符/);
+    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(phone).toHaveValue('0933333333');
+    expect(warning).toBeInTheDocument();
+  });
+
+  it('saves questionnaire and care changes using the fresh shared owner version between writes', async () => {
+    let stored = structuredClone(detail);
+    mocks.query.mockImplementation(async () => structuredClone(stored));
+    mocks.preview.mockImplementation(async (_caseNo, _owner, changes, version) => ({
+      owner: 'client_beclass', aggregate_identity: 'CASE-001', current_version: version,
+      before: {}, after: changes, preview_fingerprint: 'b'.repeat(64),
+    }));
+    mocks.apply.mockImplementation(async (_caseNo, _owner, changes) => {
+      stored.beclass.version += 1;
+      if ('email' in changes) Object.assign(stored.beclass.values, changes);
+      else Object.assign(stored.order_information.values, changes);
+      return {};
+    });
+    window.location.hash = '#clients?case=CASE-001';
+    render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('BeClass Email'), { target: { value: 'synthetic@example.test' } });
+    fireEvent.change(screen.getByLabelText('飲食習慣與中藥接受度'), { target: { value: '合成測試變更' } });
+    fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '尚有未儲存的變更' })).getByRole('button', { name: '儲存變更並離開' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mocks.apply).toHaveBeenCalledTimes(2);
+    expect(mocks.preview.mock.calls.map(call => call[3])).toEqual([3, 4]);
+    expect(mocks.apply.mock.calls.map(call => call[3])).toEqual([3, 4]);
+    expect(stored.beclass.values.email).toBe('synthetic@example.test');
+    expect(stored.order_information.values.dietary_habits).toBe('合成測試變更');
   });
 
   it('locks closing during Apply and retries only readback after confirmed commit', async () => {

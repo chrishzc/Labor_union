@@ -1,5 +1,6 @@
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StaffRegistryEditor } from '../../../../../../../components/StaffRegistryEditor';
 import { STAFF_PROFILE } from './fixtures/staff_profile_contract_fixtures';
@@ -33,6 +34,36 @@ describe('Staff registry owner editing', () => {
     mocks.previewBank.mockResolvedValue({ staff_id: STAFF_PROFILE.staff_id, current_version: STAFF_PROFILE.bank_accounts_version, operation: 'add', before: null, after: { account_id: null, bank_code: '812', branch_code: '0012', account_last4: '7890', is_primary: false, is_active: true }, preview_fingerprint: 'b'.repeat(64) });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('saves profile changes directly from the warning without a separate preview click', async () => {
+    mocks.previewProfile.mockResolvedValue({ staff_id: 11, current_version: 2,
+      before: { union_no: 'A001' }, after: { union_no: 'Ab0007' }, preview_fingerprint: 'a'.repeat(64) });
+    mocks.applyProfile.mockResolvedValue({});
+    let finishReadback!: () => void;
+    const readback = new Promise<void>(resolve => { finishReadback = resolve; });
+    const leave = vi.fn();
+    function Harness() {
+      const [profile, setProfile] = useState(STAFF_PROFILE);
+      return <><StaffRegistryEditor profile={profile} showResume={false} onUpdated={async () => {
+        await readback;
+        setProfile({ ...STAFF_PROFILE, union_no: 'Ab0007', profile_version: 3 });
+      }} /><LeaveProbe leave={leave} /></>;
+    }
+    render(<UnsavedChangesProvider><Harness /></UnsavedChangesProvider>);
+    fireEvent.change(screen.getByLabelText('公會編號'), { target: { value: 'Ab0007' } });
+    fireEvent.click(screen.getByRole('button', { name: '離開名冊' }));
+    const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    const save = within(warning).getByRole('button', { name: '儲存變更並離開' });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.applyProfile).toHaveBeenCalledOnce());
+    expect(mocks.previewProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2);
+    expect(mocks.applyProfile).toHaveBeenCalledWith(11, { union_no: 'Ab0007' }, 2, 'a'.repeat(64), '', expect.any(String));
+    expect(leave).not.toHaveBeenCalled();
+    await act(async () => { finishReadback(); await readback; });
+    await waitFor(() => expect(leave).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText('公會編號')).toHaveValue('Ab0007');
+  });
 
   it.each(['', '   ', '設定公會編號'])('saves the profile with optional notes %j', async (note) => {
     mocks.previewProfile.mockResolvedValue({ staff_id: 11, current_version: 2, before: { union_no: 'A001' }, after: { union_no: 'Ab0007' }, preview_fingerprint: 'a'.repeat(64) });

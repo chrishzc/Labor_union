@@ -1,4 +1,4 @@
-.unsaved-dialog { border: 1px solid var(--md-sys-color-outline-variant, #d7dce2); border-radius: 16px; padding: 24px; width: min(780px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; color: var(--md-sys-color-on-surface, #20272e); background: var(--md-sys-color-surface, white); box-sizing: border-box; }
+.unsaved-dialog { position: fixed; inset: 0; margin: auto; border: 1px solid var(--md-sys-color-outline-variant, #d7dce2); border-radius: 16px; padding: 24px; width: min(780px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; color: var(--md-sys-color-on-surface, #20272e); background: var(--md-sys-color-surface, white); box-sizing: border-box; }
 .unsaved-dialog::backdrop { background: #10182088; }
 .unsaved-dialog h2 { margin-top: 0; font-size: 1.35rem; }
 .unsaved-dialog h3 { font-size: 1rem; margin: 20px 0 8px; }

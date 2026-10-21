@@ -1,3 +1,7 @@
+/**
+ * File: CaseArchitectureBootstrapRepairPanel.tsx
+ * Description: 呈現案件初始帳務與排班資料補建預覽、條件補登與套用介面。
+ */
 import { useUnsavedDraft } from './UnsavedChanges';
 import React, { useEffect, useRef, useState } from 'react';
 
@@ -57,13 +61,13 @@ export const CaseArchitectureBootstrapRepairPanel: React.FC<{
     void caseArchitectureBootstrapClient.status(caseNo)
       .then(async (value) => {
         if (!active) return;
-        setStatus(value);
         if (value.domain_blockers.some(isTermsRepairBlocker)) {
           const completion = await orderIntakeCompletionClient.previewCompletion(caseNo);
           if (!active) return;
           setStartDate(completion.current_start_date ?? '');
           setServiceDays(completion.current_service_days ? String(completion.current_service_days) : '');
         }
+        setStatus(value);
       })
       .catch((error) => { if (active) setMessage(error instanceof Error ? error.message : '無法讀取案件初始資料狀態。'); })
       .finally(() => { if (active) setBusy(null); });

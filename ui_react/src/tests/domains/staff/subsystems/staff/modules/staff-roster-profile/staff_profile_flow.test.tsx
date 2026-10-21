@@ -1,5 +1,8 @@
 /** Verify the selected Staff drawer renders the bounded authenticated profile. */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
+import { staffRegistryClient } from '../../../../../../../api/staff_registry/staff_registry_client';
+import { staffQualificationEditingClient } from '../../../../../../../api/staff/qualification_editing_client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../../api/staff_lifecycle/staff_lifecycle_client';
@@ -56,6 +59,79 @@ describe('Staff roster profile flow', () => {
           : section
       )),
     });
+  });
+
+  it('opens and closes fully loaded Staff details without changes, and recognizes restored input', async () => {
+    const facts = { special_skills: [], certifications: [], transportation: [], has_massage_cert: null, care_babies: 2 };
+    vi.spyOn(staffQualificationEditingClient, 'query').mockResolvedValue({ staff_id: 11,
+      before: facts, after: facts, snapshot_fingerprint: 'a'.repeat(64), preview_fingerprint: null });
+    const apply = vi.spyOn(staffRegistryClient, 'applyProfile');
+    render(<UnsavedChangesProvider><StaffPage /></UnsavedChangesProvider>);
+    for (const [round, editAndRestore] of [false, false, true].entries()) {
+      fireEvent.click(await screen.findByRole('button', { name: `查看 ${round === 0 ? '去敏人員甲' : STAFF_PROFILE.name} 的詳情` }));
+      const number = await screen.findByLabelText('公會編號');
+      expect(await screen.findByLabelText('最多照顧寶寶數')).toHaveValue(2);
+      await screen.findByRole('combobox', { name: '可承接區域值1' });
+      if (editAndRestore) {
+        fireEvent.change(number, { target: { value: 'Synthetic-change' } });
+        fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+        const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+        expect(warning).toHaveTextContent('Synthetic-change');
+        fireEvent.click(within(warning).getByRole('button', { name: '繼續編輯' }));
+        fireEvent.change(number, { target: { value: 'A001' } });
+      }
+      fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    }
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it.each(['qualification', 'preferences'])('does not report changes when closing an untouched Staff drawer while %s is loading', async (pendingQuery) => {
+    if (pendingQuery === 'qualification') vi.spyOn(staffQualificationEditingClient, 'query').mockReturnValue(new Promise(() => {}));
+    else vi.mocked(staffCasePreferenceManualClient.query).mockReturnValue(new Promise(() => {}));
+    render(<UnsavedChangesProvider><StaffPage /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    await screen.findByLabelText('公會編號');
+    if (pendingQuery === 'qualification') expect(screen.getByText('正在載入專業資格…')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each(['saved', 'readback_failed'])('waits for real Staff profile readback before leaving (%s)', async (outcome) => {
+    let finishReadback!: (value: typeof STAFF_PROFILE) => void;
+    let rejectReadback!: (error: Error) => void;
+    const readback = new Promise<typeof STAFF_PROFILE>((resolve, reject) => { finishReadback = resolve; rejectReadback = reject; });
+    vi.mocked(staffProfileClient.query).mockResolvedValueOnce(STAFF_PROFILE).mockReturnValue(readback);
+    vi.spyOn(staffRegistryClient, 'previewProfile').mockResolvedValue({ staff_id: 11, current_version: 2,
+      before: { union_no: 'A001' }, after: { union_no: 'Ab0007' }, preview_fingerprint: 'a'.repeat(64) });
+    const apply = vi.spyOn(staffRegistryClient, 'applyProfile').mockResolvedValue({
+      staff_id: 11, resulting_version: 3, changed_fields: ['union_no'],
+      preview_fingerprint: 'a'.repeat(64), idempotency_key: 'synthetic', replayed: false, readback: { union_no: 'Ab0007' },
+    });
+    render(<UnsavedChangesProvider><StaffPage /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
+    const number = await screen.findByLabelText('公會編號');
+    fireEvent.change(number, { target: { value: 'Ab0007' } });
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變更' });
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    await waitFor(() => expect(staffProfileClient.query).toHaveBeenCalledTimes(2));
+    expect(warning()).toBeInTheDocument();
+    expect(number).toBeInTheDocument();
+    expect(within(warning()).getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    if (outcome === 'readback_failed') {
+      await act(async () => { rejectReadback(new Error('合成回讀失敗')); await readback.catch(() => undefined); });
+      expect(warning()).toBeInTheDocument();
+      expect(number).toHaveValue('Ab0007');
+      expect(apply).toHaveBeenCalledOnce();
+      return;
+    }
+    const saved = { ...STAFF_PROFILE, union_no: 'Ab0007', profile_version: 3 };
+    await act(async () => { finishReadback(saved); await readback; });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(apply).toHaveBeenCalledOnce();
+    expect(screen.getByText('Ab0007')).toBeInTheDocument();
   });
 
   it('shows the search result count and restores the loaded count after clearing an empty search', async () => {

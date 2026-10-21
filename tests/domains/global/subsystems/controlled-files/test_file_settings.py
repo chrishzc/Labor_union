@@ -4,6 +4,7 @@ from threading import Barrier
 import json
 
 import pytest
+from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -54,6 +55,35 @@ def test_real_query_save_readback_and_readonly_runtime_path(settings_environment
     monkeypatch.setenv('FILE_PHOTO_MAX_BYTES', '1')
     assert file_transfer_settings().photo_max_bytes == 30 * 1048576
     assert 'nas_path' not in json.loads(settings_environment.read_text(encoding='utf-8'))
+
+
+def test_settings_route_only_acknowledges_persisted_values_and_rejects_stale(settings_environment):
+    # Exercise the actual route/owner/storage without an HTTP server or business DB.
+    saved = file_settings.update_settings(file_settings.SaveFileSettings(**body())).data
+    persisted = json.loads(settings_environment.read_text(encoding='utf-8'))
+    assert saved.version == persisted['version'] == 1
+    assert saved.timeout_seconds == persisted['timeout_seconds'] == 60
+    assert file_settings.read_settings().data == saved
+    before = settings_environment.read_bytes()
+    with pytest.raises(HTTPException) as rejected:
+        file_settings.update_settings(file_settings.SaveFileSettings(**body()))
+    assert rejected.value.status_code == 409
+    assert settings_environment.read_bytes() == before
+
+
+def test_settings_route_write_failure_never_returns_success(settings_environment, monkeypatch):
+    from infrastructure.runtime import file_transfer_settings as settings_module
+    file_settings.update_settings(file_settings.SaveFileSettings(**body()))
+    before = settings_environment.read_bytes()
+    def fail_replace(*_args):
+        raise PermissionError('synthetic persistence failure')
+    monkeypatch.setattr(settings_module.os, 'replace', fail_replace)
+    payload = body(); payload.update(expected_version=1, timeout_seconds=120)
+    with pytest.raises(HTTPException) as rejected:
+        file_settings.update_settings(file_settings.SaveFileSettings(**payload))
+    assert rejected.value.status_code == 503
+    assert settings_environment.read_bytes() == before
+    assert file_settings.read_settings().data.timeout_seconds == 60
 
 
 def test_nonroot_cannot_read_or_save_paths_but_can_read_upload_limits(settings_environment):

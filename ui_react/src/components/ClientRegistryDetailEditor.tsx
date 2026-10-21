@@ -127,7 +127,14 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
   const dirty = Object.values(changes).some((value) => Object.keys(value).length > 0) || termsState.dirty || repairState.dirty || staffState.dirty || intakeState.dirty || accountState.dirty;
   useEffect(() => { onStateChange({ dirty, busy: pending || termsState.busy }); }, [dirty, pending, termsState.busy, onStateChange]);
   const dirtySections = (['profile', 'beclass', 'care'] as const).filter(section => Object.keys(changes[section]).length > 0);
-  const unsavedRef = useUnsavedChanges('客戶名冊', (['profile', 'beclass', 'care'] as const).flatMap(section => Object.keys(changes[section]).map(field => ({ label: `${title[section]}／${labels[section][field] ?? field}`, before: display(source(detail, section)[field]), after: display(changes[section][field]) }))), { busy: pending || termsState.busy, save: dirtySections.length === 1 && actions[dirtySections[0]].preview ? () => apply(dirtySections[0]) : undefined });
+  const unsavedRef = useUnsavedChanges('客戶名冊', (['profile', 'beclass', 'care'] as const).flatMap(section => Object.keys(changes[section]).map(field => ({ label: `${title[section]}／${labels[section][field] ?? field}`, before: display(source(detail, section)[field]), after: display(changes[section][field]) }))), { busy: pending || termsState.busy, save: async () => {
+    let current = detail;
+    for (const section of dirtySections) {
+      const updated = await apply(section, true, current);
+      if (!updated) return;
+      current = updated;
+    }
+  } });
   const update = (section: Section, field: string, value: Scalar) => {
     setDrafts((current) => ({ ...current, [section]: { ...current[section], [field]: value } }));
     setActions((current) => ({ ...current, [section]: idle() }));
@@ -138,6 +145,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       if (!alive.current || sequence !== request.current) return;
       setDrafts((current) => ({ ...current, [section]: { ...source(result, section) } }));
       setActions((current) => ({ ...current, [section]: { ...idle(), message: `${title[section]}已儲存。` } }));
+      return result;
     } catch (error) {
       if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, loading: false, message: `已儲存，但最新資料讀取失敗：${errorText(error)}` } }));
     }
@@ -157,18 +165,30 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
       if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...idle(), message: errorText(error) } }));
     }
   };
-  const apply = async (section: Section) => {
-    const approved = actions[section];
-    if (!approved.preview || !approved.key) return;
+  const apply = async (section: Section, preparePreview = false, currentDetail = detail) => {
+    let approved = actions[section];
+    const expectedVersion = section === 'profile' ? currentDetail.client.version : currentDetail.beclass.version ?? 0;
+    if (preparePreview && approved.preview?.current_version !== expectedVersion) approved = idle();
+    if (approved.loading || ((!approved.preview || !approved.key) && !preparePreview)) return;
     const sequence = ++request.current;
+    let applyStarted = false;
     setActions((current) => ({ ...current, [section]: { ...approved, loading: true, message: '正在儲存…' } }));
     try {
+      if (!approved.preview || !approved.key) {
+        const submitted = changes[section];
+        const result = await clientRegistryClient.preview(detail.case_no, owner(section), submitted as ClientProfileChanges | BeClassChanges, expectedVersion);
+        if (!alive.current || sequence !== request.current) return;
+        approved = { ...idle(), preview: result, changes: submitted, key: `client-${owner(section)}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}` };
+        setActions((current) => ({ ...current, [section]: { ...approved, loading: true, message: '正在儲存…' } }));
+      }
+      if (!approved.preview || !approved.key) return;
+      applyStarted = true;
       await clientRegistryClient.apply(detail.case_no, owner(section), approved.changes as ClientProfileChanges | BeClassChanges, approved.preview.current_version, approved.preview.preview_fingerprint, reason(section), approved.key);
       if (!alive.current || sequence !== request.current) return;
       setActions((current) => ({ ...current, [section]: { ...current[section], applied: true, unknown: false, message: '已儲存，正在讀取最新資料…' } }));
-      await refresh(section, sequence);
+      return await refresh(section, sequence);
     } catch (error) {
-      if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...approved, loading: false, unknown: !(error instanceof ApiHttpError) || error.status >= 500, message: `${errorText(error)} 請核對結果；重試使用同一筆操作識別。` } }));
+      if (alive.current && sequence === request.current) setActions((current) => ({ ...current, [section]: { ...approved, loading: false, unknown: applyStarted && (!(error instanceof ApiHttpError) || error.status >= 500), message: applyStarted ? `${errorText(error)} 請核對結果；重試使用同一筆操作識別。` : errorText(error) } }));
     }
   };
   const renderSection = (section: Section) => {

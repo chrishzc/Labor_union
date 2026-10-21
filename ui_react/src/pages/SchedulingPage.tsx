@@ -1066,7 +1066,8 @@ function LeaveSubstitutionWorkspace({
 
   const error = draft?.error;
   const errorText = error ? error.message : null;
-  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason, '已核對': confirmed }, { busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
+  const defaultScheduleId = (selectedAssignment ?? assignments[0])?.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null;
+  useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason, '已核對': confirmed }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '雙倍薪資': false, '補班日': '', '原因': '正式處理請假代班', '已核對': false }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
   useUnsavedDraft('LINE 請假申請處理', Object.fromEntries(inboxItems.filter(item => item.request_status === 'pending').map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, inboxReasonById[item.id] ?? ''])), { baseline: Object.fromEntries(inboxItems.map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, ''])), busy: inboxBusy });
 
 

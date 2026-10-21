@@ -67,7 +67,7 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
     return () => { resumeRequest.current += 1; };
   }, [profile, showResume]);
   const changes = useMemo(() => Object.fromEntries(fields.filter(([field]) => draft[String(field)] !== String(profile[field] ?? '')).map(([field]) => [apiField(field), draft[String(field)] || null])), [draft, profile]);
-  const unsavedRef = useUnsavedChanges('月嫂個人與聯絡資料', fields.filter(([field]) => draft[String(field)] !== undefined && draft[String(field)] !== String(profile[field] ?? '')).map(([field, label]) => ({ label, before: String(profile[field] ?? '') || '未填寫', after: draft[String(field)] || '未填寫' })).concat(profileReason ? [{ label: '備註', before: '未填寫', after: profileReason }] : []), { busy: profileBusy, save: profilePreview ? () => applyProfile() : undefined });
+  const unsavedRef = useUnsavedChanges('月嫂個人與聯絡資料', fields.filter(([field]) => draft[String(field)] !== undefined && draft[String(field)] !== String(profile[field] ?? '')).map(([field, label]) => ({ label, before: String(profile[field] ?? '') || '未填寫', after: draft[String(field)] || '未填寫' })).concat(profileReason ? [{ label: '備註', before: '未填寫', after: profileReason }] : []), { busy: profileBusy, save: () => applyProfile(true) });
   const bankUnsavedRef = useUnsavedDraft('月嫂銀行帳戶', { '動作': operation, '帳戶': accountId, '接續帳戶': successorId, '銀行代碼': bankCode, '分行代碼': branchCode, '新帳號已輸入（不顯示內容）': !!accountNo, '主要帳戶': primary, '異動原因': bankReason }, { busy: bankBusy, resetKey: profile.bank_accounts_version });
   const resumeUnsavedRef = useUnsavedDraft('月嫂履歷', { '待上傳檔案': resumeFile?.name ?? '' }, { busy: resumeBusy, baseline: { '待上傳檔案': '' } });
   const bankAccountLabels = adaptStaffProfile(profile).bankAccountLabels;
@@ -77,8 +77,24 @@ export const StaffRegistryEditor: React.FC<Props> = ({ profile, onUpdated, showR
   ];
   const command = (): StaffBankCommand => ({ operation, ...(operation !== 'add' ? { account_id: Number(accountId) } : {}), ...(['add', 'replace'].includes(operation) ? { bank_code: bankCode, branch_code: branchCode, account_no: accountNo, is_primary: primary } : {}), ...(operation === 'deactivate' && successorId ? { successor_account_id: Number(successorId) } : {}) });
   const previewProfile = async () => { if (profileBusy || !Object.keys(changes).length) { if (!Object.keys(changes).length) setProfileMessage('沒有需要儲存的變更。'); return; } try { setProfileError(false); setProfileBusy(true); setProfileMessage('正在產生預覽…'); setProfilePreview(await staffRegistryClient.previewProfile(profile.staff_id, changes, profile.profile_version)); setProfileApplyKey(mutationKey('staff-profile')); setProfileMessage('預覽完成，請核對後確認儲存。'); } catch (error) { setProfileError(true); setProfilePreview(null); setProfileApplyKey(null); setProfileMessage(error instanceof Error ? error.message : '預覽失敗。'); } finally { setProfileBusy(false); } };
-  const applyProfile = async () => { if (profileBusy || !profilePreview || !profileApplyKey) return;
-    try { setProfileError(false); setProfileBusy(true); setProfileMessage('正在儲存…'); await staffRegistryClient.applyProfile(profile.staff_id, changes, profile.profile_version, profilePreview.preview_fingerprint, profileReason.trim(), profileApplyKey); setProfileReason(''); setProfilePreview(null); setProfileApplyKey(null); await onUpdated(); setProfileMessage('個人資料已儲存。'); } catch (error) { setProfileError(true); setProfileMessage(error instanceof Error ? error.message : '儲存結果未確認，請用相同預覽重試或重新查詢。'); } finally { setProfileBusy(false); } };
+  const applyProfile = async (preparePreview = false) => {
+    if (profileBusy || ((!profilePreview || !profileApplyKey) && !preparePreview)) return;
+    try {
+      setProfileError(false); setProfileBusy(true); setProfileMessage('正在儲存…');
+      let approved = profilePreview;
+      let key = profileApplyKey;
+      if (!approved || !key) {
+        approved = await staffRegistryClient.previewProfile(profile.staff_id, changes, profile.profile_version);
+        key = mutationKey('staff-profile');
+        setProfilePreview(approved); setProfileApplyKey(key);
+      }
+      await staffRegistryClient.applyProfile(profile.staff_id, changes, approved.current_version, approved.preview_fingerprint, profileReason.trim(), key);
+      setProfileReason(''); setProfilePreview(null); setProfileApplyKey(null);
+      await onUpdated(); setProfileMessage('個人資料已儲存。');
+    } catch (error) {
+      setProfileError(true); setProfileMessage(error instanceof Error ? error.message : '儲存結果未確認，請用相同預覽重試或重新查詢。');
+    } finally { setProfileBusy(false); }
+  };
   const previewBank = async () => { if (bankBusy) return; if (missingBankFields.length) { setBankError(true); setBankMessage(`請填寫或選擇${missingBankFields.join('、')}，再預覽變更。`); return; } try { setBankError(false); setBankBusy(true); setBankMessage('正在產生預覽…'); setBankPreview(await staffRegistryClient.previewBank(profile.staff_id, command(), profile.bank_accounts_version)); setBankApplyKey(mutationKey('staff-bank')); setBankMessage('只顯示帳號末四碼；請核對後確認儲存。'); } catch (error) { setBankError(true); setBankPreview(null); setBankApplyKey(null); setBankMessage(error instanceof Error ? error.message : '預覽失敗。'); } finally { setBankBusy(false); } };
   const applyBank = async () => { if (bankBusy || !bankPreview || !bankApplyKey) return;
     if (!bankReason.trim()) {

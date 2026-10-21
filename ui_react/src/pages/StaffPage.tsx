@@ -203,6 +203,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
   const [statusError, setStatusError] = useState(false);
   const [options, setOptions] = useState<StaffCasePreferenceOptions | null>(null);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'editing' | 'previewing' | 'preview_ready' | 'applying' | 'error'>('loading');
+  const [applying, setApplying] = useState(false);
   const loadEpoch = useRef(0);
   const requestControllerRef = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
@@ -281,6 +282,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     const controller = new AbortController();
     requestControllerRef.current = controller;
     setPhase('applying');
+    setApplying(true);
     setStatus('');
     try {
       await staffCasePreferenceManualClient.apply(staffId, {
@@ -289,19 +291,20 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
         preview_fingerprint: preview.preview_fingerprint,
         reason: reason.trim(),
       }, { idempotencyKey: nextIntentKey('staff-case-preference-manual'), signal: controller.signal });
+      if (epoch !== loadEpoch.current) return;
+      if (await load()) { setStatus('已儲存並重新查詢六大接案能力。'); await onUpdated?.(); }
     } catch (error) {
       if (epoch === loadEpoch.current) {
         setPhase('error');
         setStatusError(true);
         setStatus(error instanceof Error ? error.message : '儲存結果尚未確認，請重新查詢。');
       }
-      return;
+    } finally {
+      setApplying(false);
     }
-    if (epoch !== loadEpoch.current) return;
-    if (await load()) { setStatus('已儲存並重新查詢六大接案能力。'); await onUpdated?.(); }
   };
   const editing = ['editing', 'previewing', 'preview_ready', 'applying'].includes(phase);
-  const locked = phase === 'loading' || phase === 'previewing' || phase === 'applying';
+  const locked = phase === 'loading' || phase === 'previewing' || applying;
   const editRow = (key: ManualRelationKey, index: number, field: 'value' | 'detail', value: string) => {
     setPreview(null); setStatus(''); setPhase('editing');
     setDraft(current => { const next = updateManualDraftRow(current, key, index, field, value); if (field === 'value' && value !== current[key][index].value) next[key][index].detail = null; return next; });
@@ -310,7 +313,7 @@ export function StaffCasePreferenceManualEditor({ staffId, surfaceId = 'staff.dr
     setPreview(null); setStatus(''); setPhase('editing');
     setDraft(current => ({ ...current, service_periods: current.service_periods.map((item, rowIndex) => rowIndex === index ? { ...item, ...changes, detail: null } : item) }));
   };
-  useUnsavedDraft('六大接案能力', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: locked });
+  useUnsavedDraft('六大接案能力', { '接案能力': draft, '備註': reason }, { enabled: !!snapshot, baseline: snapshot ? { '接案能力': snapshot.after, '備註': '' } : null, busy: phase === 'previewing' || applying });
 
   return <section data-surface-id={surfaceId}>
     <h3>服務能力與接案條件</h3>
@@ -595,6 +598,19 @@ export const StaffPage: React.FC = () => {
     };
   }, [searchQuery]);
 
+  const refreshProfile = async (staffId: number, generation: number, signal?: AbortSignal): Promise<void> => {
+    const value = await staffProfileClient.query(staffId, { signal });
+    if (!isCurrentSlice(generation, signal)) throw new Error('月嫂資料已切換，請重新確認。');
+    setProfile({ status: 'ready', data: adaptStaffProfile(value) });
+    const refreshed = adaptStaffDirectoryPage({ items: [{
+      id: value.staff_id, union_no: value.union_no ?? null, name: value.name,
+      phone: value.phone, education: value.education, profile: value,
+    }], next_cursor: null }).items[0];
+    setDirectory((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
+    setDirectorySearch((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
+    setSelectedStaff((current) => current?.id === refreshed.id ? { ...current, ...refreshed } : current);
+  };
+
   useEffect(() => {
     const { generation, controller } = beginSliceRequest();
     setAvailability({ status: 'idle' });
@@ -611,18 +627,7 @@ export const StaffPage: React.FC = () => {
     const currentStaffId = selectedStaffId;
 
       setProfile({ status: 'loading' });
-      void staffProfileClient.query(currentStaffId, { signal: controller.signal }).then((value) => {
-        if (isCurrentSlice(generation, controller.signal)) {
-          setProfile({ status: 'ready', data: adaptStaffProfile(value) });
-          const refreshed = adaptStaffDirectoryPage({ items: [{
-            id: value.staff_id, union_no: value.union_no ?? null, name: value.name,
-            phone: value.phone, education: value.education, profile: value,
-          }], next_cursor: null }).items[0];
-          setDirectory((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
-          setDirectorySearch((current) => ({ ...current, items: current.items.map((staff) => staff.id === refreshed.id ? { ...staff, ...refreshed } : staff) }));
-          setSelectedStaff((current) => current?.id === refreshed.id ? { ...current, ...refreshed } : current);
-        }
-      }).catch((error: unknown) => {
+      void refreshProfile(currentStaffId, generation, controller.signal).catch((error: unknown) => {
         if (!isCurrentSlice(generation, controller.signal)) return;
         setProfile({ status: 'error', message: errorMessage(error, '個人與聯絡資料載入失敗。') });
       });
@@ -1397,7 +1402,7 @@ export const StaffPage: React.FC = () => {
                 )}
                 {profile.status === 'ready' && (
                   <div data-surface-id="staff.profile-detail" data-testid="staff-profile-detail">
-                    <StaffRegistryEditor profile={profile.data} resumeContainer={resumeContainer} onUpdated={() => setSliceRetryGeneration(value => value + 1)} />
+                    <StaffRegistryEditor profile={profile.data} resumeContainer={resumeContainer} onUpdated={() => refreshProfile(profile.data.staff_id, sliceGenerationRef.current, sliceControllerRef.current?.signal)} />
                   </div>
                 )}
 

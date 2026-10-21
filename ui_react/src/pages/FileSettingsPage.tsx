@@ -49,8 +49,8 @@ export function FileSettingsPage() {
   const edit = (changes: Partial<Draft>) => {
     setDraft(value => value ? { ...value, ...changes } : value); setPreview(null); setFieldErrors({}); setError(null); setMessage(null);
   };
-  const createPreview = () => {
-    if (!draft || !current || saving || saveUnknown) return;
+  const createPreview = (): FileSettingsInput | null => {
+    if (!draft || !current || saving || saveUnknown) return null;
     const problems: Record<string, string> = {};
     const photo = Math.round(Number(draft.photo) * 1048576);
     const resume = Math.round(Number(draft.resume) * 1048576);
@@ -59,14 +59,16 @@ export function FileSettingsPage() {
     if (!Number.isSafeInteger(resume) || resume <= 0) problems.resume = '請輸入大於 0 的履歷容量。';
     if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > 2147483 || (!draft.noTimeout && timeout === 0)) problems.timeout = '請填有效的整數秒數，或勾選不設定等待上限。';
     setFieldErrors(problems); setError(null); setMessage(null);
-    if (Object.keys(problems).length) { setPreview(null); fields.current[Object.keys(problems)[0]]?.focus(); return; }
-    setPreview({ photo_max_bytes: photo, resume_max_bytes: resume, timeout_seconds: timeout });
+    if (Object.keys(problems).length) { setPreview(null); fields.current[Object.keys(problems)[0]]?.focus(); return null; }
+    const value = { photo_max_bytes: photo, resume_max_bytes: resume, timeout_seconds: timeout };
+    setPreview(value);
+    return value;
   };
-  const save = async () => {
-    if (!preview || !current || saving || saveUnknown) return;
+  const save = async (input: FileSettingsInput | null = preview) => {
+    if (!input || !current || saving || saveUnknown) return;
     setSaving(true); setError(null); setMessage(null);
     try {
-      const value = await fileSettingsClient.save(preview, current.version);
+      const value = await fileSettingsClient.save(input, current.version);
       if (!active.current) return;
       setCurrent(value); setDraft(draftOf(value)); setPreview(null);
       setMessage('檔案設定已儲存，容量與等待時間已生效。');
@@ -76,7 +78,7 @@ export function FileSettingsPage() {
       setSaveUnknown(!knownRejection); setPreview(null); setError(errorText(caught, true));
     } finally { if (active.current) setSaving(false); }
   };
-  const unsavedRef = useUnsavedDraft('檔案設定', draft ? { '照片單檔上限（MiB）': draft.photo, '履歷 PDF 上限（MiB）': draft.resume, '等待時間（秒）': draft.noTimeout ? '不設上限' : draft.timeout } : {}, { enabled: !!draft && !!current, busy: saving || saveUnknown, save: preview ? () => save() : undefined, baseline: current ? { '照片單檔上限（MiB）': draftOf(current).photo, '履歷 PDF 上限（MiB）': draftOf(current).resume, '等待時間（秒）': current.timeout_seconds === 0 ? '不設上限' : draftOf(current).timeout } : null });
+  const unsavedRef = useUnsavedDraft('檔案設定', draft ? { '照片單檔上限（MiB）': draft.photo, '履歷 PDF 上限（MiB）': draft.resume, '等待時間（秒）': draft.noTimeout ? '不設上限' : draft.timeout } : {}, { enabled: !!draft && !!current, busy: saving || saveUnknown, save: () => save(preview ?? createPreview()), baseline: current ? { '照片單檔上限（MiB）': draftOf(current).photo, '履歷 PDF 上限（MiB）': draftOf(current).resume, '等待時間（秒）': current.timeout_seconds === 0 ? '不設上限' : draftOf(current).timeout } : null });
   const disabled = loading || saving || saveUnknown;
   const ref = (name: string) => (node: HTMLInputElement | null) => { fields.current[name] = node; };
   const fieldError = (name: string) => fieldErrors[name] && <p className="file-settings-error" id={`file-${name}-error`} role="alert">{fieldErrors[name]}</p>;

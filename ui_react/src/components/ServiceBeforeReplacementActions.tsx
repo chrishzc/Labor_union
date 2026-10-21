@@ -1,9 +1,9 @@
-import { useUnsavedDraft } from './UnsavedChanges';
 /**
  * File: ServiceBeforeReplacementActions.tsx
  * Description: 呈現服務前換人人工 Query／Preview／確認／Apply，以及同鍵結果對帳與代班轉介。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useUnsavedDraft } from './UnsavedChanges';
 import {
   createServiceBeforeReplacementCommandIdentity,
   isServiceBeforeReplacementOutcomeUnknown,
@@ -241,7 +241,12 @@ export function ServiceBeforeReplacementActions({
     }
     await apply(request, createServiceBeforeReplacementCommandIdentity());
   };
-  useUnsavedDraft('服務前更換月嫂', { '情境': scenario, '原因': reason }, { busy, resetKey: query });
+  useUnsavedDraft('服務前更換月嫂', { '情境': scenario, '原因': reason }, {
+    enabled: expanded && uiState.type !== 'observed',
+    baseline: { '情境': initialScenario ?? '', '原因': '' },
+    busy: expanded && locked,
+    resetKey: query,
+  });
 
 
   return (

@@ -1,7 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+/**
+ * File: unsaved_changes.test.tsx
+ * Description: 驗證未儲存變更守衛的差異呈現、繼續編輯、捨棄、儲存回讀與非同步載入不誤報。
+ */
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Drawer } from '../../../../../../../components/Drawer';
+import { ServiceBeforeReplacementActions } from '../../../../../../../components/ServiceBeforeReplacementActions';
 import { UnsavedChangesProvider, useUnsavedDraft, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 
 function Editor({ fail = false, busy = false, directSave = true }: { fail?: boolean; busy?: boolean; directSave?: boolean }) {
@@ -36,7 +41,7 @@ const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變�
 const change = () => fireEvent.change(screen.getByLabelText('行政註記'), { target: { value: '新的內容' } });
 
 describe('未儲存變更離開防護', () => {
-  it('關閉抽屜會顯示前後差異；取消與返回儲存都保留原輸入', () => {
+  it('沒有可呼叫的儲存流程時停用儲存離開，繼續編輯保留原輸入', () => {
     mount({ directSave: false }); change();
     fireEvent.click(screen.getByRole('button', { name: '關閉編輯' }));
     expect(within(warning()).getByRole('cell', { name: '原本內容' })).toBeInTheDocument();
@@ -44,7 +49,9 @@ describe('未儲存變更離開防護', () => {
     fireEvent.click(within(warning()).getByRole('button', { name: '繼續編輯' }));
     expect(screen.getByLabelText('行政註記')).toHaveValue('新的內容');
     fireEvent.click(screen.getByRole('button', { name: '關閉編輯' }));
-    fireEvent.click(within(warning()).getByRole('button', { name: '返回儲存' }));
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeDisabled();
+    expect(warning()).toHaveTextContent('此處無法一次儲存這些變更');
+    fireEvent.click(within(warning()).getByRole('button', { name: '繼續編輯' }));
     expect(screen.getByLabelText('行政註記')).toHaveFocus();
     expect(screen.queryByText('已離開')).not.toBeInTheDocument();
   });
@@ -58,14 +65,85 @@ describe('未儲存變更離開防護', () => {
 
   it('儲存成功後才完成原本要求的離開', async () => {
     mount(); change(); fireEvent.click(screen.getByRole('button', { name: '切換頁面' }));
-    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更' }));
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
     await screen.findByText('已離開');
     expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
   });
 
+  it('後端回應後仍等候 owner 回讀完成，期間不能離開或重複送出', async () => {
+    let acknowledge!: () => void;
+    let finishReadback!: () => void;
+    const receipt = new Promise<void>(resolve => { acknowledge = resolve; });
+    const readback = new Promise<void>(resolve => { finishReadback = resolve; });
+    const leave = vi.fn();
+    const save = vi.fn();
+    function PendingEditor() {
+      const [baseline, setBaseline] = useState('原值');
+      const [busy, setBusy] = useState(false);
+      const { requestLeave } = useUnsavedNavigation();
+      useUnsavedDraft('等待後端與回讀', { '欄位': '新值' }, {
+        baseline: { '欄位': baseline }, busy,
+        save: async () => {
+          save(); setBusy(true);
+          await receipt;
+          setBaseline('新值');
+          void readback.then(() => setBusy(false));
+        },
+      });
+      return <button onClick={() => requestLeave(leave)}>離開</button>;
+    }
+    render(<UnsavedChangesProvider><PendingEditor /></UnsavedChangesProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '離開' }));
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    expect(leave).not.toHaveBeenCalled();
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeDisabled();
+    await act(async () => { acknowledge(); await receipt; });
+    expect(leave).not.toHaveBeenCalled();
+    expect(within(warning()).getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    expect(warning()).toHaveTextContent('結果尚未確認');
+    await act(async () => { finishReadback(); await readback; });
+    await waitFor(() => expect(leave).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it('儲存拋錯即使同時清除差異，也不得當作成功離開', async () => {
+    const leave = vi.fn();
+    function RejectedEditor() {
+      const [value, setValue] = useState('新值');
+      const { requestLeave } = useUnsavedNavigation();
+      useUnsavedDraft('儲存失敗', { '欄位': value }, { baseline: { '欄位': '原值' },
+        save: async () => { setValue('原值'); throw new Error('save rejected'); },
+      });
+      return <button onClick={() => requestLeave(leave)}>離開</button>;
+    }
+    render(<UnsavedChangesProvider><RejectedEditor /></UnsavedChangesProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '離開' }));
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
+    expect(await within(warning()).findByRole('alert')).toHaveTextContent('尚未完成儲存');
+    expect(leave).not.toHaveBeenCalled();
+  });
+
+  it('預覽使儲存能力改變時更新已開啟的提醒，不把舊回呼當作可儲存', () => {
+    const save = vi.fn();
+    function PreviewEditor({ ready }: { ready: boolean }) {
+      const { requestLeave } = useUnsavedNavigation();
+      useUnsavedDraft('需要預覽', { '欄位': '新值' }, { baseline: { '欄位': '原值' }, save: ready ? save : undefined });
+      return <button onClick={() => requestLeave(vi.fn())}>離開</button>;
+    }
+    const view = (ready: boolean) => <UnsavedChangesProvider><PreviewEditor ready={ready} /></UnsavedChangesProvider>;
+    const result = render(view(false));
+    fireEvent.click(screen.getByRole('button', { name: '離開' }));
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeDisabled();
+    result.rerender(view(true));
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeEnabled();
+    result.rerender(view(false));
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeDisabled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('原儲存流程回報失敗時保留輸入，不能當作成功離開', async () => {
     mount({ fail: true }); change(); fireEvent.click(screen.getByRole('button', { name: '切換頁面' }));
-    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更' }));
+    fireEvent.click(within(warning()).getByRole('button', { name: '儲存變更並離開' }));
     await waitFor(() => expect(within(warning()).getByRole('alert')).toHaveTextContent('尚有變更未儲存'));
     expect(screen.getByLabelText('行政註記')).toHaveValue('新的內容');
     expect(screen.queryByText('已離開')).not.toBeInTheDocument();
@@ -74,7 +152,7 @@ describe('未儲存變更離開防護', () => {
   it('進行中的變更不允許捨棄或重複儲存', () => {
     mount({ busy: true }); change(); fireEvent.click(screen.getByRole('button', { name: '切換頁面' }));
     expect(within(warning()).getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
-    expect(within(warning()).getByRole('button', { name: '儲存變更' })).toBeDisabled();
+    expect(within(warning()).getByRole('button', { name: '儲存變更並離開' })).toBeDisabled();
   });
 
   it('查詢條件、還原原值與已完成的正常儲存不會誤報', async () => {
@@ -122,5 +200,21 @@ describe('未儲存變更離開防護', () => {
     fireEvent.click(screen.getByRole('button', { name: '離頁' }));
     expect(within(warning()).getByRole('cell', { name: '已載入' })).toBeInTheDocument();
     expect(within(warning()).getByRole('cell', { name: '已修改' })).toBeInTheDocument();
+  });
+
+  it('服務前更換月嫂非同步帶入預設情境 R-04 時不誤報未儲存變更', () => {
+    const leave = vi.fn();
+    function ReplacementHost({ scenario }: { scenario?: 'R-04' }) {
+      const { requestLeave } = useUnsavedNavigation();
+      return <>
+        <ServiceBeforeReplacementActions caseNo="TEST-CASE" initialScenario={scenario} hideScenarioPicker={scenario !== undefined} />
+        <button type="button" onClick={() => requestLeave(leave)}>離開客戶抽屜</button>
+      </>;
+    }
+    const result = render(<UnsavedChangesProvider><ReplacementHost /></UnsavedChangesProvider>);
+    result.rerender(<UnsavedChangesProvider><ReplacementHost scenario="R-04" /></UnsavedChangesProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '離開客戶抽屜' }));
+    expect(screen.queryByRole('dialog', { name: '尚有未儲存的變更' })).not.toBeInTheDocument();
+    expect(leave).toHaveBeenCalledOnce();
   });
 });

@@ -29,7 +29,7 @@ export function useUnsavedChanges(name: string, changes: UnsavedChange[], option
   useLayoutEffect(() => {
     if (!update) return;
     const currentChanges = JSON.parse(signature) as UnsavedChange[];
-    update(id, { name, changes: currentChanges, busy: busy && currentChanges.length > 0,
+    update(id, { name, changes: currentChanges, busy,
       review: () => {
         if (latest.current.review) { latest.current.review(); return; }
         const root = ref.current;
@@ -88,7 +88,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const update = useCallback((id: string, entry: Entry | null) => {
     const previous = entries.current.get(id);
     if (entry) entries.current.set(id, entry); else entries.current.delete(id);
-    if (JSON.stringify(previous && [previous.name, previous.changes, previous.busy]) !== JSON.stringify(entry && [entry.name, entry.changes, entry.busy])) setRevision(value => value + 1);
+    if (JSON.stringify(previous && [previous.name, previous.changes, previous.busy, Boolean(previous.save)]) !== JSON.stringify(entry && [entry.name, entry.changes, entry.busy, Boolean(entry.save)])) setRevision(value => value + 1);
   }, []);
   const request = useCallback((proceed: () => void) => {
     if (leaving.current) { proceed(); return; }
@@ -101,6 +101,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   const active = useMemo(() => navigation ? [...entries.current.values()] : [], [navigation, revision]);
   const dirty = active.filter(entry => entry.changes.length);
   const busy = saving || active.some(entry => entry.busy);
+  const canSave = dirty.length === 1 && Boolean(dirty[0].save);
   const hasPending = [...entries.current.values()].some(entry => entry.busy || entry.changes.length);
   useEffect(() => {
     if (!hasPending) return;
@@ -120,7 +121,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     if (saveFinished && navigation) {
       if (active.some(entry => entry.busy)) { if (saving) setSaving(false); return; }
       setSaveFinished(false); setSaving(false);
-      if (!active.some(entry => entry.busy) && !dirty.length) {
+      if (!saveError && !dirty.length) {
         setNavigation(null); navigation.proceed();
       } else if (!saveError) {
         setSaveError('尚有變更未儲存，請確認原畫面的儲存結果。');
@@ -129,12 +130,10 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
   }, [revision, saveFinished, saving, navigation, active, dirty.length, saveError]);
   const save = async () => {
     const entry = dirty[0];
-    if (!entry || busy) return;
-    if (!entry.save || dirty.length > 1) { cancel(); entry.review(); return; }
+    if (!entry?.save || !canSave || busy) return;
     setSaving(true); setSaveError('');
-    try { await entry.save(); }
-    catch { setSaveError('尚未完成儲存，請返回原畫面確認錯誤與變更內容。'); }
-    finally { setSaveFinished(true); }
+    try { await entry.save(); setSaveFinished(true); }
+    catch { setSaving(false); setSaveError('尚未完成儲存，請返回原畫面確認錯誤與變更內容。'); }
   };
   const context = useMemo(() => ({ update, request, pending: navigation !== null }), [update, request, navigation]);
   return <GuardContext value={context}>{children}{navigation && createPortal(
@@ -143,15 +142,16 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
       <p>離開會捨棄以下內容。請先儲存，或確認捨棄後離開。</p>
       {dirty.map((entry, index) => <section key={index}><h3>{entry.name}</h3><div className="unsaved-table"><table><thead><tr><th>欄位</th><th>變更前</th><th>變更後</th></tr></thead><tbody>{entry.changes.map((change, i) => <tr key={i}><th scope="row">{change.label}</th><td>{change.before}</td><td>{change.after}</td></tr>)}</tbody></table></div></section>)}
       {busy && <p role="status">操作進行中或結果尚未確認，請留在原畫面完成確認。</p>}
+      {dirty.length > 0 && !canSave && <p id="unsaved-save-guidance">此處無法一次儲存這些變更。請選擇「繼續編輯」，回原表單完成儲存。</p>}
       {saveError && <p role="alert">{saveError}</p>}
       <div className="unsaved-actions">
-        <button type="button" disabled={saving} onClick={cancel}>繼續編輯</button>
+        <button type="button" disabled={saving} onClick={() => { cancel(); dirty[0]?.review(); }}>繼續編輯</button>
         <button type="button" disabled={busy} onClick={() => {
           leaving.current = true;
           try { dirty.forEach(entry => entry.discard()); dialog.current?.close(); setNavigation(null); navigation.proceed(); }
           finally { leaving.current = false; }
         }}>捨棄變更並離開</button>
-        {dirty.length > 0 && <button type="button" className="unsaved-save" disabled={busy} onClick={() => void save()}>{dirty.length === 1 && dirty[0].save ? '儲存變更' : '返回儲存'}</button>}
+        {dirty.length > 0 && <button type="button" className="unsaved-save" disabled={busy || !canSave} aria-describedby={!canSave ? 'unsaved-save-guidance' : undefined} onClick={() => void save()}>儲存變更並離開</button>}
       </div>
     </dialog>, document.body)}</GuardContext>;
 }
