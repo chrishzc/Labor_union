@@ -52,7 +52,7 @@ async function selectStage(code: CoreStageCode) {
   await screen.findByText('CASE-REFRESH');
   const strip = screen.getByRole('region', { name: '13 個核心訂單階段' });
   fireEvent.click(within(strip).getAllByRole('button')[CORE_STAGE_CODES.indexOf(code) + 1]!);
-  const card = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+  const card = (await screen.findByText('CASE-REFRESH')).closest('tr')!;
   fireEvent.click(card);
   return (await screen.findAllByLabelText('整合測試面板草稿'))[0]!;
 }
@@ -68,9 +68,9 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     });
   });
 
-  it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件卡', async () => {
+  it('清單更新中或更新失敗時，點擊與鍵盤都不能開啟舊案件列', async () => {
     render(<OrderWorkbenchV2Page />);
-    const card = await screen.findByRole('button', { name: '開啟案件 CASE-REFRESH 案件處理' });
+    const card = await screen.findByRole('row', { name: '開啟案件 CASE-REFRESH 案件處理' });
     let reject!: (reason: Error) => void;
     mocks.core.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
@@ -138,7 +138,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     expect(screen.queryByLabelText('整合測試面板草稿')).not.toBeInTheDocument();
   });
 
-  it('排班回讀後卡片更新狀態與實際期間，保留約定期間', async () => {
+  it('排班回讀後清單更新狀態與實際期間，保留約定期間', async () => {
     const before = page('formal_service');
     before.substatus_counts = {};
     before.items[0]!.lifecycle_status = '服務中';
@@ -155,7 +155,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     };
     mocks.summaries.mockResolvedValueOnce({ items: [summary], next_cursor: null, etag: 'c'.repeat(64) });
     render(<OrderWorkbenchV2Page />);
-    const card = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+    const card = (await screen.findByText('CASE-REFRESH')).closest('tr')!;
     expect(within(card).getByText('排班資料不可用')).toBeInTheDocument();
     expect(await within(card).findByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();
     expect(within(card).queryByText(/實際服務/)).not.toBeInTheDocument();
@@ -173,7 +173,7 @@ describe('Beta owner mutation 到清單與階段的完整 callback 接線', () =
     fireEvent.click(await screen.findByRole('button', { name: '模擬正式 owner 回讀完成' }));
     await waitFor(() => expect(mocks.summaries.mock.calls.length).toBeGreaterThan(reads));
     fireEvent.click(screen.getByRole('button', { name: '關閉整合測試 Drawer' }));
-    const updatedCard = (await screen.findByText('CASE-REFRESH')).closest('article')!;
+    const updatedCard = (await screen.findByText('CASE-REFRESH')).closest('tr')!;
     expect(await within(updatedCard).findByText('服務進行中')).toBeInTheDocument();
     expect(await within(updatedCard).findByText('2026-09-14 ~ 2026-10-23')).toBeInTheDocument();
     expect(within(updatedCard).getByText('2026-09-21 ~ 2026-10-30')).toBeInTheDocument();

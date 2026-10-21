@@ -237,8 +237,8 @@ function summaryPage() {
 }
 
 function cardFor(caseNo: string): HTMLElement {
-  const card = screen.getByText(caseNo).closest('article');
-  if (!(card instanceof HTMLElement)) throw new Error(`找不到 ${caseNo} 案件卡`);
+  const card = screen.getByText(caseNo).closest('tr');
+  if (!(card instanceof HTMLElement)) throw new Error(`找不到 ${caseNo} 案件列`);
   return card;
 }
 
@@ -372,14 +372,14 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(screen.queryByRole('button', { name: /客戶收款與月嫂結算/ })).not.toBeInTheDocument();
   });
 
-  it.each(['Enter', ' '])('案件卡可用 %s 開啟案件處理', async (key) => {
+  it.each(['Enter', ' '])('案件列可用 %s 開啟案件處理', async (key) => {
     const caseNo = 'CASE-CARD-KEYBOARD';
     clientMocks.getCoreStageTimelines.mockResolvedValue(page([
       timeline(caseNo, 'intake_validation', { lifecycle: '洽談中' }),
     ]));
     setOwnerFacts(caseNo);
     render(<OrderWorkbenchV2Page />);
-    const card = await screen.findByRole('button', { name: `開啟案件 ${caseNo} 案件處理` });
+    const card = await screen.findByRole('row', { name: `開啟案件 ${caseNo} 案件處理` });
     expect(card).toHaveAttribute('tabindex', '0');
     expect(card).toHaveAttribute('aria-disabled', 'false');
     card.focus();
@@ -441,7 +441,7 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(header).toHaveTextContent('讀取失敗');
   });
 
-  it('由案件卡開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
+  it('由案件列開啟／關閉，並只用正式 GET owner facts 與 core-stage projection 呈現案件、服務、派案、13 階、notice 與 lineage', async () => {
     const row = timeline('CASE-DRAWER', 'intake_validation', {
       currentStatus: 'blocked',
       blockers: [{ code: 'service_blocked', message: '排班尚未完成' }],
