@@ -8,6 +8,10 @@
 維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，向 API 暴露可驗證的 current coordination state；React workbench 目前僅保留 isolated-tested、尚未接入 App route 的 transport/presentation。
 
 ## Implementation
+- manual commute: `subsystems/scheduling/commute_query.py` — 單次人工觸發、Google 計費月、metadata-only 用量與人工全帳戶核對；既有 `background_jobs` 承接 committed inline claim，零新 schema、零自動 provider retry。
+- adapters: `infrastructure/http/google_routes.py`、`infrastructure/mysql/commute_query_repository.py` — 固定官方 TWO_WHEELER／TRAFFIC_AWARE_OPTIMAL transport（查詢當下路況）、Staff/Client 地址唯讀來源、用量 metadata；不保存地址或 Google 距離。
+- entrypoint: `api/routes/commute.py` — admin-only single caregiver POST、usage GET、manual billing reconciliation POST、case-scoped `GET /orders/{case_no}/commute-history`（最新 50 筆 metadata-only 紀錄）；由 `api/main.py` 組裝。
+- presentation: `ui_react/src/api/scheduling/commute_client.ts`、`ui_react/src/components/CaregiverCommute.tsx`、`ui_react/src/components/CaregiverCommute.css` — 既有新增候選／候選卡片／分段已選月嫂內的逐位按鈕，通勤時間與距離直接在指定月嫂卡片呈現；同一分頁以案件＋月嫂共用結果與 pending 狀態，關閉／切換案件不重查，重新整理或登入狀態變更清除。共享用量只在新增候選抽屜顯示，不掛載 50 筆歷史清單，無整批／自動查詢。
 - `api/routes/candidate_contact_pool.py`
 - `api/schemas/candidate_contact_pool.py`
 - primary:

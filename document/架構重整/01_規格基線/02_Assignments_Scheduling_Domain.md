@@ -638,6 +638,16 @@ matching-plan agreement。正式服務日期版本、actor、原因、日期集�
 歷史 `matching_holiday_work_agreements` 改寫日期。既有 agreement 資料只保留歷史證據，不再形成
 current gate、精算 override、LINE delivery 或回覆事實。
 
+## 人工機車通勤查詢顯示（2026-10-22 最新人工裁決）
+
+案件中直接在指定月嫂卡片顯示人工查詢當次的機車通勤時間、距離及查詢時間；不顯示最近 50 筆歷史清單。月用量仍只在新增候選月嫂抽屜顯示，查詢仍逐位由人員手動觸發。
+
+依同日後續人工要求，同一瀏覽器分頁的畫面狀態以案件編號與 staff identity 分開保留上次查詢結果。關閉抽屜、重新開啟案件、切換案件或候選區域不得清除結果或自動呼叫 Google；重開畫面直接呈現原查詢時間的結果。查詢中關閉卡片仍保留同一操作，完成後供重開讀取；同一組人選的多個卡片共用 pending 狀態，結果未明的確認沿用原 event key，不因重開而換鍵。重新整理／關閉瀏覽器分頁或登入狀態改變時清除，舊登入的晚回應不得填入新登入狀態。不寫入資料庫、localStorage 或 sessionStorage 保存距離與時間；地址或路況改變由人員明示重新查詢，畫面提示保留值為上次結果。
+
+路線方向固定為月嫂名冊地址到本案客戶地址，使用 `TWO_WHEELER` 與 `TRAFFIC_AWARE_OPTIMAL`，以查詢當下為出發時間，採與 Google Maps 相同的即時路況模式；不再依未指定 routing preference 的平均路況計算。這不代表不同查詢時間、起訖定位或路線選擇下的分鐘數保證相同。保留每次人工操作最多一次 Google 請求、不自動重試，機車查詢仍按 Compute Routes Enterprise 估算用量。
+
+既有 `GET /api/v1/orders/{case_no}/commute-history` 保留 system-admin-only、最近 50 筆的 metadata-only 唯讀契約，操作抽屜不掛載該清單。此端點不建立新資料表、不保存或回傳地址、距離、預估時間或 Google 原始回應，讀取不得呼叫 Google 或增加用量；結果未明與舊紀錄缺少結果狀態時顯示待確認，不假造成功或失敗。原計費估算與單次操作冪等性不變；成功取得路線與找不到路線均可能計費，後者在紀錄顯示失敗。歷史 `commute:billable` 僅代表計費分類，不能反推已取得路線。
+
 ## Historical pairing evidence（2026-08-13）
 
 Historical Order Adoption 可保存一或兩位來源月嫂的不可變配對 evidence。月嫂姓名空白、找不到或

@@ -305,3 +305,14 @@ API→Redis 的 PING 亦通過。最終去敏結果為 `scratch/nas-lifecycle-bf
 目前記憶體是初始上限，不是實測用量；正式 DS220+ Compose 不設定 NanoCPUS。基本 API 768 MiB、MySQL 512 MiB、Redis 64 MiB；每個 Worker 128 MiB、LINE API 384 MiB、Tunnel 128 MiB，尚不含 DSM。
 全部一起啟動的上限已超過 2 GB；須照順序逐組測，PDF／Chromium 可能超限而被終止，接受高延遲並不能避免記憶體不足。
 私人 API／DB 初始憑證仍為 90 天；首次執行另附的 DSM 憑證維護工作後才導入可續期 CA。程式準備與 DSM 排程啟用分開，實際維護依 CERTIFICATES.md 驗收，不因更新映像就宣稱已自動續期。
+
+## 選用：逐位機車通勤查詢
+
+1. 在 Google Cloud 建立專案、連結帳務並啟用 Routes API。建立伺服器 API key，API restrictions 僅開 Routes API；有固定對外 IP 時再設定相應 IP restriction。
+2. NAS 專案既有 .env 加入 GOOGLE_MAPS_ROUTES_API_KEY，再依本文件保留資料換版流程讓 management-api 載入；本機開發則放在根目錄未納版的 .env 或 process environment。勿使用 VITE_ 前綴、貼入聊天、提交 Git 或列印金鑰。未設定時畫面會顯示尚未設定並停用查詢。
+3. 由案件「尋找月嫂與詢問意願」逐位按「查詢機車通勤」；起點採月嫂名冊、終點採本案客戶的縣市與地址。查詢距離不永久保存，重新查詢會增加用量；連線結果未明先確認原操作，系統不自動重試。
+4. 本月用量按美國太平洋時間每月重算，所有人員共用；畫面是本系統估算，並保守扣除計費待確認次數。Google 每月免費 1000 次是目前 Compute Routes Enterprise 價格，超額按官方分級費率估計美元未稅金額。
+5. 「登錄 Google 帳務核對」可填同一帳務帳戶、全部專案、本月 Compute Routes Enterprise 的累計次數（含免費部分），及報表實際統計截止時間（畫面輸入台灣時間）。核對後只加計截止之後的本系統用量，避免重複計算；其他系統後續用量仍須再次核對。本功能不自動讀取 Google 帳單，不需要帳務服務帳戶金鑰。
+6. 在 Google Cloud 設定用量配額與預算通知；預算通知本身不是硬性停止計費開關。Google Maps 內容使用須納入服務條款與隱私告知；Google 金鑰／正式地址測試及實際帳單核對由操作者設定後驗收，本次程式驗證不代表已啟用 Google。
+
+官方設定：[Routes API key](https://developers.google.com/maps/documentation/routes/get-api-key)、[帳務與用量](https://developers.google.com/maps/documentation/routes/usage-and-billing)。

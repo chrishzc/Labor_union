@@ -104,6 +104,7 @@ from api.routes import (
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
     caregiver_segment_availability,
+    commute,
     caregiver_availability_locks,
     capability_grants,
     order_actual_start,
@@ -329,6 +330,7 @@ app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(caregiver_segment_availability.router)
+app.include_router(commute.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(staff.router)
 app.include_router(staff_registry_mutation.router)

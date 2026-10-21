@@ -14,6 +14,7 @@ import { ApiHttpError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderCandidateInformationPanel, OrderCandidateInformationSendPanel, CANDIDATE_INFORMATION_LABELS } from './OrderCandidateInformationPanel';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
+import { CaregiverCommuteQuery } from './CaregiverCommute';
 
 interface OrderCandidateContactStatusPanelProps {
   caseNo: string;
@@ -532,6 +533,7 @@ export const OrderCandidateContactStatusPanel: FC<OrderCandidateContactStatusPan
                 <div className="candidate-card-identity"><h4>{staffDisplayLabel(candidate.staff_union_no, candidate.staff_name)}</h4><p>{candidate.service_start_date} ～ {candidate.service_end_date}</p>
                   <span className={`order-candidate-willingness ${candidate.willingness}`}>{candidate.status === 'withdrawn' ? '已退出' : candidate.status === 'selected' ? '已選定' : candidate.willingness === 'pending' && !candidate.information['1'] && !candidate.information['2'] ? '尚未詢問' : ({ pending: '待回覆', willing: '願意承接', unwilling: '無意願' })[candidate.willingness]}</span>
                 </div>
+                <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
                 <dl className="order-candidate-delivery">{([1, 2, 3] as const).map(value => <div key={value}>
                   <dt>{CANDIDATE_INFORMATION_LABELS[value]}</dt><dd><span>{deliveryStatus(candidate.information[String(value) as '1' | '2' | '3'], true)}</span>
                   <button type="button" aria-label={`寄送${CANDIDATE_INFORMATION_LABELS[value]}給 ${candidate.staff_name}`}

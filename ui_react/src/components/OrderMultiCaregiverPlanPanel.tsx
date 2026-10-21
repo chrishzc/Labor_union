@@ -1,4 +1,5 @@
 import { useUnsavedDraft } from './UnsavedChanges';
+import { CaregiverCommuteQuery } from './CaregiverCommute';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
 import { subscribeStaffAvailabilityChanges } from '../api/staff_availability/staff_availability_changes';
@@ -363,6 +364,7 @@ export const OrderMultiCaregiverPlanPanel: FC<Props> = ({ caseNo, filters, onObs
                   value={segmentDates[index]?.end_date ?? ''}
                   onChange={(event) => selectDate(index, 'end_date', event.target.value)} />
               </label>
+              {!!selectedStaffIds[index] && <CaregiverCommuteQuery caseNo={caseNo} staffId={selectedStaffIds[index]} staffName={staffChoices.status === 'ready' ? staffChoices.staff.find(staff => staff.id === selectedStaffIds[index])?.name ?? '月嫂' : '月嫂'} />}
             </fieldset>
           ))}
         </div>

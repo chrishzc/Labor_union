@@ -16,6 +16,7 @@ import {
 import { ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
+import { CaregiverCommuteQuery, CommuteUsagePanel } from './CaregiverCommute';
 import { compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 
 interface OrderCandidateQueryPanelProps {
@@ -321,6 +322,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
   return (
     <section aria-label={`案件 ${caseNo} 候選月嫂查詢`}>
       <p className="order-v2-row-meta">區域與週間服務僅作提示，不符合仍可加入候選池並協調。</p>
+      <CommuteUsagePanel />
 
       <button
         type="button"
@@ -380,6 +382,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
                         return dates.length > 0 ? <li key={code}>{label}：{dates.join('、')}</li> : null;
                       })}
                     </ul></details>}
+                    <CaregiverCommuteQuery caseNo={caseNo} staffId={candidate.staff_id} staffName={candidate.staff_name} />
                   </div>
                   {outdatedStaffIds.has(candidate.staff_id) && <p role="status">原詢問期間與本次不同；更新後須重新記錄接案意願。</p>}
                   <button type="button" aria-label={`${joinedStaffIds.has(candidate.staff_id) ? '已加入候選池' : outdatedStaffIds.has(candidate.staff_id) ? '更新詢問期間' : '加入候選池'}（${candidate.staff_name}）`}

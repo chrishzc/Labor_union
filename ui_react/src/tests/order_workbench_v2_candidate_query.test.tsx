@@ -12,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   createAddCandidatesCommand: vi.fn(),
 }));
 
+vi.mock('../api/scheduling/commute_client', () => ({ commuteClient: {
+  usage: vi.fn().mockResolvedValue({ billing_month: '2026-10', configured: true, free_limit: 1000,
+    local_requests: 0, free_used: 0, free_remaining: 1000, uncertain_requests: 0, paid_requests: 0,
+    estimated_cost_usd: '0.00', verified_count: null, verified_through: null, verified_at: null }),
+  history: vi.fn((caseNo: string) => Promise.resolve({ case_no: caseNo, records: [] })),
+  query: vi.fn(), reconcile: vi.fn(),
+} }));
 
 vi.mock('../api/scheduling/matching_candidate_workflow_client', async (importOriginal) => {
   const original = await importOriginal<typeof import('../api/scheduling/matching_candidate_workflow_client')>();
