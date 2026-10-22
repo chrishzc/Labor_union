@@ -104,6 +104,12 @@ def test_line_composition_has_necessary_liff_pages_but_no_admin_or_approval_rout
 def test_compose_separates_database_credentials_and_machine_tokens():
     compose = yaml.safe_load((ROOT / "deployment/nas/compose.yaml").read_text(encoding="utf-8"))
     services = compose["services"]
+    management = services["management-api"]
+    assert management["environment"]["ACCOUNTS_PAYABLE_ARCHIVE_ROOT"] == "/data/accounts-payable-archive"
+    data_mount = next(mount for mount in management["volumes"]
+                      if isinstance(mount, dict) and mount["target"] == "/data")
+    assert data_mount["source"] == "${NAS_DATA_ROOT}/app-data"
+    assert not data_mount.get("read_only", False)
     assert "bootstrap:/etc/mysql/conf.d:ro" in services["db"]["volumes"]
     assert "default-character-set=utf8mb4" in (ROOT / "deployment/nas/mysql-client.cnf").read_text(encoding="utf-8")
     for service in services.values():

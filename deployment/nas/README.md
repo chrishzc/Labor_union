@@ -23,6 +23,8 @@
 
 ## 準備檔案與填寫 .env
 
+下次建置映像並搭配本版 Compose 時，應付帳款 Excel 使用 `ACCOUNTS_PAYABLE_ARCHIVE_ROOT=/data/accounts-payable-archive`，實際保存於 `${NAS_DATA_ROOT}/app-data/accounts-payable-archive/<年度>/`。此目錄沿用管理容器可寫的持久掛載，包含在 app-data 備份內；封存失敗不回傳成功下載。舊映像尚未包含此路徑修正，單獨更新 Compose 不會修正舊程式；不需另加公開下載目錄或放寬容器唯讀設定。
+
 把 `compose.yaml`、`.env` 放在 NAS 同一專案資料夾；`.env` 由 `.env.example` 複製，不命名成 `.env.txt`。不要搬用開發機實際 `.env`。範本不含實際帳密，DB 密碼及六組服務 token 由初始化建立，網站 root 從網頁建立。
 
 | 設定 | 填寫方式 |

@@ -14,11 +14,10 @@ from subsystems.staff_payables.accounts_payable_export import (
 
 
 class LocalAccountsPayableArchive:
-    def __init__(self, repository_root: Path) -> None:
+    def __init__(self, repository_root: Path, *, archive_root: Path | None = None) -> None:
         self._archive_root = (
-            repository_root
-            / "downloads"
-            / "accounts_payable_archive"
+            archive_root if archive_root is not None
+            else repository_root / "downloads" / "accounts_payable_archive"
         ).resolve()
 
     def save(

@@ -2,6 +2,10 @@
 
 from datetime import date, datetime, timezone
 from io import BytesIO
+import hashlib
+from pathlib import Path
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -83,6 +87,9 @@ class _Connection:
         self.commits += 1
         raise AssertionError("Accounts payable queries must not commit accounting facts")
 
+    def close(self):
+        pass
+
 
 class _Archive:
     def __init__(self):
@@ -159,3 +166,71 @@ def test_requery_reads_reduced_balance_and_removes_paid_items_without_changing_m
     assert connection.row["amount_due_ntd"] == 20_000
     assert connection.commits == 0
     assert connection.rollbacks == 4
+
+
+@pytest.mark.parametrize("configured_archive", [False, True])
+def test_composed_export_download_matches_persistent_archive(tmp_path, monkeypatch, configured_archive):
+    from api.dependencies import accounts_payable_export as composition
+    from infrastructure.archive.accounts_payable import LocalAccountsPayableArchive
+
+    repository_root = tmp_path / "app"
+    archive_root = tmp_path / "data" / "accounts-payable-archive"
+    monkeypatch.setattr(composition, "_REPOSITORY_ROOT", repository_root)
+    if configured_archive:
+        monkeypatch.setenv("ACCOUNTS_PAYABLE_ARCHIVE_ROOT", str(archive_root))
+    else:
+        monkeypatch.delenv("ACCOUNTS_PAYABLE_ARCHIVE_ROOT", raising=False)
+        archive_root = repository_root / "downloads" / "accounts_payable_archive"
+    connection = _Connection()
+    original = dict(connection.row)
+    monkeypatch.setattr(composition, "get_connection", lambda: connection)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(7, "finance", "Finance", "admin")
+    client = TestClient(app)
+
+    response = client.get(URL + "/export", params={"target_month": "2026-03"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = response.headers["content-disposition"].split('filename="', 1)[1].rstrip('"')
+    archived_file = archive_root / "2026" / filename
+    assert archived_file.read_bytes() == response.content
+    assert load_workbook(BytesIO(response.content)).active["F3"].value == 1500
+    if configured_archive:
+        assert not repository_root.exists()
+
+    # A fresh adapter/request reads the same durable file, independently of the workflow instance.
+    reopened = LocalAccountsPayableArchive(repository_root, archive_root=archive_root)
+    records = reopened.list(2026)
+    assert len(records) == 1
+    assert Path(records[0].absolute_path) == archived_file
+    assert records[0].sha256 == hashlib.sha256(response.content).hexdigest()
+    archive_response = client.get(URL + "/archive", params={"year": 2026})
+    assert archive_response.status_code == 200
+    assert archive_response.json()["data"]["records"][0]["sha256"] == records[0].sha256
+    with pytest.raises(FileExistsError):
+        reopened.save(2026, filename, b"replacement", records[0].sha256)
+    assert archived_file.read_bytes() == response.content
+    assert connection.row == original
+    assert connection.commits == 0
+
+
+def test_composed_export_does_not_download_when_archive_is_unwritable(tmp_path, monkeypatch):
+    from api.dependencies import accounts_payable_export as composition
+
+    blocked_root = tmp_path / "not-a-directory"
+    blocked_root.write_bytes(b"existing file")
+    monkeypatch.setenv("ACCOUNTS_PAYABLE_ARCHIVE_ROOT", str(blocked_root))
+    monkeypatch.setattr(composition, "get_connection", _Connection)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(7, "finance", "Finance", "admin")
+
+    response = TestClient(app).get(URL + "/export", params={"target_month": "2026-03"})
+
+    assert response.status_code == 503
+    assert "accounts_payable_archive_failed" in response.text
+    assert "content-disposition" not in response.headers
+    assert blocked_root.read_bytes() == b"existing file"

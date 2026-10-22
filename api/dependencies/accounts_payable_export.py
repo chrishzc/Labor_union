@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import os
 from pathlib import Path
 
 from infrastructure.archive.accounts_payable import LocalAccountsPayableArchive
@@ -54,11 +55,15 @@ class AccountsPayableExportApplication:
 
 
 def get_accounts_payable_export_application():
+    archive_root = os.environ.get("ACCOUNTS_PAYABLE_ARCHIVE_ROOT")
     connection = get_connection()
     workflow = AccountsPayableExportWorkflow(
         MySqlStaffPayableExportSource(connection),
         MySqlClientRefundExportSource(connection),
-        LocalAccountsPayableArchive(_REPOSITORY_ROOT),
+        LocalAccountsPayableArchive(
+            _REPOSITORY_ROOT,
+            archive_root=Path(archive_root) if archive_root else None,
+        ),
         lambda: _ReadOnlySnapshotComposition(connection),
         current_business_instant,
     )
