@@ -196,22 +196,11 @@
     if (targetPage === 'candidate_contact_customer' && /^[0-9a-f]{64}$/.test(interactionReference)) {
         targetPaths.candidate_contact_customer = `/line-candidate-contact-customer?ref=${encodeURIComponent(interactionReference)}`;
     }
-    const actions = [
-        {
-            path: '/line-bind',
-            icon: '📝',
-            label: '已申請市府平台',
-            description: '我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。',
-            isExternal: false
-        },
-        {
-            path: 'https://hsinchu-nanny.hccg.gov.tw/home',
-            icon: '🏛️',
-            label: '未申請市府平台',
-            description: '我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。',
-            isExternal: true
-        }
-    ];
+    const depositCaseNo = urlParams.get('case_no') || liffStateParams.get('case_no') || '';
+    if (targetPage === 'deposit_payment' && /^[A-Za-z0-9_-]{1,50}$/.test(depositCaseNo)) {
+        targetPaths.deposit_payment = `/line-deposit-payment?case_no=${encodeURIComponent(depositCaseNo)}`;
+    }
+    let actions = [];
 
     async function initLiff() {
         try {
@@ -219,6 +208,12 @@
             const result = await response.json();
             const liffId = result.data?.liff_id;
             if (!response.ok || !liffId) throw new Error('LIFF 尚未完成設定，請聯絡工會人員。');
+            const pageResponse = await fetch('/api/config/liff/runtime?page=gateway');
+            if (!pageResponse.ok) throw new Error('無法取得目前的服務入口，請稍後重試。');
+            const runtime = await pageResponse.json();
+            document.getElementById('pageTitle').textContent = runtime.page.title;
+            document.getElementById('pageSubtitle').textContent = runtime.page.subtitle;
+            actions = runtime.page.actions.map(action => ({...action, isExternal: action.path.startsWith('https://')}));
             await liff.init({ liffId });
             
             if (!liff.isLoggedIn()) {

@@ -26,52 +26,7 @@ class SafeReviewLinkApplication:
         self._now = now
 
     def issue(self, command: IssueSafeReviewLink) -> tuple[SafeReviewLinkReceipt, str]:
-        if command.required_capability not in command.actor.permission_scope:
-            raise SafeReviewLinkError("safe_review_link_wrong_actor", "issuer lacks required review capability")
-        digest = _digest(command.raw_token)
-        fingerprint = command_fingerprint(command).value
-        with self._unit_of_work_factory() as reader:
-            existing = reader.safe_review_links.load_receipt(command.idempotency_key.value)
-            if existing is not None:
-                _check_fingerprint(existing, fingerprint)
-                return _receipt_from_row(existing), ""
-        def mutate(uow):
-            repo = uow.safe_review_links
-            existing = repo.load_receipt(command.idempotency_key.value, for_update=True)
-            if existing is not None:
-                _check_fingerprint(existing, fingerprint)
-                return _receipt_from_row(existing), ""
-            runtime_target = _locked_runtime_target(uow)
-            now = _utc(self._now())
-            link_pk = repo.insert_link(
-                link_id=command.link_id,
-                token_digest=digest,
-                canonical_internal_target=command.canonical_internal_target,
-                target_version=command.target_version,
-                source_alert_identity=command.source_alert_identity,
-                allowed_actor_ref=command.allowed_actor_ref,
-                required_capability=command.required_capability,
-                issued_at=now,
-                expires_at=now + timedelta(seconds=command.ttl_seconds),
-                idempotency_key=command.idempotency_key.value,
-                correlation_id=command.correlation_id.value,
-            )
-            # The runtime owner's opaque version cannot be replaced by the
-            # caller's numeric version. Preserve it in the existing immutable
-            # issuance event, in the same transaction as the link root.
-            repo.insert_event(link_pk, "issued", command.actor.actor_id, "issued", command.target_version,
-                              command.idempotency_key.value, command.correlation_id.value,
-                              {"target": command.canonical_internal_target,
-                               "runtime_alert_target": runtime_target})
-            repo.insert_outbox(link_pk, command.idempotency_key.value, command.correlation_id.value,
-                               {"link_id": command.link_id, "target": command.canonical_internal_target,
-                                "source_alert_identity": command.source_alert_identity})
-            view = _view(repo.get_link(command.link_id))
-            receipt = SafeReviewLinkReceipt(command.link_id, SafeReviewLinkState.ISSUED, False,
-                                            command.idempotency_key.value, view.root_version, view)
-            repo.insert_receipt(command.idempotency_key.value, fingerprint, "issued", _receipt_payload(receipt), link_pk)
-            return receipt, command.raw_token
-        return _mutate(self._unit_of_work_factory, mutate)
+        raise SafeReviewLinkError("line_alert_group_retired", "群組告警功能已取消，不能簽發或使用群組審核連結。")
 
     def query(self, command: QuerySafeReviewLink) -> SafeReviewLinkView:
         with self._unit_of_work_factory() as uow:
@@ -81,67 +36,7 @@ class SafeReviewLinkApplication:
             return _view(row)
 
     def redeem(self, command: RedeemSafeReviewLink) -> SafeReviewLinkReceipt:
-        fingerprint = command_fingerprint(command).value
-        with self._unit_of_work_factory() as reader:
-            existing = reader.safe_review_links.load_receipt(command.idempotency_key.value)
-            if existing is not None:
-                _check_fingerprint(existing, fingerprint)
-                return _receipt_from_row(existing)
-        def mutate(uow):
-            repo = uow.safe_review_links
-            existing = repo.load_receipt(command.idempotency_key.value, for_update=True)
-            if existing is not None:
-                _check_fingerprint(existing, fingerprint)
-                return _receipt_from_row(existing)
-            row = repo.get_link(command.link_id, for_update=True)
-            if row is None:
-                raise SafeReviewLinkError("safe_review_link_not_found", "safe review link not found")
-            status = SafeReviewLinkState(str(row["status"]))
-            now = _utc(self._now())
-            if status is SafeReviewLinkState.ISSUED and now >= _utc(row["expires_at_utc"]):
-                repo.transition(row["id"], "expired", now)
-                repo.insert_event(row["id"], "expired", command.actor.actor_id, "expired", row["target_version"],
-                                  command.idempotency_key.value, command.correlation_id.value, {})
-                view = _view(repo.get_link(command.link_id, for_update=True))
-                receipt = SafeReviewLinkReceipt(command.link_id, SafeReviewLinkState.EXPIRED, False,
-                                                command.idempotency_key.value, view.root_version, view)
-                repo.insert_receipt(command.idempotency_key.value, fingerprint, "expired", _receipt_payload(receipt), row["id"])
-                raise _CommittedFailure(SafeReviewLinkError("safe_review_link_expired", "safe review link has expired"))
-            if status is SafeReviewLinkState.REDEEMED:
-                raise SafeReviewLinkError("safe_review_link_replayed", "safe review link was already redeemed")
-            if status is SafeReviewLinkState.EXPIRED:
-                raise SafeReviewLinkError("safe_review_link_expired", "safe review link has expired")
-            if status is SafeReviewLinkState.REVOKED:
-                raise SafeReviewLinkError("safe_review_link_revoked", "safe review link has been revoked")
-            if _digest(command.raw_token) != str(row["token_digest"]):
-                raise SafeReviewLinkError("safe_review_link_wrong_actor", "safe review link token is invalid")
-            if command.actor.actor_id != str(row["allowed_actor_ref"]):
-                raise SafeReviewLinkError("safe_review_link_wrong_actor", "actor is not allowed to redeem this link")
-            if command.capability not in command.actor.permission_scope:
-                raise SafeReviewLinkError("safe_review_link_wrong_actor", "actor lacks required review capability")
-            if command.capability != str(row["required_capability"]):
-                raise SafeReviewLinkError("safe_review_link_wrong_actor", "actor capability is not allowed")
-            if command.current_target != str(row["canonical_internal_target"]):
-                raise SafeReviewLinkError("safe_review_link_target_stale", "review target is stale")
-            if command.current_target_version != int(row["target_version"]):
-                raise SafeReviewLinkError("safe_review_link_version_conflict", "review target version is stale")
-            issued_target = repo.get_issued_runtime_target(int(row["id"]))
-            if not isinstance(issued_target, dict):
-                raise SafeReviewLinkError("safe_review_link_target_stale", "link lacks verified runtime target evidence; issue a new link")
-            current_target = _locked_runtime_target(uow)
-            if issued_target.get("target_id") != current_target["target_id"]:
-                raise SafeReviewLinkError("safe_review_link_target_stale", "runtime alert target changed")
-            if issued_target.get("current_version") != current_target["current_version"]:
-                raise SafeReviewLinkError("safe_review_link_version_conflict", "runtime alert target version changed")
-            repo.transition(row["id"], "redeemed", now)
-            repo.insert_event(row["id"], "redeemed", command.actor.actor_id, "redeemed", row["target_version"],
-                              command.idempotency_key.value, command.correlation_id.value, {})
-            view = _view(repo.get_link(command.link_id, for_update=True))
-            receipt = SafeReviewLinkReceipt(command.link_id, SafeReviewLinkState.REDEEMED, False,
-                                            command.idempotency_key.value, view.root_version, view)
-            repo.insert_receipt(command.idempotency_key.value, fingerprint, "redeemed", _receipt_payload(receipt), row["id"])
-            return receipt
-        return _mutate(self._unit_of_work_factory, mutate)
+        raise SafeReviewLinkError("line_alert_group_retired", "群組告警功能已取消，不能簽發或使用群組審核連結。")
 
     def revoke(self, command: RevokeSafeReviewLink) -> SafeReviewLinkReceipt:
         fingerprint = command_fingerprint(command).value

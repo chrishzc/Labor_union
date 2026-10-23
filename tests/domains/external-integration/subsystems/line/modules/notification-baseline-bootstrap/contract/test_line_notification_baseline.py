@@ -51,7 +51,6 @@ def test_current_catalog_keeps_only_required_notifications_and_real_reminders() 
     typed_definition = LineNotificationRulesDefinition.model_validate(definition)
     assert tuple(rule.event_code for rule in typed_definition.rules) == (
         "scheduling.leave.extension_requested",
-        "matching.zero_pool.preview_applied",
         "runtime.alert.review_required",
         "complaint.ingress.hold_high_ticket",
         "service_time_checkpoint",
@@ -72,7 +71,11 @@ def test_historical_task96_fixture_keeps_its_provenance_contract() -> None:
         target_database="lu_test_line96",
         occurred_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
     )
-    assert len(events) == 13
+    assert len(events) == 12
+    # Retiring ordinal 6 must not renumber the remaining immutable fixture subjects.
+    alert = next(event for event in events if event.identity == "LU96-M4-SAFE-ALERT-SOURCE-V1")
+    assert alert.facts["case_no"] == "LU96-P0-11"
+    assert alert.source_aggregate_identity == "task96-line14-p0:11"
     assert tuple(
         (event.identity, event.event_code, event.facts["recipient_projection"]["selector"])
         for event in events
@@ -94,9 +97,9 @@ def test_baseline_writer_is_allowlisted_and_single_commit() -> None:
         actor=_actor(),
         occurred_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
     )
-    assert ids == tuple(range(1, 14))
+    assert ids == tuple(range(1, 13))
     assert unit_of_work.committed is True
-    assert len(unit_of_work.notification_rules.events) == 13
+    assert len(unit_of_work.notification_rules.events) == 12
 
 
 def test_baseline_writer_rejects_non_test_target_or_wrong_actor() -> None:
@@ -108,3 +111,21 @@ def test_baseline_writer_rejects_non_test_target_or_wrong_actor() -> None:
             target_database="lu_test_line96",
             actor=ActorContext("admin", ("line.config.manage",)),
         )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_retired_zero_pool_cannot_be_restored_in_active_configuration(enabled):
+    import json
+    from pathlib import Path
+    from domains.line.notification_rules import validate_notification_rules, LineNotificationRuleError
+    from subsystems.line.message_configuration import validate_message_templates, LineMessageConfigurationError
+    rules = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
+    rule = dict(rules["rules"][0], id="LU96-M3-ZERO-POOL-RULE-V1", event_code="matching.zero_pool.preview_applied",
+                template_id="LU96-M3-ZERO-POOL-CARD-V1", enabled=enabled)
+    rules["rules"].append(rule)
+    with pytest.raises(LineNotificationRuleError, match="已退役"):
+        validate_notification_rules(rules)
+    templates = json.loads(Path("config/message_templates.json").read_text(encoding="utf-8"))
+    templates["templates"].append(dict(templates["templates"][0], id="LU96-M3-ZERO-POOL-CARD-V1"))
+    with pytest.raises(LineMessageConfigurationError, match="已退役"):
+        validate_message_templates(templates)

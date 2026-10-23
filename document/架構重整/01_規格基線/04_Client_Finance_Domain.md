@@ -152,6 +152,15 @@ Modules：
 
 鎖定銀行 facts、account version 與 obligations；驗證方向、案件、external reference、ownership 與完整 allocation。Preview 零寫入；Apply 建立正式 ledger、allocation、projection、audit 與 outbox。
 
+正式訂金核銷在原 outer Unit of Work 保存 `orders_deposit_reconciled` outbox intent，
+新事件的 payload 同時帶 `line_deposit_notification=true`，供 LINE 建立核銷成功通知。
+LINE 只讀此已提交事件及 current settled projection，不消費或變更 Orders outbox 的處理狀態。
+交易 rollback 不留下通知；沒有上述標記的歷史核銷不補送，不新增資料表或 outbox enum。
+同一 settlement identity 重試不重複建立寄送工作；Orders consumer 仍處理其原有 lifecycle intent。
+訂金通知／客戶繳費查詢共用 typed `DepositPayment` 唯讀投影：既有 deposit obligation 的金額、
+期限、版本及專屬虛擬帳號，入帳狀態以正式 settled projection 為準，日期讀對應 receipt ledger 的
+`occurred_on`。客戶留言、付款截圖、提醒與客服需求均不得建立或修改入帳事實。
+
 Modules：
 
 - `BankFactEligibilityValidator`

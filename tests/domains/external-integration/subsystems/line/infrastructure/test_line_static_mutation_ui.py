@@ -49,7 +49,7 @@ def test_staff_identity_ui_reports_direct_binding_without_claiming_menu_delivery
     assert "資料匹配後會立即完成綁定" in source
     assert "找不到匹配資訊，請檢查輸入內容是否正確或聯繫工會人員" in submit
     assert "我們已為您切換專屬圖文選單" not in submit
-    assert "專屬圖文選單將於系統處理完成後套用" in submit
+    assert "綁定成功，專屬選單將稍後更新。" in submit
 
 
 def test_mobile_review_ui_uses_preview_apply_and_safe_readback() -> None:
@@ -103,11 +103,10 @@ def test_registration_ui_uses_preview_confirmation_apply_and_typed_readback() ->
     assert "preview_fingerprint" in submit
     assert "identity_status" in submit
     assert "登記編號：" not in success_render
-
-    assert "登記編號：" not in success_render
     assert "客戶識別：" not in success_render
-    assert "不代表已完成媒合" in source
-    assert "不代表 LINE 訊息已送達" in source
+    assert "申請已送出，待工會核准。" in success_render
+    assert "申請編號：" in success_render
+    assert "renderRegistrationSuccess(applyResult.data)" in submit
 
 
 def test_mobile_ui_safely_extracts_errors_and_renders_server_text_as_text() -> None:
@@ -289,7 +288,7 @@ def test_mobile_scheduling_review_uses_line_binding_and_discards_late_forms() ->
     assert 'id="mobileAdminContent" class="hidden"' in source
     assert "revealMobileAdmin();" in initialize
     assert 'postJson("/api/v1/line/mobile-admin/client-profile/requests"' in source
-    assert 'postJson("/api/v1/line/mobile-admin/staff-leave-requests"' in source
+    assert 'postJson("/api/v1/line/mobile-admin/staff-leave-requests/page"' in source
     assert "querySequence !== schedulingQuerySequence" in source
     assert "formRevision !== schedulingFormRevision" in source
 

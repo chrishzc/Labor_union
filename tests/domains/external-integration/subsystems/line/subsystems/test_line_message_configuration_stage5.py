@@ -105,14 +105,19 @@ def test_template_render_requires_declared_required_variables() -> None:
     templates = _definition("message_templates")
 
     with pytest.raises(LineMessageConfigurationError, match="missing"):
-        render_message_template(templates, "register_success", {"case_no": "CASE-1"})
+        render_message_template(templates, "client_rebind_approved", {})
 
     rendered = render_message_template(
         templates,
-        "register_success",
-        {"name": "測試客戶", "case_no": "CASE-1"},
+        "client_rebind_approved",
+        {"client_name": "測試客戶"},
     )
-    assert "CASE-1" in rendered.payload_json
+    assert "測試客戶" in rendered.payload_json
+    registration = render_message_template(templates, "register_success")
+    assert json.loads(registration.payload_json)["text"] == "申請已送出，待工會核准。"
+
+    welcome = render_message_template(templates, "customer_onboarding_welcome", {"url": "https://example.test/register"})
+    assert "本帳號採自助服務，一般留言不會有專員回覆" in json.loads(welcome.payload_json)["text"]
 
 
 def test_retired_follow_schedule_enqueues_no_delivery_tasks() -> None:
@@ -200,3 +205,12 @@ def test_nonempty_rich_menu_configuration_is_never_repaired_by_bootstrap() -> No
 
     assert result is None
     assert repository.applied == []
+
+
+def test_management_models_read_current_templates_without_renaming_formal_ids():
+    from api.schemas.line_config import MessageTemplatesConfig, LineMenusConfig
+    root = next(p for p in Path(__file__).resolve().parents if (p / 'pyproject.toml').exists())
+    templates = json.loads((root / 'config/message_templates.json').read_text(encoding='utf-8'))
+    parsed = MessageTemplatesConfig.model_validate(templates)
+    assert [item.id for item in parsed.templates] == [item['id'] for item in templates['templates']]
+    LineMenusConfig.model_validate_json((root / 'config/line_menu.json').read_text(encoding='utf-8'))

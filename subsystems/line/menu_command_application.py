@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import (
@@ -12,7 +13,9 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
-from shared_kernel.identities import CorrelationId, IdempotencyKey
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from subsystems.line.identity_management_application import LineIdentityManagementApplication
+from subsystems.line.identity_management_contracts import SelectLineIdentityRoleCommand
 from shared_kernel.ports import OutboxIntent
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.rich_menu_binding import RICH_MENU_BINDING_INTENT
@@ -27,6 +30,9 @@ _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}
 
 class LineMenuCommandApplication:
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
+        source_type = getattr(getattr(inbox.event, 'source', None), 'source_type', None)
+        if source_type is not None and source_type.value != 'user':
+            return False
         command = text.strip()
         if command in _MENU_HELP_COMMANDS:
             return self._queue_switch_help(inbox, unit_of_work, line_user_id)
@@ -75,20 +81,47 @@ class LineMenuCommandApplication:
         *,
         allow_subject,
     ) -> bool:
-        binding = unit_of_work.identities.get(line_user_id)
-        if binding is None or binding.status is not LineIdentityBindingStatus.BOUND:
+        bindings = tuple(binding for binding in unit_of_work.identities.list_by_user(line_user_id)
+                         if binding.status is LineIdentityBindingStatus.BOUND)
+        admin = next((binding for binding in bindings if binding.subject_type is LineBindingSubjectType.ADMIN), None)
+        if not bindings:
             return False
-        if binding.subject_type not in {LineBindingSubjectType.ADMIN, allow_subject}:
+        if admin is not None:
+            if len(bindings) != 1:
+                raise RuntimeError('line_identity_admin_role_exclusive')
+            self._queue_menu(inbox, unit_of_work, line_user_id, menu_definition_id, command)
+            return True
+        if not any(binding.subject_type is allow_subject for binding in bindings):
             return False
+        if len(bindings) > 1:
+            # The verified user command is the explicit choice; the webhook owns commit.
+            application = LineIdentityManagementApplication(lambda: unit_of_work, lambda: datetime.now(timezone.utc))
+            event_id = inbox.event.event_id.value
+            key = IdempotencyKey(f'line-menu-role:{event_id}')
+            existing = unit_of_work.receipts.get(key)
+            if existing is not None:
+                if not existing.result_reference.startswith(f'line-identity-role:{line_user_id.value}:{allow_subject.value}:'):
+                    raise RuntimeError('line_identity_role_selection_idempotency_conflict')
+                return True
+            preview = application.preview_role_selection_in_unit_of_work(unit_of_work, line_user_id, allow_subject)
+            application.select_role_in_unit_of_work(unit_of_work, SelectLineIdentityRoleCommand(
+                line_user_id, allow_subject, preview.readback.context_version, preview.preview_fingerprint,
+                ActorContext(f'line-user:{line_user_id.value}'),
+                key, CorrelationId(f'line-event:{event_id}'),
+            ))
+            return True
         self._queue_menu(inbox, unit_of_work, line_user_id, menu_definition_id, command)
         return True
 
     def _queue_switch_help(self, inbox, unit_of_work, line_user_id) -> bool:
-        binding = unit_of_work.identities.get(line_user_id)
+        bindings = tuple(binding for binding in unit_of_work.identities.list_by_user(line_user_id)
+                         if binding.status is LineIdentityBindingStatus.BOUND)
+        binding = next((item for item in bindings if item.subject_type is LineBindingSubjectType.ADMIN), None)
+        dual_role = {item.subject_type for item in bindings} == {LineBindingSubjectType.CUSTOMER, LineBindingSubjectType.STAFF}
+        if binding is not None and len(bindings) != 1:
+            raise RuntimeError('line_identity_admin_role_exclusive')
         if (
-            binding is None
-            or binding.status is not LineIdentityBindingStatus.BOUND
-            or binding.subject_type is not LineBindingSubjectType.ADMIN
+            not dual_role and binding is None
         ):
             return False
         event_id = inbox.event.event_id.value
@@ -99,14 +132,14 @@ class LineMenuCommandApplication:
                 canonical_line_payload_json(
                     {
                         "type": "text",
-                        "text": (
+                        "text": ("您同時具有客戶與月嫂身分，請輸入「切換客戶」或「切換月嫂」選擇目前使用的身分。" if dual_role else (
                             "管理者可切換以下操作視角：\n"
                             "・切換訪客：訪客初始選單\n"
                             "・切換客戶：客戶專屬選單\n"
                             "・切換月嫂：月嫂專區選單\n"
                             "・切換工會：工會客服選單\n\n"
                             "此功能只切換下方圖文選單，不會降低您的管理者權限。"
-                        ),
+                        )),
                     }
                 ),
                 getattr(inbox, "received_at", None) or inbox.event.occurred_at,

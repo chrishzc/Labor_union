@@ -150,7 +150,8 @@ def test_records_reply_only_for_the_line_user_bound_to_the_sent_information():
     )
     assert "CAST(source_aggregate_identity AS UNSIGNED)=%s" in cancellation_sql
     assert "source_aggregate_identity=CAST(%s AS CHAR)" not in cancellation_sql
-    assert cancellation_args == (4, 4)
+    assert cancellation_args == (4,)
+    assert "candidate_contact_question" not in cancellation_sql
 
 
 def test_rejects_a_forged_reply_from_a_different_line_user():
@@ -200,7 +201,7 @@ def test_same_webhook_event_is_an_idempotent_replay():
     assert cursor.writes == []
 
 
-def test_rejects_a_new_postback_after_the_twenty_four_hour_window():
+def test_accepts_a_new_postback_after_the_twenty_four_hour_reminder():
     binding = _binding()
     binding["sent_at_utc"] = datetime(2026, 9, 9, 12, tzinfo=timezone.utc)
     cursor = _Cursor([binding, None])
@@ -209,18 +210,15 @@ def test_rejects_a_new_postback_after_the_twenty_four_hour_window():
         now=lambda: datetime(2026, 9, 10, 12, tzinfo=timezone.utc),
     )
 
-    with pytest.raises(ValueError, match="response expired"):
-        repository.record_willingness(
-            "a" * 64,
-            "willing",
-            LineUserId("U-caregiver"),
-            IdempotencyKey("candidate-contact-postback:webhook-expired"),
-        )
-
-    assert cursor.writes == []
+    assert repository.record_willingness(
+        "a" * 64, "willing", LineUserId("U-caregiver"),
+        IdempotencyKey("candidate-contact-postback:webhook-after-24h"),
+    ) == 44
+    assert any(sql.startswith("INSERT") for sql, args in cursor.writes)
 
 
-def test_rejects_other_candidate_responses_after_pool_has_a_willing_caregiver():
+@pytest.mark.parametrize("willingness", ["willing", "unwilling"])
+def test_accepts_other_candidate_responses_when_another_caregiver_is_willing(willingness):
     cursor = _Cursor(
         [_binding(), None],
         all_reads=[
@@ -237,15 +235,12 @@ def test_rejects_other_candidate_responses_after_pool_has_a_willing_caregiver():
         now=lambda: datetime(2026, 9, 10, 12, tzinfo=timezone.utc),
     )
 
-    with pytest.raises(ValueError, match="already resolved"):
-        repository.record_willingness(
-            "a" * 64,
-            "unwilling",
-            LineUserId("U-caregiver"),
-            IdempotencyKey("candidate-contact-postback:webhook-late"),
-        )
-
-    assert cursor.writes == []
+    assert repository.record_willingness(
+        "a" * 64, willingness, LineUserId("U-caregiver"),
+        IdempotencyKey("candidate-contact-postback:webhook-late"),
+    ) == 44
+    inserted = next(args for sql, args in cursor.writes if sql.startswith("INSERT"))
+    assert json.loads(inserted[4])["willingness"] == willingness
 
 
 def test_candidate_can_replace_their_own_willing_response_with_unwilling():
@@ -275,3 +270,40 @@ def test_candidate_can_replace_their_own_willing_response_with_unwilling():
     assert event_id == 44
     inserted = next(args for sql, args in cursor.writes if sql.startswith("INSERT"))
     assert json.loads(inserted[4])["willingness"] == "unwilling"
+
+
+@pytest.mark.parametrize("rejection", [None, ValueError("candidate contact response expired"), LookupError("recipient mismatch")])
+def test_willing_acknowledgement_has_one_uniform_message_and_stable_delivery_identity(rejection):
+    requests = []
+    class Replies:
+        def record_willingness(self, *args):
+            if rejection is not None:
+                raise rejection
+            return 91
+    unit_of_work = SimpleNamespace(
+        candidate_contact_pool_replies=Replies(),
+        delivery_tasks=SimpleNamespace(enqueue=requests.append),
+    )
+    application = LineCandidateContactPostbackApplication()
+    inbox = _inbox(f"candidate-contact:{'a' * 64}:willing")
+    assert application.handle(inbox, unit_of_work) is True
+    assert len(requests) == 1
+    assert json.loads(requests[0].payload_json) == {
+        "type": "text", "text": "已收到您願意承接的回覆，後續由工會安排媒合。"
+    }
+    assert requests[0].recipient.identity == LineUserId("U-caregiver")
+    application.handle(inbox, unit_of_work)
+    assert requests[0].idempotency_key == requests[1].idempotency_key
+
+
+def test_uncommitted_willing_reply_does_not_enqueue_an_acknowledgement():
+    requests = []
+    class Replies:
+        def record_willingness(self, *args):
+            raise RuntimeError("storage unavailable")
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        LineCandidateContactPostbackApplication().handle(
+            _inbox(f"candidate-contact:{'a' * 64}:willing"),
+            SimpleNamespace(candidate_contact_pool_replies=Replies(), delivery_tasks=SimpleNamespace(enqueue=requests.append)),
+        )
+    assert requests == []

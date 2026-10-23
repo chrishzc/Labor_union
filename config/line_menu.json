@@ -9,13 +9,96 @@
       "selected": true,
       "set_as_default": true,
       "chat_bar_text": "訪客選單",
-      "size": {"width": 2500, "height": 1686},
-      "appearance": {"background_color": "#F5F5F5", "image_mode": "generated", "image_path": "line/default_menu.jpg", "image_asset_id": null},
+      "size": {
+        "width": 2500,
+        "height": 1686
+      },
+      "appearance": {
+        "background_color": "#F5F5F5",
+        "image_mode": "generated",
+        "image_path": "line/default_menu.jpg",
+        "image_asset_id": null
+      },
       "buttons": [
-        {"id":"client_service","label":"客戶登記與綁定","text_color":"#FFFFFF","background_color":"#1E3A8A","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?entry=registration","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"staff_verification","label":"月嫂身分綁定","text_color":"#FFFFFF","background_color":"#EA580C","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_verification","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"faq","label":"常見問答","text_color":"#FFFFFF","background_color":"#3B82F6","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=faq","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"ai_assistant","label":"AI 智慧問答","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=ai_assistant","uri_source":"liff","data":null},"border_radius":54}
+        {
+          "id": "client_service",
+          "label": "客戶登記與綁定",
+          "text_color": "#FFFFFF",
+          "background_color": "#1E3A8A",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?entry=registration",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "staff_verification",
+          "label": "月嫂身分綁定",
+          "text_color": "#FFFFFF",
+          "background_color": "#EA580C",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_verification",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "ai_assistant",
+          "label": "AI 智慧問答",
+          "text_color": "#FFFFFF",
+          "background_color": "#3B82F6",
+          "bounds": {
+            "x": 0,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=ai_assistant",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "human_contact",
+          "label": "聯絡專人服務",
+          "text_color": "#FFFFFF",
+          "background_color": "#10B981",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "postback",
+            "text": null,
+            "uri": null,
+            "data": "customer-service:handoff:confirm"
+          },
+          "border_radius": 54
+        }
       ]
     },
     {
@@ -26,13 +109,96 @@
       "selected": true,
       "set_as_default": false,
       "chat_bar_text": "客戶專區",
-      "size": {"width": 2500, "height": 1686},
-      "appearance": {"background_color": "#F8FAFC", "image_mode": "generated", "image_path": "line/customer_menu.jpg", "image_asset_id": null},
+      "size": {
+        "width": 2500,
+        "height": 1686
+      },
+      "appearance": {
+        "background_color": "#F8FAFC",
+        "image_mode": "generated",
+        "image_path": "line/customer_menu.jpg",
+        "image_asset_id": null
+      },
       "buttons": [
-        {"id":"profile_update","label":"修改登記資料","text_color":"#FFFFFF","background_color":"#2563EB","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=profile_update","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"order_update","label":"修改訂單資訊","text_color":"#FFFFFF","background_color":"#0D9488","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=order_update","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"customer_faq","label":"常見問答","text_color":"#FFFFFF","background_color":"#3B82F6","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=faq","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"customer_ai_assistant","label":"AI 智慧問答","text_color":"#FFFFFF","background_color":"#10B981","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=ai_assistant","uri_source":"liff","data":null},"border_radius":54}
+        {
+          "id": "profile_update",
+          "label": "修改登記資料",
+          "text_color": "#FFFFFF",
+          "background_color": "#2563EB",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=profile_update",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "order_update",
+          "label": "修改訂單資訊",
+          "text_color": "#FFFFFF",
+          "background_color": "#0D9488",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=order_update",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "customer_ai_assistant",
+          "label": "AI 智慧問答",
+          "text_color": "#FFFFFF",
+          "background_color": "#3B82F6",
+          "bounds": {
+            "x": 0,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=ai_assistant",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "customer_human_contact",
+          "label": "聯絡專人服務",
+          "text_color": "#FFFFFF",
+          "background_color": "#10B981",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "postback",
+            "text": null,
+            "uri": null,
+            "data": "customer-service:handoff:confirm"
+          },
+          "border_radius": 54
+        }
       ]
     },
     {
@@ -43,13 +209,97 @@
       "selected": true,
       "set_as_default": false,
       "chat_bar_text": "月嫂專區",
-      "size": {"width": 2500, "height": 1686},
-      "appearance": {"background_color": "#FFF1F2", "image_mode": "generated", "image_path": "line/staff_menu.jpg", "image_asset_id": null},
+      "size": {
+        "width": 2500,
+        "height": 1686
+      },
+      "appearance": {
+        "background_color": "#FFF1F2",
+        "image_mode": "generated",
+        "image_path": "line/staff_menu.jpg",
+        "image_asset_id": null
+      },
       "buttons": [
-        {"id":"order_query","label":"訂單查詢","text_color":"#FFFFFF","background_color":"#BE123C","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_order_search","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"schedule_query","label":"排班資訊與請假","text_color":"#FFFFFF","background_color":"#F43F5E","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_schedule","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"baby_log","label":"寶寶日誌","text_color":"#FFFFFF","background_color":"#D97706","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_baby_log","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"payout_query","label":"薪資請款明細","text_color":"#FFFFFF","background_color":"#059669","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_payout","uri_source":"liff","data":null},"border_radius":54}
+        {
+          "id": "order_query",
+          "label": "訂單查詢",
+          "text_color": "#FFFFFF",
+          "background_color": "#BE123C",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_order_search",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "schedule_query",
+          "label": "排班資訊與請假",
+          "text_color": "#FFFFFF",
+          "background_color": "#F43F5E",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_schedule",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "baby_log",
+          "label": "寶寶日誌",
+          "text_color": "#FFFFFF",
+          "background_color": "#D97706",
+          "bounds": {
+            "x": 0,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_baby_log",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "payout_query",
+          "label": "薪資請款明細",
+          "text_color": "#FFFFFF",
+          "background_color": "#059669",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_payout",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        }
       ]
     },
     {
@@ -60,13 +310,97 @@
       "selected": true,
       "set_as_default": false,
       "chat_bar_text": "工會管理",
-      "size": {"width": 2500, "height": 1686},
-      "appearance": {"background_color": "#ECFDF5", "image_mode": "generated", "image_path": "line/union_staff_menu_v3.jpg", "image_asset_id": null},
+      "size": {
+        "width": 2500,
+        "height": 1686
+      },
+      "appearance": {
+        "background_color": "#ECFDF5",
+        "image_mode": "generated",
+        "image_path": "line/union_staff_menu_v3.jpg",
+        "image_asset_id": null
+      },
       "buttons": [
-        {"id":"staff_review","label":"待辦工作台","text_color":"#FFFFFF","background_color":"#047857","bounds":{"x":0,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=staff_review","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"customer_service","label":"客服中心","text_color":"#FFFFFF","background_color":"#059669","bounds":{"x":1250,"y":0,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=customer_service","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"order_tracking","label":"狀態追蹤","text_color":"#FFFFFF","background_color":"#4F46E5","bounds":{"x":0,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=order_tracking","uri_source":"liff","data":null},"border_radius":54},
-        {"id":"ops_dashboard","label":"營運摘要","text_color":"#FFFFFF","background_color":"#2563EB","bounds":{"x":1250,"y":843,"width":1250,"height":843},"action":{"type":"uri","text":null,"uri":"?target=dashboard","uri_source":"liff","data":null},"border_radius":54}
+        {
+          "id": "staff_review",
+          "label": "待辦工作台",
+          "text_color": "#FFFFFF",
+          "background_color": "#047857",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_review",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "customer_service",
+          "label": "客服中心",
+          "text_color": "#FFFFFF",
+          "background_color": "#059669",
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=customer_service",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "order_tracking",
+          "label": "狀態追蹤",
+          "text_color": "#FFFFFF",
+          "background_color": "#4F46E5",
+          "bounds": {
+            "x": 0,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=order_tracking",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        },
+        {
+          "id": "ops_dashboard",
+          "label": "營運摘要",
+          "text_color": "#FFFFFF",
+          "background_color": "#2563EB",
+          "bounds": {
+            "x": 1250,
+            "y": 843,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=dashboard",
+            "uri_source": "liff",
+            "data": null
+          },
+          "border_radius": 54
+        }
       ]
     }
   ]

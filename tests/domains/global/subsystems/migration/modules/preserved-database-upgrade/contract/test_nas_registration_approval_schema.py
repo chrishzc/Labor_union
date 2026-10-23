@@ -12,7 +12,7 @@ MANIFEST = ROOT/'db/migration_releases/labor_union_2026_10_19_nas_registration_a
 
 def test_canonical_registry_and_released_descriptor_are_identical():
     entries = migration._local_ordered_upgrade_entries()
-    assert entries[-1]['artifact']['name'] == ARTIFACT
+    assert any(entry['artifact']['name'] == ARTIFACT for entry in entries)
     released = load_migration_release_manifest(MANIFEST,ROOT).owned_object_descriptors(ROOT)[ARTIFACT]
     canonical = migration._canonical_artifact_descriptor(ARTIFACT)
     assert released['parent_columns'] == canonical['parent_columns']

@@ -31,16 +31,17 @@ class TemplateVariable(BaseModel):
 
 
 class MessageTemplate(BaseModel):
-    id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
     name: str = Field(min_length=1, max_length=100)
     category: Literal[
-        "webhook_reply", "push", "scheduled_push", "customer_service"
+        "webhook_reply", "push", "scheduled_push", "customer_service",
+        "task96_baseline", "leave_coordination", "matching_result", "runtime_alert", "service_day", "order_lifecycle"
     ]
     message_type: Literal["text", "flex"] = "text"
     enabled: bool = True
     content: str | dict[str, Any]
     variables: list[TemplateVariable] = []
-    usage: list[Literal["webhook", "push", "schedule", "customer_service"]] = []
+    usage: list[Literal["webhook", "push", "schedule", "customer_service", "task96_baseline", "leave_coordination", "matching_result", "runtime_alert", "service_day", "order_lifecycle", "notification"]] = []
 
     @model_validator(mode="after")
     def validate_content_type(self):

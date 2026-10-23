@@ -63,6 +63,8 @@ def validate_message_templates(definition: Mapping[str, object]) -> None:
     identifiers: set[str] = set()
     for template in templates:
         identifier = _identifier(template.get("id"), "template id")
+        if identifier == "LU96-M3-ZERO-POOL-CARD-V1":
+            raise LineMessageConfigurationError("候選池為空通知已退役，請使用人工條件協調流程。")
         if identifier in identifiers:
             raise LineMessageConfigurationError("message template ids must be unique")
         identifiers.add(identifier)

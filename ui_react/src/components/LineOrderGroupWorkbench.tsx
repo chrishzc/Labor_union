@@ -132,7 +132,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
           {events.error && <div role="alert"><p>{events.error}</p><button className="order-group-button" type="button" onClick={() => setEventReload(value => value + 1)}>重試歷程</button></div>}
           {events.value && <>{events.value.items.length === 0 ? <p>尚無群組歷程。</p> : <ol>{events.value.items.map(event => <li key={event.event_key}><span>{lineOrderGroupEventLabel(event)}</span><time dateTime={event.occurred_at}>{time(event.occurred_at, true)}</time></li>)}</ol>}{events.value.total_pages > 1 && <div className="order-group-pagination"><span>共 {events.value.total} 筆紀錄</span><div><button className="order-group-button" type="button" aria-label="上一頁群組事件" disabled={eventPage <= 1} onClick={() => setEventPage(value => value - 1)}>‹</button><span>第 {events.value.page} / {events.value.total_pages} 頁</span><button className="order-group-button" type="button" aria-label="下一頁群組事件" disabled={eventPage >= events.value.total_pages} onClick={() => setEventPage(value => value + 1)}>›</button></div></div>}</>}
         </>}</details>
-        <details className="order-group-help"><summary>綁定與邀請方式</summary><p>由已綁定 LINE 且有權限的工會人員，在服務群組內輸入：</p><code>綁定訂單 {record.case_no}</code><p>綁定完成後，再於同一群組輸入：</p><code>發送邀請連結 LINE群組網址</code><p>案件訂金須已確認核銷，客戶與指派月嫂須完成 LINE 身分綁定。</p></details>
+        <details className="order-group-help"><summary>綁定與邀請方式</summary><p>由已綁定 LINE 且有權限的工會人員，在服務群組內輸入：</p><code>綁定訂單 {record.case_no} 〈本群組邀請網址〉</code><p>請將佔位文字換成從本群組複製的邀請網址。三段之間可用空白或換行，網址中間不能拆行。</p><p>綁定完成後，再於同一群組輸入：</p><code>發送邀請</code><p>更新網址時，重新輸入完整綁定指令；不會自動發送。案件訂金須已確認核銷，客戶與指派月嫂須完成 LINE 身分綁定。</p></details>
       </>}
     </Drawer>
   </section>;

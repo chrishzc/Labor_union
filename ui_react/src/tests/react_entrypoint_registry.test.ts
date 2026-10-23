@@ -12,7 +12,6 @@ import {
   AlertGroupSecurity,
   type RuntimeTargetClient,
 } from '../pages/line_management/AlertGroupSecurity';
-import { LineRuntimeTargetError } from '../api/line_runtime_targets/line_runtime_target_errors';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
@@ -292,109 +291,19 @@ describe('React entrypoint registry', () => {
     expect(screen.queryByRole('heading', { name: '實機驗收入口' })).not.toBeInTheDocument();
   });
 
-  it('群組安全頁以 typed client 完成解除 Preview、確認、Apply、停用 readback 與 request identity 承接', async () => {
-    const target = {
-      target_id: 8,
-      target_kind: 'group' as const,
-      display_label: 'typed 測試群組',
-      state: 'active' as const,
-      minimum_status: 'critical' as const,
-      current_version: 'version-8',
-      updated_at: '2026-08-25T01:02:03+08:00',
-    };
-    const internalUserTarget = {
-      target_id: 18,
-      target_kind: 'admin_user' as const,
-      display_label: 'typed 內部使用者',
-      state: 'active' as const,
-      minimum_status: 'warning' as const,
-      current_version: 'version-18',
-      updated_at: '2026-08-25T01:02:03+08:00',
-    };
-    let groupDisabled = false;
+  it('通知對象入口排除舊群組且不啟動群組寫入', async () => {
     const client: RuntimeTargetClient = {
-      getPreferences: vi.fn().mockResolvedValue({ customer_service: true, dispatch_matching: true, staff_leave_urgent: true, system_health: false, contract_signing: true }),
-      listTargets: vi.fn(async () => [{ ...target, state: groupDisabled ? 'disabled' as const : 'active' as const }, internalUserTarget]),
-      previewSetEnabled: vi.fn(),
-      setEnabled: vi.fn(),
-      previewResetGroup: vi.fn(async () => ({
-        operation: 'group_reset' as const, target_id: 8, previous_state: 'active' as const,
-        resulting_state: 'disabled' as const, current_version: 'version-8',
-        preview_fingerprint: 'a'.repeat(64), apply_ready: true as const,
-      })),
-      resetGroup: vi.fn(async (request) => {
-        groupDisabled = true;
-        return {
-        receipt_id: 'receipt-toggle', command_family: 'line_alert_target' as const,
-        operation: 'group_reset' as const, target_id: 8, previous_state: 'active' as const,
-        resulting_state: 'disabled' as const, current_version: 'version-9', replayed: false,
-        correlation_id: request.correlation_id, committed_at: '2026-08-25T01:03:03+08:00',
-        };
-      }),
+      listTargets: vi.fn().mockResolvedValue([
+        { target_id: 1, target_kind: 'group', display_label: 'typed 測試群組', state: 'active', minimum_status: 'warning', current_version: 'v1', updated_at: '2026-10-22' },
+        { target_id: 2, target_kind: 'admin_user', display_label: 'typed 內部使用者', state: 'active', minimum_status: 'warning', current_version: 'v2', updated_at: '2026-10-22' },
+      ]),
+      previewResetGroup: vi.fn(), resetGroup: vi.fn(), previewSetEnabled: vi.fn(), setEnabled: vi.fn(),
     };
     render(React.createElement(AlertGroupSecurity, { runtimeTargetClient: client }));
-
-    await waitFor(() => expect(client.listTargets).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByText('typed 測試群組').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('typed 內部使用者')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '預覽解除群組' }));
-    await waitFor(() => expect(client.previewResetGroup).toHaveBeenCalledTimes(1));
-    expect(screen.getByText('異動影響確認')).toBeInTheDocument();
-    const previewCard = screen.getByText('異動影響確認').closest('.alert-security-preview-card');
-    expect(previewCard).not.toBeNull();
-    expect(within(previewCard as HTMLElement).getByText('解除目前群組')).toBeInTheDocument();
-    expect(within(previewCard as HTMLElement).getByText('啟用')).toBeInTheDocument();
-    expect(within(previewCard as HTMLElement).getByText('停用')).toBeInTheDocument();
-    const confirmation = screen.getByRole('checkbox', { name: /目前群組將從有效通知群組解除/ });
-    expect(screen.getByRole('button', { name: '確認解除群組' })).toBeDisabled();
-    fireEvent.click(confirmation);
-    fireEvent.click(screen.getByRole('button', { name: '確認解除群組' }));
-    await waitFor(() => expect(client.resetGroup).toHaveBeenCalledTimes(1));
-    const previewRequest = vi.mocked(client.previewResetGroup).mock.calls[0][0];
-    expect(client.resetGroup).toHaveBeenCalledWith({
-      ...previewRequest,
-      preview_fingerprint: 'a'.repeat(64),
-    });
-    expect(screen.getByText(/通知群組已解除/)).toBeInTheDocument();
-    expect(screen.getByText('已重新查詢並確認最新狀態。')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getAllByText('停用').length).toBeGreaterThan(0));
-    expect(client.previewSetEnabled).not.toHaveBeenCalled();
-    expect(client.setEnabled).not.toHaveBeenCalled();
-  });
-
-  it('群組解除 Preview 衝突會在畫面顯示 typed error，而非按鈕無反應', async () => {
-    const target = {
-      target_id: 8,
-      target_kind: 'group' as const,
-      display_label: '衝突測試群組',
-      state: 'active' as const,
-      minimum_status: 'critical' as const,
-      current_version: 'version-8',
-      updated_at: '2026-08-25T01:02:03+08:00',
-    };
-    const client: RuntimeTargetClient = {
-      listTargets: vi.fn(async () => [target]),
-      getPreferences: vi.fn().mockResolvedValue({ customer_service: true, dispatch_matching: true, staff_leave_urgent: true, system_health: false, contract_signing: true }),
-      previewSetEnabled: vi.fn(),
-      setEnabled: vi.fn(),
-      previewResetGroup: vi.fn(async () => {
-        throw new LineRuntimeTargetError(
-          'LINE_RUNTIME_TARGET_CONFLICT',
-          'LINE 告警對象 Preview 已過期，請重新查詢並預覽',
-          { publicCode: 'line_alert_target_preview_conflict' },
-        );
-      }),
-      resetGroup: vi.fn(),
-    };
-    render(React.createElement(AlertGroupSecurity, { runtimeTargetClient: client }));
-
-    await waitFor(() => expect(client.listTargets).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByText('衝突測試群組')).not.toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: '預覽解除群組' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'line_alert_target_preview_conflict：LINE 告警對象 Preview 已過期，請重新查詢並預覽',
-    );
-    expect(screen.queryByText('異動影響確認')).not.toBeInTheDocument();
+    await screen.findByText('typed 內部使用者');
+    expect(screen.queryByText('typed 測試群組')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '預覽解除群組' })).not.toBeInTheDocument();
+    expect(client.previewResetGroup).not.toHaveBeenCalled();
+    expect(client.resetGroup).not.toHaveBeenCalled();
   });
 });

@@ -177,6 +177,8 @@ def _request(item: HumanEscalationOutboxItem, now: datetime, *, description: str
     if target.get("active") is not True or not isinstance(target.get("configuration"), Mapping):
         raise HumanEscalationDeliveryError("human_escalation_alert_target_snapshot_invalid")
     recipient_type = str(target.get("recipient_type", ""))
+    if recipient_type != "user":
+        raise HumanEscalationDeliveryError("line_alert_group_retired")
     identity = str(target.get("recipient_identity", ""))
     try:
         kind = LineRecipientType(recipient_type)
@@ -206,11 +208,7 @@ def _request(item: HumanEscalationOutboxItem, now: datetime, *, description: str
     # The existing mobile-admin entry still verifies LINE identity and binding.
     message = canonical_line_payload_json({
         "type": "text",
-        "text": (
-            (description + "\n\n" if description else "") +
-            f"客服人工升級（{category}）：{safe_summary}\n"
-            f"請開啟工會客服系統處理：\n{base_url}{entry.public_route}"
-        ),
+        "text": human_alert_text(description, category, safe_summary, f"{base_url}{entry.public_route}"),
     })
     request = LineDeliveryRequest(
         LineRecipient(kind, recipient_identity), LineMessageKind.TEXT, message, now,
@@ -246,3 +244,8 @@ __all__ = [
     "HUMAN_ESCALATION_INTENT", "HumanEscalationDeliveryApplication", "HumanEscalationDeliveryError",
     "HumanEscalationDeliveryReceipt", "HumanEscalationDeliveryWorker", "HumanEscalationOutboxItem",
 ]
+
+
+def human_alert_text(description, category, safe_summary, entry):
+    return ((description + "\n\n" if description else "") +
+            f"客服人工升級（{category}）：{safe_summary}\n請開啟工會客服系統處理：\n{entry}")

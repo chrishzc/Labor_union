@@ -7,6 +7,7 @@ fixtures_root: tests/fixtures/
 ui_integration_root: ui_react/src/tests/domains/external-integration/subsystems/line/integration/
 
 # Routing notes
+訂金提醒與核銷通知的跨 Finance／LINE integration oracle 見 `modules/deposit-notifications.md`。
 三方服務群組與管理端唯讀工作區由 `modules/order-group-coordination.md` 定位；舊綁定／邀請與 compatibility Query oracle 維持原位。
 Customer Service reminder query 與 React reminder presentation 由 `modules/customer-service-reminders.md` 對應的 source leaf 定位；backend test root 為 `tests/domains/external-integration/subsystems/line/modules/customer-service-reminders/`，UI 為本 integration root 的 `line_customer_service_reminders.test.tsx`。
 The former `tests/line/` owner tree has moved under the canonical LINE subsystem root. Its existing `domain/`, `infrastructure/`, and `subsystems/` child names are retained as internal layout until later scoped semantic split; they no longer form a competing top-level test architecture. LINE/Scheduling boundary contracts for matching schedule confirmation and staff leave LIFF intake live under this subsystem integration root. Current additional owner-local integration coverage includes delivery-task action routes, safe configuration query/retirement guards, notification-rule mutation/query/replay routes, verified staff service-day media upload, Rich Menu image-upload typed receipt contracts, and the typed LINE admin capabilities/health contract.

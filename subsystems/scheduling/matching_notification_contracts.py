@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
+from typing import Literal
 
 from domains.line.identities import LineDeliveryTaskId, LineUserId
 from domains.line.delivery import LineDeliveryStatus
@@ -287,6 +288,15 @@ class MatchingSegmentContact:
         require_canonical_text(self.staff_name, "matching staff name", 100)
         if self.staff_union_no is not None:
             require_canonical_text(self.staff_union_no, "matching staff union number", 50)
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerRecommendationFollowup:
+    case_no: str
+    plan_id: int
+    status: Literal["contact_requested", "awaiting_signing", "reply_reminder"]
+    reminder_due_at: datetime | None
+    ticket_id: int | None
 
 
 @dataclass(frozen=True, slots=True)

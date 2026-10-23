@@ -6,8 +6,9 @@ import { useSaveValidation } from './useSaveValidation';
  * Description: 統一歡迎訊息與通知內容維護，沿用版本化儲存及既有規則影響確認。
  */
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
-import { RefreshCw, Search } from 'lucide-react';
-import { Drawer } from './Drawer';
+import { LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
+import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { LineNotificationRulesMutationPanel } from './LineNotificationRulesMutationPanel';
 import {
   adaptLineNotificationRulesCatalog,
@@ -34,7 +35,7 @@ interface NotificationEntry {
   id: string;
   name: string;
   recipient: string;
-  kind: 'welcome' | 'rule';
+  kind: 'welcome' | 'rule' | 'card';
   rule?: LineNotificationRuleModel;
   data: NotificationContent | null;
   error: string | null;
@@ -44,6 +45,7 @@ interface LineNotificationWorkbenchProps {
   configuration?: LineConfigurationQueryClient;
   onboarding?: LineOnboardingClient;
   templates?: LineNotificationTemplateClient;
+  previews?: LineMessagePreviewClient;
   search: string;
   enabled: 'all' | 'enabled' | 'disabled';
   onSearchChange(value: string): void;
@@ -52,7 +54,6 @@ interface LineNotificationWorkbenchProps {
 
 const FLOW_MANAGED_EVENTS = new Set([
   'scheduling.leave.extension_requested',
-  'matching.zero_pool.preview_applied',
   'runtime.alert.review_required',
   'complaint.ingress.hold_high_ticket',
 ]);
@@ -73,20 +74,21 @@ function readableRuleName(rule: LineNotificationRuleModel): string {
   return name !== rule.id ? name.replace(/^M\d+：/, '') : rule.eventLabel !== rule.eventCode ? rule.eventLabel : '通知內容';
 }
 
-function previewText(content: string, variables: string[]): string {
-  return variables.reduce((text, variable) => text.replaceAll(`{${variable}}`, variable === 'url' ? '［專屬安全登記連結］' : `〔${variable}〕`), content);
-}
-
 export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   configuration = lineConfigurationQueryClient,
   onboarding = lineOnboardingClient,
   templates = lineNotificationTemplateClient,
+  previews = lineMessagePreviewClient,
   search,
   enabled,
   onSearchChange,
   onEnabledChange,
 }) => {
   const [entries, setEntries] = useState<NotificationEntry[]>([]);
+  const [descriptors, setDescriptors] = useState<PreviewDescriptor[]>([]);
+  const [previewCatalogError, setPreviewCatalogError] = useState(false);
+  const [formatFilter, setFormatFilter] = useState<'all' | 'text' | 'flex'>('all');
+  const [deliveryTab, setDeliveryTab] = useState(false);
   const [catalog, setCatalog] = useState<LineNotificationRulesCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -113,6 +115,15 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
 
   useEffect(() => {
     const controller = new AbortController();
+    setDescriptors([]); setPreviewCatalogError(false);
+    void previews.catalog({ signal: controller.signal }).then(value => {
+      if (!controller.signal.aborted) setDescriptors(value);
+    }).catch(() => { if (!controller.signal.aborted) setPreviewCatalogError(true); });
+    return () => controller.abort();
+  }, [previews, reload]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const request = ++generation.current;
     setLoading(true);
     setCatalogError(null);
@@ -135,7 +146,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         return;
       }
       const snapshot = rulesResult.value;
-      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => rule.templateId !== 'customer_onboarding_welcome');
+      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3'].includes(rule.templateId));
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);
@@ -184,13 +195,17 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   };
 
   const open = (entry: NotificationEntry, button: HTMLButtonElement) => {
+    if (updating) return;
+    requestLeave(() => {
     opener.current = button;
     setSelected(entry);
-    setContent(entry.data?.content ?? '');
+    setContent(entry.data?.content ?? (descriptors.find(item => item.id === entry.id)?.allows_draft ? '請協助確認本次服務時段，謝謝。' : ''));
     setSaveError(null);
     setEditingSettings(false);
     setSettingsDirty(false);
     setNotice(null);
+    setDeliveryTab(false);
+    });
   };
 
   const save = async () => {
@@ -219,49 +234,59 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     }
   };
 
+  const allEntries: NotificationEntry[] = [...entries, ...descriptors.filter(item => item.builtin).map(item => ({
+    id: item.id, name: item.name, recipient: item.requires_case || item.requires_staff ? '公版案件與月嫂範例' : '依正式流程對象', kind: 'card' as const, data: null, error: null,
+  }))];
   const query = search.trim().toLowerCase();
-  const visible = entries.filter(entry => (!query || `${entry.name} ${entry.data?.content ?? ''}`.toLowerCase().includes(query))
+  const formatOf = (entry: NotificationEntry) => descriptors.find(item => item.id === entry.id)?.format ?? 'text';
+  const visible = allEntries.filter(entry => (!query || `${entry.name} ${entry.data?.content ?? ''}`.toLowerCase().includes(query))
+    && (formatFilter === 'all' || formatOf(entry) === formatFilter)
     && (enabled === 'all' || (!entry.rule || !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode)) && (entry.rule?.enabled ?? true) === (enabled === 'enabled')));
   const managed = selected?.rule ? FLOW_MANAGED_EVENTS.has(selected.rule.eventCode) : false;
+  const descriptor = descriptors.find(item => item.id === selected?.id);
 
   return (
     <section className="notification-workspace" aria-label="通知內容設定">
       <div className="notification-page-heading">
-        <div><h2>通知設定</h2><p>統一編輯各則通知內容，包含新好友歡迎訊息。</p></div>
-        <button type="button" className="notification-button" disabled={loading} onClick={() => { setNotice(null); setReload(value => value + 1); }}><RefreshCw aria-hidden="true" />重新整理</button>
+        <div><h2>通知與發送</h2><p>從通知文案到互動卡片，使用公版範例預覽，清楚查看每個帶入欄位與值。</p></div>
+        <div className="notification-heading-actions"><span className="notification-safe-badge"><ShieldCheck />預覽不會實際發送</span><button type="button" className="notification-button" disabled={loading || updating} onClick={() => requestLeave(() => { setSelected(null); setNotice(null); setReload(value => value + 1); })}><RefreshCw aria-hidden="true" />重新整理</button></div>
       </div>
-      <div className="notification-content-list">
-        <div className="notification-filters">
-          <label className="notification-search"><span className="sr-only">搜尋通知名稱或內容</span><Search aria-hidden="true" /><input type="search" value={search} maxLength={100} placeholder="搜尋通知名稱或內容" onChange={event => onSearchChange(event.target.value)} /></label>
+      {notice && <p className="notification-feedback" role="status">{notice}</p>}
+      {catalogError && <p className="notification-feedback error" role="alert">{catalogError}</p>}
+      {previewCatalogError && <p className="notification-feedback error" role="alert">訊息卡片與預覽來源讀取失敗，請重新整理；既有通知內容仍可維護。</p>}
+      <div className="notification-unified-layout">
+        <section className="notification-message-library" aria-label="訊息清單">
+          <div className="notification-library-title"><h3>所有訊息</h3><span>{visible.length} 則</span></div>
+          <label className="notification-search"><span className="sr-only">搜尋通知名稱或內容</span><Search aria-hidden="true" /><input type="search" value={search} maxLength={100} placeholder="搜尋訊息名稱或內容" onChange={event => onSearchChange(event.target.value)} /></label>
+          <div className="notification-format-filter" aria-label="訊息格式篩選">{([['all', '全部'], ['text', '純文字'], ['flex', '訊息卡片']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={formatFilter === key} onClick={() => setFormatFilter(key)}>{label}</button>)}</div>
           <select aria-label="啟用狀態" value={enabled} onChange={event => onEnabledChange(event.target.value as typeof enabled)}><option value="all">全部狀態</option><option value="enabled">已啟用</option><option value="disabled">已停用</option></select>
-        </div>
-        {notice && <p className="notification-feedback" role="status">{notice}</p>}
-        {catalogError && <p className="notification-feedback error" role="alert">{catalogError}</p>}
-        {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? (
-          <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); }}>清除條件</button></div>
-        ) : <table className="notification-content-table"><caption className="sr-only">通知內容設定清單</caption><thead><tr><th scope="col">通知名稱</th><th scope="col">通知對象</th><th scope="col">內容摘要</th><th scope="col">操作</th></tr></thead><tbody>{visible.map(entry => <tr key={entry.id}>
-          <td data-label="通知名稱"><strong>{entry.name}</strong>{entry.rule?.enabled === false && !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode) && <span className="notification-secondary">已停用</span>}</td>
-          <td data-label="通知對象">{entry.recipient}</td>
-          <td data-label="內容摘要"><span className={`notification-excerpt${entry.error ? ' error' : ''}`}>{entry.error ?? entry.data?.content}</span></td>
-          <td data-label="操作"><button type="button" className="notification-text-button" data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} onClick={event => open(entry, event.currentTarget)}>{entry.data ? '編輯內容' : '查看狀態'}</button></td>
-        </tr>)}</tbody></table>}
-      </div>
-      <Drawer isOpen={selected !== null} title={selected?.name ?? '通知內容'} className="notification-content-drawer" closeLabel="關閉通知內容" closeDisabled={updating} onClose={close}
-        footer={editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => { requestLeave(() => { setSettingsDirty(false); setEditingSettings(false); }); }}>返回內容</button> : <><button type="button" className="notification-button" disabled={saving} onClick={close}>取消</button>{selected?.data && <button type="button" className="notification-button primary" disabled={saving || !contentDirty} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button>}</>}>
-        <fieldset className="notification-editor-scope" >
-        {selected && editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : selected && <>
-          {selected.error && <p className="notification-feedback error" role="alert">{selected.error}</p>}
-          {selected.data && <>
-            <><label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={selected.kind === 'welcome' ? 12 : 7} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>{saveValidation.feedback}</>
-            {managed && <p className="notification-help">說明文字會用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
-            {selected.data.variables.length > 0 && <p className="notification-help">動態資料於發送時帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p>}
-            <div className="notification-preview"><p>訊息預覽</p><div className="notification-bubble">{previewText(content, selected.data.variables) || '尚未輸入內容'}</div></div>
+          <div className="notification-message-items">
+            {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); setFormatFilter('all'); }}>清除條件</button></div> : visible.map(entry => <button type="button" key={entry.id} className="notification-message-item" aria-pressed={selected?.id === entry.id} data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} disabled={updating} onClick={event => open(entry, event.currentTarget)}>
+              <span className="notification-message-icon">{formatOf(entry) === 'flex' ? <LayoutPanelTop /> : <MessageSquare />}</span><span><strong>{entry.name}</strong><small>{entry.recipient}・{formatOf(entry) === 'flex' ? '訊息卡片' : '純文字'}{entry.rule?.enabled === false && !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode) ? '・已停用' : ''}</small></span>
+            </button>)}
+          </div>
+          <p className="notification-library-note">資料只用於查看訊息效果，不會建立投遞任務。</p>
+        </section>
+        {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data || descriptor?.allows_draft ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
+          editor={<>
+            <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
+            <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>
+            {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
+              <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{selected.kind === 'welcome' ? '加入或重新加入好友時' : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
+              {selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}
+              {contentDirty && <p className="notification-help">請先儲存或取消內容修改，再調整發送設定。</p>}
+            </section> : <>
+              {selected.error && <p className="notification-feedback error" role="alert">{selected.error}</p>}
+              {selected.data ? <><label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>{saveValidation.feedback}
+                {managed && <p className="notification-help">說明文字用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
+                {selected.data.variables.length > 0 ? <p className="notification-help">預覽變數使用下方公版範例值；實際發送由正式流程帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p> : <p className="notification-help">此段文案沒有需要手動填寫的變數。</p>}
+              </> : descriptor?.allows_draft ? <><label className="notification-content-field" htmlFor="notification-message-content">預覽文案<textarea id="notification-message-content" rows={16} value={content} maxLength={5000} onChange={event => setContent(event.target.value)} /></label><p className="notification-help">只試看工會自行輸入的詢問或回覆，不會儲存、建立待辦或發送。</p></> : selected.kind === 'card' && <p className="notification-help">使用正式訊息與卡片組裝方式，以下方公版範例資料展示內容。</p>}
+              {saveError && <p className="notification-feedback error" role="alert">{saveError}</p>}
+            </>}
           </>}
-          {saveError && <p className="notification-feedback error" role="alert">{saveError}</p>}
-          <details className="notification-delivery-settings"><summary>發送設定</summary><dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{selected.kind === 'welcome' ? '加入或重新加入好友時' : managed ? '由業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>{selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}{contentDirty && selected.rule && !managed && <p className="notification-help">請先儲存或取消內容修改，再調整發送設定。</p>}</details>
-        </>}
-        </fieldset>
-      </Drawer>
+          footer={editingSettings ? <button type="button" className="notification-button" disabled={updating} onClick={() => requestLeave(() => { setSettingsDirty(false); setEditingSettings(false); setDeliveryTab(false); })}>返回內容</button> : <><button type="button" className="notification-button" disabled={updating} onClick={close}>取消</button>{selected.data && <><button type="button" className="notification-text-button" disabled={updating || !contentDirty} onClick={() => { setContent(selected.data!.content); setSaveError(null); }}>還原內容</button><button type="button" className="notification-button primary" disabled={updating || !contentDirty} onClick={() => void save()}>{saving ? '儲存中…' : '儲存內容'}</button></>}</>}
+        /> : <div className="notification-editor-placeholder"><MessageSquare /><h3>選擇訊息，查看用戶收到的樣子</h3><p>從左側選擇通知或卡片，立即查看公版預覽及帶入的欄位與值。</p></div>}
+      </div>
     </section>
   );
 };

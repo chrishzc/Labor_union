@@ -20,6 +20,21 @@ class LineOrderGroupRecord(BaseModel):
     version: int
 
 
+class PaidOrderGroupTodoView(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    case_no: str
+    deposit_amount_ntd: int
+
+
+class PaidOrderGroupTodoPageView(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    items: list[PaidOrderGroupTodoView]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class LineOrderGroupPageResponse(BaseModel):
     items: list[LineOrderGroupRecord]
     total: int
@@ -100,6 +115,8 @@ class LineOrderGroupWorkspaceEventPageResponse(BaseModel):
 
 
 __all__ = [
+    "PaidOrderGroupTodoView",
+    "PaidOrderGroupTodoPageView",
     "LineOrderGroupEventResponse",
     "LineOrderGroupEventPageResponse",
     "LineOrderGroupNumberedPageResponse",

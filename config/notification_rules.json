@@ -11,16 +11,6 @@
       "predicates": []
     },
     {
-      "id": "LU96-M3-ZERO-POOL-RULE-V1",
-      "event_code": "matching.zero_pool.preview_applied",
-      "recipient_selector": "matching.request.participants",
-      "template_id": "LU96-M3-ZERO-POOL-CARD-V1",
-      "enabled": false,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
-      "predicates": []
-    },
-    {
       "id": "LU96-M4-SAFE-ALERT-RULE-V1",
       "event_code": "runtime.alert.review_required",
       "recipient_selector": "admin.review_actor",

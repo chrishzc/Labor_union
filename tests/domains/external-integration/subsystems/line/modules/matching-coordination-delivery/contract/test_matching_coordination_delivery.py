@@ -325,3 +325,10 @@ def test_worker_records_typed_failure_and_continues_after_one_immutable_bad_row(
     assert worker.failures[0].reference_id == "match-96:notify:bad"
     assert worker.failures[0].code == "line_matching_delivery_message_missing"
     assert worker.failures[0].fallback == "manual_review"
+
+
+def test_retired_zero_pool_intent_cannot_open_interaction_or_enqueue_delivery():
+    from subsystems.line.matching_coordination_delivery import normalize_matching_coordination_intent, MatchingCoordinationDeliveryError
+    with pytest.raises(MatchingCoordinationDeliveryError) as error:
+        normalize_matching_coordination_intent(_item(recipient_selector="matching.request.participants"), now=NOW)
+    assert error.value.code == "matching_zero_pool_notification_retired"

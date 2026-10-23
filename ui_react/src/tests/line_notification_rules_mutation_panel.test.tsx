@@ -1,9 +1,9 @@
 import { UnsavedChangesProvider } from '../components/UnsavedChanges';
 /**
  * File: line_notification_rules_mutation_panel.test.tsx
- * Description: 驗證通知規則欄位編輯、Preview 確認 Save、刪除專用 Preview 與 receipt 顯示。
+ * Description: 驗證一次點擊送出、選填原因、內部 Preview／Apply 一致性及唯讀訊息預覽。
  */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LineNotificationRulesCatalog } from '../api/line_configuration/line_configuration_query_schemas';
 import type { LineNotificationRulesMutationClient } from '../api/line_notification_rules/line_notification_rules_mutation_client';
@@ -15,6 +15,7 @@ import { LineNotificationWorkbench } from '../components/LineNotificationWorkben
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import type { LineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
 
 const FINGERPRINT = '0123456789abcdef'.repeat(4);
 const CATALOG: LineNotificationRulesCatalog = {
@@ -68,175 +69,81 @@ function templateClient(overrides: Partial<LineNotificationTemplateClient> = {})
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE notification rules mutation panel', () => {
-  it('欄位變更後先顯示去敏 Preview，經原因與人工確認才儲存', async () => {
-    const preview = vi.fn().mockImplementation(async (request) => ({
-      before_revision: request.expected_revision,
-      resulting_revision: request.expected_revision + 1,
-      definition: request.definition,
-      fingerprint: FINGERPRINT,
+  it.each(['', '核准訂金通知事件更新'])('一次點擊儲存，內部檢查後套用同一候選；原因可選填：%s', async reason => {
+    const preview = vi.fn().mockImplementation(async request => ({
+      before_revision: request.expected_revision, resulting_revision: request.expected_revision + 1,
+      definition: request.definition, fingerprint: FINGERPRINT,
     }));
-    const save = vi.fn().mockResolvedValue({
-      revision: 4,
-      preview_fingerprint: FINGERPRINT,
-      cancelled_intent_count: 1,
-      cancelled_task_count: 2,
-    });
-    const client: LineNotificationRulesMutationClient = {
-      preview,
-      save,
-      deleteRule: vi.fn(),
-    };
+    const save = vi.fn().mockResolvedValue({ revision: 4, preview_fingerprint: FINGERPRINT, cancelled_intent_count: 1, cancelled_task_count: 2 });
+    const client: LineNotificationRulesMutationClient = { preview, save, deleteRule: vi.fn() };
     const onCommitted = vi.fn();
-
-    render(
-      <LineNotificationRulesMutationPanel
-        catalog={CATALOG}
-        client={client}
-        templateClient={templateClient()}
-        onCommitted={onCommitted}
-      />
-    );
-
+    render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} onCommitted={onCommitted} />);
     await screen.findByRole('textbox', { name: '訊息內容編輯' });
-    const ruleSelector = screen.getByRole('combobox', { name: '通知規則：' });
-    expect(within(ruleSelector).getByRole('option', { name: '訂金確認' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '儲存變更' })).toBeDisabled();
     expect(screen.queryByRole('textbox', { name: '規則 ID' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '訊息模板 ID' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '事件' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新增規則' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '預覽儲存變更' })).toBeDisabled();
-    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), {
-      target: { value: 'assigned_caregiver' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
-
-    await screen.findByText('儲存預覽已就緒');
-    expect(screen.queryByText('版本 3 → 4')).not.toBeInTheDocument();
-    expect(screen.queryByText(/指紋摘要/)).not.toBeInTheDocument();
-    expect(screen.queryByText(FINGERPRINT)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '確認儲存通知規則' })).toBeDisabled();
-
-    window.alert = vi.fn();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認通知規則與影響範圍' }));
-    const saveButton = screen.getByRole('button', { name: '確認儲存通知規則' });
-    expect(saveButton).toBeEnabled();
-    fireEvent.click(saveButton);
-    expect(window.alert).toHaveBeenCalled();
-    expect(screen.getByRole('textbox', { name: '操作原因' })).toHaveFocus();
-    expect(save).not.toHaveBeenCalled();
-    // Editing the reason retains the preview but requires confirming its scope again.
-    fireEvent.change(screen.getByRole('textbox', { name: '操作原因' }), {
-      target: { value: '核准訂金通知事件更新' },
-    });
-    fireEvent.click(screen.getByRole('checkbox', {
-      name: '我已確認通知規則與影響範圍',
-    }));
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存通知規則' }));
-
+    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), { target: { value: 'assigned_caregiver' } });
+    if (reason) fireEvent.change(screen.getByRole('textbox', { name: '操作原因（選填）' }), { target: { value: reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存變更' }));
     await screen.findByText(/通知規則已儲存；已取消 1 筆待發通知與 2 筆發送工作/);
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(preview).toHaveBeenCalledWith({ expected_revision: 3, definition: expect.objectContaining({ rules: [expect.objectContaining({ recipient_selector: 'assigned_caregiver' })] }) }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(save).toHaveBeenCalledTimes(1);
+    expect(preview.mock.invocationCallOrder[0]).toBeLessThan(save.mock.invocationCallOrder[0]);
     expect(save.mock.calls[0][0]).toMatchObject({
-      expected_revision: 3,
-      preview_fingerprint: FINGERPRINT,
-      reason: '核准訂金通知事件更新',
-      definition: { rules: [expect.objectContaining({
-        event_code: 'deposit_confirmed',
-        id: 'deposit_notice',
-        recipient_selector: 'assigned_caregiver',
-        template_id: 'deposit_template',
-      })] },
-      idempotency_key: expect.stringMatching(/^line-notification-save-idem-/),
-      correlation_id: expect.stringMatching(/^line-notification-save-corr-/),
+      expected_revision: 3, preview_fingerprint: FINGERPRINT, reason,
+      definition: { rules: [expect.objectContaining({ event_code: 'deposit_confirmed', id: 'deposit_notice', recipient_selector: 'assigned_caregiver', template_id: 'deposit_template' })] },
+      idempotency_key: expect.stringMatching(/^line-notification-save-idem-/), correlation_id: expect.stringMatching(/^line-notification-save-corr-/),
     });
-    expect(save.mock.calls[0][0].idempotency_key).not.toBe(
-      save.mock.calls[0][0].correlation_id
-    );
+    expect(save.mock.calls[0][0].idempotency_key).not.toBe(save.mock.calls[0][0].correlation_id);
+    expect(document.body.textContent).not.toContain(FINGERPRINT);
+    expect(screen.queryByRole('button', { name: '預覽儲存變更' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認儲存通知規則' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '我已確認通知規則與影響範圍' })).not.toBeInTheDocument();
     await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(1));
   });
 
-  it('刪除使用目前 revision 移除單一規則的專用 Preview，再呼叫 DELETE', async () => {
-    const preview = vi.fn().mockResolvedValue({
-      before_revision: 3,
-      resulting_revision: 4,
-      definition: { rules: [] },
-      fingerprint: FINGERPRINT,
-    });
-    const deleteRule = vi.fn().mockResolvedValue({
-      rule_id: 'deposit_notice',
-      revision: 4,
-      preview_fingerprint: FINGERPRINT,
-      cancelled_intent_count: 0,
-      cancelled_task_count: 1,
-    });
-    const client: LineNotificationRulesMutationClient = {
-      preview,
-      save: vi.fn(),
-      deleteRule,
-    };
-
-    render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} />);
-    fireEvent.click(screen.getByRole('button', { name: '預覽刪除規則' }));
-
-    await screen.findByText('刪除預覽已就緒');
-    expect(preview).toHaveBeenCalledWith(
-      { expected_revision: 3, definition: { rules: [] } },
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    );
-    fireEvent.change(screen.getByRole('textbox', { name: '操作原因' }), {
-      target: { value: '停用已退役通知流程' },
-    });
-    fireEvent.click(screen.getByRole('checkbox', {
-      name: '我已確認通知規則與影響範圍',
-    }));
-    fireEvent.click(screen.getByRole('button', { name: '確認刪除通知規則' }));
-
-    await screen.findByText(/規則 deposit_notice 已刪除；已取消 0 筆待發通知與 1 筆發送工作/);
-    expect(deleteRule).toHaveBeenCalledTimes(1);
-    expect(deleteRule.mock.calls[0][0]).toBe('deposit_notice');
-    expect(deleteRule.mock.calls[0][1]).toMatchObject({
-      expected_revision: 3,
-      preview_fingerprint: FINGERPRINT,
-      reason: '停用已退役通知流程',
-      idempotency_key: expect.stringMatching(/^line-notification-delete-idem-/),
-      correlation_id: expect.stringMatching(/^line-notification-delete-corr-/),
-    });
-  });
-
-  it('存在未儲存編輯時鎖定 Delete，避免用錯 fingerprint 合併未確認變更', async () => {
-    const client: LineNotificationRulesMutationClient = {
-      preview: vi.fn(),
-      save: vi.fn(),
-      deleteRule: vi.fn(),
-    };
+  it('一次點擊刪除，以目前版本取得刪除候選後呼叫 DELETE，空白原因可接受', async () => {
+    const preview = vi.fn().mockResolvedValue({ before_revision: 3, resulting_revision: 4, definition: { rules: [] }, fingerprint: FINGERPRINT });
+    const deleteRule = vi.fn().mockResolvedValue({ rule_id: 'deposit_notice', revision: 4, preview_fingerprint: FINGERPRINT, cancelled_intent_count: 0, cancelled_task_count: 1 });
+    const client: LineNotificationRulesMutationClient = { preview, save: vi.fn(), deleteRule };
     render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} />);
     await screen.findByRole('textbox', { name: '訊息內容編輯' });
+    fireEvent.click(screen.getByRole('button', { name: '刪除規則' }));
+    await screen.findByText(/規則 deposit_notice 已刪除；已取消 0 筆待發通知與 1 筆發送工作/);
+    expect(preview).toHaveBeenCalledWith({ expected_revision: 3, definition: { rules: [] } }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(deleteRule).toHaveBeenCalledTimes(1);
+    expect(preview.mock.invocationCallOrder[0]).toBeLessThan(deleteRule.mock.invocationCallOrder[0]);
+    expect(deleteRule.mock.calls[0]).toEqual(['deposit_notice', expect.objectContaining({ expected_revision: 3, preview_fingerprint: FINGERPRINT, reason: '', idempotency_key: expect.stringMatching(/^line-notification-delete-idem-/), correlation_id: expect.stringMatching(/^line-notification-delete-corr-/) }), expect.objectContaining({ signal: expect.any(AbortSignal) })]);
+    expect(screen.queryByRole('button', { name: '確認刪除通知規則' })).not.toBeInTheDocument();
+  });
 
-    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), {
-      target: { value: 'assigned_caregiver' },
-    });
-
-    expect(screen.getByRole('button', { name: '預覽刪除規則' })).toBeDisabled();
+  it('存在未儲存編輯時鎖定刪除，不呼叫內部檢查或刪除命令', async () => {
+    const client: LineNotificationRulesMutationClient = { preview: vi.fn(), save: vi.fn(), deleteRule: vi.fn() };
+    render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} />);
+    await screen.findByRole('textbox', { name: '訊息內容編輯' });
+    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), { target: { value: 'assigned_caregiver' } });
+    const remove = screen.getByRole('button', { name: '刪除規則' });
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(client.preview).not.toHaveBeenCalled();
+    expect(client.deleteRule).not.toHaveBeenCalled();
     expect(screen.getByText(/有未儲存編輯時，刪除功能會鎖定/)).toBeInTheDocument();
   });
 
-  it('不將 typed error code 或後端訊息穿透到一般通知規則畫面', async () => {
+  it('內部檢查失敗時不儲存，不將錯誤代碼與後端原文顯示於通知規則畫面', async () => {
     const client: LineNotificationRulesMutationClient = {
-      preview: vi.fn().mockRejectedValue(new LineNotificationRulesMutationError(
-        'raw_rule_failure',
-        'raw provider detail must stay closed',
-      )),
-      save: vi.fn(),
-      deleteRule: vi.fn(),
+      preview: vi.fn().mockRejectedValue(new LineNotificationRulesMutationError('raw_rule_failure', 'raw provider detail must stay closed')),
+      save: vi.fn(), deleteRule: vi.fn(),
     };
     render(<LineNotificationRulesMutationPanel catalog={CATALOG} client={client} templateClient={templateClient()} />);
     await screen.findByRole('textbox', { name: '訊息內容編輯' });
-
-    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), {
-      target: { value: 'assigned_caregiver' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '預覽儲存變更' }));
-
+    fireEvent.change(screen.getByRole('combobox', { name: '收件者' }), { target: { value: 'assigned_caregiver' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存變更' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('LINE 通知規則操作未完成，請重新載入最新規則後再試。');
+    expect(client.save).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain('raw_rule_failure');
     expect(document.body.textContent).not.toContain('raw provider detail');
   });
@@ -333,19 +240,45 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
   const configuration: LineConfigurationQueryClient = {
     getNotificationRules: vi.fn(async () => catalog), getRichMenuConfiguration: vi.fn(), listRichMenuPublications: vi.fn(), getRichMenuPublication: vi.fn(),
   };
+  const previews: LineMessagePreviewClient = {
+    catalog: vi.fn(async () => [
+      { id: 'welcome', template_id: 'customer_onboarding_welcome', name: '歡迎', format: 'text' as const, requires_case: false, requires_staff: false, builtin: false, allows_draft: false },
+      ...('rules' in catalog.definition ? catalog.definition.rules : []).map(rule => ({ id: rule.id, template_id: rule.template_id, name: '通知', format: 'text' as const, requires_case: true, requires_staff: false, builtin: false, allows_draft: false })),
+    ]),
+    subjects: vi.fn(async () => ({ items: [{ id: 'CASE-1', label: 'CASE-1｜測試客戶' }], next_cursor: null })),
+    render: vi.fn(async payload => ({ status: 'ready' as const, note: '公版範例', format: 'text' as const,
+      text: (payload.content ?? '').replaceAll('{url}', '［專屬安全登記連結］').replaceAll('{case_no}', 'DEMO-CASE-001'), bubbles: [],
+      facts: payload.id === 'welcome' ? [] : [{ id: '案件編號（case_no）', label: 'DEMO-CASE-001' }] })),
+  };
   function Harness() {
     const [search, setSearch] = useState('');
     const [enabled, setEnabled] = useState<'all' | 'enabled' | 'disabled'>('all');
-    return <UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} search={search} enabled={enabled} onSearchChange={setSearch} onEnabledChange={setEnabled} /></UnsavedChangesProvider>;
+    return <UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} previews={previews} search={search} enabled={enabled} onSearchChange={setSearch} onEnabledChange={setEnabled} /></UnsavedChangesProvider>;
   }
-  return { templates, onboarding, configuration, Harness };
+  return { templates, onboarding, configuration, previews, Harness };
 }
 
 describe('通知內容統一工作區', () => {
+  it('補列正式訊息與卡片，詢問文案只能預覽，不提供儲存或正式動作', async () => {
+    const { Harness, previews, templates, onboarding } = contentWorkbench();
+    vi.mocked(previews.catalog).mockResolvedValue([
+      { id: 'service-contact', template_id: null, name: '呼叫專員－需求受理', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false },
+      { id: 'card-union-question', template_id: null, name: '工會詢問客戶卡', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
+    ]);
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看呼叫專員－需求受理內容' }));
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看工會詢問客戶卡內容' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '預覽文案' }), { target: { value: '請協助確認服務條件。' } });
+    await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-union-question', content: '請協助確認服務條件。', data_source: 'sample' }, expect.any(Object)));
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
+  });
+
   it('歡迎訊息與通知共用清單，搜尋內容且直接開啟編輯，不提供獨立發送紀錄', async () => {
     const { Harness } = contentWorkbench(); render(<Harness />);
     await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' });
-    expect(screen.getAllByRole('row')).toHaveLength(3);
+    expect(within(screen.getByRole('region', { name: '訊息清單' })).getAllByRole('button', { name: /^編輯/ })).toHaveLength(2);
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByText('發送紀錄')).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: '登記' } });
@@ -360,7 +293,7 @@ describe('通知內容統一工作區', () => {
     const { Harness, onboarding, templates } = contentWorkbench(); render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' }));
     fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '新歡迎文字 {url}' } });
-    expect(document.querySelector('.notification-bubble')).toHaveTextContent('新歡迎文字 ［專屬安全登記連結］');
+    await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('新歡迎文字 ［專屬安全登記連結］'));
     fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(onboarding.update).toHaveBeenCalledWith({ content: '新歡迎文字 {url}', expected_revision: 7 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
@@ -368,7 +301,9 @@ describe('通知內容統一工作區', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '新訂金通知 {case_no}' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
     await waitFor(() => expect(templates.update).toHaveBeenCalledWith('deposit_notice', { content: '新訂金通知 {case_no}', expected_revision: 8 }, expect.any(Object)));
-    await screen.findByText('新訂金通知 {case_no}');
+    await waitFor(() => expect(templates.get).toHaveBeenCalledTimes(3));
+    fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
+    expect(screen.getByRole('textbox', { name: '通知內容' })).toHaveValue('新訂金通知 {case_no}');
   });
 
   it('卡片說明可編輯，原流程的對象與排程不可在此改寫', async () => {
@@ -411,11 +346,55 @@ describe('通知內容統一工作區', () => {
   it('確認放棄之前不卸載發送設定草稿，繼續編輯時保留選擇', async () => {
     const { Harness } = contentWorkbench(); render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
-    fireEvent.click(screen.getByText('發送設定', { selector: 'summary' }));
+    fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
     fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '啟用此規則' }));
     fireEvent.click(screen.getByRole('button', { name: '返回內容' }));
     fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
     expect(screen.getByRole('checkbox', { name: '啟用此規則' })).not.toBeChecked();
+  });
+
+  it('公版直接預覽且列出欄位與值，不查真實案件，試改只呼叫預覽', async () => {
+    const { Harness, previews, templates, onboarding } = contentWorkbench(); render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
+    await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('案件 DEMO-CASE-001 已確認訂金。'));
+    expect(screen.queryByRole('combobox', { name: '選擇案件' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '公版預覽資料' })).toHaveTextContent('案件編號（case_no）');
+    expect(screen.getByRole('table', { name: '本次帶入欄位與值' })).toHaveTextContent('DEMO-CASE-001');
+    expect(previews.subjects).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '試改案件 {case_no}' } });
+    await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('試改案件 DEMO-CASE-001'));
+    expect(previews.render).toHaveBeenLastCalledWith({ id: 'deposit_notice', content: '試改案件 {case_no}', data_source: 'sample' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '一般內容' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '長文字' })).not.toBeInTheDocument();
+  });
+
+  it('舊文案的晚到預覽不能覆蓋最新內容', async () => {
+    const { Harness, previews } = contentWorkbench();
+    let resolveOld: ((value: Awaited<ReturnType<LineMessagePreviewClient['render']>>) => void) | undefined;
+    vi.mocked(previews.render).mockImplementation(payload => payload.content === '舊文案'
+      ? new Promise(resolve => { resolveOld = resolve; })
+      : Promise.resolve({ status: 'ready', note: '', format: 'text', text: payload.content ?? '', bubbles: [], facts: [] }));
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '舊文案' } });
+    await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
+    fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '最新文案' } });
+    await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('最新文案'));
+    await act(async () => { resolveOld!({ status: 'ready', note: '', format: 'text', text: '舊文案', bubbles: [], facts: [] }); });
+    await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('最新文案'));
+    expect(document.querySelector('.notification-bubble')).not.toHaveTextContent('舊文案');
+  });
+
+  it('公版預覽失敗顯示錯誤，不殘留舊值或洩漏資料庫訊息', async () => {
+    const { Harness, previews } = contentWorkbench();
+    vi.mocked(previews.render).mockRejectedValue(new Error('private database detail'));
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
+    await screen.findByText('預覽載入失敗，請重新查詢。');
+    expect(screen.queryByRole('option', { name: 'CASE-1｜測試客戶' })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('private database detail');
+    expect(document.querySelector('.notification-bubble')).toBeNull();
   });
 });

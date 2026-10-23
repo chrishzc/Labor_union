@@ -37,7 +37,7 @@ class RuntimeAlertTargetApplication:
     def list_targets(self) -> tuple[AlertTargetView, ...]:
         with self._unit_of_work_factory() as unit_of_work:
             rows = unit_of_work.runtime_monitor.list_alert_targets()
-            return tuple(_target_view(row) for row in rows)
+            return tuple(_target_view(row) for row in rows if row["target_type"] == "admin_user")
 
     def list_admin_candidates(self) -> tuple[AlertAdminCandidateView, ...]:
         with self._unit_of_work_factory() as unit_of_work:
@@ -45,9 +45,13 @@ class RuntimeAlertTargetApplication:
             return tuple(_candidate_view(row) for row in rows)
 
     def reset(self, command: ResetLineAlertGroupCommand) -> LineAlertTargetMutationReceipt:
-        return self._apply(command, operation="group_reset")
+        _group_retired()
 
     def set_enabled(self, command: SetLineAlertTargetEnabledCommand) -> LineAlertTargetMutationReceipt:
+        with self._unit_of_work_factory() as reader:
+            target = reader.runtime_monitor.get_alert_target(command.target_id, for_update=False)
+            if target is not None:
+                _ensure_admin_target(target)
         return self._apply(command, operation="enable" if command.enabled else "disable")
 
     def add_admin_target(self, command: AddLineAlertAdminTargetCommand) -> LineAlertTargetMutationReceipt:
@@ -69,6 +73,8 @@ class RuntimeAlertTargetApplication:
         )
 
     def preview(self, command) -> LineAlertTargetMutationPreview:
+        if isinstance(command, ResetLineAlertGroupCommand):
+            _group_retired()
         operation = _operation(command)
         with self._unit_of_work_factory() as unit_of_work:
             snapshot = _preview_snapshot(
@@ -95,66 +101,7 @@ class RuntimeAlertTargetApplication:
         actor_id: str,
         event_id: str,
     ) -> bool:
-        """以新的已授權群組指令重新啟用原紀錄；重播不重做 mutation。"""
-        key = IdempotencyKey(f"line-alert-registration:{event_id}")
-        correlation = CorrelationId(f"line-event:{event_id}")
-        fingerprint = fingerprint_payload(
-            {"operation": "group_registration", "event_id": event_id, "actor_id": actor_id,
-             "group_identity_digest": hashlib.sha256(group_id.encode("utf-8")).hexdigest()}
-        )
-        repo = unit_of_work.runtime_monitor
-        existing = repo.load_admin_command_receipt(_COMMAND_FAMILY, key.value, for_update=False)
-        if existing is not None:
-            _check_receipt(existing, fingerprint.value)
-            return bool(_receipt_result(existing).get("created", False))
-        _acquire(repo)
-        unit_of_work.add_after_completion(lambda: _release(repo))
-        existing = repo.load_admin_command_receipt(_COMMAND_FAMILY, key.value, for_update=True)
-        if existing is not None:
-            _check_receipt(existing, fingerprint.value)
-            return bool(_receipt_result(existing).get("created", False))
-        active = repo.find_active_group_targets(for_update=True)
-        if len(active) > 1:
-            raise RuntimeAlertTargetError(
-                "conflict", "line_alert_group_singleton_violation", "active LINE 告警群組狀態需人工復原"
-            )
-        if active:
-            if str(active[0].get("group_id")) == group_id:
-                current = _target_view(active[0])
-                result = _registration_result(
-                    current, False, key.value, correlation.value, self._now(),
-                    previous_state=current.state, expected_version=current.current_version,
-                )
-                repo.save_admin_command_receipt(
-                    _COMMAND_FAMILY, key.value, fingerprint.value, actor_id,
-                    "LINE 群組告警註冊重播", result,
-                )
-                _save_registration_audit(repo, actor_id, current, result, "LINE 群組告警註冊重播")
-                return False
-            raise RuntimeAlertTargetError(
-                "conflict", "line_alert_group_already_active", "已有其他 LINE 告警群組啟用"
-            )
-        historical = repo.find_group_target(group_id, for_update=True)
-        previous_state, expected_version = "absent", "absent"
-        reason = "LINE 群組告警註冊"
-        if historical is not None:
-            before = _target_view(historical)
-            previous_state, expected_version = before.state, before.current_version
-            target_id = before.target_id
-            repo.update_alert_target_enabled(target_id, True)
-            reason = "LINE 群組告警重新綁定"
-        else:
-            target_id = repo.insert_group_target(group_id, "LINE 工會異常通知群組", actor_id)
-        current = _target_view(repo.get_alert_target(target_id, for_update=True))
-        result = _registration_result(
-            current, True, key.value, correlation.value, self._now(),
-            previous_state=previous_state, expected_version=expected_version,
-        )
-        repo.save_admin_command_receipt(
-            _COMMAND_FAMILY, key.value, fingerprint.value, actor_id, reason, result,
-        )
-        _save_registration_audit(repo, actor_id, current, result, reason)
-        return True
+        _group_retired()
 
     def _apply(self, command, *, operation: str) -> LineAlertTargetMutationReceipt:
         fingerprint = command_fingerprint(command)
@@ -244,7 +191,7 @@ class RuntimeAlertTargetApplication:
                         _raise_not_found()
                     _check_version(target, command.expected_version)
                     enabled = command.enabled
-                    _ensure_singleton(repo, target, enabled)
+                    _ensure_admin_target(target)
                 else:
                     target = repo.get_admin_target(command.admin_user_id, for_update=True)
                     enabled = True
@@ -315,7 +262,7 @@ def _preview_snapshot(repo, command, operation: str, *, for_update: bool) -> dic
         if target is None:
             _raise_not_found()
         _check_version(target, command.expected_version)
-        _ensure_singleton(repo, target, command.enabled)
+        _ensure_admin_target(target)
         view = _target_view(target)
         return _preview_values(
             view.target_id,
@@ -410,14 +357,10 @@ def _reset_target(repo, expected_version):
     return target
 
 
-def _ensure_singleton(repo, target, enabled):
-    if not enabled or target["target_type"] != "group":
-        return
-    active = repo.find_active_group_targets(for_update=True)
-    if any(int(row["id"]) != int(target["id"]) for row in active):
-        raise RuntimeAlertTargetError(
-            "conflict", "line_alert_group_already_active", "已有其他 LINE 告警群組啟用"
-        )
+def _ensure_admin_target(target):
+    if target["target_type"] == "group":
+        _group_retired()
+
 
 
 def _target_view(row) -> AlertTargetView:
@@ -607,3 +550,7 @@ def _audit_action(operation):
 
 
 __all__ = ["RuntimeAlertTargetApplication"]
+
+
+def _group_retired():
+    raise RuntimeAlertTargetError("conflict", "line_alert_group_retired", "群組告警功能已取消。")

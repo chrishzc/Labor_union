@@ -28,6 +28,13 @@ class StaffLeaveInboxItemView(BaseModel):
     aggregate_version: int = Field(gt=0)
 
 
+class StaffLeaveInboxPageView(BaseModel):
+    items: list[StaffLeaveInboxItemView]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=50)
+
+
 class StaffLeaveCoordinationTargetView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

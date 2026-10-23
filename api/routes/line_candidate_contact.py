@@ -84,8 +84,8 @@ def submit_candidate_contact(payload: CandidateContactSubmitRequest):
         return BaseResponse(
             data=CandidateContactSubmitView.model_validate(result),
             message=(
-                "已記錄回應；需要確認的資訊會由助理直接聯絡客戶。"
-                if result["customer_message_queued"]
+                "已收到您的問題，待工會確認後回覆。"
+                if result["union_followup_required"]
                 else "已記錄回應。"
             ),
         )
@@ -114,18 +114,13 @@ def submit_candidate_contact_customer(payload: CandidateContactCustomerSubmitReq
             payload.interaction_reference,
             identity.line_user_id,
             payload.answer,
-            payload.decision,
             IdempotencyKey(payload.idempotency_key),
         )
         return BaseResponse(
             data=CandidateContactCustomerSubmitView.model_validate(
                 result
             ),
-            message=(
-                "回答已直接轉交提出問題的月嫂。"
-                if result["caregiver_message_queued"]
-                else "已記錄是否可調整，並交由工會人員接續處理。"
-            ),
+            message="已收到您的回答，待工會人員審核處理。",
         )
     except _ROUTE_ERRORS as error:
         _raise_error(error, "line-candidate-contact-customer:submit")
@@ -163,11 +158,7 @@ def _raise_error(error: Exception, correlation_id: str):
         status,
         "expired" if status == 410 else "forbidden" if status == 403 else "not_found" if status == 404 else "validation",
         code,
-        (
-            "此案件客戶尚未綁定 LINE，問題目前無法傳送；請先由客戶完成 LINE 身分綁定。"
-            if code == "candidate_contact_customer_unavailable"
-            else "回應未送出，請重新從案件卡片開啟表單。"
-        ),
+        "回應未送出，請重新從案件卡片開啟表單。",
         correlation_id,
     ) from error
 

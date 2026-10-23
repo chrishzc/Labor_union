@@ -5,7 +5,8 @@ Description: 編排 verified LINE platform root、身分流程、原子登記、
 
 from __future__ import annotations
 
-from dataclasses import replace
+from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_BOUND
+
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -27,8 +28,6 @@ from domains.line.identity_binding import (
     LineIdentityClaim,
     advance_binding_failure_streak,
 )
-from domains.customer_service.escalation import EscalationContext, TriggerCode
-from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.identity_flow import (
     LineIdentityFlowPurpose,
     validate_identity_flow,
@@ -41,9 +40,6 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
-from subsystems.customer_service.escalation_application import HumanEscalationApplication
-from subsystems.customer_service.escalation_contracts import CreateHumanEscalation
-from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
     CustomerIdentityProof,
@@ -458,7 +454,7 @@ class LineIdentityApplication:
                 line_user_id,
                 lock=True,
             )
-            streak, threshold = advance_binding_failure_streak(
+            streak, _threshold = advance_binding_failure_streak(
                 current,
                 line_user_id=line_user_id,
                 identity_flow_id=flow_id.value,
@@ -469,57 +465,6 @@ class LineIdentityApplication:
             if streak is current:
                 unit_of_work.commit()
                 return
-            if threshold:
-                source_identity = (
-                    f"binding-failure:{streak.scope_fingerprint}:"
-                    f"{streak.generation}"
-                )
-                source_fingerprint = fingerprint_payload(
-                    {
-                        "scope_fingerprint": streak.scope_fingerprint,
-                        "generation": streak.generation,
-                        "failure_count": 2,
-                    }
-                ).value
-                escalation_command = CreateHumanEscalation(
-                    source_event_identity=source_identity,
-                    source_kind="binding_failure",
-                    source_fingerprint=source_fingerprint,
-                    trigger_code=TriggerCode.BINDING_FAILURE_THRESHOLD_2,
-                    trigger_policy_version="identity.v1",
-                    ticket_category=CustomerServiceCategory.CONTACT_UNION,
-                    context=EscalationContext(
-                        (
-                            "customer_binding_failure_threshold_2"
-                            if subject_type is LineBindingSubjectType.CUSTOMER
-                            else "staff_verification_failure_threshold_2"
-                        ),
-                        "identity.v1",
-                        "other",
-                        "m1-mask.v1",
-                    ),
-                    hold_scope=source_identity,
-                    idempotency_key=IdempotencyKey(source_identity),
-                    correlation_id=correlation_id,
-                    actor=ActorContext("system:line-identity"),
-                )
-                ticket = unit_of_work.customer_service.create_or_append(
-                    CreateCustomerServiceMessage(
-                        line_user_id.value,
-                        CustomerServiceCategory.CONTACT_UNION,
-                        "binding_failure_threshold_2",
-                        source_identity,
-                    )
-                )
-                receipt = HumanEscalationApplication(
-                    self._unit_of_work_factory,
-                    self._now,
-                ).create_for_ticket(
-                    escalation_command,
-                    ticket,
-                    unit_of_work,
-                )
-                streak = replace(streak, escalation_id=receipt.escalation_id)
             unit_of_work.identities.save_failure_streak(streak)
             unit_of_work.commit()
 
@@ -989,9 +934,9 @@ def _create_review(
 def _enqueue_result_message(unit_of_work, result, correlation_id, scheduled_at):
     pending = result.status is LineIdentityApplyStatus.PENDING_REVIEW
     text = (
-        "您的身分申請已送出，請等待工會人員確認。"
+        IDENTITY_PENDING
         if pending
-        else "您的 LINE 身分已完成綁定。"
+        else IDENTITY_BOUND
     )
     key_fingerprint = fingerprint_payload(
         {

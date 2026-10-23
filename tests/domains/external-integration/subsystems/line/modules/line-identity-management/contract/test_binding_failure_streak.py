@@ -1,4 +1,4 @@
-"""Unique oracle for the bounded two-failure LINE identity streak."""
+"""Binding failure counts never create human-service requests without an explicit call."""
 
 from __future__ import annotations
 
@@ -20,8 +20,6 @@ from domains.line.identity_binding import (
 from shared_kernel.identities import CorrelationId, ExpectedVersion
 from subsystems.line.identity_application import LineIdentityApplication, LineIdentityNotFoundError
 from subsystems.line.identity_contracts import CustomerIdentityProof
-from api.routes.customer_service import _escalation_view_response
-from subsystems.customer_service.escalation_application import _view
 
 
 class _Identities:
@@ -102,7 +100,8 @@ class _UnitOfWork:
         self.commits += 1
 
 
-def test_second_distinct_failure_creates_one_idempotent_customer_service_ticket() -> None:
+@pytest.mark.parametrize("subject_type", (LineBindingSubjectType.CUSTOMER, LineBindingSubjectType.STAFF))
+def test_second_distinct_failure_records_count_without_customer_service_effects(subject_type) -> None:
     identities = _Identities()
     customer_service = _CustomerService()
     escalations = _Escalations()
@@ -120,7 +119,7 @@ def test_second_distinct_failure_creates_one_idempotent_customer_service_ticket(
     application._record_binding_failure(
         flow_id,
         line_user_id,
-        LineBindingSubjectType.CUSTOMER,
+        subject_type,
         "proof-scope-a",
         CorrelationId("failure-1"),
     )
@@ -130,25 +129,25 @@ def test_second_distinct_failure_creates_one_idempotent_customer_service_ticket(
     application._record_binding_failure(
         flow_id,
         line_user_id,
-        LineBindingSubjectType.CUSTOMER,
+        subject_type,
         "proof-scope-a",
         CorrelationId("failure-2"),
     )
     assert identities.current.failure_count == 2
-    assert identities.current.escalation_id == 41
-    assert customer_service.created == 1
-    assert escalations.created == 1
+    assert identities.current.escalation_id is None
+    assert customer_service.created == 0
+    assert escalations.created == 0
 
     application._record_binding_failure(
         flow_id,
         line_user_id,
-        LineBindingSubjectType.CUSTOMER,
+        subject_type,
         "proof-scope-a",
         CorrelationId("failure-2"),
     )
     assert identities.current.failure_count == 2
-    assert customer_service.created == 1
-    assert escalations.created == 1
+    assert customer_service.created == 0
+    assert escalations.created == 0
 
 
 def test_scope_change_replaces_count_and_success_reset_advances_generation() -> None:
@@ -183,7 +182,7 @@ def test_scope_change_replaces_count_and_success_reset_advances_generation() -> 
     assert reset.generation == changed.generation + 1
 
 
-def test_apply_customer_identity_mismatch_escalates_once_and_readback_is_typed() -> None:
+def test_apply_customer_identity_mismatch_never_automatically_escalates() -> None:
     """Exercise the real Apply ingress, not just the private streak recorder."""
 
     line_user_id = LineUserId("U-gateway-ingress")
@@ -296,18 +295,6 @@ def test_apply_customer_identity_mismatch_escalates_once_and_readback_is_typed()
         )
 
     assert state["streak"].failure_count == 2
-    assert state["ticket_creates"] == 1
-    assert state["escalations"] == 1
-    readback = _escalation_view_response(_view(state["row"]))
-    assert readback.trigger_identity.startswith("binding-failure:")
-    assert readback.attempt_window is not None
-    assert readback.attempt_window.attempt_count == 2
-    assert readback.attempt_window.maximum_attempts == 2
-    assert readback.owner_selector == "customer_service.ticket_owner"
-    assert set(readback.context) == {
-        "summary_code", "policy_version", "category", "redaction_version",
-    }
-    serialized = str(readback.model_dump())
-    assert "wrong name" not in serialized
-    assert "U-gateway-ingress" not in serialized
-    assert "0900000000" not in serialized
+    assert state["ticket_creates"] == 0
+    assert state["escalations"] == 0
+    assert state["row"] is None

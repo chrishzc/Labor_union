@@ -62,6 +62,35 @@ def candidate_contact_information_card(
     return canonical_line_payload_json(_bubble_payload(title, body, actions))
 
 
+def candidate_customer_question_card(case_no: str, text: str, response_url: str) -> str:
+    return canonical_line_payload_json({
+        "type": "flex", "altText": f"案件 {case_no} 的工會詢問",
+        "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": [
+            {"type": "text", "text": "工會詢問", "weight": "bold", "size": "xl", "wrap": True},
+            {"type": "text", "text": text, "wrap": True},
+        ]}, "footer": {"type": "box", "layout": "vertical", "contents": [
+            {"type": "button", "style": "primary", "action": {
+                "type": "uri", "label": "回答問題", "uri": response_url,
+            }},
+        ]}},
+    })
+
+
+def candidate_caregiver_answer_card(case_no: str, answer: str, reference: str, response_url: str) -> str:
+    return canonical_line_payload_json({
+        "type": "flex", "altText": f"案件 {case_no} 的客戶回覆",
+        "contents": {"type": "bubble", "body": {
+            "type": "box", "layout": "vertical", "spacing": "md", "contents": [
+                {"type": "text", "text": "工會回覆", "weight": "bold", "size": "xl", "wrap": True},
+                {"type": "text", "text": answer, "size": "sm", "wrap": True},
+            ],
+        }, "footer": {"type": "box", "layout": "vertical", "contents": [
+            _candidate_contact_button("願意承接", reference, "willing", "#06C755"),
+            {"type": "button", "action": {"type": "uri", "label": "提出疑問或無法承接", "uri": response_url}},
+        ]}},
+    })
+
+
 def _information_table_section(title: str, rows: Sequence[tuple[str, str]]) -> dict[str, object]:
     if not isinstance(title, str) or not title.strip() or not rows:
         raise ValueError("candidate information table section is invalid")
@@ -296,6 +325,8 @@ def _list_text(value):
 
 
 __all__ = [
+    "candidate_customer_question_card",
+    "candidate_caregiver_answer_card",
     "candidate_contact_information_card",
     "caregiver_information_card",
     "customer_profiles_card",

@@ -337,12 +337,7 @@ def _decision_acknowledgement(
     *,
     ticket_id: int | None = None,
 ) -> LineDeliveryRequest:
-    if receipt.decision == "agree_defer":
-        text = "已記錄您同意順延的選擇，工會將依正式排班流程處理。"
-    else:
-        if ticket_id is None:
-            raise ValueError("leave_substitution_ticket_required")
-        text = f"已登記案件 {receipt.case_no} 的代班需求（客服單 #{ticket_id}），待工會安排；正式班表尚未變更。"
+    text = leave_decision_text(receipt.decision, receipt.case_no, ticket_id)
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
@@ -361,16 +356,7 @@ def _decision_rejection_acknowledgement(
     event_identity: str,
     scheduled_at: datetime,
 ) -> LineDeliveryRequest:
-    if error_code in {
-        "leave_request_stale",
-        "leave_request_not_accepted",
-        "leave_request_dates_missing",
-    }:
-        text = "這個確認已失效，請以最新通知為準；如有疑問請聯絡工會。"
-    elif error_code == "leave_customer_decision_idempotency_conflict":
-        text = "這個確認目前無法更改；如需調整已選擇的安排，請聯絡工會。"
-    else:
-        text = "這個確認目前無法使用，請聯絡工會。"
+    text = leave_decision_rejection_text(error_code)
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
@@ -404,3 +390,27 @@ __all__ = [
     "StaffLeaveCustomerCoordinationApplication",
     "parse_staff_leave_customer_postback",
 ]
+
+
+def leave_decision_text(decision, case_no, ticket_id=None):
+    if decision == "agree_defer":
+        text = "已記錄您同意順延的選擇，工會將依正式排班流程處理。"
+    else:
+        if ticket_id is None:
+            raise ValueError("leave_substitution_ticket_required")
+        text = f"已登記案件 {case_no} 的代班需求（客服單 #{ticket_id}），待工會安排；正式班表尚未變更。"
+    return text
+
+
+def leave_decision_rejection_text(error_code):
+    if error_code in {
+        "leave_request_stale",
+        "leave_request_not_accepted",
+        "leave_request_dates_missing",
+    }:
+        text = "這個確認已失效，請以最新通知為準；如有疑問請聯絡工會。"
+    elif error_code == "leave_customer_decision_idempotency_conflict":
+        text = "這個確認目前無法更改；如需調整已選擇的安排，請聯絡工會。"
+    else:
+        text = "這個確認目前無法使用，請聯絡工會。"
+    return text

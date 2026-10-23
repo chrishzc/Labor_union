@@ -305,38 +305,7 @@ class MatchingCoordinationWorkflow:
                 raise _workflow_error(request.correlation_id, "matching_criteria_diff_required")
             return criteria_diff_view(build_criteria_diff(before, after, facts.candidates, facts.refusal_history, facts.willingness_lineage))
         if isinstance(request, PreviewZeroCandidateAlternative):
-            if request.criteria_snapshot_id != facts.snapshot.snapshot_id:
-                raise _workflow_error(request.correlation_id, "matching_alternative_stale")
-            if any(
-                item.eligibility.value == "eligible" and item.willingness == "willing"
-                for item in facts.candidates
-            ):
-                raise _workflow_error(request.correlation_id, "matching_no_candidate")
-            relaxed = tuple(request.relaxed_criteria)
-            if not relaxed or not set(relaxed).issubset(facts.snapshot.criteria):
-                raise _workflow_error(request.correlation_id, "matching_alternative_not_explicit")
-            unchanged = tuple(sorted(set(facts.snapshot.criteria) - set(relaxed)))
-            selection_fingerprint = fingerprint_payload(
-                {
-                    "snapshot_id": facts.snapshot.snapshot_id,
-                    "policy_id": request.policy_id,
-                    "policy_version": request.policy_version,
-                    "relaxed_criteria": relaxed,
-                }
-            )
-            alternative = build_zero_candidate_alternative(
-                alternative_id=(
-                    f"{facts.snapshot.snapshot_id}:alternative:"
-                    f"{selection_fingerprint.value[:24]}"
-                ),
-                policy_id=request.policy_id,
-                policy_version=request.policy_version,
-                relaxed_criteria=relaxed,
-                unchanged_hard_criteria=unchanged,
-                candidate_result=None,
-                risk_warnings=("explicit_manual_confirmation_required",),
-            )
-            return alternative_view(alternative)
+            raise _workflow_error(request.correlation_id, "matching_zero_pool_notification_retired")
         if isinstance(request, PreviewZeroCandidateConfirmation):
             return package_view(_zero_candidate_confirmation_package(request, facts))
         raise _workflow_error(request.correlation_id, "matching_criteria_invalid")
@@ -671,47 +640,7 @@ class MatchingCoordinationWorkflow:
                 criteria_recontact_intents=recontact_intents,
             )
         if isinstance(request, ApplyZeroCandidateAlternative):
-            if request.criteria_snapshot_id != facts.snapshot.snapshot_id:
-                raise _workflow_error(request.correlation_id, "matching_alternative_stale")
-            if any(
-                item.eligibility.value == "eligible" and item.willingness == "willing"
-                for item in facts.candidates
-            ):
-                raise _workflow_error(request.correlation_id, "matching_no_candidate")
-            relaxed = tuple(request.relaxed_criteria)
-            if not set(relaxed).issubset(facts.snapshot.criteria):
-                raise _workflow_error(
-                    request.correlation_id, "matching_alternative_not_explicit"
-                )
-            selection_fingerprint = fingerprint_payload(
-                {
-                    "snapshot_id": facts.snapshot.snapshot_id,
-                    "policy_id": request.policy_id,
-                    "policy_version": request.policy_version,
-                    "relaxed_criteria": relaxed,
-                }
-            )
-            expected_alternative_id = (
-                f"{facts.snapshot.snapshot_id}:alternative:"
-                f"{selection_fingerprint.value[:24]}"
-            )
-            if request.alternative_id != expected_alternative_id:
-                raise _workflow_error(request.correlation_id, "matching_alternative_stale")
-            alternative = build_zero_candidate_alternative(
-                alternative_id=expected_alternative_id,
-                policy_id=request.policy_id,
-                policy_version=request.policy_version,
-                relaxed_criteria=relaxed,
-                unchanged_hard_criteria=tuple(
-                    sorted(set(facts.snapshot.criteria) - set(relaxed))
-                ),
-                risk_warnings=("explicit_manual_confirmation_required",),
-            )
-            if request.preview_fingerprint != alternative.preview_fingerprint:
-                raise _workflow_error(request.correlation_id, "matching_alternative_stale")
-            lineage = build_zero_candidate_decision(event_id=f"{request.idempotency_key.value}:zero-candidate", case_no=request.case_no, alternative=alternative, decision=request.decision, actor_id=request.actor.actor_id, source_versions=facts.source_versions)
-            state = "alternative_agreed_pending_owning_workflows" if lineage.decision is ZeroCandidateDecision.AGREE else "awaiting_matching"
-            return self._receipt(request, facts, preview_fingerprint, result_state=state, zero_candidate_decision=lineage)
+            raise _workflow_error(request.correlation_id, "matching_zero_pool_notification_retired")
         if isinstance(request, ApplyZeroCandidateConfirmation):
             package = _zero_candidate_confirmation_package(request, facts)
             if request.preview_fingerprint != package.fingerprint:

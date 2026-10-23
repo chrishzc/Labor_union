@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-持久化同一套 role-scoped canonical LINE identity binding、event、readback 與 application contract；customer／staff 可並存，admin 維持排他。同類客戶案件替換只更新 customer role，保留 staff role，並由LINE Identity正常流程完成；不追加LINE-004 anomaly recheck。此 Module 只擁有一個 nullable selected-role 狀態與一個 bounded binding-failure streak，第二次失敗以既有 Customer Service typed application 冪等建立客服單。
+持久化同一套 role-scoped canonical LINE identity binding、event、readback 與 application contract；customer／staff 可並存，admin 維持排他。同類客戶案件替換只更新 customer role，保留 staff role，並由LINE Identity正常流程完成；不追加LINE-004 anomaly recheck。此 Module 只擁有一個 nullable selected-role 狀態與一個 bounded binding-failure streak，失敗只記錄 bounded count，不自動建立客服需求；客戶改綁需明確申請並沿既有審核，核准前保留原綁定。
 
 ## Implementation
 - query transport: `api/routes/line_identity_management.py` — role-scoped detail／Preview／Apply 與 bounded replacement-candidates reader。
@@ -14,11 +14,13 @@
 - review query contract: `subsystems/line/review_contracts.py` — bounded numbered review search，審核 state machine 不變。
 - review transport projection: `api/schemas/line_identity.py` — 審核對象姓名、案件及 canonical 綁定的唯讀展示欄位。
 - primary:
+  - `line/static/bind.html` — 客戶綁定／已綁定／改綁申請分流、取消與明確呼叫專員。
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`
   - `subsystems/line/identity_contracts.py`
   - `api/dependencies/line_identity.py` — NAS 管理員 credential binding 使用內部 access profile；外部客戶／月嫂仍用 LINE profile。
   - `subsystems/line/webhook_identity_handlers.py` — webhook identity dispatch 與未注入 canonical Service Help application 時的 bounded guidance fallback。
+  - `subsystems/line/menu_command_application.py` — 既有一對一切換指令接 role-selection application，共用 webhook outer commit，雙角色選擇與事件重播保護。
   - `subsystems/line/identity_management_application.py`
   - `subsystems/line/identity_management_contracts.py`
   - `subsystems/line/staff_retirement_effect.py`
@@ -41,7 +43,6 @@
 
 ## Dependencies
 - outbound: `external-integration/line` — implements the LINE identity typed repository port used by the identity management application.
-- outbound: `customer-service` — on the bounded second binding failure only, invokes the existing typed escalation application inside the caller-owned Unit of Work.
 - inbound: `subsystems/line/identity_management_application.py` — coordinates replacement validation, owner projections, audit and the outer Unit of Work.
 - outbound: `anomalies` — LINE identity replacement不產生LINE-004 anomaly；LINE-006另由notification-failure typed readback提供必要 owner facts，Anomalies不寫LINE root。
 - inbound: `staff/module:staff-retirement` — only after a committed Staff retirement candidate, through the typed effect port and shared outer UoW.
@@ -60,6 +61,7 @@
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_friend_feedback_regressions.py` — canonical webhook friend-state／welcome composition 與同 handler 內 feedback continuation 的既有 cohesive regression。
+- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_menu_command_application.py` — 既有 scoped menu command／admin 視角與訪客回復 regression；雙角色選擇的新驗證沿用本 Module contract root。
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 
 ## Provenance

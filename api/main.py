@@ -74,6 +74,7 @@ from api.routes import (
     line_admin,
     line_configurations,
     line_notification_rules,
+    line_message_preview,
     line_onboarding,
     line_ai_events,
     line_feedback,
@@ -88,6 +89,7 @@ from api.routes import (
     line_identity_management,
     line_order_change,
     line_candidate_contact,
+    line_deposit_payment,
     customer_service,
     line_order_groups,
     line_rich_menus,
@@ -260,6 +262,7 @@ app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
 app.include_router(line_notification_rules.router)
+app.include_router(line_message_preview.router)
 app.include_router(line_onboarding.router)
 app.include_router(line_ai_events.router)
 app.include_router(line_feedback.router)
@@ -287,6 +290,8 @@ app.include_router(line_order_change.router)
 app.include_router(line_order_change.page_router)
 app.include_router(line_candidate_contact.router)
 app.include_router(line_candidate_contact.page_router)
+app.include_router(line_deposit_payment.router)
+app.include_router(line_deposit_payment.page_router)
 app.include_router(line_service_help.public_router)
 app.include_router(line_service_help.page_router)
 

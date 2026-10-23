@@ -1,13 +1,13 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-2026-10-19-v46",
+  "release_id": "labor-union-validation-schema-2026-10-22-v47",
   "source_bindings": {
-    "assembly_sha256": "e454e0b5265e5fa726b2ea641407c93d546fc44b1208f8ea6aff26e718518504",
-    "validation_manifest_sha256": "ac4cff4e265be2afadd982a9004c3981e1f8af2f5a378a3db2997635b02091a2",
+    "assembly_sha256": "2e5ead1bcb9ddc51e79edc64689221e4ea4bfcc20af081e4ddea184af0be2e2d",
+    "validation_manifest_sha256": "94b66e0257098de9553640002cb0b2c90a80961d1d570edc8475c3905f9b3d69",
     "retirement_policy_sha256": "646929c1dbac5711ec58481a7d2f534714ac4129ecd1f16ba7fcaad7bf067da4"
   },
-  "sql_sha256": "842a62c41c237ec34f6f263d584d85aba6c5879b0c74273815f7c3a7eeb06da5",
+  "sql_sha256": "bf0616e38c3a324cd45b4488a1ef212a2c548ef65a5fe43af081a0965a12ddba",
   "objects": {
     "tables": 371,
     "views": 1,

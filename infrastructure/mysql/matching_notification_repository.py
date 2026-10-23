@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Any, Mapping
 
 from domains.line.delivery import LineDeliveryStatus
@@ -21,10 +21,11 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
     MatchingResponseSource,
 )
-from infrastructure.mysql.line_repository_support import database_utc
+from infrastructure.mysql.line_repository_support import database_utc, aware_utc
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.scheduling.matching_notification_contracts import (
+    CustomerRecommendationFollowup,
     ManualCustomerProfilesEvidence,
     ManualCustomerProfilesReceipt,
     ManualMatchingConfirmationMethod,
@@ -475,6 +476,27 @@ class MySqlMatchingNotificationRepository:
             "caregiver_resumes": resumes,
             "blockers": tuple(dict.fromkeys(blockers)),
         }
+
+    def customer_recommendation_followup_count(self, now: datetime) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total " + _CUSTOMER_FOLLOWUPS_SOURCE_SQL,
+                           (database_utc(now - timedelta(days=7)),))
+            return int(cursor.fetchone()["total"])
+
+    def customer_recommendation_followups(self, now: datetime, *, limit: int = 100, offset: int = 0) -> tuple[CustomerRecommendationFollowup, ...]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("customer_recommendation_followup_limit_invalid")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("customer_recommendation_followup_offset_invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CUSTOMER_FOLLOWUPS_SQL, (database_utc(now - timedelta(days=7)), limit, offset))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(CustomerRecommendationFollowup(
+            case_no=str(row["case_no"]), plan_id=int(row["plan_id"]),
+            status="contact_requested" if row["decision"] == "contact_requested" and row["ticket_status"] != "resolved" else "awaiting_signing" if row["decision"] == "accepted" else "reply_reminder",
+            reminder_due_at=(aware_utc(row["sent_at_utc"]) + timedelta(days=7)) if row.get("sent_at_utc") else None,
+            ticket_id=int(row["ticket_id"]) if row.get("ticket_id") is not None else None,
+        ) for row in rows)
 
     def _plan_row(self, cursor, case_no, plan_id, lock):
         suffix = " FOR UPDATE" if lock else ""
@@ -938,7 +960,8 @@ reason,idempotency_key,payload_fingerprint,occurred_at_utc)
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
 _CONSUME_INTERACTION_SQL = """UPDATE matching_line_interactions SET
 interaction_status='consumed',consumed_at_utc=%s,consumed_by_line_user_id=%s
-WHERE token_hash=%s AND interaction_status='active'"""
+WHERE token_hash=%s AND (interaction_status='active'
+OR (interaction_status='expired' AND action_scope='customer_decision'))"""
 _CAREGIVER_CARD_FACTS_SQL = """SELECT p.case_no,s.assigned_start_date AS start_date,
 s.assigned_end_date AS end_date,c.city,c.service_type,c.service_time,c.baby_info,
 c.residence_type FROM caregiver_matching_plans p
@@ -983,3 +1006,38 @@ WHERE segment.plan_id=%s ORDER BY segment.segment_order"""
 
 
 __all__ = ["MySqlMatchingNotificationRepository"]
+
+
+_CUSTOMER_FOLLOWUPS_SOURCE_SQL = """FROM (
+SELECT p.id AS plan_id,p.case_no,
+COALESCE((SELECT response_value FROM matching_response_events r
+WHERE r.plan_id=p.id AND r.response_type='customer_decision'
+ORDER BY r.occurred_at_utc DESC,r.id DESC LIMIT 1),'pending') AS decision,
+(SELECT MAX(task.sent_at_utc) FROM matching_notification_intents i
+JOIN line_delivery_tasks task ON task.id=i.delivery_task_id
+WHERE i.plan_id=p.id AND i.notification_kind='customer_profiles'
+AND task.processing_status='sent') AS sent_at_utc,
+(SELECT MAX(t.id) FROM customer_service_tickets t
+JOIN customer_service_ticket_events e ON e.ticket_id=t.id
+WHERE e.event_key LIKE CONCAT('matching-assistance:',p.id,':%%')) AS ticket_id,
+(SELECT t.status FROM customer_service_tickets t
+JOIN customer_service_ticket_events e ON e.ticket_id=t.id
+WHERE e.event_key LIKE CONCAT('matching-assistance:',p.id,':%%')
+ORDER BY t.id DESC LIMIT 1) AS ticket_status,
+(EXISTS(SELECT 1 FROM contract_signing_events e
+JOIN contract_document_versions d ON d.id=e.document_version_id
+WHERE e.matching_plan_id=p.id AND e.event_type='signed_received'
+AND d.document_scope='client_contract')
+AND NOT EXISTS(SELECT 1 FROM caregiver_matching_plan_segments s
+WHERE s.plan_id=p.id AND NOT EXISTS(SELECT 1 FROM contract_signing_events e
+JOIN contract_document_versions d ON d.id=e.document_version_id
+WHERE e.matching_segment_id=s.id AND e.event_type='signed_received'
+AND d.document_scope='staff_segment'))) AS signing_complete
+FROM caregiver_matching_plans p JOIN orders ON orders.case_no=p.case_no
+WHERE p.is_active=1 AND p.status IN ('proposed','accepted')
+AND orders.status IN ('洽談中','訂單成立')
+) followup WHERE (decision='contact_requested' AND (ticket_status IS NULL OR ticket_status<>'resolved'))
+OR (decision='accepted' AND signing_complete=0)
+OR ((decision='pending' OR (decision='contact_requested' AND ticket_status='resolved')) AND sent_at_utc<=%s)"""
+
+_CUSTOMER_FOLLOWUPS_SQL = "SELECT * " + _CUSTOMER_FOLLOWUPS_SOURCE_SQL + " ORDER BY plan_id LIMIT %s OFFSET %s"

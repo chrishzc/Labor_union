@@ -144,3 +144,14 @@ def test_runtime_alert_preferences_are_fixed_by_target_type(target_type, system_
     assert result == expected
     result["customer_service"] = False
     assert repository.get_target_preferences(7) == expected
+
+
+def test_group_alert_projection_is_retired_even_if_old_preferences_enable_it():
+    from subsystems.line.runtime_alert_application import RuntimeLineAlertProjector
+    intents = []
+    repo = SimpleNamespace(pending_alert_targets=lambda event_id: [{"id": 7, "target_type": "group", "preferences_json": {"system_health": True}}],
+        append_alert_intent=lambda *args: intents.append(args))
+    def forbidden(*args):
+        pytest.fail("retired group alerts cannot enqueue delivery")
+    assert RuntimeLineAlertProjector(lambda: None).project(41, repo, SimpleNamespace(enqueue=forbidden)) == 0
+    assert intents[0][-1] == "line_alert_group_retired"

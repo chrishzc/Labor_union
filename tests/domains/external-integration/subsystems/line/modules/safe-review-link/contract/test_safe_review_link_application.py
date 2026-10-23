@@ -82,80 +82,35 @@ def _issue(key="issue-1", now=None):
         "alert:1", "admin:1", "line.alert.manage", 60, _actor(), IdempotencyKey(key), CorrelationId("corr-1"))
 
 
-def test_issue_persists_digest_and_redeem_is_one_time():
-    repo = FakeRepository(); now = datetime.now(timezone.utc)
+@pytest.mark.parametrize("existing", [False, True])
+def test_group_link_issue_and_redeem_are_retired_without_writes(existing):
+    repo = FakeRepository()
+    if existing:
+        repo.receipts["issue-1"] = {"historical": "receipt"}
+    def forbidden():
+        pytest.fail("retired operations must not open a writer or read historical tokens")
+    app = SafeReviewLinkApplication(forbidden, lambda: datetime.now(timezone.utc))
+    commands = [lambda: app.issue(_issue()), lambda: app.redeem(RedeemSafeReviewLink(
+        "link-1", "opaque-token-123456", _actor(), "line.alert.manage", "/api/v1/runtime/health-status", 3,
+        IdempotencyKey("redeem-1"), CorrelationId("corr-2")))]
+    for operation in commands:
+        with pytest.raises(SafeReviewLinkError) as error:
+            operation()
+        assert error.value.code == "line_alert_group_retired"
+    assert not repo.links and not repo.events and not repo.outbox
+
+
+def test_historical_group_link_can_still_be_revoked_and_queried():
+    from subsystems.line.safe_review_link_contracts import QuerySafeReviewLink
+    from hashlib import sha256
+    repo = FakeRepository(); now = datetime(2026, 10, 22, tzinfo=timezone.utc)
+    repo.insert_link(link_id="link-1", token_digest=sha256(b"historical").hexdigest(),
+        canonical_internal_target="/api/v1/runtime/health-status", target_version=3, source_alert_identity="alert:1",
+        allowed_actor_ref="admin:1", required_capability="line.alert.manage", issued_at=now,
+        expires_at=now+timedelta(seconds=60), idempotency_key="historical", correlation_id="historical")
     app = SafeReviewLinkApplication(_factory(repo), lambda: now)
-    receipt, token = app.issue(_issue())
-    assert token == "opaque-token-123456"
-    assert repo.links["link-1"]["token_digest"] != token
-    redeemed = app.redeem(RedeemSafeReviewLink("link-1", token, _actor(), "line.alert.manage",
-        "/api/v1/runtime/health-status", 3, IdempotencyKey("redeem-1"), CorrelationId("corr-2")))
-    assert redeemed.outcome.value == "redeemed"
-    with pytest.raises(SafeReviewLinkError, match="already redeemed"):
-        app.redeem(RedeemSafeReviewLink("link-1", token, _actor(), "line.alert.manage",
-            "/api/v1/runtime/health-status", 3, IdempotencyKey("redeem-2"), CorrelationId("corr-3")))
-
-
-def test_wrong_actor_and_stale_target_fail_without_transition():
-    repo = FakeRepository(); now = datetime.now(timezone.utc)
-    app = SafeReviewLinkApplication(_factory(repo), lambda: now)
-    app.issue(_issue())
-    with pytest.raises(SafeReviewLinkError, match="not allowed"):
-        app.redeem(RedeemSafeReviewLink("link-1", "opaque-token-123456", _actor("admin:2"), "line.alert.manage",
-            "/api/v1/runtime/health-status", 3, IdempotencyKey("redeem-wrong"), CorrelationId("corr-2")))
-    with pytest.raises(SafeReviewLinkError, match="stale"):
-        app.redeem(RedeemSafeReviewLink("link-1", "opaque-token-123456", _actor(), "line.alert.manage",
-            "/api/v1/runtime/other", 3, IdempotencyKey("redeem-stale"), CorrelationId("corr-3")))
-    assert repo.links["link-1"]["status"] == "issued"
-
-
-def test_expiry_revocation_version_conflict_and_idempotent_issue_are_closed():
-    repo = FakeRepository()
-    clock = [datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc)]
-    app = SafeReviewLinkApplication(_factory(repo), lambda: clock[0])
-
-    first, token = app.issue(replace(_issue(), ttl_seconds=1))
-    replay, replay_token = app.issue(replace(_issue(), ttl_seconds=1))
-    assert first.outcome.value == "issued"
-    assert replay.replayed is True
-    assert replay_token == ""
-
-    clock[0] += timedelta(seconds=2)
-    with pytest.raises(SafeReviewLinkError) as expired:
-        app.redeem(RedeemSafeReviewLink(
-            "link-1", token, _actor(), "line.alert.manage",
-            "/api/v1/runtime/health-status", 3,
-            IdempotencyKey("redeem-expired"), CorrelationId("corr-expired"),
-        ))
-    assert expired.value.code == "safe_review_link_expired"
-    assert repo.links["link-1"]["status"] == "expired"
-    assert repo.events[-1][1][0] == "expired"
-
-    repo = FakeRepository()
-    clock[0] = datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc)
-    app = SafeReviewLinkApplication(_factory(repo), lambda: clock[0])
-    app.issue(_issue())
-    revoked = app.revoke(RevokeSafeReviewLink(
-        "link-1", _actor(), "人工撤銷", IdempotencyKey("revoke-1"), CorrelationId("corr-revoke"),
-    ))
-    assert revoked.outcome.value == "revoked"
-    assert repo.links["link-1"]["status"] == "revoked"
-    with pytest.raises(SafeReviewLinkError) as revoked_replay:
-        app.redeem(RedeemSafeReviewLink(
-            "link-1", "opaque-token-123456", _actor(), "line.alert.manage",
-            "/api/v1/runtime/health-status", 3,
-            IdempotencyKey("redeem-revoked"), CorrelationId("corr-revoked"),
-        ))
-    assert revoked_replay.value.code == "safe_review_link_revoked"
-
-    repo = FakeRepository()
-    app = SafeReviewLinkApplication(_factory(repo), lambda: clock[0])
-    app.issue(_issue())
-    with pytest.raises(SafeReviewLinkError) as version_conflict:
-        app.redeem(RedeemSafeReviewLink(
-            "link-1", "opaque-token-123456", _actor(), "line.alert.manage",
-            "/api/v1/runtime/health-status", 4,
-            IdempotencyKey("redeem-stale-version"), CorrelationId("corr-stale-version"),
-        ))
-    assert version_conflict.value.code == "safe_review_link_version_conflict"
-    assert repo.links["link-1"]["status"] == "issued"
+    result = app.revoke(RevokeSafeReviewLink("link-1", _actor(), "撤銷歷史連結", IdempotencyKey("revoke-1"), CorrelationId("revoke")))
+    assert result.outcome.value == "revoked"
+    assert app.query(QuerySafeReviewLink("link-1")).status.value == "revoked"
+    replay = app.revoke(RevokeSafeReviewLink("link-1", _actor(), "撤銷歷史連結", IdempotencyKey("revoke-1"), CorrelationId("revoke")))
+    assert replay.replayed

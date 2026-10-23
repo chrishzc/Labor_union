@@ -11,11 +11,7 @@
 escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，請協助處理。」。
 一般「退費／主管處理」語句不因此自動取得 complaint 語意。
 
-另承接真人轉接確認／active conversation hold／原 requester 恢復 AI：自然的
-找真人／拒絕 AI／回答錯誤語句在確認前零 ticket／hold，明確 postback 才建立去敏
-ticket、automation hold、masked alert intent 與 durable notice；此確認規則不能
-混寫為所有 explicit complaint 都必須先點 postback。requester resume 由 Customer
-Service owner 原子結案並 release hold。LINE 不擁有客服、Payroll 或 assignment root。
+另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold、masked alert intent 與簡短受理回覆；一般留言不啟動聊天室 AI 或自動轉人工。後續訊息加入同一案件，專員正式結案時解除 hold 並通知完成。舊繼續／恢復 AI 入口只提示停用，不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
 
 ## Implementation
 
@@ -38,20 +34,17 @@ Service owner 原子結案並 release hold。LINE 不擁有客服、Payroll 或 
   `open → claimed → handling → resolved`。`start_handling_for_escalation()`
   在 ticket version CAS 下接受 `waiting | handling`，不能因工單已重新開啟而拒絕接手；
   沒有新訊息的 `resolved` 工單仍不能由此操作直接接手。
-- 客服告警優先擷取唯一啟用群組的 recipient/configuration snapshot。額外啟用的
-  管理員通知對象不使群組失效；多個啟用群組仍拒絕。沒有群組且恰有一個啟用管理員
-  時保留既有行為，多個管理員不任選一人，也不新增多對象發送。
+- 2026-10-22 人工裁決取消群組告警。客服告警只擷取唯一啟用管理員個人對象；沒有或多個管理員不任選一人。新 intent 不選群組，歷史 group intent 拒絕投遞；provider 前亦拒絕既有群組告警工作。
 - 告警投遞來源為 `customer_service_escalation` 與 `escalation:<id>`，terminal
-  outcome 回寫 escalation 的告警狀態。管理員結案後發給客戶的恢復通知則使用既有
-  `customer_service_ticket` 與 ticket id，僅記錄其 delivery task outcome，不覆蓋群組告警。
+  outcome 回寫 escalation 的告警狀態。管理員結案後發給客戶的完成通知則使用既有
+  `customer_service_ticket` 與 ticket id，僅記錄其 delivery task outcome，不覆蓋告警狀態。
 - 告警附上 catalog「開啟客服系統」對應的 `/line-mobile-admin?target=customer_service`
   導航。基底依序取非空 `LINE_PUBLIC_BASE_URL`、`BASE_URL`；缺少或格式無效時回報
   `human_escalation_management_url_unavailable`，catalog 入口缺失則為
   `human_escalation_management_entry_unavailable`，由既有 outbox failure 路徑記錄。
   手機測試須配置可到達的本站 HTTPS URL；程式的 URL 格式檢查本身不證明可連線。
 - 此 URL 不含授權 token；mobile-admin 仍驗證 LINE 身分與管理員 binding。
-  普通導航與短效一次性 Safe Review Link 是不同路徑，不能用前者宣稱規格 26 的
-  `R4-SAFE-LINK` 告警直達閉環已通過。
+  群組專用 Safe Review Link 已退役，普通導航仍須驗證 LINE 管理員身分。
 
 ## Verification
 
@@ -66,5 +59,4 @@ alert. The Customer Service owner retains its required routing identity; the
 source fingerprint is evidence only. Provider delivery remains the existing
 committed intent/outbox boundary.
 
-Requester resume 必須綁定同一 LINE identity 與 conversation hold；只允許
-`open | claimed | handling` 對話型 escalation，並沿 owner version／lock 防止與後台 resolve 競爭。
+客服正式結案沿 Customer Service owner 的 version／lock；LINE 的舊 AI 按鈕與指令不得呼叫 requester resume writer，也不改寫既有結案 receipt。

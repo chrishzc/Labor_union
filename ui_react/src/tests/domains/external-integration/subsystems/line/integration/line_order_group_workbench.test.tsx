@@ -44,6 +44,9 @@ describe('三方服務群組精簡工作區', () => {
     const help = within(dialog).getByText('綁定與邀請方式').closest('details')!;
     expect(help.open).toBe(false);
     expect(help.textContent).toContain('訂金須已確認核銷');
+    expect(help.textContent).toContain('綁定訂單 CASE-1 〈本群組邀請網址〉');
+    expect(help.textContent).toContain('空白或換行');
+    expect(help.querySelectorAll('code')[1].textContent).toBe('發送邀請');
   });
 
   it('uses server search and status and resets page instead of filtering the loaded page', async () => {

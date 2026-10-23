@@ -13,6 +13,7 @@ from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.staff_leave_management import (
     StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
+    StaffLeaveInboxPageView,
     StaffLeaveReviewReceiptView,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -47,6 +48,15 @@ def list_staff_leave_requests(
     connection = get_connection()
     try:
         return BaseResponse(data=MySqlStaffLeaveIntakeRepository(connection).list_requests(status, limit))
+    finally:
+        connection.close()
+
+
+def query_pending_staff_leave_page(*, page: int, page_size: int) -> BaseResponse[StaffLeaveInboxPageView]:
+    connection = get_connection()
+    try:
+        items, total = MySqlStaffLeaveIntakeRepository(connection).pending_page(page=page, page_size=page_size)
+        return BaseResponse(data=StaffLeaveInboxPageView(items=items, total=total, page=page, page_size=page_size))
     finally:
         connection.close()
 

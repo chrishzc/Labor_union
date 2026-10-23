@@ -18,7 +18,9 @@ from domains.line.delivery import (
     LineRecipient,
     LineRecipientType,
 )
-from domains.line.identities import LineGroupId, LineUserId
+from domains.line.identities import LineUserId
+from domains.customer_service.ticket import CustomerServiceCategory
+from subsystems.customer_service.contracts import CreateCustomerServiceMessage
 from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
@@ -337,11 +339,30 @@ class MatchingNotificationApplication:
         unit_of_work.delivery_tasks.enqueue(
             _response_confirmation(result, line_user_id, correlation_id, occurred_at)
         )
-        if decision == "accepted":
-            _enqueue_match_success_group_notification(
-                unit_of_work, result.plan, correlation_id, occurred_at
+        if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
+            unit_of_work.customer_service.create_or_append(
+                CreateCustomerServiceMessage(
+                    line_user_id.value, CustomerServiceCategory.OTHER,
+                    f"客戶希望進一步了解推薦方案；案件 {result.plan.case_no}，請查看後續留言。",
+                    f"matching-assistance:{result.plan.plan_id}:{result.event_id}",
+                    case_no=result.plan.case_no,
+                )
             )
         return result
+
+    def append_customer_assistance_message_in_unit_of_work(
+        self, unit_of_work, line_user_id, text, event_key,
+    ) -> bool:
+        ticket = unit_of_work.customer_service.active_matching_assistance(line_user_id.value)
+        if ticket is None:
+            return False
+        unit_of_work.customer_service.create_or_append(
+            CreateCustomerServiceMessage(
+                line_user_id.value, ticket.category, text, event_key,
+                case_no=ticket.case_no,
+            )
+        )
+        return True
 
     def record_manual_response(
         self,
@@ -512,13 +533,17 @@ class MatchingNotificationApplication:
         interaction = unit_of_work.matching_notifications.interaction(token_hash)
         if interaction is None:
             raise LookupError("matching interaction not found")
-        _require_active_interaction(interaction, line_user_id, occurred_at)
         state = _required_state(
             unit_of_work,
             str(interaction["case_no"]),
             int(interaction["plan_id"]),
             True,
         )
+        _require_active_interaction(interaction, line_user_id, occurred_at, state)
+        if interaction.get("action_scope") == "customer_decision":
+            _require_sendable_state(state, state.plan.version)
+            if state.customer_decision not in {CustomerMatchingDecision.PENDING, CustomerMatchingDecision.CONTACT_REQUESTED}:
+                raise MatchingCommunicationConflictError("customer recommendation was already decided")
         return _append_line_response(
             unit_of_work,
             interaction,
@@ -583,16 +608,25 @@ def _require_expected_state(state, expected_version):
         raise MatchingCommunicationStaleError("matching communication version is stale")
 
 
-def _require_active_interaction(interaction, line_user_id, occurred_at):
+def _require_active_interaction(interaction, line_user_id, occurred_at, state):
     if str(interaction["recipient_line_user_id"]) != line_user_id.value:
         raise MatchingRecipientMismatchError("LINE responder does not match the recipient")
     reusable_caregiver_response = (
         interaction.get("action_scope") == "caregiver_willingness"
         and str(interaction["interaction_status"]) == "consumed"
     )
-    if str(interaction["interaction_status"]) != "active" and not reusable_caregiver_response:
+    customer_response = interaction.get("action_scope") == "customer_decision"
+    reusable_customer_response = (
+        customer_response
+        and (
+            str(interaction["interaction_status"]) == "expired"
+            or (str(interaction["interaction_status"]) == "consumed"
+                and state.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED)
+        )
+    )
+    if str(interaction["interaction_status"]) != "active" and not (reusable_caregiver_response or reusable_customer_response):
         raise MatchingCommunicationStaleError("matching interaction is no longer active")
-    if aware_datetime(interaction["expires_at_utc"]) <= occurred_at:
+    if not customer_response and aware_datetime(interaction["expires_at_utc"]) <= occurred_at:
         raise MatchingCommunicationStaleError("matching interaction has expired")
 
 
@@ -652,7 +686,7 @@ def _append_line_response(unit_of_work, interaction, state, decision, line_user_
             actor_id=f"line:{line_user_id.value}",
         ),
         occurred_at=occurred_at,
-        token_hash=None if scope == "caregiver_willingness" else token_hash,
+        token_hash=None if scope == "caregiver_willingness" or decision == "contact_requested" or interaction.get("interaction_status") == "consumed" else token_hash,
     )
 
 
@@ -800,10 +834,7 @@ def _matching_delivery(command, recipient, payload_json, intent_id, scheduled_at
 
 
 def _response_confirmation(result, recipient, correlation_id, scheduled_at):
-    if result.caregiver_willingness is not None:
-        text = "已收到您的承接意願，工會人員會依流程與您聯繫。"
-    else:
-        text = "已收到您的配對選擇，工會人員會依流程與您聯繫。"
+    text = matching_response_text(result.caregiver_willingness, result.customer_decision)
     from domains.line.canonical_payload import canonical_line_payload_json
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
@@ -816,71 +847,6 @@ def _response_confirmation(result, recipient, correlation_id, scheduled_at):
         str(result.event_id),
     )
 
-
-def _enqueue_match_success_group_notification(
-    unit_of_work,
-    plan: MatchingPlanReference,
-    correlation_id: CorrelationId,
-    scheduled_at: datetime,
-) -> None:
-    runtime_monitor = getattr(unit_of_work, "runtime_monitor", None)
-    if runtime_monitor is None:
-        return
-    targets_fn = getattr(runtime_monitor, "find_active_group_targets", None)
-    if not callable(targets_fn):
-        return
-    targets = targets_fn(for_update=False)
-    if not targets:
-        return
-    target = targets[0]
-    group_id = str(target.get("group_id") if hasattr(target, "get") else getattr(target, "group_id", "")).strip()
-    if not group_id:
-        return
-    payload = {
-        "type": "flex",
-        "altText": f"【案件媒合成功通知】案號：{plan.case_no}",
-        "contents": {
-            "type": "bubble",
-            "body": {
-                "type": "box",
-                "layout": "vertical",
-                "spacing": "md",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": "🎉 案件媒合成功通知",
-                        "weight": "bold",
-                        "size": "xl",
-                        "color": "#047857",
-                    },
-                    {
-                        "type": "text",
-                        "text": f"案件編號：{plan.case_no}",
-                        "size": "sm",
-                        "color": "#666666",
-                    },
-                    {
-                        "type": "text",
-                        "text": "客戶已確認同意配對方案！請工會專員接手進行後續簽約與服務確認流程。",
-                        "size": "sm",
-                        "wrap": True,
-                    },
-                ],
-            },
-        },
-    }
-    unit_of_work.delivery_tasks.enqueue(
-        LineDeliveryRequest(
-            LineRecipient(LineRecipientType.GROUP, LineGroupId(group_id)),
-            LineMessageKind.FLEX,
-            canonical_line_payload_json(payload),
-            scheduled_at,
-            IdempotencyKey(f"matching-group-success:{plan.case_no}:{plan.plan_id}"),
-            correlation_id,
-            "matching_plan_decision",
-            str(plan.plan_id),
-        )
-    )
 
 
 def _response_fingerprint(
@@ -967,3 +933,15 @@ def _availability_blocker(error: ValueError) -> str:
 
 
 __all__ = ["MatchingNotificationApplication"]
+
+
+def matching_response_text(caregiver_willingness, customer_decision):
+    if caregiver_willingness is not None:
+        text = "已收到您的承接意願，工會人員會依流程與您聯繫。"
+    elif customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
+        text = "已收到您的聯絡需求，請留下您的疑問。"
+    elif customer_decision is CustomerMatchingDecision.ACCEPTED:
+        text = "已收到您接受配對的回覆，後續由工會安排簽約。"
+    else:
+        text = "已收到您的配對選擇，工會人員會依流程與您聯繫。"
+    return text

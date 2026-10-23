@@ -219,7 +219,8 @@ def test_staff_self_service_flow_requires_current_staff_binding(binding) -> None
     assert uow.committed is False
 
 
-def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:
+@pytest.mark.parametrize("message", ("我是月嫂", "我要綁定月嫂"))
+def test_staff_command_only_opens_flow_and_queues_liff_link(message) -> None:
     flows = SimpleNamespace(open=lambda command: _opened_flow(command))
     deliveries = RecordingRepository()
     platform_events = []
@@ -233,7 +234,7 @@ def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:
         lambda purpose, flow_id: f"https://example.test/{purpose}/{flow_id}",
     )
 
-    handler.handle_message(_message_inbox("我是月嫂"), uow)
+    handler.handle_message(_message_inbox(message), uow)
 
     assert platform_events[0].line_user_id == LineUserId("U-staff")
     assert len(deliveries.items) == 1
@@ -267,6 +268,11 @@ def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
     handler.handle_message(_message_inbox(message), uow)
 
     assert purpose in deliveries.items[0].payload_json
+    if purpose == "customer_binding":
+        welcome = json.loads(deliveries.items[0].payload_json)["text"]
+        assert "本帳號採自助服務，一般留言不會有專員回覆" in welcome
+        assert "聯絡專人服務" in welcome
+        assert "AI 智慧問答" in welcome
 
 
 def test_staff_apply_binds_exact_unclaimed_match_without_manual_review() -> None:

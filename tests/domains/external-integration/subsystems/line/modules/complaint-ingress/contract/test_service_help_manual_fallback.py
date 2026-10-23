@@ -87,29 +87,19 @@ def _unit_of_work():
 
 @pytest.mark.parametrize(
     "message_text",
-    ("幫我轉真人", "我不想要機器人回答，這個機器人好爛"),
+    ("呼叫專員", "轉真人客服", "幫我轉真人", "聯絡工會專員"),
 )
-def test_natural_language_human_request_requires_confirmation_without_ticket(
-    message_text: str,
-) -> None:
+def test_human_request_directly_creates_ticket_without_confirmation(message_text: str) -> None:
     unit_of_work = _unit_of_work()
-    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
-
-    assert application.handle(
-        _inbox(),
-        unit_of_work,
-        LineUserId("U123456789"),
-        message_text,
-    ) is True
-
-    assert unit_of_work.customer_service.messages == []
-    assert len(unit_of_work.delivery_tasks.requests) == 1
+    gateway = _EscalationGateway()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
+    )
+    assert application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), message_text) is True
+    assert len(unit_of_work.customer_service.messages) == 1
+    assert len(gateway.create_calls) == 1
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    actions = [item["action"] for item in payload["quickReply"]["items"]]
-    assert [action["data"] for action in actions] == [
-        "customer-service:handoff:confirm",
-        "customer-service:handoff:continue-ai",
-    ]
+    assert payload == {"type": "text", "text": "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。"}
 
 
 def test_unscoped_subsidy_amount_asks_which_program_the_customer_means() -> None:
@@ -198,7 +188,7 @@ def test_service_help_and_faq_aliases_share_one_card() -> None:
         "費用與補助怎麼算？",
         "如何查詢目前進度？",
         "登記資料填錯怎麼辦？",
-        "找不到答案，聯絡工會",
+        "呼叫專員",
         "詢問其他問題",
     ]
     assert "月嫂身分認證" not in service_request.payload_json
@@ -279,123 +269,87 @@ def test_explicit_human_referral_maps_masked_escalation_in_same_unit_of_work() -
     assert re.fullmatch(r"[0-9a-f]{64}", command.source_fingerprint)
 
 
-def test_answer_rejected_asks_for_confirmation_without_creating_escalation() -> None:
+def test_wrong_answer_with_explicit_human_request_directly_creates_escalation() -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway()
     application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
     )
-
-    application.handle(
-        _inbox("event-wrong"),
-        unit_of_work,
-        LineUserId("U123456789"),
-        "答錯，我要找客服",
-    )
-
-    assert gateway.create_calls == []
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert payload["quickReply"]["items"][0]["action"]["data"] == (
-        "customer-service:handoff:confirm:answer-rejected"
-    )
-
-
-def test_continue_ai_postback_uses_resume_gate_for_a_stale_confirmation() -> None:
-    unit_of_work = _unit_of_work()
-    gateway = _EscalationGateway(resume_receipt=None)
-    application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
-    )
-
-    assert application.handle_postback(
-        _inbox("event-continue-ai"),
-        unit_of_work,
-        LineUserId("U123456789"),
-        "customer-service:handoff:continue-ai",
-    ) is True
-
-    assert len(gateway.resume_calls) == 1
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "AI 助理目前已啟用，您可以繼續提問。"
-
-
-def test_confirm_postback_creates_hold_and_exposes_resume_action() -> None:
-    unit_of_work = _unit_of_work()
-    gateway = _EscalationGateway()
-    application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
-    )
-
-    assert application.handle_postback(
-        _inbox("event-confirm"),
-        unit_of_work,
-        LineUserId("U123456789"),
-        "customer-service:handoff:confirm",
-    ) is True
-
-    assert len(unit_of_work.customer_service.messages) == 1
+    application.handle(_inbox("event-wrong"), unit_of_work, LineUserId("U123456789"), "答錯，我要找客服")
     assert len(gateway.create_calls) == 1
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert "AI 自動回答目前暫停" in payload["text"]
-    assert "請直接在此對話中留言" in payload["text"]
-    assert "quickReply" not in payload
+    assert "quickReply" not in json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
 
 
-def test_resume_postback_releases_hold_in_caller_uow_and_acknowledges() -> None:
+def test_old_continue_ai_postback_does_not_resume_or_close_ticket() -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway(resume_receipt=SimpleNamespace(escalation_id=41))
     application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
     )
-
     assert application.handle_postback(
-        _inbox("event-resume"),
-        unit_of_work,
-        LineUserId("U123456789"),
+        _inbox("event-continue-ai"), unit_of_work, LineUserId("U123456789"),
+        "customer-service:handoff:continue-ai",
+    ) is True
+    assert gateway.resume_calls == []
+    assert gateway.create_calls == []
+    assert unit_of_work.customer_service.messages == []
+    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert payload == {"type": "text", "text": "此功能已停用。如需協助，請輸入「呼叫專員」。"}
+
+
+def test_call_postback_directly_creates_ticket_with_short_acknowledgement() -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
+    )
+    assert application.handle_postback(
+        _inbox("event-confirm"), unit_of_work, LineUserId("U123456789"),
+        "customer-service:handoff:confirm",
+    ) is True
+    assert len(gateway.create_calls) == 1
+    assert json.loads(unit_of_work.delivery_tasks.requests[0].payload_json) == {
+        "type": "text", "text": "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。",
+    }
+
+
+def test_old_resume_postback_preserves_active_ticket() -> None:
+    unit_of_work = _unit_of_work()
+    gateway = _EscalationGateway(resume_receipt=SimpleNamespace(escalation_id=41))
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
+    )
+    assert application.handle_postback(
+        _inbox("event-resume"), unit_of_work, LineUserId("U123456789"),
         "customer-service:handoff:resume-ai",
     ) is True
-
-    command, gateway_uow = gateway.resume_calls[0]
-    assert command.requester_line_user_id == "U123456789"
-    assert command.actor.actor_id == "line:U123456789"
-    assert gateway_uow is unit_of_work
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
+    assert gateway.resume_calls == []
+    assert gateway.create_calls == []
+    assert unit_of_work.customer_service.messages == []
+    assert "quickReply" not in json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
 
 
 @pytest.mark.parametrize(
-    "resume_text",
-    ("恢復ai", "恢復機器人", "恢復機器人回答", "繼續讓機器人回答"),
+    "resume_text", ("恢復ai", "恢復機器人", "恢復機器人回答", "繼續讓機器人回答"),
 )
-def test_resume_message_alias_releases_hold_before_active_hold_guard(
-    resume_text: str,
-) -> None:
+def test_old_resume_message_does_not_release_active_ticket(resume_text: str) -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway(
         HumanEscalationError("domain_blocked", "automation_hold_active", "自動化暫停中"),
         resume_receipt=SimpleNamespace(escalation_id=41),
     )
     application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc),
-        escalation_gateway=gateway,
+        lambda: datetime(2026, 8, 21, tzinfo=timezone.utc), escalation_gateway=gateway,
     )
-
     assert application.handle(
-        _inbox("event-lowercase-resume"),
-        unit_of_work,
-        LineUserId("U123456789"),
-        resume_text,
+        _inbox("event-lowercase-resume"), unit_of_work, LineUserId("U123456789"), resume_text,
     ) is True
-
-    assert len(gateway.resume_calls) == 1
-    assert gateway.hold_calls == []
+    assert gateway.resume_calls == []
+    assert gateway.create_calls == []
     assert unit_of_work.customer_service.messages == []
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "已結束真人客服並恢復 AI 助理，您可以繼續提問。"
+    assert json.loads(unit_of_work.delivery_tasks.requests[0].payload_json) == {
+        "type": "text", "text": "此功能已停用。如需協助，請輸入「呼叫專員」。",
+    }
 
 
 def test_active_hold_appends_to_existing_ticket_without_auto_reply() -> None:

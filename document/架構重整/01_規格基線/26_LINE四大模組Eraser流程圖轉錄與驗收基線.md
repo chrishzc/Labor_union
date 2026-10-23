@@ -11,9 +11,7 @@ spec_convergence: SPEC_READY（2026-09-01 direct-flow acceptance amendment）
 
 ## 1. 用途、權威與執行邊界
 
-本文件忠實保存使用者提供的 Eraser 模組一至四與全系統總覽流程，作為後續檢閱 LINE
-系統是否依原始業務流程運作的需求輸入基線。節點名稱、顯示文字與箭頭語意均保留；
-排版改為可搜尋的表格與箭頭清單，不改變原圖主張。
+本文件彙整 LINE 四大模組的流程與驗收。登記、身分綁定與人工服務依 current owner 正式規格維護；Eraser 原圖只作需求輸入，不覆蓋現行契約。
 
 權威順序固定為：人工最新明確裁決 → 15 及其 current Domain／Global 正式規格 →
 本文件保存的 Eraser 原圖需求 → live code／UI／test。原圖不會自行建立 owner、根事實、
@@ -70,7 +68,6 @@ provenance，不覆寫。
 | M1 Staff retirement | `LU96-M1-STAFF-RETIRE-SOURCE-V1` | `LU96-M1-STAFF-RETIRE-RULE-V1` | `LU96-M1-STAFF-RETIRE-CARD-V1` | `staff.retirement.committed` | `staff.binding_owner` |
 | M2 deterministic router reply | `LU96-M2-ROUTER-REPLY-SOURCE-V1` | `LU96-M2-ROUTER-REPLY-RULE-V1` | `LU96-M2-ROUTER-REPLY-CARD-V1` | `router.deterministic.reply_committed` | `conversation.bound_actor` |
 | M2 feedback unresolved | `LU96-M2-FEEDBACK-UNRESOLVED-SOURCE-V1` | `LU96-M2-FEEDBACK-UNRESOLVED-RULE-V1` | `LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1` | `feedback.unresolved.recorded` | `customer_service.ticket_owner` |
-| M3 zero-pool proposal | `LU96-M3-ZERO-POOL-SOURCE-V1` | `LU96-M3-ZERO-POOL-RULE-V1` | `LU96-M3-ZERO-POOL-CARD-V1` | `matching.zero_pool.preview_applied` | `matching.request.participants` |
 | M3 Match_Success client | `LU96-M3-MATCH-SUCCESS-CLIENT-SOURCE-V1` | `LU96-M3-MATCH-SUCCESS-CLIENT-RULE-V1` | `LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1` | `matching.decision.committed.client` | `assignment.client_snapshot` |
 | M3 Match_Success staff | `LU96-M3-MATCH-SUCCESS-STAFF-SOURCE-V1` | `LU96-M3-MATCH-SUCCESS-STAFF-RULE-V1` | `LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1` | `matching.decision.committed.staff` | `assignment.staff_snapshot` |
 | M3 Client_Agree | `LU96-M3-LEAVE-AGREE-SOURCE-V1` | `LU96-M3-LEAVE-AGREE-RULE-V1` | `LU96-M3-LEAVE-AGREE-CARD-V1` | `client.leave.extension_agreed` | `scheduling.owner` |
@@ -79,23 +76,30 @@ provenance，不覆寫。
 | M4 complaint escalation | `LU96-M4-COMPLAINT-HIGH-SOURCE-V1` | `LU96-M4-COMPLAINT-HIGH-RULE-V1` | `LU96-M4-COMPLAINT-HIGH-CARD-V1` | `complaint.ingress.hold_high_ticket` | `customer_service.claim_owner` |
 | M4 salary/payable anomaly | `LU96-M4-SALARY-PAYABLE-SOURCE-V1` | `LU96-M4-SALARY-PAYABLE-RULE-V1` | `LU96-M4-SALARY-PAYABLE-CARD-V1` | `payroll.substitute.obligation_projected` | `staff_payables.anomaly_owner` |
 
-2026-09-18 人工裁決：上表 13 筆繼續保存為 Task96 development fixture 與歷史驗收 provenance，
+2026-09-18 人工裁決：上表保留的歷史項目繼續保存為 Task96 development fixture 與歷史驗收 provenance，
 但不再等同 current 可維護通知目錄。current 目錄只保留具獨立收件人價值的請假客戶確認、
-候選池協調建議、系統重大異常與重大客訴告警；Gateway 失敗、
+系統重大異常與重大客訴告警；Gateway 失敗、
 staff retirement、deterministic router reply、unresolved feedback、請假同意／拒絕均由各自
 owner 的工單、回覆、receipt 或互動流程承接，不另建可配置通知規則。代班出勤薪資／應付
 仍由 Payroll／Staff Payables 正常計算與讀回，但完全不建立 LINE 通知規則。
 
-媒合成功只提交媒合結果與內部稽核，不另外通知客戶或月嫂。後續由工會依序發送契約簽署
-提醒與訂金付款提醒；客戶付款完成後，才可建立第三方服務群組並發送群組邀請。
+媒合成功只提交媒合結果與內部稽核，不另外通知客戶或月嫂。契約簽署提醒由人員操作；
+訂金計算資料與繳費資料完整後，人員由待辦點擊發送提醒。案號無法產生專屬帳號且無唯一匯入帳號時，
+保留資料待確認，不寄出不完整繳費資訊。客戶可查看本案金額、期限、銀行代碼、複製帳號，
+或直接點專人協助留下疑問。正式銀行核銷提交後才自動通知「已確認入帳」，可查看入帳狀態及日期；
+同一核銷結果重試不重複建立通知。未綁定 LINE 時只保留人員人工通知待辦，不發群組通知。
+客戶付款留言或截圖不等於核銷，群組邀請仍須正式訂金核銷通過原有資格驗證。
+服務群組由工會人員在群內輸入 `綁定訂單 案件編號 邀請網址`，三段以空白、全形空白或換行分隔；網址自身不可拆行。設定只保存，不寄邀請。之後同群只輸入 `發送邀請`，以保存網址及目前核銷／身分資格排入私人邀請，無再次確認。更新網址重輸完整設定指令，保留成員歷史。格式錯誤回覆原因與正確範例，不保存或寄送；發送前資格或網址有變則取消舊工作。完整文案與錯誤提示依規格 17「服務群組設定與邀請指令」。
+提醒與通知的完整文案、按鈕及身分邊界以規格 20 §6.7 為準。
+
+2026-10-22 依現行人工協調流程退役「候選池為空／候選池協調建議」固定通知。無意願只保存月嫂回覆；零候選不建立協商。人員自行撰寫的詢問卡、客戶新條件與工會審核仍為現行流程。舊通知不再列入預覽、有效規則／模板或 fixture；既有 source intent 不得再建立投遞或互動憑證。歷史事件與 receipt 保留，不作現行需求依據。
+
 
 current 目錄另納入已有正式 source worker 的三項營運提醒：服務日結束且寶寶日誌尚未完成時
 提醒已指派月嫂上傳、服務開始前三日提醒客戶，以及第二期款到期提醒客戶。通知規則 UI
 只以業務名稱選擇既有規則；event code 是 owner contract，不提供一般管理員改寫，也不提供
-脫離 owner producer 的任意新增規則。前述六項業務通知不得一律降級為文字模板：請假客戶確認與
-候選池協調建議由正式流程產生 recipient-bound Flex 互動卡片；媒合成功客戶／月嫂通知由 committed
-媒合結果流程送出非互動文字；runtime 重大異常的 current 實作仍送文字，尚未完成規格要求的安全
-審核卡片；重大客訴尚未具備 canonical ingress → hold → HIGH ticket → masked alert 的正式來源閉環。
+脫離 owner producer 的任意新增規則。前述現行業務通知不得一律降級為文字模板：請假客戶確認由正式流程產生 recipient-bound Flex 互動卡片；媒合成功不另行通知客戶或月嫂。
+runtime／客訴告警只使用已設定管理員個人對象，呈現去敏摘要與需驗證身分的客服入口；不發送群組告警、不承諾尚未提供的安全審核卡片。
 通知規則 UI 必須如實顯示上述載體與接通狀態，並鎖定由 owner 流程管理的收件者、排程、頻率與
 啟用狀態；只有真正由 notification rule／template engine 產生的營運提醒提供文字內容編輯。
 
@@ -139,50 +143,41 @@ intent／outbox 並回 receipt，public typed readback 再讀回 deterministic t
 Chrome 驗收須實際點擊 UI；mutation 不得以 API 直接呼叫替代。LINE 真 provider 未獲授權時固定
 `not_run` 且不阻塞 Task 96；仍須取得 committed delivery task 與 mock/local adapter result／typed readback，不得以未持久化 queue 或本機預覽冒充已完成的 delivery decision。
 
-## 3. 模組一原圖轉錄：LINE LIFF 表單架構與身分升級切換
+## 3. 模組一：LINE LIFF 表單與身分綁定
 
-原圖說明：涵蓋 8 大 LIFF 表單、身分核對、自動綁定、排班調休與手機審核閉環。
+本節的登記及身分綁定流程以 current LINE Identity、Case Import 正式規格為準。
 
-### 3.1 訪客入口與 Gateway 身分先行導流
+### 3.1 訪客入口與身分核對
 
 ```mermaid
 flowchart TD
-    User_Entry["訪客點擊 LINE 預設選單【服務登記／身分綁定】"] --> Gateway_View["開啟 gateway.html（服務確認首頁）"]
-
-    Gateway_View --> Branch_Gov_No["【未申請市府平台】<br/>彈窗提醒 ➔ 外連市府月子平台登記<br/>(提醒登記後回 LINE 填 60 題問卷)"]
-    Gateway_View --> Branch_Gov_Yes["【已申請市府平台】<br/>身分先行：輸入 姓名 + 手機 09xx<br/>(系統即時向後端 clients 查詢)"]
-
-    Branch_Gov_Yes -->|"完全吻合"| State_A["【狀態 A：舊客完全命中】<br/>綁定成功！推播案件編號【case_no】<br/>無需重複填問卷 ➔ 啟用【客戶選單】"]
-    Branch_Gov_Yes -->|"有案號待填問卷"| State_B["【狀態 B：有案號但缺問卷】<br/>自動預填 姓名+電話+case_no<br/>無縫跳轉 register.html (60 題問卷)"]
-    Branch_Gov_Yes -->|"名冊未同步"| State_C["【狀態 C：查無案號/未同步】<br/>建立臨時檔案，預填姓名+電話<br/>跳轉 register.html (60 題問卷)"]
-    Branch_Gov_Yes -->|"連續失敗 2 次"| Retry_Fail["【重試失敗協處】<br/>自動於 customer_service_tickets 建立協處工單"]
-
-    State_B --> Register_Form["register.html (60 題需求調查問卷)"]
+    User_Entry["客戶登記與綁定／歡迎連結"] --> Gateway_View["是否已申請市府平台？"]
+    Gateway_View --> Branch_Gov_No["未申請：前往市府平台"]
+    Gateway_View --> Branch_Gov_Yes["已申請：輸入姓名與電話"]
+    Branch_Gov_Yes -->|資料完整、尚未綁定| State_A["確認綁定成功<br/>專屬選單稍後更新"]
+    Branch_Gov_Yes -->|同一帳號已綁定| Already_Bound["您已完成綁定<br/>返回 LINE 使用，不重複 Apply"]
+    Branch_Gov_Yes -->|需要改綁| Rebind_Request["申請重新綁定／取消"]
+    Rebind_Request -->|明確申請| Rebind_Review["待工會確認<br/>核准前保留原綁定"]
+    Branch_Gov_Yes -->|缺問卷| State_B["帶入已核對資料"]
+    Branch_Gov_Yes -->|查無資料| State_C["帶入姓名與電話"]
+    State_B --> Register_Form["填寫服務需求<br/>送出後待工會核准"]
     State_C --> Register_Form
+    Branch_Gov_Yes -->|核對失敗| Retry_Fail["返回修改／呼叫專員<br/>失敗不自動開單"]
+    Retry_Fail -->|明確呼叫| Human_Call["沿既有人工服務流程受理"]
 ```
 
-| Node | 原圖顯示文字 | 系統執行與狀態機契約 |
-|---|---|---|
-| User_Entry | 訪客點擊 LINE 預設選單【服務登記／身分綁定】 | 觸發 LINE URI 進入 Gateway |
-| Gateway_View | 開啟 gateway.html（服務確認首頁） | 提供二選一安全導流介面 |
-| Branch_Gov_No | 未申請市府平台：彈窗提醒 → 外連市府月子平台登記；提醒登記後回 LINE 填 60 題問卷 | 彈出提醒視窗後外連 `https://hsinchu-nanny.hccg.gov.tw/home` |
-| Branch_Gov_Yes | 已申請市府平台：身分先行，輸入姓名＋手機 09xx；系統即時向後端 clients 查詢 | 進入 `bind.html`，輸入姓名與 09xx 手機，向後端查詢 clients 與訂單狀態 |
-| State_A | 狀態 A：舊客完全命中；綁定成功！推播案件編號【case_no】無需重複填問卷 ➔ 啟用【客戶選單】 | 後端比對吻合且問卷已完成：成功綁定、推播 case_no，無需重填問卷，即刻啟用客戶選單 |
-| State_B | 狀態 B：有案號但缺問卷；自動預填 姓名+電話+case_no 無縫跳轉 register.html（60 題問卷） | 後端有客戶案件但問卷未齊：回傳 case_no，前端無縫跳轉 `/line-registration?name=...&phone=...&case_no=...` 並自動帶入欄位 |
-| State_C | 狀態 C：查無案號／未同步；建立臨時檔案、預填姓名＋電話 跳轉 register.html（60 題問卷） | 後端查無案號（市府名冊未同步或新客）：建立 provisional 臨時登記，前端無縫跳轉 `/line-registration?name=...&phone=...` 並自動帶入欄位 |
-| Retry_Fail | 第 1 次提示確認；第 2 次仍失敗時，自動於 customer_service_tickets 建立協處工單 | 連續 2 次輸入查核失敗，轉真人客服工單協處 |
-
-箭頭：User_Entry → Gateway_View（載入 LIFF）；Gateway_View → Branch_Gov_No／Branch_Gov_Yes；
-Branch_Gov_Yes → State_A（完全吻合）／State_B（有案號待填問卷）／State_C（名冊未同步）／
-Retry_Fail（連續失敗 2 次）；State_B／State_C → Register_Form。
+- 只有成功查核才依狀態分流；API 失敗不冒充查無資料，也不自動轉往填表。
+- 「申請重新綁定」沿原 Customer Preview／Apply 建立待審需求；取消零 mutation，核准前保留原綁定。
+- 成功畫面只顯示真實案件編號；沒有案件編號時不填入範例，不宣稱選單已發布或訊息已送達。
+- 第一次、第二次及後續失敗均只提示修正；點選「呼叫專員」或在官方聊天室明確呼叫後才建立客服需求。
 
 ### 3.2 產婦問卷登記與資料異動
 
 | Node | 原圖顯示文字 |
 |---|---|
-| Register_Form | register.html 產婦 60 題問卷；100% 對齊 91 項 BeClass 欄位與 15 項設備；全員必填；3 大條款強制彈窗 |
-| Save_Direct | 狀態 B 客戶送出問卷後，100% 自動歸戶至既有正式案件 |
-| Save_Staging | 狀態 C 客戶送出問卷後，寫入 provisional_registrations 暫存池，待綁定姓名＋電話＋問卷＋LINE ID |
+| Register_Form | 服務需求表單包含基本資料、照護環境、飲食、居家設備及費用與同意條款；必要欄位及退費閱讀同意檢查後才可送出 |
+| Save_Direct | 已有案件但缺問卷者送出後保存需求申請，顯示待工會核准，不自動宣稱正式歸戶或媒合完成 |
+| Save_Staging | 新客送出後保存需求申請及申請編號，工會核准後才由 owner 建立正式客戶與對應綁定 |
 | Profile_Update_Page | profile_update.html 資料異動申請；5 大分類折疊；敏感欄位檔期影響彈窗；依訂單狀態鎖定欄位 |
 | Ticket_Update | 送出異動申請後產生 Diff 差異工單，等待工會專員審核，不直接覆蓋主表 |
 
@@ -193,8 +188,8 @@ Save_Staging（狀態 C）；Profile_Update_Page → Ticket_Update。
 
 | Node | 原圖顯示文字 |
 |---|---|
-| Staff_Binding_Page | identity.html?purpose=staff_verification；輸入姓名、身分證字號、生日 |
-| Staff_Auto_Check | 比對 staff 資料庫；吻合且未綁則自動綁定並啟用月嫂選單；已被他人綁定則轉 STAFF_REBIND 人工審核 |
+| Staff_Binding_Page | 點選「月嫂身分綁定」，或輸入「我是月嫂／我要綁定月嫂」，進入同一姓名、身分證字號與生日驗證頁 |
+| Staff_Auto_Check | 唯一吻合且無衝突時綁定，專屬選單稍後更新；已綁其他 LINE 帳號時回 typed conflict，不以人工審核繞過改綁限制 |
 | Staff_Order_View | staff_order_search.html；高對比大字版 Flex 卡片；可檢視曾徵詢且未指派案件並重新表達意願 |
 | Staff_Schedule_View | staff_schedule.html；標準 7 格月曆、長假日期區間選擇、點擊服務日申請調休 |
 | Client_Extension_Push | 自動 LINE 通知客戶：月嫂請假一日，服務日往後順延一天，詢問是否同意 |
@@ -304,24 +299,52 @@ AI_Badge_Rating → Feedback_Analytics；Feedback_Analytics → Web_Admin_UI。
 箭頭：Client_Term_Update → Diff_Analyzer；Diff_Analyzer → Group_1_Willing（原本願意者）／
 Group_2_Resolved（痛點已解決者）／Group_3_Ignored（無關者）。
 
-### 5.2 意願池判定與拒接原因降維撮合
+### 5.2 多人意願與人工條件協調
 
-| Node | 原圖顯示文字 |
+| Node | 目前行為 |
 |---|---|
-| Willing_Pool_Check | 動態計算有效意願池人數 willing_pool |
-| Match_Success | 人數 ≥1 時媒合成功；工會專員後台一鍵指派，推播派案成功通知給雙方 |
-| Zero_Pool_Engine | 已聯繫的非空候選池中，意願人數＝0 且全員完成回應或 provider 成功送達後 24 小時逾期時，彙整尚未解決的結構化調整條件；逾期未回與沒有意願保持不同語意 |
-| Client_Compromise_Push | AI 對調整條件去重後直接向客戶提出具體協商建議，例如改為 09:00～17:00 可重新詢問相關月嫂；不得宣稱修改後必然承接 |
-| Union_Manual_Followup | 已聯繫的非空候選池全員結束且無人願意時，若沒有調整條件，或客戶已回覆可以／無法調整，建立工會 LIFF 人工跟進待辦，並向唯一啟用的工會群組排入一次去敏通知；客戶同意時由工會完成正式修改後再重新詢問月嫂，群組投遞異常不得隱藏待辦 |
-| Client_Compromise_Agree | 客戶同意調整為 09:00；原圖主張系統自動更新訂單並立即完成派案 |
-| Client_Compromise_Disagree | 客戶保留原需求，案件保持於工會待媒合隊列 |
+| Willing_Pool_Check | 可同時有多位月嫂願意，人員決定推薦人選，再交客戶確認；不得因已有願意者阻擋其他回覆 |
+| No_Interest | 月嫂勾選「沒有意願」後按「送出回應」，頁面顯示「已送出，謝謝您的回應。」；人員端標示「無意願」、備註「沒有意願」，不顯示內部代碼。不另發聊天室訊息、不建立協調待辦、不通知客戶、不影響其他候選或自動結案 |
+| Staff_Adjustment_Todo | 月嫂提出調整條件就建立人員待辦，不等待全池完成、不因滿 24 小時自動詢問客戶 |
+| Client_Compromise_Push | 人員查看月嫂原文，自行輸入詢問文案並按發送；系統不擬草稿、不直接轉發原文 |
+| Client_Compromise_Answer | 客戶填寫更新後的條件；原文、詢問與回答只供人員審核，不直接改單 |
+| Union_Manual_Followup | 人員審核不通過即重新輸入文案、再次詢問；通過時由系統更新 DB 正式案件條件，再由人員選擇月嫂重新詢問。不設「是否需要修改」分支，不發群組通知 |
+| Response_Reminder | 成功送達滿 24 小時仍未回覆時，只顯示內部待辦提醒，不阻擋月嫂回覆、不自動記為沒有意願 |
 
-箭頭：Group_1_Willing／Group_2_Resolved → Willing_Pool_Check；Willing_Pool_Check →
-Match_Success（人數 ≥1）／Zero_Pool_Engine（人數＝0）；Zero_Pool_Engine →
-Client_Compromise_Push；Client_Compromise_Push → Client_Compromise_Agree／
-Client_Compromise_Disagree；Client_Compromise_Agree → Match_Success。
+```mermaid
+flowchart TD
+  A[月嫂提出調整條件] --> B[工會人員待辦：查看月嫂原文]
+  B --> C[人員自行輸入詢問文案]
+  C --> D[人員發送給客戶]
+  D --> E[客戶回答更新後的條件]
+  E --> F{工會人員審核}
+  F -->|不通過，繼續協調| C
+  F -->|通過| G[系統更新 DB 的正式案件條件]
+  G --> H[人員選擇月嫂重新詢問接案意願]
+  H --> I[收集各月嫂回覆，由人員推薦給客戶確認]
+```
 
-Current 裁決補充：初次候選搜尋結果為零不屬於 `Zero_Pool_Engine`，不建立 LINE 通知或人工跟進；工會人員在媒合操作中直接看見零搜尋結果。只有「已實際聯繫的非空候選池」才可進入上述全池完成判定。若存在尚未由客戶回答的調整條件，走 `Client_Compromise_Push`；若沒有調整條件，或客戶已回覆可以／無法調整，走 `Union_Manual_Followup`。客戶回覆可以調整只建立待工會修改任務；工會 LIFF 顯示同意項目與受影響原候選人，第一步由 Orders Terms owner Query／Preview／Apply 並讀回綁定相同 pool、晚於 client answer 的收據，第二步才可預覽及重新發出候選資訊。重送 identity 綁定 client-answer event 與 candidate，重試不得重複；日期變更還須以 current Orders 日期重驗原候選完整 availability、在同一交易更新 contact period／coverage 並留存前後日期事件。沒有直接 owner 欄位的分類 fail closed，不能沿用舊資料假裝閉環。任何尚待回答的確認資訊、尚未完成的候選回應或已出現願意者，都不得進入這兩個終局分支。同一候選可在原訊息的 24 小時期限內以 append-only 新事件更正自己的既有意願，current willing pool 必須依每位候選的最新結構化回覆重算；自己的舊 `willing` 不得阻擋更正，但其他候選已願意時仍 fail closed。
+審核更新借用 Orders Terms canonical writer 及其既有 `apply_in_current_uow`，與本輪協調審核事件共用單一 outer UoW；寫入失敗不留下成功審核。客戶回答、審核及重新詢問綁定 exact round／answer 與 resulting order version；stale 或冪等衝突須零重複效果。工會人員 current binding、enabled Admin 與 matching capability 驗證不省略，操作不限定 system_admin。可修改欄位沿用現有正式 Terms 契約，不由月嫂分類或自由文字自動推測。
+
+### 5.2.1 推薦月嫂給客戶確認
+
+```mermaid
+flowchart TD
+  A[人員選定願意承接者並寄送確認資訊] --> B{客戶操作}
+  B -->|專人協助／進一步了解| C[已收到您的聯絡需求，請留下您的疑問。]
+  C --> D[工會人員待辦：查看留言與回覆]
+  D --> E[原卡片仍可接受此配對]
+  B -->|接受此配對| F[保存客戶接受]
+  E --> F
+  F --> G[已收到您接受配對的回覆，後續由工會安排簽約。]
+  F --> H[待辦改為辦理簽約]
+  H --> I[準備契約與發起簽署]
+  I --> J[雙方完成簽約後，才由人員建立服務群組]
+  A --> K[成功送達滿 7 天尚未接受：只作內部提醒]
+  K --> B
+```
+
+客戶推薦由人員選定願意承接者並主動寄送確認資訊。專人協助回覆「已收到您的聯絡需求，請留下您的疑問。」，人員從待辦查看與回覆，原卡片仍可接受配對；接受時回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，待辦改為辦理簽約，雙方完成簽約後才由人員建立本案服務群組。成功送達滿 7 天未接受僅作內部提醒，不阻擋回覆、不發群組通知。本人、current binding 與有效方案驗證不省略，取消、更換或最終決定的方案不能重用；履歷下載仍沿原短效憑證規則。
 
 ### 5.3 服務進行中：月嫂調休與客戶順延確認
 
@@ -348,7 +371,7 @@ Staff_Shift_Agree／Staff_Shift_Conflict。
 
 ## 6. 模組四原圖轉錄：工會管理端、異常通報與客訴轉真人
 
-原圖說明：兩大管理端協同、單一告警群後台重設、客訴轉真人 SOP 與代班自動拆帳。
+原圖說明：兩大管理端協同、（群組告警已依 2026-10-22 人工裁決退役）、客訴轉真人 SOP 與代班自動拆帳。
 
 ### 6.1 兩大核心管理端協同
 
@@ -356,33 +379,23 @@ Staff_Shift_Agree／Staff_Shift_Conflict。
 |---|---|
 | Desktop_Web_Admin | 工會電腦版 Web 後台：媒合排班總表、代班直接指派、財務核銷／請款清冊、AI 客服事件管理、重設異常群組 |
 | Mobile_Ops_Group | LINE 手機行動管理端，包含通知協調層與執行審核層 |
-| Mobile_Group_Alert | LINE 幹部異常通知群組：主動通知與告警、群內分工、附安全審核連結 |
 | Mobile_Admin_Page | mobile_admin.html：專員一鍵核准／退回，原圖聚焦資料異動、舊客重綁、月嫂重綁 |
 
 箭頭：Mobile_Ops_Group → Mobile_Group_Alert（收到重大告警）；
 Mobile_Group_Alert → Mobile_Admin_Page（開啟審核）。
 
-### 6.2 幹部群組單一鎖定與後台重設
+### 6.2 群組告警已取消
 
-| Node | 原圖顯示文字 |
-|---|---|
-| Group_Command_In | 幹部於 LINE 群組輸入「設定異常通知群組」 |
-| Check_Group_Lock | 系統檢查資料庫中的 alert_group_id |
-| Group_Bind_Success | group_id 為空時綁定為唯一異常通報群組 |
-| Group_Bind_Reject | group_id 已有值時拒絕重複綁定 |
-| Admin_Reset_Group | 最高權限管理員在 Web 後台重設；原圖描述為將 alert_group_id 清空為 NULL 後重新綁定 |
-
-箭頭：Group_Command_In → Check_Group_Lock → Group_Bind_Success／Group_Bind_Reject；
-Desktop_Web_Admin → Admin_Reset_Group → Group_Bind_Success。
+2026-10-22 人工裁決取消整個群組告警功能。原圖的群組登錄、單一鎖定、重設、重新啟用及群組審核連結不再是現行需求或驗收。保留管理員個人通知與案件服務群組；不得以原圖恢復群組告警。
 
 ### 6.3 客訴爭議與重大異常轉真人 SOP
 
 | Node | 原圖顯示文字 |
 |---|---|
-| Trigger_Anomaly | 觸發條件：客訴情緒字眼、Gateway 姓名電話連續比對失敗兩次、主動要求轉真人 |
+| Trigger_Anomaly | 明確客訴或主動呼叫專員沿正式人工處理入口受理；Gateway 核對失敗不自動建立客服需求或告警 |
 | Step1_AI_Empathy | Step 1：AI 即刻同理安撫，回覆官方安撫文案並暫停自動應答 |
 | Step2_Create_Ticket | Step 2：建立 HIGH_PRIORITY 急件工單，進入後台待辦隊列 |
-| Step3_Push_Alert | Step 3：推播紅色告警卡至 LINE 幹部群；原圖描述附姓名／電話／摘要，由專員電話或私訊接手 |
+| Step3_Push_Alert | committed HIGH escalation 的去敏摘要與客服處理入口只通知已設定的管理員個人；不發送告警群組、不帶完整姓名／電話或 raw 摘要 |
 
 箭頭：Trigger_Anomaly → Step1_AI_Empathy → Step2_Create_Ticket → Step3_Push_Alert；
 Step3_Push_Alert → Mobile_Group_Alert。
@@ -470,13 +483,13 @@ typed readback；缺任一 required evidence 即為 implementation `not_run`，�
 
 | Gap | 原圖來源 | Observable acceptance | Failure／not accepted |
 |---|---|---|---|
-| Gateway 兩次失敗的 durable escalation 門檻與去重 | M1 Retry_Fail、M4 Trigger_Anomaly | 連續兩次 identity 比對失敗後，建立一筆可去重的 Customer Service ticket；UI／typed readback 顯示 trigger identity、attempt window、owner、masked evidence 與 manual replay。 | 只有提示、pending／processing／retry 中間態、重複 ticket、無 owner／readback 或直接寫 LINE 表，均 failure／`not_run`。 |
+| Gateway 失敗提示與明確呼叫 | M1 Retry_Fail、M4 Trigger_Anomaly | 連續失敗不自動開單；返回修改零客服副作用，明確呼叫後才沿既有人工服務建立或沿用需求。 | 未呼叫就建立 ticket／escalation／通知、取消仍變更綁定，或未受理卻宣稱已開單，均 failure。 |
 | dual-role 選單切換與案件結束後恢復 | M1 Dual_Role_Trigger／Dual_Menu／Auto_Restore | 雙角色使用者可選 active context，選單投影與 binding intent 對應該 context；案件 closure 後恢復預設 role，並由 typed readback 證明。 | context 過期、選單與 active role 不一致、closure 不恢復、跨 owner 直寫或無 intent/readback，均 failure。 |
 | staff retirement 的根事實與 LINE 權限回收 | M1 Admin_Retire_Staff | Staff owner retirement Apply 產生 receipt；binding projection／LINE 權限與 Rich Menu 失效，open assignment blocker 明確回報，無法退休時 typed failure 可讀回。 | LINE adapter 自行改 Staff root、仍可操作受限 menu、open assignment 被靜默覆蓋或無 blocker/readback，均 failure。 |
 | deterministic navigation／event catalog | M2 Nav_Command、Agent_Router | server-owned revision 的 command／event 以 protected alias 命中正確 tier、source citation、durable reply/event receipt；unknown 與 fallback 亦有 typed result。 | alias 漂移、unknown 誤命中受保護 action、revision 不可讀、無 citation／receipt 或只回 HTTP 200，均 failure。 |
 | deterministic semantic confidence／clarification | M2 Agent_Router／Confidence_Gate | deterministic harness 對固定 semantic bucket／confidence 輸出可重現的 answer、clarification 或 manual fallback，含 reason、source revision、reply／ticket readback；不要求 full AI/provider。 | 結果依外部 provider 隨機變化、低信心瞎猜、無 clarification reason、無 fallback／readback 或以 provider send 代替，均 failure。 |
 | feedback root／receipt／aggregate／ticket | M2 AI_Badge_Rating／Feedback_Analytics | feedback 以 owner root／event linkage 持久化並回 receipt；依固定 revision／window 可重算 aggregate；`unresolved` 產生 Customer Service ticket，Query 可讀回。 | local counter、無 root／receipt、aggregate 不可重算、unresolved 無 ticket、raw provider payload 穿透，均 failure。 |
-| zero-pool 具體協商建議與 client decision | M3 Zero_Pool_Engine／Client_Compromise_Push | 候選月嫂以 recipient-bound LIFF 提交固定八項分類；確認資訊可直接詢問客戶，調整條件須等候選池全員完成或 24 小時逾期且無人願意後由 AI 彙整直送。任一願意回應會阻止尚未發送的協調；調整只表示修改後可重新詢問。client response 必須綁定 exact recipient 與 current pool／event；客戶回覆可以調整後由工會待辦與群組通知接手，正式改單仍由 owner fresh Preview／Apply，工會完成修改並重新發出候選資訊後才建立月嫂的新回覆窗口；LINE 不直接改 Orders／Assignment。 | query-string 身分、沒有意願與逾期未回混同、未等候選池即發送調整、已有願意者仍發送、把條件式回應宣稱成承接、要求客戶自行改單、自動改單、未完成修改即重發、recipient 不明或 replay／wrong-recipient 未拒絕，均 failure。 |
+| 人工條件協調與新條件審核 | M3 Client_Compromise_Push／Union_Manual_Followup | 月嫂原文只供人員查看；人員自行撰寫詢問，客戶提供更新後條件，不通過可反覆詢問。人員審核通過時同交易委派正式 writer 更新 DB 條件及協調審核事件，之後選擇月嫂重新詢問。24 小時只作內部提醒，不發群組通知。 | 自動轉問或擬草稿、二選一取代新條件、未審核改單、通過後另問是否需要修改、非當輪回答、DB 更新失敗卻審核成功、逾時阻擋回覆、群組通知、recipient 或冪等不符均 failure。 |
 | 派案成功雙方通知 | M3 Match_Success | 已 committed 的 `accepted` customer decision 產生雙方 exact recipient snapshot、owner outbox consumer、兩筆 delivery task／retry／manual fallback；mock/local adapter result 與既有 accepted decision receipt 可讀回。Match_Success 通知是 decision 後的資訊通知，不得再建立第二組 accept／reject token。 | 只有 queue、單方通知、無 consumer、既有 accepted decision receipt 不可讀、重複要求客戶決策或無 fallback/readback，均 failure。 |
 | 請假同意／拒絕與 due-shift rematch | M1 Review_4、M3 Client_Leave_Disagree | Scheduling owner 讀回 leave／availability；通知 intent/outbox/task 可本地完成。Agree 經 owner Apply 更新 end_date／班表；Disagree 建立 substitute ticket，due-shift rematch Preview／Apply 產生新 assignment／recipient readback。 | LINE 直接改 assignment、stale availability 被採用、同意無 owner receipt、拒絕無 ticket、rematch 無 fresh readback，均 failure。 |
 | M4 alert 群組安全直達審核連結 | M4 Mobile_Group_Alert | masked alert intent/outbox/task 指向 canonical review target；short-lived authorization 的 expiry、replay、revocation 與 wrong-actor typed failure 可在 mobile UI readback。 | raw PII、永久／可重放／未撤銷 link、wrong target、無失敗 reason 或僅頁面存在，均 failure。 |
@@ -485,25 +498,9 @@ typed readback；缺任一 required evidence 即為 implementation `not_run`，�
 
 ### 9.1 B／C current owner-safe contract amendments（2026-09-01）
 
-#### `R4-SAFE-LINK`：M4 安全審核連結
+#### 群組審核連結驗收退役
 
-LINE Integration 是 review-link transport persistence 的唯一 owner；`runtime_alert_application`
-只提供 active singleton target、target version 與 alert reference，Access Control 只提供既有
-Admin Session／capability 驗證。Link root 最小欄位為 opaque link identity、token digest、
-canonical internal target、target version、source alert identity、allowed actor／capability、
-issued／expires／redeemed／revoked timestamps、root version、correlation 與 idempotency；不得
-保存 raw token、PII 或 arbitrary URL。狀態固定 `issued → redeemed | expired | revoked`，terminal
-狀態不可復活。
-
-Typed contract 為 `IssueSafeReviewLink`、`RedeemSafeReviewLink`、`RevokeSafeReviewLink` 與
-masked `QuerySafeReviewLink`（若有 Preview 必須零寫入）。Issue 在 LINE outer UoW 內 fresh-read
-target 並提交 link root／receipt／notification intent／outbox；Redeem 鎖 root 並重驗 current
-target、Admin Session、actor、capability、expiry 與 version，成功只可一次；Revoke 由 runtime
-target owner 以 typed reference 觸發。錯誤固定為 expired、replayed、revoked、wrong-actor、
-target-stale 或 version-conflict typed result，且失敗零寫入。Readback 僅回 masked target、
-status、expiry／redeem／revoke outcome、versions 與 receipts。可承擔此 root 的 additive schema
-須另過既有 DB change gate；本規格不授權新 route、production、`union_db`、provider 或 deployment，
-也禁止 query／fragment Bearer token、raw PII 與 arbitrary URL。
+依 2026-10-22 人工裁決，群組告警及其專用審核連結已取消，不再要求簽發或兌換。歷史 Query／撤銷保留。管理員客服入口是需驗證身分的導航，不宣稱為短效一次性安全審核連結。
 
 #### `R1-LIFECYCLE`：案件 terminal closure 自動恢復
 

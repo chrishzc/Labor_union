@@ -299,6 +299,21 @@ class MySqlStaffLeaveIntakeRepository:
             )
             return list(cursor.fetchall() or ())
 
+    def pending_page(self, *, page: int, page_size: int) -> tuple[list[dict[str, Any]], int]:
+        if type(page) is not int or page < 1 or type(page_size) is not int or not 1 <= page_size <= 50:
+            raise ValueError("staff_leave_page_invalid")
+        source = (" FROM scheduling_staff_leave_request_aggregates r JOIN staff s ON s.id=r.staff_id "
+                  "WHERE r.request_status IN ('pending','accepted_for_processing')")
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total" + source, ())
+            total = int(cursor.fetchone()["total"])
+            cursor.execute(
+                "SELECT r.id,r.staff_id,s.name AS staff_name,r.leave_start_date,r.leave_end_date,"
+                "r.request_reason,r.request_status,r.aggregate_version" + source
+                + " ORDER BY r.created_at,r.id LIMIT %s OFFSET %s", (page_size, (page - 1) * page_size),
+            )
+            return list(cursor.fetchall() or ()), total
+
     def transition(self, snapshot, target, reason: str, actor_id: str, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot:
         with self._connection.cursor() as cursor:
             cursor.execute(_ROOT_TRANSITION_SQL, (target.value, snapshot.request_id, snapshot.version))

@@ -33,7 +33,7 @@ def _inbox(event_id="event-1"):
 
 def _uow(binding=None):
     return SimpleNamespace(
-        identities=SimpleNamespace(get=lambda _line_user_id: binding),
+        identities=SimpleNamespace(list_by_user=lambda _line_user_id: (binding,) if binding else ()),
         outbox=_Outbox(),
         audit=_Audit(),
     )

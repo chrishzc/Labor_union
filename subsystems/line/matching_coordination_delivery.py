@@ -251,6 +251,8 @@ def normalize_matching_coordination_intent(
         payload, "source_event_identity", "line_matching_source_event_missing"
     )
     selector = _text(payload, "recipient_selector", "line_matching_recipient_selector_missing")
+    if selector == "matching.request.participants":
+        raise MatchingCoordinationDeliveryError("matching_zero_pool_notification_retired")
     snapshot = payload.get("recipient_snapshot")
     if not isinstance(snapshot, Mapping):
         raise MatchingCoordinationDeliveryError("line_matching_recipient_snapshot_missing")

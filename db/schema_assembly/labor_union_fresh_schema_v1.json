@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "7866eb3f5c1de5de16603b7f4ebf61bee4e48d5352f5af33a52272b9593e8367",
+  "active_artifacts_sha256": "b38b85a2674d355ee87031df7a8f545846fc38c83ae9a8ed341bf2e2a26a67eb",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -181,7 +181,8 @@
     "db/schema_parts/230_client_hcm_email.sql",
     "db/schema_parts/231_staff_union_number.sql",
     "db/schema_parts/232_candidate_weekly_information.sql",
-    "db/schema_parts/1052_nas_registration_approval.sql"
+    "db/schema_parts/1052_nas_registration_approval.sql",
+    "db/schema_parts/1053_line_order_group_invitation_url.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",

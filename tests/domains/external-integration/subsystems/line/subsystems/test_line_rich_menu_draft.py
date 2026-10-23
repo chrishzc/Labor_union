@@ -637,3 +637,13 @@ def test_draft_and_publication_notes_are_optional_but_length_bounded():
         assert model(**command, reason='').reason == ''
         with pytest.raises(ValidationError):
             model(**command, reason='x' * 501)
+
+
+@pytest.mark.parametrize("menu_id", ["default_menu", "customer_menu"])
+def test_bootstrap_menu_has_merged_ai_faq_and_direct_human_contact_at_bottom(menu_id):
+    definition = normalize_rich_menu_draft(json.loads(Path("config/line_menu.json").read_text(encoding="utf-8")))
+    menu = next(menu for menu in definition["menus"] if menu["id"] == menu_id)
+    lower = sorted((button for button in menu["buttons"] if button["bounds"]["y"] > 0), key=lambda b:b["bounds"]["x"])
+    assert [button["label"] for button in lower] == ["AI 智慧問答", "聯絡專人服務"]
+    assert lower[0]["action"] == {"type":"uri", "uri":"?target=ai_assistant", "uri_source":"liff"}
+    assert lower[1]["action"] == {"type":"postback", "data":"customer-service:handoff:confirm"}

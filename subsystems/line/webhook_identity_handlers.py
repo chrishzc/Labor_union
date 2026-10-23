@@ -490,11 +490,11 @@ DEFAULT_ONBOARDING_WELCOME_MESSAGE = (
     "{url}\n"
     "（此安全登記連結將於 15 分鐘後失效）\n\n"
     "2️⃣ 專業月嫂服務人員：\n"
-    "👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n"
+    "👉 請點擊下方選單【月嫂身分綁定】或直接在對話框輸入「我是月嫂」進行身分認證。\n\n"
     "3️⃣ 服務說明與專人諮詢：\n"
-    "👉 請點擊下方選單【服務說明】查看服務流程與常見問答。\n\n"
+    "👉 請點擊下方選單【AI 智慧問答】使用 AI 問答或瀏覽常見問答。\n\n"
     "---\n"
-    "💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n"
+    "📌 本帳號採自助服務，一般留言不會有專員回覆。如需協助，請點選【聯絡專人服務】或輸入「聯絡專人服務」，專員才會在聊天室回覆您。\n\n"
     "👇 請點擊下方圖文選單，開啟您的專屬服務！"
 )
 
@@ -522,7 +522,7 @@ def _identity_link_message(purpose, url, unit_of_work=None):
 
 def _identity_purpose_for_text(text):
     normalized = text.strip()
-    if _STAFF_COMMAND in normalized:
+    if _STAFF_COMMAND in normalized or normalized == "我要綁定月嫂":
         return LineIdentityFlowPurpose.STAFF_VERIFICATION
     if normalized in _ADMIN_COMMANDS:
         return LineIdentityFlowPurpose.ADMIN_BINDING

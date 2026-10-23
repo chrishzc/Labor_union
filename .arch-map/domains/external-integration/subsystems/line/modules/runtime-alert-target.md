@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-既有 LINE 告警對象 Query／Preview／Apply、啟停與群組重設、版本檢查、receipt 與 audit。分類沿用固定群組／管理員規則，沒有個別偏好寫入；管理介面保留唯讀分類及訊息預覽。
+管理員個人 LINE 通知對象的 Query／Preview／Apply、啟停、版本檢查、receipt 與 audit。2026-10-22 人工裁決取消群組告警：群組登錄、重設、啟用、群組分類與虛構模擬退役。管理端只顯示管理員個人對象，舊群組命令明確拒絕；不新增個別偏好。
 
 ## Implementation
 - primary: `subsystems/line/runtime_alert_target_application.py`
@@ -18,7 +18,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — runtime target 與 NAS-LINE-03。
 - 分類 GET 唯讀；舊 PATCH 明確回報固定規則衝突，不假裝儲存、不新增偏好表。
-- target 啟停／reset 保留既有 Preview／Apply 與唯一 outer UoW。
+- 管理員個人 target 啟停保留既有 Preview／Apply 與唯一 outer UoW；群組 reset／Preview／啟用回 typed retired conflict，登錄不開 UoW 或寫入。
 
 ## Verification
 - layout_status: `custom_current`

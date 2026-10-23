@@ -4691,6 +4691,7 @@ CREATE TABLE `line_order_group_bindings` (
   `activated_at_utc` datetime(6) DEFAULT NULL,
   `created_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `updated_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  `invitation_url` varchar(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   PRIMARY KEY (`case_no`),
   UNIQUE KEY `uq_line_order_group_id` (`group_id`),
   CONSTRAINT `fk_line_order_group_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,

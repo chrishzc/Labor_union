@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import hashlib
-import json
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from subsystems.line.matching_coordination_delivery import (
     MatchingCoordinationDeliveryError,
 )
-from subsystems.scheduling.matching_line_cards import customer_profiles_card
 from domains.line.configuration import LineConfigurationKind
 from infrastructure.mysql.line_configuration_publication_repository import MySqlLineConfigurationRepository
-from subsystems.line.message_configuration import notification_description
 
 
 class MySqlLineMatchingCoordinationDeliveryProjection:
@@ -35,6 +31,8 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
         selector = str(payload.get("recipient_selector", ""))
+        if selector == "matching.request.participants":
+            raise MatchingCoordinationDeliveryError("matching_zero_pool_notification_retired")
         audience, staff_id = self._audience(selector, payload)
         recipient = self._recipient(command.case_no, audience, staff_id)
         line_user_id = recipient.get("recipient_line_user_id")
@@ -45,31 +43,7 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
         binding = self._binding(line_user_id)
         template_snapshot = self._configuration()
         configuration = {"active": True, "revision": template_snapshot.revision.value}
-        interaction = None
-        if selector == "matching.request.participants":
-            # Keep the raw token only in the transient delivery envelope.  The
-            # LINE consumer stores its hash in the existing interaction owner.
-            token = "p6" + hashlib.sha256(
-                f"{reference_id}:{line_user_id}".encode("utf-8")
-            ).hexdigest()
-            expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-            message = json.loads(
-                customer_profiles_card(
-                    command.case_no,
-                    (),
-                    token,
-                    notification_description(template_snapshot, "LU96-M3-ZERO-POOL-CARD-V1"),
-                )
-            )
-            interaction = {
-                "token": token,
-                "plan_id": int(recipient["plan_id"]),
-                "segment_id": None,
-                "action_scope": "customer_decision",
-                "expires_at_utc": expires_at.isoformat(),
-            }
-        else:
-            message = {"type": "text", "text": _message_text(payload)}
+        message = {"type": "text", "text": _message_text(payload)}
         result = {
             "source_event_identity": payload.get("source_event_identity")
             or getattr(receipt, "decision_event_id", None)
@@ -82,15 +56,13 @@ class MySqlLineMatchingCoordinationDeliveryProjection:
             },
             "binding": binding,
             "configuration": configuration,
-            "message_kind": "flex" if interaction is not None else "text",
+            "message_kind": "text",
             "message": message,
             # Persist the handoff schedule so replay reconstructs the exact
             # delivery fingerprint instead of defaulting to a new wall clock.
             "scheduled_at": datetime.now(timezone.utc).isoformat(),
             "notification_reason": "recipient_unavailable",
         }
-        if interaction is not None:
-            result["interaction"] = interaction
         return result
 
     def _audience(self, selector: str, payload: Mapping[str, Any]) -> tuple[str, int | None]:

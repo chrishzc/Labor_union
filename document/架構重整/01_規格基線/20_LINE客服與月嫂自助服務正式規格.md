@@ -22,7 +22,7 @@
 3. LIFF 正式身分只信任 server-side 驗證後的 ID token 與正式 binding；query string userId 不是身分證明。
 4. LINE Integration 不擁有 Orders、Scheduling、Customer Service 或客戶主檔狀態。
 5. Rich Menu 圖面與文字可沿用 merge，但 definition、revision、publication 與 per-user binding 仍以 wen DB 為 SSOT。
-6. `綁定訂單`、`訂單查詢` 固定進入 customer binding；`綁定後台帳號` 固定進入 admin binding。
+6. 1 對 1 私訊的 `綁定訂單`、`訂單查詢` 固定進入 customer binding；`綁定後台帳號` 固定進入 admin binding。服務群組中的完整設定指令走規格 17 的工會群組流程。
    Service Help／Customer Service 不得攔截或重定義這三個既有 identity aliases。
 7. `工會選單`、`開啟客服系統`、`月嫂驗證管理` 只接受已 bound 的 admin LINE identity，並透過
    Rich Menu binding outbox 套用 `union_staff_menu`；`esc` 對所有 LINE user 透過同一 outbox
@@ -49,9 +49,9 @@ waiting → handling → resolved
 
 不允許跳過狀態驗證或以 UI 字串決定 transition。管理 command 必須帶 expected version；stale command 回 conflict。
 
-2026-09-10 人工裁決：自然語句偵測到「找真人／拒絕 AI／回答錯誤」時，只顯示明確確認選項，確認前不得建立 ticket、escalation 或 automation hold。Rich Menu「專人客服諮詢」與確認按鈕屬明確操作，可直接建立或沿用同一使用者＋同一 category 的未完成 ticket，並以一次通知說明 AI 已暫停、後續訊息會加入同一案件及「恢復 AI 助理」入口。active hold 期間的其他訊息只加入原案件，不產生 AI 自動回答。
+官方帳號以自助服務為主。聊天室一般留言不啟動 AI 問答，也不因未知輸入、回答錯誤或未取得答案自動轉人工。使用者點選「聯絡專人服務」、輸入「聯絡專人服務」或既有「呼叫專員」，或明確要求真人協助時，直接建立或沿用同一使用者＋同一 category 的未完成 ticket，無需再次確認。既有「轉真人客服」「轉接真人客服」「專人客服」入口導向相同流程。成功只回覆「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」；收到需求不代表專員已即時上線。
 
-automation hold 只能由兩條 owner-backed 路徑解除：客服人員完成 `handling → resolved`，或原 LINE requester 明確選擇恢復 AI。requester 可在 escalation `open | claimed | handling` 且 ticket `waiting | handling` 時，以同一交易將 ticket／escalation 結案、hold 標為 released，reason 固定為 `requester_resumed_ai`，並排入恢復確認；不同 LINE identity、非對話型 hold、stale version 或重複競爭必須 fail closed。客服後台 resolve 成功時亦須以 committed durable delivery 通知原 requester「客服已完成，AI 已恢復」。不採用逾時自動解除。
+呼叫後的後續留言加入同一客服案件，由工會專員回覆。既有 active hold 只用於維持人工處理的對話歸屬，不向使用者呈現 AI 暫停／恢復狀態；客服人員正式結案時依 owner version／lock 解除 hold，並通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊「繼續使用 AI」「恢復 AI」按鈕與文字指令只提示入口停用，不得結案、解除 hold 或宣稱聊天室 AI 已啟用。
 
 ### 3.3 交易、冪等與 retry
 
@@ -60,7 +60,6 @@ automation hold 只能由兩條 owner-backed 路徑解除：客服人員完成 `
   才可另開新的 Unit of Work，只保存`retryable_failed`／`terminal_failed` inbox completion。禁止把部分ticket、
   binding、outbox或其他業務 mutation與failure completion一起commit。
 - admin reply：鎖定 ticket、驗證 version、保存回覆、更新狀態、audit、delivery task 同交易 commit。
-- requester resume：鎖定 active conversation escalation 與 ticket、核對原 LINE requester、保存 resolved／hold released 事件、receipt 與恢復通知 task，同一 LINE Unit of Work commit。
 - inbound idempotency 使用 LINE event ID；admin mutation 使用 caller idempotency key。
 - provider timeout/5xx 只 retry delivery task；validation、authorization、stale conflict 不自動 retry。
 - retry exhausted 建立 LINE runtime alert，客服資料不得因 provider 暫時失敗回滾。
@@ -209,12 +208,12 @@ React「客服與營運」的客服案件頁只提醒與追蹤未結案客服，
   壓縮成狹長欄；窄螢幕改為堆疊或可捲動配置。移除黃色區域中「原始 8 個 LIFF 與 4 個 Flex 功能均保留」等
   實作／盤點說明，該資訊只留在正式規格，不作為一般操作者畫面內容；移除說明不得刪除、隱藏或停用任何
   8 個 LIFF、4 個 Flex 資產與其既有操作入口。
-- legacy `/static/bind.html` 只可保留為導向 `/line-identity` 的相容入口；query string 可原樣帶往 canonical
-  頁面作導航，但不得參與身分或授權判斷。`profile_update.html` 在正式異動契約完成前只保留唯讀設計與
+- legacy `/static/bind.html` 僅作相容資產路徑；正式客戶入口為 `/line-bind`，經 Customer Preview／Apply 處理。query string 可帶往 canonical
+  頁面作導航及可修改預填，但不得參與身分或授權判斷。`profile_update.html` 在正式異動契約完成前只保留唯讀設計與
   人工補登指引，不得呼叫不存在的 API、接受 client-supplied `line_user_id` 或呈現假成功。
 
 LIFF 資產入口對齊狀態（2026-08-25）：`completed`。工作室保留 8 個 LIFF 與 4 個 Flex；
-`gateway.html`、`bind.html`、`identity.html` 明確共用 `/line-identity` canonical shell，其餘已存在入口由
+現行 `/line-gateway`、`/line-bind` 與 `/line-identity` 分別提供導流、客戶核對及跨角色驗證 presentation，共用 canonical LINE Identity typed application，其餘已存在入口由
 runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實點並核對正式頁面；
 `profile_update.html` 仍明確顯示待建且不導向假頁面，其正式 Query／Preview／Apply 工作仍由 §6.1 列管，
 不因本項入口對齊完成而視為完成。Staff verified-token 與 provider delivery 亦不包含在本項完成範圍。
@@ -329,21 +328,23 @@ allowlist、version、repository contract 與必要 `lu_test_*` schema release�
 |---|---|---|---|
 | flex_dispatch | M1 Staff_Order_View 與 M3 派案意願調查：讓候選月嫂去敏查閱正式案件資訊；主動作為「願意承接」，另一動作固定為「提出疑問或無法承接」並開啟 recipient-bound LIFF | Scheduling Candidate Contact Pool、Orders case projection；LINE 只 render／deliver | 不代表已建立聯繫事件、delivery task 或送達；不得攜帶客戶姓名、電話、詳細地址；LIFF 不接受 query-string LINE 身分 |
 | flex_leave_confirm | M1 Client_Extension_Push 與 M3 Client_Leave_Notice：請客戶確認月嫂請假後順延或不同意並轉代班 | Scheduling leave request／canonical leave receipt／assignment service dates | 點擊只可形成 recipient-bound typed decision；卡片文字不得直接改 end_date、班表或代班 |
-| flex_alert_critical | M4 Step3_Push_Alert：將 committed HIGH escalation 的去敏摘要與安全處理入口通知已設定的幹部群 | Customer Service escalation；runtime alert target owner只提供 current recipient target；LINE負責delivery | 不顯示完整姓名、電話或 raw 摘要；不代表群組已設定、task 已送達或案件已被 claim |
-| flex_negotiation | M3 Zero_Pool_Engine／Client_Compromise_Push：無人願意承接且候選池已完成回應時，由 AI 彙整 current criteria 與結構化回應後直接詢問客戶 | Scheduling Matching Coordination criteria／willingness／zero-candidate preview | 不自動套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
+| flex_alert_critical | M4 Step3_Push_Alert：將 committed HIGH escalation 的去敏摘要與需驗證身分的客服處理入口通知已設定的管理員個人對象 | Customer Service escalation；runtime alert target owner只提供 current recipient target；LINE負責delivery | 不顯示完整姓名、電話或 raw 摘要；不代表通知對象已設定、task 已送達或案件已被 claim |
+| flex_negotiation | 人工條件協調詢問：月嫂提出調整條件後，由人員查看原文並自行輸入文案詢問客戶，客戶提供新條件後由工會審核 | Scheduling Candidate Contact Response／staff-authored question／customer answer／adjustment review | 不自動套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
 
-2026-09-10 人工裁決，`flex_dispatch` 的候選回應契約固定如下：
+`flex_dispatch` 的候選回應契約如下：
 
-1. LIFF 固定提供服務地區、服務日期／檔期、每日服務時段、每日服務時數、下廚需求、交通／停車／樓層、個人因素，以及互斥的「沒有意願」八項。前七項可複選，且每項須標示為「確認資訊」或「調整條件」並提供結構化說明；第八項不要求自由文字。
-2. 「確認資訊」不是拒絕；AI 可直接使用已知 owner facts 回覆月嫂，資訊不足時直接向客戶詢問，不需工會人員先行核准。客戶回答後，月嫂須依最新資訊重新表達意願。
-3. 「調整條件」只代表條件修改後可重新詢問，不代表月嫂已承諾承接。只在候選池全員完成或逾期且仍無人願意承接時，AI 才彙整去重後一次詢問客戶；任一月嫂先表示願意時，不再發送尚未送出的其他問題或調整要求。
-4. 每次要求月嫂作出選擇的 LINE 訊息，以 provider 成功送達時間起算 24 小時；期限內未回覆記為獨立的「逾期未回」，算本輪完成但不得改寫成「沒有意願」。所有人提早完成時立即判斷，不等待滿 24 小時。
-5. AI 可直接發送確認與調整詢問，但不得直接修改 Orders／Assignments。客戶明確接受後仍由 owner workflow fresh-read／Preview／Apply；完成正式條件變更後，只重新詢問受該 criteria 影響的月嫂。
-6. 「初次搜尋沒有任何候選月嫂」與「已聯繫的非空候選池無人願意」是兩個不同狀態。前者不建立 LINE 通知或人工跟進項目，工會人員在媒合操作中直接看見搜尋結果為零；不得以空搜尋結果觸發客戶協商。
-7. 非空候選池全員已明確沒有意願或自 provider 成功送達後逾時，且無人願意、沒有尚待回答的確認資訊，並且沒有結構化調整條件，或客戶已對彙整條件回覆「可以調整／目前無法調整」時，Scheduling 衍生一筆工會人工跟進待辦。該待辦顯示於已驗證工會人員的 LIFF「媒合指派與重新媒合」，並透過唯一啟用的工會通知群組排入一次去敏 Flex 通知；內容只含案件編號、人數摘要與「待修改後重新詢問／客戶無法調整／無可協調條件」的高階原因，不含姓名、電話、地址、調整細節或拒絕自由文字。
-8. 人工跟進待辦以 current candidate-contact events 衍生，不另建競爭 root。每個 pool response round 只能排入一次群組通知；群組未設定、設定衝突或投遞失敗時，待辦仍須留在 LIFF 並顯示通知狀態。新增候選、工會完成正式條件修改後發出新的候選資訊、出現願意者、出現新一輪可協調條件，或案件離開洽談中時，該 current 待辦不再成立，尚未送出的群組通知必須取消。
-9. 同一 recipient-bound 聯繫在原 24 小時期限內，候選月嫂可更正自己的既有意願；每次更正均追加 immutable event，current projection 只採該候選人的最新結構化回覆。自己的既有 `willing` 不得把更正入口鎖死；但池內其他候選人已為 `willing`、案件或候選已失效、期限已過、recipient 不符時仍須拒絕且零寫入。
-10. 客戶對已彙整的調整條件回覆「目前無法調整」後，該批條件不再是可繼續協調的 current adjustment；不得再次推送同一批客戶協調卡，應由上述工會人工跟進與群組通知接手。回覆「可以調整」也不得要求不熟悉系統的客戶自行改單；系統建立「待工會修改後重新詢問」人工待辦並通知工會群組。工會待辦 LIFF 必須顯示該次客戶同意的結構化條件與受影響原候選人，並以兩個可恢復步驟完成：先呼叫 Orders Terms owner 的 fresh Query／Preview／Apply 且讀回正式收據，再預覽並向勾選的受影響月嫂發出新一輪候選資訊。後端只有查到晚於該次客戶同意、且 correlation 綁定相同 pool 的正式修改收據時才可開放重送；重送使用該客戶答覆事件與候選人組成穩定 idempotency identity。服務日期變更時，Scheduling 在重送交易內以 current Orders 起訖日 fresh-read、重驗該原候選完整可服務期間，更新候選聯繫期間及 coverage fingerprint 並追加前後日期事件後才排入新卡；任一步失敗整筆 rollback，不得沿用舊期間。新投遞建立新的 24 小時回覆窗口並解除舊待辦。若調整分類沒有可安全修改且可重新驗證的正式欄位（例如服務地區、交通／停車／樓層綜合項目或個人原因），LIFF 必須阻擋直接重送並轉由相應 owner／重新建立候選聯繫，不得代寫或把客戶同意誤報為已完成修改或月嫂願意承接。
+1. LIFF 固定提供服務地區、服務日期／檔期、每日服務時段、每日服務時數、下廚需求、交通／停車／樓層、個人因素，以及互斥的「沒有意願」八項。前七項可複選，且每項須標示為「確認資訊」或「調整條件」並提供結構化說明。「沒有意願」不要求理由，勾選時取消其他問題，按「送出回應」才保存；成功後僅在頁面顯示「已送出，謝謝您的回應。」，不另發聊天室訊息。人員端顯示「無意願」，備註顯示「沒有意願」，既有 `no_interest` 事件讀取時亦採此文字，不改寫歷史事件。不建立協調待辦或通知客戶，不影響其他月嫂回覆，也不自動取消或結束案件；推薦對象仍由人員決定。
+2. 「確認資訊」與「調整條件」均保存為工會人員待辦，不自動詢問客戶、不產生草稿、不建立群組通知。月嫂畫面顯示「已收到您的問題，待工會確認後回覆。」；月嫂填寫的分類及原文只供已驗證的工會人員查看。
+3. 工會 LIFF「月嫂確認與條件協調」呈現原文、已發出的詢問及客戶回答。文案欄預設空白，人員自行輸入後點「發送給客戶」才建立 durable task。確認資訊可由人員輸入文案後直接發送給月嫂；調整條件必須完成客戶新條件與工會審核流程。
+4. 調整條件的客戶表單顯示人員輸入的詢問文案，要求填寫「更新後的條件」，不再提供可以／無法調整的二選一。客戶回答只更新人員待辦，不自動轉交月嫂，也不直接改單。每次詢問及回答綁定同一收件人、案件、原月嫂調整事件與本輪 staff-authored event；舊連結不能回答新一輪，exact replay 不重複建立事件或投遞任務。
+5. 人員審核新條件：不通過時回到空白詢問文案，修改後再次詢問客戶，可反覆協調；通過時只需「審核通過並更新案件條件」，沒有「是否需要修改」分支。系統在同一 outer UoW fresh-lock 本輪回答與案件版本，透過 Orders Terms 的 fresh Preview／apply_in_current_uow 更新正式 DB 條件，並追加綁定 exact answer、resulting order version 與審核值的協調審核事件；任一步失敗全部 rollback。普通 Terms 保存仍不偽造 Orders 永久 receipt。
+6. 審核面板使用現有 Orders Terms 欄位：預計開始日、服務天數、每日時數、下廚需求、樓層費與完整每日時段。月嫂原分類是協調來源，不得直接變成 DB 欄位或由自由文字猜測寫入。工會人員須先把客戶新條件核對到正式欄位後才審核通過；其他 owner 的地區／地址等資料不可由此旁路改寫。
+7. 24 小時僅作工會內部回覆提醒，從成功送達起算，不關閉表單、不阻擋願意或其他回覆，不自動把未回覆者改寫成沒有意願，也不以時間到期觸發客戶協商。等待人員或客戶處理時留在待辦；不發月嫂逾時提示。初次搜尋零候選不建立協商或回覆提醒。「候選池為空／候選池協調建議」固定通知已退役：移除預覽項目、有效規則、模板與 bootstrap，不以停用或隱藏代替；設定 writer 拒絕重新加入，舊通知 producer／consumer 與待送工作亦不得恢復發送。保留歷史事件、receipt、稽核與查詢。
+8. 可同時詢問多位月嫂；本人或其他候選的既有 willing 均不阻擋回覆或更正。最新結構化意願由 append-only event 投影，人員決定推薦誰給客戶確認，願意不代表獲選、媒合成功或正式指派。願意按鈕只回覆「已收到您願意承接的回覆，後續由工會安排媒合。」；案件／候選失效、原詢問期間已變更或 recipient 不符仍拒絕業務寫入，不發額外原因提示。
+9. 工會人員已通過 LINE current binding、enabled Admin 及 matching capability 驗證即可協調、審核與改單，不限 system_admin；一般未綁定使用者不得使用人員入口。人員待辦是唯一提醒介面，不建立新的協調群組通知；既有未送出的自動調整／群組通知由 worker 取消，已送達歷史不改寫。
+10. 審核通過並讀回新案件版本後，人員選擇目前有效的候選月嫂重新詢問。重送綁定同一 customer-answer 與 candidate 的冪等 identity，並檢查審核後案件版本未漂移。服務日期改變時，由既有 Scheduling writer 使用 current Orders 起訖日 fresh-read、重驗 availability、更新 contact period／coverage 並保留前後日期事件，不能沿用舊期間；重送不等於月嫂願意或正式指派。
+
+客戶推薦由人員選定願意承接者並主動寄送確認資訊。專人協助回覆「已收到您的聯絡需求，請留下您的疑問。」，人員從待辦查看與回覆，原卡片仍可接受配對；接受時回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，待辦改為辦理簽約，雙方完成簽約後才由人員建立本案服務群組。成功送達滿 7 天未接受僅作內部提醒，不阻擋回覆、不發群組通知。本人、current binding 與有效方案驗證不省略，取消、更換或最終決定的方案不能重用；履歷下載仍沿原短效憑證規則。
 
 工作室可持有 closed asset identity、design revision、去敏固定文案與 owner-fact availability
 狀態，並在 owner facts 缺失時顯示明確 blocker。它不是 Flex 素材資料庫、provider payload API
@@ -375,6 +376,35 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
 
 設定更新只影響之後新組裝的通知；已提交的 intent／outbox／delivery payload 沿用 immutable snapshot，不能在 retry 時套用新文案或因儲存而重新送出。規則欄位收在次要發送設定，仍沿用既有 Preview／Confirm／Apply、取消待發工作的 owner 及效果上限；流程管理通知不得把 shadow rule 的停用狀態冒充實際流程關閉。
 
+服務群組由工會人員在群內輸入 `綁定訂單 案件編號 邀請網址`，三段以空白、全形空白或換行分隔；網址自身不可拆行。設定只保存，不寄邀請。之後同群只輸入 `發送邀請`，以保存網址及目前核銷／身分資格排入私人邀請，無再次確認。更新網址重輸完整設定指令，保留成員歷史。格式錯誤回覆原因與正確範例，不保存或寄送；發送前資格或網址有變則取消舊工作。完整文案與錯誤提示依規格 17「服務群組設定與邀請指令」。
+
+### 6.7 訂金繳費提醒與核銷成功通知
+
+訂金正式核銷後，尚未綁定服務群組的正常未結案案件另列在工會 LINE 工作台「尚未建群」；
+只提供建群說明及複製群內綁定指令，規則與零副作用契約見規格 17 的 Order group observation workspace。
+此待辦不要求客戶已簽約；已付訂金不代表客戶已簽約，也不自動建立正式排班。
+
+- 訂金分類只提供「已銷帳／未銷帳」兩種狀態篩選，預設未銷帳；依既有正式核銷投影判定，不從寄送狀態推算銷帳。篩選與分頁不改變該分類的全部待處理總數。已銷帳通知完成後依既有通知條件移出，不補列歷史核銷；同案其他尚未完成工作仍各自保留。
+- 人員待辦「訂金繳費與核銷通知」只讀既有訂金應收。已綁定 LINE 且金額、期限、
+  虛擬帳號與銀行代碼完整時，人員點「發送訂金繳費提醒」即建立 committed delivery task。
+  使用 current enabled Admin binding 與 `line.task.read`／`line.task.send`，不要求第二次確認。
+- 提醒文案：`案件〈{case_no}〉訂金 NT${amount}，請於{due_date}前完成匯款。`
+  「查看繳費資訊」開啟客戶 LIFF；「專人協助」直接建立或接續 Customer Service 需求，
+  回覆 `已收到您的聯絡需求，請留下您的疑問。`，後續聊天室留言加入同一客服案件，不發群組通知。
+- 正式訂金核銷提交帶 `line_deposit_notification=true` 的既有財務 outbox 事件後，worker 自動建立成功通知：
+  `案件〈{case_no}〉訂金 NT${amount}已確認入帳，謝謝您。`；「查看繳費狀態」開啟同案 LIFF，
+  顯示已入帳金額及銀行實際入帳日期。同一 settlement identity 僅建立一個工作；不補發歷史核銷。
+- 客戶頁 `/line-deposit-payment` 由 gateway `target=deposit_payment&case_no=...` 進入；
+  Query 只接受 server-verified LINE ID token，並核對客戶主檔與 current customer binding。
+  不信任 URL 案號或 userId 作身分。未入帳時顯示金額、期限、銀行代碼及本案帳號，提供複製帳號；
+  已入帳只顯示狀態、金額與入帳日，不再引導匯款。
+- 案號不符合既有虛擬帳號規則且無唯一匯入帳號時，不生成替代帳號；資料未齊保留「繳費資料待確認」
+  待辦且禁止寄提醒。銀行代碼由明確部署設定 `CLIENT_DEPOSIT_BANK_CODE` 提供（三碼）；未設定不猜銀行。
+  既有實際匯入帳號仍依 Client Finance 規則優先，LINE 不另行推算。
+- 未綁定客戶保留人員人工通知待辦，不假造寄送成功；worker 後續依同一核銷事件重查綁定。
+  寄送前 fresh-read 財務來源及收件者綁定；已入帳的催繳、條件已更新、已取消或失效綁定的工作取消。
+  未實際 provider 成功前只顯示已排入／處理中，不能標為已送達。
+
 ## 7. 第一版驗收
 
 1. 服務說明回覆六分類且 exact replay 不重複建立 task。
@@ -387,7 +417,7 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
 
 ## 2026-08-21 M2／M4 routing and escalation amendment
 
-- explicit human／wrong 優先於所有自動路由。含 `human`／`wrong` marker 的 inbound 不得進 identity alias、AI、Knowledge 或 Service Help 自動回答；只有不含 marker 且 exact match protected identity alias 才可進 identity。
+- 明確呼叫專員優先於自助路由，直接受理而不再確認；一般提及客服、錯誤或無法解決不自動開單。聊天室不啟動 AI／Knowledge 問答，既有 exact protected identity alias 仍由身分流程處理。
 - production full AI 現在不核准；Phase 1 僅允許 deterministic harness、source-cited typed outcome 與 durable manual fallback，Phase 2 維持 proposed。active automation hold 時連 deterministic auto-reply 也禁止。
 - Customer Service 是 HIGH escalation／ticket／hold／人工處理的 owner；Anomaly 僅提供 source projection。escalation 透過 typed `TicketReferral`／escalation port，不競寫 M2 `service_help` 或 M4 `runtime_alert_application`；Scheduling 不在 escalation transaction。
 - production composition必須注入automation hold／escalation gateway；active hold會在任何deterministic reply、ticket或
@@ -412,3 +442,9 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
   回讀 exact environment、target、recipient、quota 與 worker isolation，只送最小受控案例並保存 provider receipt。
 - 這項授權不允許猜測 production recipient、`union_db`、部署 target 或 entry switch，也不取消各 owner 的
   Preview／Apply、fresh-lock、idempotency、receipt、readback、rollback 與 manual fallback。
+
+
+### 現行流程訊息的唯讀公版預覽補充
+
+「通知與發送」除可維護模板外，列入現行固定流程產生的訂金繳費提醒／入帳卡及協助受理、服務群組設定與私人邀請卡及格式／資格錯誤、月嫂願意承接受理與客戶推薦回覆、請假決策與失效／不可更改回覆、服務進度／登記與身分入口，以及管理員系統健康告警。一般無意願與客戶條件回答只有 LIFF 頁面結果，不虛構聊天室通知。
+預覽共用實際流程的純文案／卡片組裝函式；所有動態值明列為公版欄位，不查真實資格、不簽發憑證、不建立任務或發送。資料庫中的有效規則／模板移除與歷史紀錄保存分開驗證。

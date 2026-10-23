@@ -11,6 +11,10 @@
 
 ## Implementation
 - primary:
+  - `db/schema_parts/1053_line_order_group_invitation_url.sql` — nullable 私有群組網址，無資料回填。
+  - `db/migration_releases/labor_union_2026_10_22_line_order_group_invitation_url_v1.json`
+  - `db/migration_releases/labor_union_2026_10_22_line_order_group_invitation_url_v1.descriptors.json`
+  - `validation/receipts/PROV-L07-GROUP-INVITATION-local-additive-qualification-20261022.json` — synthetic MySQL fresh／preserve qualification；既有綁定與成員歷史保留，網址保持 NULL，無 provider effect。
   - `db/schema_parts/1052_nas_registration_approval.sql` — additive 申請快照、版本及核准欄位；不回填既有客戶／表單。
   - `db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.json`
   - `db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.descriptors.json`
@@ -135,6 +139,7 @@
   replacement boundary — `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
 
 ## Verification
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_line_group_invitation_url_schema.py` — additive 私有網址欄位、release／fresh／descriptor 一致與 drift 拒絕。
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_nas_registration_approval_schema.py` — canonical registry、四欄 descriptor、absent／exact／partial／drift。
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_candidate_weekly_information_schema.py` — exact predecessor／successor、順序／型別／nullability drift 與限定的 additive SQL effect。
 - layout_status: `custom_current`

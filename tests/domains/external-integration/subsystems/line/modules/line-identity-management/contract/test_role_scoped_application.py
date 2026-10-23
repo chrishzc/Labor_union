@@ -606,3 +606,31 @@ def test_manual_menu_repair_failure_keeps_authorization_revoked_and_records_erro
     assert management.request.status is LineIdentityRevocationStatus.MANUAL_COMPLETED
     assert unit_of_work.outbox.items[0].retryable is False
     assert unit_of_work.commits == 1
+
+
+@pytest.mark.parametrize("command,role", [("切換客戶", LineBindingSubjectType.CUSTOMER), ("切換月嫂", LineBindingSubjectType.STAFF)])
+def test_verified_menu_command_selects_dual_role_once_without_own_commit(command, role):
+    from subsystems.line.menu_command_application import LineMenuCommandApplication
+    user = LineUserId("U-dual-command")
+    uow = _UnitOfWork(_Identities(user))
+    inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value="role-command-event")))
+    application = LineMenuCommandApplication()
+    assert application.handle(inbox, uow, user, command)
+    assert uow.identities.selected is role
+    assert len(uow.outbox.items) == 1
+    assert application.handle(inbox, uow, user, command)
+    assert len(uow.outbox.items) == 1
+    assert uow.commits == 0
+    other_command = "切換月嫂" if role is LineBindingSubjectType.CUSTOMER else "切換客戶"
+    with pytest.raises(RuntimeError, match="idempotency_conflict"):
+        application.handle(inbox, uow, user, other_command)
+
+
+def test_group_message_cannot_select_an_identity_role():
+    from subsystems.line.menu_command_application import LineMenuCommandApplication
+    user = LineUserId("U-dual-command")
+    uow = _UnitOfWork(_Identities(user))
+    inbox = SimpleNamespace(event=SimpleNamespace(source=SimpleNamespace(source_type=SimpleNamespace(value="group"))))
+    assert not LineMenuCommandApplication().handle(inbox, uow, user, "切換客戶")
+    assert uow.identities.selected is None
+    assert uow.outbox.items == []

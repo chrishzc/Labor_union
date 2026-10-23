@@ -43,6 +43,8 @@ from domains.line.identity_flow import (
     LineIdentityFlowSnapshot,
 )
 from domains.line.media import LineMediaMetadata
+from subsystems.client_finance.deposit_payment_query import DepositPaymentQueryPort
+from subsystems.line.deposit_notifications import DepositNotificationPort
 from domains.line.media_asset import RichMenuMediaAsset
 from domains.line.order_group import LineOrderGroupBindingSnapshot
 from domains.line.review import LineReviewDecisionCandidate, LineReviewSnapshot
@@ -115,6 +117,8 @@ from subsystems.line.outbox_contracts import (
 )
 from subsystems.line.feedback_contracts import LineFeedbackRepository
 from subsystems.line.order_group_contracts import (
+    PaidOrderGroupTodoPage,
+    LineOrderGroupInvitationSettings,
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
     LineOrderGroupEventPage,
@@ -798,6 +802,12 @@ class LineRichMenuMediaAssetQueryRepositoryPort(Protocol):
 
 
 class LineOrderGroupBindingRepositoryPort(Protocol):
+    def get_invitation(self, case_no: str, *, lock: bool = False) -> LineOrderGroupInvitationSettings | None: ...
+
+    def save_invitation_url(self, binding: LineOrderGroupBindingSnapshot, invitation_url: str) -> None: ...
+
+    def paid_uncreated_todos(self, *, page: int, page_size: int) -> PaidOrderGroupTodoPage: ...
+
     def workspace_list(
         self, *, search: str | None, status: str | None, page: int, page_size: int
     ) -> LineOrderGroupWorkspacePage: ...
@@ -994,6 +1004,8 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     staff: StaffIdentityOwnerPort
     admins: AdminIdentityOwnerPort
     delivery_tasks: LineDeliveryTaskRepositoryPort
+    deposit_payments: DepositPaymentQueryPort
+    deposit_notifications: DepositNotificationPort
     notification_rules: LineNotificationRuleRepositoryPort
     anomaly_rechecks: LineAnomalyRecheckPort
     configurations: LineConfigurationRepositoryPort

@@ -76,6 +76,7 @@ def _safe_link_receipt(receipt):
 
 def _safe_link_error(error: SafeReviewLinkError) -> HTTPException:
     mapping = {
+        "line_alert_group_retired": (410, "conflict", "line_alert_group_retired"),
         "safe_review_link_not_found": (404, "not_found", "safe_review_link_not_found"),
         "safe_review_link_wrong_actor": (403, "forbidden", "safe_review_link_wrong_actor"),
         "safe_review_link_expired": (410, "conflict", "safe_review_link_expired"),

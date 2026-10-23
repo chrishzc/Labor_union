@@ -199,7 +199,9 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
 
 
 def _additional_workers(worker_identity: str, now, images, provider) -> dict[str, object]:
+    from api.dependencies.line_deposit import get_deposit_notifications
     return {
+        "deposit_settlement_notifications": get_deposit_notifications(),
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
         "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),
         "order_pre_start_notification_sources": MySqlOrderPreStartNotificationSourceWorker(get_connection, now),

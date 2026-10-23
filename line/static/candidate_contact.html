@@ -199,9 +199,9 @@
         interaction_reference: reference
       });
       document.getElementById("caseLine").textContent = `案件編號：${result.data.case_no}・月嫂：${result.data.staff_name}`;
-      if (result.data.status !== "open") throw new Error("這次回應已完成或已超過 24 小時期限。");
+      if (result.data.status !== "open") throw new Error("本次案件已停止收集回覆。");
       document.getElementById("responseForm").hidden = false;
-      showStatus(`請於 ${new Date(result.data.deadline_at).toLocaleString("zh-TW")} 前送出。`, false);
+      showStatus("請確認後送出回覆。", false);
     } catch (error) { showStatus(error.message || "目前無法開啟表單。", true); }
   }
 
@@ -228,8 +228,8 @@
       });
       document.getElementById("responseForm").hidden = true;
       document.getElementById("success").hidden = false;
-      document.getElementById("success").textContent = result.data.customer_message_queued
-        ? "已送出。需要確認的資訊會由助理直接詢問客戶。"
+      document.getElementById("success").textContent = result.data.union_followup_required
+        ? "已收到您的問題，待工會確認後回覆。"
         : "已送出，謝謝您的回應。";
       document.getElementById("success").focus();
     } catch (error) { showStatus(error.message || "回應未送出，請稍後再試。", true); button.disabled = false; }

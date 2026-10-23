@@ -297,10 +297,10 @@ def test_complaint_claimed_inbox_reaches_high_masked_escalation_in_one_business_
     )
     empathy = json.loads(delivery.payload_json)["text"]
     assert "很抱歉讓您有不好的感受" in empathy
-    assert "AI 自動回答目前暫停" in empathy
+    assert "AI" not in empathy
 
 
-def test_handoff_confirmation_postback_reaches_ticket_hold_and_resume_notice():
+def test_call_postback_reaches_ticket_hold_and_short_acknowledgement():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     state = _State(_handoff_postback_event(now))
     unit_of_work_factory = _UnitOfWorkFactory(state)
@@ -323,6 +323,5 @@ def test_handoff_confirmation_postback_reaches_ticket_hold_and_resume_notice():
     assert len(state.customer_service.messages) == 1
     assert len(state.escalations.commands) == 1
     payload = json.loads(state.delivery_tasks.requests[0].payload_json)
-    assert "AI 自動回答目前暫停" in payload["text"]
-    assert "請直接在此對話中留言" in payload["text"]
+    assert payload["text"] == "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。"
     assert "quickReply" not in payload

@@ -1,4 +1,4 @@
-"""Pure order-group binding and transient invitation relay rules."""
+"""Pure order-group binding, invitation URL and relay rules."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ class LineGroupInvitationRelay:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", _CASE_NUMBER_MAXIMUM_LENGTH)
-        _validate_invitation_url(self.invitation_url)
+        validate_invitation_url(self.invitation_url)
         _validate_recipients(self.recipients)
 
     @property
@@ -138,7 +138,7 @@ def _validate_binding_candidate(
         raise LineOrderGroupBindingConflict("LINE group is already bound to this order")
 
 
-def _validate_invitation_url(invitation_url: str) -> None:
+def validate_invitation_url(invitation_url: str) -> None:
     require_canonical_text(
         invitation_url,
         "LINE group invitation URL",
@@ -147,6 +147,8 @@ def _validate_invitation_url(invitation_url: str) -> None:
     parsed = urlparse(invitation_url)
     if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_INVITATION_HOSTS:
         raise ValueError("LINE group invitation URL must use the approved LINE host")
+    if parsed.netloc != "line.me" or any(char.isspace() for char in invitation_url):
+        raise ValueError("LINE group invitation URL must be a complete clean URL")
     if not re.fullmatch(r"/(?:R/)?ti/g/[^/?#]+", parsed.path):
         raise ValueError("LINE group invitation URL path is invalid")
     if parsed.params or parsed.query or parsed.fragment:
@@ -174,4 +176,5 @@ __all__ = [
     "LineOrderGroupBindingSnapshot",
     "LineOrderGroupBindingStatus",
     "build_order_group_binding_candidate",
+    "validate_invitation_url",
 ]

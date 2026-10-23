@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-10-19-v46
+-- Release: labor-union-validation-schema-2026-10-22-v47
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21798,3 +21798,10 @@ ALTER TABLE provisional_client_registrations
     ADD COLUMN approved_by_actor VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
     ADD COLUMN approved_at_utc DATETIME(6) NULL;
 -- END SOURCE: db/schema_parts/1052_nas_registration_approval.sql
+
+-- BEGIN SOURCE: db/schema_parts/1053_line_order_group_invitation_url.sql
+-- Persist only the current manually supplied service-group invitation URL.
+-- Existing bindings remain NULL; no group, participant or financial backfill.
+ALTER TABLE line_order_group_bindings
+    ADD COLUMN invitation_url VARCHAR(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL;
+-- END SOURCE: db/schema_parts/1053_line_order_group_invitation_url.sql

@@ -61,18 +61,20 @@ def test_candidate_liffs_never_render_structured_api_errors_as_objects():
         assert 'typeof item?.msg === "string"' in page
 
 
-def test_candidate_liff_customer_binding_failure_has_actionable_message():
+def test_candidate_liff_information_receipt_waits_for_union_handling():
     route = (ROOT / "api" / "routes" / "line_candidate_contact.py").read_text(encoding="utf-8")
 
-    assert 'code == "candidate_contact_customer_unavailable"' in route
-    assert "此案件客戶尚未綁定 LINE" in route
+    assert "已收到您的問題，待工會確認後回覆。" in route
+    assert "助理直接聯絡客戶" not in route
 
 
 def test_customer_adjustment_is_handed_to_union_instead_of_redirecting_customer():
     page = (ROOT / "line" / "static" / "candidate_contact_customer.html").read_text(encoding="utf-8")
     route = (ROOT / "api" / "routes" / "line_candidate_contact.py").read_text(encoding="utf-8")
 
-    assert "可以，請工會協助修改" in page
-    assert "已通知工會人員。工會完成正式資料修改後，會重新詢問月嫂。" in page
+    assert "更新後的條件" in page
+    assert "已收到您更新後的條件，待工會審核。" in page
+    assert 'decisionField' not in page
+    assert 'decision:' not in page
     assert "前往修改訂單" not in page
-    assert "已記錄是否可調整，並交由工會人員接續處理。" in route
+    assert "已收到您的回答，待工會人員審核處理。" in route

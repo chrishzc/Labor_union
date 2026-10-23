@@ -343,7 +343,7 @@ class MySqlCustomerServiceEscalationRepository:
             "SELECT t.id,t.target_type,t.group_id,t.minimum_status,t.updated_at_utc,"
             "a.linked_line_user_id FROM line_alert_notification_targets t "
             "LEFT JOIN admin_users a ON a.id=t.admin_user_id "
-            "WHERE t.enabled=TRUE ORDER BY (t.target_type='group') DESC,t.id LIMIT 2"
+            "WHERE t.enabled=TRUE AND t.target_type='admin_user' ORDER BY t.id LIMIT 2"
         )
         with self._connection.cursor() as cursor:
             if not hasattr(cursor, "fetchall"):
@@ -351,25 +351,16 @@ class MySqlCustomerServiceEscalationRepository:
             cursor.execute(sql)
             fetchall = getattr(cursor, "fetchall", None)
             rows = tuple(fetchall() or ()) if callable(fetchall) else ()
-        # Groups sort first, so two rows are enough to detect a singleton
-        # violation. An additional admin target must not hide a valid group.
-        groups = tuple(row for row in rows if row["target_type"] == "group")
-        if groups:
-            if len(groups) != 1:
-                return None
-            row = groups[0]
-        elif len(rows) == 1:
-            row = rows[0]
-        else:
+        if len(rows) != 1 or rows[0]["target_type"] != "admin_user":
             return None
-        target_type = str(row["target_type"])
-        identity = row.get("group_id") if target_type == "group" else row.get("linked_line_user_id")
+        row = rows[0]
+        identity = row.get("linked_line_user_id")
         if not identity:
             return None
         updated = row.get("updated_at_utc")
         return {
             "target_id": int(row["id"]),
-            "recipient_type": "group" if target_type == "group" else "user",
+            "recipient_type": "user",
             "recipient_identity": str(identity),
             "active": True,
             "configuration": {

@@ -322,7 +322,7 @@ def test_admin_resolve_enqueues_ai_restored_notice_in_the_same_uow():
     assert resolve_uow.committed is True
     assert len(resolve_uow.delivery_tasks.requests) == 1
     payload = json.loads(resolve_uow.delivery_tasks.requests[0].payload_json)
-    assert payload["text"] == "客服案件已完成，AI 助理已恢復，您可以繼續提問。"
+    assert payload["text"] == "您的客服案件已處理完成。如仍有問題，請再次呼叫專員。"
 
 
 @pytest.mark.parametrize(

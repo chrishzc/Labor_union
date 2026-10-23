@@ -292,7 +292,7 @@ def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:
     assert unit_of_work.matching_notifications.projection_arguments[0] == 31
 
 
-def test_record_line_response_accepted_enqueues_match_success_group_notification() -> None:
+def test_record_line_response_accepted_only_acknowledges_customer_without_group_notification() -> None:
     state = _state()
     unit_of_work = _UnitOfWork(
         state,
@@ -324,11 +324,8 @@ def test_record_line_response_accepted_enqueues_match_success_group_notification
     )
 
     assert result.customer_decision is CustomerMatchingDecision.ACCEPTED
-    assert len(unit_of_work.delivery_tasks.requests) == 2
-    customer_confirmation, group_notification = unit_of_work.delivery_tasks.requests
+    assert len(unit_of_work.delivery_tasks.requests) == 1
+    customer_confirmation = unit_of_work.delivery_tasks.requests[0]
     assert customer_confirmation.recipient.identity.value == "U-customer"
     assert customer_confirmation.message_kind == LineMessageKind.TEXT
-    assert group_notification.recipient.recipient_type == LineRecipientType.GROUP
-    assert group_notification.recipient.identity.value == "C-group-target"
-    assert group_notification.message_kind == LineMessageKind.FLEX
-    assert "案件媒合成功通知" in group_notification.payload_json
+    assert json.loads(customer_confirmation.payload_json)["text"] == "已收到您接受配對的回覆，後續由工會安排簽約。"

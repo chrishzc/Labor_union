@@ -11,6 +11,7 @@
 - primary:
   - `subsystems/line/worker_runtime.py`
   - `subsystems/line/runtime_monitoring_application.py`
+  - `subsystems/line/runtime_alert_application.py` — heartbeat／health observation 持久化與 RuntimeLineAlertProjector；2026-10-22 群組告警退役後跳過所有 group target，個人通知沿既有 committed delivery。
 - persistence adapter: `infrastructure/mysql/runtime_monitor_repository.py`
 - 告警候選查詢只使用既有 target／event／delivery 資料表，分類依固定 target type 規則；不依賴個別偏好表，不吞掉必要資料表的權限／缺表錯誤。
 

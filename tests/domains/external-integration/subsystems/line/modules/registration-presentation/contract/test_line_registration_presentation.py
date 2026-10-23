@@ -12,6 +12,63 @@ ROOT = next(
 )
 
 
+def test_runtime_copy_describes_review_instead_of_promising_matching():
+    source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
+    runtime_function = "function applyRuntime(runtime)" + source.split("function applyRuntime(runtime)", 1)[1].split("function applySystemField", 1)[0]
+    settings = json.loads((ROOT / "config/liff_settings.json").read_text(encoding="utf-8"))
+    runtime = {"theme": settings["theme"], "page": settings["pages"]["registration"]}
+    script = r"""
+const nodes = new Map();
+function element(id) {if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id);}
+const document = {documentElement: {style: {setProperty(){}}}, body: {style: {}}, getElementById: element, querySelector: element};
+function applySystemField() {}
+function renderCustomFields() {}
+""" + runtime_function + "\napplyRuntime(" + json.dumps(runtime, ensure_ascii=False) + ");\nconsole.log(JSON.stringify(element('.subtitle').textContent));"
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
+    assert json.loads(result.stdout) == "請填寫服務需求，送出後由工會審核。"
+    assert "即刻啟動媒合" not in source
+    assert "【市府案件已建立】" not in source
+    assert "預填案件編號：${caseNo}（待工會核對）" in source
+
+
+def test_success_readback_requires_a_real_receipt_and_keeps_existing_registration_outcomes():
+    source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
+    renderer = "function renderRegistrationSuccess(receipt)" + source.split(
+        "function renderRegistrationSuccess(receipt)", 1
+    )[1].split("function requireRegistrationPreview", 1)[0]
+    script = r'''
+const assert = require('node:assert/strict');
+const nodes = new Map();
+const element = id => {if(!nodes.has(id))nodes.set(id,{style:{display:'block'},textContent:''});return nodes.get(id)};
+const document={getElementById:element,querySelector:element};
+''' + renderer + r'''
+const pending={registration_id:42,identity_status:'pending_approval',client_id:null,beclass_record_id:null};
+renderRegistrationSuccess(pending);
+assert.equal(element('.success-desc').textContent,'申請已送出，待工會核准。\n申請編號：42');
+assert.equal(element('.success-title').textContent,'申請已送出');
+assert.equal(element('successCard').style.display,'block');
+assert.equal(element('registerForm').style.display,'none');
+for(const status of ['bound','existing']){
+  renderRegistrationSuccess({...pending,identity_status:status,client_id:10,beclass_record_id:11});
+  assert.equal(element('.success-desc').textContent,'登記資料已提交。\n申請編號：42');
+  assert(!element('.success-desc').textContent.includes('待工會核准'));
+  assert(!element('.success-desc').textContent.includes('10'));
+}
+for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,registration_id:'42'},
+  {...pending,identity_status:null},{...pending,identity_status:'unrecognized'},
+  {...pending,client_id:10},{...pending,beclass_record_id:11}]){
+  element('successCard').style.display='none';element('registerForm').style.display='block';
+  assert.throws(()=>renderRegistrationSuccess(invalid),/讀回不完整/);
+  assert.equal(element('successCard').style.display,'none');
+  assert.equal(element('registerForm').style.display,'block');
+}
+console.log('registration receipt rendering passed');
+'''
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True,
+                            encoding="utf-8", timeout=10, check=True)
+    assert "registration receipt rendering passed" in result.stdout
+
+
 def test_default_service_registration_menu_uses_the_canonical_identity_entry() -> None:
     source = (ROOT / "config" / "line_menu.json").read_text(encoding="utf-8")
     identity = (ROOT / "line" / "static" / "identity.html").read_text(encoding="utf-8")

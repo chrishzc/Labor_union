@@ -19,6 +19,8 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptCommand,
 )
 from subsystems.line.ports import LineMessagingProviderPort, LineUnitOfWorkPort
+from subsystems.line.deposit_notifications import deposit_delivery_is_current
+from subsystems.line.order_group_application import group_invitation_delivery_is_current
 from subsystems.line.notification_failure_current_fact import (
     append_line_notification_failure_rechecks,
 )
@@ -159,19 +161,28 @@ class LineDeliveryWorker:
             return False
         with self._unit_of_work_factory() as unit_of_work:
             current = unit_of_work.delivery_tasks.get(task.task_id)
-        return (
-            current is not None
-            and current.status.value == "processing"
-            and current.lease is not None
-            and current.lease.owner == task.lease.owner
-            and current.lease.acquired_at == task.lease.acquired_at
-            and current.lease.expires_at == task.lease.expires_at
-            and self._now() < current.lease.expires_at
-        )
+            lease_valid = (
+                current is not None
+                and current.status.value == "processing"
+                and current.lease is not None
+                and current.lease.owner == task.lease.owner
+                and current.lease.acquired_at == task.lease.acquired_at
+                and current.lease.expires_at == task.lease.expires_at
+                and self._now() < current.lease.expires_at
+            )
+            return (lease_valid
+                    and deposit_delivery_is_current(unit_of_work, task, self._now())
+                    and group_invitation_delivery_is_current(unit_of_work, task))
 
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
+        if (task.request.source_aggregate_type == "matching_coordination_outbox"
+                and task.request.source_aggregate_identity.endswith(":zero-candidate:client-decision")):
+            return "matching_zero_pool_notification_retired"
+        if (task.request.recipient.recipient_type.value == "group"
+                and task.request.source_aggregate_type in {"runtime_health_event", "customer_service_escalation", "matching_plan_decision", "candidate_contact_adjustment", "candidate_contact_manual_followup", "candidate_contact_staff_review"}):
+            return "line_alert_group_retired"
         with self._unit_of_work_factory() as unit_of_work:
             notification_rules = getattr(unit_of_work, "notification_rules", None)
             validator = getattr(

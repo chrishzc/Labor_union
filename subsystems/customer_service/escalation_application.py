@@ -4,6 +4,8 @@ Description: M4 escalation create、claim、handling、resolve、hold 與 caller
 
 from __future__ import annotations
 
+from subsystems.line.message_copy import CONTACT_RESOLVED
+
 from datetime import datetime, timezone
 from dataclasses import fields, replace
 import hashlib
@@ -544,7 +546,7 @@ def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetim
         canonical_line_payload_json(
             {
                 "type": "text",
-                "text": "客服案件已完成，AI 助理已恢復，您可以繼續提問。",
+                "text": CONTACT_RESOLVED,
             }
         ),
         now,

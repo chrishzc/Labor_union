@@ -7,6 +7,7 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `deposit-notifications` — 訂金繳費提醒、正式核銷成功通知及本人繳費 LIFF；path: `modules/deposit-notifications.md`
 - `runtime-alert-target` — 告警對象既有 Query／Preview／Apply、固定分類與管理介面；path: `modules/runtime-alert-target.md`
 - `customer-service-reminders` — React 客服案件唯讀提醒、來源投影與未結案分頁；path: `modules/customer-service-reminders.md`
 - `worker-runtime-monitoring` — canonical worker cycle orchestration、success／failure heartbeat 與 runtime health classification；path: `modules/worker-runtime-monitoring.md`

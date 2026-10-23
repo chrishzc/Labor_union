@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-order-group-invitation-url-2026-10-22-v1",
+  "release_metadata": {
+    "release_name": "LINE service group saved invitation URL",
+    "application_version": "line-order-group-invitation-v1",
+    "published_at": "2026-10-22",
+    "description": "Save the current manually supplied URL for the group command; preserve all existing bindings and participant history without backfill"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-nas-registration-approval-2026-10-19-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1053_line_order_group_invitation_url.sql",
+      "relative_path": "db/schema_parts/1053_line_order_group_invitation_url.sql",
+      "sha256": "3520ed7ffe7dcec38b9f535f0623d4a81654ee972601081b497762443a03b7fe",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-additive-column-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "line-order-group-invitation-url-exact",
+      "phase": "post-schema",
+      "policy": "Exact nullable binary invitation URL column; existing bindings, membership, Orders and finance unchanged; no URL backfill",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "line-order-group-invitation-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "line-order-group-invitation-url-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_22_line_order_group_invitation_url_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_22_line_order_group_invitation_url_v1.descriptors.json",
+    "sha256": "423993246650e87a2986c2e2060f9f3849ff407e114f6928841704f72df510d1",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

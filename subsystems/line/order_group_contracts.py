@@ -5,7 +5,7 @@ Description: 定義 LINE 訂單群組綁定、邀請與唯讀 numbered query 的
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -16,6 +16,7 @@ from domains.line.order_group import (
     LineOrderGroupBindingCandidate,
     LineOrderGroupBindingSnapshot,
     LineOrderGroupBindingStatus,
+    validate_invitation_url,
 )
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -79,6 +80,18 @@ class LineOrderGroupQueryResult:
 
 
 @dataclass(frozen=True, slots=True)
+class LineOrderGroupInvitationSettings:
+    """Private command/worker data, excluded from the observation API."""
+
+    binding: LineOrderGroupBindingSnapshot
+    invitation_url: str | None = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.invitation_url is not None:
+            validate_invitation_url(self.invitation_url)
+
+
+@dataclass(frozen=True, slots=True)
 class OrderLineAudience:
     case_no: str
     customer_line_user_id: LineUserId
@@ -89,6 +102,21 @@ class OrderLineAudience:
         values = tuple(item.value for item in self.staff_line_user_ids)
         if values != tuple(sorted(set(values))):
             raise ValueError("order staff LINE user IDs must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True)
+class PaidOrderGroupTodo:
+    case_no: str
+    deposit_amount_ntd: int
+
+
+@dataclass(frozen=True, slots=True)
+class PaidOrderGroupTodoPage:
+    items: tuple[PaidOrderGroupTodo, ...]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +215,8 @@ class LineOrderGroupWorkspaceEventPage:
 
 
 __all__ = [
+    "PaidOrderGroupTodo",
+    "PaidOrderGroupTodoPage",
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
     "GetLineOrderGroupQuery",
@@ -196,6 +226,7 @@ __all__ = [
     "LineOrderGroupNumberedPage",
     "LineOrderGroupPage",
     "LineOrderGroupQueryResult",
+    "LineOrderGroupInvitationSettings",
     "LineOrderGroupParticipant",
     "LineOrderGroupWorkspaceEvent",
     "LineOrderGroupWorkspaceRecord",

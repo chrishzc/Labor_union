@@ -157,11 +157,11 @@ def test_masked_alert_uses_existing_global_outbox_and_updates_status():
 def test_masked_alert_captures_active_target_and_configuration_snapshot():
     target = _TargetCursor(({
         "id": 3,
-        "target_type": "group",
+        "target_type": "admin_user",
         "group_id": "Ctask96M4Alert0901",
         "minimum_status": "warning",
         "updated_at_utc": datetime(2026, 9, 1, tzinfo=timezone.utc),
-        "linked_line_user_id": None,
+        "linked_line_user_id": "U-admin-test",
     },))
     outbox, update = _Cursor(), _Cursor()
     intent = EscalationAlertIntent(
@@ -172,8 +172,8 @@ def test_masked_alert_captures_active_target_and_configuration_snapshot():
     payload = json.loads(outbox.calls[0][1][3])
     assert payload["target_snapshot"] == {
         "target_id": 3,
-        "recipient_type": "group",
-        "recipient_identity": "Ctask96M4Alert0901",
+        "recipient_type": "user",
+        "recipient_identity": "U-admin-test",
         "active": True,
         "configuration": {
             "minimum_status": "warning",

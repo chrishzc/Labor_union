@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer"><title>訂金繳費資訊</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;padding:24px 16px;background:#f5f6f8;color:#263445;font:16px/1.6 system-ui,sans-serif}
+    main{max-width:560px;margin:auto;padding:24px;background:white;border-radius:18px;border:1px solid #dde3eb}
+    h1{font-size:24px;margin:4px 0 20px}h2{font-size:19px;margin-top:24px}p{overflow-wrap:anywhere}
+    .brand{color:#627080;font-size:14px}dl{display:grid;grid-template-columns:100px minmax(0,1fr);gap:12px;margin:24px 0}
+    dt{color:#627080}dd{margin:0;overflow-wrap:anywhere;font-weight:600}button{font:inherit;min-height:48px;width:100%;border:0;border-radius:10px;padding:12px;background:#2867a2;color:white;cursor:pointer}
+    button:disabled{opacity:.5}button:focus-visible{outline:3px solid #8cbce7;outline-offset:3px}.error{color:#a52b2b}[hidden]{display:none!important}
+  </style>
+</head>
+<body><main>
+  <p class="brand">新竹市月子工會</p><h1>訂金繳費資訊</h1>
+  <p id="status" role="status" aria-live="polite">正在確認案件與身分…</p>
+  <section id="payment" hidden>
+    <dl><dt>案件編號</dt><dd id="caseNo"></dd><dt>訂金</dt><dd id="amount"></dd><dt>繳費狀態</dt><dd id="state"></dd></dl>
+    <section id="unpaid" hidden><dl><dt>繳費期限</dt><dd id="due"></dd><dt>銀行代碼</dt><dd id="bank"></dd><dt>虛擬帳號</dt><dd id="account"></dd></dl>
+      <button id="copy" type="button">複製帳號</button></section>
+    <section id="settled" hidden><dl><dt>入帳日期</dt><dd id="received"></dd></dl><p>訂金已確認入帳，謝謝您。</p></section>
+  </section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+let virtualAccount = "";
+function show(text, error=false) { const node=document.getElementById("status"); node.textContent=text; node.classList.toggle("error",error); }
+function put(id,text){document.getElementById(id).textContent=text;}
+async function initialize(){
+  const caseNo = new URLSearchParams(location.search).get("case_no") || "";
+  if(!/^[A-Za-z0-9_-]{1,50}$/.test(caseNo)){show("連結無效，請從 LINE 重新開啟。",true);return;}
+  try{
+    const configResponse=await fetch("/api/v1/line/identity/runtime-config",{cache:"no-store"});
+    const config=await configResponse.json();
+    if(!configResponse.ok || !config.data?.liff_id)throw new Error("目前無法開啟繳費資訊。");
+    await liff.init({liffId:config.data.liff_id});
+    if(!liff.isLoggedIn()){liff.login({redirectUri:location.href});return;}
+    const token=liff.getIDToken(); if(!token)throw new Error("請重新從 LINE 開啟此頁。");
+    const response=await fetch("/api/v1/line/deposit-payment/query",{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({case_no:caseNo,line_id_token:token})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.detail?.error?.message || result.error?.message || "目前無法取得繳費資料。");
+    const data=result.data;
+    if(data.case_no!==caseNo || !Number.isSafeInteger(data.amount_ntd) || data.amount_ntd<=0 || !["unpaid","settled"].includes(data.status))throw new Error("繳費資料不完整，請聯絡工會。");
+    put("caseNo",data.case_no);put("amount",`NT$${data.amount_ntd.toLocaleString("zh-TW")}`);put("state",data.status==="settled"?"已入帳":"尚未入帳");
+    document.getElementById("payment").hidden=false;
+    if(data.status==="settled"){
+      put("received",data.received_on || "待工會確認");document.getElementById("settled").hidden=false;show("已確認訂金入帳。");
+    }else if(data.due_date && /^[0-9]{3}$/.test(data.bank_code || "") && /^[0-9]{10,20}$/.test(data.virtual_account || "")){
+      put("due",data.due_date);put("bank",data.bank_code);put("account",data.virtual_account);virtualAccount=data.virtual_account;
+      document.getElementById("unpaid").hidden=false;show("請依下列資訊完成匯款。");
+    }else{show("繳費資料待工會確認，請先勿匯款。");}
+  }catch(error){show(error.message || "目前無法取得繳費資料。",true);}
+}
+document.getElementById("copy").addEventListener("click",async()=>{
+  if(!virtualAccount)return;
+  try{await navigator.clipboard.writeText(virtualAccount);show("已複製帳號。");}
+  catch{show("無法自動複製，請長按上方帳號複製。",true);}
+});
+initialize();
+</script></body></html>

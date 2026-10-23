@@ -26,7 +26,9 @@
 
 ## 3. 服務與問答入口、六類意圖及訂單修改分流
 
-「服務與問答」合併原「服務說明」與「常見問答」，是單一 guidance／dispatch entry，不是 unrestricted chatbot。舊文字「服務說明」、「常見問答」、「問答」與 `FAQ` 僅作同一入口的相容 alias，不得產生另一套卡片或語意。Current category 固定為：
+圖文選單左下的「AI 智慧問答」以 `?target=ai_assistant` 開啟同一整合頁 `/line-service-help?tab=ai`，可切換 AI 與常見問答；不再分占兩個選單格位。既有 `?target=faq` 仍開啟該頁的 FAQ 分頁。這是專用 LIFF 頁面，不啟動官方聊天室的自由文字 AI。
+
+聊天室的「服務與問答」合併原「服務說明」與「常見問答」，是單一 guidance／dispatch entry，不是 unrestricted chatbot。舊文字「服務說明」、「常見問答」、「問答」與 `FAQ` 僅作同一入口的相容 alias，不得產生另一套卡片或語意。Current category 固定為：
 
 1. `service_flow`／服務流程
 2. `fee_and_subsidy`／收費與補助
@@ -45,7 +47,7 @@
 - 聯絡工會人員：建立或延續 Customer Service ticket。
 - 其他問題：先查核准回答；無足夠來源、衝突或低信心時轉人工，不猜答案。
 
-未知輸入先重新顯示選項；同一 requester 的重複未知或明確「找真人／回答錯誤」可依 `20` 建立幂等人工 escalation。同一使用者＋同一 category 最多一張未完成 ticket；exact replay 回原 ticket。
+聊天室一般留言不啟動 AI 問答，也不因未知輸入或回答錯誤自動呼叫專員。使用者點選「聯絡專人服務」或明確要求人工協助後，才建立或沿用 Customer Service ticket；同一使用者＋同一 category 最多一張未完成 ticket，exact replay 回原 ticket。
 
 「修改訂單資訊」是獨立 verified LIFF 分流，包含服務地址（縣市、地址、居住型態與樓層／電梯說明）、下廚需求、服務日期／天數、每日服務時段及其他會影響訂單或月嫂接案意願的內容。LIFF 只顯示 current binding 所屬客戶仍有效的訂單；多筆時由客戶明確選擇，單筆可預選但不得由 query string 指定 target。
 
@@ -55,17 +57,25 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 
 ## 4. Gateway 與服務登記導流
 
-未綁定的一般使用者點選預設 Rich Menu「服務登記」時，進入 current LIFF gateway；目前 artifact entry 為 `gateway.html`，實際 publication 仍以 versioned LINE configuration 為準。Gateway 只作安全導流與身分檢查，不直接建立正式 Client／Order：
+未綁定的一般使用者點選預設 Rich Menu「客戶登記與綁定」時，進入 current LIFF gateway；目前 artifact entry 為 `gateway.html`，實際 publication 仍以 versioned LINE configuration 為準。Gateway 只作安全導流與身分檢查，不直接建立正式 Client／Order：
 
 - 選擇「未申請市府平台」：開啟新竹市政府月子照顧服務平台，提示先完成市府申請。
-- 選擇「已申請市府平台」：進入 `/line-registration` 的需求調查流程。
+- 選擇「已申請市府平台」：先進入 `/line-bind` 核對姓名與電話；已有完整登記且未綁定者由 canonical Apply 綁定、同帳號已綁定者直接返回、需改綁者明確申請；尚無資料或缺需求問卷者才進入 `/line-registration`。此核對不以市府申請狀態冒充工會核准。
 - Gateway／registration 頁不得因 query string、browser local state 或單次點擊即宣稱 binding、案件或申請成功。
 - 2026-10-19 人工裁決：Registration Preview 零寫入；外部 Apply 只保存完整需求申請及必要事件，回傳待工會核准，不建立 Client／BeClass 或宣稱已綁定正式客戶。工會核准才由 Case Import owning flow 建立正式客戶、來源資料及對應 LINE binding；核准具重複操作與競爭保護。既有已完成 registration／客戶／綁定保存。此段取代先前外部 Apply 可立即建立 intake Client 的規則，並依 `17` 的 NAS-LINE-01 驗收。
 - 後續 verify、provisional registration、binding 與人工 review 依 `17`、`23` 與 `26` 的 owner contract 執行；任何資料庫 mutation 都必須走 typed application boundary。
 
+客戶綁定頁明確分流「尚未綁定／已綁定同一帳號／需要改綁」。已綁定不重複提交；改綁只在按下「申請重新綁定」後送交工會，取消及核准前都保留原綁定。任何連續核對失敗均只提示修正，不自動呼叫真人。
+
+Gateway、綁定頁及管理預覽的有效設定須使用一致文案；綁定是客戶身分綁定，不宣稱已建立、綁定或查得最新訂單。網址所帶姓名、電話與案件編號僅作可修改預填，不是身分驗證，不得僅因帶有案件編號就鎖定姓名或電話。訊息模板保留正式識別碼與分類，不得為迎合舊管理 schema 改名或移除有效訊息。
+
+登記表單說明為「請填寫服務需求，送出後由工會審核。」；新申請成功顯示「申請已送出，待工會核准。」及申請編號，不宣稱媒合完成。綁定成功只說明「綁定成功，專屬選單將稍後更新。」；只有 owner 提供真實案件編號時才顯示，不填入固定範例號碼。
+
+月嫂入口顯示「月嫂身分綁定」，文字「我是月嫂」與「我要綁定月嫂」均導向同一驗證頁。
+
 ### 4.1 加好友引導：只保留即時歡迎（2026-09-16 使用者裁決）
 
-首次加好友與封鎖後重新加好友，對目前有效的新 `follow` 事件都只接續現有即時歡迎訊息及其中的身分／服務入口。歡迎沿用既有模板、identity flow、durable delivery 與結果回讀，不另建新好友引導流程。
+首次加好友與封鎖後重新加好友，對目前有效的新 `follow` 事件都只接續現有即時歡迎訊息及其中的身分／服務入口。歡迎沿用既有模板、identity flow、durable delivery 與結果回讀，不另建新好友引導流程。歡迎保留原有服務介紹，以【AI 智慧問答】引導至整合 AI／常見問答頁，並顯示「本帳號採自助服務，一般留言不會有專員回覆。如需協助，請點選【聯絡專人服務】或輸入『聯絡專人服務』，專員才會在聊天室回覆您。」。
 
 D+1、D+2、D+3 三日引導已取消，不是停用待啟用、deferred、blocked 或尚待實作的功能；不屬於現行需求、工作項目或驗收條件，也不得改名為其他 D+N 加好友排程重新加入。舊規格、計畫、流程圖、測試、bootstrap JSON、模板或通用排程程式的殘留，均不構成恢復三日引導的依據。此段直接取代它們對新好友延後推送的舊要求。
 
@@ -98,7 +108,7 @@ Production／production-like runtime 不得在服務啟動時自動 seed。具�
 
 路由順序固定為：
 
-1. 明確人工需求、錯誤回報或受保護安全詞；自然語句命中時先要求確認，確認前零 ticket／hold。
+1. 明確呼叫專員或要求人工協助時，直接進入客服；一般錯誤回報不自動轉人工。
 2. exact identity／security／command alias。
 3. group／target context。
 4. Service Help 六類 deterministic dispatch。
@@ -112,16 +122,16 @@ LLM 不得直接產生業務 final answer、不得寫 owner root、不得自選�
 
 選單 audience 正式區分為四套獨立版本：
 
-- `default_menu`（訪客初始選單，`audience_role: "visitor"`，`set_as_default: true`）：專供未綁定任何身分之訪客使用。具備快速上手功能：「客戶登記與綁定」、「月嫂身分綁定」、「服務與問答」、「專人客服諮詢」。
-- `customer_menu`（客戶專屬選單，`audience_role: "customer"`，`set_as_default: false`）：已完成客戶身分綁定專用。四格固定為左上「修改登記資料」、右上「修改訂單資訊」、左下「服務與問答」、右下「專人客服諮詢」（不含初始登記與月嫂綁定）；右上必須是 server-built LIFF URI，不是 message action。
+- `default_menu`（訪客初始選單，`audience_role: "visitor"`，`set_as_default: true`）：專供未綁定任何身分之訪客使用。具備快速上手功能：「客戶登記與綁定」、「月嫂身分綁定」、左下「AI 智慧問答」（整合常見問答）、右下「聯絡專人服務」。
+- `customer_menu`（客戶專屬選單，`audience_role: "customer"`，`set_as_default: false`）：已完成客戶身分綁定專用。四格固定為左上「修改登記資料」、右上「修改訂單資訊」、左下「AI 智慧問答」（整合常見問答）、右下「聯絡專人服務」（不含初始登記與月嫂綁定）；右上必須是 server-built LIFF URI，不是 message action。
 - `staff_menu`（月嫂專屬選單，`audience_role: "staff"`，`set_as_default: false`）：current role 為 staff 且 binding 有效（訂單查詢、排班資訊、請假代班申請、薪資請款明細）。
-- `union_staff_menu`（工會人員專屬選單，`audience_role: "union_staff"`，`set_as_default: false`）：已認證的工會內部使用者入口，四格為「待辦工作台」、「客服中心」、「狀態追蹤」、「營運摘要」；其業務權限仍由 Access owner 判定。LINE 異常仍由既有工會群組通知承接，不再占用 Rich Menu 格位。
+- `union_staff_menu`（工會人員專屬選單，`audience_role: "union_staff"`，`set_as_default: false`）：已認證的工會內部使用者入口，四格為「待辦工作台」、「客服中心」、「狀態追蹤」、「營運摘要」；其業務權限仍由 Access owner 判定。群組告警已取消；保留已設定的管理員個人通知，不占用 Rich Menu 格位。
 
 同一 LINE User 可同時具 customer 與 staff binding；雙角色必須依 `23` 明確選擇 current role，不得由訂單、排班、前一頁、provider 狀態或 local storage 猜測。選定 role 不再 active 時，menu readback 不得沿用 stale audience；解除身分綁定（revocation）後，自動回退並繼承全域預設之訪客選單（`default_menu`）。
 
-Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 作為 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。訪客選單至少提供「客戶登記與綁定」與「月嫂身分綁定」；客戶選單提供「修改登記資料」、「修改訂單資訊」與「服務與問答」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
+Current menu content 與 action 由 MySQL versioned LINE configuration 及 current publication 決定。`config/*.json` 作為 bootstrap source；本文件不硬編舊 menu ID、provider ID 或已退役 deep link。訪客選單至少提供「客戶登記與綁定」與「月嫂身分綁定」；客戶選單提供「修改登記資料」、「修改訂單資訊」、「AI 智慧問答」（整合常見問答）與「聯絡專人服務」；staff／union-staff menu 只可放置其 owner 已核准的 typed entry。
 
-`default_menu`／`customer_menu` 的「專人客服諮詢」必須使用 typed postback 表示明確轉接，不依顯示文字猜測 intent；既有已發布版本仍送出 exact「專人客服」訊息時，保留等價相容路徑直到下一次正式 publication。自然語句只回「轉接真人客服／繼續使用 AI」確認；確認後才建立 hold。provider publication 仍需獨立授權，不因本地 source 更新而自動發布。
+`default_menu`／`customer_menu` 右下的「聯絡專人服務」使用 `customer-service:handoff:confirm` typed postback，直接進入人工服務，不再詢問是否轉真人。輸入「聯絡專人服務」及既有「呼叫專員」「轉真人客服」「轉接真人客服」「專人客服」具有相同效果。選單只提供服務入口，點選自助功能不代表呼叫專員；provider publication 仍需獨立授權。
 
 管理端 LIFF 資產目錄沿用同一組正式 audience，不得以舊 `client | staff | admin` 三分法或檔名猜測角色：`gateway`／`register`／`bind` 屬 visitor；`profile_guard`／`profile_update`／`order_update` 屬 customer；`staff_order_search`／`staff_schedule`／`staff_baby_log`／`staff_payout` 屬 staff；`mobile_admin` 屬 union_staff。`identity` 是跨角色身分入口，可出現在四類目錄，但不因此授予任何角色或業務權限。
 
@@ -131,7 +141,11 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 - 「待辦工作台」彙整四組需要工會人員決定的工作入口：Client owner 的客戶資料異動審核、LINE Identity owner 的客戶／月嫂重綁與身分異常審核、Scheduling owner 的請假受理與代班／改期處理，以及 Matching／Scheduling owner 的媒合最終指派與重新媒合。每組清單、狀態、版本、Preview／Confirm／Apply、receipt 與 fresh readback 仍由原 owner 提供；mobile surface 只作 bounded presentation，不建立共用 approval root 或跨 owner writer。
 - 只有具 owner-backed pending Query 的項目可以顯示待辦筆數；既有 Scheduling Assignment Plan 在 pending Query 完成前只作獨立的「正式排班重建工具」，不計入待辦數量，也不得以案件總數、前端推算或假資料冒充 pending review。此工具只處理已具 current confirmed service dates、尚未開始服務，且需要建立或重建正式月嫂指派的案件；它不是 Orders Terms 修改後的下一步，也不處理服務中代班或完成訂單。案件選項由 Scheduling purpose-specific bounded Query 以 canonical Orders `洽談中／訂單成立` 狀態及 current confirmed service dates 組成，月嫂與日期來自 Scheduling 的 active Staff 與 confirmed service dates；調整原因維持必填自由文字。一般月嫂身分資料唯一吻合且尚未綁定時依 `23` 直接完成綁定，不建立人工待辦；工作台中的月嫂項目只代表 canonical review root 已存在的重綁／身分異常案件。
-- 客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback 與 QA／Knowledge 內容管理分別留在「客服中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。current LINE 異常由工會群組通知承接，不在 Rich Menu 另設清單入口。
+- 各分類須提供可遍歷全部待辦的分頁；總數由同一 owner 的完整列入條件取得，不得以當頁筆數或固定上限代替。身分審核查看已核准／已退回紀錄時仍獨立更新 pending 總數。完成操作後重新查詢清單與數量，末頁失效時回到仍有效頁，不在前端自行扣數。相同案件的不同工作保留各自身分與計數；正式排班重建工具須有獨立入口且不計入待辦。
+- 月嫂確認資訊與調整條件在待辦工作台列示，文案由人員自行輸入後發送，客戶回答只更新待辦。調整條件由客戶提供更新後的條件，人員可反覆協調，審核通過時系統直接更新正式案件條件，再由人員選擇月嫂重新詢問；工會人員通過 current binding／enabled Admin／matching capability 即可處理，不限系統管理員。24 小時只作內部回覆提醒，不阻擋月嫂回覆；上述協調不發群組通知。客戶訂單異動目前只建立 Customer Service 人工確認需求，仍留在「客服中心」；客訴／人工 fallback 與 QA／Knowledge 內容管理分別留在「客服中心」與 AI 事件工作室，不因待辦工作台彙整而重複列示或重複計數。current LINE 異常僅由已設定的管理員個人通知承接；群組告警已取消，不在 Rich Menu 另設清單入口。
+
+- 客戶推薦確認與簽約待辦由 Matching owner 提供聯絡客戶、辦理簽約與成功送達滿 7 天未接受的唯讀投影；協助後原卡片仍可接受配對，7 天不阻擋回覆。人員可從待辦開啟既有客服留言與回覆，接受後改列簽約，雙方簽約後才由人員建立服務群組；推薦流程不發群組通知，不新增待辦 root。
+- 推薦協助的客服案件結案後移出原聯絡待辦；未接受且成功送達滿 7 天時另依既有條件列為回覆提醒，不再顯示為尚未處理的聯絡需求。不改寫客戶決定、不限制原卡片接受配對。
 - 「客服中心」只呈現 Customer Service 的 waiting／handling／resolved 查詢、明細與既有回覆流程；不得因共用 LIFF asset 顯示不相干的審核頁籤。
 - 「狀態追蹤」第一版只讀呈現未完成訂單的案件編號、canonical lifecycle、十三核心階段目前位置、已完成階段數、最後更新時間及 owner-backed 下一步。可用案件編號搜尋、重新整理及分頁載入；不得在此修改訂單、媒合、排班、財務或客服 root。候選池已有月嫂回覆願意但尚未建立正式媒合方案時，下一步固定提示工會建立正式媒合方案並寄送月嫂履歷；「前往待辦工作台」只切換既有工作入口，不構成 mutation。
 - 「營運摘要」第一版以 Global Reporting 的 `operations-report.v3` 顯示 current business week（Asia/Taipei，星期一至 current business date）摘要與 `generated_at`。只顯示 owner query 已提供的案件申請、一般符合、補助符合、不符合待分流、已成立訂單與資料不完整數量，不宣稱即時監控，也不在 LIFF 寫入週報人工指標。
@@ -154,7 +168,7 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 requester 的新訊息可依 current policy reopen 或建立新的幂等 ticket；不得靜默遺失。Claim、handling、reply 與 resolve 必須保留 actor、version、reason、event 與 receipt。
 
-確認轉接後的首次回覆必須明示 AI 已暫停、後續訊息會加入同一 ticket，並提供「恢復 AI 助理」。active hold 期間不得自動回答；訊息須保存到同一 ticket。原 requester 可於 `open | claimed | handling` 主動恢復 AI；成功時以 `requester_resumed_ai` 結案並原子解除 hold。客服人員由後台正常 resolve 時也解除 hold並通知 requester。兩者競爭時沿用 owner version／lock，只有先成功者生效；不同 requester 不得解除，且不得以 timeout 自動恢復。
+使用者明確呼叫後，首次回覆固定為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」。後續留言加入同一客服案件，由專員處理；不顯示 AI 暫停、繼續使用 AI 或恢復 AI 的訊息與按鈕。客服人員正式結案時解除對話 hold，並通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊 AI 操作只回覆功能停用提示，不得結束既有案件或解除 hold。
 
 客服回覆仍由 committed durable delivery task 外送。外送失敗不回滾已提交的 ticket 狀態，但不得把未送達顯示成已送達。含個人案件內容的訊息只可送給經 binding 與 authorization 確認的 recipient；群組或公開回答不得洩漏個案資料。
 
@@ -163,7 +177,7 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 1. 六類 Service Help 均有 deterministic routing、合法空狀態與 manual fallback。
 2. Gateway 兩個分支導向正確且零未授權業務寫入。
 3. enabled answer 只來自 versioned published catalog；draft、conflict 與 unowned item 不會自動回覆。
-4. explicit human／wrong precedence 高於自動回答；自然語句確認前零開單／零 hold，Rich Menu 或確認 postback 才轉接；相同 escalation identity 不重複開單。active hold 的訊息加入原 ticket 且零 AI 回答；原 requester 或客服後台可依正式狀態機解除 hold並收到恢復通知，不同 requester、stale version 與重複競爭 fail closed。
+4. 明確呼叫專員直接建立或沿用客服案件，不再要求確認；相同 escalation identity 不重複開單。一般留言不啟動聊天室 AI 或自動轉人工，呼叫後的訊息加入原 ticket。舊 AI 按鈕／指令不結案、不解除 hold；專員結案沿 owner version／lock 並回覆正式完成通知。
 5. customer／staff 雙角色必須明確選擇；不同 audience 不交叉顯示。
 6. local menu preview 不建立 provider task 或成功 receipt；publish 以 durable task 及 terminal readback 判定。
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
@@ -184,3 +198,5 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 - `document/line/服務說明規則書.md` 保留為歷史輸入／wording evidence，不與 current formal spec 競爭；需要舊語意時由其內容或 Git history 查核，不建立第二套 owner。
 
 Rich Menu source-review 已完成；後續若需要新增 layout、endpoint 或 provider capability，直接更新唯一 owning formal spec／current implementation／操作手冊，不恢復已退役的 source-review 規格。
+
+2026-10-22 選單名稱與位置同步：上述訪客／客戶兩格為現行設定契約；更新 MySQL draft 與歡迎模板不等於發布。只追加草稿版本，保留既有 published snapshot，未獲授權不得建立 publication、link、unlink 或投遞工作。

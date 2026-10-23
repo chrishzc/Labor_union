@@ -1,0 +1,26 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-line-order-group-invitation-url-2026-10-22-v1",
+  "descriptors": {
+    "1053_line_order_group_invitation_url.sql": {
+      "tables": {},
+      "parent_columns": {
+        "line_order_group_bindings": {
+          "invitation_url": {
+            "column_type": "varchar(2048)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_bin"
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

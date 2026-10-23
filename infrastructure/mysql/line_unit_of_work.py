@@ -51,6 +51,8 @@ from infrastructure.mysql.line_webhook_inbox_repository import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
+from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from infrastructure.mysql.matching_notification_repository import (
     MySqlMatchingNotificationRepository,
 )
@@ -110,6 +112,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.staff = MySqlStaffIdentityOwnerAdapter(connection)
         self.admins = MySqlAdminIdentityOwnerAdapter(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
+        self.deposit_payments = MySqlDepositPaymentQueryRepository(connection)
+        self.deposit_notifications = MySqlDepositNotificationRepository(connection)
         self.notification_rules = MySqlLineNotificationRepository(connection)
         self.anomaly_rechecks = MySqlCurrentIssueRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)

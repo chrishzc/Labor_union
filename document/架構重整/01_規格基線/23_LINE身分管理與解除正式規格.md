@@ -66,7 +66,7 @@ Typed errors：
 
 1. revoked 身分明確 link canonical current publication 的 `default_menu`，不依賴 legacy unlink 或 LINE 全域隱含狀態。
 2. `config/line_menu.json` 只提供 bootstrap source；既有環境由 MySQL `line_configuration_current` 指向的 revision 決定管理中心預設值。
-3. 舊「訂單查詢／尋找專員」只能在 current fingerprint 符合已知舊版時，以 expected revision 與 idempotent upgrade 追加新 revision，更新為「服務登記／服務說明」。人工已修改的 divergent revision 必須阻擋，不得覆蓋。
+3. 舊「訂單查詢／尋找專員」只能在 current fingerprint 符合已知舊版時，以 expected revision 與 idempotent upgrade 追加新 revision，更新為 `29` §7 的現行訪客選單：「客戶登記與綁定／月嫂身分綁定／AI 智慧問答／聯絡專人服務」。人工已修改的 divergent revision 必須阻擋，不得覆蓋。
 4. 新解除請求的 publication root 必須指向 `line_rich_menu_publication_tasks`；
    `line_rich_menu_publications` 只保留 stage 12 以前的 legacy 解除歷史參照，不得參與新請求的
    default menu 選擇。既有 legacy request 必須保持可讀，且不得藉 migration 改寫其 provider receipt。
@@ -96,13 +96,13 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 3. default menu 成功套用前，owner projection User ID 不清除。
 4. 成功後 binding 為 revoked，owner projection 為 NULL，解除時間、actor、reason 與事件可追溯。
 5. retry、provider-success/process-crash replay、stale version、owner conflict 與 manual override 均有測試。
-6. canonical Rich Menu current revision 顯示「服務登記／服務說明」；divergent 人工 revision 不被自動覆蓋。
+6. canonical Rich Menu current revision 使用 `29` §7 的現行四格名稱；divergent 人工 revision 不被自動覆蓋。
 
 ## 2026-08-21 M1 ownership amendment
 
-- `line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；`clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 只作 owner projection。
-- `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF onboarding 成功只表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
-- legacy direct writers、舊 approve writer 與 `bind.html` 必須 guarded／readonly 或 `410`，逐 caller 建立 replacement、focused regression 與 restore trigger 後退出。Customer Service 的 `binding_failed_assistance` 可提供人工協助；dual-role 依 §2 明定為合法多 binding，後續實作必須補角色選擇、同 type conflict 與 two-failure escalation，不得把雙角色本身投影為 `LINE-004`。
+- `line_identity_role_bindings` 與 role binding events 由 LINE Identity application 作唯一 writer；舊單一 binding 表僅作 migration／歷史相容輸入；`clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 只作 owner projection。
+- `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF 新登記成功只表示需求申請已保存、待工會核准；既有身分綁定才表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
+- legacy direct writers 與舊 approve writer 保持 guarded／readonly 或 `410`；現行 `/line-bind` 以 `bind.html` 作 presentation，所有核對、綁定及重新綁定申請均經 canonical Customer Preview／Apply。雙角色依 §9.2 明確選擇；失敗依 §9.3 只記錄 bounded count，不自動轉人工、開單或告警，不把雙角色投影為 `LINE-004`。
 - 真實 verified-token／LIFF browser／registration／binding／Rich Menu E2E 仍需 sandbox config；本正式規格同步不把現況 evidence 宣稱為 PASS，也不授權 provider、schema／DB 或 route cutover。
 
 ## 9. 2026-08-30 M1 role-scoped identity amendment
@@ -128,6 +128,10 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
    已綁定其他 LINE 帳號時必須 fail closed 回傳 typed conflict；Apply 仍以 fresh facts 重新驗證，
    不得以預覽結果繞過防重。
 
+客戶以姓名及電話核對後，未綁定者沿既有 Apply 完成綁定；已綁定同一帳號者直接顯示「您已完成綁定，可直接返回 LINE 使用」，不重複 Apply。需要改綁時只顯示「申請重新綁定／取消」；明確申請後才沿原 Customer Preview／Apply 建立 pending review，核准前保留原 LINE 綁定及客戶 projection。取消不提交 mutation，版本衝突不得當成成功。
+
+月嫂選單與歡迎詞統一使用「月嫂身分綁定」及「我是月嫂」；「我要綁定月嫂」保留為同一正式驗證入口，不另建審核或改綁路徑。
+
 ### 9.2 目前選定角色
 
 1. 目前選定角色由 LINE Identity 擁有，每個 LINE User ID 最多只有一個 nullable
@@ -143,25 +147,19 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
    menu intent。這項適配不改變既有解除 saga 狀態機、retry、manual completion 或
    provider-success 判定。
 
-### 9.3 雙次失敗的 bounded streak
+### 9.2.1 現行使用者入口與結果讀回（2026-10-23）
 
-1. LINE Identity 每個 LINE User ID 最多保留一筆 current binding-failure streak。scope 固定為
-   同一 verified identity flow 與同一 candidate `(subject_type, subject_reference)`；尚未解析出
-   root reference 的 not-found 路徑以 normalized proof fingerprint 作為 opaque candidate scope，
-   不保存 raw proof。更換 scope 時取代舊 current streak，不累積歷史、window 或通用規則。
-2. 第一次失敗只將 count 記為 `1`。同 scope 的第二次連續失敗將 count 記為 `2`，
-   並且只呼叫既有 Customer Service `CreateHumanEscalation` typed application 一次；不建立
-   generic escalation engine。
-3. 同 scope 的綁定成功將 count 歸零並推進單一 streak generation。第二次失敗
-   的 ticket source identity／idempotency key 由 scope 與 generation 決定；replay 只回傳原 ticket，
-   不重複開單。
-4. 原 binding Apply 失敗仍 rollback。失敗記錄使用既有 LINE-owned failure-recording outer
-   Unit of Work，在同一 commit 更新 streak 並透過既有 Customer Service typed gateway 建立
-   幂等客服單，不新增 provider side effect 或 hidden commit。
-5. failure event 與 escalation context 只保存 masked evidence／fingerprint、flow purpose、candidate
-   subject type 與 policy version；不寫入姓名、電話、身分證、raw LIFF payload 或 token。既有
-   Customer Service ticket root 仍依其 owner contract 保存 canonical requester LINE User ID，
-   本 amendment 不另造匿名 ticket schema 或第二套客服 identity。
+- 沿用官方一對一聊天室「切換客戶／切換月嫂」及既有別名作明確角色選擇；雙角色由既有 LINE Identity role-selection application 在 webhook outer Unit of Work fresh-read、驗版本、保存 selected role／audit／receipt 及 menu intent。同一事件重播不重複套用，不新增 public API 或 transaction owner。
+- 「切換選單」對雙角色顯示選擇方式；工會管理員的操作視角仍只切選單，不取得客戶／月嫂業務授權。雙角色未選定時不得假稱專屬選單已完成套用。
+- 綁定成功須驗合法 status、非空 receipt identity、相同 preview fingerprint；pending review 另須有效審核編號。月嫂與工會帳號不得以 pending review 當成綁定成功。結果不完整只顯示待查核，不盲目重送。
+- 新一次入口建立新的流程識別；同一 request 重播仍保有後端冪等。新連結優先於舊 browser 暫存，過期／已使用時清除該暫存並提供對應角色的重新進入方式。這不取消 15 分鐘有效期或一次性限制。
+
+### 9.3 綁定失敗與人工協助
+
+1. LINE Identity 每個 LINE User ID 最多保留一筆 current binding-failure streak；scope 沿用 verified flow 與 candidate／opaque proof fingerprint，count 上限維持 2，不保存 raw proof。
+2. 第一次、第二次及後續綁定失敗都不得自動建立 Customer Service ticket、escalation、hold、通知或告警。失敗畫面只顯示資料核對提示及「返回修改／呼叫專員」。
+3. 只有使用者明確點選「呼叫專員」或在官方聊天室提出相同要求，才由既有人工服務流程受理。頁面按鈕透過 LIFF 送出固定文字指令；環境不支援或送出失敗時提示返回官方聊天室輸入，不宣稱已建立需求。
+4. 綁定成功仍清除同 scope 的失敗計數；失敗記錄維持原 LINE-owned Unit of Work，不呼叫 Customer Service writer。既有歷史客服需求不因本項規則被刪除或結案。
 
 ### 9.4 本 amendment 的非目標與驗收
 
@@ -175,8 +173,7 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
   provider qualification、production／`union_db` 變更或 deployment。
 - 最低驗收：同一 User ID 的 customer／staff 可同時建立、獨立 version／event／readback；
   同 type conflict 與 admin 互斥 fail closed；雙角色未選擇不能越權；選擇 replay 幂等且只產生
-  一個 menu intent；失敗 `1 → 2` 只建一張客服單，success reset 後的新 streak
-  可在再次兩次失敗時建立新單；Staff retirement 與 staff-role解除同一 commit，customer role保留且
+  一個 menu intent；綁定連續失敗不自動開單或通知，只有明確呼叫專員才進入人工服務；Staff retirement 與 staff-role解除同一 commit，customer role保留且
   successor menu intent不與舊bind intent碰撞；既有 revocation／provider／`LINE-006` focused
   regression 不退步。
 

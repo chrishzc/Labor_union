@@ -33,12 +33,16 @@ Description: 提供 LIFF 身分與登記前導流程，安全顯示 typed flow �
   <h1 id="title">LINE 身分確認</h1>
   <p id="description">正在確認登入狀態…</p>
   <div id="customer-choice" hidden>
-    <button id="register-new" type="button"><strong>📝 已申請市府平台</strong><span>我已在市府媒合服務平台完成登記，要繼續填寫工會【需求調查表單】。</span></button>
+    <button id="register-new" type="button"><strong>📝 已申請市府平台</strong><span>我已在市府媒合服務平台完成登記，要核對客戶資料並繼續填寫工會需求調查表單。</span></button>
     <button id="goto-gov" type="button"><strong>🏛️ 未申請市府平台</strong><span>我尚未於市府平台登記，請先前往新竹市政府到宅月子媒合服務平台提出申請。</span></button>
   </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
   <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
+  <div id="binding-help" hidden>
+    <button id="edit-binding" class="secondary" type="button">返回修改</button>
+    <button id="call-staff" class="secondary" type="button">呼叫專員</button>
+  </div>
 </section></main>
 <script>
 const definitions = {
@@ -65,6 +69,7 @@ let idToken = "";
 let flowId = "";
 let formBuilt = false;
 let pendingIdentityPreview = null;
+let bindingResultUnknown = false;
 const identityPreviewStatusLabels = {
   authentication_pending: "等待套用時驗證管理員帳號",
   matched: "已找到可綁定資料",
@@ -89,6 +94,7 @@ function safeIdentityErrorMessage(result, fallback) {
   const message = candidates.find(
     candidate => typeof candidate === "string" && candidate.trim()
   );
+  if (message && /^[a-z][a-z0-9_]+$/.test(message.trim())) return '身分資料或操作連結已失效，請返回 LINE 重新開啟對應入口；如仍無法完成，請呼叫專員。';
   return message ? message.trim() : fallback;
 }
 
@@ -166,9 +172,7 @@ async function openStaffPage(path) {
 
 async function openIdentityFlow(purpose) {
   await ensureLineIdToken();
-  const storageKey = `line-flow-idempotency:${purpose}`;
-  const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
-  sessionStorage.setItem(storageKey, idempotencyKey);
+  const idempotencyKey = crypto.randomUUID();
   const response = await fetch("/api/v1/line/identity/flow/open", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -179,7 +183,7 @@ async function openIdentityFlow(purpose) {
     })
   });
   const result = await response.json();
-  if (!response.ok) {
+  if (!response.ok || !result.data?.flow_id) {
     const error = new Error(safeIdentityErrorMessage(result, "目前無法建立安全操作連結，請稍後再試。"));
     error.code = identityErrorCode(result);
     throw error;
@@ -251,7 +255,10 @@ function identityPreviewText(endpoint, preview) {
 
 async function submitForm(event, definition, button, previewBox, editButton) {
   event.preventDefault();
+  if (bindingResultUnknown) return;
+  let applySubmitted = false;
   button.disabled = true;
+  document.getElementById("binding-help").hidden = true;
   showMessage("正在核對並綁定身分資料…");
   const values = Object.fromEntries(new FormData(event.target).entries());
   const payload = {flow_id: flowId, line_id_token: idToken, ...values};
@@ -271,6 +278,7 @@ async function submitForm(event, definition, button, previewBox, editButton) {
     const preview = requireIdentityPreview(previewResult);
 
     // 2. 一鍵直接套用
+    applySubmitted = true;
     const applyRes = await fetch(`/api/v1/line/identity/${definition.endpoint}/apply`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -281,13 +289,14 @@ async function submitForm(event, definition, button, previewBox, editButton) {
       })
     });
     const applyResult = await applyRes.json();
-    if (!applyRes.ok || !applyResult.data) {
+    if (!applyRes.ok) {
+      applySubmitted = false;
       throw new Error(safeIdentityErrorMessage(
         applyResult,
         definition.endpoint === "staff" ? staffMismatchMessage : "身分套用失敗，請稍後再試。"
       ));
     }
-
+    requireIdentityApply(applyResult, preview, definition.endpoint);
     const pending = applyResult.data.status === "pending_review";
     const reviewReference = Number.isInteger(applyResult.data.review_request_id)
       ? `｜審核編號：${applyResult.data.review_request_id}` : "";
@@ -299,13 +308,40 @@ async function submitForm(event, definition, button, previewBox, editButton) {
       `處理結果：${pending ? "等待工會人員確認" : "LINE 身分已成功綁定"}${reviewReference}`,
       pending
         ? "工會人員確認完成後，系統才會套用月嫂專屬圖文選單。"
-        : "專屬圖文選單將於系統處理完成後套用；請稍後返回 LINE 聊天室查看。"
+        : "綁定成功，專屬選單將稍後更新。若同時具有客戶與月嫂身分，請返回聊天室輸入「切換客戶」或「切換月嫂」，明確選擇要使用的身分。"
     ].join("\n");
     previewBox.hidden = false;
     button.disabled = true;
     editButton.hidden = true;
   } catch (error) {
     showIdentityError(error, "目前無法完成身分綁定，請確認資料正確或稍後再試。");
+    document.getElementById("binding-help").hidden = false;
+    bindingResultUnknown = applySubmitted;
+    button.disabled = bindingResultUnknown;
+  }
+}
+
+function requireIdentityApply(result, preview, endpoint) {
+  const receipt = result?.data;
+  const allowed = endpoint === 'customer' ? ['bound', 'existing', 'pending_review'] : ['bound', 'existing'];
+  if (!receipt || !allowed.includes(receipt.status)
+      || typeof receipt.receipt_identity !== 'string' || !receipt.receipt_identity.trim()
+      || receipt.preview_fingerprint !== preview.preview_fingerprint
+      || (receipt.status === 'pending_review' && (!Number.isSafeInteger(receipt.review_request_id) || receipt.review_request_id <= 0))) {
+    throw new Error('綁定結果讀回不完整，請勿重複送出；請聯絡工會確認。');
+  }
+  return receipt;
+}
+
+async function callBindingStaff() {
+  const button = document.getElementById('call-staff');
+  button.disabled = true;
+  try {
+    if (!liff.isInClient() || liff.getContext()?.type !== 'utou' || !liff.isApiAvailable('sendMessages')) throw new Error();
+    await liff.sendMessages([{type:'text', text:'呼叫專員'}]);
+    showMessage('呼叫已送出，請返回聊天室留言。');
+  } catch (_) {
+    showMessage('請返回官方 LINE 聊天室輸入「呼叫專員」。', true);
     button.disabled = false;
   }
 }
@@ -333,11 +369,7 @@ async function applyIdentityPreview(definition, button, previewBox, editButton) 
     if (!response.ok) {
       throw new Error(safeIdentityErrorMessage(result, "身分套用失敗。"));
     }
-    if (!result?.data || typeof result.data.status !== "string"
-        || typeof result.data.receipt_identity !== "string" || !result.data.receipt_identity
-        || result.data.preview_fingerprint !== candidate.preview.preview_fingerprint) {
-      throw new Error("套用結果驗證資料不完整，請勿重複送出並聯絡工會確認。");
-    }
+    requireIdentityApply(result, candidate.preview, definition.endpoint);
     const pending = result.data.status === "pending_review";
     const reviewReference = Number.isInteger(result.data.review_request_id)
       ? `｜審核編號：${result.data.review_request_id}` : "";
@@ -348,7 +380,7 @@ async function applyIdentityPreview(definition, button, previewBox, editButton) 
     pendingIdentityPreview = null;
     previewBox.textContent = [
       `處理結果：${pending ? "等待工會人員確認" : "LINE 身分已完成綁定"}${reviewReference}`,
-      "通知僅排入可靠佇列，不代表 LINE 已送達。",
+      "綁定成功，專屬選單將稍後更新。",
     ].join("\n");
     button.disabled = true;
     editButton.hidden = true;
@@ -475,7 +507,8 @@ async function validateIdentityFlow(purpose) {
   if (response.ok) return;
   const result = await response.json();
   if (response.status === 410) {
-    throw new Error("此連結已超過 15 分鐘安全時效已失效，請返回 LINE 聊天室點選下方圖文選單【服務登記】即可重新進入。");
+    const entry = purpose === 'staff_verification' ? '月嫂身分綁定' : purpose === 'admin_binding' ? '綁定工會帳號' : '客戶登記與綁定';
+    throw new Error(`此連結已失效，請返回 LINE 聊天室重新開啟「${entry}」。工會帳號請輸入「綁定工會帳號」。`);
   }
   throw new Error(
     safeIdentityErrorMessage(result, "目前無法驗證連結，請稍後再試。")
@@ -519,6 +552,12 @@ async function initialize() {
 }
 
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
+document.getElementById('call-staff').addEventListener('click', callBindingStaff);
+document.getElementById('edit-binding').addEventListener('click', () => {
+  document.getElementById('binding-help').hidden = true;
+  showMessage('請確認資料後重新送出。');
+  document.querySelector('#form input')?.focus();
+});
 initialize().catch(error => showIdentityError(error, "頁面初始化失敗。"));
 </script>
 </body>

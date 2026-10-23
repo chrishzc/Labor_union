@@ -21,6 +21,7 @@
 - `infrastructure/mysql/leave_substitution_repository.py`
 - `infrastructure/mysql/leave_substitution_impact_ports.py` — 使用同一份 Client Finance candidate 推導代班的月嫂付款期限與薪資影響。
 - `infrastructure/mysql/staff_leave_intake_repository.py` — 請假待辦與受理後案件／客戶協調查詢；客戶 subject reference 以欄位正式 collation 比對字串化的客戶識別。
+- `api/schemas/staff_leave_management.py` — Scheduling 請假待辦、pending／accepted_for_processing 完整總數分頁及處理 readback 的 typed transport views。
 - `infrastructure/mysql/substitution_payables_lineage_repository.py`
 - `ui_react/src/api/scheduling/leave_substitution_client.ts`
 - `ui_react/src/api/scheduling/staff_leave_inbox_client.ts`

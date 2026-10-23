@@ -108,6 +108,9 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
       .toolbar { align-items:stretch; }
       .field-grid { grid-template-columns:1fr; }
     }
+    #matchingOperation .toolbar { flex-wrap:wrap; }
+    #matchingCandidates label { display:flex; align-items:center; gap:10px; }
+    #matchingCandidates input[type="checkbox"] { width:auto; min-height:auto; flex-shrink:0; }
   </style>
 </head>
 <body>
@@ -175,8 +178,42 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
       <div id="leaveWorkstream" class="workstream-panel hidden">
         <div id="leaveReviews" class="surface-list"></div>
       </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="candidateInformationWorkstream">
+        <span class="workstream-copy"><strong>月嫂確認與條件協調</strong><small id="candidateInformationMeta">待處理 — 件</small></span>
+        <span class="workstream-count" id="candidateInformationCount">—</span>
+        <span class="workstream-action">查看</span>
+      </button>
+      <div id="candidateInformationWorkstream" class="workstream-panel hidden">
+        <div id="candidateInformationQuestions" class="surface-list"></div>
+      </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="customerRecommendationWorkstream">
+        <span class="workstream-copy"><strong>客戶推薦確認與簽約</strong><small id="customerRecommendationMeta">待處理 — 件</small></span>
+        <span class="workstream-count" id="customerRecommendationCount">—</span>
+        <span class="workstream-action">查看</span>
+      </button>
+      <div id="customerRecommendationWorkstream" class="workstream-panel hidden">
+        <div id="customerRecommendationFollowups" class="surface-list"></div>
+      </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="depositWorkstream">
+        <span class="workstream-copy"><strong>訂金繳費與核銷通知</strong><small id="depositMeta">待處理 — 件</small></span>
+        <span class="workstream-count" id="depositCount">—</span><span class="workstream-action">查看</span>
+      </button>
+      <div id="depositWorkstream" class="workstream-panel hidden">
+        <div class="toolbar"><select id="depositStatus" aria-label="訂金銷帳狀態"><option value="unpaid">未銷帳</option><option value="settled">已銷帳</option></select></div>
+        <div id="depositPayments" class="surface-list"></div>
+        <div class="row"><button id="depositPrevious" type="button" disabled>上一頁</button><span id="depositPageLabel">第 1 頁</span><button id="depositNext" type="button" disabled>下一頁</button></div>
+      </div>
+      <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="groupTodoWorkstream">
+        <span class="workstream-copy"><strong>尚未建群</strong><small id="groupTodoMeta">待建群 — 件</small></span>
+        <span class="workstream-count" id="groupTodoCount">—</span><span class="workstream-action">查看</span>
+      </button>
+      <div id="groupTodoWorkstream" class="workstream-panel hidden">
+        <p class="muted">只列訂金已核銷、尚未綁定服務群組的案件。建群並綁定案件後，重新整理即移出清單。</p>
+        <div id="groupTodos" class="surface-list"></div>
+        <div class="row"><button id="groupTodoPrevious" type="button" disabled>上一頁</button><span id="groupTodoPageLabel">第 1 頁</span><button id="groupTodoNext" type="button" disabled>下一頁</button></div>
+      </div>
       <button class="workstream-trigger" type="button" aria-expanded="false" aria-controls="matchingWorkstream">
-        <span class="workstream-copy"><strong>媒合指派與重新媒合</strong><small id="matchingFollowupMeta">需人工跟進 — 件</small></span>
+        <span class="workstream-copy"><strong>月嫂回覆提醒</strong><small id="matchingFollowupMeta">待提醒 — 件</small></span>
         <span class="workstream-count" id="matchingFollowupCount">—</span>
         <span class="workstream-action">查看</span>
       </button>
@@ -185,28 +222,26 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
         <section id="matchingOperation" class="hidden" aria-live="polite">
           <article class="card step-card">
             <div class="row"><strong id="matchingOperationTitle">媒合條件處理</strong><span class="pill">步驟 1 / 2</span></div>
-            <p class="muted">先核對客戶同意的調整內容，修改正式案件條件並預覽影響。</p>
+            <p class="muted">核對客戶更新後的條件並填入下列正式欄位。審核通過後，系統直接更新案件資料。</p>
+            <p id="matchingCustomerConditions"></p>
             <div id="matchingIssues"></div>
-            <div id="matchingUnsupported" class="error hidden"></div>
             <div class="field-grid">
               <label>預計開始日期<input id="matchingStartDate" type="date"></label>
               <label>服務天數<input id="matchingServiceDays" type="number" min="1"></label>
               <label>每日服務時數<input id="matchingDailyHours" type="number" min="1"></label>
-              <label>是否需要下廚<select id="matchingCooking"><option value="true">需要下廚</option><option value="false">不需要下廚</option></select></label>
+              <label>是否需要下廚<select id="matchingCooking"><option value="unknown">待確認</option><option value="true">需要下廚</option><option value="false">不需要下廚</option></select></label>
               <label>樓層費<input id="matchingFloorFee" type="number" min="0"></label>
               <label>每日開始時間<input id="matchingStartTime" type="time"></label>
               <label>每日結束時間<input id="matchingEndTime" type="time"></label>
               <label>結束日<select id="matchingEndOffset"><option value="0">同日</option><option value="1">翌日</option></select></label>
             </div>
-            <label>修改原因<textarea id="matchingTermsReason" maxlength="500">客戶已同意媒合條件調整，由工會修改正式案件資料。</textarea></label>
             <div class="toolbar">
-              <button id="previewMatchingTerms" type="button">預覽正式修改</button>
-              <button id="applyMatchingTerms" type="button" class="secondary hidden">確認套用修改</button>
+              <button id="reconsiderMatchingConditions" type="button">不通過，繼續協調</button>
+              <button id="applyMatchingTerms" type="button" class="secondary hidden">審核通過並更新案件條件</button>
             </div>
-            <div id="matchingTermsPreview" class="preview hidden"></div>
           </article>
           <article class="card step-card">
-            <div class="row"><strong>重新詢問原月嫂</strong><span class="pill">步驟 2 / 2</span></div>
+            <div class="row"><strong>選擇月嫂重新詢問</strong><span class="pill">步驟 2 / 2</span></div>
             <p class="muted" id="matchingRecontactGate">完成正式修改後，才能預覽並傳送更新後的案件資訊。</p>
             <div id="matchingCandidates"></div>
             <div class="toolbar">
@@ -218,6 +253,8 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
         </section>
       </div>
     </div>
+    <div class="section-heading"><div><h2>工作工具</h2><p class="muted">獨立操作工具，不計入待辦總數。</p></div></div>
+    <button id="openSchedulingTool" type="button" class="secondary">正式排班重建工具</button>
   </section>
   <section id="schedulingPane" class="hidden">
     <div class="section-heading">
@@ -237,7 +274,7 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     <div class="section-heading">
       <div>
         <h2>未完成訂單</h2>
-        <p class="muted">唯讀顯示目前階段與下一步；異常通知仍由工會群組接收。</p>
+        <p class="muted">唯讀顯示目前階段與下一步。</p>
       </div>
       <button id="refreshOrderStatuses" class="quiet" type="button">重新整理</button>
     </div>
@@ -280,9 +317,19 @@ let ticketQuerySequence = 0;
 let reviewQuerySequence = 0;
 let profileReviewQuerySequence = 0;
 let leaveReviewQuerySequence = 0;
+let candidateInformationQuerySequence = 0;
+let profileReviewPage = 1;
+let leaveReviewPage = 1;
+let candidateInformationPage = 1;
+let matchingFollowupPage = 1;
+let customerRecommendationPage = 1;
 let matchingFollowupQuerySequence = 0;
+let customerRecommendationQuerySequence = 0;
+let depositPage = 1;
+let depositQuerySequence = 0;
+let groupTodoPage = 1;
+let groupTodoQuerySequence = 0;
 let matchingOperation = null;
-let matchingTermsPreview = null;
 let matchingRecontactPreview = null;
 let orderTrackingQuerySequence = 0;
 let operationsQuerySequence = 0;
@@ -344,7 +391,7 @@ function showEmpty(root, message) {
 }
 
 function updateReviewTotal() {
-  const countIds = ["identityReviewCount", "profileReviewCount", "leaveReviewCount", "matchingFollowupCount"];
+  const countIds = ["identityReviewCount", "profileReviewCount", "leaveReviewCount", "matchingFollowupCount", "candidateInformationCount", "customerRecommendationCount", "depositCount", "groupTodoCount"];
   const counts = countIds.map(id => Number.parseInt(document.getElementById(id).dataset.pendingCount || "", 10));
   document.getElementById("reviewTotal").textContent = counts.every(Number.isInteger)
     ? String(counts.reduce((sum, count) => sum + count, 0))
@@ -431,6 +478,13 @@ function renderPagination(root, pageData, onPage) {
   next.addEventListener("click", () => onPage(pageData.page + 1));
   navigation.append(previous, summary, next);
   root.appendChild(navigation);
+}
+
+function requireTodoPage(data, page) {
+  if (!data || !Array.isArray(data.items) || data.page !== page || data.page_size !== 25
+      || !Number.isInteger(data.total) || data.total < 0 || data.items.length > 25
+      || data.items.length > data.total) throw new Error("待辦分頁資料不完整，請重新整理。");
+  return {...data, totalPages: Math.max(1, Math.ceil(data.total / data.page_size))};
 }
 
 function safeErrorMessage(result, fallback) {
@@ -523,12 +577,17 @@ function renderStudioPreview(next) {
     setWorkstreamCount("identityReviewCount", "identityReviewMeta", 1, "待審核");
     setWorkstreamCount("profileReviewCount", "profileReviewMeta", 3, "待審核");
     setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 2, "待處理");
-    setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", 1, "需人工跟進");
+    setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", 1, "待提醒");
+    setWorkstreamCount("candidateInformationCount", "candidateInformationMeta", 0, "待處理");
+    setWorkstreamCount("customerRecommendationCount", "customerRecommendationMeta", 0, "待處理");
+    setWorkstreamCount("depositCount", "depositMeta", 0, "待處理");
+    setWorkstreamCount("groupTodoCount", "groupTodoMeta", 0, "待建群");
     const previewGroups = [
       ["profileReviews", "安全預覽不載入正式客戶資料異動申請。"],
       ["reviews", "安全預覽不載入正式身分重綁與異常申請。"],
       ["leaveReviews", "安全預覽不載入正式請假、客戶決策與順延操作。"],
       ["matchingFollowups", "安全預覽不載入正式媒合人工跟進案件。"],
+      ["candidateInformationQuestions", "安全預覽不載入正式月嫂確認問題。"],
     ];
     previewGroups.forEach(([id, message]) => {
       const root = document.getElementById(id);
@@ -789,7 +848,8 @@ async function applyTicketReply(ticket) {
       "LINE 訊息已排入可靠發送佇列，尚未送達。",
     ].join("\n"));
     ticketPageState.page = 1;
-    await loadTickets();
+    if (target === "staff_review") await loadCustomerRecommendationFollowups();
+    else await loadTickets();
   } catch (error) { showStatus(error.message, true); }
 }
 
@@ -1158,6 +1218,97 @@ async function applySchedulingReview() {
   } catch (error) { showStatus(error.message, true); }
 }
 
+async function loadCandidateInformation() {
+  const sequence = ++candidateInformationQuerySequence;
+  const page = candidateInformationPage;
+  const data = requireTodoPage(await postJson("/api/v1/line/mobile-admin/candidate-information", {page, page_size:25}), page);
+  if (sequence !== candidateInformationQuerySequence || target !== "staff_review") return;
+  if (page > data.totalPages) { candidateInformationPage = data.totalPages; return loadCandidateInformation(); }
+  const root = document.getElementById("candidateInformationQuestions");
+  root.replaceChildren();
+  renderPagination(root, data, page => { candidateInformationPage = page; loadCandidateInformation().catch(error => showStatus(error.message, true)); });
+  setWorkstreamCount("candidateInformationCount", "candidateInformationMeta", data.total, "待處理");
+  if (!data.items.length) return showEmpty(root, "目前沒有待處理的月嫂確認問題。");
+  data.items.forEach(item => root.appendChild(candidateInformationCard(item)));
+}
+
+function candidateInformationCard(item) {
+  const card = document.createElement("article");
+  card.className = "card";
+  card.dataset.questionId = item.question_id;
+  const adjustment = item.request_kind === "condition_adjustment";
+  const heading = document.createElement("h3");
+  heading.textContent = `${item.case_no}・${item.staff_name}`;
+  card.appendChild(heading);
+  item.issues.forEach(issue => {
+    const question = document.createElement("p");
+    question.textContent = `${issue.label}：${issue.detail}`;
+    card.appendChild(question);
+  });
+  const customerMessage = document.createElement("p");
+  customerMessage.className = "muted";
+  customerMessage.textContent = item.customer_message ? `已詢問客戶：${item.customer_message}` : "";
+  card.appendChild(customerMessage);
+  const answer = document.createElement("p");
+  answer.textContent = item.customer_answer ? `${adjustment ? "客戶更新後的條件" : "客戶回答"}：${item.customer_answer}` : "";
+  card.appendChild(answer);
+  const label = document.createElement("label");
+  label.textContent = adjustment ? "詢問客戶的文案" : "發送文案";
+  const text = document.createElement("textarea");
+  text.rows = 4;
+  text.maxLength = 1000;
+  text.placeholder = "請自行輸入要發送的內容";
+  label.appendChild(text);
+  card.appendChild(label);
+  const status = document.createElement("p");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  let intent = null;
+  const review = document.createElement("button");
+  review.type = "button";
+  review.textContent = item.review_completed ? "選擇月嫂重新詢問" : "審核客戶新條件";
+  review.hidden = !adjustment;
+  review.disabled = !item.customer_answer_event_id;
+  review.addEventListener("click", () => openMatchingFollowup(item).catch(error => { status.textContent = error.message; }));
+  const choices = adjustment ? [["customer", "發送給客戶"]] : [["caregiver", "發送給月嫂"], ["customer", "發送給客戶"]];
+  const canSend = recipient => !item.review_completed && (recipient !== "customer" || (item.customer_available && (!item.customer_message || (adjustment && item.customer_answer))));
+  const buttons = choices.map(([recipient, title]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = title;
+    button.disabled = !canSend(recipient);
+    button.addEventListener("click", async () => {
+      const message = text.value.trim();
+      if (!message) { status.textContent = "請先輸入發送文案。"; text.focus(); return; }
+      if (!intent || intent.recipient !== recipient || intent.message_text !== message) {
+        intent = {recipient, message_text: message, idempotency_key: `candidate-information:${crypto.randomUUID()}`};
+      }
+      buttons.forEach(value => { value.disabled = true; });
+      text.disabled = true;
+      review.disabled = true;
+      try {
+        await postJson(`/api/v1/line/mobile-admin/candidate-information/${item.question_id}/send`, {...intent});
+        status.textContent = "文案已排入傳送，尚未證明送達。";
+        showStatus("文案已排入傳送，尚未證明送達。");
+        await loadCandidateInformation();
+      } catch (error) {
+        status.textContent = error.message || "尚無法確認寄送結果，請以原文案重試。";
+      }
+      text.disabled = false;
+      buttons.forEach((value, index) => { value.disabled = !canSend(choices[index][0]); });
+      review.disabled = !item.customer_answer_event_id;
+    });
+    actions.appendChild(button);
+    return button;
+  });
+  actions.appendChild(review);
+  card.appendChild(actions);
+  card.appendChild(status);
+  return card;
+}
+
 async function loadReviewWorkbench() {
   // 客服、異常與 QA 內容審核不會在這裡重複列入。
   const jobs = [
@@ -1165,6 +1316,10 @@ async function loadReviewWorkbench() {
     ["reviews", loadIdentityReviews],
     ["leaveReviews", loadLeaveReviews],
     ["matchingFollowups", loadMatchingFollowups],
+    ["candidateInformationQuestions", loadCandidateInformation],
+    ["customerRecommendationFollowups", loadCustomerRecommendationFollowups],
+    ["depositPayments", loadDepositPayments],
+    ["groupTodos", loadGroupTodos],
   ];
   const results = await Promise.allSettled(jobs.map(([, loader]) => loader()));
   let failed = 0;
@@ -1178,7 +1333,11 @@ async function loadReviewWorkbench() {
       ["profileReviewCount", "profileReviewMeta", "待審核"],
       ["identityReviewCount", "identityReviewMeta", "待審核"],
       ["leaveReviewCount", "leaveReviewMeta", "待處理"],
-      ["matchingFollowupCount", "matchingFollowupMeta", "需人工跟進"],
+      ["matchingFollowupCount", "matchingFollowupMeta", "待提醒"],
+      ["candidateInformationCount", "candidateInformationMeta", "待處理"],
+      ["customerRecommendationCount", "customerRecommendationMeta", "待處理"],
+      ["depositCount", "depositMeta", "待處理"],
+      ["groupTodoCount", "groupTodoMeta", "待建群"],
     ];
     const [countId, metaId, label] = countTargets[index];
     setWorkstreamCount(countId, metaId, null, label);
@@ -1189,31 +1348,10 @@ async function loadReviewWorkbench() {
   );
 }
 
-const matchingNotificationLabels = Object.freeze({
-  pending: "群組通知待送出",
-  processing: "群組通知傳送中",
-  sent: "群組已通知",
-  retryable_failed: "群組通知待重試",
-  failed: "群組通知失敗",
-  cancelled: "群組通知已取消",
-  target_missing: "尚未設定通知群組",
-  target_conflict: "通知群組設定衝突",
-});
-
 function requireMatchingFollowupPage(data) {
-  const isoDateTime = value => typeof value === "string" && !Number.isNaN(Date.parse(value));
-  if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total) || data.total < 0
-      || data.items.length > data.total
-      || data.items.some(item => !item || !Number.isInteger(item.pool_id) || item.pool_id < 1
-        || typeof item.case_no !== "string" || !item.case_no.trim()
-        || !Number.isInteger(item.candidate_count) || item.candidate_count < 1
-        || !Number.isInteger(item.no_interest_count) || item.no_interest_count < 0
-        || !Number.isInteger(item.timed_out_count) || item.timed_out_count < 0
-        || item.no_interest_count + item.timed_out_count !== item.candidate_count
-        || !["modify_then_recontact", "manual_resolution"].includes(item.action_required)
-        || !isoDateTime(item.completed_at)
-        || !Object.hasOwn(matchingNotificationLabels, item.notification_status))) {
-    throw new Error("媒合人工跟進清單格式不完整，未顯示不完整資料。");
+  if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)
+      || data.items.some(item => !Number.isInteger(item.reminder_count) || item.reminder_count < 1)) {
+    throw new Error("月嫂回覆提醒格式不完整。");
   }
   return data;
 }
@@ -1229,12 +1367,12 @@ function matchingTermsFromForm() {
     planned_start_date: document.getElementById("matchingStartDate").value,
     service_days: Number(document.getElementById("matchingServiceDays").value),
     service_hours_per_day: Number(document.getElementById("matchingDailyHours").value),
-    requires_cooking: document.getElementById("matchingCooking").value === "true",
+    requires_cooking: document.getElementById("matchingCooking").value === "unknown" ? null : document.getElementById("matchingCooking").value === "true",
     floor_fee_ntd: Number(document.getElementById("matchingFloorFee").value),
     service_time: {
-      start_time: document.getElementById("matchingStartTime").value,
-      end_time: document.getElementById("matchingEndTime").value,
-      end_day_offset: Number(document.getElementById("matchingEndOffset").value),
+      start_time: document.getElementById("matchingStartTime").value || null,
+      end_time: document.getElementById("matchingEndTime").value || null,
+      end_day_offset: document.getElementById("matchingStartTime").value || document.getElementById("matchingEndTime").value ? Number(document.getElementById("matchingEndOffset").value) : null,
     },
   };
 }
@@ -1243,7 +1381,7 @@ function fillMatchingTerms(terms) {
   document.getElementById("matchingStartDate").value = terms.planned_start_date;
   document.getElementById("matchingServiceDays").value = String(terms.service_days);
   document.getElementById("matchingDailyHours").value = String(terms.service_hours_per_day);
-  document.getElementById("matchingCooking").value = String(terms.requires_cooking);
+  document.getElementById("matchingCooking").value = terms.requires_cooking === null ? "unknown" : String(terms.requires_cooking);
   document.getElementById("matchingFloorFee").value = String(terms.floor_fee_ntd);
   document.getElementById("matchingStartTime").value = String(terms.service_time.start_time).slice(0, 5);
   document.getElementById("matchingEndTime").value = String(terms.service_time.end_time).slice(0, 5);
@@ -1251,9 +1389,7 @@ function fillMatchingTerms(terms) {
 }
 
 function invalidateMatchingTermsPreview() {
-  matchingTermsPreview = null;
-  document.getElementById("matchingTermsPreview").classList.add("hidden");
-  document.getElementById("applyMatchingTerms").classList.add("hidden");
+  matchingApprovalIntent = null;
 }
 
 function invalidateMatchingRecontactPreview() {
@@ -1267,125 +1403,88 @@ function selectedMatchingCandidateIds() {
     .map(input => Number(input.value));
 }
 
+let matchingApprovalIntent = null;
 function renderMatchingOperation(data) {
   matchingOperation = data;
-  invalidateMatchingTermsPreview();
+  matchingApprovalIntent = null;
   invalidateMatchingRecontactPreview();
-  const root = document.getElementById("matchingOperation");
-  root.classList.remove("hidden");
-  document.getElementById("matchingOperationTitle").textContent = `案件 ${data.case_no} 的媒合條件處理`;
+  document.getElementById("matchingOperation").classList.remove("hidden");
+  document.getElementById("matchingOperationTitle").textContent = `案件 ${data.case_no} 的新條件審核`;
+  document.getElementById("matchingCustomerConditions").textContent = `客戶更新後的條件：${data.customer_new_conditions}`;
   const issues = document.getElementById("matchingIssues");
   issues.replaceChildren();
   data.issues.forEach(item => {
     const block = document.createElement("p");
-    block.className = "muted";
-    block.textContent = `${item.label}：${item.detail}（${item.candidate_ids.length} 位月嫂）`;
+    block.textContent = `${item.label}：${item.detail}`;
     issues.appendChild(block);
   });
-  const unsupported = data.issues.filter(item => !item.formal_terms_supported);
-  const unsupportedBox = document.getElementById("matchingUnsupported");
-  unsupportedBox.classList.toggle("hidden", unsupported.length === 0);
-  unsupportedBox.textContent = unsupported.length
-    ? `此待辦不能安全代寫：${[...new Set(unsupported.map(item => item.label))].join("、")}。請先由對應資料管理流程處理，再建立新的候選聯繫。`
-    : "";
   fillMatchingTerms(data.order_terms.terms);
   const candidates = document.getElementById("matchingCandidates");
   candidates.replaceChildren();
   data.candidates.forEach(item => {
     const label = document.createElement("label");
-    label.className = "candidate-choice";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.value = String(item.candidate_id);
-    input.checked = !item.recontact_queued;
-    input.disabled = item.recontact_queued;
+    input.disabled = !data.recontact_allowed || item.recontact_queued;
     input.addEventListener("change", invalidateMatchingRecontactPreview);
-    const copy = document.createElement("span");
-    copy.textContent = item.recontact_queued
-      ? `${item.staff_name}（已排入重新詢問）`
-      : item.staff_name;
-    label.append(input, copy);
+    label.append(input, document.createTextNode(item.staff_name + (item.recontact_queued ? "（已排入詢問）" : "")));
     candidates.appendChild(label);
   });
-  const allowed = data.recontact_allowed && data.candidates.some(item => !item.recontact_queued);
-  document.getElementById("previewMatchingRecontact").disabled = !allowed;
-  const termsCompleted = Boolean(data.terms_change_completed);
-  const termsButton = document.getElementById("previewMatchingTerms");
-  termsButton.disabled = unsupported.length > 0 || termsCompleted;
-  termsButton.textContent = termsCompleted ? "正式修改已完成" : "預覽正式修改";
-  if (termsCompleted) {
-    const termsPreview = document.getElementById("matchingTermsPreview");
-    termsPreview.textContent = "本次客戶同意後的正式修改已完成並讀回，請直接進行步驟 2 的重新詢問預覽。";
-    termsPreview.classList.remove("hidden");
-  }
+  document.getElementById("applyMatchingTerms").classList.remove("hidden");
+  document.getElementById("applyMatchingTerms").disabled = data.terms_change_completed;
+  document.getElementById("applyMatchingTerms").textContent = data.terms_change_completed ? "已審核通過並更新" : "審核通過並更新案件條件";
+  document.getElementById("previewMatchingRecontact").disabled = !data.recontact_allowed;
   document.getElementById("matchingRecontactGate").textContent = data.recontact_allowed
-    ? "正式修改收據已確認。選擇月嫂後先預覽更新內容，再確認傳送。"
-    : "完成正式修改並讀回收據後，才能預覽並傳送更新後的案件資訊。";
+    ? "案件新條件已更新，請選擇月嫂重新詢問。" : "人員審核通過並更新案件條件後，才能重新詢問月嫂。";
+  const reconsider = document.getElementById("reconsiderMatchingConditions");
+  reconsider.disabled = data.terms_change_completed;
 }
 
 async function openMatchingFollowup(item) {
-  showStatus(`正在載入案件 ${item.case_no} 的調整內容…`);
-  const data = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${item.pool_id}/operation`,
-    {case_no: item.case_no},
-  );
+  const data = await postJson(`/api/v1/line/mobile-admin/matching-followups/${item.pool_id}/operation`, {
+    case_no: item.case_no, customer_answer_event_id: item.customer_answer_event_id,
+  });
+  const trigger = document.querySelector('[aria-controls="matchingWorkstream"]');
+  if (trigger.getAttribute("aria-expanded") !== "true") toggleWorkstream(trigger);
   renderMatchingOperation(data);
-  document.getElementById("matchingOperation").scrollIntoView({block:"start"});
-  showStatus("已載入客戶同意內容與目前正式案件條件");
-}
-
-async function previewMatchingTerms() {
-  if (!matchingOperation) return;
-  if (matchingOperation.terms_change_completed) {
-    showStatus("正式修改已完成，請直接進行重新詢問預覽");
-    return;
-  }
-  invalidateMatchingTermsPreview();
-  const data = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${matchingOperation.pool_id}/terms/preview`,
-    {case_no: matchingOperation.case_no, proposed_terms: matchingTermsFromForm()},
-  );
-  matchingTermsPreview = data;
-  const preview = document.getElementById("matchingTermsPreview");
-  preview.textContent = [
-    `將把訂單版本 ${data.order_version} 的正式條件更新：`,
-    `開始日期：${data.before.planned_start_date} → ${data.after.planned_start_date}`,
-    `修改後預計結束日期：${data.planned_end_date}`,
-    `服務天數：${data.before.service_days} → ${data.after.service_days}`,
-    `每日時數：${data.before.service_hours_per_day} → ${data.after.service_hours_per_day}`,
-    `是否下廚：${data.before.requires_cooking ? "需要" : "不需要"} → ${data.after.requires_cooking ? "需要" : "不需要"}`,
-    `每日時段：${data.before.service_time.start_time}–${data.before.service_time.end_time} → ${data.after.service_time.start_time}–${data.after.service_time.end_time}`,
-    `受影響既有指派：${data.scheduling.cancelled_assignment_ids?.length || 0} 筆`,
-  ].join("\n");
-  preview.classList.remove("hidden");
-  document.getElementById("applyMatchingTerms").classList.remove("hidden");
-  showStatus("正式修改預覽已建立；確認前尚未寫入");
+  document.getElementById("matchingOperation").scrollIntoView({block: "start"});
 }
 
 async function applyMatchingTerms() {
-  if (!matchingOperation || !matchingTermsPreview) return;
-  const preview = matchingTermsPreview;
-  const data = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${matchingOperation.pool_id}/terms/apply`,
-    {
-      case_no: matchingOperation.case_no,
-      proposed_terms: matchingTermsFromForm(),
-      expected_order_version: preview.order_version,
-      expected_scheduling_version: preview.scheduling_version,
-      expected_client_finance_version: preview.client_finance_version,
-      expected_payroll_version: preview.payroll_version,
-      preview_fingerprint: preview.preview_fingerprint,
-      idempotency_key: globalThis.crypto?.randomUUID?.() || `matching-terms-${Date.now().toString(36)}`,
-      reason: document.getElementById("matchingTermsReason").value.trim(),
-    },
-  );
-  showStatus(`正式案件條件已保存（訂單版本 ${data.receipt.order_version}），正在確認重送門檻…`);
-  const refreshed = await postJson(
-    `/api/v1/line/mobile-admin/matching-followups/${matchingOperation.pool_id}/operation`,
-    {case_no: matchingOperation.case_no},
-  );
-  renderMatchingOperation(refreshed);
-  showStatus("正式修改已讀回；現在可以預覽重新詢問內容");
+  if (!matchingOperation) return;
+  const operation = matchingOperation;
+  const body = {case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id,
+    proposed_terms: matchingTermsFromForm(), expected_order_version: operation.order_terms.order_version};
+  const signature = JSON.stringify(body);
+  if (!matchingApprovalIntent || matchingApprovalIntent.signature !== signature) {
+    matchingApprovalIntent = {signature, key: crypto.randomUUID()};
+  }
+  const button = document.getElementById("applyMatchingTerms");
+  button.disabled = true;
+  try {
+    await postJson(`/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/terms/apply`, {
+      ...body, idempotency_key: matchingApprovalIntent.key,
+    });
+    const refreshed = await postJson(`/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/operation`, {
+      case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id,
+    });
+    renderMatchingOperation(refreshed);
+    await loadCandidateInformation();
+    showStatus("審核通過，系統已更新新的案件條件。請選擇月嫂重新詢問。");
+  } finally { button.disabled = Boolean(matchingOperation?.terms_change_completed); }
+}
+
+function reconsiderMatchingConditions() {
+  if (!matchingOperation) return;
+  const questionId = matchingOperation.question_id;
+  document.getElementById("matchingOperation").classList.add("hidden");
+  matchingOperation = null;
+  const trigger = document.querySelector('[aria-controls="candidateInformationWorkstream"]');
+  if (trigger.getAttribute("aria-expanded") !== "true") toggleWorkstream(trigger);
+  const editor = document.querySelector(`[data-question-id="${questionId}"] textarea`);
+  editor?.focus();
+  showStatus("請重新輸入詢問文案，再次詢問客戶。尚未修改案件條件。");
 }
 
 async function previewMatchingRecontact() {
@@ -1395,7 +1494,7 @@ async function previewMatchingRecontact() {
   invalidateMatchingRecontactPreview();
   const data = await postJson(
     `/api/v1/line/mobile-admin/matching-followups/${matchingOperation.pool_id}/recontact/preview`,
-    {case_no: matchingOperation.case_no, candidate_ids: candidateIds},
+    {case_no: matchingOperation.case_no, customer_answer_event_id: matchingOperation.customer_answer_event_id, candidate_ids: candidateIds},
   );
   matchingRecontactPreview = data;
   const preview = document.getElementById("matchingRecontactPreview");
@@ -1412,6 +1511,7 @@ async function applyMatchingRecontact() {
     `/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/recontact/apply`,
     {
       case_no: operation.case_no,
+      customer_answer_event_id: operation.customer_answer_event_id,
       items: matchingRecontactPreview.map(item => ({
         candidate_id: item.candidate_id,
         preview_fingerprint: item.preview_fingerprint,
@@ -1421,76 +1521,173 @@ async function applyMatchingRecontact() {
   showStatus(`已將更新後資料排入 ${data.length} 位月嫂的 LINE 傳送。`);
   const refreshed = await postJson(
     `/api/v1/line/mobile-admin/matching-followups/${operation.pool_id}/operation`,
-    {case_no: operation.case_no},
+    {case_no: operation.case_no, customer_answer_event_id: operation.customer_answer_event_id},
   );
   renderMatchingOperation(refreshed);
-  await loadMatchingFollowups();
+  await Promise.all([loadMatchingFollowups(), loadCandidateInformation()]);
+}
+
+async function loadGroupTodos() {
+  const sequence=++groupTodoQuerySequence;
+  const requestedPage=groupTodoPage;
+  const data=await postJson("/api/v1/line/mobile-admin/order-group-todos", {page:requestedPage,page_size:25});
+  if (sequence!==groupTodoQuerySequence || target!=="staff_review") return;
+  if (!Array.isArray(data.items) || !Number.isInteger(data.total) || !Number.isInteger(data.total_pages) || data.page!==requestedPage) throw new Error("尚未建群待辦資料不完整。");
+  if (requestedPage > Math.max(1, data.total_pages)) { groupTodoPage = Math.max(1, data.total_pages); return loadGroupTodos(); }
+  const root=document.getElementById("groupTodos");root.replaceChildren();
+  setWorkstreamCount("groupTodoCount","groupTodoMeta",data.total,"待建群");
+  document.getElementById("groupTodoPageLabel").textContent=`第 ${data.page} 頁`;
+  document.getElementById("groupTodoPrevious").disabled=data.page<=1;
+  document.getElementById("groupTodoNext").disabled=data.page>=data.total_pages;
+  if(!data.items.length) showEmpty(root,"目前沒有訂金已核銷且尚未建群的案件。");
+  data.items.forEach(item=>{
+    const card=document.createElement("article");card.className="card";
+    const title=document.createElement("strong");title.textContent=`案件 ${item.case_no}`;
+    const amount=document.createElement("p");amount.textContent=`訂金 NT$${Number(item.deposit_amount_ntd).toLocaleString("zh-TW")} 已核銷`;
+    const help=document.createElement("p");help.textContent="建群後，將下方的〈本群組邀請網址〉換成實際網址，再貼到群內。各項可用空白或換行分隔：";
+    const command=document.createElement("code");command.textContent=`綁定訂單 ${item.case_no} 〈本群組邀請網址〉`;
+    const copy=document.createElement("button");copy.type="button";copy.textContent="複製設定格式";
+    copy.addEventListener("click",async()=>{
+      try{await navigator.clipboard.writeText(command.textContent);showStatus("已複製設定格式，請先填入本群組邀請網址。設定完成後輸入「發送邀請」。");}
+      catch{showStatus("無法自動複製，請長按上方指令複製。",true);}
+    });
+    card.append(title,amount,help,command,copy);root.appendChild(card);
+  });
+}
+document.getElementById("groupTodoPrevious").addEventListener("click",async()=>{if(groupTodoPage>1){groupTodoPage--;try{await loadGroupTodos();}catch(error){showStatus(error.message,true);}}});
+document.getElementById("groupTodoNext").addEventListener("click",async()=>{groupTodoPage++;try{await loadGroupTodos();}catch(error){showStatus(error.message,true);}});
+
+async function loadDepositPayments() {
+  const sequence = ++depositQuerySequence;
+  const requestedPage = depositPage;
+  const settled = document.getElementById("depositStatus").value === "settled";
+  const data = await postJson("/api/v1/line/mobile-admin/deposit-payments", {page: requestedPage, page_size:25, settled});
+  if (sequence !== depositQuerySequence || target !== "staff_review") return;
+  if (!Array.isArray(data.items) || typeof data.has_next !== "boolean" || data.page !== requestedPage
+      || !Number.isInteger(data.total) || data.total < 0 || data.total < data.items.length
+      || !Number.isInteger(data.pending_total) || !Number.isInteger(data.unpaid_total) || !Number.isInteger(data.settled_total)
+      || data.unpaid_total < 0 || data.settled_total < 0 || data.pending_total !== data.unpaid_total + data.settled_total
+      || data.total !== (settled ? data.settled_total : data.unpaid_total)) throw new Error("繳費待辦資料不完整。");
+  const lastPage = Math.max(1, Math.ceil(data.total / 25));
+  if (requestedPage > lastPage) { depositPage = lastPage; return loadDepositPayments(); }
+  const root=document.getElementById("depositPayments");root.replaceChildren();
+  setWorkstreamCount("depositCount", "depositMeta", data.pending_total, "待處理");
+  document.getElementById("depositPageLabel").textContent=`第 ${data.page} 頁`;
+  document.getElementById("depositPrevious").disabled=data.page<=1;
+  document.getElementById("depositNext").disabled=!data.has_next;
+  if (!data.items.length) showEmpty(root, "本頁沒有待處理的訂金通知。");
+  data.items.forEach(item=>{
+    const card=document.createElement("article");card.className="card";
+    const title=document.createElement("strong");title.textContent=`案件 ${item.case_no}`;
+    const summary=document.createElement("p");summary.textContent=`訂金 NT$${Number(item.amount_ntd).toLocaleString("zh-TW")}｜${item.settled ? "已銷帳" : `未銷帳｜期限 ${item.due_date || "待確認"}`}`;
+    const status=document.createElement("p");status.setAttribute("role","status");
+    card.append(title,summary,status);
+    const deliveryLabels={pending:"已排入寄送",processing:"寄送處理中",retryable_failed:"等待重試",sent:"已送出",failed:"寄送失敗，請至寄送工作處理",cancelled:"寄送已取消，請確認案件及綁定"};
+    if (!item.line_bound) status.textContent=item.settled ? "客戶未綁定 LINE，請人工通知已入帳。" : "客戶未綁定 LINE，請人工通知繳費。";
+    else if (item.delivery_status) status.textContent=deliveryLabels[item.delivery_status] || "請確認寄送工作狀態。";
+    else if (item.settled) status.textContent="核銷成功通知待系統排入寄送。";
+    else if (!item.ready) status.textContent="繳費資料待確認，尚不能發送提醒。";
+    else {
+      const button=document.createElement("button");button.type="button";button.textContent="發送訂金繳費提醒";
+      let intent=null;
+      button.addEventListener("click",async()=>{
+        button.disabled=true;
+        intent ||= {case_no:item.case_no,expected_version:item.expected_version,idempotency_key:`deposit-reminder:${crypto.randomUUID()}`};
+        try{
+          await postJson("/api/v1/line/mobile-admin/deposit-payments/remind",intent);
+          status.textContent="已建立寄送工作，尚未證明送達。";
+        }catch(error){status.textContent=error.message || "尚無法確認寄送結果，請重試。";button.disabled=false;}
+      });
+      card.appendChild(button);
+    }
+    root.appendChild(card);
+  });
+}
+document.getElementById("depositPrevious").addEventListener("click",async()=>{if(depositPage>1){depositPage--;try{await loadDepositPayments();}catch(error){showStatus(error.message,true);}}});
+document.getElementById("depositNext").addEventListener("click",async()=>{depositPage++;try{await loadDepositPayments();}catch(error){showStatus(error.message,true);}});
+document.getElementById("depositStatus").addEventListener("change",async()=>{depositPage=1;try{await loadDepositPayments();}catch(error){showStatus(error.message,true);}});
+
+async function loadCustomerRecommendationFollowups() {
+  const sequence = ++customerRecommendationQuerySequence;
+  const page = customerRecommendationPage;
+  const data = requireTodoPage(await postJson("/api/v1/line/mobile-admin/customer-recommendation-followups", {page, page_size:25}), page);
+  if (sequence !== customerRecommendationQuerySequence || target !== "staff_review") return;
+  if (page > data.totalPages) { customerRecommendationPage = data.totalPages; return loadCustomerRecommendationFollowups(); }
+  const labels = {
+    contact_requested: "客戶希望進一步了解，請查看留言並回覆。",
+    awaiting_signing: "客戶已接受配對，請至案件頁面準備契約並發起簽署；雙方簽約後才建立服務群組。",
+    reply_reminder: "確認資訊送達滿 7 天尚未接受；客戶仍可要求協助或接受配對。",
+  };
+  if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)
+      || data.items.some(item => !Number.isInteger(item.plan_id) || !Object.hasOwn(labels, item.status))) {
+    throw new Error("客戶推薦確認待辦格式不完整。");
+  }
+  const root = document.getElementById("customerRecommendationFollowups");
+  root.replaceChildren();
+  renderPagination(root, data, page => { customerRecommendationPage = page; loadCustomerRecommendationFollowups().catch(error => showStatus(error.message, true)); });
+  setWorkstreamCount("customerRecommendationCount", "customerRecommendationMeta", data.total, "待處理");
+  if (!data.items.length) { showEmpty(root, "目前沒有待處理的客戶推薦確認。"); return; }
+  data.items.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "card";
+    const title = document.createElement("strong");
+    title.textContent = `案件 ${item.case_no}`;
+    const summary = document.createElement("p");
+    summary.textContent = labels[item.status];
+    card.append(title, summary);
+    if (item.status === "contact_requested" && item.reminder_due_at && new Date(item.reminder_due_at) <= new Date()) {
+      const reminder = document.createElement("p");
+      reminder.className = "muted";
+      reminder.textContent = "確認資訊送達已滿 7 天，請跟進客戶需求；原卡片仍可接受配對。";
+      card.appendChild(reminder);
+    }
+    if (item.ticket_id) {
+      const view = document.createElement("button");
+      view.type = "button";
+      view.textContent = "查看留言與回覆";
+      view.addEventListener("click", async () => {
+        view.disabled = true;
+        try {
+          const detail = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${item.ticket_id}`, {});
+          card.appendChild(ticketCard(detail.ticket));
+        } catch (error) { view.disabled = false; showStatus(error.message, true); }
+      });
+      card.appendChild(view);
+    }
+    root.appendChild(card);
+  });
 }
 
 function matchingFollowupCard(item) {
   const card = document.createElement("article");
   card.className = "card";
-  card.id = `matching-followup-${item.pool_id}`;
-  card.dataset.caseNo = item.case_no;
-  const row = document.createElement("div");
-  row.className = "row";
   const title = document.createElement("strong");
   title.textContent = `案件 ${item.case_no}`;
-  const status = document.createElement("span");
-  status.className = "pill";
-  status.textContent = matchingNotificationLabels[item.notification_status];
-  row.append(title, status);
   const summary = document.createElement("p");
-  summary.className = "muted";
-  summary.textContent = item.action_required === "modify_then_recontact"
-    ? `客戶已同意調整。請完成正式案件資料修改，再重新詢問相關月嫂。`
-    : `已聯繫 ${item.candidate_count} 位：${item.no_interest_count} 位無意願、${item.timed_out_count} 位逾時；請人工接續處理。`;
-  const completed = document.createElement("p");
-  completed.className = "muted";
-  completed.textContent = `完成聯繫：${new Date(item.completed_at).toLocaleString()}`;
-  card.append(row, summary, completed);
-  if (item.action_required === "modify_then_recontact") {
-    const open = document.createElement("button");
-    open.type = "button";
-    open.textContent = "處理條件並重新詢問";
-    open.addEventListener("click", () => openMatchingFollowup(item).catch(error => showStatus(error.message, true)));
-    card.appendChild(open);
-  } else {
-    const guidance = document.createElement("p");
-    guidance.className = "muted";
-    guidance.textContent = "下一步：回到正式媒合流程新增候選人，或由工會人工聯繫；此待辦不會開啟排班重建。";
-    card.appendChild(guidance);
-  }
+  summary.textContent = `${item.reminder_count} 位月嫂送達滿 24 小時尚未回覆；仍可繼續回覆。`;
+  card.append(title, summary);
   return card;
 }
 
 async function loadMatchingFollowups() {
   const querySequence = ++matchingFollowupQuerySequence;
+  const page = matchingFollowupPage;
   const root = document.getElementById("matchingFollowups");
   root.replaceChildren();
-  const data = requireMatchingFollowupPage(await postJson(
+  const data = requireTodoPage(requireMatchingFollowupPage(await postJson(
     "/api/v1/line/mobile-admin/matching-followups",
-    {},
-  ));
+    {page, page_size:25},
+  )), page);
   if (querySequence !== matchingFollowupQuerySequence || target !== "staff_review") return;
-  setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", data.total, "需人工跟進");
+  if (page > data.totalPages) { matchingFollowupPage = data.totalPages; return loadMatchingFollowups(); }
+  renderPagination(root, data, page => { matchingFollowupPage = page; loadMatchingFollowups().catch(error => showStatus(error.message, true)); });
+  setWorkstreamCount("matchingFollowupCount", "matchingFollowupMeta", data.total, "待提醒");
   if (!data.items.length) {
-    showEmpty(root, "目前沒有需要工會人工跟進的媒合案件。");
+    showEmpty(root, "目前沒有需要提醒的月嫂回覆。");
     return;
   }
   data.items.forEach(item => root.appendChild(matchingFollowupCard(item)));
-  const requestedCaseNo = requestedMatchingCaseNo();
-  const requestedCard = [...root.querySelectorAll("[data-case-no]")]
-    .find(card => card.dataset.caseNo === requestedCaseNo);
-  if (requestedCard) {
-    const trigger = document.querySelector('[aria-controls="matchingWorkstream"]');
-    if (trigger?.getAttribute("aria-expanded") !== "true") toggleWorkstream(trigger);
-    requestedCard.scrollIntoView({block: "center"});
-    const requestedItem = data.items.find(item => item.case_no === requestedCaseNo);
-    if (requestedItem?.action_required === "modify_then_recontact") {
-      openMatchingFollowup(requestedItem).catch(error => showStatus(error.message, true));
-    }
-  }
+
 }
 
 async function loadIdentityReviews() {
@@ -1499,16 +1696,25 @@ async function loadIdentityReviews() {
   const querySequence = ++reviewQuerySequence;
   document.getElementById("reviews").replaceChildren();
   try {
-    const data = await postJson("/api/v1/line/mobile-admin/identity-reviews", {
-      review_status: requestedStatus,
-      review_type: null,
-      page: requestedPage,
-      page_size: reviewPageState.pageSize,
-    });
+    const [data, pending] = await Promise.all([
+      postJson("/api/v1/line/mobile-admin/identity-reviews", {
+        review_status: requestedStatus, review_type: null, page: requestedPage, page_size: reviewPageState.pageSize,
+      }),
+      requestedStatus === "pending" ? Promise.resolve(null) : postJson("/api/v1/line/mobile-admin/identity-reviews", {
+        review_status: "pending", review_type: null, page: 1, page_size: 1,
+      }),
+    ]);
     if (querySequence !== reviewQuerySequence
         || requestedStatus !== document.getElementById("reviewStatus").value
         || requestedPage !== reviewPageState.page) return;
+    if (Number.isInteger(data?.total) && data.total >= 0 && requestedPage > Math.max(1, Math.ceil(data.total / reviewPageState.pageSize))) {
+      reviewPageState.page = Math.max(1, Math.ceil(data.total / reviewPageState.pageSize));
+      return loadIdentityReviews();
+    }
     const pageData = requireReviewPage(data, requestedPage);
+    const pendingTotal = requestedStatus === "pending" ? pageData.total : pending?.total;
+    if (!Number.isInteger(pendingTotal) || pendingTotal < 0) throw new Error("待審核數量不完整，請重新整理。");
+    setWorkstreamCount("identityReviewCount", "identityReviewMeta", pendingTotal, "待審核");
     reviewPageState.page = pageData.page;
     reviewPageState.pageSize = pageData.page_size;
     reviewPageState.total = pageData.total;
@@ -1519,16 +1725,10 @@ async function loadIdentityReviews() {
       loadIdentityReviews().catch(error => showStatus(error.message, true));
     });
     if (!pageData.items.length) {
-      if (requestedStatus === "pending") {
-        setWorkstreamCount("identityReviewCount", "identityReviewMeta", 0, "待審核");
-      }
       showEmpty(root, "目前沒有符合條件的身分重綁或異常申請。");
       return 0;
     }
     pageData.items.forEach(review => root.appendChild(reviewCard(review)));
-    if (requestedStatus === "pending") {
-      setWorkstreamCount("identityReviewCount", "identityReviewMeta", pageData.total, "待審核");
-    }
     return pageData.total;
   } catch (error) {
     if (querySequence === reviewQuerySequence) throw error;
@@ -1689,12 +1889,16 @@ function appendDiffList(card, before, requested) {
 
 async function loadProfileReviews() {
   const querySequence = ++profileReviewQuerySequence;
+  const page = profileReviewPage;
   const root = document.getElementById("profileReviews");
   root.replaceChildren();
-  const data = await postJson("/api/v1/line/mobile-admin/client-profile/requests", {
-    status: "pending", page: 1, page_size: 50,
-  });
+  const data = requireTodoPage(await postJson("/api/v1/line/mobile-admin/client-profile/requests", {
+    status: "pending", page, page_size:25,
+  }), page);
   if (querySequence !== profileReviewQuerySequence) return 0;
+  if (page > data.totalPages) { profileReviewPage = data.totalPages; return loadProfileReviews(); }
+  renderPagination(root, data, page => { profileReviewPage = page; loadProfileReviews().catch(error => showStatus(error.message, true)); });
+  setWorkstreamCount("profileReviewCount", "profileReviewMeta", data.total, "待審核");
   if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)) {
     throw new Error("客戶資料異動待辦格式不完整。");
   }
@@ -1800,29 +2004,22 @@ async function applyProfileDecision(request) {
 
 async function loadLeaveReviews() {
   const querySequence = ++leaveReviewQuerySequence;
+  const page = leaveReviewPage;
   const root = document.getElementById("leaveReviews");
   root.replaceChildren();
-  const [pending, accepted] = await Promise.all([
-    postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
-      status: "pending", limit: 50,
-    }),
-    postJson("/api/v1/line/mobile-admin/staff-leave-requests", {
-      status: "accepted_for_processing", limit: 50,
-    }),
-  ]);
+  const data = requireTodoPage(await postJson("/api/v1/line/mobile-admin/staff-leave-requests/page", {page, page_size:25}), page);
   if (querySequence !== leaveReviewQuerySequence) return 0;
-  if (!Array.isArray(pending) || !Array.isArray(accepted)) {
-    throw new Error("請假待辦格式不完整。");
-  }
-  const items = [...pending, ...accepted].sort((left, right) => left.id - right.id);
+  if (page > data.totalPages) { leaveReviewPage = data.totalPages; return loadLeaveReviews(); }
+  const items = data.items;
+  renderPagination(root, data, page => { leaveReviewPage = page; loadLeaveReviews().catch(error => showStatus(error.message, true)); });
+  setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", data.total, "待處理");
   if (!items.length) {
     setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", 0, "待處理");
     showEmpty(root, "目前沒有待處理的月嫂請假或客戶順延案件。");
     return 0;
   }
   items.forEach(request => root.appendChild(leaveReviewCard(request)));
-  setWorkstreamCount("leaveReviewCount", "leaveReviewMeta", items.length, "待處理");
-  return items.length;
+  return data.total;
 }
 
 function leaveReviewCard(request) {
@@ -2368,7 +2565,8 @@ document.getElementById("orderStatusSearchForm").addEventListener("submit", even
 });
 document.getElementById("refreshOperations").addEventListener("click", loadOperationsSummary);
 document.getElementById("backToWorkQueue").addEventListener("click", () => switchPane("staff_review"));
-document.getElementById("previewMatchingTerms").addEventListener("click", () => previewMatchingTerms().catch(error => showStatus(error.message, true)));
+document.getElementById("openSchedulingTool").addEventListener("click", () => switchPane("scheduling_review"));
+document.getElementById("reconsiderMatchingConditions").addEventListener("click", reconsiderMatchingConditions);
 document.getElementById("applyMatchingTerms").addEventListener("click", () => applyMatchingTerms().catch(error => showStatus(error.message, true)));
 document.getElementById("previewMatchingRecontact").addEventListener("click", () => previewMatchingRecontact().catch(error => showStatus(error.message, true)));
 document.getElementById("applyMatchingRecontact").addEventListener("click", () => applyMatchingRecontact().catch(error => showStatus(error.message, true)));

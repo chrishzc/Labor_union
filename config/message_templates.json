@@ -7,7 +7,7 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n📱【新手快速導覽・三步驟開始使用】\n\n1️⃣ 準爸媽／產婦專區：\n👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n{url}\n（此安全登記連結將於 15 分鐘後失效）\n\n2️⃣ 專業月嫂服務人員：\n👉 請點擊下方選單【月嫂專區】或直接在對話框輸入「我要綁定月嫂」進行身分認證。\n\n3️⃣ 服務說明與專人諮詢：\n👉 請點擊下方選單【服務說明】查看服務流程與常見問答。\n\n---\n💡 如需真人專員協助，隨時在對話框輸入「轉真人客服」，我們將由專人為您服務。\n\n👇 請點擊下方圖文選單，開啟您的專屬服務！",
+      "content": "您好！歡迎加入【新竹市月子工會】官方服務平台 🤱✨\n\n我們提供專業、安心、有保障的到府坐月子媒合與母嬰照護服務。\n\n📱【新手快速導覽・三步驟開始使用】\n\n1️⃣ 準爸媽／產婦專區：\n👉 請開啟以下專屬登記頁面，進行服務需求填寫或核對市府登記案件：\n{url}\n（此安全登記連結將於 15 分鐘後失效）\n\n2️⃣ 專業月嫂服務人員：\n👉 請點擊下方選單【月嫂身分綁定】或直接在對話框輸入「我是月嫂」進行身分認證。\n\n3️⃣ 服務說明與專人諮詢：\n👉 請點擊下方選單【AI 智慧問答】使用 AI 問答或瀏覽常見問答。\n\n---\n📌 本帳號採自助服務，一般留言不會有專員回覆。如需協助，請點選【聯絡專人服務】或輸入「聯絡專人服務」，專員才會在聊天室回覆您。\n\n👇 請點擊下方圖文選單，開啟您的專屬服務！",
       "variables": [
         {
           "name": "url",
@@ -25,7 +25,7 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "身分驗證成功！已為您切換至【月嫂專屬選單】。\n\n您現在可以使用下方的專屬功能查詢訂單與班表了。",
+      "content": "月嫂身分已完成綁定，專屬選單將稍後更新。",
       "variables": [],
       "usage": [
         "webhook",
@@ -38,14 +38,8 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "切換選單失敗 (Error {status_code})，請聯絡系統管理員。",
-      "variables": [
-        {
-          "name": "status_code",
-          "required": true,
-          "description": "LINE API HTTP 狀態碼"
-        }
-      ],
+      "content": "月嫂專屬選單暫時無法更新，請稍後再試；如需協助，請呼叫專員。",
+      "variables": [],
       "usage": [
         "webhook"
       ]
@@ -80,14 +74,8 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "切換回預設選單失敗 (Error {status_code})，請聯絡系統管理員。",
-      "variables": [
-        {
-          "name": "status_code",
-          "required": true,
-          "description": "LINE API HTTP 狀態碼"
-        }
-      ],
+      "content": "訪客選單暫時無法回復，請呼叫專員協助確認目前身分與處理進度。",
+      "variables": [],
       "usage": [
         "webhook"
       ]
@@ -98,7 +86,7 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "您好！請點擊以下連結進行案件查詢與帳號綁定：\n\n{bind_url}\n\n請在網頁中輸入您的真實姓名與行動電話，系統核對後將會回傳您的案件編號。如有任何問題，請聯絡公會專員。",
+      "content": "請開啟以下頁面核對姓名與行動電話，完成帳號綁定或提出重新綁定申請：\n\n{bind_url}\n\n只有核對成功並完成正式綁定後，才會顯示可用的案件資訊。",
       "variables": [
         {
           "name": "bind_url",
@@ -113,23 +101,12 @@
     },
     {
       "id": "register_success",
-      "name": "服務登記成功",
+      "name": "服務登記申請受理（待工會核准）",
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "【系統通知】\n服務登記與綁定成功！\n您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n您的案件編號為：{case_no}。\n如案件編號尚未核發，行政完成核對後將主動通知您。",
-      "variables": [
-        {
-          "name": "name",
-          "required": true,
-          "description": "客戶姓名"
-        },
-        {
-          "name": "case_no",
-          "required": false,
-          "description": "案件編號"
-        }
-      ],
+      "content": "申請已送出，待工會核准。",
+      "variables": [],
       "usage": [
         "webhook",
         "push"
@@ -141,19 +118,8 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "【系統通知】\n已為您綁定與查詢成功。\n您的 LINE 帳號已綁定至客戶「{name}」的資料庫。\n您的案件編號為：{case_no}。",
-      "variables": [
-        {
-          "name": "name",
-          "required": true,
-          "description": "客戶姓名"
-        },
-        {
-          "name": "case_no",
-          "required": false,
-          "description": "案件編號"
-        }
-      ],
+      "content": "綁定成功，專屬選單將稍後更新。",
+      "variables": [],
       "usage": [
         "webhook",
         "push"
@@ -165,19 +131,8 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "【系統通知】\n您已經綁定過了。\n您的 LINE 帳號已關聯至客戶「{name}」。\n您的案件編號為：{case_no}。",
-      "variables": [
-        {
-          "name": "name",
-          "required": true,
-          "description": "客戶姓名"
-        },
-        {
-          "name": "case_no",
-          "required": false,
-          "description": "案件編號"
-        }
-      ],
+      "content": "您已綁定同一帳號，無須重複提交。",
+      "variables": [],
       "usage": [
         "webhook",
         "push"
@@ -189,7 +144,7 @@
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "您之前已經綁定過另一個帳戶，請問是否重新綁定？",
+      "content": "目前已有其他帳號綁定。送出重新綁定申請後由工會審核；取消或核准前會保留原綁定。",
       "variables": [],
       "usage": [
         "webhook",
@@ -366,7 +321,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: gateway retry review.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
@@ -376,7 +333,10 @@
       "enabled": true,
       "content": "月嫂已提出請假／調休申請，服務日期可能需要順延。請在 LINE 通知中確認是否同意；若不同意，工會將協助安排代班月嫂。",
       "variables": [],
-      "usage": ["leave_coordination", "notification"]
+      "usage": [
+        "leave_coordination",
+        "notification"
+      ]
     },
     {
       "id": "LU96-M1-STAFF-RETIRE-CARD-V1",
@@ -386,7 +346,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: staff retirement.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M2-ROUTER-REPLY-CARD-V1",
@@ -396,7 +358,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: deterministic router reply.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1",
@@ -406,17 +370,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: unresolved feedback.",
       "variables": [],
-      "usage": ["task96_baseline"]
-    },
-    {
-      "id": "LU96-M3-ZERO-POOL-CARD-V1",
-      "name": "候選池協調建議",
-      "category": "matching_coordination",
-      "message_type": "text",
-      "enabled": true,
-      "content": "目前已聯繫的候選月嫂皆已完成回覆，但尚無人願意承接。工會已彙整可協調的服務條件，請確認是否可以調整；您的回覆不代表已完成派案。",
-      "variables": [],
-      "usage": ["matching_coordination", "notification"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1",
@@ -426,7 +382,10 @@
       "enabled": true,
       "content": "媒合已完成，工會已確認本案的服務月嫂。請查看最新服務安排；如需協助，請直接於官方 LINE 留言。",
       "variables": [],
-      "usage": ["matching_result", "notification"]
+      "usage": [
+        "matching_result",
+        "notification"
+      ]
     },
     {
       "id": "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
@@ -436,7 +395,10 @@
       "enabled": true,
       "content": "您已完成本案媒合指派，請查看最新服務日期與案件安排；如資料有誤，請儘速聯繫工會專員。",
       "variables": [],
-      "usage": ["matching_result", "notification"]
+      "usage": [
+        "matching_result",
+        "notification"
+      ]
     },
     {
       "id": "LU96-M3-LEAVE-AGREE-CARD-V1",
@@ -446,7 +408,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: leave extension agreed.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M3-LEAVE-DISAGREE-CARD-V1",
@@ -456,7 +420,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: leave extension rejected.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LU96-M4-SAFE-ALERT-CARD-V1",
@@ -464,9 +430,12 @@
       "category": "runtime_alert",
       "message_type": "text",
       "enabled": true,
-      "content": "系統偵測到需要人工處理的重大異常。請由安全審核入口查看去敏資訊並進行處理；請勿在群組轉貼個案資料。",
+      "content": "系統偵測到需要人工處理的重大異常。請開啟工會客服系統，驗證身分後查看去敏資訊並處理。",
       "variables": [],
-      "usage": ["runtime_alert", "notification"]
+      "usage": [
+        "runtime_alert",
+        "notification"
+      ]
     },
     {
       "id": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
@@ -474,9 +443,12 @@
       "category": "customer_service",
       "message_type": "text",
       "enabled": true,
-      "content": "收到重大客訴急件，系統已建立 HIGH 優先工單並暫停自動回覆。請由客服中心查看去敏摘要並接手處理。",
+      "content": "收到重大客訴急件，已建立優先處理的客服案件。請開啟工會客服系統，查看去敏摘要並接手處理。",
       "variables": [],
-      "usage": ["customer_service", "notification"]
+      "usage": [
+        "customer_service",
+        "notification"
+      ]
     },
     {
       "id": "LU96-M4-SALARY-PAYABLE-CARD-V1",
@@ -486,7 +458,9 @@
       "enabled": true,
       "content": "Task96 baseline notification: payable anomaly review.",
       "variables": [],
-      "usage": ["task96_baseline"]
+      "usage": [
+        "task96_baseline"
+      ]
     },
     {
       "id": "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1",
@@ -502,7 +476,10 @@
           "description": "服務日期"
         }
       ],
-      "usage": ["service_day", "notification"]
+      "usage": [
+        "service_day",
+        "notification"
+      ]
     },
     {
       "id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
@@ -533,7 +510,10 @@
           "description": "第一期款繳費狀態"
         }
       ],
-      "usage": ["order_lifecycle", "notification"]
+      "usage": [
+        "order_lifecycle",
+        "notification"
+      ]
     },
     {
       "id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
@@ -564,7 +544,10 @@
           "description": "第二期款繳費狀態"
         }
       ],
-      "usage": ["order_lifecycle", "notification"]
+      "usage": [
+        "order_lifecycle",
+        "notification"
+      ]
     }
   ]
 }

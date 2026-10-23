@@ -493,6 +493,7 @@ def test_canonical_review_numbered_route_is_additive(monkeypatch) -> None:
         review_type=LineReviewType.STAFF_VERIFICATION,
         page=2,
         page_size=25,
+        search="",
     )
 
     assert captured == [

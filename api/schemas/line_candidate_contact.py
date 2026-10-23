@@ -69,6 +69,7 @@ class CandidateContactSubmitView(BaseModel):
     event_id: int = Field(gt=0)
     response_kind: Literal["coordination_requested", "no_interest"]
     customer_message_queued: bool
+    union_followup_required: bool
 
 
 class CandidateContactCustomerQueryRequest(CandidateContactIdentityRequest):
@@ -91,11 +92,57 @@ class CandidateContactCustomerFormView(BaseModel):
     request_kind: Literal["information_question", "condition_adjustment"]
     status: Literal["open", "closed"]
     issues: list[CandidateContactCustomerIssueView]
+    message_text: str | None = None
+
+
+class CandidateInformationStaffIssueView(BaseModel):
+    label: str
+    detail: str
+
+
+class CandidateInformationStaffItemView(BaseModel):
+    question_id: int = Field(gt=0)
+    pool_id: int = Field(gt=0)
+    request_kind: Literal['information_question', 'condition_adjustment']
+    customer_answer_event_id: int | None
+    review_completed: bool
+    case_no: str
+    staff_name: str
+    issues: list[CandidateInformationStaffIssueView]
+    customer_answer: str | None
+    customer_message: str | None
+    customer_available: bool
+
+
+class CandidateInformationStaffPageView(BaseModel):
+    items: list[CandidateInformationStaffItemView]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=50)
+
+
+class CandidateInformationStaffQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    line_id_token: str = Field(min_length=1, max_length=4096)
+    page: int = Field(default=1, ge=1, le=10000)
+    page_size: int = Field(default=25, ge=1, le=50)
+
+
+class CandidateInformationStaffSendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    line_id_token: str = Field(min_length=1, max_length=4096)
+    recipient: Literal["caregiver", "customer"]
+    message_text: str = Field(min_length=1, max_length=1000)
+    idempotency_key: str = Field(min_length=1, max_length=100)
+
+
+class CandidateInformationStaffSendView(BaseModel):
+    status: Literal["queued", "idempotent_replay"]
+    event_id: int = Field(gt=0)
 
 
 class CandidateContactCustomerSubmitRequest(CandidateContactIdentityRequest):
     answer: str = Field(default="", max_length=1000)
-    decision: Literal["can_adjust", "cannot_adjust"] | None = None
     idempotency_key: str = Field(min_length=1, max_length=100)
 
 
@@ -109,6 +156,10 @@ class CandidateContactCustomerSubmitView(BaseModel):
 
 
 __all__ = [
+    "CandidateInformationStaffPageView",
+    "CandidateInformationStaffQueryRequest",
+    "CandidateInformationStaffSendRequest",
+    "CandidateInformationStaffSendView",
     "CandidateContactFormView",
     "CandidateContactIdentityRequest",
     "CandidateContactIssueRequest",

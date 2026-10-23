@@ -12,8 +12,8 @@
     "gateway": {
       "page_type": "navigation",
       "enabled": true,
-      "title": "歡迎！請選擇您的狀態",
-      "subtitle": "為協助您快速完成服務建檔，請告訴我們您是否已經填寫過申請表單？",
+      "title": "服務確認與身分導流",
+      "subtitle": "請確認您是否已於新竹市政府平台完成申請登記？",
       "submit_button": "繼續",
       "success_title": "",
       "success_description": "",
@@ -25,20 +25,20 @@
       },
       "actions": [
         {
-          "id": "bind_existing",
-          "label": "已登記服務 / 補助",
-          "description": "我已經登記過政府補助或填寫過 BeClass 表單，我要直接綁定查詢進度。",
+          "id": "registered_city",
+          "label": "已申請市府平台",
+          "description": "我已在市府媒合服務平台完成登記，要核對客戶資料並繼續填寫工會需求調查表單。",
           "icon": "📝",
-          "path": "/line-identity",
+          "path": "/line-bind",
           "enabled": true,
           "order": 10
         },
         {
-          "id": "register_new",
-          "label": "尚未填寫登記表單",
-          "description": "我是新客戶，尚未填寫任何資料，我要現在填寫並建立服務訂單。",
-          "icon": "✨",
-          "path": "/line-registration",
+          "id": "apply_city",
+          "label": "未申請市府平台",
+          "description": "請先前往新竹市政府到宅月子媒合服務平台提出申請。",
+          "icon": "🏛️",
+          "path": "https://hsinchu-nanny.hccg.gov.tw/home",
           "enabled": true,
           "order": 20
         }
@@ -48,23 +48,23 @@
     "bind": {
       "page_type": "bind",
       "enabled": true,
-      "title": "服務綁定與訂單查詢",
-      "subtitle": "請填寫您的基本資料，以完成 LINE 帳號與最新訂單的綁定與查詢。",
+      "title": "客戶登記與身分綁定",
+      "subtitle": "請核對姓名與電話。已有完整登記資料者可綁定；尚未完成者將前往需求調查表單，送出後由工會審核。",
       "submit_button": "確認綁定",
-      "success_title": "綁定與查詢成功",
-      "success_description": "您的服務綁定與最新案件查詢已成功。",
+      "success_title": "綁定成功",
+      "success_description": "綁定成功，專屬選單將稍後更新。",
       "loading_text": "正在初始化系統...",
       "content": {
         "logo": "新竹市月子工會",
-        "rebind_title": "確認重新綁定",
-        "rebind_description": "本筆訂單已有綁定另一個帳戶。確認後將送交工會人員審核，通過後才會重新綁定。",
-        "rebind_cancel_button": "取消綁定",
-        "rebind_confirm_button": "送出重新綁定申請",
+        "rebind_title": "申請重新綁定",
+        "rebind_description": "此資料需要重新綁定。送出後由工會確認，核准前保留原綁定。",
+        "rebind_cancel_button": "取消",
+        "rebind_confirm_button": "申請重新綁定",
         "close_button": "關閉視窗",
-        "client_prefill_message": "已自動帶入您先前綁定之姓名與電話。若本次訂單使用不同資料，請修改後再按確認綁定。",
+        "client_prefill_message": "已帶入您先前綁定的姓名與電話，請核對；如需綁定其他案件，請修改資料後確認。",
         "validation_error": "請填寫所有必要欄位。",
         "submit_loading_text": "正在核對並綁定帳號...",
-        "rebind_loading_text": "正在送出重新綁定申請..."
+        "rebind_loading_text": "正在申請重新綁定..."
       },
       "actions": [],
       "fields": [
@@ -98,10 +98,10 @@
       "page_type": "registration",
       "enabled": true,
       "title": "產婦服務登記表單",
-      "subtitle": "請詳細填寫以下資料，送出後將為您建立專屬服務檔案並進行媒合。",
+      "subtitle": "請填寫服務需求，送出後由工會審核。",
       "submit_button": "送出完整服務登記表單",
-      "success_title": "送出成功！",
-      "success_description": "您的服務資料已經完整登錄至系統。案件編號完成行政核發後，LINE 將主動通知您。",
+      "success_title": "申請已送出",
+      "success_description": "申請已送出，待工會核准。",
       "loading_text": "資料傳送中，請稍候...",
       "content": {
         "logo": "新竹市月子工會",

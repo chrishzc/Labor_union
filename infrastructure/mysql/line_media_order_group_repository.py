@@ -14,6 +14,8 @@ from domains.line.media import LineMediaCategory, LineMediaMetadata
 from domains.line.order_group import (
     LineOrderGroupBindingSnapshot,
     LineOrderGroupBindingStatus,
+    LineOrderGroupBindingConflict,
+    validate_invitation_url,
     build_order_group_binding_candidate,
 )
 from infrastructure.mysql.line_repository_support import (
@@ -29,6 +31,9 @@ from subsystems.line.media_contracts import (
     LineMediaArchiveOutcome,
 )
 from subsystems.line.order_group_contracts import (
+    PaidOrderGroupTodo,
+    PaidOrderGroupTodoPage,
+    LineOrderGroupInvitationSettings,
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
     LineOrderGroupCommandOutcome,
@@ -114,6 +119,28 @@ class MySqlLineMediaMetadataRepository:
 class MySqlLineOrderGroupBindingRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def paid_uncreated_todos(self, *, page: int, page_size: int) -> PaidOrderGroupTodoPage:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise ValueError('line_group_todo_page_invalid')
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 50:
+            raise ValueError('line_group_todo_page_size_invalid')
+        source = (
+            " FROM orders o JOIN client_deposit_settlement_projection p ON p.case_no=o.case_no "
+            "LEFT JOIN line_order_group_bindings g ON g.case_no=o.case_no "
+            "WHERE o.status IN ('洽談中','訂單成立','服務中') AND p.settlement_state='settled' "
+            "AND p.contracted_amount_ntd>0 AND g.group_id IS NULL"
+        )
+        with self._connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) AS total' + source, ())
+            total = int(cursor.fetchone()['total'])
+            cursor.execute(
+                'SELECT o.case_no,p.contracted_amount_ntd' + source + ' ORDER BY o.case_no LIMIT %s OFFSET %s',
+                (page_size, (page - 1) * page_size),
+            )
+            items = tuple(PaidOrderGroupTodo(str(row['case_no']), int(row['contracted_amount_ntd']))
+                          for row in cursor.fetchall())
+        return PaidOrderGroupTodoPage(items, page, page_size, total, (total + page_size - 1) // page_size)
 
     def workspace_list(self, *, search, status, page, page_size) -> LineOrderGroupWorkspacePage:
         conditions = []
@@ -333,6 +360,32 @@ class MySqlLineOrderGroupBindingRepository:
             total,
             (total + page_size - 1) // page_size,
         )
+
+    def get_invitation(self, case_no: str, *, lock: bool = False) -> LineOrderGroupInvitationSettings | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT case_no,group_id,binding_status,aggregate_version,invitation_url "
+                "FROM line_order_group_bindings WHERE case_no=%s" + (" FOR UPDATE" if lock else ""),
+                (case_no,),
+            )
+            row = optional_row(cursor.fetchone())
+        return None if row is None else LineOrderGroupInvitationSettings(_group_snapshot(row), row.get("invitation_url"))
+
+    def save_invitation_url(self, binding: LineOrderGroupBindingSnapshot, invitation_url: str) -> None:
+        validate_invitation_url(invitation_url)
+        current = self.get_invitation(binding.case_no, lock=True)
+        if current is None or current.binding.group_id != binding.group_id or current.binding.version != binding.version:
+            raise LineOrderGroupBindingConflict("line_order_group_binding_conflict")
+        if current.invitation_url == invitation_url:
+            return
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE line_order_group_bindings SET invitation_url=%s "
+                "WHERE case_no=%s AND group_id=%s AND aggregate_version=%s",
+                (invitation_url, binding.case_no, binding.group_id.value, binding.version.value),
+            )
+            if cursor.rowcount != 1:
+                raise LineOrderGroupBindingConflict("line_order_group_binding_conflict")
 
     def bind(
         self,

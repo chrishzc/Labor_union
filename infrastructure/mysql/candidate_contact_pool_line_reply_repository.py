@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from infrastructure.mysql.replacement_matching_query import candidate_contact_open
@@ -39,8 +39,7 @@ class MySqlCandidateContactPoolLineReplyRepository:
                 "EXISTS(SELECT 1 FROM caregiver_candidate_contact_events refreshed "
                 "WHERE refreshed.candidate_id=entry.id AND refreshed.id>source_event.id "
                 "AND refreshed.event_type='willingness_changed' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.response_kind'))='candidate_period_refreshed' "
-                "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.willingness'))='pending') AS period_stale, "
+                "AND JSON_UNQUOTE(JSON_EXTRACT(refreshed.payload,'$.response_kind'))='candidate_period_refreshed') AS period_stale, "
                 "staff_binding.line_user_id, orders.status AS order_status, "
                 "COALESCE((SELECT MAX(answer_delivery.sent_at_utc) FROM line_delivery_tasks answer_delivery "
                 "WHERE answer_delivery.source_aggregate_type='candidate_contact_answer' "
@@ -109,15 +108,6 @@ class MySqlCandidateContactPoolLineReplyRepository:
                 if sent_at.tzinfo is None
                 else sent_at.astimezone(timezone.utc)
             )
-            if self._now() >= sent_at + timedelta(hours=24):
-                raise ValueError("candidate contact response expired")
-            if _pool_has_willing_candidate(
-                cursor,
-                int(binding["pool_id"]),
-                excluding_candidate_id=int(binding["candidate_id"]),
-            ):
-                raise ValueError("candidate contact pool is already resolved")
-
             cursor.execute(
                 "INSERT INTO caregiver_candidate_contact_events "
                 "(pool_id,candidate_id,event_type,event_key,actor,payload) "
@@ -136,56 +126,16 @@ class MySqlCandidateContactPoolLineReplyRepository:
             return event_id
 
 
-def _payload(row: Mapping[str, object]) -> Mapping[str, object]:
-    value = row.get("payload")
-    parsed = json.loads(value) if isinstance(value, str) else value
-    return parsed if isinstance(parsed, Mapping) else {}
-
-
-def _pool_has_willing_candidate(
-    cursor,
-    pool_id: int,
-    *,
-    excluding_candidate_id: int | None = None,
-) -> bool:
-    cursor.execute(
-        "SELECT candidate_id,payload FROM caregiver_candidate_contact_events "
-        "WHERE pool_id=%s AND candidate_id IS NOT NULL "
-        "AND event_type='willingness_changed' ORDER BY id",
-        (pool_id,),
-    )
-    latest: dict[int, Mapping[str, object]] = {}
-    for row in cursor.fetchall() or ():
-        if not isinstance(row, Mapping):
-            continue
-        candidate_id = int(row.get("candidate_id") or 0)
-        payload = _payload(row)
-        if candidate_id and (
-            payload.get("response_kind")
-            in {"coordination_requested", "no_interest", "timed_out"}
-            or payload.get("willingness") in {"pending", "willing", "unwilling"}
-        ):
-            latest[candidate_id] = payload
-    return any(
-        candidate_id != excluding_candidate_id
-        and payload.get("willingness") == "willing"
-        for candidate_id, payload in latest.items()
-    )
-
-
 def _cancel_pending_coordination(cursor, pool_id: int) -> None:
     cursor.execute(
         "UPDATE line_delivery_tasks SET processing_status='cancelled',"
         "error_code='candidate_contact_pool_resolved',"
         "error_message='candidate contact pool already has a willing caregiver',"
         "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-        "WHERE processing_status IN ('pending','retryable_failed') AND (("
-        "source_aggregate_type='candidate_contact_adjustment' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s) OR ("
-        "source_aggregate_type='candidate_contact_question' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED) IN ("
-        "SELECT id FROM caregiver_candidate_contact_events WHERE pool_id=%s)))",
-        (pool_id, pool_id),
+        "WHERE processing_status IN ('pending','retryable_failed') "
+        "AND source_aggregate_type='candidate_contact_adjustment' "
+        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s",
+        (pool_id,),
     )
 
 __all__ = ["MySqlCandidateContactPoolLineReplyRepository"]

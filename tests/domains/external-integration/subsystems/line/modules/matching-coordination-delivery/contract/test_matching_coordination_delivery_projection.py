@@ -99,14 +99,13 @@ def test_draft_snapshot_is_fail_closed_behind_confirmation_gate():
     assert "NOT IN ('confirmed','manually_confirmed')" in recipient_sql
 
 
-def test_new_card_reads_configured_copy_without_changing_actions_or_case_fields():
-    _, before = _project('matching.request.participants', '原本的說明文字。')
-    _, after = _project('matching.request.participants', '更新後的通知說明。')
-    old_bubble = before['message']['contents']['contents'][-1]
-    new_bubble = after['message']['contents']['contents'][-1]
-    assert old_bubble['body']['contents'][-1]['text'] == '原本的說明文字。'
-    assert new_bubble['body']['contents'][-1]['text'] == '更新後的通知說明。'
-    assert old_bubble['body']['contents'][:-1] == new_bubble['body']['contents'][:-1]
-    assert old_bubble['footer'] == new_bubble['footer']
-    assert before['recipient_snapshot'] == after['recipient_snapshot']
-    assert before['interaction']['token'] == after['interaction']['token']
+def test_retired_zero_pool_projection_never_reads_configuration_or_creates_a_token():
+    import pytest
+    from types import SimpleNamespace
+    from subsystems.line.matching_coordination_delivery import MatchingCoordinationDeliveryError
+    def forbidden():
+        pytest.fail("retired projection must not read recipients or configuration")
+    adapter = MySqlLineMatchingCoordinationDeliveryProjection(SimpleNamespace(cursor=forbidden))
+    with pytest.raises(MatchingCoordinationDeliveryError) as error:
+        adapter.project(SimpleNamespace(case_no="CASE-96"), None, "old-zero", {"recipient_selector":"matching.request.participants"})
+    assert error.value.code == "matching_zero_pool_notification_retired"

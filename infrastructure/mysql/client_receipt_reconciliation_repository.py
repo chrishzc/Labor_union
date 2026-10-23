@@ -279,6 +279,7 @@ class MySqlClientReceiptReconciliationRepository:
         payload = {
             "case_no": request.selection.case_no,
             "settlement_identity": candidate.settlement_identity.value,
+            "line_deposit_notification": True,
             "resulting_account_version": (
                 request.expected_account_version.value + 1
             ),

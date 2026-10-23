@@ -358,6 +358,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_13_staff_union_number_v1.json",
     "labor_union_2026_10_14_candidate_weekly_information_v1.json",
     "labor_union_2026_10_19_nas_registration_approval_v1.json",
+    "labor_union_2026_10_22_line_order_group_invitation_url_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -5888,6 +5889,14 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {
             "event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')", "NO"),
         }
+    if part_name == "1053_line_order_group_invitation_url.sql":
+        descriptor["parent_columns"]["line_order_group_bindings"] = {
+            "invitation_url": {
+                **_column_contract("varchar(2048)", "YES"),
+                "character_set_name": "utf8mb4",
+                "collation_name": "utf8mb4_bin",
+            },
+        }
     if part_name == "1052_nas_registration_approval.sql":
         descriptor["parent_columns"]["provisional_client_registrations"] = {
             "application_payload": _column_contract("json", "YES"),
@@ -6245,6 +6254,7 @@ def _release_descriptor_metadata_state(
         "1050_staff_union_number.sql",
         "1051_candidate_weekly_information.sql",
         "1052_nas_registration_approval.sql",
+        "1053_line_order_group_invitation_url.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(

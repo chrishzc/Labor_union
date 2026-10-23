@@ -7,11 +7,7 @@
 
 ## Responsibility
 
-Own the short-lived, one-time safe review-link transport root, its masked
-readback, receipts, audit events, and committed local outbox intent. Runtime
-alert targets remain the source of alert-target identity/version; this module
-reads those roots but never changes them or performs provider delivery.
-Business review facts and approval remain with their owning Domain.
+2026-10-22 人工裁決取消群組告警及其專用一次性審核連結。Issue／Redeem 僅回 retired error，零 UoW／token／outbox；保留歷史 masked Query、Revoke、receipt 與 audit，不恢復群組通知。
 
 ## Implementation
 
@@ -36,25 +32,9 @@ Business review facts and approval remain with their owning Domain.
 
 ## Safety boundary
 
-Only token digests are persisted. A fresh Issue reads and locks the unique
-active runtime alert group in the same UoW as the link, event, receipt, and
-outbox. A first Redeem locks the link and rechecks token, actor, capability,
-path, expiry, and the freshly read runtime group id/opaque version against
-its immutable issuance evidence. The public numeric `target_version` /
-`current_target_version` fields are still compared, but are not a substitute
-for the runtime owner's opaque version or for a business owner's version check.
+群組連結不得重新簽發、兌換或因 replay 回復功能；API 對退役操作回 HTTP 410。歷史 Query／撤銷沿原 root version 與 receipt。既有 schema 與 immutable issued events 保留，不回填或刪除。
 
-A changed group, disabled group, or changed version after same-group
-reactivation rejects the old link. A pre-correction link without issuance
-owner evidence must be reissued; do not invent or backfill that evidence.
-An exact command replay returns its existing receipt, not a new redemption.
-Provider send is outside this module's effect ceiling.
-
-The ordinary `/line-mobile-admin?target=customer_service` URL now included in
-Customer Service alerts is authenticated navigation, not an issued one-time
-Safe Review Link. Its presence does not prove the alert-to-one-time-link
-acceptance in specification 26 §9 / §9.1. That end-to-end flow and the business
-review's Preview/Apply/readback must be verified separately.
+普通 `/line-mobile-admin?target=customer_service` 為仍有效的身分驗證導航，不是群組一次性審核連結。
 
 ## Verification
 - layout_status: `custom_current`

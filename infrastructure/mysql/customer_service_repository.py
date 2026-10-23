@@ -48,6 +48,19 @@ class MySqlCustomerServiceRepository:
     def get_by_event_key(self, event_key: str) -> CustomerServiceTicket | None:
         return self._ticket_for_event(event_key)
 
+    def active_matching_assistance(self, line_user_id: str) -> CustomerServiceTicket | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT t.* FROM customer_service_tickets t WHERE t.line_user_id=%s "
+                "AND t.status IN ('waiting','handling') AND EXISTS "
+                "(SELECT 1 FROM customer_service_ticket_events e WHERE e.ticket_id=t.id "
+                "AND (e.event_key LIKE 'matching-assistance:%%' OR e.event_key LIKE 'deposit-assistance:%%')) "
+                "ORDER BY t.id DESC LIMIT 1 FOR UPDATE",
+                (line_user_id,),
+            )
+            row = cursor.fetchone()
+        return _ticket(row) if row else None
+
     def event_message(self, event_key: str) -> str | None:
         with self._connection.cursor() as cursor:
             cursor.execute(

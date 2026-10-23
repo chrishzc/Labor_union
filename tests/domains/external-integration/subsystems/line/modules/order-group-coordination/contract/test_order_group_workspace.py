@@ -19,6 +19,88 @@ from subsystems.line.capabilities import LineCapabilityDeniedError
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
 
 
+def prepare_paid_group_todos(connection):
+    connection.db.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT '訂單成立'")
+    connection.db.execute('CREATE TABLE client_deposit_settlement_projection (case_no TEXT PRIMARY KEY,settlement_state TEXT,contracted_amount_ntd INT)')
+    for case, order_status, state, amount, group in (
+        ('PAID-1','訂單成立','settled',12000,None),
+        ('PAID-2','洽談中','settled',18000,None),
+        ('UNPAID','洽談中','unsettled',12000,None),
+        ('ZERO','洽談中','settled',0,None),
+        ('BOUND','訂單成立','settled',12000,'C-bound'),
+        ('CANCELLED','訂單取消','settled',12000,None),
+        ('COMPLETED','訂單完成','settled',12000,None),
+    ):
+        connection.db.execute('INSERT INTO orders(case_no,status) VALUES (?,?)',(case,order_status))
+        connection.db.execute('INSERT INTO client_deposit_settlement_projection VALUES (?,?,?)',(case,state,amount))
+        if group:
+            connection.db.execute("INSERT INTO line_order_group_bindings VALUES (?,?,'active',1,'2026-10-22',NULL)",(case,group))
+    connection.db.execute("INSERT INTO orders(case_no,status) VALUES ('NO-SETTLEMENT','訂單成立')")
+    connection.db.execute("INSERT INTO line_order_group_bindings VALUES ('PAID-2',NULL,'unbound',0,'2026-10-22',NULL)")
+
+
+def test_paid_uncreated_todos_only_include_unfinished_paid_cases_without_a_group(store):
+    connection, repository=store
+    prepare_paid_group_todos(connection)
+    first=repository.paid_uncreated_todos(page=1,page_size=1)
+    second=repository.paid_uncreated_todos(page=2,page_size=1)
+    assert first.total==2 and first.total_pages==2
+    assert [(item.case_no,item.deposit_amount_ntd) for item in first.items]==[('PAID-1',12000)]
+    assert [item.case_no for item in second.items]==['PAID-2']
+    assert repository.paid_uncreated_todos(page=3,page_size=1).items==()
+    assert all(sql.lstrip().startswith('SELECT') for sql,_ in connection.executed)
+
+
+def test_binding_or_deposit_reversal_removes_group_todo_on_readback(store):
+    connection, repository=store
+    prepare_paid_group_todos(connection)
+    connection.db.execute("INSERT INTO line_order_group_bindings VALUES ('PAID-1','C-new','bound',1,'2026-10-22',NULL)")
+    connection.db.execute("UPDATE client_deposit_settlement_projection SET settlement_state='unsettled' WHERE case_no='PAID-2'")
+    page=repository.paid_uncreated_todos(page=1,page_size=25)
+    assert page.total==0 and not page.items
+
+
+def test_paid_group_todo_query_requires_capability_and_never_commits(store):
+    connection, repository=store
+    prepare_paid_group_todos(connection)
+    application=make_application(repository)
+    with pytest.raises(LineCapabilityDeniedError):
+        application.paid_uncreated_todos(ActorContext('customer'),page=1,page_size=25)
+    assert connection.executed==[]
+    page=application.paid_uncreated_todos(ActorContext('admin:7',('line.order_group.read',)),page=1,page_size=25)
+    assert page.total==2
+
+
+def test_mobile_paid_group_todo_is_verified_paginated_and_read_only(monkeypatch,store):
+    from api.routes import line_mobile_admin
+    from fastapi import HTTPException
+    from types import SimpleNamespace
+    connection,repository=store
+    prepare_paid_group_todos(connection)
+    capabilities=[]
+    @contextmanager
+    def unit():
+        yield SimpleNamespace(order_groups=repository)
+    def context(token,capability):
+        capabilities.append(capability.value)
+        if token!='staff': raise HTTPException(403,'staff binding required')
+        return None,ActorContext('admin:7',('line.order_group.read',))
+    monkeypatch.setattr(line_mobile_admin,'open_line_unit_of_work',unit)
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',context)
+    api=FastAPI();api.include_router(line_mobile_admin.router)
+    client=TestClient(api)
+    path='/api/v1/line/mobile-admin/order-group-todos'
+    response=client.post(path,json={'line_id_token':'staff','page':1,'page_size':1})
+    assert response.status_code==200
+    page=response.json()['data']
+    assert page['total']==2 and page['items']==[{'case_no':'PAID-1','deposit_amount_ntd':12000}]
+    assert capabilities==['line.order_group.read']
+    connection.executed.clear()
+    assert client.post(path,json={'line_id_token':'customer'}).status_code==403
+    assert client.post(path,json={'line_id_token':'staff','page':0}).status_code==422
+    assert not connection.executed
+
+
 class Connection:
     """SQLite executes real SELECTs; translate only MySQL's text cast and CONCAT."""
     def __init__(self):

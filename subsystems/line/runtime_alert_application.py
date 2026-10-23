@@ -180,6 +180,9 @@ class RuntimeLineAlertProjector:
     def project(self, event_id: int, repository, delivery_tasks) -> int:
         queued = 0
         for target in repository.pending_alert_targets(event_id):
+            if target["target_type"] == "group":
+                repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", "group", "", "line_alert_group_retired")
+                continue
             resolved_type, resolved_id = _resolve_target(target)
             if not _category_enabled(target, "system_health"):
                 repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", resolved_type, resolved_id, "category_system_health_disabled")

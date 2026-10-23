@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from subsystems.line.message_copy import CANDIDATE_WILLING_RECEIVED
+
 import hashlib
 import json
 import re
 
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineSourceType
-from shared_kernel.identities import IdempotencyKey
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 
 _CANDIDATE_CONTACT_POSTBACK = re.compile(
     r"^candidate-contact:([0-9a-f]{64}):(willing|unwilling)$"
@@ -37,6 +41,22 @@ class LineCandidateContactPostbackApplication:
             )
         except (LookupError, ValueError):
             pass
+        if match.group(2) == "willing":
+            unit_of_work.delivery_tasks.enqueue(LineDeliveryRequest(
+                LineRecipient(LineRecipientType.USER, line_user_id),
+                LineMessageKind.TEXT,
+                canonical_line_payload_json({
+                    "type": "text",
+                    "text": CANDIDATE_WILLING_RECEIVED,
+                }),
+                event.occurred_at,
+                IdempotencyKey("candidate-willing-ack:" + hashlib.sha256(
+                    event.event_id.value.encode("utf-8")
+                ).hexdigest()),
+                CorrelationId("candidate-willing-ack:" + event.event_id.value),
+                "line_webhook_event",
+                event.event_id.value,
+            ))
         return True
 
 

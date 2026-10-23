@@ -26,7 +26,6 @@ _EVENT_CODES = frozenset(
         "router.deterministic.reply_committed",
         "feedback.resolved.recorded",
         "feedback.unresolved.recorded",
-        "matching.zero_pool.preview_applied",
         "matching.decision.committed.client",
         "matching.decision.committed.staff",
         "client.leave.extension_agreed",
@@ -70,7 +69,11 @@ _RULE_FIELDS = frozenset({
 
 def validate_notification_rules(definition: Mapping[str, object]) -> None:
     """Validate a configuration snapshot without evaluating business facts."""
-    materialize_notification_rules_definition(definition)
+    normalized = materialize_notification_rules_definition(definition)
+    for rule in normalized["rules"]:
+        if (rule["event_code"] == "matching.zero_pool.preview_applied" or rule["id"] == "LU96-M3-ZERO-POOL-RULE-V1"
+                or rule["template_id"] == "LU96-M3-ZERO-POOL-CARD-V1"):
+            raise LineNotificationRuleError("候選池為空通知已退役，請使用人工條件協調流程。")
 
 
 def materialize_notification_rules_definition(
@@ -95,7 +98,7 @@ def materialize_notification_rules_definition(
         enabled = rule.get("enabled", False)
         if not isinstance(enabled, bool):
             raise LineNotificationRuleError("notification enabled state is invalid")
-        if enabled and event_code not in _EVENT_CODES:
+        if enabled and event_code not in _EVENT_CODES and event_code != "matching.zero_pool.preview_applied":
             raise LineNotificationRuleError("notification event is not registered")
         _identifier(rule.get("template_id"), "template id")
         schedule = _materialize_schedule(rule.get("schedule"))

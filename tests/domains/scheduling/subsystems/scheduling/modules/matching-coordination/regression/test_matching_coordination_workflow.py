@@ -436,124 +436,23 @@ def test_customer_acceptance_requires_an_eligible_willing_candidate() -> None:
     assert rematch.rematch_reference == "matching:case-001:workflow:rematch"
 
 
-def test_zero_candidate_disagreement_queues_client_prompt_and_service_ticket() -> None:
-    candidate_facts = _facts()
-    facts = MatchingCoordinationFacts(
-        snapshot=candidate_facts.snapshot,
-        package=None,
-        candidates=(),
-        source_versions=candidate_facts.source_versions,
-    )
-    workflow = MatchingCoordinationWorkflow()
-    preview = workflow.preview(
-        PreviewZeroCandidateAlternative(
-            **_common(),
-            criteria_snapshot_id="snapshot-1",
-            policy_id="policy-v1",
-            policy_version=1,
-            relaxed_criteria=("service_days",),
-        ),
-        facts,
-    )
-    command = ApplyZeroCandidateAlternative(
-        **_common(),
-        criteria_snapshot_id="snapshot-1",
-        alternative_id=preview.alternative_id,
-        policy_id="policy-v1",
-        policy_version=1,
-        relaxed_criteria=("service_days",),
-        preview_fingerprint=preview.preview_fingerprint,
-        decision="disagree",
-    )
-    receipt = workflow.apply(
-        command,
-        facts,
-        preview_fingerprint=preview.preview_fingerprint,
-    )
-    assert receipt.result_state == "awaiting_matching"
-    assert receipt.zero_candidate_decision is not None
-    assert receipt.zero_candidate_decision.alternative_id == preview.alternative_id
-    assert receipt.outbox_intent_ids == (
-        "matching:case-001:workflow:zero-candidate:client-decision",
-        "matching:case-001:workflow:zero-candidate:customer-service",
-    )
+def test_retired_zero_pool_preview_cannot_create_a_fixed_customer_notification():
+    command = PreviewZeroCandidateAlternative(**_common(), criteria_snapshot_id="snapshot-1", policy_id="policy-v1",
+        policy_version=1, relaxed_criteria=("service_days",))
+    with pytest.raises(MatchingCoordinationWorkflowError) as error:
+        MatchingCoordinationWorkflow().preview(command, _facts())
+    assert error.value.error.code == "matching_zero_pool_notification_retired"
 
 
-def test_zero_candidate_agreement_queues_client_prompt_before_orders_handoff() -> None:
-    original = _facts()
-    facts = MatchingCoordinationFacts(
-        snapshot=original.snapshot,
-        package=None,
-        candidates=(),
-        source_versions=original.source_versions,
-    )
-    workflow = MatchingCoordinationWorkflow()
-    preview = workflow.preview(
-        PreviewZeroCandidateAlternative(
-            **_common(),
-            criteria_snapshot_id="snapshot-1",
-            policy_id="policy-v1",
-            policy_version=1,
-            relaxed_criteria=("service_days",),
-        ),
-        facts,
-    )
-    command = ApplyZeroCandidateAlternative(
-        **_common(),
-        criteria_snapshot_id="snapshot-1",
-        alternative_id=preview.alternative_id,
-        policy_id="policy-v1",
-        policy_version=1,
-        relaxed_criteria=("service_days",),
-        preview_fingerprint=preview.preview_fingerprint,
-        decision="agree",
-    )
-
-    receipt = workflow.apply(
-        command,
-        facts,
-        preview_fingerprint=preview.preview_fingerprint,
-    )
-
-    assert receipt.result_state == "alternative_agreed_pending_owning_workflows"
-    assert receipt.outbox_intent_ids == (
-        "matching:case-001:workflow:zero-candidate:client-decision",
-        "matching:case-001:workflow:zero-candidate:orders",
-    )
-
-
-def test_zero_candidate_preview_uses_only_admin_selected_criteria() -> None:
-    original = _facts()
-    facts = MatchingCoordinationFacts(
-        snapshot=original.snapshot,
-        package=None,
-        candidates=(),
-        source_versions=original.source_versions,
-    )
-    command = PreviewZeroCandidateAlternative(
-        **_common(),
-        criteria_snapshot_id="snapshot-1",
-        policy_id="union-admin-manual-relaxation",
-        policy_version=1,
-        relaxed_criteria=("service_days",),
-    )
-
-    view = MatchingCoordinationWorkflow().preview(command, facts)
-
-    assert view.relaxed_criteria == ("service_days",)
-    assert view.unchanged_hard_criteria == ()
-    assert view.candidate_result is None
-
-    invalid = PreviewZeroCandidateAlternative(
-        **_common(),
-        criteria_snapshot_id="snapshot-1",
-        policy_id="union-admin-manual-relaxation",
-        policy_version=1,
-        relaxed_criteria=("unknown_criterion",),
-    )
-    with pytest.raises(MatchingCoordinationWorkflowError) as captured:
-        MatchingCoordinationWorkflow().preview(invalid, facts)
-    assert captured.value.error.code == "matching_alternative_not_explicit"
+@pytest.mark.parametrize("decision", ["agree", "disagree"])
+def test_retired_zero_pool_apply_cannot_create_prompt_or_handoff(decision):
+    fingerprint = fingerprint_payload({"retired": True})
+    command = ApplyZeroCandidateAlternative(**_common(), criteria_snapshot_id="snapshot-1", alternative_id="retired",
+        policy_id="policy-v1", policy_version=1, relaxed_criteria=("service_days",),
+        preview_fingerprint=fingerprint, decision=decision)
+    with pytest.raises(MatchingCoordinationWorkflowError) as error:
+        MatchingCoordinationWorkflow().apply(command, _facts(), preview_fingerprint=fingerprint)
+    assert error.value.error.code == "matching_zero_pool_notification_retired"
 
 
 def test_zero_candidate_confirmation_creates_canonical_owner_package_and_intent() -> None:

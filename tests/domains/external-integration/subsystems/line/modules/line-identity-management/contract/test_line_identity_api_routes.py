@@ -215,7 +215,7 @@ def test_admin_preview_is_zero_write_intent_and_defers_password_authentication(m
             fingerprint_payload({"admin": "preview"}),
         )
     )
-    monkeypatch.setattr(line_identity, "get_line_identity_application", lambda: application)
+    monkeypatch.setattr(line_identity, "get_line_admin_identity_application", lambda: application)
     monkeypatch.setattr(line_identity, "_verified_line_user_id", lambda _: LineUserId("U-admin"))
 
     response = line_identity.preview_admin(

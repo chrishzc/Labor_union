@@ -16,7 +16,7 @@
   Scheduling Matching Coordination Phase A–D、M4 runtime target／human escalation ownership 已核准；
   後續人工已核准 M1-A、M2-A、M3-A～D、M4-A 的 exact production implementation slice；這不擴張為
   provider、deployment、production DB、未另行核准 schema 或其他外部副作用授權。
-- 2026-09-13 使用者明確要求同一異常通知群組可重新綁定；本次修訂限既有 runtime target owner，詳見文末同群重綁修訂。PR #299 source 不代表 main 已合併、部署或手機／provider 驗收。
+- 2026-10-22 人工裁決取消整個群組告警功能；先前登錄、同群重綁、重設與群組審核連結要求均退役。保留管理員個人通知與案件服務群組。
 
 ## 2. Global Integration Boundary
 
@@ -217,6 +217,19 @@ deployment。
 第 26 份規格 §9／§9.1 的 alert → canonical review target → mobile failure/readback 驗收；
 該完整鏈仍須直接證明，不能因本段 source 修正標為 passed 或 superseded。
 
+#### 通知與發送：真實資料訊息預覽（2026-10-22 人工核准）
+
+本次核准範圍為既有「通知與發送」整合工作台與 authenticated、zero-write 訊息預覽，不改 Domain roots、schema、正式投遞、部署或 provider 權限。此節同時界定本次 bounded implementation／驗收，完成後不另建平行規格或追蹤文件。
+
+- LINE-PREVIEW-01：通知文案與訊息卡片共用清單，支援搜尋與文字／卡片篩選；內容編輯、既有發送設定與手機預覽置於同一工作台。文案框預設高度 504px，依 2026-10-22 後續人工裁決將實作的 252px 再加高一倍；手機預覽只保留一般手機，移除窄螢幕模式。
+- LINE-PREVIEW-02：依 2026-10-22 最新人工裁決，通知工作台改用明確標示的公版範例，移除案件／月嫂選擇與資格限制。範例不得標示為真實案件、正式金額、日期或已完成的業務結果；不查詢真實對象以補齊公版。固定文案不要求業務對象。
+- LINE-PREVIEW-03：`GET /api/v1/line/message-previews/catalog` 提供明列的正式訊息與純內容卡片入口。`POST .../preview` 增加 closed `data_source: sample | record`（既有呼叫預設 record）；工作台一律傳 sample，接受選用的 browser-memory 文案但不保存。既有 `GET .../subjects` 與 record 預覽維持原契約，不再由工作台呼叫。所有入口要求 `line.config.read`，回應 `Cache-Control: no-store`。
+- LINE-PREVIEW-04：公版透過獨立、無 DB／writer／provider 能力的 typed sample port 提供案例、月嫂、請假、付款、候選與完整確認包範例，重用原純卡片組裝。公版結果逐項列出真正帶入的欄位中文名稱、變數／欄位路徑與值；文字只列使用到的變數，卡片列出其動態內容。公版不代表正式資格或真實財務結果。既有 record port 仍使用 readonly transaction 與原 owner Query，不改根事實。
+- LINE-PREVIEW-05：重用正式文字範本與純卡片組裝函式，手機 renderer 只接受 closed display model。postback、interaction token、recipient identity、正式 URI 與 provider payload 不得穿透畫面；按鈕點擊只顯示動作說明。預覽不建立憑證、task、receipt、audit mutation、outbox／source event，不 commit、不 wakeup、不呼叫 provider。
+- LINE-PREVIEW-06：公版不因未選案件或缺少符合資格資料而 unavailable；無效文案仍回 typed 422，訊息不存在回 typed 404、設定查詢失敗回 closed 503。使用者清空工會草稿時提示輸入，不冒充成功。record 呼叫維持 needs_subject／unavailable／not_found。前端以 cancellation／request generation 防止晚到結果覆蓋新文案，失敗不顯示舊欄位或舊預覽。
+- LINE-PREVIEW-07：既有文案儲存與規則異動仍走原 owner、授權、revision 與回讀，不新增發送操作。驗收包含公版不呼叫真實對象 reader、欄位／值與渲染一致、所有目前正式訊息及卡片可直接預覽、去除可執行 action、原儲存回歸、晚到查詢防護、桌面／手機實際畫面及 build。測試與 source 歸屬沿用 notification-rules-presentation module。
+- LINE-PREVIEW-08：依 2026-10-22 人工裁決，清單補列 current 身分／登記模板、服務與問答及訂單異動導覽、客服受理／結案、身分受理／完成、候選聯絡資訊一／二／每週服務說明、工會詢問／回覆及客戶完整推薦確認包。來源採明列的正式入口，不以所有 bootstrap 模板自動升格為現行訊息；D+1～D+3、未具正式用途的測試／baseline 模板均不加入。公版完整確認包與候選卡使用明列的範例欄位，不受現行正式方案或候選資格限制；既有 record API 仍只查所選對象的 owner 唯讀 projection，不鎖資料、不發履歷下載憑證。`allows_draft` 只對工會詢問／回覆卡開放 browser-memory 文案，畫面不提供儲存或發送；其餘補列訊息為唯讀預覽。
+
 #### LINE Configuration typed／redacted query（2026-08-20）
 
 LINE Configuration 提供 authenticated、query-only 的
@@ -272,11 +285,46 @@ metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋�
 `GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`
 及 `GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`。
 清單支援長度不超過 50 的案件編號字面包含搜尋、closed status 與 bounded server 分頁，先列需要處理，再依更新時間排序；不是未建群案件的完整待辦。
+
+工會 LINE 待辦工作台另提供「尚未建群」唯讀分頁清單：僅列正常未結案案件中，正式訂金
+`settlement_state='settled'`、訂金金額大於零，且尚無服務群組綁定的案件。未核銷、只有付款留言／
+銀行待處理流水、已取消、已完成、歷史案件及已綁定群組均不列入。不新增客戶簽約門檻或 LINE 綁定門檻；
+既有建群／邀請指令仍各自驗證核銷及收件者身分。客戶簽約前可已有合法訂金核銷，不能由已付推定已簽。
+新端點 `POST /api/v1/line/mobile-admin/order-group-todos` 只接受 server-verified 工會 LINE 身分及
+`ORDER_GROUP_READ`，Query 零 commit／receipt／outbox／provider call，僅回案號、已核銷訂金金額及分頁數。
+「複製設定格式」只複製 `綁定訂單 {case_no} 〈本群組邀請網址〉`；人員先換成實際網址，再貼到服務群組。複製本身不綁定或發邀請。
+正式綁定完成後，重新查詢即移出待辦；核銷撤銷或案件取消亦不再列入。
 所有舊 limit／numbered／detail Query 保持原契約。新 Query 沿用 `ORDER_GROUP_READ` 授權，固定零寫入、零 commit／receipt／outbox／provider call，不改綁定、邀請、狀態 writer 或 schema。
 
 清單與側欄只提供必要姓名、原綁定狀態、最近事件、目前綁定時間、目前群組的最近邀請排入時間及客戶／指派月嫂加入狀況。成員來源沿用 Orders 目前客戶與指派 audience，LINE 身分須由 canonical role binding 與 owner projection 一致確認；失配標記無法確認。加入／離開以目前群組綁定版本後已收到的 membership 事件為證據，不沿用先前群組的 joined 投影，不視為即時完整群組名單，也不判定工會幹部是否全部到齊。新工作區不輸出群組 ID、LINE user ID、actor ID、邀請原文或指紋。
 
 不同來源歷程使用 `binding:<id>`／`runtime:<id>` 唯一事件鍵並依 server 分頁，英文事件代碼由 presentation 轉成中文；未知事件保留中性說明，不假推斷成功／失敗。邀請排入不等於 provider 已送達或成員已加入。網頁僅查詢，綁定與發送邀請仍由已授權人員在 LINE 群組內操作；需正式訂金核銷與既有身分資格。其他 LINE 工作區不變。
+
+#### 服務群組設定與邀請指令
+
+已綁定 LINE 且具 `ORDER_GROUP_BIND` 的工會人員，在服務群組輸入
+`綁定訂單 案件編號 邀請網址`，例如 `綁定訂單 115000157 https://line.me/R/ti/g/xxxxx`。
+三段之間可用一般空白、多個空白、全形空白或換行；網址自身必須完整、不得拆行。
+只接受無額外參數的 `https://line.me/ti/g/...` 或 `https://line.me/R/ti/g/...` 群組邀請網址。
+格式檢查不能驗證連結是否仍有效、是否屬於本群組；網址由人員在本群組複製與確認，不由 Messaging API 取得。
+
+設定須通過目前工會身分、案件、正式訂金已核銷及客戶／指派月嫂身分資格檢查。
+綁定與網址在同一 outer UoW 保存；回覆「已設定案件 {case_no} 的服務群組。」。
+設定不寄送私人邀請。相同群組／相同案件重輸新網址只更新網址，不清除成員紀錄或增加假綁定版本。
+現有綁定的網址保持 NULL，直到人員輸入完整設定指令；不得從歷史投遞內容回填。
+
+之後在同一群組只輸入 `發送邀請`，系統讀取保存網址、重新檢查資格後，
+在同一交易排入媽媽與目前已綁定指派月嫂的私人邀請工作，無第二次確認。
+群組回覆「訂單 {case_no} 的邀請已排入發送，共 {count} 位。」。
+私人卡片：「服務群組邀請」「案件編號：{case_no}」「媽媽／月嫂您好，請點下方按鈕加入本案服務群組。」；
+按鈕「加入服務群組」開啟保存網址。排入不等於送達或已加入。
+發送前重新核對目前群組、網址、核銷與收件者；有變動即取消舊工作，需人員重新輸入發送指令。
+
+缺案號、缺網址、無分隔、網址拆行、多餘內容或不合格式的網址，回覆對應簡短原因並附正確三段格式；不寫入設定或建立邀請。
+尚未設定時提示先完成設定。邀請指令帶參數及舊式指令一律提示目前用法，不沿用舊式發送路徑。
+未授權、未核銷或身分未就緒保留既有業務錯誤提示。未預期保存失敗交由 consumer 回滾，不回覆成功。
+邀請網址僅供群組命令與發送工作內部使用，不出現在管理 Query、audit 或 repr；送達／失敗／過期後仍依既有規則遮蔽 delivery payload。
+持久化為既有 `line_order_group_bindings` 的 nullable 私有 `invitation_url` 欄位，無新業務狀態、無業務資料回填。
 
 #### Notification Rule Administration（2026-08-20）
 
@@ -456,7 +504,7 @@ Authority：使用者核准本次最終權限清單並授權實作、設定與�
 - NAS-WORKER-02：私人操作只在隔離網路提供 HTTPS，Worker 驗證 server 憑證；缺憑證、未知／撤銷 token、錯服務、明文連線皆 fail closed。初始化準備憑證，不新增人員啟用碼。既有 local development shared-key 工作流限 local/test，不能 fallback 成 production。
 - NAS-LINE-01：LINE token 於後端驗證，再核對 current bound identity 與本人案件／assignment/day。需求表單先保存完整申請，工會核准才建立 Client／BeClass 與完成對應 binding；同筆申請重複核准不得建立重複客戶。既有已建立客戶不回退成待審。
 - NAS-LINE-02：異動申請仍只寫 Customer Service intake；正式核心異動由工會與既有 owner writer 執行。日誌／照片保留本人有效服務範圍直接提交，不增加逐筆工會核准。
-- NAS-LINE-03（2026-10-19 使用者取消偏好表）：告警分類沿用既有固定規則，群組的 system_health 關閉，管理員開啟，其他既有分類皆開啟。不新增 `line_alert_target_preferences`、不另存個別偏好。管理介面分類改為唯讀並保留訊息預覽；GET 回讀固定規則，舊 PATCH 對存在的對象回 HTTP 409／`line_alert_preferences_fixed`，不存在仍回 404，不進行寫入或 commit。告警對象的啟停與重設維持原有 Preview／Apply。
+- NAS-LINE-03（2026-10-22 人工裁決）：取消群組告警及其分類模擬、登錄、重新啟用、重設與群組審核連結。管理端只顯示管理員個人通知對象，保留既有個人通知 Query／Preview／Apply；分類仍使用固定規則，不新增偏好表。舊群組入口明確拒絕，歷史工作不得繼續送往告警群組。客服受理／工單／hold、管理員個人通知、案件服務群組綁定與私人邀請不受影響。
 - NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。這次只修改後端、直接測試與契約，不準備或修改 Compose，不改前端、不搬移檔案、不操作 NAS 或既有資料；部署 UID／ACL／掛載與前端畫面於後續驗收。
 
 - NAS-LINE-04 的資料庫邊界：公開 LINE profile 對 controlled-file staging／objects／receipts／finalize／lease／reference／cleanup／reconciliation 及日誌主檔／附件／完成事件僅 SELECT，不可直接 INSERT／UPDATE；私人管理後端保留原受限 management profile 的合法 writer。原 LINE 通知 outbox／checkpoint、LINE 專用媒體及其他既有功能權限不變；不加寬任何 DB 權限，不新增表。
@@ -1236,7 +1284,7 @@ webhook dispatch 任一業務處理失敗時，當次 business Unit of Work 必�
 
 ### M3／M4 boundaries
 
-Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。Runtime target registration／reset／enable／disable 共用 0-schema advisory serialization boundary、active singleton、opaque CAS 與 same-key replay；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
+Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。管理員個人通知 target enable／disable 共用既有 advisory serialization boundary、opaque CAS 與 same-key replay；群組告警登錄與重設已取消；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
 
 M3 的 service-date Apply 必須在單一 outer UoW 內 fresh-lock owner service dates、assignment與shifted-date availability後重算preview。leave Preview／Apply只讀Scheduling-owned immutable canonical receipt；Apply須在同一outer UoW重新讀取並把receipt identity、version與fingerprint綁入完整M3 source tuple。package／criteria／leave version／original staff／preview任一stale時，必須在M3 lineage、receipt與intent前rollback；M3不得藉此寫Leave、Orders、Assignment、Payroll或直接呼叫LINE provider。
 
@@ -1244,21 +1292,10 @@ M3 的 service-date Apply 必須在單一 outer UoW 內 fresh-lock owner service
 的 exact production implementation slice。LINE／AI provider、deployment、production DB、未另行核准的
 schema／DDL與 external side effect 仍不在授權範圍。
 
-## 2026-09-13 同群告警重新綁定修訂與修正證據邊界
+## 2026-10-22 群組告警退役
 
-依使用者「異常通知群組設定能改成能在同一個群組重新綁定」的明確指示，已綁定且通過
-既有告警管理授權的管理員，在停用的原群組重新送出「設定異常通知群組」，可由既有
-`RuntimeAlertTargetApplication.register_group` 將同一 target row 重新啟用；保留 target id、
-通知門檻與歷史，並在 caller UoW 內保存正確前後狀態／版本、receipt及audit。
-
-同群已啟用時不重做 target mutation；已處理 event 的 exact replay只回原receipt，不因重送
-使後來停用的群組復活。另一個群組已啟用時不得自動覆蓋，多群啟用仍回singleton conflict。
-registration、reset、enable／disable沿用既有advisory serialization、owner及交易邊界；
-管理端仍走 `/api/v1/runtime/line-alert-targets` 的既有Preview／Apply，不新增入口或清除歷史。
-這項同群重綁變更不使舊Safe Review Link復活，也不授權重送既存失敗／結果未知的通知。
-
-本次原始碼及回歸證據固定對照PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`。
-53項指定回歸（29項M4、24項原LINE修正）不是所有M1～M4直接流程已通過；完整pytest、
-真實MySQL鎖／整合、手機、provider及部署仍分別核對。第20份規格§5.3的intake-only邊界
-不取消第26份規格§9的客戶同意／拒絕、通知及rematch；一般mobile-admin導航也不取消
-`R4-SAFE-LINK`。缺直接證據者保留NOT_RUN／具體BLOCKED，不由程式現況推導supersession。
+依最新人工裁決，群組告警已取消，不是暫停或待啟用；舊同群重綁要求不再有效。
+`設定異常通知群組` 不登錄、不回覆成功、不建立投遞；群組重設／啟用 API 與群組專用審核連結簽發／使用拒絕操作。
+管理端不得提供群組登錄教學、分類推播或虛構訊息模擬；預覽收件人不得寫死為幹部群。
+既存群組告警工作在 provider 前拒絕，不改寫歷史投遞、receipt、audit 或已發布 schema。
+保留管理員個人告警與歷史 Query／撤銷，以及案件服務群組的綁定、成員紀錄與私人邀請。

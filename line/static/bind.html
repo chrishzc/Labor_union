@@ -319,11 +319,12 @@
     <div id="formContent">
         <div class="header">
             <div class="logo" id="pageLogo">Labor Union</div>
-            <div class="title" id="formTitle">服務綁定與訂單查詢</div>
-            <div class="subtitle" id="formSubtitle">請填寫您的基本資料，以完成 LINE 帳號與最新訂單的綁定與查詢。</div>
+            <div class="title" id="formTitle">客戶登記與身分綁定</div>
+            <div class="subtitle" id="formSubtitle">請核對姓名與電話。已有完整登記資料者可綁定；尚未完成者將前往需求調查表單，送出後由工會審核。</div>
         </div>
 
         <div class="status-message" id="statusMessage"></div>
+        <a id="restartBinding" href="/line-bind" hidden>重新開啟客戶登記與綁定</a>
 
         <form id="bindForm" onsubmit="handleFormSubmit(event)" novalidate>
             <!-- LINE User ID 在背景自動獲取，不需產婦手動填寫 -->
@@ -341,18 +342,23 @@
 
             <button class="btn-submit" type="submit" id="btnSubmit">確認綁定</button>
         </form>
+        <div id="bindingFailureActions" style="display:none; gap:10px; margin-top:14px;">
+            <button type="button" class="btn-close" style="flex:1;" onclick="dismissBindingFailure()">返回修改</button>
+            <button type="button" class="btn-submit" id="callStaffButton" style="flex:1; margin-top:0;" onclick="callStaff()">呼叫專員</button>
+        </div>
     </div>
 
     <!-- 重新綁定確認卡片 -->
     <div class="success-card" id="rebindContent" style="display: none;">
         <div class="success-icon" style="color: var(--primary); background: rgba(74, 144, 226, 0.1); border-color: rgba(74, 144, 226, 0.2);">?</div>
-        <div class="success-title" id="rebindTitle" style="color: var(--primary);">確認重新綁定</div>
+        <div class="success-title" id="rebindTitle" style="color: var(--primary);">申請重新綁定</div>
         <div class="success-text" id="rebindDesc">
-            本筆訂單已有綁定另一個帳戶，請問是否確認要覆蓋舊有紀錄，並重新綁定為當前這個 LINE 帳戶？
+            此資料需要重新綁定。送出後由工會確認，核准前保留原綁定。
         </div>
+        <div id="rebindStatusMessage" class="status-message" role="status" aria-live="polite"></div>
         <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <button class="btn-close" id="rebindCancelButton" style="flex: 1;" onclick="cancelRebind()">取消綁定</button>
-            <button class="btn-submit" id="rebindConfirmButton" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">確認綁定</button>
+            <button class="btn-close" id="rebindCancelButton" style="flex: 1;" onclick="cancelRebind()">取消</button>
+            <button class="btn-submit" id="rebindConfirmButton" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">申請重新綁定</button>
         </div>
     </div>
 
@@ -361,8 +367,7 @@
         <div class="success-icon">✓</div>
         <div class="success-title" id="successTitle">綁定與查詢成功</div>
         <div class="success-text" id="successDesc">
-            您的服務綁定與最新案件查詢已成功！<br>
-            系統已自動發送案件編號通知至您的 LINE 視窗。
+            綁定成功，專屬選單將稍後更新。
         </div>
         <button class="btn-close" id="closeButton" onclick="closeLiffWindow()">關閉視窗</button>
     </div>
@@ -375,6 +380,9 @@
     let isTestMode = false;
     let currentIdToken = '';
     let runtimePage = null;
+    let pendingCustomerBinding = null;
+    let bindingOperationPending = false;
+    let bindingResultUnknown = false;
 
     // 取得 DOM 元素
     const loader = document.getElementById('loader');
@@ -545,10 +553,10 @@
         document.getElementById('btnSubmit').textContent = page.submit_button;
         document.getElementById('successTitle').textContent = page.success_title;
         successDesc.textContent = page.success_description;
-        document.getElementById('rebindTitle').textContent = page.content.rebind_title || '確認重新綁定';
+        document.getElementById('rebindTitle').textContent = page.content.rebind_title || '申請重新綁定';
         document.getElementById('rebindDesc').textContent = page.content.rebind_description || '';
-        document.getElementById('rebindCancelButton').textContent = page.content.rebind_cancel_button || '取消綁定';
-        document.getElementById('rebindConfirmButton').textContent = page.content.rebind_confirm_button || '送出申請';
+        document.getElementById('rebindCancelButton').textContent = page.content.rebind_cancel_button || '取消';
+        document.getElementById('rebindConfirmButton').textContent = page.content.rebind_confirm_button || '申請重新綁定';
         document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
         loaderText.textContent = page.loading_text;
         const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
@@ -595,198 +603,193 @@
         hideLoader();
     }
 
-    function recordFailureAndCheckStreak(message) {
-        let streak = parseInt(sessionStorage.getItem('bind_fail_streak') || '0', 10) + 1;
-        sessionStorage.setItem('bind_fail_streak', String(streak));
-        if (streak >= 2) {
-            const desc = `⚠️【狀態 D：連續失敗協處】\n您已連續輸入查核失敗 ${streak} 次。\n系統已自動於 customer_service_tickets 建立協處工單，工會專員將會主動聯繫您協助確認資料！\n\n您也可以直接回到 LINE 聊天室點選「專人客服諮詢」。`;
-            showMessage(desc, 'error');
-        } else {
-            showMessage(`${message}（提醒：若連續查核失敗 2 次，系統將自動為您建立專人客服協處工單）`, 'error');
+    function showBindingFailure(message) {
+        showMessage(message || '資料無法核對，請確認姓名與電話。', 'error');
+        document.getElementById('bindingFailureActions').style.display = 'flex';
+        document.getElementById('callStaffButton').disabled = false;
+    }
+
+    function dismissBindingFailure() {
+        document.getElementById('bindingFailureActions').style.display = 'none';
+        showMessage('', 'info');
+        document.getElementById('userName').focus();
+    }
+
+    async function callStaff() {
+        const button = document.getElementById('callStaffButton');
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            if (!liff.isInClient() || liff.getContext()?.type !== 'utou'
+                || !liff.isApiAvailable('sendMessages')) {
+                throw new Error('call-unavailable');
+            }
+            // The explicit user command enters the existing canonical webhook.
+            await liff.sendMessages([{type: 'text', text: '呼叫專員'}]);
+            showMessage('呼叫已送出，請返回聊天室留言。', 'info');
+            liff.closeWindow();
+        } catch (_) {
+            showMessage('請返回官方 LINE 聊天室輸入「呼叫專員」。', 'error');
+            button.disabled = false;
         }
     }
 
-    // 提交表單綁定
+    function showBindingResult(title, description, caseNo) {
+        formContent.style.display = 'none';
+        rebindContent.style.display = 'none';
+        successContent.style.display = 'block';
+        document.getElementById('successTitle').textContent = title;
+        successDesc.style.whiteSpace = 'pre-line';
+        successDesc.textContent = caseNo ? `${description}\n案件編號：${caseNo}` : description;
+    }
+
+    async function applyCustomerBinding(candidate) {
+        bindingResultUnknown = true;
+        const response = await fetch('/api/v1/line/identity/customer/apply', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                flow_id: candidate.flowId,
+                line_id_token: currentIdToken,
+                name: candidate.name,
+                phone: candidate.phone,
+                expected_version: candidate.preview.expected_version,
+                preview_fingerprint: candidate.preview.preview_fingerprint,
+            }),
+        });
+        const result = await response.json();
+        if (!response.ok) bindingResultUnknown = false;
+        if (response.status === 410) {
+            sessionStorage.removeItem('line_flow_id_customer');
+            document.getElementById('restartBinding').hidden = false;
+        }
+        if (!response.ok || !result.data
+            || !['bound', 'existing', 'pending_review'].includes(result.data.status)) {
+            throw new Error('目前無法完成綁定，請重新核對資料。');
+        }
+        if (typeof result.data.receipt_identity !== 'string' || !result.data.receipt_identity.trim()
+            || result.data.preview_fingerprint !== candidate.preview.preview_fingerprint
+            || (result.data.status === 'pending_review' && (!Number.isSafeInteger(result.data.review_request_id) || result.data.review_request_id <= 0))) {
+            throw new Error('綁定結果讀回不完整，請勿重複送出；請聯絡工會確認。');
+        }
+        sessionStorage.removeItem('line_flow_id_customer');
+        bindingResultUnknown = false;
+        pendingCustomerBinding = null;
+        if (result.data.status === 'pending_review') {
+            showBindingResult('申請已送出', '申請已送出，待工會確認。核准前保留原綁定。');
+        } else {
+            showBindingResult('綁定成功', '綁定成功，專屬選單將稍後更新。若同時具有客戶與月嫂身分，請返回聊天室輸入「切換客戶」或「切換月嫂」，明確選擇要使用的身分。', candidate.preview.candidate?.case_no);
+        }
+    }
+
     async function handleFormSubmit(event) {
         event.preventDefault();
-        
+        if (bindingOperationPending || bindingResultUnknown) return;
         const nameInput = document.getElementById('userName');
         const phoneInput = document.getElementById('userPhone');
-        const name = nameInput.value.trim();
-        const phone = normalizePhone(phoneInput.value);
-        const lineUserId = lineUserIdInput.value.trim();
-
-        const validation = validateBindForm(nameInput, phoneInput, lineUserId);
+        const validation = validateBindForm(nameInput, phoneInput, lineUserIdInput.value.trim());
         if (!validation.ok) {
-            recordFailureAndCheckStreak(validation.message || runtimePage?.content?.validation_error || '請填寫所有必要欄位。');
+            showBindingFailure(validation.message);
             return;
         }
-
-        showLoader(runtimePage?.content?.submit_loading_text || '正在核對並綁定帳號...');
-        showMessage('', 'info'); // 清空提示
-
+        pendingCustomerBinding = null;
+        dismissBindingFailure();
+        bindingOperationPending = true;
+        showLoader(runtimePage?.content?.submit_loading_text || '正在核對資料...');
         try {
-            // 1. 開啟或取得 Flow ID
-            let flowId = sessionStorage.getItem('line_flow_id_customer') || getQueryParam('flow_id');
-            if (flowId) {
-                sessionStorage.setItem('line_flow_id_customer', flowId);
-            } else {
-                const flowRes = await fetch('/api/v1/line/identity/flow/open', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        purpose: 'customer_binding',
-                        idempotency_key: crypto.randomUUID(),
-                        line_id_token: currentIdToken
-                    })
+            let flowId = getQueryParam('flow_id') || sessionStorage.getItem('line_flow_id_customer');
+            if (!flowId) {
+                const response = await fetch('/api/v1/line/identity/flow/open', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({purpose: 'customer_binding', idempotency_key: crypto.randomUUID(), line_id_token: currentIdToken}),
                 });
-                const flowResult = await flowRes.json();
-                if (flowRes.ok && flowResult.data?.flow_id) {
-                    flowId = flowResult.data.flow_id;
-                    sessionStorage.setItem('line_flow_id_customer', flowId);
-                } else {
-                    throw new Error(flowResult?.detail?.message || '無法建立身分驗證連結');
-                }
+                const result = await response.json();
+                if (!response.ok || !result.data?.flow_id) throw new Error('請回到 LINE 重新開啟綁定頁面。');
+                flowId = result.data.flow_id;
             }
-
-            // 2. 進行身分先行 Preview 查詢
-            const previewRes = await fetch('/api/v1/line/identity/customer/preview', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    flow_id: flowId,
-                    line_id_token: currentIdToken,
-                    name: name,
-                    phone: phone
-                })
+            sessionStorage.setItem('line_flow_id_customer', flowId);
+            const name = nameInput.value.trim();
+            const phone = normalizePhone(phoneInput.value);
+            const response = await fetch('/api/v1/line/identity/customer/preview', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({flow_id: flowId, line_id_token: currentIdToken, name, phone}),
             });
-
-            const previewResult = await previewRes.json();
-
-            if (previewRes.ok && previewResult.data) {
-                const preview = previewResult.data;
-
-                // 【狀態 B：有案號但缺問卷】➔ 自動預填 姓名+電話+case_no 無縫跳轉 register.html
-                if (preview.status === 'matched' && preview.candidate && !preview.candidate.has_completed_survey) {
-                    const caseNo = preview.candidate.case_no || '';
-                    showLoader(`已為您找到案件編號【${caseNo}】，即將無縫載入需求調查表單...`);
-                    const target = new URL('/line-registration', window.location.origin);
-                    target.searchParams.set('flow_id', flowId);
-                    target.searchParams.set('name', name);
-                    target.searchParams.set('phone', phone);
-                    if (caseNo) target.searchParams.set('case_no', caseNo);
-                    window.location.replace(target.toString());
-                    return;
-                }
-
-                // 【狀態 A：舊客完全命中】
-                if (preview.status === 'matched') {
-                    // 自動一鍵完成 Apply 綁定
-                    const applyRes = await fetch('/api/v1/line/identity/customer/apply', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            flow_id: flowId,
-                            line_id_token: currentIdToken,
-                            name: name,
-                            phone: phone,
-                            expected_version: preview.expected_version,
-                            preview_fingerprint: preview.preview_fingerprint
-                        })
-                    });
-                    const applyResult = await applyRes.json();
-
-                    if (applyRes.ok && applyResult.data) {
-                        sessionStorage.removeItem('bind_fail_streak');
-                        formContent.style.display = 'none';
-                        successContent.style.display = 'block';
-
-                        const caseNoDisplay = preview.candidate?.case_no || 'CASE-2026-M301';
-                        let desc = `【狀態 A：舊客完全命中】\n您的 LINE 帳號已成功連結客戶「${name}」的專屬資料！`;
-                        desc += `\n\n您的案件編號為：【${caseNoDisplay}】。`;
-                        desc += `\n\n系統資料庫已有您的完整需求問卷，無需重複填寫問卷！\n我們已為您啟用【客戶專屬選單】，請關閉此頁面回到聊天室即可使用。`;
-                        successDesc.style.whiteSpace = 'pre-line';
-                        successDesc.textContent = desc;
-                        hideLoader();
-                        return;
-                    } else {
-                        recordFailureAndCheckStreak(applyResult?.detail?.message || '套用綁定時發生錯誤，請重試。');
-                        hideLoader();
-                        return;
-                    }
-                }
-
-                // 【狀態 C：查無案號/名冊未同步】➔ 自動預填姓名+電話 無縫跳轉 register.html
-                if (preview.status === 'not_found') {
-                    showLoader('市府名冊同步中，即將無縫載入工會需求調查表單...');
-                    const target = new URL('/line-registration', window.location.origin);
-                    target.searchParams.set('flow_id', flowId);
-                    target.searchParams.set('name', name);
-                    target.searchParams.set('phone', phone);
-                    window.location.replace(target.toString());
-                    return;
-                }
-
-                showMessage(previewResult.message || '找不到相符的登記資料。', 'error');
-                hideLoader();
-            } else {
-                // 安全降級：無縫進入問卷
-                showLoader('即將為您載入工會需求調查表單...');
+            const result = await response.json();
+            if (response.status === 410) {
+                sessionStorage.removeItem('line_flow_id_customer');
+                document.getElementById('restartBinding').hidden = false;
+                throw new Error('連結已失效或已使用，請重新開啟客戶登記與綁定。');
+            }
+            if (!response.ok || !result.data) throw new Error('目前無法核對資料，請稍後再試。');
+            const preview = result.data;
+            if (!['already_bound', 'requires_review', 'matched', 'not_found'].includes(preview.status)
+                || !Number.isSafeInteger(preview.expected_version) || preview.expected_version < 0
+                || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint || '')
+                || (preview.status !== 'not_found' && (!preview.candidate || typeof preview.candidate.currently_bound !== 'boolean'))) {
+                throw new Error('資料核對結果不完整，請重新開啟頁面或聯絡工會確認。');
+            }
+            if (preview.status === 'already_bound') {
+                showBindingResult('您已完成綁定', '您已完成綁定，可直接返回 LINE 使用。', preview.candidate?.case_no);
+                return;
+            }
+            if (preview.status === 'requires_review' && preview.candidate) {
+                pendingCustomerBinding = {flowId, name, phone, preview};
+                document.getElementById('rebindStatusMessage').textContent = '';
+                document.getElementById('rebindStatusMessage').className = 'status-message';
+                formContent.style.display = 'none';
+                rebindContent.style.display = 'block';
+                return;
+            }
+            if (preview.status === 'matched' && preview.candidate?.has_completed_survey) {
+                await applyCustomerBinding({flowId, name, phone, preview});
+                return;
+            }
+            if (preview.status === 'not_found' || (preview.status === 'matched' && preview.candidate)) {
                 const target = new URL('/line-registration', window.location.origin);
+                target.searchParams.set('flow_id', flowId);
                 target.searchParams.set('name', name);
                 target.searchParams.set('phone', phone);
+                if (preview.candidate?.case_no) target.searchParams.set('case_no', preview.candidate.case_no);
                 window.location.replace(target.toString());
+                return;
             }
-
-        } catch (err) {
-            console.error('提交綁定請求出錯:', err);
-            showMessage('與伺服器連線失敗，請稍後再試。', 'error');
+            throw new Error('資料無法核對，請確認姓名與電話。');
+        } catch (error) {
+            showBindingFailure(error.message || '目前無法核對資料，請稍後再試。');
+            document.getElementById('btnSubmit').disabled = bindingResultUnknown;
+        } finally {
+            bindingOperationPending = false;
             hideLoader();
         }
     }
 
-    // 重新綁定
     async function confirmRebind() {
-        const name = document.getElementById('userName').value.trim();
-        const phone = document.getElementById('userPhone').value.trim();
-        const lineUserId = lineUserIdInput.value.trim();
-
-        showLoader(runtimePage?.content?.rebind_loading_text || '正在送出重新綁定申請...');
-        try {
-            const response = await fetch('/api/line/bind', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    phone: phone,
-                    line_user_id: lineUserId,
-                    line_id_token: currentIdToken,
-                    force_rebind: true
-                })
-            });
-            const result = await response.json();
-            if (response.ok && ['success', 'pending_approval'].includes(result.status)) {
-                rebindContent.style.display = 'none';
-                successContent.style.display = 'block';
-                document.getElementById('successTitle').textContent = result.status === 'pending_approval'
-                    ? '申請已送出'
-                    : (runtimePage?.success_title || '綁定與查詢成功');
-                successDesc.style.whiteSpace = 'pre-line';
-                successDesc.textContent = result.message || runtimePage?.success_description || '申請已送出。';
-            } else {
-                showMessage(result.message || result.detail || '綁定失敗', 'error');
-            }
-        } catch (err) {
-            showMessage('與伺服器連線失敗。', 'error');
+        if (bindingOperationPending || bindingResultUnknown) return;
+        if (!pendingCustomerBinding) {
+            cancelRebind();
+            showBindingFailure('請重新核對資料後再申請。');
+            return;
         }
-        hideLoader();
+        bindingOperationPending = true;
+        showLoader('正在送出重新綁定申請...');
+        try {
+            await applyCustomerBinding(pendingCustomerBinding);
+        } catch (error) {
+            const message = document.getElementById('rebindStatusMessage');
+            message.textContent = error.message || '目前無法送出申請，請稍後再試。';
+            message.className = 'status-message error';
+            document.getElementById('rebindConfirmButton').disabled = bindingResultUnknown;
+        } finally {
+            bindingOperationPending = false;
+            hideLoader();
+        }
     }
 
-    // 取消重新綁定
     function cancelRebind() {
+        pendingCustomerBinding = null;
         rebindContent.style.display = 'none';
         formContent.style.display = 'block';
-        showMessage('已取消重新綁定，原帳戶紀錄維持不變。', 'info');
+        showMessage('已取消申請，原綁定維持不變。', 'info');
     }
 
     // 關閉 LIFF 視窗

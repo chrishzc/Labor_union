@@ -3,6 +3,7 @@ File: test_deterministic_ai_router.py
 Description: 驗證 M2 deterministic 路由的真人確認優先序、typed closed outcome 與 fail-closed 邊界。
 """
 
+import pytest
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
 from subsystems.line.ai_router_contracts import (
@@ -11,6 +12,7 @@ from subsystems.line.ai_router_contracts import (
     DeterministicRoute,
     RouterOutcomeKind,
     SafeMenu,
+    TicketReferral,
 )
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 
@@ -21,10 +23,9 @@ def test_human_marker_precedes_exact_identity_alias() -> None:
         source_event_id="event-1",
     )
 
-    assert isinstance(outcome, DeterministicRoute)
-    assert outcome.kind is RouterOutcomeKind.DETERMINISTIC_ROUTE
+    assert isinstance(outcome, TicketReferral)
+    assert outcome.kind is RouterOutcomeKind.TICKET_REFERRAL
     assert outcome.category is CustomerServiceCategory.OTHER
-    assert outcome.route_key == "human_handoff_confirmation"
 
 
 def test_human_marker_precedes_service_registration() -> None:
@@ -33,15 +34,15 @@ def test_human_marker_precedes_service_registration() -> None:
         source_event_id="event-human-registration",
     )
 
-    assert isinstance(outcome, DeterministicRoute)
-    assert outcome.route_key == "human_handoff_confirmation"
+    assert isinstance(outcome, TicketReferral)
 
 
-def test_explicit_confirmation_alias_creates_ticket_referral() -> None:
+@pytest.mark.parametrize("command", ["專人客服", "呼叫專員", "聯絡專人服務"])
+def test_explicit_confirmation_alias_creates_ticket_referral(command) -> None:
     from subsystems.line.ai_router_contracts import TicketReferral
 
     outcome = DeterministicLineRouter().route(
-        "專人客服", source_event_id="event-confirmed-human"
+        command, source_event_id="event-confirmed-human"
     )
 
     assert isinstance(outcome, TicketReferral)
@@ -64,9 +65,10 @@ def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:
     assert isinstance(near_miss, SafeMenu)
 
 
-def test_unknown_input_is_safe_menu_and_never_provider_or_domain_command() -> None:
+@pytest.mark.parametrize("message", ("請幫我猜一個答案", "這個不對", "無法解決", "我不想要機器人回答", "客服幾點上班", "月嫂是真人嗎"))
+def test_unknown_input_is_safe_menu_and_never_provider_or_domain_command(message) -> None:
     outcome = DeterministicLineRouter().route(
-        "請幫我猜一個答案",
+        message,
         source_event_id="event-4",
     )
 

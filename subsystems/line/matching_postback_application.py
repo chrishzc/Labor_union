@@ -13,6 +13,7 @@ from domains.scheduling.matching_communication import (
     MatchingRecipientMismatchError,
 )
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.line.deposit_notifications import handle_deposit_assistance
 
 _MATCHING_POSTBACK = re.compile(
     r"^matching:([A-Za-z0-9_-]{20,191}):(willing|unwilling|accepted|declined|rejected|contact_requested)$"
@@ -34,6 +35,8 @@ class LineMatchingPostbackApplication:
         if line_user_id is None:
             return
         postback_data = _postback_data(inbox)
+        if handle_deposit_assistance(postback_data, event, unit_of_work):
+            return
         match = _MATCHING_POSTBACK.fullmatch(postback_data)
         if match is not None:
             self._handle_matching_postback(match, line_user_id, event, unit_of_work)
@@ -52,7 +55,7 @@ class LineMatchingPostbackApplication:
     def handle_message(self, inbox, unit_of_work, line_user_id, text) -> bool:
         event_key = f"matching-schedule-rejection-reason:{inbox.event.event_id.value}"
         try:
-            return bool(
+            handled = bool(
                 unit_of_work.matching_schedule_confirmations.confirm_line_rejection_reason(
                     line_user_id,
                     text,
@@ -60,7 +63,13 @@ class LineMatchingPostbackApplication:
                 )
             )
         except (LookupError, ValueError):
-            return False
+            handled = False
+        if handled:
+            return True
+        return self._matching_application.append_customer_assistance_message_in_unit_of_work(
+            unit_of_work, line_user_id, text,
+            f"matching-assistance-message:{inbox.event.event_id.value}",
+        )
 
     def _handle_matching_postback(self, match, line_user_id, event, unit_of_work):
         event_identity = event.event_id.value

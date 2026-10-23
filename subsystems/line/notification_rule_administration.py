@@ -14,7 +14,7 @@ from domains.line.configuration import (
     build_configuration_candidate,
 )
 from domains.line.identities import LineConfigurationRevision
-from domains.line.notification_rules import materialize_notification_rules_definition
+from domains.line.notification_rules import materialize_notification_rules_definition, validate_notification_rules
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
@@ -68,6 +68,7 @@ class LineNotificationRuleAdministration:
         idempotency_key: IdempotencyKey,
         correlation_id: CorrelationId,
     ) -> SaveNotificationRulesResult:
+        validate_notification_rules(definition)
         normalized = materialize_notification_rules_definition(definition)
         result = self._mutate(
             action="save",
@@ -174,6 +175,7 @@ class LineNotificationRuleAdministration:
                     "line_notification_rule_command_invalid",
                     "notification rule definition is required",
                 )
+            validate_notification_rules(resulting)
             candidate = build_configuration_candidate(
                 kind=LineConfigurationKind.NOTIFICATION_RULES,
                 current_revision=current.revision,

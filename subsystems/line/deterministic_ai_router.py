@@ -26,16 +26,17 @@ from subsystems.line.navigation_catalog import (
 
 
 _HUMAN_MARKERS = (
-    "人工",
-    "真人",
-    "客服",
+    "人工協助",
+    "人工客服",
+    "找真人",
+    "轉真人",
+    "轉接真人",
+    "找客服",
+    "聯絡客服",
     "聯絡工會",
     "找人",
     "找專員",
     "問人",
-    "答錯",
-    "不對",
-    "無法解決",
 )
 _IDENTITY_ALIASES = {"綁定訂單", "訂單查詢", "綁定後台帳號"}
 _GROUP_INTENTS = {"工會選單", "開啟客服系統", "月嫂驗證管理"}
@@ -93,7 +94,7 @@ _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
     "一般市民補助",
     "低收／中低收入戶社福補助",
 )
-_CONFIRMED_HUMAN_ALIASES = {"專人客服", "轉接真人客服"}
+_CONFIRMED_HUMAN_ALIASES = {"聯絡專人服務", "呼叫專員", "聯絡工會專員", "專人客服", "轉接真人客服", "轉真人客服"}
 
 
 class DeterministicLineRouter:
@@ -111,25 +112,17 @@ class DeterministicLineRouter:
         normalized = text.strip() if isinstance(text, str) else ""
         require_canonical_text(source_event_id, "source event id", 191)
 
-        human_reason = _human_reason(normalized)
+        human_reason = (
+            "explicit_human_request"
+            if normalized in _CONFIRMED_HUMAN_ALIASES
+            else _human_reason(normalized)
+        )
         if human_reason is not None:
-            if normalized in _CONFIRMED_HUMAN_ALIASES:
-                return TicketReferral(
-                    CustomerServiceCategory.OTHER,
-                    human_reason,
-                    source_event_id,
-                    IdempotencyKey(f"line-service-help:other:{source_event_id}"),
-                )
-            return DeterministicRoute(
-                "human_handoff_confirmation",
+            return TicketReferral(
                 CustomerServiceCategory.OTHER,
-                None,
                 human_reason,
-                CATALOG_SOURCE_IDENTITY,
-                CATALOG_REVISION,
-                CATALOG_SOURCE_IDENTITY,
-                "confirmation",
-                100,
+                source_event_id,
+                IdempotencyKey(f"line-service-help:other:{source_event_id}"),
             )
 
         if _is_ambiguous_subsidy_scope(normalized):
@@ -209,10 +202,6 @@ def score_band(score: int | None) -> str:
 def _human_reason(text: str) -> str | None:
     if not text:
         return None
-    if any(marker in text for marker in ("答錯", "不對", "無法解決")):
-        return "answer_rejected"
-    if "機器人" in text and any(marker in text for marker in ("不要", "不想要")):
-        return "explicit_human_request"
     if any(marker in text for marker in _HUMAN_MARKERS):
         return "explicit_human_request"
     return None
