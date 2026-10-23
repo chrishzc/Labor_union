@@ -2,6 +2,8 @@
 ARG BASE_IMAGE=labor-union-nas-test:local
 FROM ${BASE_IMAGE}
 USER root
+# This layer inherits all CA stores: reject an old base instead of hiding it.
+RUN python -c "import ssl, certifi, pip._vendor.certifi as pc; assert all(value != 'emSign ECC Root CA - G3' for path in (certifi.where(), pc.where(), None) for cert in ssl.create_default_context(cafile=path).get_ca_certs() for rdn in cert['subject'] for key, value in rdn if key == 'commonName'), 'Rebuild BASE_IMAGE with fixed certifi, pip and system CA first'"
 COPY scripts/nas_test_runtime.py scripts/nas_appliance.py /app/scripts/
 COPY api/routes/nas_setup.py /app/api/routes/
 COPY subsystems/access/authentication_session.py /app/subsystems/access/

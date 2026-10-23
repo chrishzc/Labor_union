@@ -2,6 +2,7 @@
 # pyproject.toml is the dependency authority; pip resolves transitive packages.
 # Pins match uv.lock and the current environment; no legacy Streamlit UI packages.
 cachecontrol==0.14.4
+certifi==2026.10.19
 chromadb==1.5.9
 cryptography==50.0.1
 fastapi==0.141.1

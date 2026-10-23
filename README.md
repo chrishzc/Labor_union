@@ -8,12 +8,12 @@
 
 以下命令從 repository root 執行。先以 Python 3.11 以上建立 `.venv`；已有環境時沿用，不重建。尚未建立時，Windows 執行 `python -m venv .venv`，macOS／Linux 執行 `python3 -m venv .venv`。
 
-開發／測試環境需安裝 `requirements.txt` 的 runtime pins，以及 `pyproject.toml` 既有的 `dev` 群組（含 `pytest`）。`--group` 需要 pip 25.1 以上；下列命令先滿足此前提，再一併安裝 runtime 與開發依賴。
+開發／測試環境需安裝 `requirements.txt` 的 runtime pins，以及 `pyproject.toml` 既有的 `dev` 群組（含 `pytest`）。本次 CA 安全修補要求 pip 26.2.2 以上（或已回補的供應商版本），其版本也支援 `--group`。下列命令以官方固定 wheel 與 SHA-256 修補 pip，再安裝 runtime 與開發依賴；已確認 pip 與內附 CA 均已修補者可略過第一步。
 
 Windows 依賴安裝：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install "pip>=25.1"
+.\.venv\Scripts\python.exe -m pip install --no-deps "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt --group dev
 cd ui_react
 npm ci
@@ -23,7 +23,7 @@ cd ..
 macOS／Linux 依賴安裝：
 
 ```bash
-./.venv/bin/python -m pip install "pip>=25.1"
+./.venv/bin/python -m pip install --no-deps "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
 ./.venv/bin/python -m pip install -r requirements.txt --group dev
 cd ui_react
 npm ci
@@ -31,6 +31,10 @@ cd ..
 ```
 
 只需執行應用而不跑 Python 測試時，可省略 `--group dev`；僅安裝 runtime pins 不包含測試依賴。Dependency group 的命令語意見 [pip 官方說明](https://pip.pypa.io/en/stable/user_guide/#dependency-groups)。
+
+`pyproject.toml` 設定 certifi 的安全版本下限；`requirements.txt` 固定部署版本，Docker／CI 依此安裝，並不讀取 `uv.lock`。`uv.lock` 保留為 uv 重建依據，本次僅更新 certifi。使用 uv 者須先確認 `uv --version` 至少為 0.13.4，再執行 `uv sync --locked`；未使用 uv 者不需安裝。
+
+CA 驗收須分別確認獨立 certifi、`pip._vendor.certifi` 及系統 CA／自訂 CA bundle。certifi 2026.10.18 已移除受影響 roots，2026.10.19 恢復未受影響 roots，故本專案採用後者。容器改用固定 digest 的 Python 3.14.9 基底（含修補後 pip 與系統 CA），仍須以 `--pull --no-cache` 重建及檢查新映像；更新宿主機 pip 不會修補既有容器。歷史 web-setup 薄層若重建，會檢查其 `BASE_IMAGE` 的三份 CA，受影響時拒絕建置，必須先重建底層應用映像。NAS 換版沿用 [保留資料換版程序](deployment/nas/README.md)，舊映像不得視為已修補。依據：[Python 官方公告](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)。
 
 Windows 啟動：
 

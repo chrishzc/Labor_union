@@ -79,8 +79,33 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Refresh runner system CA certificates
+        run: |
+          sudo apt-get update
+          sudo apt-get install --only-upgrade -y ca-certificates
+      - name: Bootstrap pip with the official CA security fix
+        run: >-
+          python -m pip install --no-deps
+          'pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70'
       - name: Install declared runtime and test dependencies
         run: python -m pip install -r requirements.txt 'pytest>=8.0' 'httpx2==2.10.0'
+      - name: Verify application, pip and system CA stores
+        run: |
+          python - <<'PY'
+          import ssl
+          import certifi
+          import pip._vendor.certifi as pip_certifi
+          for name, path in (("certifi", certifi.where()), ("pip", pip_certifi.where()), ("system", None)):
+              context = ssl.create_default_context(cafile=path)
+              affected = any(
+                  key == "commonName" and value == "emSign ECC Root CA - G3"
+                  for cert in context.get_ca_certs()
+                  for rdn in cert["subject"]
+                  for key, value in rdn
+              )
+              assert not affected, f"{name}: affected emSign G3 root is still trusted"
+              print(f"{name}: affected root absent")
+          PY
       - name: Initialize random credentials for this disposable MySQL service
         id: database
         run: |
