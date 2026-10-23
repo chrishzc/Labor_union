@@ -191,7 +191,9 @@ def _state():
     )
 
 
-def test_manual_customer_decision_allows_documented_non_line_confirmation() -> None:
+@pytest.mark.parametrize("decision", [CustomerMatchingDecision.ACCEPTED, CustomerMatchingDecision.DECLINED])
+@pytest.mark.parametrize("reason", ["", "電話確認客戶的正式決定"])
+def test_manual_customer_decision_allows_optional_reason_without_line_delivery(decision, reason) -> None:
     unit_of_work = _UnitOfWork(_state())
     application = MatchingNotificationApplication(
         lambda: unit_of_work,
@@ -202,8 +204,8 @@ def test_manual_customer_decision_allows_documented_non_line_confirmation() -> N
         MatchingPlanReference("CASE-1", 10, 0),
         None,
         None,
-        CustomerMatchingDecision.ACCEPTED,
-        "電話確認客戶接受正式方案",
+        decision,
+        reason,
         ActorContext("admin:1", ("line.matching.override",)),
         ExpectedVersion(0),
         IdempotencyKey("manual-customer:1"),
@@ -212,9 +214,14 @@ def test_manual_customer_decision_allows_documented_non_line_confirmation() -> N
 
     result = application.record_manual_response(command)
 
-    assert result.customer_decision is CustomerMatchingDecision.ACCEPTED
+    assert result.customer_decision is decision
+    assert result.plan.version == 1
     assert unit_of_work.committed
     assert unit_of_work.matching_notifications.response_arguments["line_user_id"] is None
+    assert unit_of_work.matching_notifications.response_arguments["reason"] == reason
+    assert unit_of_work.matching_notifications.response_arguments["actor_id"] == "admin:1"
+    assert unit_of_work.matching_notifications.intent_arguments is None
+    assert unit_of_work.delivery_tasks.requests == []
 
 
 def test_manual_customer_profiles_requires_preview_and_appends_distinct_evidence() -> None:

@@ -216,7 +216,6 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
   it('將 Stage 5 current willing candidate 的 server dates 原樣交給正式方案 client', async () => {
     const candidate = {
       ...pool().candidates[0],
-      staff_id: 1,
       service_start_date: '2026-12-01',
       service_end_date: '2026-12-20',
     };
@@ -230,7 +229,7 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
 
     await waitFor(() => expect(mocks.createSingleCaregiverPlan).toHaveBeenCalledWith(expect.objectContaining({
       caseNo: CASE,
-      segments: [{ staff_id: 1, start_date: '2026-12-01', end_date: '2026-12-20' }],
+      segments: [{ staff_id: 8892, start_date: '2026-12-01', end_date: '2026-12-20' }],
     })));
   });
 

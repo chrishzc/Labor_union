@@ -619,8 +619,8 @@ fingerprint 語意；不得為省略輸入捏造聯繫紀錄。客戶資訊集�
 明確確認；建立發送工作不代表送達，履歷仍為 optional attachment。
 
 LINE identity、recipient binding 或 delivery 缺漏時，已登入的內部操作者可透過正式 matching-plan
-manual response 記錄特定 segment 的月嫂意願與客戶決策。每筆皆須 actor、非空 reason、目前 plan
-version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略正式 plan recipient。LINE callback
+manual response 記錄特定 segment 的月嫂意願與客戶決策。客戶決策的「客戶回覆依據」為選填，空白亦可保存接受或拒絕；有填寫時保存內容並沿用 500 字上限。每筆仍須 actor、目前 plan
+version、idempotency identity 與正式回讀；不得為填滿依據捏造聯繫紀錄，也不得偽造 LINE delivery 或省略正式 plan recipient。LINE callback
 仍必須驗證 recipient／delivery state。客戶接受仍只形成 matching decision，後續鎖定、契約與 execution
 各自遵守其既有 Preview／Apply gate。
 
