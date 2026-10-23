@@ -577,7 +577,7 @@ pending／contact_requested 時反覆修改 willing／unwilling；已接受的�
 形成換人需求，但不得由 LINE 自行改回 willing 而解除該需求。客戶已 declined 時不開放意願變更。
 每次新回覆沿既有 append-only event、原 webhook idempotency key 與 communication version writer；
 仍核對互動及區段 recipient、有效方案與原到期時間。caregiver_willingness 互動可重複使用，包含尚未
-過期且此前已標 consumed 的月嫂互動；客戶決策互動仍為一次性，取消、過期或失效方案不能重用。
+過期且此前已標 consumed 的月嫂互動。客戶的專人協助不消耗接受資格，7 天只作內部提醒，不阻擋回覆；仍核對本人與有效案件／推薦，取消、更換或已最終決定的方案不能重用。
 最新正式通知為不承接者，不論是否已有 effective assignment，推薦確認的唯讀待辦投影皆回到待處理，
 要求換人及重新取得客戶確認。既有客戶接受或檔期保留不得冒充現行接案同意；不回寫 Orders lifecycle、
 歷史決定或指派資料，不自動撤銷檔期、契約或排班。已有指派者由既有換人流程處理；已有 actual-service
@@ -629,6 +629,10 @@ version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略�
 操作介面明確提醒未附履歷，送出的 LINE 卡片省略該履歷下載按鈕；公會人員可沿用既有方式另行以 LINE
 手工傳送履歷，但不得把這個系統外動作偽造成受控檔案 delivery。訂單資訊－1、訂單資訊－2、每周服務中
 說明、方案有效性、全體月嫂意願、客戶 LINE 綁定與檔期 fresh validation 仍是寄送 blocker。
+
+客戶點「專人協助／進一步了解」後回覆「已收到您的聯絡需求，請留下您的疑問。」；聯絡需求及後續留言沿既有 Customer Service create-or-append writer 保存，人員從待辦查看並沿原客服 Preview／Apply 回覆，不建立 escalation 或群組通知。客戶仍可由原卡片接受配對。點「接受此配對」後回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，原聯絡待辦改為辦理簽約；契約準備、發起簽署及雙方簽約完成仍由 Contract Signing owner 承接，簽約後才由人員建立本案服務群組。接受配對不等於簽約完成或正式排班。
+
+推薦確認待辦由 active plan、最新 customer decision、實際 delivery sent time 與雙方簽回事實唯讀投影，不新增待辦 root。成功送達滿 7 天仍未接受只作內部提醒，不關閉按鈕、不自動拒絕、不發逾期訊息；接受後不再列未確認提醒。雙方完成簽回後解除辦理簽約待辦，取消／更換方案不列原方案待辦。仍核對本人、current binding 與有效案件／推薦，既有因協助而標 consumed 的卡片仍可在 current contact_requested 下接受；已取消、更換或最終決定的方案不能重用。履歷 PDF 下載仍沿原短效檔案憑證規則，與客戶回覆期限分開。推薦流程不查詢通知群組、不產生媒合成功群組訊息；既有 pending／retryable_failed 的 matching_plan_decision 投遞由 delivery 前置 worker 取消，已送達歷史不改寫。
 
 2026-09-22 人工裁決：退休獨立的「國定假日上班雙方協調」入口與 agreement
 Preview／Apply contract。出勤精算的初始建議仍將國定假日視為休假；工會人員在 Orders-owned

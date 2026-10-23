@@ -1133,13 +1133,10 @@ def _cancel_pending_candidate_coordination(cursor: Any, pool_id: int) -> None:
         "error_code='candidate_contact_pool_resolved',"
         "error_message='candidate contact pool already has a willing caregiver',"
         "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-        "WHERE processing_status IN ('pending','retryable_failed') AND (("
-        "source_aggregate_type='candidate_contact_adjustment' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s) OR ("
-        "source_aggregate_type='candidate_contact_question' "
-        "AND CAST(source_aggregate_identity AS UNSIGNED) IN ("
-        "SELECT id FROM caregiver_candidate_contact_events WHERE pool_id=%s)))",
-        (pool_id, pool_id),
+        "WHERE processing_status IN ('pending','retryable_failed') "
+        "AND source_aggregate_type='candidate_contact_adjustment' "
+        "AND CAST(source_aggregate_identity AS UNSIGNED)=%s",
+        (pool_id,),
     )
     _cancel_pending_manual_followup(cursor, pool_id)
 
@@ -1172,6 +1169,8 @@ def _candidate_projection(events: list[dict[str, Any]]):
                 information = {"1": None, "2": None, "3": None}
             if payload.get("willingness") in {"pending", "willing", "unwilling"}:
                 willingness, reason = payload["willingness"], payload.get("reason")
+                if payload.get("response_kind") == "no_interest":
+                    reason = "沒有意願"
                 latest_willingness_event_id = _positive_int(
                     event["id"], "latest_willingness_event_id"
                 )
