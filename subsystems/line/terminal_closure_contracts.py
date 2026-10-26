@@ -16,6 +16,7 @@ class TerminalClosureDecision(StrEnum):
     BLOCKED_ACTIVE_CLIENT_CASE = "blocked_active_client_case"
     BLOCKED_REVOKED_STAFF = "blocked_revoked_staff"
     NOOP_REPLAY = "noop_replay"
+    NOOP_NOT_STAFF = "noop_not_staff"
 
 
 @dataclass(frozen=True, slots=True)

@@ -192,6 +192,8 @@ def _build_preview(
         selected_kind = CustomerOrderChangeKind(kind)
     except (TypeError, ValueError) as error:
         raise CustomerOrderChangeError("order_change_kind_not_allowed") from error
+    if selected_kind is CustomerOrderChangeKind.SERVICE_DAYS:
+        raise CustomerOrderChangeError("order_change_service_dates_retired")
     if snapshot.order_version != expected_order_version:
         raise CustomerOrderChangeError("order_change_order_version_stale")
     normalized = _normalize_requested(selected_kind, requested)

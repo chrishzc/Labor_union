@@ -40,6 +40,7 @@
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
   <section id="results"></section>
+<section class="panel" aria-label="回報服務開始安排"><h2>回報服務開始安排</h2><p id="serviceStartStatus" role="status"></p><div id="serviceStartCases"></div><button type="button" onclick="loadServiceStartCases()">重新查詢服務開始安排</button></section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
@@ -169,7 +170,7 @@ async function init() {
   } finally {
     searchButton.disabled = false;
     searchButton.textContent = "篩選訂單";
-    if (identityReady || flowId || lineIdToken) await loadOrders();
+    if (identityReady || flowId || lineIdToken) { await loadOrders(); await loadServiceStartCases(); }
   }
 }
 
@@ -205,6 +206,55 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
 });
 
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);
+
+async function serviceStartPost(path, body) {
+  const response=await fetch('/api/v1/line/staff-self-service/service-start/'+path,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,flow_id:flowId,line_id_token:lineIdToken})});
+  const result=await response.json();
+  if(!response.ok || !result.success){const error=new Error(result.detail?.error?.message || result.detail?.message || result.message || '目前無法完成服務安排。');error.httpStatus=response.status;throw error;}
+  return result.data;
+}
+async function loadServiceStartCases() {
+  const root=document.getElementById('serviceStartCases');root.replaceChildren();
+  const status=document.getElementById('serviceStartStatus');status.textContent='正在查詢本人服務安排…';
+  try {
+    const data=await serviceStartPost('cases',{});
+    for(let i=0;i<sessionStorage.length;i++){const key=sessionStorage.key(i);if(!key?.startsWith('service-start-submit:'))continue;let saved;try{saved=JSON.parse(sessionStorage.getItem(key));}catch{continue;}if(saved && !data.items.some(item=>item.case_no===saved.case_no && item.segment_id===saved.segment_id && item.assignment_id===saved.assignment_id))data.items.push({...saved,order_version:saved.expected_order_version,segment_start_date:saved.start_date??'待確認',segment_end_date:'原操作結果待確認'});}
+    if(!data || !Array.isArray(data.items)) throw new Error('服務安排資料格式錯誤。');
+    status.textContent=data.items.length?'請先與客戶在服務群組協調，再提交結果。':'目前沒有可回報的服務安排。';
+    for(const item of data.items){
+      const card=document.createElement('article');card.className='panel';
+      const heading=document.createElement('h3');heading.textContent='案件 '+item.case_no+'｜服務區段 '+item.segment_start_date+'～'+item.segment_end_date;card.append(heading);
+      const form=document.createElement('form');
+      const choice=document.createElement('select');choice.setAttribute('aria-label','協調結果');
+      for(const [value,text] of [['accepted','接受，填寫開始日期'],['declined','無法配合，請工會安排代班']]){const option=document.createElement('option');option.value=value;option.textContent=text;choice.append(option);}
+      const label=document.createElement('label');label.textContent='雙方約定的服務開始日';
+      const start=document.createElement('input');start.type='date';start.required=true;start.setAttribute('aria-label','雙方約定的服務開始日');label.append(start);
+      choice.onchange=()=>{label.hidden=choice.value!=='accepted';start.required=choice.value==='accepted';};
+      const submit=document.createElement('button');submit.type='submit';submit.textContent='送出協調結果';
+      const state=document.createElement('p');state.setAttribute('role','status');
+      const recover=document.createElement('button');recover.type='button';recover.textContent='確認原操作結果';recover.hidden=true;
+      const storageKey='service-start-submit:'+item.case_no+':'+item.segment_id+':'+item.assignment_id;
+      const saved=sessionStorage.getItem(storageKey);let pending=saved?JSON.parse(saved):null;
+      const lock=()=>{submit.disabled=Boolean(pending);choice.disabled=Boolean(pending);start.disabled=Boolean(pending);recover.hidden=!pending;};lock();
+      const send=async()=>{
+        if(!pending)return;submit.disabled=true;recover.disabled=true;
+        try{const result=await serviceStartPost('submit',pending);sessionStorage.removeItem(storageKey);pending=null;
+          state.textContent=result.status==='applied'?'實際服務日期與排班已更新，結果將記錄於服務群組。':result.status==='substitute_required'?'已交由工會安排代班。':'已收到約定日期，等待其他服務區段的月嫂提交。';
+          choice.disabled=true;start.disabled=true;recover.hidden=true;
+        }catch(error){state.textContent=error.message;if(error.httpStatus>=400 && error.httpStatus<500){pending=null;sessionStorage.removeItem(storageKey);}lock();}
+        finally{recover.disabled=false;}
+      };
+      recover.onclick=()=>void send();
+      form.onsubmit=event=>{event.preventDefault();if(pending)return;
+        pending={case_no:item.case_no,segment_id:item.segment_id,assignment_id:item.assignment_id,expected_order_version:item.order_version,
+          decision:choice.value,start_date:choice.value==='accepted'?start.value:null,idempotency_key:crypto.randomUUID()};
+        sessionStorage.setItem(storageKey,JSON.stringify(pending));lock();void send();};
+      form.append(choice,label,submit,recover,state);card.append(form);root.append(card);
+    }
+  }catch(error){status.textContent=error.message;status.setAttribute('role','alert');}
+}
+
 init();
 </script>
 </body>

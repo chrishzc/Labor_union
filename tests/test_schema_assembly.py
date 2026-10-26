@@ -54,7 +54,8 @@ def test_catalog_rejects_duplicate_active_artifact(tmp_path: Path) -> None:
 
 def test_catalog_rejects_an_unclassified_live_schema_part(tmp_path: Path) -> None:
     catalog = json.loads(DEFAULT_ASSEMBLY_PATH.read_text(encoding="utf-8"))
-    catalog["active_bootstrap"].pop()
+    removed = catalog["active_bootstrap"].pop()
+    catalog['classifications'].pop(removed,None)
     catalog_path = tmp_path / "missing-part.json"
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
 

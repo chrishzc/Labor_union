@@ -5,6 +5,7 @@ Description: 建立訂單取消查詢、receipt 讀取及 Preview／Apply applic
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -37,7 +38,7 @@ class OrderCancellationApplication:
     def query(self, case_no: str):
         facts = self.repository.load_for_preview(case_no, ())
         options = self.repository.list_caregiver_options(case_no)
-        return OrderCancellationQueryResult(facts, options)
+        return OrderCancellationQueryResult(facts, options, self.workflow.cancellation_date)
 
     def preview(self, case_no, confirmed_service_days):
         return self.workflow.preview(case_no, confirmed_service_days)
@@ -59,6 +60,7 @@ class OrderCancellationApplication:
 class OrderCancellationQueryResult:
     facts: CancellationWorkflowFacts
     caregiver_options: tuple[Mapping[str, object], ...]
+    cancellation_date: date
 
 
 def get_order_cancellation_application():

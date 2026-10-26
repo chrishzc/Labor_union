@@ -492,14 +492,11 @@
                 console.warn('讀取 runtime-config 失敗:', e);
             }
 
-            try {
-                const runtimeRes = await fetch('/api/config/liff/runtime?page=bind');
-                if (runtimeRes.ok) {
-                    const runtime = await runtimeRes.json();
-                    runtimePage = runtime.page;
-                    applyRuntime(runtime);
-                }
-            } catch (_) {}
+            const runtimeRes = await fetch('/api/config/liff/runtime?page=bind');
+            if (!runtimeRes.ok) throw new Error('目前無法讀取 LIFF 設定，請稍後重試。');
+            const runtime = await runtimeRes.json();
+            runtimePage = runtime.page;
+            applyRuntime(runtime);
 
             // 檢查是否配置了 LIFF ID
             if (!liffId || liffId === 'your_liff_id_here' || liffId.trim() === '') {
@@ -534,6 +531,8 @@
         } catch (error) {
             console.warn('LIFF 載入提示:', error);
             hideLoader();
+            showMessage(error.message || '頁面初始化失敗，請稍後重試。', 'error');
+            document.querySelectorAll('#bindForm input, #bindForm button').forEach(control => control.disabled = true);
         }
     });
 
@@ -638,9 +637,10 @@
         formContent.style.display = 'none';
         rebindContent.style.display = 'none';
         successContent.style.display = 'block';
-        document.getElementById('successTitle').textContent = title;
+        document.getElementById('successTitle').textContent = runtimePage?.success_title || title;
         successDesc.style.whiteSpace = 'pre-line';
-        successDesc.textContent = caseNo ? `${description}\n案件編號：${caseNo}` : description;
+        successDesc.textContent = [...new Set([runtimePage?.success_description || '', title, description,
+            caseNo ? `案件編號：${caseNo}` : ''])].filter(Boolean).join('\n');
     }
 
     async function applyCustomerBinding(candidate) {

@@ -6,6 +6,7 @@
 
 ## Responsibility
 從 canonical `staff_obligations`、`staff_payable_projections` 與 immutable payout ledger，依 `staff_id + target payment month` 組成逐案唯讀明細。歸月以 `due_date` 為準；付款狀態與 net paid 不從 LINE 或 legacy `staff_payments` 重算。
+回傳 projection 剩餘待付金額 `amount_remaining`，有實付且餘額為正時保留 `partially_paid`，不將部分付款合併為未付款。
 
 ## Implementation
 - primary:

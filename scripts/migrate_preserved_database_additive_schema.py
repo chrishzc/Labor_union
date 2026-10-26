@@ -359,6 +359,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_14_candidate_weekly_information_v1.json",
     "labor_union_2026_10_19_nas_registration_approval_v1.json",
     "labor_union_2026_10_22_line_order_group_invitation_url_v1.json",
+    "labor_union_2026_10_23_scheduling_service_start_v1.json",
+    "labor_union_2026_10_24_government_subsidy_periods_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -656,7 +658,8 @@ def _configure_default_release_manifests() -> None:
         (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
         include_backfills=True,
         backfill_release_ids=frozenset(
-            {"labor-union-twins-payroll-policy-2026-09-12-v2"}
+            {"labor-union-twins-payroll-policy-2026-09-12-v2",
+             "labor-union-subsidy-periods-2026-10-24-v1"}
         ),
     )
 
@@ -3236,6 +3239,7 @@ def _local_ordered_upgrade_entries() -> tuple[dict[str, Any], ...]:
                 "descriptor": local_additive_release_qualification(
                     manifest.release_id, artifact.name
                 )["schema_artifacts"][0]["descriptor"],
+                "backfill_ids": tuple(item.backfill_id for item in manifest.backfills),
             })
     if not baseline_found or not entries:
         raise LocalAdditiveBlocked(
@@ -3385,6 +3389,19 @@ def _local_ordered_chain_plan(
                 },
             )
 
+    # Classify the complete pending chain before asking for schema-only qualifications.
+    # Otherwise an earlier missing receipt hides a later mandatory business backfill.
+    for projected, entry in zip(artifacts, entries, strict=True):
+        if projected["state"] in {"absent", "dependency_pending"} and entry.get("backfill_ids"):
+            projected["qualification"] = "not_eligible"
+            projected["blocked_reason"] = "replacement_required"
+            raise LocalAdditiveBlocked(
+                f"{entry['artifact']['name']} declares business backfills; use the preserve-data replacement route",
+                code="replacement_required",
+                details={**chain_details, "release_id":entry["release_id"],
+                         "artifact":entry["artifact"]["name"],
+                         "backfills":list(entry["backfill_ids"])},
+            )
     pending: list[dict[str, Any]] = []
     for projected, entry in zip(artifacts, entries, strict=True):
         if projected["state"] not in {"absent", "dependency_pending"}:
@@ -4514,6 +4531,11 @@ def build_plan(
         "candidate_precondition": "source_data_must_match_before_apply",
         "candidate_matches_source": candidate_matches_source,
         "schema_artifacts": schema_artifacts(),
+        "backfills": [
+            {"backfill_id": item.backfill_id, "artifact": item.artifact.name,
+             "sha256": item.artifact.sha256}
+            for item in RELEASE_MANIFEST.backfills
+        ],
         "source_schema_sha256": source_snapshot["sha256"],
         "source_objects": source_objects,
         "source_data": source_data,
@@ -4620,6 +4642,7 @@ def _validate_plan_integrity(
         "release_id",
         "release_fingerprint",
         "schema_artifacts",
+        "backfills",
         "phase_order",
     ):
         if plan.get(key) != fresh.get(key):
@@ -5897,6 +5920,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "collation_name": "utf8mb4_bin",
             },
         }
+    if part_name == '1055_government_subsidy_periods.sql':
+        # This receipt key has exact, case-sensitive replay semantics in the new DDL.
+        descriptor['tables']['government_subsidy_period_entries']['idempotency_key'].update(
+            character_set_name='utf8mb4',collation_name='utf8mb4_bin')
     if part_name == "1052_nas_registration_approval.sql":
         descriptor["parent_columns"]["provisional_client_registrations"] = {
             "application_payload": _column_contract("json", "YES"),
@@ -8914,10 +8941,10 @@ def _verified_manifest_backfill_receipt(
         return None
     path = Path(str(path_value)).expanduser().resolve()
     if not path.is_file() or _sha256_file(path) != phase.get("sha256"):
-        raise UpgradeBlocked("twins Payroll verify receipt changed")
+        raise UpgradeBlocked("verified backfill receipt changed")
     result = read_receipt(path)
     if (
-        result.get("contract") != "twins-payroll-rate-snapshot-backfill/v1"
+        result.get("contract") != ({'subsidy-period-policy-v1':'subsidy-period-policy-migration/v1'}.get(backfill_id,'twins-payroll-rate-snapshot-backfill/v1'))
         or result.get("mode") != "verify"
         or result.get("receipt_status") != "verified"
         or result.get("unresolved")
@@ -9024,8 +9051,17 @@ def verify_candidate(
         and int(backfill_result.get("review_required", -1)) == 0
     )
     additive_projection_preservation: dict[str, Any] = {}
+    subsidy_policy_verify = _verified_manifest_backfill_receipt(receipt, 'subsidy-period-policy-v1')
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
+        if subsidy_policy_verify is not None:
+            from scripts.migrate_subsidy_period_policy import PRESERVED_POLICY_TABLES, verify_preserved_policy_table
+            if table in PRESERVED_POLICY_TABLES:
+                try:
+                    additive_projection_preservation[table]=verify_preserved_policy_table(config,source,candidate,table)
+                except ValueError as error:
+                    raise UpgradeBlocked(str(error)) from error
+                continue
         if not actual:
             if (
                 table in INTENTIONALLY_RETIRED_EMPTY_TABLES

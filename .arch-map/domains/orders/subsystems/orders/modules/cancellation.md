@@ -7,6 +7,7 @@
 ## Responsibility
 組成訂單取消的 Query／Preview／Apply，驗證 fresh Orders、Scheduling、Client Finance 與 Payroll 根事實，並以單一交易產生取消 receipt／outbox。
 合法不存在的下游 owner 以 NULL 表達；專用 reader 驗證 partial roots／孤立財務歷史，取消不自動 bootstrap。日期-only 開始日不代表已服務。
+Query 依注入的台北業務日期排除未來排班，人員核對當日是否服務；未鎖定服務資料可確認為零日。取消與退款成功不產生 LINE 訊息，既有 terminal menu handoff 保留。
 
 ## Implementation
 - primary:
@@ -15,6 +16,7 @@
   - `infrastructure/mysql/order_cancellation_read_model.py`
   - `infrastructure/mysql/order_cancellation_repository.py`
   - `api/schemas/order_cancellation.py`
+  - `api/dependencies/order_cancellation.py`
 - entrypoints:
   - `api/routes/order_cancellation.py`
   - `ui_react/src/api/orders/order_cancellation_client.ts`

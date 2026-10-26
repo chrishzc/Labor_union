@@ -20,9 +20,6 @@ from subsystems.orders.historical_order_review_remediation_outbox_consumer impor
 )
 from subsystems.finance_import.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
 from subsystems.anomalies.ports import AnomalyRuntime, require_runtime
-from subsystems.government_subsidy.subsidy_advance_outbox_consumer import (
-    consume_government_subsidy_advance_events,
-)
 from subsystems.orders.client_finance_outbox_consumer import (
     consume_client_finance_orders_events,
 )
@@ -90,12 +87,9 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None, 
                 connection, runtime=runtime
             )
         )
-        subsidy_advance_delivered, subsidy_advance_failed = (
-            consume_government_subsidy_advance_events(
-                connection,
-                runtime.subsidy_advance_recovery_repository,
-            )
-        )
+        # Current recovery is atomic with the whole-period receipt owner.
+        # Legacy per-case outbox facts remain historical evidence, not a new writer.
+        subsidy_advance_delivered, subsidy_advance_failed = 0, 0
         deposit_delivered, deposit_failed = consume_client_finance_orders_events(
             connection
         )

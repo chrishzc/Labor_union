@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.error_contracts import typed_http_error
 from api.dependencies.line_identity import get_liff_token_verifier
@@ -160,3 +160,40 @@ def _development_fallback_enabled():
 
 
 __all__ = ["router"]
+
+
+from dataclasses import asdict
+from api.dependencies.service_start import get_service_start_application
+from api.schemas.service_start import StaffServiceStartSubmission, ServiceStartView
+from domains.scheduling.service_start import ServiceStartSubmission, ServiceStartDecision
+from api.routes.service_start import call as _service_start_call
+
+
+@router.post('/service-start/cases')
+def service_start_cases(payload: StaffLiffRequest, app=Depends(get_service_start_application)):
+    line_user_id=_verified_line_user_id(payload)
+    with open_line_unit_of_work() as unit:
+        staff=_required_staff(unit.customer_service.staff_subject(line_user_id.value))
+    return BaseResponse(data={'items':[asdict(item) for item in app.staff_cases(int(staff['staff_id']))]})
+
+
+@router.post('/service-start/submit',response_model=BaseResponse[ServiceStartView])
+def submit_service_start(payload: StaffServiceStartSubmission, app=Depends(get_service_start_application)):
+    line_user_id=_verified_line_user_id(payload)
+    with open_line_unit_of_work() as unit:
+        staff=_required_staff(unit.customer_service.staff_subject(line_user_id.value))
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.submit(ServiceStartSubmission(
+        payload.case_no,int(staff['staff_id']),payload.segment_id,ServiceStartDecision(payload.decision),
+        payload.start_date,payload.expected_order_version,payload.idempotency_key,payload.assignment_id)))))
+
+
+class _StaffStartReadback(StaffLiffRequest):
+    request_id:int
+
+
+@router.post('/service-start/result',response_model=BaseResponse[ServiceStartView])
+def service_start_result(payload: _StaffStartReadback, app=Depends(get_service_start_application)):
+    line_user_id=_verified_line_user_id(payload)
+    with open_line_unit_of_work() as unit:
+        staff=_required_staff(unit.customer_service.staff_subject(line_user_id.value))
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.repository.view(payload.request_id,staff_id=int(staff['staff_id'])))))

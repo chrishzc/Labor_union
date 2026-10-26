@@ -33,6 +33,11 @@ END
 """
 _MATCHED_CLIENT_RECEIPT_PREDICATE = f"""
 event.classification_type='client_receipt'
+AND NOT EXISTS (
+    SELECT 1 FROM client_ledger_entries posted_receipt
+    WHERE posted_receipt.finance_import_row_id=finance_row.id
+      AND posted_receipt.entry_type='receipt'
+)
 AND (
     EXISTS (
         SELECT 1
@@ -58,6 +63,18 @@ AND (
     )
 )
 """
+_REVIEW_ROW_PREDICATE = f"""
+(({_MATCHED_CLIENT_RECEIPT_PREDICATE}) OR (
+    event.classification_type='staff_payout'
+    AND NOT EXISTS (SELECT 1 FROM staff_payout_events posted_payout
+                    WHERE posted_payout.finance_import_row_id=finance_row.id)
+) OR (
+    event.classification_type='client_refund'
+    AND NOT EXISTS (SELECT 1 FROM client_ledger_entries posted_refund
+                    WHERE posted_refund.finance_import_row_id=finance_row.id)
+))
+"""
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,7 +352,7 @@ class FinanceImportQueryService:
                            AND event.disposition IN (
                                'manual_review','business_pending','blocked'
                            )
-                           AND {_MATCHED_CLIENT_RECEIPT_PREDICATE}
+                           AND {_REVIEW_ROW_PREDICATE}
                            AND event.classification_version=(
                                SELECT MAX(latest.classification_version)
                                  FROM finance_import_classification_events latest
@@ -406,7 +423,7 @@ class FinanceImportQueryService:
                 WHERE contract.batch_identity=%s
                   AND (%s IS NULL OR finance_row.id>%s)
                   AND event.disposition IN (%s,%s,%s)
-                  AND {_MATCHED_CLIENT_RECEIPT_PREDICATE}
+                  AND {_REVIEW_ROW_PREDICATE}
                 ORDER BY finance_row.id ASC
                 LIMIT %s
                 """,

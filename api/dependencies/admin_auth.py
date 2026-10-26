@@ -111,7 +111,6 @@ def ensure_development_line_configuration() -> None:
             LineConfigurationKind.MESSAGE_SCHEDULES: root / "config" / "message_schedules.json",
             LineConfigurationKind.RICH_MENUS: root / "config" / "line_menu.json",
             LineConfigurationKind.LIFF: root / "config" / "liff_settings.json",
-            LineConfigurationKind.CUSTOMER_SERVICE: root / "config" / "customer_service.json",
             LineConfigurationKind.NOTIFICATION_RULES: root / "config" / "notification_rules.json",
         }
         definitions = {

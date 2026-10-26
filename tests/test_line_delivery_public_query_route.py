@@ -6,9 +6,11 @@ Description: 驗證 LINE Delivery 公開查詢 route 的 typed response 與零�
 from argparse import Namespace
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import json
 import os
 import re
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -26,7 +28,7 @@ from subsystems.line.delivery_admin_contracts import (
     LineDeliveryAttemptRecord,
 )
 
-G7_DATABASE = "lu_test_line_delivery_public_query_20260820_a1"
+G7_DATABASE = "lu_test_line_delivery_public_query_" + uuid4().hex[:16]
 _DISPOSABLE_SCHEMA_PATTERN = re.compile(r"^lu_test_[a-z0-9_]+$")
 
 
@@ -157,28 +159,65 @@ def test_delivery_source_groups_are_safe_and_bounded() -> None:
 
 
 @pytest.mark.parametrize(
-    "source_aggregate_type",
-    ("matching_schedule_recipient", "matching_schedule_snapshot"),
+    "source_aggregate_type,expected_type",
+    [(name, kind) for kind, names in {
+        'matching': ('matching_schedule_recipient', 'matching_schedule_snapshot', 'candidate_contact_question',
+                     'candidate_contact_answer', 'candidate_weekly_service_information', 'service_start_inquiry'),
+        'finance': ('client_deposit_reminder', 'client_deposit_settled', 'manual_payment_overdue_reminder',
+                    'client_second_payment_reminder','client_second_payment_settled'),
+        'order': ('order_service_start_day','order_service_start_day_response','order_service_completion'),
+        'assignment': ('manual_service_day_log_reminder', 'service_start_schedule'),
+        'group_invitation': ('service_start_invitation',),
+    }.items() for name in names],
 )
 def test_matching_schedule_sources_project_to_bounded_matching_label(
     monkeypatch,
     source_aggregate_type: str,
+    expected_type: str,
 ) -> None:
     class _MatchingApplication(_Application):
         def list(self, _query, _actor):
             record = replace(_record(), source_aggregate_type=source_aggregate_type)
             return LineDeliveryAdminPage((record,), 1, 1, 25)
+        def get(self, _task_id, _actor):
+            record, attempts=super().get(_task_id,_actor)
+            return replace(record,source_aggregate_type=source_aggregate_type),attempts
 
     client = _client(monkeypatch, _MatchingApplication())
     response = client.get("/api/v1/line/tasks")
 
     assert response.status_code == 200
     item = response.json()["data"]["items"][0]
-    assert item["source_type"] == "matching"
-    assert item["task_type"] == "matching"
+    assert item["source_type"] == expected_type
+    assert item["task_type"] == expected_type
     assert "U-secret" not in response.text
     assert "CASE-secret" not in response.text
     assert "provider-secret" not in response.text
+    detail=client.get('/api/v1/line/tasks/7')
+    assert detail.status_code==200 and detail.json()['data']['task']['source_type']==expected_type
+
+
+@pytest.mark.parametrize('category,required,excluded',[
+    ('review','contract_document_version','client_second_payment_reminder'),
+    ('reminder','client_second_payment_reminder','customer_service_ticket'),
+    ('support','customer_service_ticket','order_service_completion'),
+])
+def test_public_category_filters_the_original_owner_before_counting_and_pagination(monkeypatch,category,required,excluded):
+    queries=[]
+    class Reader(_Application):
+        def list(self,query,actor):
+            queries.append(query);return LineDeliveryAdminPage((),41,2,6)
+    response=_client(monkeypatch,Reader()).get('/api/v1/line/tasks',params={'category':category,'page':2,'page_size':6})
+    assert response.status_code==200 and response.json()['data']['total']==41
+    assert required in queries[0].source_aggregate_types and excluded not in queries[0].source_aggregate_types
+    assert queries[0].page==2 and queries[0].page_size==6
+
+
+def test_incompatible_category_and_source_returns_zero_without_an_unfiltered_read(monkeypatch):
+    application=_Application();client=_client(monkeypatch,application)
+    response=client.get('/api/v1/line/tasks',params={'category':'review','source_type':'finance'})
+    assert response.status_code==200 and response.json()['data']['total']==0 and application.calls==[]
+    assert client.get('/api/v1/line/tasks',params={'category':'not-a-category'}).status_code==422
 
 
 def test_scheduling_leave_notification_projects_to_bounded_assignment_label(
@@ -263,6 +302,11 @@ class _TrackedConnection:
     def __getattr__(self, name):
         return getattr(self._connection, name)
 
+    @contextmanager
+    def cursor(self, *args, **kwargs):
+        with self._connection.cursor(*args, **kwargs) as cursor:
+            yield _ReadOnlyTrackedCursor(cursor, self._counters)
+
     def commit(self):
         self._counters["commit"] += 1
         return self._connection.commit()
@@ -270,6 +314,26 @@ class _TrackedConnection:
     def rollback(self):
         self._counters["rollback"] += 1
         return self._connection.rollback()
+
+
+class _ReadOnlyTrackedCursor:
+    def __init__(self, cursor, counters):
+        self._cursor = cursor
+        self._counters = counters
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def execute(self, sql, args=None):
+        self._counters["queries"] += 1
+        if not sql.lstrip().upper().startswith(("SELECT ", "SHOW ")):
+            self._counters["writes"] += 1
+            raise AssertionError("delivery query attempted a database write")
+        return self._cursor.execute(sql, args)
+
+    def executemany(self, *args, **kwargs):
+        self._counters["writes"] += 1
+        raise AssertionError("delivery query attempted a batch write")
 
 
 def _assert_disposable_schema_name(name: str) -> None:
@@ -393,8 +457,7 @@ def _g7_database_values() -> dict[str, str]:
         existing = os.getenv(db_name, "").strip()
         if existing and existing != values[source_name]:
             pytest.skip(f"BLOCKED_ENGINE_EVIDENCE: {db_name} conflicts with disposable test env")
-    if values["LABOR_UNION_TEST_MYSQL_USER"].lower() == "root":
-        pytest.skip("BLOCKED_ENGINE_EVIDENCE: host root account is prohibited")
+    _assert_disposable_schema_name(values["LABOR_UNION_TEST_MYSQL_DATABASE"])
     return values
 
 
@@ -486,6 +549,17 @@ def test_disposable_schema_rejects_union_db_before_admin_calls() -> None:
     assert admin.dropped == []
 
 
+def test_g7_explicit_local_root_configuration_is_allowed(monkeypatch):
+    # Current migration contract section 9.1 permits development credentials,
+    # including root; the explicit disposable target remains mandatory.
+    values = {"HOST": "127.0.0.1", "PORT": "3306", "USER": "root",
+              "PASSWORD": "synthetic-only", "DATABASE": G7_DATABASE}
+    for name, value in values.items():
+        monkeypatch.setenv("LABOR_UNION_TEST_MYSQL_" + name, value)
+        monkeypatch.setenv("DB_" + name, value)
+    assert _g7_database_values()["LABOR_UNION_TEST_MYSQL_USER"] == "root"
+
+
 def _with_g7_database(test_function):
     def wrapped(monkeypatch):
         from infrastructure.mysql import mysql_adapter
@@ -493,6 +567,18 @@ def _with_g7_database(test_function):
         original_db_config = dict(mysql_adapter.DB_CONFIG)
         try:
             with _managed_g7_database(monkeypatch) as values:
+                # Set the adapter before importing the production composition,
+                # so imports and lifespan can only see this leased database.
+                mysql_adapter.DB_CONFIG.update(
+                    host=values["LABOR_UNION_TEST_MYSQL_HOST"],
+                    port=int(values["LABOR_UNION_TEST_MYSQL_PORT"]),
+                    user=values["LABOR_UNION_TEST_MYSQL_USER"],
+                    password=values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+                    database=G7_DATABASE,
+                )
+                monkeypatch.setenv("APP_ENV", "test")
+                monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+                monkeypatch.setenv("REDIS_URL", "")
                 return test_function(monkeypatch, values)
         finally:
             mysql_adapter.DB_CONFIG.clear()
@@ -528,72 +614,151 @@ def test_delivery_query_g7_uses_production_app_and_real_repository(monkeypatch, 
         password=values["LABOR_UNION_TEST_MYSQL_PASSWORD"],
         database=G7_DATABASE,
     )
+    # Use real owner persistence for all five current sources plus enough
+    # review/support rows to prove category filtering happens before paging.
+    kinds = (
+        ("order_service_start_day", "order", "reminder"),
+        ("order_service_start_day_response", "order", "reminder"),
+        ("order_service_completion", "order", "reminder"),
+        ("client_second_payment_reminder", "finance", "reminder"),
+        ("client_second_payment_settled", "finance", "reminder"),
+        *(("contract_document_version", "contract", "review"),) * 3,
+        *(("customer_service_ticket", "customer_service", "support"),) * 5,
+    )
+    expected = {}
+    now = datetime.now(timezone.utc)
     seed_connection = mysql_adapter.get_connection()
     try:
-        result = MySqlLineDeliveryTaskRepository(seed_connection).enqueue(
-            LineDeliveryRequest(
+        repository = MySqlLineDeliveryTaskRepository(seed_connection)
+        for index, (source, public_type, category) in enumerate(kinds):
+            result = repository.enqueue(LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, LineUserId("U-g7-safe")),
                 LineMessageKind.TEXT,
                 canonical_line_payload_json({"type": "text", "text": "g7-safe"}),
-                datetime.now(timezone.utc),
-                IdempotencyKey("g7-line-delivery-query-a1"),
-                CorrelationId("g7-line-delivery-query-a1"),
-                "customer_service_ticket",
-                "CASE-G7-SAFE",
-            )
-        )
-        seed_connection.commit()
+                now + timedelta(days=1, minutes=index),
+                IdempotencyKey(f"g7-line-delivery-query-{index}"),
+                CorrelationId("g7-private-correlation"), source, "CASE-G7-SAFE",
+            ))
+            expected[result.task_id.value] = (public_type, category)
         task_id = result.task_id.value
+        # Synthetic failed attempt exercises masking of actual stored provider
+        # details without calling a transport or running a delivery worker.
+        with seed_connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE line_delivery_tasks SET processing_status='failed',"
+                "completed_attempts=1,failed_at_utc=%s,provider_message_id=%s,"
+                "error_code=%s,error_message=%s WHERE id=%s",
+                (now, "g7-private-provider", "g7-private-error", "g7-private-message", task_id),
+            )
+            cursor.execute(
+                "INSERT INTO line_delivery_attempt_events "
+                "(task_id,attempt_number,outcome,provider_outcome_type,provider_message_id,"
+                "error_code,error_message,retry_after_seconds,started_at_utc,completed_at_utc,"
+                "idempotency_key,correlation_id) VALUES (%s,1,'terminal_failure',"
+                "'rejected',%s,%s,%s,NULL,%s,%s,%s,%s)",
+                (task_id, "g7-private-provider", "g7-private-error", "g7-private-message",
+                 now, now, "g7-private-attempt", "g7-private-correlation"),
+            )
+        seed_connection.commit()
     finally:
         seed_connection.close()
 
-    counters = {"commit": 0, "rollback": 0}
+    counters = {"commit": 0, "rollback": 0, "queries": 0, "writes": 0, "wakeup": 0}
     original_get_connection = mysql_adapter.get_connection
 
     def tracked_connection():
+        assert mysql_adapter.DB_CONFIG["database"] == G7_DATABASE
         return _TrackedConnection(original_get_connection(), counters)
 
-    def fail_wakeup():
+    def fail_wakeup(*args, **kwargs):
+        # A publisher error can be swallowed by best-effort wrappers. Count the
+        # invocation as well, so swallowing cannot make this assertion pass.
+        counters["wakeup"] += 1
         raise AssertionError("query invoked wakeup")
 
+    def snapshot():
+        connection = original_get_connection()
+        try:
+            with connection.cursor() as cursor:
+                result = {}
+                for table in ("line_delivery_tasks", "line_delivery_attempt_events",
+                              "line_domain_outbox", "line_domain_audit_events",
+                              "line_command_receipts", "line_rich_menu_publication_tasks"):
+                    cursor.execute(f"SELECT * FROM `{table}`")
+                    result[table] = tuple(sorted(
+                        json.dumps(row, sort_keys=True, default=str) for row in cursor.fetchall()
+                    ))
+                return result
+        finally:
+            connection.close()
+
     line_runtime.get_line_delivery_task_admin_application.cache_clear()
-    monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("LINE_WEBHOOK_RUNTIME_MODE", "canonical")
     monkeypatch.setenv("LINE_WORKER_RUNTIME_MODE", "canonical")
     production_app.dependency_overrides[require_line_task_reader] = _principal
+    responses = []
     try:
         with TestClient(production_app) as client:
-            # Lifespan may commit development defaults. Measure only the queries,
-            # without disabling startup or resetting counts after a request.
+            # Keep the real lifespan. Measure after startup and never reset
+            # counters during queries; bootstrap/fixture writes are separate.
+            before = snapshot()
             with monkeypatch.context() as query_patch:
+                query_patch.setattr(mysql_adapter, "get_connection", tracked_connection)
                 query_patch.setattr(line_unit_of_work, "get_connection", tracked_connection)
                 query_patch.setattr(line_tasks, "get_connection", tracked_connection)
                 query_patch.setattr(line_tasks, "get_line_wakeup_publisher", fail_wakeup)
-                summary = client.get("/api/v1/line/tasks/summary")
-                listing = client.get(
-                    "/api/v1/line/tasks",
-                    params={"source_type": "general_push", "page": 1, "page_size": 25},
-                )
-                detail = client.get(f"/api/v1/line/tasks/{task_id}")
-                assert counters["commit"] == 0
+                query_patch.setattr(line_runtime, "publish_line_wakeup_best_effort", fail_wakeup)
+
+                def get(path="", **params):
+                    response = client.get("/api/v1/line/tasks" + path, params=params)
+                    assert response.status_code == 200, response.text
+                    responses.append(response)
+                    return response.json()["data"]
+
+                summary = get("/summary")
+                assert summary["total"] == len(expected)
+                assert summary["pending"] == len(expected) - 1 and summary["failed"] == 1
+                listing = get(page=1, page_size=100)
+                assert listing["total"] == len(expected)
+                assert {item["id"] for item in listing["items"]} == set(expected)
+                assert {item["source_type"] for item in get(page=1, page_size=2)["items"]} == {"customer_service"}
+
+                # Every seeded source, including the five formerly missing
+                # mappings, must open through the real public detail endpoint.
+                for identity, (public_type, _) in expected.items():
+                    detail = get("/" + str(identity))
+                    assert detail["task"]["id"] == identity
+                    assert detail["task"]["source_type"] == public_type
+                assert get("/" + str(task_id))["attempts"][0]["outcome"] == "terminal_failure"
+
+                for category, total in (("review", 3), ("reminder", 5), ("support", 5)):
+                    seen = []
+                    for page in range(1, (total + 1) // 2 + 1):
+                        data = get(category=category, page=page, page_size=2)
+                        assert data["total"] == total and data["total_pages"] == (total + 1) // 2
+                        assert len(data["items"]) == min(2, total - (page - 1) * 2)
+                        assert all(expected[item["id"]][1] == category for item in data["items"])
+                        seen.extend(item["id"] for item in data["items"])
+                    assert len(set(seen)) == total
+                    assert set(seen) == {identity for identity, (_, group) in expected.items() if group == category}
+                    assert get(category=category, page=10, page_size=2)["items"] == []
+                combined = get(category="reminder", source_type="finance", page=1, page_size=1)
+                assert combined["total"] == 2 and combined["items"][0]["source_type"] == "finance"
+                assert get(category="review", source_type="finance")["total"] == 0
+                assert get(source_type="general_push", page_size=100)["total"] == 8
+                assert counters["queries"] > 0 and counters["rollback"] > 0
+                assert counters["commit"] == counters["writes"] == counters["wakeup"] == 0
+            assert snapshot() == before
     finally:
         production_app.dependency_overrides.pop(require_line_task_reader, None)
         line_runtime.get_line_delivery_task_admin_application.cache_clear()
         mysql_adapter.DB_CONFIG.clear()
         mysql_adapter.DB_CONFIG.update(original_db_config)
 
-    assert summary.status_code == 200
-    assert listing.status_code == 200
-    assert detail.status_code == 200
-    assert any(item["id"] == task_id for item in listing.json()["data"]["items"])
-    assert detail.json()["data"]["task"]["id"] == task_id
-    for response in (summary, listing, detail):
+    for response in responses:
         body = response.text
-        assert "U-g7-safe" not in body
-        assert "CASE-G7-SAFE" not in body
-        assert "g7-safe" not in body
-        assert "recipient_identity" not in body
-        assert "payload_json" not in body
-        assert "provider_message_id" not in body
-        assert "correlation_id" not in body
-        assert "error_message" not in body
+        for value in ("U-g7-safe", "CASE-G7-SAFE", "g7-safe", "g7-private"):
+            assert value not in body
+        for field in ("recipient_identity", "payload_json", "payload_snapshot", "source_aggregate_identity",
+                      "provider_message_id", "provider_outcome_type", "correlation_id", "error_code", "error_message"):
+            assert field not in body

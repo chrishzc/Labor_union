@@ -25,3 +25,6 @@
 - test_root: `tests/domains/finance-import/subsystems/finance-import/`
 - integration_root: `tests/domains/finance-import/subsystems/finance-import/integration/`.
 - integration_root: `tests/test_finance_import_batch_job_outcome_route.py`
+- integration_root: `tests/test_finance_import_disposable_mysql_e2e.py` — current cross-owner bank/refund/advance/recovery MySQL regression.
+- integration_root: `tests/test_durable_finance_import_batch_e2e.py` — current durable worker crash/replay MySQL regression.
+- integration_root: `tests/test_finance_source_review_mysql_e2e.py` — current MySQL response to typed React review integration.

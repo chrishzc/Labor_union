@@ -39,6 +39,11 @@ class RuntimeAlertTargetApplication:
             rows = unit_of_work.runtime_monitor.list_alert_targets()
             return tuple(_target_view(row) for row in rows if row["target_type"] == "admin_user")
 
+    def has_available_admin_target(self) -> bool:
+        """Enabled target, enabled Admin and current canonical binding must agree."""
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.runtime_monitor.has_available_admin_alert_target()
+
     def list_admin_candidates(self) -> tuple[AlertAdminCandidateView, ...]:
         with self._unit_of_work_factory() as unit_of_work:
             rows = unit_of_work.runtime_monitor.list_admin_alert_candidates()

@@ -5,7 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlencode
 
 from domains.customer_service.ticket import CustomerServiceCategory
@@ -59,7 +59,7 @@ class DepositNotificationPort(Protocol):
     def customer_line_user_id(self, case_no: str, *, lock: bool = False) -> str | None: ...
     def next_settlement(self) -> DepositSettlementIntent | None: ...
     def existing_delivery(self, key: IdempotencyKey) -> LineDeliveryTaskSnapshot | None: ...
-    def followups(self, *, page: int = 1, page_size: int = 25, settled: bool | None = None) -> DepositNotificationTodoPage: ...
+    def followups(self, *, page: int = 1, page_size: int = 25, settled: bool | None = None, case_no: str | None = None) -> DepositNotificationTodoPage: ...
 
 
 def payment_source(payment: DepositPayment) -> str:
@@ -88,8 +88,19 @@ class DepositNotificationApplication:
             return payment
 
     def ready(self, payment: DepositPayment) -> bool:
-        return bool(payment.due_date and re.fullmatch(r'[0-9]{10,20}', payment.virtual_account or '')
-                    and re.fullmatch(r'[0-9]{3}', self._bank_code))
+        return not self.missing_reminder_fields(payment)
+
+    def missing_reminder_fields(self, payment: DepositPayment) -> tuple[Literal['due_date','virtual_account','bank_code','liff'], ...]:
+        missing: list[Literal['due_date','virtual_account','bank_code','liff']] = []
+        if not payment.due_date:
+            missing.append('due_date')
+        if not re.fullmatch(r'[0-9]{10,20}', payment.virtual_account or ''):
+            missing.append('virtual_account')
+        if not re.fullmatch(r'[0-9]{3}', self._bank_code):
+            missing.append('bank_code')
+        if not self._liff_id or self._liff_id == 'your_liff_id_here':
+            missing.append('liff')
+        return tuple(missing)
 
     @property
     def bank_code(self) -> str | None:

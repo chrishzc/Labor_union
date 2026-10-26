@@ -163,29 +163,29 @@ def api_client(application):
     return api, TestClient(api)
 
 
-def test_authenticated_query_preview_apply_and_fresh_readback():
+def test_authenticated_history_remains_read_only_and_old_mutations_are_retired():
     repo, application, command = setup()
     api, client = api_client(application)
     base = '/api/v1/client-finance/subsidy-advance-recoveries'
     assert client.get(base).json()['data']['rows'][0]['status'] == 'ready'
-    preview = client.post(f'{base}/10/preview', json={}).json()['data']
+    assert client.post(f'{base}/10/preview',json={}).status_code==410
     body = {key: value for key, value in asdict(command).items() if key in {
         'expected_account_version', 'expected_batch_version', 'preview_fingerprint', 'reason'}}
-    assert preview['preview_fingerprint'] == body['preview_fingerprint']
     response = client.post(f'{base}/10/apply', json=body, headers={'Idempotency-Key': command.idempotency_key})
-    assert response.status_code == 200
-    assert client.get(base).json()['data']['rows'][0]['status'] == 'recovered'
+    assert response.status_code == 410
+    assert response.json()['detail']['error']['code']=='subsidy_period_recovery_required'
+    assert client.get(base).json()['data']['rows'][0]['status'] == 'ready'
     assert client.post(f'{base}/10/apply', json=body, headers={'Idempotency-Key': command.idempotency_key}).json() == response.json()
     conflict = client.post(f'{base}/10/apply', json={**body, 'reason': '不同指令'}, headers={'Idempotency-Key': command.idempotency_key})
-    assert conflict.status_code == 409
-    assert conflict.json()['detail']['error']['code'] == 'idempotency_mismatch'
+    assert conflict.status_code == 410
+    assert repo.recovery_count==0 and repo.commit_count==0
 
 
 def test_invalid_command_and_denied_admin_never_write():
     repo, application, command = setup()
     api, client = api_client(application)
     base = '/api/v1/client-finance/subsidy-advance-recoveries'
-    assert client.post(f'{base}/10/apply', json={}, headers={'Idempotency-Key': 'invalid key'}).status_code == 422
+    assert client.post(f'{base}/10/apply', json={}, headers={'Idempotency-Key': 'invalid key'}).status_code == 410
     assert client.get(base + '?page_size=101').status_code == 422
 
     def denied():

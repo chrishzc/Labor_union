@@ -82,6 +82,12 @@ SystemPrincipal 只能執行明確允許自動化的 typed Command；需要人�
 
 ## 3. Domain：LINE Integration
 
+### 3.0 服務當天原群組通知
+
+依規格 20 §6.8，`order.service_start_day` 只對正式開工當天的原服務群組產生單次即時通知，包含未結清第一期款提醒及當日月嫂服務狀況按鈕；已結清省略催款。明確 postback 驗證 current bound staff、原群組、正式日期及有效當日班表後，記錄回覆；協助需求交 Customer Service 既有待辦 writer。無管理員告警、一般群組對話監聽或服務／帳務事實變更。來源投影及回覆各沿既有 outer UoW，provider 僅由 committed task worker 呼叫。舊 `order.pre_start_reminder` 不再啟用、投影或重送，尚未發出的私人提醒取消。完整文案、按鈕、重播及 stale 行為見規格 20 §6.8。
+
+第二期款依規格 20 §6.9，以 `client.second_payment_due`／`client.second_payment_settled` 投影原服務群組純文字通知；只接受原群組、即時、單次規則。到期當天仍欠款才提醒，已結清不催款，不需第二期／零金額／資料不足完全不觸發。成功通知只來自帶標記的 committed Finance `projection_refresh` 及有效核銷；送前 fresh-read 需求、金額、日期、群組及收款，失效取消。無群組走既有 LINE-006 待辦。舊前三日私訊來源／模板及未寄工作停用，歷史設定仍可讀但不可重新啟用；不補送歷史核銷、不發布選單。
+
 ### 3.1 責任與 SSOT
 
 LINE Integration 擁有：
@@ -125,19 +131,18 @@ Modules：
 
 ### 3.3 Subsystem：LINE Delivery Task
 
-#### Matching Schedule Confirmation Delivery (2026-08-12)
+#### 服務完工群組通知
 
-The owning Matching/Scheduling subsystem creates immutable customer-parent and caregiver-segment
-schedule snapshots only after a staff member explicitly sends a previewed, current confirmed
-service-date version. LINE owns recipient binding, durable delivery tasks, interaction tokens,
-and provider retries. If any required recipient lacks a LINE binding, the Send command fails
-closed and creates neither snapshot nor delivery task.
+規格 20 §5.6 的服務完工／滿意度問卷邀請只消費新提交且明確標記的 Orders completion outbox，透過現有 source／decision／intent 建立原案件群組的一次文字通知。問卷網址先留空，不建立空白網址按鈕；日後沿既有模板內容加入連結。provider 前複核完工證據、群組及版本，缺群組交既有內部處理，不私訊或補發歷史。此通知與身分選單恢復各自去重，不新增時段或完工關卡，不更動帳務，不直接呼叫 provider 或發布選單。
 
-LINE confirmation buttons append recipient-scoped events only after token, current snapshot and
-bound LINE user checks pass. A rejection first enters `awaiting_rejection_reason`, sends a
-durable text request, and becomes a rejected event only when a nonblank reply is received. The
-webhook consumer must dispatch both postback and subsequent message through the same matching
-schedule confirmation application; duplicate provider events reuse durable event identities.
+#### 服務開始提交、代班邀請與群組日期結果
+
+服務中換人共用本節意願、單人邀請、current membership 與群組日期表投遞契約，業務詳規格 02「服務中換人」及規格 20 §5.2B。工會記錄交接日後委派既有正式 handover writer，日期表無確認按鈕；不監控聊天、不新建群組、不發額外私人通知。
+
+業務流程由規格 02 SSTART-01～08 擁有。群組聊天不監控、不解析日期或同意；客戶不透過 LIFF 提交本流程日期申請。一般月嫂經 verified LIFF 主動提交接受與約定日期或不接受需代班；LINE 只驗證身分並轉交 Scheduling，不能自行寫 Orders／Scheduling／Finance roots。
+正式日期與班表成功提交後，LINE 只消費 committed owner intent，對目前綁定的本案服務群組建立無「確認日期表／拒絕日期表」按鈕的日期結果紀錄。記錄含案件、實際開始日、各月嫂區段與服務日；不寄個別日期確認卡，不追問拒絕原因，不把 recipient 回覆或送達狀態作排班資格。舊卡片不再授權新變更，歷史 snapshot、回覆、receipt 保留不可變。delivery failure 不回滾正式結果、不再次執行排班或帳務。
+
+代班例外先由工會選人詢問意願，不願意改問其他人；願意才經 Scheduling 的選定人選／替代區段授權，對該月嫂寄送本案原群組邀請。入群後由人員直接填實際服務日期；代班月嫂不用再開 LIFF 接受或填日期。邀請工作送出、provider 送達與 membership 加入是三種不同證據，不得互相推定。
 
 State：
 
@@ -269,7 +274,7 @@ React 記憶體切片。管理端篩選變更固定回第 1 頁，previous／nex
 
 #### Order group numbered observation query（2026-08-25）
 
-React 三方群組清單使用 additive `GET /api/v1/line/order-groups/numbered`；事件歷程使用
+React 案件群組清單使用 additive `GET /api/v1/line/order-groups/numbered`；事件歷程使用
 `GET /api/v1/line/order-groups/{case_no}/events/numbered`。兩者只接受 positive `page`、bounded
 `page_size`，清單另接受 closed `status`，並回 strict `items/page/page_size/total/total_pages`。
 既有兩條 `limit` Query 保留為 compatibility projection，不改義或退役。
@@ -281,7 +286,7 @@ metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋�
 
 #### Order group observation workspace（2026-10-16 人工裁決）
 
-依使用者核准的精簡預覽，管理端三方服務群組使用 additive
+依使用者核准的精簡預覽，管理端案件群組使用 additive
 `GET /api/v1/line/order-groups/workspace/numbered`、`GET /api/v1/line/order-groups/workspace/{case_no}`
 及 `GET /api/v1/line/order-groups/workspace/{case_no}/events/numbered`。
 清單支援長度不超過 50 的案件編號字面包含搜尋、closed status 與 bounded server 分頁，先列需要處理，再依更新時間排序；不是未建群案件的完整待辦。
@@ -296,9 +301,9 @@ metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋�
 正式綁定完成後，重新查詢即移出待辦；核銷撤銷或案件取消亦不再列入。
 所有舊 limit／numbered／detail Query 保持原契約。新 Query 沿用 `ORDER_GROUP_READ` 授權，固定零寫入、零 commit／receipt／outbox／provider call，不改綁定、邀請、狀態 writer 或 schema。
 
-清單與側欄只提供必要姓名、原綁定狀態、最近事件、目前綁定時間、目前群組的最近邀請排入時間及客戶／指派月嫂加入狀況。成員來源沿用 Orders 目前客戶與指派 audience，LINE 身分須由 canonical role binding 與 owner projection 一致確認；失配標記無法確認。加入／離開以目前群組綁定版本後已收到的 membership 事件為證據，不沿用先前群組的 joined 投影，不視為即時完整群組名單，也不判定工會幹部是否全部到齊。新工作區不輸出群組 ID、LINE user ID、actor ID、邀請原文或指紋。
+清單與側欄只提供必要姓名、原綁定狀態、最近事件、目前綁定時間、目前群組的最近邀請排入時間及客戶／指派月嫂加入狀況。成員來源沿用 Orders 目前客戶與指派 audience，另由 Scheduling 提供本案已選定、已表達願意的代班月嫂之受限邀請授權與區段；LINE 身分須由 canonical role binding 與 owner projection 一致確認；失配標記無法確認。加入／離開以目前群組綁定版本後已收到的 membership 事件為證據，不沿用先前群組的 joined 投影，不視為即時完整群組名單，也不判定工會幹部是否全部到齊。新工作區不輸出群組 ID、LINE user ID、actor ID、邀請原文或指紋。
 
-不同來源歷程使用 `binding:<id>`／`runtime:<id>` 唯一事件鍵並依 server 分頁，英文事件代碼由 presentation 轉成中文；未知事件保留中性說明，不假推斷成功／失敗。邀請排入不等於 provider 已送達或成員已加入。網頁僅查詢，綁定與發送邀請仍由已授權人員在 LINE 群組內操作；需正式訂金核銷與既有身分資格。其他 LINE 工作區不變。
+不同來源歷程使用 `binding:<id>`／`runtime:<id>` 唯一事件鍵並依 server 分頁，英文事件代碼由 presentation 轉成中文；未知事件保留中性說明，不假推斷成功／失敗。邀請排入不等於 provider 已送達或成員已加入。群組觀察網頁僅查詢；一般綁定與全體邀請由已授權人員在 LINE 群組內操作，代班專用邀請由工會代班工作面沿下述受限授權發起；需正式訂金核銷與既有身分資格。其他 LINE 工作區不變。
 
 #### 服務群組設定與邀請指令
 
@@ -325,6 +330,12 @@ metadata 鎖定，AbortController 與 request generation 防止舊回應覆蓋�
 未授權、未核銷或身分未就緒保留既有業務錯誤提示。未預期保存失敗交由 consumer 回滾，不回覆成功。
 邀請網址僅供群組命令與發送工作內部使用，不出現在管理 Query、audit 或 repr；送達／失敗／過期後仍依既有規則遮蔽 delivery payload。
 持久化為既有 `line_order_group_bindings` 的 nullable 私有 `invitation_url` 欄位，無新業務狀態、無業務資料回填。
+
+#### 代班月嫂單人邀請
+
+代班工作面只可對本案「人員已選定且該月嫂已願意」的人選寄邀請，重用保存的原群組網址、目前綁定與 canonical staff identity。Scheduling 提供 case／原區段／selected staff／意願版本的 typed 授權；一般候選池願意不能單獨取得入群資格。收件人限該代班月嫂，不重新邀請全案成員，也不先建立正式 assignment。撤回、改選、群組／網址／身分或意願授權失效時，舊未送出工作依 delivery 前 fresh 驗證取消。
+工會手機與 React 代班工作面必須有「寄送本案群組邀請連結」操作，點擊即透過經授權的 typed command 建立選定一人的 committed delivery，無再次確認視窗；不能只提供唯讀狀態或要求人員回群組輸入全體邀請指令。按鈕及 server command 都核對 selected staff／願意回覆／本案區段／群組網址，回讀分開呈現排入、投遞與加入；提供重新查詢加入狀態。具體畫面／API 對照依規格 02「前端畫面與按鈕逐項對照」。
+此入口不改一般 `發送邀請` 指令的全體收件語意。membership 使用目前群組綁定後的同一月嫂加入證據；人員工作面顯示待加入／已加入及投遞失敗，不能以「邀請已排入」解鎖加入完成。加入本身不代表正式指派；加入後由工會保存日期，成功後再對原群組寄日期結果表。邀請網址不輸出至一般管理 Query、audit 或 repr。
 
 #### Notification Rule Administration（2026-08-20）
 
@@ -374,6 +385,8 @@ successor。missing successor、pending／processing／retryable、terminal fail
 lineage、fresh validation failure或owner readback incomplete／unavailable都不得解除；沒有applicable failed
 source時predicate為false。Notification／Delivery相關mutation在既有outer UoW／outbox邊界內追加既有
 `anomaly.recheck` intent；不得建立另一套replay、remediation或escalation framework。
+
+通知事項與工會待辦 LIFF 沿此唯讀契約顯示建立前受阻的通知，typed readback 可提供確切未排除 source IDs 及其中排送中的 IDs，及經 exact lineage 核對的相關 task IDs，供原補送入口定位、去重及保留原工作處理。補送以原 source domain 的規則／收件資格解析，persisted successor 仍為 manual_replay，不把案件群組改套舊群組條件。此為既有事件衍生值，不建立新通知狀態。相關 task IDs 同時依 exact original source ID 分組，原工作只限制同一來源的補送，不阻擋同案其他來源。原案件取消或成為歷史案件時不再視為目前適用的服務通知來源；第二期款與完工通知的 applicability 重用各來源現行業務複核，不以收件人、模板或排程設定錯誤當作來源已失效。補送排隊、處理中、等待重試都不等於 terminal success。
 
 ### 3.4 Subsystem：LINE Identity／Review
 
@@ -505,10 +518,10 @@ Authority：使用者核准本次最終權限清單並授權實作、設定與�
 - NAS-LINE-01：LINE token 於後端驗證，再核對 current bound identity 與本人案件／assignment/day。需求表單先保存完整申請，工會核准才建立 Client／BeClass 與完成對應 binding；同筆申請重複核准不得建立重複客戶。既有已建立客戶不回退成待審。
 - NAS-LINE-02：異動申請仍只寫 Customer Service intake；正式核心異動由工會與既有 owner writer 執行。日誌／照片保留本人有效服務範圍直接提交，不增加逐筆工會核准。
 - NAS-LINE-03（2026-10-22 人工裁決）：取消群組告警及其分類模擬、登錄、重新啟用、重設與群組審核連結。管理端只顯示管理員個人通知對象，保留既有個人通知 Query／Preview／Apply；分類仍使用固定規則，不新增偏好表。舊群組入口明確拒絕，歷史工作不得繼續送往告警群組。客服受理／工單／hold、管理員個人通知、案件服務群組綁定與私人邀請不受影響。
-- NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。這次只修改後端、直接測試與契約，不準備或修改 Compose，不改前端、不搬移檔案、不操作 NAS 或既有資料；部署 UID／ACL／掛載與前端畫面於後續驗收。
+- NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。現行 LIFF 日誌頁直接送出並提供照片選檔預覽及本人附件查看／下載；部署 UID／ACL／掛載仍由 NAS 部署契約負責，不因本機介面驗證變更。
 
 - NAS-LINE-04 的資料庫邊界：公開 LINE profile 對 controlled-file staging／objects／receipts／finalize／lease／reference／cleanup／reconciliation 及日誌主檔／附件／完成事件僅 SELECT，不可直接 INSERT／UPDATE；私人管理後端保留原受限 management profile 的合法 writer。原 LINE 通知 outbox／checkpoint、LINE 專用媒體及其他既有功能權限不變；不加寬任何 DB 權限，不新增表。
-- 本人附件下載：`POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 保留 LINE token 在 body；私人對應路徑為 `/internal/v1/line-media/service-day-logs/{log_id}/photos/{file_id}/download`。先查本人日誌，限制 file_id 為該日誌已保存附件且屬 Scheduling／相同案件／寶寶或餐食照片，再經原 controlled-file digest-verified download 讀取；未授權／不相關檔案皆不得開檔。只回 JPEG／PNG，private no-store／nosniff；不提供任意檔案下載、公開 URL 或 token query。前端後續以 authenticated fetch／Blob 使用，不在本輪實作畫面。
+- 本人附件下載：`POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 保留 LINE token 在 body；私人對應路徑為 `/internal/v1/line-media/service-day-logs/{log_id}/photos/{file_id}/download`。先查本人日誌，限制 file_id 為該日誌已保存附件且屬 Scheduling／相同案件／寶寶或餐食照片，再經原 controlled-file digest-verified download 讀取；未授權／不相關檔案皆不得開檔。只回 JPEG／PNG，private no-store／nosniff；不提供任意檔案下載、公開 URL 或 token query。前端以 authenticated fetch／Blob 顯示及下載本人已提交照片。
 
 驗收對照：上述每一契約均需包含合法成功與邊界拒絕。DB 必須在 local disposable MySQL 驗直接刪除／DDL 拒絕、授權程序成功、錯目標與 stale 拒絕及 outer rollback；Worker 必須驗各服務隔離、HTTPS／CA、撤銷與不攜 DB credential。NAS 與 provider 未執行不得宣稱通過。
 

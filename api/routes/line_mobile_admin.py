@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from dataclasses import asdict
+from infrastructure.mysql.line_repository_support import aware_utc
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -60,6 +61,10 @@ from api.schemas.assignment_plan import (
     AssignmentPlanSegmentView,
 )
 from api.schemas.base import BaseResponse
+from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
+from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
+from api.routes import line_payment_overdue_reminders as overdue_reminder_routes
+from api.routes import line_order_groups as order_group_routes
 from api.schemas.line_order_groups import PaidOrderGroupTodoPageView
 from subsystems.line.order_group_application import LineOrderGroupQueryApplication
 from api.schemas.customer_service import (
@@ -218,6 +223,14 @@ class _MobileStaffLeaveListRequest(_LiffAuthRequest):
 class _MobileTodoPageRequest(_LiffAuthRequest):
     page: int = Field(default=1, ge=1, le=10000)
     page_size: int = Field(default=25, ge=1, le=50)
+
+
+class _MobileOverdueReminderSend(overdue_reminder_routes.ReminderSend):
+    line_id_token: str = Field(min_length=1, max_length=4096)
+
+
+class _MobileLogReminderSend(order_group_routes.LogReminderSendRequest):
+    line_id_token: str = Field(min_length=1, max_length=4096)
 
 
 class _MobileStaffLeaveReviewRequest(_LiffAuthRequest):
@@ -593,6 +606,36 @@ def candidate_information_questions(payload: CandidateInformationStaffQueryReque
     ))
 
 
+@router.post('/payment-overdue-reminders', response_model=BaseResponse[overdue_reminder_routes.ReminderPageView])
+def mobile_payment_overdue_reminders(payload: _MobileTodoPageRequest,
+                                    application=Depends(get_payment_overdue_reminders)):
+    principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
+    return overdue_reminder_routes.list_reminders(payload.page, payload.page_size, principal, application)
+
+
+@router.post('/payment-overdue-reminders/send', response_model=BaseResponse[overdue_reminder_routes.ReminderReceiptView])
+def mobile_send_payment_overdue_reminder(payload: _MobileOverdueReminderSend,
+                                       application=Depends(get_payment_overdue_reminders)):
+    principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
+    body = overdue_reminder_routes.ReminderSend.model_validate(payload.model_dump(exclude={'line_id_token'}))
+    return overdue_reminder_routes.send_reminder(body, principal, application)
+
+
+@router.post('/log-reminders', response_model=BaseResponse[order_group_routes.LogReminderPage])
+def mobile_log_reminders(payload: _MobileTodoPageRequest,
+                         application=Depends(get_service_day_log_reminders)):
+    principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.ORDER_GROUP_READ)
+    return order_group_routes.list_log_reminders(payload.page, payload.page_size, principal, application)
+
+
+@router.post('/log-reminders/send', response_model=BaseResponse[order_group_routes.LogReminderReceipt])
+def mobile_send_log_reminder(payload: _MobileLogReminderSend,
+                             application=Depends(get_service_day_log_reminders)):
+    principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_HANDLE)
+    body = order_group_routes.LogReminderSendRequest.model_validate(payload.model_dump(exclude={'line_id_token'}))
+    return order_group_routes.send_log_reminder(body, principal, application)
+
+
 @router.post("/candidate-information/{question_id}/send", response_model=BaseResponse[CandidateInformationStaffSendView])
 def candidate_information_send(question_id: int, payload: CandidateInformationStaffSendRequest):
     principal, _ = _mobile_admin_context(payload.line_id_token, LineCapability.MATCHING_SEND)
@@ -757,6 +800,10 @@ def matching_followup_terms_apply(
     application: OrderTermsApplication = Depends(get_order_terms_application),
 ):
     _, actor = _matching_followup_editor_context(payload.line_id_token)
+    return _approve_matching_terms(pool_id, payload, application, actor)
+
+
+def _approve_matching_terms(pool_id, payload, application, actor):
     def approve():
         try:
             result = CandidateAdjustmentReviewApplication(application.connection, application.workflow).approve(
@@ -781,6 +828,10 @@ def matching_followup_recontact_preview(
     payload: _MobileMatchingRecontactPreviewRequest,
 ):
     _matching_followup_editor_context(payload.line_id_token)
+    return _preview_matching_recontact(pool_id, payload)
+
+
+def _preview_matching_recontact(pool_id, payload):
     operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
     candidate_ids = _validated_recontact_candidates(operation, payload.candidate_ids)
     try:
@@ -821,6 +872,10 @@ def matching_followup_recontact_apply(
     payload: _MobileMatchingRecontactApplyRequest,
 ):
     _, actor = _matching_followup_editor_context(payload.line_id_token)
+    return _apply_matching_recontact(pool_id, payload, actor)
+
+
+def _apply_matching_recontact(pool_id, payload, actor):
     operation = _matching_operation(pool_id, payload.case_no, payload.customer_answer_event_id)
     candidate_ids = _validated_recontact_candidates(
         operation, [item.candidate_id for item in payload.items]
@@ -1103,7 +1158,6 @@ def mobile_staff_leave_requests(payload: _MobileStaffLeaveListRequest):
 def mobile_staff_leave_review(
     request_id: int,
     payload: _MobileStaffLeaveReviewRequest,
-    application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
 ):
     principal, _ = _mobile_admin_context(
         payload.line_id_token,
@@ -1118,7 +1172,6 @@ def mobile_staff_leave_review(
         ),
         payload.idempotency_key,
         principal,
-        application,
     )
 
 
@@ -1202,7 +1255,7 @@ def _mobile_order_tracking_item(item) -> dict:
         has_willing_candidate and item.current_core_stage_ordinal in {2, 3, 4}
     )
     occurred_at = [
-        stage.occurred_at
+        aware_utc(stage.occurred_at)
         for stage in item.core_stages
         if stage.occurred_at is not None
     ]
@@ -1931,3 +1984,67 @@ def _mask(value: str) -> str:
 
 
 __all__ = ["router", "page_router"]
+
+
+from api.dependencies.service_start import get_service_start_application
+from api.schemas.service_start import ServiceStartInquiry, ServiceStartDates, ServiceStartCommand, LeaveDeferDates
+from domains.scheduling.leave_result import LeaveDateChange
+from api.routes.service_start import call as _service_start_call
+
+class _MobileServiceStartPage(_LiffAuthRequest):
+    page:int=Field(default=1,ge=1)
+    page_size:int=Field(default=25,ge=1,le=100)
+
+class _MobileServiceStartInquiry(ServiceStartInquiry):
+    line_id_token:str=Field(min_length=1,max_length=4096)
+
+class _MobileServiceStartDates(ServiceStartDates):
+    line_id_token:str=Field(min_length=1,max_length=4096)
+
+class _MobileLeaveDeferDates(LeaveDeferDates):
+    line_id_token:str=Field(min_length=1,max_length=4096)
+
+class _MobileServiceStartCommand(ServiceStartCommand):
+    line_id_token:str=Field(min_length=1,max_length=4096)
+
+class _MobileServiceStartOptions(_LiffAuthRequest):
+    keyword:str=Field(default='',max_length=50)
+
+@router.post('/service-start/todos')
+def mobile_service_start_todos(body:_MobileServiceStartPage,app=Depends(get_service_start_application)):
+    _mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    items,total=_service_start_call(lambda:app.todos(body.page,body.page_size))
+    return BaseResponse(data={'items':[asdict(item) for item in items],'total':total,'page':body.page,'page_size':body.page_size})
+
+@router.post('/service-start/staff-options')
+def mobile_service_start_options(body:_MobileServiceStartOptions,app=Depends(get_service_start_application)):
+    _mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data={'items':app.repository.staff_options(body.keyword)})
+
+@router.post('/service-start/{request_id}/query')
+def mobile_service_start_query(request_id:int,body:_LiffAuthRequest,app=Depends(get_service_start_application)):
+    _mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.repository.view(request_id))))
+
+@router.post('/service-start/{request_id}/inquire')
+def mobile_service_start_inquire(request_id:int,body:_MobileServiceStartInquiry,app=Depends(get_service_start_application)):
+    principal,_=_mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.inquire(request_id,body.staff_id,body.start_date,body.end_date,body.expected_version,principal.username,body.idempotency_key))))
+
+@router.post('/service-start/{request_id}/invite')
+def mobile_service_start_invite(request_id:int,body:_MobileServiceStartCommand,app=Depends(get_service_start_application)):
+    principal,_=_mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.invite(request_id,body.expected_version,principal.username,body.idempotency_key))))
+
+@router.post('/service-start/{request_id}/dates')
+def mobile_service_start_dates(request_id:int,body:_MobileServiceStartDates,app=Depends(get_service_start_application)):
+    principal,_=_mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.save_dates(request_id,body.start_date,body.expected_version,principal.username,body.idempotency_key,
+        tuple(LeaveDateChange(d.original_date,d.new_date) for d in body.date_changes) if body.date_changes is not None else None))))
+
+@router.post('/service-start/{request_id}/defer')
+def mobile_leave_defer(request_id:int,body:_MobileLeaveDeferDates,app=Depends(get_service_start_application)):
+    principal,_=_mobile_admin_context(body.line_id_token,LineCapability.MATCHING_OVERRIDE)
+    return BaseResponse(data=asdict(_service_start_call(lambda:app.save_defer_dates(request_id,
+        tuple(LeaveDateChange(d.original_date,d.new_date) for d in body.dates),
+        body.expected_version,principal.username,body.idempotency_key))))

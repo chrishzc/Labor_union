@@ -9,6 +9,8 @@ import uuid
 import pandas as pd
 import pytest
 
+from subsystems.jobs.command_application import DurableJobCommandApplication
+
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 
 
@@ -75,7 +77,7 @@ def test_g16_durable_worker_crash_recovery_and_duplicate_delivery_apply_once(tmp
             ExpectedVersion(preview.batch_version),
             preview.fingerprint,
             IdempotencyKey("durable-finance-apply"),
-            ActorContext("durable-test"),
+            ActorContext("admin_user_id:1"),
             "durable worker e2e",
             CorrelationId("durable-finance-apply"),
         )
@@ -112,7 +114,7 @@ def test_g16_durable_worker_crash_recovery_and_duplicate_delivery_apply_once(tmp
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
         assert stored is not None
         assert stored.status == "succeeded"
-        assert stored.receipt_payload["batch_identity"] == ingestion.batch_identity
+        assert stored.receipt_payload['result_reference'] == 'finance_import_batch:' + ingestion.batch_identity
         assert stored.attempt_count == 2
         assert worker.recover_and_run_once() is False
         with worker_connection.cursor() as cursor:
@@ -176,7 +178,7 @@ def test_g07_timeout_retry_enqueues_and_applies_one_cross_domain_command(tmp_pat
             "idempotency_key": "timeout-retry-apply",
             "correlation_id": "timeout-retry-apply",
             "principal": principal,
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_finance_import_batch(**apply_kwargs)  # The client loses this response.
         retry_response = apply_finance_import_batch(**apply_kwargs)
@@ -191,6 +193,7 @@ def test_g07_timeout_retry_enqueues_and_applies_one_cross_domain_command(tmp_pat
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "timeout-retry-worker",
             retry_delay_seconds=0,
@@ -200,7 +203,7 @@ def test_g07_timeout_retry_enqueues_and_applies_one_cross_domain_command(tmp_pat
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
         assert stored is not None
         assert stored.status == "succeeded"
-        assert stored.receipt_payload["batch_identity"] == ingestion.batch_identity
+        assert stored.receipt_payload['result_reference'] == 'finance_import_batch:' + ingestion.batch_identity
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM finance_import_apply_receipts")
             assert cursor.fetchone() == {"count": 1}

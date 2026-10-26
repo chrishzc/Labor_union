@@ -28,7 +28,7 @@ function expandHistory() {
 }
 afterEach(() => vi.restoreAllMocks());
 
-describe('三方服務群組精簡工作區', () => {
+describe('案件群組精簡工作區', () => {
   it('only shows three useful columns and reads events after expanding the drawer history', async () => {
     const { api } = mount();
     await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' });
@@ -71,9 +71,9 @@ describe('三方服務群組精簡工作區', () => {
     const api = client(); vi.mocked(api.workspaceList).mockRejectedValue(new LineOrderGroupQueryError('PRIVATE_DB_ERROR', 'raw U-sensitive C-group SQL failed', true));
     mount(api); await screen.findByRole('alert');
     expect(screen.queryByText(/PRIVATE_DB_ERROR|U-sensitive|SQL failed/)).not.toBeInTheDocument();
-    expect(screen.queryByText('目前沒有服務群組綁定紀錄')).not.toBeInTheDocument();
+    expect(screen.queryByText('目前沒有案件群組綁定紀錄')).not.toBeInTheDocument();
     vi.mocked(api.workspaceList).mockResolvedValue(page([])); fireEvent.click(screen.getByRole('button', { name: '重試查詢' }));
-    await screen.findByText('目前沒有服務群組綁定紀錄');
+    await screen.findByText('目前沒有案件群組綁定紀錄');
   });
 
   it('aborts old list and detail requests and ignores their late responses', async () => {
@@ -101,7 +101,7 @@ describe('三方服務群組精簡工作區', () => {
     expect(screen.getByText('已離開')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重試歷程' })); await screen.findByRole('button', { name: '下一頁群組事件' });
     vi.mocked(api.workspaceEvents).mockResolvedValue({ items: [{ ...event, event_key: 'binding:1', event_type: 'bound' }], page: 2, page_size: 25, total: 26, total_pages: 2 });
-    fireEvent.click(screen.getByRole('button', { name: '下一頁群組事件' })); await screen.findByText('已綁定服務群組');
+    fireEvent.click(screen.getByRole('button', { name: '下一頁群組事件' })); await screen.findByText('已綁定案件群組');
     expect(api.workspaceDetail).toHaveBeenCalledTimes(1);
     expect(api.workspaceEvents).toHaveBeenLastCalledWith('CASE-1', { page: 2, pageSize: 25 }, expect.any(Object));
   });

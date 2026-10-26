@@ -72,6 +72,7 @@ def _item(row, transactions_by_item) -> StaffPayoutItemView:
         staff_id=int(row["staff_id"]),
         total_payable=Decimal(str(row["total_payable_ntd"])),
         amount_paid=Decimal(str(row["net_paid_ntd"])),
+        amount_remaining=Decimal(str(row["balance_ntd"])),
         due_date=key[2],
         paid_at=max(payout_dates) if payout_dates else None,
         payment_status=str(row["payment_status"]),
@@ -92,9 +93,12 @@ SELECT obligations.assignment_id,
        obligations.due_date,
        SUM(COALESCE(projection.obligation_amount_ntd, obligations.amount_due_ntd)) AS total_payable_ntd,
        SUM(COALESCE(projection.net_paid_ntd, 0)) AS net_paid_ntd,
+       SUM(COALESCE(projection.balance_ntd, obligations.amount_due_ntd)) AS balance_ntd,
        CASE
          WHEN SUM(CASE WHEN COALESCE(projection.status, 'payable') = 'anomaly' THEN 1 ELSE 0 END) > 0 THEN 'anomaly'
          WHEN SUM(COALESCE(projection.balance_ntd, obligations.amount_due_ntd)) = 0 THEN 'completed'
+         WHEN SUM(COALESCE(projection.net_paid_ntd, 0)) > 0
+          AND SUM(COALESCE(projection.balance_ntd, obligations.amount_due_ntd)) > 0 THEN 'partially_paid'
          ELSE 'payable'
        END AS payment_status
 FROM staff_obligations obligations

@@ -1,0 +1,80 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-scheduling-service-start-2026-10-23-v1",
+  "release_metadata": {
+    "release_name": "Scheduling service start and substitute coordination",
+    "application_version": "scheduling-service-start-v1",
+    "published_at": "2026-10-23",
+    "description": "Schema-only explicit results and substitute willingness; preserve old service and accounting facts"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-line-order-group-invitation-url-2026-10-22-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1054_scheduling_service_start.sql",
+      "relative_path": "db/schema_parts/1054_scheduling_service_start.sql",
+      "sha256": "e90358237f23f81025841966e11939fbb438fb5fa167ea3113546dfa61b0208d",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-additive-tables-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "scheduling-service-start-exact",
+      "phase": "post-schema",
+      "policy": "Exact owned result and candidate tables; no seed/backfill; preserve prior business facts",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "scheduling-service-start-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "scheduling-service-start-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_23_scheduling_service_start_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_23_scheduling_service_start_v1.descriptors.json",
+    "sha256": "3624d00282306b89ad8658b335a7a74b2b56ba8978ae4623f95f7f619ecc666b",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

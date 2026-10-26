@@ -3,7 +3,7 @@
  * Description: 驗證 4 個 Flex 設計預覽皆去敏、零寫入，並如實區分正式資料是否已接通。
  */
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LINE_FLEX_DESIGN_SOURCES } from '../adapters/line_flex_design/line_flex_design_adapter';
 import type {
@@ -11,39 +11,50 @@ import type {
   LineIdentityRuntimeConfigClient,
 } from '../api/line_identity/line_identity_runtime_config_client';
 import { LineFlexDesignPreview } from '../components/LineFlexDesignPreview';
+import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
-describe('LINE Flex design preview', () => {
+describe('LINE studio public preview', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/#line-liff-studio');
+    vi.spyOn(lineMessagePreviewClient, 'catalog').mockResolvedValue([]);
   });
 
-  it('4 個既有 Flex 資產都顯示去敏設計與目前正式資料狀態', () => {
-    const runtimeConfigClient: LineIdentityRuntimeConfigClient = {
-      get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)),
+  it('四個項目重用公版查詢與對話預覽，按鈕僅顯示說明且不查真實案件', async () => {
+    const ids = ['card-candidate-information-1', 'service-start-result', 'LU96-M4-SAFE-ALERT-RULE-V1', 'card-union-question'];
+    const previewClient: LineMessagePreviewClient = {
+      catalog: vi.fn().mockResolvedValue(ids.map(id => ({id,template_id:null,name:id,format:'flex',requires_case:false,requires_staff:false,builtin:true,allows_draft:false} satisfies PreviewDescriptor))),
+      subjects: vi.fn(),
+      render: vi.fn().mockImplementation(async ({id}) => ({status:'ready',note:'',format:'flex',text:'',facts:[],bubbles:[{kind:'button',text:id,bold:false,size:'sm',layout:'vertical',primary:false,action_description:'只顯示動作說明',children:[]}]})),
     };
-    render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-
-    fireEvent.click(screen.getByRole('button', { name: '訊息卡片 (4)' }));
-    const expected = [
-      ['派案通知', '案件編號：【寄送前依正式案件資料帶入】'],
-      ['服務日順延確認', '正式請假日期與順延後結束日會在寄送前核對。'],
-      ['重大異常通報', '案件與告警摘要會以去敏方式提供'],
-      ['媒合條件協調', '由正式候選聯繫結果彙整可調整條件與可重新詢問人數。'],
-    ] as const;
-
-    for (const [title, safeText] of expected) {
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(title) }));
-      expect(screen.getByText(safeText)).toBeInTheDocument();
-      expect(screen.getByRole('status', { name: '正式資料狀態' })).toHaveTextContent(
-        title === '媒合條件協調' || title === '服務日順延確認'
-          ? '正式資料已接通'
-          : '正式資料尚未載入',
-      );
+    const runtimeConfigClient: LineIdentityRuntimeConfigClient = {get:vi.fn().mockResolvedValue({liff_id:'test'})};
+    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} previewClient={previewClient} />);
+    fireEvent.click(screen.getByRole('button', {name:'訊息卡片 (4)'}));
+    for (const [index,title] of ['接案意願詢問','服務日期表','重大異常通知','媒合條件協調'].entries()) {
+      fireEvent.click(screen.getByRole('button', {name:new RegExp(title)}));
+      const action = await screen.findByRole('button', {name:ids[index]});
+      fireEvent.click(action);
+      expect(screen.getByText(`${ids[index]}：只顯示動作說明`)).toBeInTheDocument();
+      expect(previewClient.render).toHaveBeenLastCalledWith({id:ids[index],data_source:'sample'},expect.anything());
     }
+    expect(previewClient.subjects).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('正式資料狀態')).not.toBeInTheDocument();
+    expect(screen.getByText('僅預覽，不發送')).toBeInTheDocument();
+  });
 
-    expect(screen.queryByText(/demo[-_ ]?token|client[_ -]?id|line[_ -]?user[_ -]?id/i)).not.toBeInTheDocument();
-    expect(runtimeConfigClient.get).toHaveBeenCalledTimes(1);
+  it('公版清單失敗可重試；圖例移除客戶日期修改與日誌預覽', async () => {
+    const previewClient: LineMessagePreviewClient = {catalog:vi.fn().mockRejectedValueOnce(new Error('internal')).mockResolvedValue([]),subjects:vi.fn(),render:vi.fn()};
+    const runtimeConfigClient: LineIdentityRuntimeConfigClient = {get:vi.fn().mockResolvedValue({liff_id:'test'})};
+    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} previewClient={previewClient} />);
+    fireEvent.click(screen.getByRole('button', {name:'訊息卡片 (4)'}));
+    fireEvent.click(await screen.findByRole('button', {name:'重新載入公版'}));
+    await waitFor(() => expect(previewClient.catalog).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', {name:'全部 (21)'}));
+    fireEvent.click(screen.getByRole('button', {name:/申請訂單異動 提出/}));
+    expect(screen.queryByText('服務日期／天數')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name:/寶寶日誌與餐食照片 依服務日/}));
+    expect(screen.getByRole('button', {name:'送出日誌'})).toBeDisabled();
+    expect(screen.queryByText('預覽寶寶日誌')).not.toBeInTheDocument();
   });
 
   it('拒絕額外 provider 欄位且不把來源內容穿透畫面', () => {

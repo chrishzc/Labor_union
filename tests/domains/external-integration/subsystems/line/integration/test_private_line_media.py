@@ -154,7 +154,9 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
         with patch.object(runtime, 'CA', self.root/'ca'), patch.object(runtime, 'API_TLS', self.root/'tls'), patch.object(runtime, '_write', write):
-            runtime._prepare_api_tls()
+            from cryptography import x509
+            import ipaddress
+            runtime._prepare_api_tls([x509.DNSName('management-api'), x509.IPAddress(ipaddress.ip_address('127.0.0.1'))])
         self.sock = socket.socket(); self.sock.bind(('127.0.0.1', 0))
         port = self.sock.getsockname()[1]
         config = uvicorn.Config(self.backend, log_level='critical', lifespan='off',
@@ -166,7 +168,7 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
             if self.server.started: break
             await asyncio.sleep(.01)
         self.assertTrue(self.server.started)
-        self.base = f'https://management-api:{port}'
+        self.base = f'https://127.0.0.1:{port}'
         self.client = LineMediaClient(self.base, str(self.root/'credentials/line-media-proxy/token'), str(self.root/'ca/ca.pem'))
         from api.nas_apps import line_app
         self.public = line_app()
@@ -207,7 +209,7 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('100 bytes', oversized.text)
         self.assertFalse(self.media.staged)
 
-    async def test_https_upload_preview_apply_readback_replay_and_real_private_bytes(self):
+    async def test_https_upload_direct_submit_readback_replay_and_real_private_bytes(self):
         async with self.caller() as c:
             upload = await self.photo(c); self.assertEqual(upload.status_code, 200, upload.text)
             again = await self.photo(c); self.assertEqual(again.json()['data']['outcome'], 'existing')
@@ -218,15 +220,13 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
                 'baby_log_text':'synthetic diary','controlled_file_attachments':[{
                     'staging_id':media['staging_id'], 'sha256_digest':media['sha256_digest'],
                     'attachment_kind':'baby_log_photo'}]}
-            preview = await c.post(PUBLIC+'/service-day-logs/preview', json=body)
-            self.assertEqual(preview.status_code, 200, preview.text)
-            apply = {**body,'preview_fingerprint':preview.json()['data']['preview_fingerprint']}
-            stale=await c.post(PUBLIC+'/service-day-logs/apply',json={**apply,'preview_fingerprint':'0'*64},
-                               headers={'Idempotency-Key':'stale-log'})
-            self.assertEqual(stale.status_code,409,stale.text)
+            options = await c.post(PUBLIC+'/service-day-logs/options', json={
+                'line_id_token':'owner-token','assignment_id':12,'service_date':DAY.isoformat()})
+            self.assertEqual(options.status_code,200,options.text)
+            self.assertFalse(options.json()['data']['requires_cooking'])
             self.assertEqual(self.logs.commits,0)
             for _ in range(2):
-                response = await c.post(PUBLIC+'/service-day-logs/apply', json=apply, headers={'Idempotency-Key':'private-log'})
+                response = await c.post(PUBLIC+'/service-day-logs/apply', json=body, headers={'Idempotency-Key':'private-log'})
                 self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(self.logs.submits, 1)
             read = await c.post(PUBLIC+'/service-day-logs/1/query',json={'line_id_token':'owner-token'})
@@ -312,10 +312,16 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_untrusted_tls_and_plaintext_are_rejected(self):
         with self.assertRaises(LineMediaError):
             LineMediaClient('http://management-api',str(self.root/'credentials/line-media-proxy/token'),str(self.root/'ca/ca.pem'))
-        # OS roots do not trust the private test CA: actual TLS connection fails.
+        # An unrelated private CA is deterministic on Windows and Linux alike.
         import ssl
-        untrusted=LineMediaClient(self.base,str(self.root/'credentials/line-media-proxy/token'),
-                                  ssl.get_default_verify_paths().cafile)
+        from scripts import nas_security_runtime as runtime
+        def write(path, content, mode=0o400):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        other=self.root/'unrelated-ca'
+        with patch.object(runtime,'CA',other),patch.object(runtime,'API_TLS',self.root/'unrelated-tls'),patch.object(runtime,'_write',write):
+            runtime._prepare_api_tls()
+        untrusted=LineMediaClient(self.base,str(self.root/'credentials/line-media-proxy/token'),str(other/'ca.pem'))
         with self.assertRaises(LineMediaError):
             await untrusted.preview({'line_id_token':'owner-token'})
         self.assertFalse(self.media.staged)

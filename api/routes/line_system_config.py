@@ -8,13 +8,13 @@
 from __future__ import annotations
 
 import threading
+from uuid import uuid4
 from typing import TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, ValidationError
 
 from api.schemas.line_config import (
-    CustomerServiceConfig,
     LiffField,
     LiffPage,
     LiffSettingsConfig,
@@ -34,7 +34,11 @@ from subsystems.line.configuration_store import (
     upsert_by_id,
     write_config,
 )
-from api.dependencies.admin_auth import require_line_manager, require_line_viewer
+from api.dependencies.admin_auth import require_line_manager, require_line_viewer, admin_actor_context
+from api.dependencies.line_runtime import get_line_configuration_application
+from domains.line.configuration import LineConfigurationKind, LineConfigurationRevisionConflict
+from domains.line.identities import LineConfigurationRevision
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from line.worker import wake_worker
 from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
@@ -44,7 +48,6 @@ from subsystems.line.rich_menu_publication_workflow import (
 from subsystems.line.liff_configuration_history import (
     get_liff_snapshot,
     list_liff_history,
-    snapshot_liff_config,
 )
 
 
@@ -114,23 +117,46 @@ def _require_line_menu_revision(if_match: str | None) -> None:
         )
 
 
-def _require_liff_revision(if_match: str | None) -> None:
+def _liff_reader() -> ActorContext:
+    # Public projection is fixed to LIFF page configuration, never other kinds.
+    return ActorContext("system:public-liff-pages", permission_scope=("line.config.read",))
+
+
+def _liff_snapshot():
+    try:
+        snapshot = get_line_configuration_application().get(LineConfigurationKind.LIFF, _liff_reader())
+        if snapshot.revision.value == 0:
+            raise ValueError("LIFF configuration missing")
+        config = LiffSettingsConfig.model_validate_json(snapshot.definition_json)
+        return snapshot, config
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="目前無法讀取 LIFF 設定，請稍後重試。") from error
+
+
+def _require_liff_revision(if_match: str | None):
+    snapshot, config = _liff_snapshot()
     expected = _normalize_revision(if_match)
-    if expected and expected != config_revision("liff"):
-        raise HTTPException(
-            status_code=409,
-            detail="LIFF 設定已被其他人修改，請重新載入後再儲存",
-        )
+    if expected is not None and expected != str(snapshot.revision.value):
+        raise HTTPException(status_code=409, detail="LIFF 設定已被其他人修改，請重新載入後再儲存")
+    return snapshot, config
 
 
-def _principal_name(request: Request) -> str:
-    principal = getattr(request.state, "admin_principal", None)
-    return str(getattr(principal, "username", None) or "system")
-
-
-def _save_liff(payload: LiffSettingsConfig, request: Request, *, reason: str) -> None:
-    snapshot_liff_config(actor=_principal_name(request), reason=reason)
-    _save("liff", payload)
+def _save_liff(payload: LiffSettingsConfig, request: Request, *, reason: str,
+               expected_revision: LineConfigurationRevision):
+    actor = admin_actor_context(request.state.admin_principal)
+    try:
+        return get_line_configuration_application().apply(
+            kind=LineConfigurationKind.LIFF, expected_revision=expected_revision,
+            definition=payload.model_dump(mode="json"), actor=actor, reason=reason,
+            idempotency_key=IdempotencyKey("liff-config:" + uuid4().hex),
+            correlation_id=CorrelationId("liff-config:" + uuid4().hex),
+        ).snapshot
+    except LineConfigurationRevisionConflict as error:
+        raise HTTPException(status_code=409, detail="LIFF 設定已被其他人修改，請重新載入後再儲存") from error
+    except RuntimeError as error:
+        if str(error) != "line_configuration_revision_conflict":
+            raise HTTPException(status_code=503, detail="目前無法儲存 LIFF 設定，請稍後重試。") from error
+        raise HTTPException(status_code=409, detail="LIFF 設定已被其他人修改，請重新載入後再儲存") from error
 
 
 def _template_schedule_references(template_id: str) -> list[dict[str, int | str]]:
@@ -487,16 +513,17 @@ def publish_line_menu(menu_id: str, request: Request):
 # ---------------------------------------------------------------------------
 @public_router.get("/liff", response_model=LiffSettingsConfig)
 def get_liff_config(response: Response):
-    revision = config_revision("liff")
+    snapshot, config = _liff_snapshot()
+    revision = str(snapshot.revision.value)
     response.headers["ETag"] = f'"{revision}"'
     response.headers["Cache-Control"] = "no-cache"
-    return _read("liff", LiffSettingsConfig)
+    return config
 
 
 @public_router.get("/liff/runtime")
 def get_liff_runtime(response: Response, page: str | None = None):
-    config = _read("liff", LiffSettingsConfig)
-    revision = config_revision("liff")
+    snapshot, config = _liff_snapshot()
+    revision = str(snapshot.revision.value)
     response.headers["ETag"] = f'"{revision}"'
     response.headers["Cache-Control"] = "no-cache"
     if page:
@@ -523,10 +550,8 @@ def get_liff_runtime(response: Response, page: str | None = None):
 
 @router.get("/liff/state")
 def get_liff_state():
-    return {
-        "revision": config_revision("liff"),
-        "config": _read("liff", LiffSettingsConfig),
-    }
+    snapshot, config = _liff_snapshot()
+    return {"revision": str(snapshot.revision.value), "config": config}
 
 
 @router.post("/liff/validate")
@@ -536,7 +561,10 @@ def validate_liff_config(payload: LiffSettingsConfig):
 
 @router.get("/liff/history")
 def get_liff_history():
-    return {"items": list_liff_history()}
+    try:
+        return {"items": list_liff_history(get_line_configuration_application(), _liff_reader())}
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="目前無法讀取 LIFF 設定歷史，請稍後重試。") from error
 
 
 class LiffRollbackRequest(BaseModel):
@@ -551,21 +579,25 @@ def rollback_liff_config(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        snapshot = get_liff_snapshot(revision)
-        if snapshot is None:
+        snapshot, config = _require_liff_revision(if_match)
+        try:
+            historical = get_liff_snapshot(revision, get_line_configuration_application(), _liff_reader())
+        except Exception as error:
+            raise HTTPException(status_code=503, detail="目前無法讀取 LIFF 設定歷史，請稍後重試。") from error
+        if historical is None:
             raise HTTPException(status_code=404, detail="找不到指定的 LIFF 設定版本")
-        restored = LiffSettingsConfig.model_validate(snapshot)
-        _save_liff(
+        restored = LiffSettingsConfig.model_validate(historical)
+        applied = _save_liff(
             restored,
             request,
             reason=payload.reason.strip() or f"rollback to {revision[:12]}",
+            expected_revision=snapshot.revision,
         )
     request.state.audit_action = "line.liff.rollback"
     request.state.audit_resource_type = "line_liff_config"
     request.state.audit_resource_id = revision
     request.state.audit_details = {"reason": payload.reason.strip()}
-    return {"revision": config_revision("liff"), "config": restored}
+    return {"revision": str(applied.revision.value), "config": restored}
 
 
 @router.put("/liff", response_model=LiffSettingsConfig, dependencies=[Depends(require_line_manager)])
@@ -575,8 +607,8 @@ def replace_liff_config(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        _save_liff(payload, request, reason="replace configuration")
+        snapshot, config = _require_liff_revision(if_match)
+        _save_liff(payload, request, reason="replace configuration", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.replace"
     request.state.audit_resource_type = "line_liff_config"
     request.state.audit_details = {
@@ -593,10 +625,9 @@ def update_liff_theme(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        config = _read("liff", LiffSettingsConfig)
+        snapshot, config = _require_liff_revision(if_match)
         config.theme = payload
-        _save_liff(config, request, reason="update theme")
+        _save_liff(config, request, reason="update theme", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.theme.update"
     request.state.audit_resource_type = "line_liff_config"
     return payload
@@ -610,13 +641,12 @@ def update_liff_page(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        config = _read("liff", LiffSettingsConfig)
+        snapshot, config = _require_liff_revision(if_match)
         if page_id not in config.pages:
             raise HTTPException(status_code=404, detail="LIFF page not found")
         config.pages[page_id] = payload
         validated = LiffSettingsConfig.model_validate(config)
-        _save_liff(validated, request, reason=f"update page {page_id}")
+        _save_liff(validated, request, reason=f"update page {page_id}", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.page.update"
     request.state.audit_resource_type = "line_liff_page"
     request.state.audit_resource_id = page_id
@@ -633,8 +663,7 @@ def create_liff_field(
     if payload.system_field:
         raise HTTPException(status_code=400, detail="Cannot create a new system field")
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        config = _read("liff", LiffSettingsConfig)
+        snapshot, config = _require_liff_revision(if_match)
         page = config.pages.get(page_id)
         if not page:
             raise HTTPException(status_code=404, detail="LIFF page not found")
@@ -643,7 +672,7 @@ def create_liff_field(
         page.fields.append(payload)
         page.fields.sort(key=lambda field: field.order)
         validated = LiffSettingsConfig.model_validate(config)
-        _save_liff(validated, request, reason=f"create field {page_id}.{payload.id}")
+        _save_liff(validated, request, reason=f"create field {page_id}.{payload.id}", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.field.create"
     request.state.audit_resource_type = "line_liff_field"
     request.state.audit_resource_id = f"{page_id}.{payload.id}"
@@ -661,8 +690,7 @@ def update_liff_field(
     if payload.id != field_id:
         raise HTTPException(status_code=400, detail="Path id and payload id must match")
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        config = _read("liff", LiffSettingsConfig)
+        snapshot, config = _require_liff_revision(if_match)
         page = config.pages.get(page_id)
         existing = find_by_id(page.fields, field_id) if page else None
         if not existing:
@@ -677,7 +705,7 @@ def update_liff_field(
         page.fields = upsert_by_id(page.fields, payload)
         page.fields.sort(key=lambda field: field.order)
         validated = LiffSettingsConfig.model_validate(config)
-        _save_liff(validated, request, reason=f"update field {page_id}.{field_id}")
+        _save_liff(validated, request, reason=f"update field {page_id}.{field_id}", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.field.update"
     request.state.audit_resource_type = "line_liff_field"
     request.state.audit_resource_id = f"{page_id}.{field_id}"
@@ -692,8 +720,7 @@ def delete_liff_field(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     with LIFF_CONFIG_LOCK:
-        _require_liff_revision(if_match)
-        config = _read("liff", LiffSettingsConfig)
+        snapshot, config = _require_liff_revision(if_match)
         page = config.pages.get(page_id)
         field = find_by_id(page.fields, field_id) if page else None
         if not field:
@@ -702,7 +729,7 @@ def delete_liff_field(
             raise HTTPException(status_code=409, detail="System field cannot be deleted")
         page.fields = [item for item in page.fields if item.id != field_id]
         validated = LiffSettingsConfig.model_validate(config)
-        _save_liff(validated, request, reason=f"delete field {page_id}.{field_id}")
+        _save_liff(validated, request, reason=f"delete field {page_id}.{field_id}", expected_revision=snapshot.revision)
     request.state.audit_action = "line.liff.field.delete"
     request.state.audit_resource_type = "line_liff_field"
     request.state.audit_resource_id = f"{page_id}.{field_id}"
@@ -712,12 +739,11 @@ def delete_liff_field(
 # ---------------------------------------------------------------------------
 # Customer service static settings
 # ---------------------------------------------------------------------------
-@router.get("/customer-service", response_model=CustomerServiceConfig)
+@router.get("/customer-service")
 def get_customer_service_config():
-    return _read("customer_service", CustomerServiceConfig)
+    raise HTTPException(status_code=410, detail="閒置客服設定已停用；客服案件請使用客服中心。")
 
 
-@router.put("/customer-service", response_model=CustomerServiceConfig, dependencies=[Depends(require_line_manager)])
-def update_customer_service_config(payload: CustomerServiceConfig):
-    _save("customer_service", payload)
-    return payload
+@router.put("/customer-service", dependencies=[Depends(require_line_manager)])
+def update_customer_service_config():
+    raise HTTPException(status_code=410, detail="閒置客服設定已停用；客服案件請使用客服中心。")

@@ -102,6 +102,16 @@ def test_real_sql_projects_sources_and_priority_without_raw_content(facts):
     assert len(connection.statements) == 4  # fixed reads, not one request per ticket
 
 
+def test_start_day_group_assistance_appears_in_union_service_todos(facts):
+    db, connection, repository = facts
+    db.execute("INSERT INTO customer_service_ticket_events VALUES(12,7,?,'customer_message','服務開始日協助需求')",
+               ('start-day-response:'+'0'*64+':U_SYNTHETIC:help',))
+    result=repository.list_reminders(CustomerServiceReminderQuery(source=CustomerServiceReminderSource.SERVICE))
+    item=next(item for item in result.items if item.ticket_id==7)
+    assert item.source is CustomerServiceReminderSource.SERVICE
+    assert item.reason=='service_referral'
+
+
 @pytest.mark.parametrize("source, expected", [("feedback", {3, 8}), ("handoff", {1, 8}), ("unknown", {7}), ("order", {4})])
 def test_source_filters_match_any_proven_origin_and_do_not_duplicate_tickets(facts, source, expected):
     _, _, repository = facts
@@ -161,7 +171,8 @@ def test_reader_route_is_bounded_and_preserves_existing_endpoints(facts, monkeyp
     assert "/api/v1/customer-service/tickets/{ticket_id}/reply/apply" in app.openapi()["paths"]
 
 
-def test_reader_route_requires_authorization():
+def test_reader_route_requires_authorization(monkeypatch):
+    monkeypatch.setenv('ENABLE_ADMIN_AUTH', 'true')
     app = FastAPI()
     app.include_router(routes.router)
     with TestClient(app) as client:

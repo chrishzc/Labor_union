@@ -14,12 +14,20 @@
   - `subsystems/client_finance/reconciliation_workflow.py`
   - `subsystems/client_finance/virtual_account_resolution.py`
   - `infrastructure/mysql/client_receipt_reconciliation_repository.py`
+  - `subsystems/client_finance/second_payment_query.py` — typed required-stage／settlement query；LINE 不重算入帳根事實。
+  - `infrastructure/mysql/second_payment_query_repository.py`
+  - `subsystems/client_finance/deposit_payment_query.py`
+  - `infrastructure/mysql/deposit_payment_query_repository.py`
+  - `subsystems/client_finance/overdue_payment_query.py` — 訂金／第一期／第二期各筆正式到期日與未核銷餘額的 typed 唯讀契約。
+  - `infrastructure/mysql/overdue_payment_query_repository.py` — 依各筆 obligation 查詢，不跨期合計；Query 無寫入。
 - entrypoints:
   - `api/routes/client_receipt_reconciliation.py`
 
 ## Dependencies
 - inbound: `finance-import` — 透過 owning-domain composite 委派收款核銷並保留外層交易。
 - outbound: `orders` — 以已提交的 deposit intent 通知訂金核銷結果。
+- outbound: `external-integration/line/order-pre-start-notification-source` — 第二期正式核銷在既有 projection_refresh payload 帶通知標記與正式金額／分配 identity；零新 enum／schema；正常核銷不產生財務 anomaly，真實超收仍保留。
+- outbound: `external-integration/line/deposit-notifications` — 原 outer UoW 核銷 outbox payload 加入 LINE 通知標記；LINE 只讀事件及 typed DepositPayment，不消費 Orders 狀態，不反向建立財務或改寫 Orders。
 - inbound: `scheduling/waiting-deposit-lock` — 無 settlement projection 的 Release 借用 typed 未收款確認；Apply fresh-read，來源版本與歷史變更受原 fingerprint 保護。
 
 ## Contracts
@@ -32,6 +40,7 @@
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_virtual_account_resolution.py`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/modules/receipt-reconciliation/unit/`
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`
+- 訂金通知跨 owner 驗證由 LINE `deposit-notifications` leaf 的 integration root 擁有。
 
 ## Provenance
 - Owner 與金額核銷規則 — `architecture_declared` — Client Finance 正式規格。

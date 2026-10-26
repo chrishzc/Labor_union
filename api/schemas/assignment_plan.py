@@ -13,7 +13,7 @@ class AutomaticArrangementStatusView(BaseModel):
 
     case_no: str
     plan_id: int = Field(gt=0)
-    state: Literal['awaiting_confirmations', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']
+    state: Literal['awaiting_service_start', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']
     blockers: tuple[str, ...] = ()
     job_id: str | None = None
     assignment_count: int = Field(default=0, ge=0)

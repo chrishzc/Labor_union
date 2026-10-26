@@ -4,6 +4,9 @@ architecture: ../../../../../domains/finance-import/subsystems/finance-import/in
 test_root: tests/domains/finance-import/subsystems/finance-import/
 integration_root: tests/domains/finance-import/subsystems/finance-import/integration/
 integration_root: tests/test_finance_import_batch_job_outcome_route.py
+integration_root: tests/test_finance_import_disposable_mysql_e2e.py
+integration_root: tests/test_durable_finance_import_batch_e2e.py
+integration_root: tests/test_finance_source_review_mysql_e2e.py
 fixtures_root: tests/fixtures/
 
 modules:

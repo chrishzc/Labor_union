@@ -281,6 +281,10 @@ class LeaveSubstitutionWorkflow:
                 raise
             raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "代班儲存或確認回應失敗，結果尚未確認；請按「再次確認變更結果」以同一筆操作查核，避免另開重複操作。") from exception
 
+    def apply_in_current_unit_of_work(self, request):
+        """Borrow the service-start transaction while preserving the canonical writer."""
+        return self._replay_or_apply(request, _command_fingerprint(request))
+
     def _apply_transaction(self, request):
         command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:

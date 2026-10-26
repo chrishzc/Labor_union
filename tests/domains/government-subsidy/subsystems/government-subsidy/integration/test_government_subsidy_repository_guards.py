@@ -193,6 +193,13 @@ def test_claim_items_link_to_one_exact_client_subsidy_return_entitlement():
     ]
 
 
+def test_full_service_claim_does_not_force_customer_refund_to_equal_requested_grant():
+    cursor = _EntitlementCursor()
+    item = type('Item', (), {'requested_amount_ntd': MoneyNTD(72_000)})()
+    _link_client_subsidy_return(cursor, 'CASE-450', ((101, item),))
+    assert not any('INSERT INTO client_subsidy_return_claim_item_links' in sql for sql, _ in cursor.statements)
+
+
 def test_claim_planning_source_rejects_missing_assignment_frozen_rate():
     with pytest.raises(ValueError, match="government_subsidy_claim_facts_invalid"):
         _planning_source(

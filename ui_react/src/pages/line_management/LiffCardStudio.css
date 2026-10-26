@@ -457,3 +457,8 @@
     flex: 1;
   }
 }
+
+.liff-studio-public-preview { width: 100%; min-width: 0; }
+.liff-studio-public-preview .notification-edit-and-preview { width: 100%; min-width: 0; }
+.liff-studio-public-preview .notification-inline-editor { min-width: 0; }
+@media (max-width: 1100px) { .liff-studio-public-preview .notification-edit-and-preview { grid-template-columns: minmax(0, 1fr); } }

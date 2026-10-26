@@ -153,15 +153,15 @@ export const OrderAssignmentPlanPanel: FC<OrderAssignmentPlanPanelProps> = ({ ca
         </details>
       )}
 
-      {plan !== null && matchingPlan !== null && !historicalArrangementPending && (matchingPlan.segments ?? []).length > 0 && (
+      {plan !== null && !historicalArrangementPending && (
         <MatchingScheduleAndAssignmentActions
           caseNo={caseNo}
-          planId={matchingPlan.planId}
-          planSegments={matchingPlan.segments ?? []}
+          planId={matchingPlan?.planId ?? 0}
+          planSegments={matchingPlan?.segments ?? []}
           staffNames={names}
           onEditStateChange={onEditStateChange}
           contractReady={contractReady} depositReady={depositReady} onOpenDates={onOpenDates} onOpenRecommendation={onOpenRecommendation}
-          waitingLockAcquired={matchingPlan.activeLockId !== null}
+          waitingLockAcquired={matchingPlan?.activeLockId != null}
           assignmentExists={plan.assignments.length > 0}
           officialServiceDates={plan.assignments.flatMap(segment => segment.official_service_dates).sort()}
           onAssignmentCompleted={() => load(true)}

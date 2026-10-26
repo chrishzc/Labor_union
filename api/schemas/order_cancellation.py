@@ -88,6 +88,20 @@ class ClientFinanceImpactView(BaseModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class CancellationPayrollImpactView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_no: str = Field(min_length=1)
+    expected_payroll_version: int = Field(ge=0)
+    resulting_payroll_version: int = Field(ge=0)
+    payroll: dict[str, Any]
+    carried_rate_snapshots: list[dict[str, Any]]
+    actions: list[dict[str, Any]]
+    special_pay_events: list[dict[str, Any]]
+    blockers: list[str]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class OrderCancellationQueryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -124,7 +138,7 @@ class OrderCancellationPreviewView(BaseModel):
     payroll_version: int | None = Field(ge=0)
     scheduling: dict[str, Any] | None
     client_finance_impact: ClientFinanceImpactView | None
-    payroll_impact: dict[str, Any] | None
+    payroll_impact: CancellationPayrollImpactView | None
     lifecycle_impact: dict[str, Any]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 

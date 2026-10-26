@@ -2,7 +2,7 @@
 
 ## 1. 分責
 
-`Staff Payables` 管理月嫂付款義務、銀行出款、退匯／reversal、精確核銷及 payable／completed／anomaly 投影。
+`Staff Payables` 管理月嫂付款義務、銀行出款、退匯／reversal、核銷及 payable／partially_paid／completed／anomaly 投影。
 
 `Accounts Payable Export` 是跨 Domain 唯讀 reporting subsystem，組合 Staff Payables 與 Client Finance 的客戶補助退還義務。
 
@@ -18,7 +18,7 @@
 | 銀行帳戶 owner | 唯一有效 primary `staff_bank_accounts` |
 | net paid | succeeded payout − return − reversal |
 | balance | obligation − net paid |
-| due date | Orders 唯一 `staff_payment_due_date`：一般及非全補助案件為結案後次一曆月 15 日；補助市民、有效正式服務不超過 120 小時且客戶應付為 0 的全補助案件為結案後第二曆月 15 日 |
+| due date | Orders 唯一 `staff_payment_due_date`：一般及非全補助案件為結案後次一曆月 15 日；社福、有效正式服務不超過 120 小時且客戶應付為 0 的全補助案件為結案後第二曆月 15 日 |
 | 同月合併 | Query／export projection |
 
 狀態：
@@ -26,13 +26,14 @@
 ```text
 balance = obligation 且 net_paid = 0 → payable
 balance = 0 → completed
-部分、超付、ownership／帳戶／金額不符 → anomaly
-退匯／reversal 使 net_paid 不足 → payable
+0 < net_paid < obligation → partially_paid，餘額繼續待付
+超付、ownership／帳戶／金額不符 → anomaly
+退匯／reversal → 依剩餘有效付款重算 payable／partially_paid
 ```
 
-不建立正式 `partially_paid`。
+不足額核銷保留原應付全額，只記錄實際銀行付款；補款僅核銷當下剩餘款。
 
-2026-09-11 人工裁決：Staff Payables 對每一 assignment 只接收 Payroll 的一筆整筆應付，補助案不得拆成補助薪資／自費薪資或分次 payout。非全補助的補助市民訂單由客戶先代墊完整服務薪資，月嫂整筆應付日為結案後次一曆月 15 日；服務完成後退還客戶的補助款屬 Client Finance，不能改寫或清償月嫂義務。全補助案件固定為補助市民、有效正式服務不超過 120 小時且客戶應付為 0，客戶不出資，月嫂整筆應付日為結案後第二曆月 15 日；實務申請通常排滿 120 小時。到期仍不得因政府款未入帳而把一筆義務拆成多次 payout。
+Staff Payables 對每一 assignment 只接收 Payroll 的一筆整筆應付，不因補助來源拆成補助薪資／自費薪資等多筆義務。非全補助的補助市民訂單由客戶先代墊完整服務薪資，月嫂整筆應付日為結案後次一曆月 15 日；服務完成後退還客戶的補助款屬 Client Finance，不能改寫或清償月嫂義務。全補助案件固定為社福、有效正式服務不超過 120 小時且客戶應付為 0，客戶不出資，月嫂整筆應付日為結案後第二曆月 15 日；實務申請通常排滿 120 小時。政府款未入帳不改變原整筆應付及到期日；若實際付款不足，先核銷實付，剩餘款繼續列待付。
 
 ## 3. Subsystems
 
@@ -40,9 +41,11 @@ balance = 0 → completed
 
 選取有效 obligations，依 `staff_id + target payment month` 聚合顯示，但保留所有 `staff_payment_ids`、case numbers 與逐筆金額。聚合不落 DB entity。
 
+月嫂 LINE 自助查詢依本人及目標付款月份，讀取正式 projection 的應付、實付淨額及剩餘待付金額。已付部分且仍有餘額時回傳 `partially_paid`，畫面顯示「部分付款」；未付、付清及異常分別保留原狀態。補款、退匯或沖正後重新查詢即反映目前帳務，不由 LINE 重算或改寫。薪資結算及付款成功均不發送 LINE 通知。
+
 ### Payout Reconciliation Preview
 
-驗證所有銀行列為 outgoing debit、同一月嫂、帳戶 owner 唯一、所選義務完整應付，且支出總額恰等於完整義務合計。禁止半筆義務、部分付款、超付、跨 staff 或重複 raw fact。
+驗證所有銀行列為 outgoing debit、同一月嫂、帳戶 owner 唯一，且無重複 raw fact。一般核銷的支出總額須恰等於所選義務的當下剩餘款。付款不足走不足額核銷，先記實付並保留餘額；付款超額走超額核銷，另列追收。不得跨 staff、重用已核銷銀行列或改寫原應付。
 
 ### Payout Apply
 
@@ -63,7 +66,7 @@ staff_payout_obligation_links
   allocated_amount_ntd
 ```
 
-正式 ledger 只保存實際成功的 payout／return／reversal；失敗嘗試留在 bank staging／anomaly，不混入正式帳本。每筆 obligation 必須完整 allocation。
+正式 ledger 只保存實際成功的 payout／return／reversal；失敗嘗試留在 bank staging／anomaly，不混入正式帳本。每筆成功銀行支出須完整分配；不足額核銷允許 obligation 留有未付餘額。
 
 ### Historical Payout Evidence／Settlement（2026-08-28 人工裁決）
 
@@ -130,7 +133,7 @@ Archive 在本輪預設永久保留且不提供自動刪除。存取權限治理
 
 - 同月嫂同月兩訂單：兩筆義務、一列匯出、一筆銀行支出完整連結兩筆。
 - completed／anomaly 不匯出。
-- 部分、超付、混 staff、帳戶不唯一零正式 payout。
+- 一般足額核銷拒絕不足／超額；專用差額核銷依規格 16 保存實付、待付餘額或超額追償。混 staff、帳戶不唯一不得建立正式 payout。
 - return／reversal 重開 payable。
 - exact replay 不重複 event 或 links。
 - 4 日、5 日多次下載各自保存；archive 與 response bytes 完全相同。

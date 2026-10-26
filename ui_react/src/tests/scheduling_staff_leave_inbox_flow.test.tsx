@@ -162,7 +162,7 @@ describe('Scheduling staff leave inbox flow', () => {
     vi.mocked(leaveSubstitutionClient.listAssignments).mockRejectedValue(new Error('query unavailable'));
     renderLeaveWorkspace();
     const select = screen.getByRole('combobox', { name: '請假代班訂單編號' });
-    expect(await screen.findByRole('alert')).toHaveTextContent('已排班案件載入失敗');
+    expect(await screen.findByText('已排班案件載入失敗，請重新載入。')).toBeInTheDocument();
     expect(select).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
     vi.mocked(leaveSubstitutionClient.listAssignments).mockResolvedValue([...LEAVE_ASSIGNMENTS]);

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+from dataclasses import replace
+from shared_kernel.fingerprints import fingerprint_payload
 
 from infrastructure.mysql.client_finance_terms_writer import (
     persist_client_finance_terms_impact,
@@ -34,6 +36,8 @@ class MySqlClientFinanceLeaveImpactPort:
         self._connection = connection
 
     def preview_leave_substitution(self, facts, scheduling):
+        dates = tuple(day for assignment in scheduling.assignments for day in assignment.service_dates)
+        facts = replace(facts, client_finance=replace(facts.client_finance,effective_start_date=min(dates)))
         return build_client_finance_assignment_impact(facts, scheduling)
 
     def persist_leave_substitution(self, candidate, context, scheduling_result):
@@ -56,7 +60,7 @@ class MySqlPayrollLeaveImpactPort:
         self._connection = connection
 
     def preview_leave_substitution(self, facts, scheduling):
-        client_finance = build_client_finance_assignment_impact(facts, scheduling)
+        client_finance = MySqlClientFinanceLeaveImpactPort(self._connection).preview_leave_substitution(facts, scheduling)
         return build_payroll_assignment_impact(facts, scheduling, client_finance)
 
     def preview_handover(self, facts, scheduling):
@@ -85,12 +89,15 @@ class MySqlOrdersLeaveImpactPort:
         self._clock = clock
 
     def preview_leave_substitution(self, facts, scheduling, client_finance):
-        return build_orders_assignment_impact(
-            facts,
+        start = min(day for assignment in scheduling.assignments for day in assignment.service_dates)
+        impact = build_orders_assignment_impact(
+            replace(facts, lifecycle=replace(facts.lifecycle,actual_start_date=start)),
             scheduling,
             client_finance,
             self._clock.now(),
         )
+        return replace(impact, payload=replace(impact.payload,actual_start_date=start),
+            fingerprint=fingerprint_payload({'impact':impact.fingerprint.value,'actual_start_date':str(start)}))
 
     def persist_leave_substitution(self, candidate, context, scheduling_result):
         del scheduling_result
@@ -107,6 +114,7 @@ class MySqlOrdersLeaveImpactPort:
             correlation_id=context.correlation_id,
             trigger_event="leave_substitution_applied",
             staff_payment_due_date=payload.staff_payment_due_date,
+            actual_start_date=payload.actual_start_date,
         )
         with self._connection.cursor() as cursor:
             persist_order_lifecycle_impact(cursor, command)

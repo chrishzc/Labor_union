@@ -8,11 +8,9 @@ import {
   lineIdentityRuntimeConfigClient,
   type LineIdentityRuntimeConfigClient,
 } from '../../api/line_identity/line_identity_runtime_config_client';
-import {
-  LINE_FLEX_DESIGN_SOURCES,
-  type LineFlexDesignSource,
-} from '../../adapters/line_flex_design/line_flex_design_adapter';
-import { LineFlexDesignPreview } from '../../components/LineFlexDesignPreview';
+import { LineMessagePreviewWorkspace } from '../../components/LineMessagePreviewWorkspace';
+import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../../api/line_notification_rules/line_message_preview_client';
+import '../../components/LineNotificationWorkbench.css';
 import '../LineManagementPage.css';
 import './LiffCardStudio.css';
 
@@ -36,7 +34,7 @@ export interface LiffAssetItem {
   description: string;
   apiMapping: string;
   audienceRoles: LiffAudienceRole[];
-  flexDesignSource?: LineFlexDesignSource;
+  previewId?: string;
 }
 
 const ASSET_ITEMS: LiffAssetItem[] = [
@@ -53,7 +51,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-gateway',
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
     description: '正式入口先詢問是否已登記市府平台：已申請者繼續填寫工會「需求調查表單」，未申請者引導至新竹市到宅坐月子媒合服務平台。',
-    apiMapping: '身分開啟、候選綁定檢查與確認流程已接通',
+    apiMapping: '身分開啟、候選綁定檢查與確認流程示意',
     audienceRoles: ['visitor'],
   },
   {
@@ -69,7 +67,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-registration',
     authLevel: '後端驗證 LINE 登入憑證；不接受網址列身分',
     description: '登記資料先顯示隱去個資的摘要，明確確認後才送出；完整建立服務需求調查。',
-    apiMapping: '登記資料檢查、確認送出與結果回讀已接通',
+    apiMapping: '登記資料檢查、確認送出與結果回讀',
     audienceRoles: ['visitor'],
   },
   {
@@ -85,7 +83,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-bind',
     authLevel: '後端驗證 LINE 登入憑證；候選匹配後仍需明確確認',
     description: '正式入口先顯示登記選擇；選擇已登記後才進入候選資料檢查與明確確認，不以姓名、電話或網址列 userId 授權。',
-    apiMapping: '候選綁定、資料檢查與確認送出已接通',
+    apiMapping: '候選綁定、資料檢查與確認送出流程示意',
     audienceRoles: ['visitor'],
   },
   {
@@ -116,14 +114,14 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-profile-update',
     launchPath: '/line-profile-guard',
     authLevel: '必須驗證 LINE 登入憑證與正式客戶綁定',
-    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話、預產期或寶寶資訊等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
-    apiMapping: '客戶資料異動之查詢、預覽與申請流程已接通',
+    description: '產婦可查詢目前已登記的個人資料，勾選聯絡電話或寶寶資訊等欄位並送審；服務地址與訂單條件請從「訂單資訊異動申請」提出。',
+    apiMapping: '客戶資料異動之查詢、預覽與申請流程示意',
     audienceRoles: ['customer'],
   },
   {
     id: 'order_update',
     displayTitle: "申請訂單異動",
-    purpose: "提出服務地址、日期或時段異動。",
+    purpose: "提出服務地址、天數或時段異動。",
     group: "客戶服務",
     type: 'liff',
     title: '6. order_update.html',
@@ -134,7 +132,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     previewPath: '/line-order-update?studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證、正式客戶綁定、本人有效訂單與最新版本',
     description: '客戶選擇自己的有效訂單與異動項目，預覽修改前後內容後送出客服需求；不直接修改正式訂單、排班、費用或月嫂意願。',
-    apiMapping: '訂單異動 Query／Preview／Apply 與客服案件回讀已接通',
+    apiMapping: '訂單異動 Query／Preview／Apply 與客服案件回讀流程示意',
     audienceRoles: ['customer'],
   },
   {
@@ -148,8 +146,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     badge: '案件專屬回覆',
     endpointUrl: '/line-candidate-contact-customer?ref={案件專屬識別碼}',
     authLevel: '後端驗證 LINE 登入憑證、正式客戶綁定、案件與協調事件；只允許通知收件人回覆',
-    description: '原條件沒有月嫂願意承接時，列出月嫂提出的可協調項目；客戶回覆後交由工會處理，不要求客戶自行操作訂單。',
-    apiMapping: '客戶協調 Query／Submit、工會人工跟進與群組通知已接通',
+    description: '工會自行輸入詢問文案；客戶回答更新後的條件，工會審核通過即更新案件條件，再選月嫂重新詢問意願。',
+    apiMapping: '客戶回答更新條件，工會審核並重新詢問意願',
     audienceRoles: ['customer'],
     launchNote: '此頁必須由客戶收到的案件協調卡帶入專屬識別碼，無法從管理頁建立通用正式入口。',
   },
@@ -166,13 +164,13 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-staff-orders',
     authLevel: '後端驗證 LINE 登入憑證與正式月嫂綁定',
     description: '只呈現正式月嫂自助服務回傳的案件欄位、狀態與鎖定原因；本設計頁不載入或合成案件資料。',
-    apiMapping: '月嫂安全查單與案件狀態流程已接通',
+    apiMapping: '月嫂安全查單與案件狀態流程示意',
     audienceRoles: ['staff'],
   },
   {
     id: 'staff_schedule',
     displayTitle: "班表與請假",
-    purpose: "查看班表，提出請假或不可服務期間。",
+    purpose: "查看班表，記錄已協調的順延或提出代班需求。",
     group: "月嫂服務",
     type: 'liff',
     title: '9. staff_schedule.html',
@@ -181,8 +179,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-staff-schedule',
     launchPath: '/line-staff-schedule',
     authLevel: '後端驗證 LINE 登入憑證與正式月嫂綁定',
-    description: '呈現正式月曆、待定金檔期鎖、不可服務期間與請假申請；正式指派中的休息日僅稱休息日。',
-    apiMapping: '月嫂排班月曆、檔期鎖定與請假 Preview／Apply 已接通',
+    description: '呈現班表與不可服務期間；月嫂填入已協調的順延日期，無衝突即更新排班、帳務並發日期表到案件群組；需要代班或有衝突才交工會。',
+    apiMapping: '班表、已協調順延及代班需求',
     audienceRoles: ['staff'],
   },
   {
@@ -197,8 +195,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     endpointUrl: '/line-staff-baby-log',
     launchPath: '/line-staff-baby-log',
     authLevel: '後端驗證 LINE 登入憑證、正式月嫂綁定與本人排班與服務日期',
-    description: '先由正式班表選取服務日，再預覽並送出寶寶日誌；需要下廚時照片會經受控檔案 staging。',
-    apiMapping: '服務日選取、日誌與餐食照片 Preview／Apply／Readback 已接通',
+    description: '選取服務日並填寫日誌與照片，點擊送出即儲存並顯示成功；可提前填寫，送出後無修改入口。',
+    apiMapping: '服務日選取、日誌與照片直接送出',
     audienceRoles: ['staff'],
   },
   {
@@ -214,7 +212,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-staff-payout',
     authLevel: '後端驗證 LINE 登入憑證與正式月嫂綁定；只能依本人 staff_id 查詢',
     description: '依目標付款月份顯示逐案應付金額、已付金額、狀態、目標付款日、實際付款日與交易紀錄。',
-    apiMapping: '本人 staff_id ＋目標付款月份的 bounded typed query 已接通',
+    apiMapping: '本人 staff_id ＋目標付款月份的 bounded typed query 流程示意',
     audienceRoles: ['staff'],
   },
   {
@@ -225,13 +223,13 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     type: 'liff',
     title: '12. candidate_contact.html',
     subtitle: '候選月嫂提出疑問或回覆無法承接',
-    badge: '24 小時案件回覆',
+    badge: '案件回覆',
     endpointUrl: '/line-candidate-contact?ref={案件專屬識別碼}',
     launchPath: '/line-candidate-contact',
     previewPath: '/line-candidate-contact?studio_preview=1',
-    authLevel: '後端驗證 LINE 登入憑證、候選月嫂身分、案件收件人與 24 小時回覆期限',
+    authLevel: '後端驗證 LINE 登入憑證、候選月嫂身分、案件收件人；24 小時僅作內部提醒',
     description: '候選月嫂可針對服務地區、日期、時段、時數、下廚、交通或個人因素提出資訊問題、調整條件，或直接回覆沒有意願。',
-    apiMapping: '月嫂回覆 Query／Submit、最新意願投影與客戶協調通知已接通',
+    apiMapping: '月嫂回覆 Query／Submit、最新意願投影與客戶協調通知流程示意',
     audienceRoles: ['staff'],
   },
   {
@@ -247,13 +245,13 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-identity',
     authLevel: '後端驗證 LINE 登入憑證；網址列 userId 僅供導航，不具授權效果',
     description: '依已驗證的 LINE 使用者開啟客戶、月嫂或管理員流程；驗證失敗時不顯示資料，並要求重新登入。',
-    apiMapping: '身分開啟、綁定檢查與確認流程已接通',
+    apiMapping: '身分開啟、綁定檢查與確認流程示意',
     audienceRoles: ['visitor', 'customer', 'staff', 'union_staff'],
   },
   {
     id: 'mobile_admin_staff_review',
-    displayTitle: "月嫂身分審核",
-    purpose: "查看待審申請與需要補充的資料。",
+    displayTitle: "待辦工作台",
+    purpose: "查看身分審核與案件待辦。",
     group: "工會工作",
     type: 'liff',
     title: '14. mobile_admin.html · 待辦工作台',
@@ -263,8 +261,8 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     launchPath: '/line-mobile-admin?target=staff_review',
     previewPath: '/line-mobile-admin?target=staff_review&studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定',
-    description: '只顯示待處理的月嫂身分審核；排班審查維持案號工具，不混入待辦清單。',
-    apiMapping: '月嫂身分審核 Query／Preview／Apply 與排班案號工具已接通',
+    description: '呈現月嫂身分審核與案件待辦；工會查看目前待處理項目並決定是否發送提醒。',
+    apiMapping: '月嫂身分審核 Query／Preview／Apply 與排班案號工具流程示意',
     audienceRoles: ['union_staff'],
   },
   {
@@ -281,7 +279,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     previewPath: '/line-mobile-admin?target=customer_service&studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定',
     description: '只載入客服案件、對話與回覆流程，不與身分審核共用可見工作面。',
-    apiMapping: '客服摘要、案件列表、回覆 Preview／Apply 與結果回讀已接通',
+    apiMapping: '客服摘要、案件列表、回覆 Preview／Apply 與結果回讀流程示意',
     audienceRoles: ['union_staff'],
   },
   {
@@ -298,7 +296,7 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     previewPath: '/line-mobile-admin?target=order_tracking&studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；訂單進度為唯讀',
     description: '依案件編號查詢未完成訂單目前階段、最後更新與下一步；此入口不修改訂單。',
-    apiMapping: 'Orders operational-stage projection bounded typed readback 已接通',
+    apiMapping: 'Orders operational-stage projection bounded typed readback 流程示意',
     audienceRoles: ['union_staff'],
   },
   {
@@ -315,73 +313,74 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     previewPath: '/line-mobile-admin?target=dashboard&studio_preview=1',
     authLevel: '後端驗證 LINE 登入憑證與正式管理員綁定；只回傳本週彙總',
     description: '依 Asia／Taipei 業務週顯示本週六項營運統計、期間與產生時間。',
-    apiMapping: 'operations-report.v3 本週 bounded summary query 已接通',
+    apiMapping: 'operations-report.v3 本週 bounded summary query 流程示意',
     audienceRoles: ['union_staff'],
   },
   {
     id: 'flex_dispatch',
-    displayTitle: "派案通知",
-    purpose: "邀請候選月嫂查看案件與回覆意願。",
-    group: "訊息卡片",
+    displayTitle: '接案意願詢問',
+    purpose: '邀請月嫂查看案件並回覆意願。',
+    group: '訊息卡片',
     type: 'flex_card',
-    title: '派案通知卡設計稿',
-    subtitle: '候選月嫂派案意願調查 ｜ 案件摘要入口',
-    badge: '卡片設計稿',
-    endpointUrl: '排定於模組三：月嫂派案與媒合 Subsystem',
-    authLevel: '候選月嫂專屬 ｜ LINE Flex 去敏安全版面（受派案資格保護）',
-    description: '【業務定位】當系統媒合成功時向候選月嫂推播。去敏呈現服務期間、時段與區域，詳細地址不留在對話中；供月嫂查閱案件或回覆接案意願。',
-    apiMapping: '模組三排定：LineBotPushService.send_dispatch_notice() ＋ Postback 意願回覆',
+    title: '接案意願詢問',
+    subtitle: '公版預覽',
+    badge: '公版預覽',
+    endpointUrl: '',
+    authLevel: '公版範例',
+    description: '邀請月嫂查看案件並回覆意願。',
+    apiMapping: '重用既有訊息公版預覽',
     audienceRoles: ['staff'],
-    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_dispatch,
+    previewId: 'card-candidate-information-1',
   },
   {
     id: 'flex_leave_confirm',
-    displayTitle: "服務日順延確認",
-    purpose: "請客戶確認是否同意順延服務。",
-    group: "訊息卡片",
+    displayTitle: '服務日期表',
+    purpose: '記錄已確定的服務日期與排班，無再次確認按鈕。',
+    group: '訊息卡片',
     type: 'flex_card',
-    title: '服務日順延確認卡設計稿',
-    subtitle: '產婦調休/順延雙選項確認 ｜ 雙向決策卡',
-    badge: '卡片設計稿',
-    endpointUrl: '排定於模組三：月嫂排班與請假 Subsystem',
-    authLevel: '簽約產婦專屬 ｜ 雙選項互動確認（受簽約案件版本保護）',
-    description: '【業務定位】月嫂因故請假時自動推播給產婦。提供「同意順延一日」或「由工會派代班」決策按鈕，回覆後經後端排班狀態機核對生效。',
-    apiMapping: '模組三排定：LeaveWorkflow.push_extension_confirm() ＋ Postback 順延決策確認',
-    audienceRoles: ['customer'],
-    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_leave_confirm,
+    title: '服務日期表',
+    subtitle: '公版預覽',
+    badge: '公版預覽',
+    endpointUrl: '',
+    authLevel: '公版範例',
+    description: '記錄已確定的服務日期與排班，無再次確認按鈕。',
+    apiMapping: '重用既有訊息公版預覽',
+    audienceRoles: ['customer', 'staff'],
+    previewId: 'service-start-result',
   },
   {
     id: 'flex_alert_critical',
-    displayTitle: "重大異常通報",
-    purpose: "通知工會人員查看並處理異常。",
-    group: "訊息卡片",
+    displayTitle: '重大異常通知',
+    purpose: '通知設定中的工會人員私人聊天室。',
+    group: '訊息卡片',
     type: 'flex_card',
-    title: '重大異常通報卡設計稿',
-    subtitle: '工會幹部群重大告警 ｜ 幹部通知版面',
-    badge: '卡片設計稿',
-    endpointUrl: '排定於模組四：客服與異常處置 Subsystem',
-    authLevel: '工會幹部群組專屬 ｜ 去敏高層級告警（僅推播已授權幹部群）',
-    description: '【業務定位】重大客訴、連續身分核對異常或重大排班衝突時，自動推播至幹部群組，並附帶一鍵進入手機管理中心審核處理之入口。',
-    apiMapping: '模組四排定：AlertDispatchService.broadcast_critical_alert() ＋ 管理中心一鍵處置',
+    title: '重大異常通知',
+    subtitle: '公版預覽',
+    badge: '公版預覽',
+    endpointUrl: '',
+    authLevel: '公版範例',
+    description: '通知設定中的工會人員私人聊天室。',
+    apiMapping: '重用既有訊息公版預覽',
     audienceRoles: ['union_staff'],
-    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_alert_critical,
+    previewId: 'LU96-M4-SAFE-ALERT-RULE-V1',
   },
   {
     id: 'flex_negotiation',
-    displayTitle: "媒合條件協調",
-    purpose: "邀請客戶回覆可調整的條件。",
-    group: "訊息卡片",
+    displayTitle: '媒合條件協調',
+    purpose: '由人員輸入詢問文案，客戶回答更新後的條件。',
+    group: '訊息卡片',
     type: 'flex_card',
-    title: '媒合條件協調卡',
-    subtitle: '候選皆無法承接 ｜ 客戶條件協調卡',
-    badge: '正式流程已接通',
-    endpointUrl: '候選回覆彙整 → 客戶 LINE 耐久投遞 → 案件專屬 LIFF 回覆',
-    authLevel: '正式綁定客戶專屬 ｜ 候選最新意願與條件彙整 ｜ 收件人驗證',
-    description: '【業務定位】候選月嫂皆無法承接且有人提出可調整條件時，系統彙整實際回覆並通知客戶確認；客戶同意後由工會修改正式資料，再重新詢問相關月嫂。',
-    apiMapping: '候選聯繫結果彙整、客戶 Flex 投遞、工會人工跟進與群組通知已接通',
+    title: '媒合條件協調',
+    subtitle: '公版預覽',
+    badge: '公版預覽',
+    endpointUrl: '',
+    authLevel: '公版範例',
+    description: '由人員輸入詢問文案，客戶回答更新後的條件。',
+    apiMapping: '重用既有訊息公版預覽',
     audienceRoles: ['customer'],
-    flexDesignSource: LINE_FLEX_DESIGN_SOURCES.flex_negotiation,
+    previewId: 'card-union-question',
   },
+
 ];
 
 function canonicalLiffUrl(path: string, origin: string): string {
@@ -426,7 +425,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <div className="mock-step-indicator">需求調查表單</div>
         <strong>1. 基本資料</strong>
         <label>產婦姓名 *</label><input type="text" placeholder="請填寫真實姓名" readOnly />
-        <label>身分證字號 *</label><input type="text" placeholder="例如：A123456789" readOnly />
+        <label>身分證字號（選填）</label><input type="text" placeholder="例如：A123456789" readOnly />
         <label>行動電話 *</label><input type="text" placeholder="例如：0912345678" readOnly />
         <label>服務地址 *</label><input type="text" placeholder="請填寫完整地址（含巷弄樓層）" readOnly />
         <strong>2. 照護與環境</strong>
@@ -440,7 +439,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label><input type="checkbox" disabled /> 奶瓶消毒鍋</label>
         <strong>5. 費用與同意條款</strong>
         <label><input type="checkbox" disabled /> 已詳閱退費原則</label>
-        <button type="button" className="mock-primary-btn" disabled>預覽登記資料</button>
+        <button type="button" className="mock-primary-btn" disabled>送出完整服務登記表單</button>
       </div>
     );
   }
@@ -474,14 +473,13 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>欲異動項目</label>
         <div className="mock-change-options">
           <span><CheckSquare aria-hidden="true" /> 聯絡電話</span>
-          <span><CheckSquare aria-hidden="true" /> 預產期</span>
           <span><CheckSquare aria-hidden="true" /> 寶寶資訊</span>
           <span><CheckSquare aria-hidden="true" /> 生產方式</span>
         </div>
         <label>填寫異動內容</label>
         <textarea rows={2} placeholder="請輸入欲變更的新內容" readOnly />
         <button type="button" className="mock-primary-btn" disabled>預覽異動差異</button>
-        <small>正式異動流程已接通後端 API；送出後等待工會人員審核。</small>
+        <small>正式異動流程示意後端 API；送出後等待工會人員審核。</small>
       </div>
     );
   }
@@ -500,7 +498,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <div className="mock-change-options">
           <span><CheckSquare aria-hidden="true" /> 服務地址</span>
           <span><CheckSquare aria-hidden="true" /> 下廚需求</span>
-          <span><CheckSquare aria-hidden="true" /> 服務日期／天數</span>
+          <span><CheckSquare aria-hidden="true" /> 服務天數</span>
           <span><CheckSquare aria-hidden="true" /> 每日時段</span>
         </div>
         <button type="button" className="mock-primary-btn" disabled>預覽修改內容</button>
@@ -513,17 +511,17 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">媒合條件協調</div>
-        <p>目前原條件尚無月嫂願意承接，請確認月嫂提出的條件能否修改。</p>
+        <p>請依工會提出的問題，填寫更新後的服務條件。</p>
         <div className="mock-placeholder-box">
           <strong>可協調項目</strong>
-          <small>實際內容由候選月嫂最新回覆彙整，並顯示可重新詢問的人數。</small>
+          <small>此處顯示工會人員自行輸入的詢問文案。</small>
         </div>
-        <label>這些條件可以調整嗎？</label>
-        <select disabled defaultValue=""><option value="">請選擇</option><option>可以，請工會協助修改</option><option>目前無法調整</option></select>
+        <label>更新後的條件</label>
+        <textarea rows={2} placeholder="請填寫更新後的條件" readOnly />
         <label>補充說明（選填）</label>
         <textarea rows={2} placeholder="可補充能調整的方式" readOnly />
         <button type="button" className="mock-primary-btn" disabled>送出回答</button>
-        <small>送出後會通知工會人員；工會完成正式資料修改後才會重新詢問月嫂。</small>
+        <small>工會審核通過即更新案件條件；未通過時由人員再次詢問。</small>
       </div>
     );
   }
@@ -544,7 +542,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">排班資訊與請假</div>
-        <p>您可以查詢個人班表月曆，並預覽、確認請假申請。</p>
+        <p>雙方自行協調後，由月嫂填入順延日期；無衝突即更新，需代班或有衝突才交工會。</p>
         <label>查詢月份</label><input type="month" readOnly />
         <button type="button" className="mock-primary-btn" disabled>查詢班表</button>
         <div className="mock-placeholder-box">
@@ -562,7 +560,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>服務月份</label><input type="month" readOnly />
         <label>服務日</label><input type="text" value="請先載入服務日" readOnly />
         <label>寶寶日誌</label><textarea rows={2} placeholder="選擇服務日後填寫" readOnly />
-        <button type="button" className="mock-primary-btn" disabled>預覽寶寶日誌</button>
+        <button type="button" className="mock-primary-btn" disabled>送出日誌</button>
       </div>
     );
   }
@@ -603,10 +601,10 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     return (
       <div className="mock-admin-view">
         <div className="mock-step-indicator">待辦工作台</div>
-        <p>目前只列出待處理的月嫂身分審核。</p>
-        <div className="mock-placeholder-box">月嫂身分待審 ｜ 檢查資料後決定通過或退回</div>
+        <p>列出身分審核與案件待辦，可由工會決定是否發送提醒。</p>
+        <div className="mock-placeholder-box">身分待審 ｜ 案件群組與連續缺漏天數 ｜ 各期逾期款項</div>
         <button type="button" className="mock-primary-btn" disabled>開啟月嫂驗證</button>
-        <small>排班審查使用案號查詢，不列入待辦清單。</small>
+        <small>只顯示目前需要人員處理的項目。</small>
       </div>
     );
   }
@@ -664,6 +662,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
 
 export interface LiffCardStudioProps {
   runtimeConfigClient?: LineIdentityRuntimeConfigClient;
+  previewClient?: LineMessagePreviewClient;
 }
 
 type RuntimeConfigState =
@@ -673,6 +672,7 @@ type RuntimeConfigState =
 
 export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   runtimeConfigClient = lineIdentityRuntimeConfigClient,
+  previewClient = lineMessagePreviewClient,
 }) => {
   const [selectedId, setSelectedId] = useState<string>(() => {
     const requested = liffHashParams().get('asset');
@@ -691,6 +691,16 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   const [searchQuery, setSearchQuery] = useState(() => liffHashParams().get('q') ?? '');
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigState>({ status: 'loading' });
   const [expanded, setExpanded] = useState(false);
+  const [catalog, setCatalog] = useState<PreviewDescriptor[]>([]);
+  const [catalogError, setCatalogError] = useState(false);
+  const [catalogRetry, setCatalogRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setCatalogError(false);
+    setCatalog([]);
+    void previewClient.catalog({ signal: controller.signal }).then(result => { if (!controller.signal.aborted) setCatalog(result); }).catch(() => { if (!controller.signal.aborted) setCatalogError(true); });
+    return () => controller.abort();
+  }, [previewClient, catalogRetry]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const dialogTitleId = useId();
 
@@ -764,7 +774,14 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
     }
   }, [filterRole, filterType, searchQuery, selectedId]);
 
-  const visualPreview = selectedItem && (
+  const visualPreview = selectedItem && (selectedItem.type === 'flex_card' ? (
+    <div className="liff-studio-public-preview">
+      {catalogError && <p role="alert">公版清單載入失敗。<button type="button" onClick={() => setCatalogRetry(v => v + 1)}>重新載入公版</button></p>}
+      <LineMessagePreviewWorkspace descriptor={catalog.find(item => item.id === selectedItem.previewId)}
+        entryId={selectedItem.previewId!} client={previewClient}
+        editor={<p>{selectedItem.purpose}</p>} footer={null} />
+    </div>
+  ) : (
     <div className="liff-studio-device" key={selectedItem.id}>
       <div className="liff-studio-device-brand">
         {selectedItem.type === 'liff' ? '新竹市到宅月子工會' : 'LINE 訊息卡片'}
@@ -776,10 +793,10 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
             <p className="mock-liff-desc">{selectedItem.purpose}</p>
             <LiffVisualPreview item={selectedItem} />
           </div>
-        ) : <LineFlexDesignPreview source={selectedItem.flexDesignSource} compact />}
+        ) : null}
       </div>
     </div>
-  );
+  ));
 
   return (
     <div className="liff-studio-container liff-studio-clean">
@@ -883,7 +900,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               <div className="liff-studio-preview-stage">
                 <div className="liff-studio-stage-caption">
                   <span>{selectedItem.type === 'liff' ? <Smartphone aria-hidden="true" /> : <MessageSquare aria-hidden="true" />}{selectedItem.type === 'liff' ? 'LINE 服務畫面' : '訊息卡片'}</span>
-                  <span>設計預覽</span>
+                  <span>流程示意</span>
                 </div>
                 {selectedItem.type === 'liff' && selectedItem.launchPath && runtimeConfig.status !== 'ready' && (
                   <div className="line-warning liff-preview-warning" role="status">

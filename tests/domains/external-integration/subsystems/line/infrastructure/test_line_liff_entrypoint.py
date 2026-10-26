@@ -142,7 +142,7 @@ def test_gateway_and_mobile_admin_use_canonical_liff_config_without_url_identity
     assert "/api/v1/line/identity/runtime-config" in gateway
     assert "/api/v1/line/identity/runtime-config" in mobile_admin
     assert "/api/line/config" not in gateway
-    assert "/api/config/liff/runtime" not in gateway
+    assert "/api/config/liff/runtime?page=gateway" in gateway
     assert "urlUserId" not in gateway
     assert "?userId=" not in gateway
     assert "/api/line/config" not in mobile_admin
@@ -211,22 +211,15 @@ def test_active_liff_pages_do_not_accept_query_string_user_id() -> None:
 
 
 def test_staff_schedule_page_uses_strict_leave_flow() -> None:
-    source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
-        encoding="utf-8"
-    )
-
-    assert "/api/v1/line/staff-self-service/leave-requests/preview" in source
-    assert "/api/v1/line/staff-self-service/leave-requests/apply" in source
-    assert "/query`" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in source
+    source=(ROOT/'line/static/staff_schedule.html').read_text(encoding='utf-8')
+    assert '/api/v1/line/staff-self-service/leave-results/' in source
+    assert "leaveResultPost('submit',pending)" in source
+    assert '需要安排代班' in source and '已協調順延' in source
+    assert '/leave-requests/preview' not in source and 'confirmLeave' not in source
+    assert '確認原操作結果' in source
+    assert 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in source
     assert 'development_line_user_id: ""' in source
     assert 'params.get("userId")' not in source
-    assert '"line_user_id"' not in source
-    assert "function requireStaffSchedule" in source
-    assert 'id="submitLeave"' in source
-    assert 'disabled>預覽請假待辦</button>' in source
-    assert 'addEventListener("click", submitLeave)' in source
-    assert "重新登入 LINE" in source
     assert 'redirect.searchParams.set("target", "staff_schedule")' in source
     assert 'liff.login({redirectUri: redirect.toString()})' in source
 
@@ -235,12 +228,12 @@ def test_staff_baby_log_page_uses_strict_service_day_log_flow() -> None:
     source = (ROOT / "line" / "static" / "staff_baby_log.html").read_text(encoding="utf-8")
 
     assert "/api/v1/line/staff-self-service/schedule" in source
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in source
     assert "/api/v1/line/staff-self-service/service-day-logs/apply" in source
     assert "/api/v1/line/staff-self-service/service-day-media" in source
-    assert "受控檔案 staging" in source
-    assert 'id="previewLog" class="primary" type="button" disabled' in source
-    assert 'addEventListener("click", previewServiceDayLog)' in source
+    assert "staging_id" in source
+    assert 'id="previewLog"' not in source
+    assert "送出日誌" in source
     assert 'development_line_user_id: ""' in source
     assert 'redirect.searchParams.set("target", "staff_baby_log")' in source
 

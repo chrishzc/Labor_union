@@ -27,8 +27,8 @@ ANNUAL_HEADERS = (
     "\u670d\u52d9\u5929\u6578", "\u88dc\u52a9\u6b3e\u91d1\u984d", "\u55ae\u50f9", "\u96c7\u4e3b", "\u670d\u52d9\u4eba\u54e1",
 )
 
-GENERAL_CITIZEN = "\u4e00\u822c\u5e02\u6c11"
-SUBSIDIZED_CITIZEN = "\u88dc\u52a9\u5e02\u6c11"
+GENERAL_CITIZEN = "補助市民"
+SUBSIDIZED_CITIZEN = "社福"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
 ESTABLISHED_ORDER_STATUSES = (
@@ -124,6 +124,9 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                        AS official_service_days
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id
+                LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
+                LEFT JOIN scheduling_generations current_generation
+                    ON current_generation.id=current_schedule.effective_generation_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
                 LEFT JOIN beclass_record_correction_states correction
@@ -166,6 +169,7 @@ def _select_established_cases(
     period_start: date | None,
     period_end: date | None,
     order_statuses: tuple[str, ...] = ESTABLISHED_ORDER_STATUSES,
+    *, lock: bool = False,
 ) -> list[dict]:
     if (period_start is None) != (period_end is None):
         raise ValueError("period_start and period_end must both be provided or omitted")
@@ -184,6 +188,10 @@ def _select_established_cases(
                        COALESCE(o.actual_start_date, o.start_date) AS actual_start_date,
                        COALESCE(o.actual_end_date, o.end_date) AS actual_end_date,
                        o.service_days, o.service_hours_per_day,
+                       (current_schedule.effective_generation_id IS NOT NULL
+                        AND (current_generation.id IS NULL
+                             OR current_generation.case_no<>o.case_no
+                             OR current_generation.status<>'effective')) AS scheduling_source_invalid,
                        c.name AS employer_name, c.address AS employer_address,
                        COALESCE(
                            s.name,
@@ -213,6 +221,9 @@ def _select_established_cases(
                        AS official_service_days
                 FROM orders o
                 JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
+                LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
+                LEFT JOIN scheduling_generations current_generation
+                    ON current_generation.id=current_schedule.effective_generation_id
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br
                     ON (br.query_no = o.case_no OR br.bound_case_no = o.case_no)
@@ -225,7 +236,7 @@ def _select_established_cases(
                 WHERE o.status IN ({status_placeholders})
                   AND c.identity_status IN (%s, %s)
                 {period_clause}
-                ORDER BY o.case_no
+                ORDER BY o.case_no {"FOR UPDATE" if lock else ""}
                 """,
                 (
                     *order_statuses,
@@ -275,6 +286,10 @@ def _fetch_claim_submission_period_cases(
                        COALESCE(o.actual_start_date, a.assigned_start_date) AS actual_start_date,
                        COALESCE(o.actual_end_date, a.assigned_end_date) AS actual_end_date,
                        o.service_days, o.service_hours_per_day,
+                       (current_schedule.effective_generation_id IS NOT NULL
+                        AND (current_generation.id IS NULL
+                             OR current_generation.case_no<>o.case_no
+                             OR current_generation.status<>'effective')) AS scheduling_source_invalid,
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, s.union_no AS staff_union_no, br.survey_details,
                        item.claimed_hours, item.unit_price,
@@ -400,6 +415,8 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
     This is a read-only estimate, never a claim, approval or receivable root.
     Missing facts stay unknown instead of becoming a zero-value subsidy.
     """
+    if source.get("scheduling_source_invalid"):
+        return SubsidyReceivableEstimate(None, "scheduling_effective_generation_invalid")
     if source.get("identity_status") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
         return SubsidyReceivableEstimate(None, "eligibility_pending")
     days = source.get("service_days")
@@ -477,6 +494,8 @@ def _effective_payroll_rate(source: dict) -> object | None:
 
 
 def _to_register_row(source: dict) -> dict | None:
+    if source.get("scheduling_source_invalid"):
+        raise ValueError("scheduling_effective_generation_invalid")
     actual_start = _as_date(source.get("actual_start_date"))
     actual_end = _as_date(source.get("actual_end_date"))
     daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))

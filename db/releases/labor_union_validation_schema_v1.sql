@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-10-22-v47
+-- Release: labor-union-validation-schema-2026-10-24-v49
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -21805,3 +21805,114 @@ ALTER TABLE provisional_client_registrations
 ALTER TABLE line_order_group_bindings
     ADD COLUMN invitation_url VARCHAR(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL;
 -- END SOURCE: db/schema_parts/1053_line_order_group_invitation_url.sql
+
+-- BEGIN SOURCE: db/schema_parts/1054_scheduling_service_start.sql
+-- Scheduling-owned customer/caregiver coordination results. Schema only.
+CREATE TABLE IF NOT EXISTS scheduling_service_start_requests (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    plan_id BIGINT NULL,
+    segment_id BIGINT NULL,
+    assignment_id BIGINT NULL,
+    decision VARCHAR(20) NOT NULL,
+    requested_start_date DATE NULL,
+    source_order_version BIGINT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    aggregate_version BIGINT NOT NULL DEFAULT 1,
+    selected_candidate_id BIGINT NULL,
+    execution_dates JSON NULL,
+    confirmed_version_id BIGINT NULL,
+    result_snapshot JSON NULL,
+    submit_key VARCHAR(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    submit_fingerprint CHAR(64) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_start_submit (submit_key),
+    KEY ix_service_start_case (case_no, id),
+    KEY ix_service_start_pending (status, id),
+    CONSTRAINT ck_service_start_decision CHECK (decision IN ('accepted','declined')),
+    CONSTRAINT ck_service_start_status CHECK (status IN ('awaiting_peers','substitute_required','applied'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_start_candidates (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    request_id BIGINT NOT NULL,
+    staff_id INT NOT NULL,
+    proposed_start_date DATE NOT NULL,
+    proposed_end_date DATE NOT NULL,
+    willingness VARCHAR(20) NOT NULL DEFAULT 'pending',
+    interaction_hash CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    response_event_key VARCHAR(191) NULL,
+    invitation_identity VARCHAR(191) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_start_interaction (interaction_hash),
+    UNIQUE KEY uq_service_start_response_event (response_event_key),
+    KEY ix_service_start_candidates (request_id, id),
+    CONSTRAINT fk_service_start_candidate_request FOREIGN KEY (request_id) REFERENCES scheduling_service_start_requests(id),
+    CONSTRAINT ck_service_start_willingness CHECK (willingness IN ('pending','willing','unwilling')),
+    CONSTRAINT ck_service_start_period CHECK (proposed_end_date >= proposed_start_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/1054_scheduling_service_start.sql
+
+-- BEGIN SOURCE: db/schema_parts/233_government_subsidy_periods.sql
+-- Additive whole-period receipt roots. No claim submission/approval stage or case cash allocation.
+CREATE TABLE IF NOT EXISTS client_subsidy_policy_migrations (
+    policy_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    completed_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_subsidy_identity_label_changes (
+    client_id INT NOT NULL PRIMARY KEY,
+    before_identity VARCHAR(100) NOT NULL,
+    after_identity VARCHAR(100) NOT NULL,
+    changed_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_subsidy_identity_client FOREIGN KEY (client_id) REFERENCES clients(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS government_subsidy_period_years (
+    period_year INT NOT NULL PRIMARY KEY,
+    aggregate_version BIGINT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS government_subsidy_period_entries (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    period_unit VARCHAR(10) NOT NULL,
+    period_year INT NOT NULL,
+    period_index INT NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    finance_import_row_id BIGINT NOT NULL,
+    amount_ntd BIGINT NOT NULL,
+    reversal_of_id BIGINT NULL,
+    paid_on DATE NOT NULL,
+    idempotency_key VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    actor VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_subsidy_period_bank (finance_import_row_id),
+    UNIQUE KEY uq_subsidy_period_key (idempotency_key),
+    UNIQUE KEY uq_subsidy_period_reversal (reversal_of_id),
+    KEY ix_subsidy_period_range (period_start,period_end),
+    CONSTRAINT fk_subsidy_period_bank FOREIGN KEY (finance_import_row_id) REFERENCES finance_import_rows(id),
+    CONSTRAINT fk_subsidy_period_reversal FOREIGN KEY (reversal_of_id) REFERENCES government_subsidy_period_entries(id),
+    CONSTRAINT ck_subsidy_period_unit CHECK (period_unit IN ('month','quarter','year')),
+    CONSTRAINT ck_subsidy_period_amount CHECK (amount_ntd>0),
+    CONSTRAINT ck_subsidy_period_range CHECK (period_end>period_start)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS government_subsidy_period_members (
+    receipt_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    service_end_date DATE NOT NULL,
+    amount_ntd BIGINT NOT NULL,
+    PRIMARY KEY (receipt_id,case_no),
+    KEY ix_subsidy_period_case (case_no),
+    CONSTRAINT fk_subsidy_period_member FOREIGN KEY (receipt_id) REFERENCES government_subsidy_period_entries(id),
+    CONSTRAINT ck_subsidy_period_member_amount CHECK (amount_ntd>=0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+INSERT IGNORE INTO client_subsidy_policy_migrations(policy_key) VALUES ('subsidy-period-policy-2026-10-24-v1');
+-- END SOURCE: db/schema_parts/233_government_subsidy_periods.sql

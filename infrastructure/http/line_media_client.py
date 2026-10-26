@@ -68,6 +68,9 @@ class LineMediaClient:
     async def apply(self, body, key: str):
         return await self._send("/service-day-logs/apply", json=body, key=key)
 
+    async def options(self, body):
+        return await self._send("/service-day-logs/options", json=body)
+
     async def query(self, log_id: int, body):
         if type(log_id) is not int or log_id < 1:
             raise LineMediaError("service_day_log_not_found", 404)

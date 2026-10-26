@@ -65,6 +65,13 @@ def test_only_exact_unmarked_identity_alias_routes_to_identity() -> None:
     assert isinstance(near_miss, SafeMenu)
 
 
+@pytest.mark.parametrize('message', ['問題', '其他問題', '詢問其他問題', '不是以上', '5', '6'])
+def test_general_question_is_self_service_and_not_a_ticket_referral(message):
+    outcome = DeterministicLineRouter().route(message, source_event_id='self-service')
+    assert isinstance(outcome, DeterministicRoute)
+    assert outcome.route_key == 'service_help_menu' and outcome.category is None
+
+
 @pytest.mark.parametrize("message", ("請幫我猜一個答案", "這個不對", "無法解決", "我不想要機器人回答", "客服幾點上班", "月嫂是真人嗎"))
 def test_unknown_input_is_safe_menu_and_never_provider_or_domain_command(message) -> None:
     outcome = DeterministicLineRouter().route(
@@ -85,7 +92,7 @@ def test_unscoped_subsidy_amount_question_requires_program_clarification() -> No
 
     assert isinstance(outcome, Clarification)
     assert outcome.question_key == "subsidy_scope"
-    assert outcome.options == ("一般市民補助", "低收／中低收入戶社福補助")
+    assert outcome.options == ("補助市民（最高40小時）", "社福（最高120小時）")
     assert outcome.reason_code == "subsidy_scope_ambiguous"
 
 

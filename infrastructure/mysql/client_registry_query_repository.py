@@ -253,7 +253,7 @@ class MySqlClientRegistryQueryRepository:
                 customer_payable,
                 normalize_subsidy_policy_identity(
                     str(row.get("identity_status") or "")
-                ) == "補助市民" and Decimal(str(customer_payable)) == 0,
+                ) == "社福" and Decimal(str(customer_payable)) == 0,
             )
         claim = _claim_application_month(row)
         baby_info = str(row.get("baby_info") or "")
@@ -626,7 +626,7 @@ def _claim_application_month(row) -> dict[str, int | None]:
     # planned date to fill a missing actual end date in this diagnostic list.
     eligible = normalize_subsidy_policy_identity(
         str(row.get("identity_status") or "")
-    ) in {"一般市民", "補助市民"}
+    ) in {"補助市民", "社福"}
     schedule = _claim_schedule(row.get("actual_end_date") if eligible else None)
     return {
         "claim_application_year": schedule["claim_application_year"],

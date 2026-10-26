@@ -69,7 +69,7 @@ from subsystems.government_subsidy.claim_workflow import (
     GovernmentSubsidyClaimReceiptCommand,
     StoredGovernmentSubsidyClaimReceipt,
 )
-from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest
+from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest, receipt_with_overage_command_fingerprint
 from subsystems.government_subsidy.overpayment_query import GovernmentSubsidyOffsetTargetQueryView, GovernmentSubsidyOverpaymentQueryView
 
 _GENERAL_CITIZEN = "一般市民"
@@ -79,7 +79,7 @@ _SUBSIDIZED_CITIZEN = "補助市民"
 def _advance_overpayment(cursor, request, candidate, event_type, evidence_reference):
     cursor.execute("UPDATE government_subsidy_overpayments SET remaining_amount_ntd=%s,status=%s,projection_version=%s WHERE overpayment_identity=%s AND projection_version=%s", (candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value + 1, request.identity, request.expected_version.value))
     _require_single_updated_row(cursor)
-    cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (request.identity, event_type, candidate.remaining_before_ntd.amount, candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value, request.expected_version.value + 1, candidate.fingerprint.value, request.idempotency_key.value, request.actor.actor_id, request.reason, evidence_reference))
+    cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (request.identity, event_type, candidate.remaining_before_ntd.amount, candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value, request.expected_version.value + 1, candidate.fingerprint.value, request.idempotency_key.value, request.actor.actor_id, request.reason or "系統記錄政府補助溢撥抵扣", evidence_reference))
 
 
 def _overpayment_receipt(candidate):
@@ -319,16 +319,56 @@ class MySqlGovernmentSubsidyRepository:
 
     def persist_receipt_with_overage(self, request, candidate, bank, batch):
         with self._connection.cursor() as cursor:
-            cursor.execute("INSERT INTO government_subsidy_transactions (claim_batch_id,finance_import_row_id,transaction_type,transaction_status,amount,occurred_at,external_reference,expected_batch_version,resulting_batch_version,preview_fingerprint,idempotency_key,actor,reason,correlation_id) VALUES (%s,%s,'receipt','succeeded',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,request.finance_import_row_id,bank.amount_ntd.amount,bank.occurred_on,bank.bank_fact_identity,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason,request.correlation_id.value))
+            cursor.execute("INSERT INTO government_subsidy_transactions (claim_batch_id,finance_import_row_id,transaction_type,transaction_status,amount,occurred_at,external_reference,expected_batch_version,resulting_batch_version,preview_fingerprint,idempotency_key,actor,reason,correlation_id) VALUES (%s,%s,'receipt','succeeded',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,request.finance_import_row_id,bank.amount_ntd.amount,bank.occurred_on,bank.bank_fact_identity,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason or "系統記錄政府補助溢撥核銷",request.correlation_id.value))
             transaction_id=int(cursor.lastrowid)
             cursor.executemany("INSERT INTO government_subsidy_allocations (transaction_id,claim_batch_id,claim_item_id,allocation_type,allocated_amount) VALUES (%s,%s,%s,'receipt',%s)",tuple((transaction_id,batch.batch_id,item.claim_item_id,item.amount_ntd.amount) for item in candidate.allocations))
             cursor.execute(_ACCOUNT_UPDATE_SQL,(batch.requested_total_ntd.amount,batch.approved_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,candidate.resulting_batch_status,batch.aggregate_version+1,batch.batch_id,batch.aggregate_version))
             _require_single_updated_row(cursor)
             identity=f"government-overpayment:{bank.bank_fact_identity}"
-            cursor.execute("INSERT INTO government_subsidy_overpayments (overpayment_identity,source_finance_import_row_id,source_transaction_id,payer_identity,original_amount_ntd,remaining_amount_ntd,status,projection_version,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,'pending_review',1,%s,%s,%s)",(identity,request.finance_import_row_id,transaction_id,PAYER_IDENTITY,candidate.overpayment_amount_ntd.amount,candidate.overpayment_amount_ntd.amount,request.actor.actor_id,request.reason,request.evidence_reference))
-            cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,'established',1,%s,'pending_review',0,1,%s,%s,%s,%s,%s)",(identity,candidate.overpayment_amount_ntd.amount,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason,request.evidence_reference))
-            cursor.execute("INSERT INTO government_subsidy_projection_events (batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,transaction_id,reduce_batch_status(batch).value,candidate.resulting_batch_status,batch.net_allocated_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.actor.actor_id,request.reason,request.idempotency_key.value))
+            cursor.execute("INSERT INTO government_subsidy_overpayments (overpayment_identity,source_finance_import_row_id,source_transaction_id,payer_identity,original_amount_ntd,remaining_amount_ntd,status,projection_version,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,'pending_review',1,%s,%s,%s)",(identity,request.finance_import_row_id,transaction_id,PAYER_IDENTITY,candidate.overpayment_amount_ntd.amount,candidate.overpayment_amount_ntd.amount,request.actor.actor_id,request.reason or "系統記錄政府補助溢撥核銷",request.evidence_reference))
+            cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,'established',1,%s,'pending_review',0,1,%s,%s,%s,%s,%s)",(identity,candidate.overpayment_amount_ntd.amount,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason or "系統記錄政府補助溢撥核銷",request.evidence_reference))
+            cursor.execute("INSERT INTO government_subsidy_projection_events (batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,transaction_id,reduce_batch_status(batch).value,candidate.resulting_batch_status,batch.net_allocated_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.actor.actor_id,request.reason or "系統記錄政府補助溢撥核銷",request.idempotency_key.value))
+            projection_event_id = int(cursor.lastrowid)
+            receipt = GovernmentSubsidyCommandReceipt(
+                GovernmentSubsidyLedgerKind.RECEIPT, transaction_id, batch.batch_id,
+                batch.aggregate_version + 1, bank.bank_fact_identity, bank.amount_ntd.amount,
+                len(candidate.allocations), candidate.resulting_batch_status,
+                candidate.resulting_outstanding_ntd.amount, candidate.fingerprint,
+            )
+            cursor.execute(_RECEIPT_INSERT_SQL, (
+                request.idempotency_key.value, receipt_with_overage_command_fingerprint(request).value,
+                candidate.fingerprint.value, "receipt", transaction_id, batch.batch_id,
+                receipt.batch_version, bank.bank_fact_identity, receipt.amount_ntd,
+                receipt.allocation_count, receipt.status, receipt.outstanding_ntd,
+                request.correlation_id.value, _canonical_json(_receipt_payload(receipt)),
+            ))
+            cursor.execute(_OUTBOX_INSERT_SQL, (
+                batch.batch_id, transaction_id, projection_event_id,
+                f"government_subsidy_receipt_allocated:{request.idempotency_key.value}",
+                "government_subsidy_receipt_allocated", _canonical_json({
+                    "batch_id": batch.batch_id, "transaction_id": transaction_id,
+                    "overpayment_identity": identity,
+                    "allocations": [{"claim_item_id": item.claim_item_id, "amount_ntd": item.amount_ntd.amount} for item in candidate.allocations],
+                }),
+            ))
         return {'overpayment_identity':identity,'transaction_id':transaction_id,'status':'pending_review','amount_ntd':candidate.overpayment_amount_ntd.amount,'preview_fingerprint':candidate.fingerprint.value}
+
+    def find_overage_receipt(self, key, command_fingerprint):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_RECEIPT_SELECT_SQL + " FOR UPDATE", (key.value,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if str(row["command_fingerprint"]) != command_fingerprint.value:
+                raise ValueError("government_subsidy_overpayment_idempotency_mismatch")
+            receipt = _stored_receipt(row).receipt
+            cursor.execute("SELECT overpayment_identity,original_amount_ntd FROM government_subsidy_overpayments WHERE source_transaction_id=%s FOR UPDATE", (receipt.transaction_id,))
+            root = cursor.fetchone()
+            if root is None:
+                raise RuntimeError("government_subsidy_overpayment_lineage_missing")
+            return {"overpayment_identity": str(root["overpayment_identity"]), "transaction_id": receipt.transaction_id,
+                    "status": "pending_review", "amount_ntd": int(root["original_amount_ntd"]),
+                    "preview_fingerprint": receipt.preview_fingerprint.value}
 
     def persist_offset(self, request: OffsetApplyRequest, candidate):
         with self._connection.cursor() as cursor:
@@ -541,6 +581,12 @@ class MySqlGovernmentSubsidyRepository:
             _update_approved_items(cursor, candidate)
             _update_approved_batch(cursor, candidate)
             _update_claim_account_for_approval(cursor, candidate)
+            cursor.execute("SELECT id,case_no,approved_amount FROM subsidy_claim_batch_items WHERE batch_id=%s ORDER BY case_no,id FOR UPDATE", (candidate.batch.batch_id,))
+            approved = tuple(cursor.fetchall())
+            for case_no in sorted({row['case_no'] for row in approved}):
+                _link_client_subsidy_return_amounts(cursor, case_no,
+                    tuple((int(row['id']), int(row['approved_amount'])) for row in approved
+                          if row['case_no'] == case_no and int(row['approved_amount']) > 0))
 
     def append_claim_outbox(
         self,
@@ -713,6 +759,11 @@ def _insert_claim_items(cursor, batch_id, candidate):
 
 
 def _link_client_subsidy_return(cursor, case_no, claim_items):
+    return _link_client_subsidy_return_amounts(cursor, case_no,
+        tuple((identity, item.requested_amount_ntd.amount) for identity, item in claim_items))
+
+
+def _link_client_subsidy_return_amounts(cursor, case_no, claim_items):
     cursor.execute(
         "SELECT obligation_identity,amount_due_ntd FROM client_obligations "
         "WHERE case_no=%s AND obligation_type='subsidy_return' "
@@ -723,17 +774,23 @@ def _link_client_subsidy_return(cursor, case_no, claim_items):
     obligations = tuple(cursor.fetchall() or ())
     if not obligations:
         return
-    entitled_total = sum(item.requested_amount_ntd.amount for _, item in claim_items)
-    if len(obligations) != 1 or int(obligations[0]["amount_due_ntd"]) != entitled_total:
+    if len(obligations) != 1:
         raise ValueError("client_subsidy_return_entitlement_ambiguous")
-    for claim_item_id, item in claim_items:
+    entitled_total = sum(amount for _, amount in claim_items)
+    if int(obligations[0]['amount_due_ntd']) != entitled_total:
+        return
+    cursor.execute('SELECT claim_item_id FROM client_subsidy_return_claim_item_links WHERE obligation_identity=%s FOR UPDATE',
+                   (str(obligations[0]['obligation_identity']),))
+    if cursor.fetchall():
+        return
+    for claim_item_id, amount in claim_items:
         cursor.execute(
             "INSERT INTO client_subsidy_return_claim_item_links "
             "(obligation_identity,claim_item_id,entitled_amount_ntd) VALUES (%s,%s,%s)",
             (
                 str(obligations[0]["obligation_identity"]),
                 claim_item_id,
-                item.requested_amount_ntd.amount,
+                amount,
             ),
         )
 
@@ -759,7 +816,7 @@ def _insert_submission_event(cursor, request, candidate):
             candidate.fingerprint.value,
             request.idempotency_key.value,
             request.actor.actor_id,
-            request.reason,
+            request.reason or "系統記錄政府補助送件",
             request.correlation_id.value,
         ),
     )
@@ -796,7 +853,7 @@ def _insert_approval_event(cursor, request, candidate):
             candidate.fingerprint.value,
             request.idempotency_key.value,
             request.actor.actor_id,
-            request.reason,
+            request.reason or "系統記錄政府補助核定",
             request.correlation_id.value,
         ),
     )
@@ -1219,7 +1276,7 @@ def _transaction_values(request, candidate):
         candidate.fingerprint.value,
         request.idempotency_key.value,
         request.actor.actor_id,
-        request.reason,
+        request.reason or "系統記錄政府補助帳務核銷",
         request.correlation_id.value,
     )
 
@@ -1265,7 +1322,7 @@ def _projection_event_values(request, candidate, transaction_id):
         candidate.resulting_batch_version,
         candidate.fingerprint.value,
         request.actor.actor_id,
-        request.reason,
+        request.reason or "系統記錄政府補助帳務核銷",
         request.idempotency_key.value,
     )
 
@@ -1672,10 +1729,12 @@ _CLAIM_RECEIPT_PAYLOAD_KEYS = frozenset(
 )
 _BANK_FACT_SELECT_SQL = (
     "SELECT r.id,r.dedup_fingerprint,r.transaction_date,r.debit,r.credit,"
-    "r.direction,r.classification_type,r.resolved_counterparty_account,"
+    "r.direction,COALESCE(classification.classification_type,r.classification_type) AS classification_type,r.resolved_counterparty_account,"
     "(SELECT t.id FROM government_subsidy_transactions t "
     "WHERE t.finance_import_row_id=r.id LIMIT 1) AS existing_transaction_id "
-    "FROM finance_import_rows r WHERE r.id=%s"
+    "FROM finance_import_rows r LEFT JOIN finance_import_classification_events classification "
+    "ON classification.id=(SELECT MAX(latest.id) FROM finance_import_classification_events latest WHERE latest.finance_import_row_id=r.id) "
+    "WHERE r.id=%s"
 )
 _BATCH_COLUMNS = (
     "a.batch_id,a.aggregate_version,a.requested_total_ntd,"

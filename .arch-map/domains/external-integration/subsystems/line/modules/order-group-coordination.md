@@ -6,7 +6,7 @@
 
 ## Responsibility
 以已驗證的 LINE 管理員身分綁定訂單群組、同步 Orders 提供的客戶與月嫂 audience，並以 durable LINE delivery intent 轉送群組邀請；不得以客戶／月嫂資料表中的投影取代 canonical LINE role binding。
-管理端工作區僅觀察既有綁定，以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現；不在網頁增加 mutation。
+管理端「案件群組」的綁定工作區僅觀察既有綁定，以 server 分頁／案件搜尋、目前客戶與指派月嫂、綁定後 membership 事件及可展開歷程呈現。相鄰服務日誌提醒由 `service-day-reminder` owner 提供人工發送，綁定工作區本身不增加 mutation。
 工會 LINE 工作台另以正式已核銷的未結案案件與現有群組綁定差集呈現「尚未建群」，server 分頁、
 零寫入，僅提供案號、已核銷金額及複製綁定指令；不要求客戶簽約或推進案件。
 

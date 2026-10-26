@@ -59,7 +59,7 @@ def build_contract_delivery_request(
 ) -> LineDeliveryRequest:
     _require_https_url(download_url)
     payload = canonical_line_payload_json(
-        {"text": _delivery_text(case_no, audience_label, download_url)}
+        {"type": "text", "text": _delivery_text(case_no, audience_label, download_url)}
     )
     return LineDeliveryRequest(
         recipient,
@@ -85,7 +85,7 @@ def build_external_platform_reminder_request(
     correlation_id: CorrelationId,
 ) -> LineDeliveryRequest:
     payload = canonical_line_payload_json(
-        {"text": external_platform_staff_reminder_text(case_no)}
+        {"type": "text", "text": external_platform_staff_reminder_text(case_no)}
     )
     return LineDeliveryRequest(
         recipient,
@@ -110,7 +110,7 @@ def build_external_platform_client_reminder_request(
     correlation_id: CorrelationId,
 ) -> LineDeliveryRequest:
     payload = canonical_line_payload_json(
-        {"text": external_platform_staff_reminder_text(case_no)}
+        {"type": "text", "text": external_platform_staff_reminder_text(case_no)}
     )
     return LineDeliveryRequest(
         recipient,

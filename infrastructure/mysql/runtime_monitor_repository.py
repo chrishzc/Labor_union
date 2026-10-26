@@ -140,6 +140,18 @@ class MySqlRuntimeMonitorRepository:
             cursor.execute(_LIST_TARGETS)
             return tuple(cursor.fetchall() or ())
 
+    def has_available_admin_alert_target(self) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT t.id FROM line_alert_notification_targets t "
+                "JOIN admin_users a ON a.id=t.admin_user_id AND a.enabled=TRUE "
+                "JOIN line_identity_role_bindings b ON b.subject_type='admin' "
+                "AND b.subject_reference=CAST(a.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+                "AND b.binding_status='bound' AND b.line_user_id=a.linked_line_user_id "
+                "WHERE t.target_type='admin_user' AND t.enabled=TRUE LIMIT 1"
+            )
+            return cursor.fetchone() is not None
+
     def list_admin_alert_candidates(self):
         with self._connection.cursor() as cursor:
             cursor.execute(_LIST_ADMIN_ALERT_CANDIDATES)

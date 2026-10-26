@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-10-22-v47",
+  "release_id": "labor-union-validation-schema-2026-10-24-v49",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 176,
-    "ordered_digest_sha256": "b38b85a2674d355ee87031df7a8f545846fc38c83ae9a8ed341bf2e2a26a67eb",
-    "terminal_artifact": "1053_line_order_group_invitation_url.sql"
+    "expected_count": 178,
+    "ordered_digest_sha256": "ca5787f54e1e1a5e9a22502cb2c7cd621e108540dba6c7572e4c9db04d0cec8f",
+    "terminal_artifact": "233_government_subsidy_periods.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "2e5ead1bcb9ddc51e79edc64689221e4ea4bfcc20af081e4ddea184af0be2e2d"
+    "sha256": "b97ceaa6fb89ec1c266695d5efba929df2bb093ec161a5aaa93aaac8826c38ee"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

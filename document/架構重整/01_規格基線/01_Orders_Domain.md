@@ -62,6 +62,8 @@ Orders 不擁有：
   immutable owner fact；不得用同一 Contract Completion event 代替月嫂與客戶兩種簽回。
 - Step 2「媒合月嫂候選人加入意願池」只依 Assignments／Scheduling 的候選池／聯繫根事實完成；
   不得等待客戶接受正式方案。七階段的 Stage 2 仍依其完整媒合狀態投影，兩者不可互相覆寫。
+- 正式日期完成證據採規格 02 SSTART 的月嫂接受／工會代班日期保存及正式回讀，不讀舊日期表按鈕確認。正常流程不列人工日期核准待辦；未來開工日到達時由 canonical lifecycle command 評估更新，不由 Query 寫狀態。
+- 請假順延依規格 20 §5.3：月嫂提交雙方明確協議後，Scheduling 在同一交易執行 canonical Preview／Apply，Orders owner 依完整有效班表保存最早服務日及服務結束日，Finance 同步相關期限。沒有額外人工確認；已履約服務日保留，不能藉順延重設既往開工事實。代班或排程衝突才由工會記錄後續協議／安排人選。
 - 第 9 步正式日期已確認只完成日期確認，不得自行把目前步驟推進到第 10 步；只有 persisted
   Orders lifecycle 已為 `服務中` 時，第 10 步「正式排班與服務履約」才能成為 current step。
   進入後的履約狀態只依 effective assignment-owned official service dates、完整 service-time tuple 與
@@ -385,6 +387,8 @@ Identity 的 typed handoff，不是 LINE、UI、worker 或付款／通知 adapte
 或 LINE root。event producer 必須保留 current lifecycle version，讓 consumer 可辨識 stale
 event；相同 key／payload replay 回原 receipt，payload mismatch 固定 conflict。
 
+一般客戶沒有月嫂綁定時，LINE 保存正常略過 receipt，不建立選單恢復工作；已處理的事件依 LINE receipt 排除，不更動 Orders outbox。
+
 LINE Identity 依該 committed outbox 呼叫既有 role-scoped Query／Apply：只有該 LINE User ID
 的 staff binding 仍為 `active`，且其全部 active client-role cases 都由 owner readback 證明
 terminal，才可建立一次 staff default menu intent。仍有 active client case 時必須回 typed
@@ -392,7 +396,12 @@ no-op；staff retirement／revocation pending 或 revoked 優先，絕不可由�
 consumer 不得修改 Orders 或任何其他 Domain root；binding／menu version、subject mismatch
 與 stale event 必須 fail closed，透過 owner Query／manual reconciliation 處理，不得盲目 retry。
 
+正常服務完工的同一 Orders outbox 另帶 `line_service_completion_notification=true`，由既有 LINE source worker 在 commit 後建立原案件群組的單次完工／滿意度問卷邀請通知（規格 20 §5.6）。此標記不代表訊息已送達，不是付款或結案的新狀態；取消、歷史完工及沒有標記的既有事件不補發。選單恢復與通知分別去重，一般客戶略過選單不影響群組通知。既有時段前置驗證維持，不新增完工補件或空白時段自動完工流程。
+
 ### 3.4 Actual Start Preview／Apply
+
+正常案件服務開始及本次工會代班的觸發、操作權限與結果紀錄，以 `02_Assignments_Scheduling_Domain.md`「服務開始、排班與代班」SSTART-01～08 為準。客戶在群組提出、月嫂 LIFF 接受並填日期；檔期無衝突且既有正式條件通過即自動更新，無人員再次核准。拒絕／檔期衝突需代班時才由工會介入，選定願意者、邀請加入原群組，再由人員直接填日期。無客戶 LIFF 日期替代入口、雙方日期表確認或代班月嫂再次填日期步驟。
+正式服務結果由共同 coordinator 在原 outer UoW 委派 Orders actual-start／Scheduling 及 Client Finance 期限 writer，同步正式開始日、完整班表、結束日與第一期款到期日；成功後才建立群組日期表 outbox。現有底層日期-only／獨立更正契約如下，不得把其僅保存日期的 HTTP 成功當成新服務開始流程已完成。Preview／fresh-lock 檢查保留於 server，並不增加正常流程人工 Preview／Confirm 關卡。
 
 - 首次確認與更正都必須 Preview／Apply。
 - 不得以 planned start、訂金日期、第一個 schedule 或 UI default fallback。
@@ -438,7 +447,7 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 不另要求人工核對頁、第二次確認或 reason 輸入。Preview／fresh-lock Apply 的版本與冪等驗證仍保留。
 只保存事前服務日期，不保存星期設定、不呼叫 Actual Start、不建立正式排班，也不代表客戶同意。
 重新開啟及後續客戶確認內容使用已保存日期；寄送時沿用既有不可變通知內容快照。
-此裁決僅適用前段每週說明，後段正式服務安排的人工確認流程維持原契約。
+此裁決僅適用前段每週說明；後段服務開始依規格 02 的月嫂提交／工會代班流程，不以日期表確認作正式排班關卡。
 
 2026-10-13 人工裁決：排班畫面顯示原始匯入服務方式，供操作者對照後勾選每週休假星期。
 星期僅為當次 `custom_rest_weekdays` 試算參數，不新增 DB 欄位、不保存為案件條款或持久草稿。
@@ -454,7 +463,7 @@ consumer 不得修改 Orders 或任何其他 Domain root；binding／menu versio
 時改依 §3.4 的逐段可見 Preview 與單一原子 Apply，不串接事前 Service Dates writer；正式
 重排候選須等於人員核對結果，不得靜默保存另一組日期。
 部分完成保留原操作及已保存結果，回讀失敗不得重送已成功寫入；工作台提示接續日期確認，完成前不能
-將舊日期視為本次已確認安排。保存後自動更新工作台及相關正式安排投影。國定假日人工確認方式依
+將舊日期視為本次已確認安排。保存後自動更新工作台及相關正式安排投影。正常服務開始不再要求操作上述人工日期表確認，改由規格 02 的共同 Apply 保存結果。國定假日人工確認方式依
 Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復已退役入口。
 
 - 在尚未形成正式 assignment 前，服務日期確認 UI 必須由 server 精算：`週休1日` 預設週日、
@@ -506,6 +515,7 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
   以原有 typed version conflict／stale preview 拒絕，不得盲目略過。取消事件、取消控制、等待訂金鎖釋放、lifecycle
   與 committed outbox 仍由同一 outer transaction 保存；只有不存在的下游 writer 可省略。
 - 已開始服務時，Preview 由使用者確認逐日「實際服務日期＋實際月嫂」；現有事實預填，新增或改派必須指定月嫂與原因。
+- 取消 Query 依注入的台北業務日期自動排除取消日之後的排班，僅預填截至當日的候選服務日；當日是否已服務由人員保留或移除，不逐筆刪除未來排班。開始日期或預排不代表已實際服務，確認完全未服務可按 0 日取消；已鎖定的完整履約及未來日驗證仍不得旁路。取消原因選填，點擊取消即執行內部 Preview／Apply，結果依 receipt／正式回讀確認。
 - Apply 取消舊 assignments、未來 schedule 與 buffer，依確認後服務日建立新 assignments，重算 hours、整數樓層費、Client Finance 與 Staff Finance。
 - 沒有取消費或解約違約金。服務中取消的服務本金固定為已確認實際服務時數乘有效服務單價；已正式
   核銷的訂金與第一期款都納入既有實收，與新本金比較後只形成應退款、應補收或無帳務變動。
@@ -515,6 +525,7 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
   `direction`（`refund_due`／`additional_charge_due`／`no_finance_change`）與
   `direction_amount_ntd`。Orders、API 與 UI 不得由 action kind、obligation amount 或金額正負自行推定。
 - 完整履約後取消回 `order_cancellation_after_full_service` blocker 並零寫入；狀態、薪資與服務結算維持完整履約。
+- 取消與退款成功均不建立 LINE 訊息。既有取消 terminal closure 僅依 LINE 身分資格處理選單恢復，不代表退款或通知已完成。
 
 #### 3.5.1 服務中代班的契約邊界（2026-08-27 人工裁決）
 
@@ -646,7 +657,7 @@ must be previewed, sent, and confirmed again before formal assignment can procee
 的下一代 Scheduling generation。此時「尚無正式排班」是允許修改的前提，不得反向成為 blocker，也
 不得為了修改進件資料先虛構 assignment 或逐日服務日期。
 
-2026-10-17 人工裁決：一般進件資料補件（姓名、日期／天數／時段及補件完成）的人工「修改原因」改為「備註（選填）」。既有 intake Apply 的 `reason` 省略或空白皆保存空字串，仍納入原 command fingerprint；actor、版本、Preview、冪等鍵、事件、receipt、回讀與同交易初始化契約不變。自動初始化步驟獨立記錄「系統依已完成進件資料初始化本案」作為實際系統觸發說明，不冒充人工備註；人工原文／空白仍保留在 Orders 命令紀錄。正式 Terms 影響、取消／重開、實際服務更正與財務操作的必填原因保持原契約。
+2026-10-17 人工裁決：一般進件資料補件（姓名、日期／天數／時段及補件完成）的人工「修改原因」改為「備註（選填）」。既有 intake Apply 的 `reason` 省略或空白皆保存空字串，仍納入原 command fingerprint；actor、版本、Preview、冪等鍵、事件、receipt、回讀與同交易初始化契約不變。自動初始化步驟獨立記錄「系統依已完成進件資料初始化本案」作為實際系統觸發說明，不冒充人工備註；人工原文／空白仍保留在 Orders 命令紀錄。取消訂單的取消原因維持選填；省略或空白仍納入原命令比對，人工備註保留空白。解除接案意願鎖與啟用取消控制等系統稽核事件，空白時記錄「系統記錄取消訂單」，不冒充人工填寫原因。正式 Terms 影響、重開、實際服務更正與財務操作的原因依各自現行契約。
 
 2026-10-13 人工裁決：進件補件畫面只顯示 owner Preview 的 `missing_fields` 中實際缺少的
 服務開始日／服務天數；已齊全的欄位不作為補件輸入顯示。補一項時沿用另一項已保存的值，
@@ -677,14 +688,14 @@ Client Finance 付款政策與 Payroll 費率分類建立缺少的本案初始�
 完成時點「不建立下游 roots」的限制；一般分段補件、歷史修補及 Query／Preview 保持零下游寫入。
 初始化與 Orders 保存／進件完成及原命令 receipt 同交易 commit；任何失敗全部 rollback，
 不得保留已完成補件卻未初始化的部分結果。初始化僅建立付款條款、薪資政策與空 aggregate，
-不建立應收、應付、ledger、正式 assignment 或外部通知。same-key 重播回讀原 receipt，
+完整計價資料由 Client Finance 在同一交易自動同步客戶應付，不新增人工建帳關卡；不建立實際收付款 ledger、正式 assignment 或外部通知。same-key 重播回讀原 receipt，
 不重複初始化；既有完整初始資料維持原值，partial roots typed 拒絕，不補零、不覆寫。
 既有案件資料回填不在本次施工範圍，驗證使用 localhost 全新隔離 lu_test_* 合成資料。
 
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact
 使用 `NULL`，不得以 `0`、空金額或自動 bootstrap 冒充完整資料。若 root 已存在但內部關聯不完整，或已
-存在 Client／Staff obligation，固定 fail closed；若未讀取該 owner，該 owner 的無關版本變動不得使
+存在不符此次異動的 nonstage Client／Staff 帳務，固定 fail closed；若未讀取該 owner，該 owner 的無關版本變動不得使
 Preview／Apply stale。已有有效 segment 時仍讀取完整下游 facts、驗證版本並執行既有 impact writer。
 
 若已有 current confirmed service dates，planned start 平移且 `service_days` 不變時，Apply 保留原日期

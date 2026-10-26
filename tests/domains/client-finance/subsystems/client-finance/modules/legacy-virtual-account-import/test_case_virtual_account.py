@@ -1,6 +1,6 @@
 """Single-case writer oracles; SQL persistence uses an isolated in-memory DB.
 
-SQLite executes the adapter's DML with placeholder/locking syntax translated.
+SQLite executes the adapter's DML and emulates its named replacement procedure.
 This does not claim to verify MySQL advisory or row-lock scheduling.
 """
 
@@ -33,7 +33,18 @@ class _Cursor:
 
     def execute(self, sql, args=()):
         self.statements.append(sql)
+        if sql.startswith("CALL `lu_nas_replace_case_account_v1`"):
+            case, expected, account, digest, actor = args
+            current = [row['id'] for row in self.raw.execute(
+                'SELECT id FROM client_legacy_virtual_accounts WHERE case_no=? ORDER BY id', (case,))]
+            assert current == json.loads(expected)
+            self.raw.execute('DELETE FROM client_legacy_virtual_accounts WHERE case_no=?', (case,))
+            self.raw.execute('INSERT INTO client_legacy_virtual_accounts(case_no,virtual_account,source_content_digest,source_row,created_by) VALUES (?,?,?,0,?)', (case, account, digest, actor))
+            return
         self.raw.execute(sql.replace("%s", "?").replace(" FOR UPDATE", ""), args)
+
+    def nextset(self):
+        return None
 
     def fetchone(self):
         return self.raw.fetchone()

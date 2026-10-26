@@ -1,0 +1,10 @@
+.service-start-workbench { margin: 18px 0; padding: 18px; border: 1px solid var(--border-color,#ddd); border-radius: 12px; text-align:left; overflow-wrap:anywhere; }
+.service-start-workbench header,.service-start-workbench nav { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.service-start-workbench h2 { flex:1; font-size:1.15rem; }
+.service-start-card { padding:16px; margin:14px 0; border:1px solid #d1d5db; border-radius:10px; background:var(--bg-primary,#fff); }
+.service-start-card fieldset { display:grid; gap:12px; border:1px solid #d1d5db; padding:14px; margin:12px 0; }
+.service-start-card label { display:grid; gap:6px; }
+.service-start-card input,.service-start-card select { padding:9px; min-height:42px; max-width:100%; }
+.service-start-workbench button { min-height:42px; padding:8px 12px; margin:5px 6px 5px 0; cursor:pointer; }
+.service-start-workbench button:disabled { opacity:.55; cursor:default; }
+.service-start-workbench [role=alert] { color:#a51c30; }

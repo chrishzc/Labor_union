@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from pymysql.err import IntegrityError, OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -20,7 +20,14 @@ from subsystems.client_finance.subsidy_advance_settlement import (
     AdvanceSettlementApplication, AdvanceSettlementCommand, AdvanceSettlementConflict,
 )
 
-router = APIRouter(prefix='/api/v1/client-finance/subsidy-advance-recoveries', tags=['Client Finance'])
+def _read_only_legacy_recovery(request: Request,principal=Depends(require_system_admin)):
+    if request.method=='POST':
+        from api.error_contracts import typed_http_error
+        raise typed_http_error(410,'validation','subsidy_period_recovery_required',
+            '代墊回收已改由政府整期入款核銷同步處理。','subsidy-period')
+
+
+router = APIRouter(prefix='/api/v1/client-finance/subsidy-advance-recoveries', tags=['Client Finance'],dependencies=[Depends(_read_only_legacy_recovery)])
 Application = Annotated[AdvanceSettlementApplication, Depends(get_advance_settlement_application)]
 Admin = Annotated[AdminPrincipal, Depends(require_system_admin)]
 

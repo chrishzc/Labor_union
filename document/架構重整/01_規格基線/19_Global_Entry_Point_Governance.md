@@ -88,3 +88,7 @@ Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source
 - 直接相關 typed API client 與 focused UI test 通過。
 
 不得再要求 Streamlit rollback、retention window、removal receipt 或舊 queue 一致性來驗證 current React entry。
+
+## 政府補助現行入口
+
+政府入款與代墊回收改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷。原 claim planning／submission／approval、逐案 receipt、offset，以及逐案 advance settlement POST 入口回 410，指向整期工作台；既有歷史 Query 與原交易沖正保留。Durable worker 拒絕舊 claim／receipt 建立命令；runtime 不再消費逐案 allocation 進行代墊回收。申請與核准作業在系統外辦理，不保留舊操作關卡。

@@ -1,5 +1,5 @@
 """File: staff_leave_intake.py
-Description: 提供已驗證月嫂提交 Scheduling 請假待辦的 LIFF API。"""
+Description: 提供已驗證月嫂提交請假協調結果，保留歷史請假查閱。"""
 
 from typing import Annotated
 
@@ -18,48 +18,38 @@ from api.schemas.line_staff_self_service import (
     StaffLeaveRequestReadbackResponse,
     StaffLiffRequest,
 )
-from domains.scheduling.staff_leave_intake import StaffLeaveRequestIntent
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
-from shared_kernel.fingerprints import PreviewFingerprint
-from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflow, StaffLeaveIntakeWorkflowError, SubmitStaffLeaveRequest
+from subsystems.scheduling.staff_leave_intake_workflow import ReviewStaffLeaveRequest, StaffLeaveIntakeApplication, StaffLeaveIntakeWorkflowError
 
 
 router = APIRouter(prefix="/api/v1/line/staff-self-service", tags=["Scheduling Staff Leave Intake"])
 
+from dataclasses import asdict
+from api.dependencies.service_start import get_service_start_application
+from api.routes.service_start import call as _result_call
+from api.schemas.service_start import StaffLeaveResultSubmission, ServiceStartView
+from domains.scheduling.leave_result import LeaveResultSubmission, LeaveDateChange
+
+
+@router.post('/leave-results/cases')
+def leave_result_cases(body: StaffLiffRequest, app=Depends(get_service_start_application)):
+    _, staff = _verified_staff_context(body)
+    return BaseResponse(data={'items': [asdict(item) for item in app.leave_cases(int(staff['staff_id']))]})
+
+
+@router.post('/leave-results/submit', response_model=BaseResponse[ServiceStartView])
+def submit_leave_result(body: StaffLeaveResultSubmission, app=Depends(get_service_start_application)):
+    _, staff = _verified_staff_context(body)
+    return BaseResponse(data=asdict(_result_call(lambda: app.submit_leave(LeaveResultSubmission(
+        body.case_no,int(staff['staff_id']),body.assignment_id,body.decision,
+        tuple(LeaveDateChange(d.original_date,d.new_date) for d in body.dates),
+        body.expected_order_version,body.expected_scheduling_version,body.idempotency_key)))))
+
 
 @router.post("/leave-requests/preview", response_model=BaseResponse[StaffLeaveRequestPreviewResponse])
 def preview_staff_leave_request(body: StaffLeaveRequestCreate):
-    """Validate a staff-owned leave intent without writing Scheduling facts."""
-    line_user_id, staff = _verified_staff_context(body)
-    try:
-        preview = StaffLeaveIntakeWorkflow.preview(
-            SubmitStaffLeaveRequest(
-                int(staff["staff_id"]),
-                line_user_id.value,
-                StaffLeaveRequestIntent(
-                    body.leave_start_date,
-                    body.leave_end_date,
-                    body.leave_reason,
-                ),
-                "preview",
-            )
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail={"code": str(error)}) from error
-    return BaseResponse(
-        data={
-            "staff_id": preview.staff_id,
-            "staff_name": staff["staff_name"],
-            "leave_start_date": preview.intent.leave_start_date,
-            "leave_end_date": preview.intent.leave_end_date,
-            "leave_reason": preview.intent.reason.strip(),
-            "can_apply": preview.can_apply,
-            "blockers": list(preview.blockers),
-            "preview_fingerprint": preview.preview_fingerprint.value,
-        },
-        message="請假待辦預覽完成",
-    )
+    _retired_intake(body)
 
 
 @router.post("/leave-requests/apply", response_model=BaseResponse[StaffLeaveRequestReadbackResponse])
@@ -68,27 +58,7 @@ def apply_staff_leave_request(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)],
     application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
 ):
-    """Apply only the exact intent that was returned by Preview."""
-    line_user_id, staff = _verified_staff_context(body)
-    try:
-        intent = StaffLeaveRequestIntent(
-            body.leave_start_date,
-            body.leave_end_date,
-            body.leave_reason,
-        )
-        command = SubmitStaffLeaveRequest(
-            int(staff["staff_id"]), line_user_id.value, intent, idempotency_key,
-        )
-        result = application.apply(command, PreviewFingerprint(body.preview_fingerprint))
-    except StaffLeaveIntakeWorkflowError as error:
-        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
-    except ValueError as error:
-        status_code = 409 if str(error) == "leave_request_idempotency_conflict" else 422
-        raise HTTPException(status_code=status_code, detail={"code": str(error)}) from error
-    return BaseResponse(
-        data=_readback_payload(result, staff["staff_name"]),
-        message="請假待辦已送出，等待工會人員處理",
-    )
+    _retired_intake(body)
 
 
 @router.post("/leave-requests/{request_id}/query", response_model=BaseResponse[StaffLeaveRequestReadbackResponse])
@@ -138,25 +108,7 @@ def submit_staff_leave_request(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)],
     application: StaffLeaveIntakeApplication = Depends(get_staff_leave_intake_application),
 ):
-    line_user_id = _verified_line_user_id(body)
-    from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
-
-    with open_line_unit_of_work() as line_uow:
-        staff = _required_staff(line_uow.customer_service.staff_subject(line_user_id.value))
-    try:
-        result = application.submit(
-            SubmitStaffLeaveRequest(
-                int(staff["staff_id"]), line_user_id.value,
-                StaffLeaveRequestIntent(body.leave_start_date, body.leave_end_date, body.leave_reason),
-                idempotency_key,
-            )
-        )
-    except StaffLeaveIntakeWorkflowError as error:
-        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
-    except ValueError as error:
-        status_code = 409 if str(error) == "leave_request_idempotency_conflict" else 422
-        raise HTTPException(status_code=status_code, detail={"code": str(error)}) from error
-    return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "staff_id": result.staff_id, "staff_name": staff["staff_name"], "version": result.version}, message="請假申請已送出，等待工會人員處理")
+    _retired_intake(body)
 
 
 @router.post("/leave-requests/{request_id}/cancel", response_model=BaseResponse[StaffLeaveRequestCreateResponse])
@@ -194,3 +146,9 @@ def cancel_staff_leave_request(
             raise
         raise typed_http_error(409, "idempotency_mismatch", str(error), "此取消操作識別已用於不同內容；請重新查詢請假狀態後再操作。", "staff-leave-cancel") from error
     return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "staff_id": result.staff_id, "staff_name": staff["staff_name"], "version": result.version}, message="請假申請已取消")
+
+
+def _retired_intake(body):
+    _verified_staff_context(body)
+    raise HTTPException(status_code=410, detail={'code':'leave_intake_replaced',
+        'message':'請重新開啟「排班資訊與請假」，直接送出雙方協調結果。'})

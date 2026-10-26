@@ -70,6 +70,10 @@ class LineIdentityManagementApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.replacement_candidates(query)
 
+    def binding_reminders(self, query: LineIdentityCandidateQuery):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.identity_management.binding_reminders(query)
+
     def subject_contexts(self, subjects):
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.identity_management.subject_contexts(subjects)

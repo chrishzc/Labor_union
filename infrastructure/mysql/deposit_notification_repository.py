@@ -37,7 +37,8 @@ class MySqlDepositNotificationRepository:
                 "AND p.settlement_identity=JSON_UNQUOTE(JSON_EXTRACT(f.payload_snapshot,'$.settlement_identity')) "
                 "JOIN client_obligations d ON d.obligation_identity=p.deposit_obligation_identity AND d.case_no=p.case_no "
                 "AND d.obligation_type='deposit' AND d.direction='receivable_from_client' AND d.status<>'cancelled' "
-                "AND d.amount_due_ntd=p.contracted_amount_ntd AND d.amount_due_ntd>0 "
+                "JOIN client_obligation_events e ON e.id=d.current_event_id "
+                "AND e.after_amount_ntd=p.contracted_amount_ntd AND e.after_amount_ntd>0 "
                 "AND p.allocated_net_amount_ntd=p.contracted_amount_ntd "
                 "JOIN client_ledger_entries l ON l.id=p.latest_ledger_entry_id AND l.case_no=p.case_no AND l.entry_type='receipt' "
                 "JOIN orders o ON o.case_no=f.case_no AND o.status IN ('洽談中','訂單成立','服務中') "
@@ -59,7 +60,7 @@ class MySqlDepositNotificationRepository:
             return None
         return DepositSettlementIntent(int(row['id']), str(row['case_no']), str(row['settlement_identity']))
 
-    def followups(self, *, page=1, page_size=25, settled=None):
+    def followups(self, *, page=1, page_size=25, settled=None, case_no=None):
         items = []
         total = 0
         unpaid_total = 0
@@ -74,9 +75,12 @@ class MySqlDepositNotificationRepository:
             with self._connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT DISTINCT d.case_no FROM client_obligations d JOIN orders o ON o.case_no=d.case_no "
+                    "JOIN client_obligation_events e ON e.id=d.current_event_id "
                     "WHERE d.obligation_type='deposit' AND d.direction='receivable_from_client' "
-                    "AND d.status<>'cancelled' AND d.amount_due_ntd>0 AND o.status IN ('洽談中','訂單成立','服務中') "
-                    "AND d.case_no>%s ORDER BY d.case_no LIMIT %s", (after_case_no, 100),
+                    "AND d.status<>'cancelled' AND (d.amount_due_ntd>0 OR (d.status='settled' AND e.after_amount_ntd>0)) AND o.status IN ('洽談中','訂單成立','服務中') "
+                    "AND d.case_no>%s" + (" AND d.case_no=%s" if case_no is not None else "")
+                    + " ORDER BY d.case_no LIMIT %s",
+                    (after_case_no, case_no, 100) if case_no is not None else (after_case_no, 100),
                 )
                 rows = tuple(cursor.fetchall())
             if not rows:

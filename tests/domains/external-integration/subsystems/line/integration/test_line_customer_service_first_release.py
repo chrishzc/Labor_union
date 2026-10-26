@@ -301,15 +301,15 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "?entry=registration" in action_uris
     assert "?target=registration" not in action_uris
     assert "?target=order_update" in action_uris
-    assert "?target=faq" in action_uris
+    assert "?target=faq" not in action_uris  # FAQ is a tab of the merged LIFF entry.
     assert "?target=ai_assistant" in action_uris
     assert "服務說明" not in message_texts
     assert "常見問答" not in message_texts
     assert customer_quadrants == [
         ("修改登記資料", "uri", None, "?target=profile_update"),
         ("修改訂單資訊", "uri", None, "?target=order_update"),
-        ("常見問答", "uri", None, "?target=faq"),
         ("AI 智慧問答", "uri", None, "?target=ai_assistant"),
+        ("聯絡專人服務", "postback", None, "customer-service:handoff:confirm"),
     ]
     assert "?target=staff_order_search" in action_uris
     assert "?target=staff_schedule" in action_uris
@@ -328,26 +328,17 @@ def test_staff_self_service_exposes_leave_and_split_service_day_log_flows():
         PROJECT_ROOT / "line/static/staff_baby_log.html"
     ).read_text(encoding="utf-8")
 
-    preview_route = "/api/v1/line/staff-self-service/leave-requests/preview"
-    apply_route = "/api/v1/line/staff-self-service/leave-requests/apply"
-    readback_route = "/api/v1/line/staff-self-service/leave-requests/${result.data.request_id}/query"
-    assert preview_route in schedule
-    assert apply_route in schedule
-    assert readback_route in schedule
-    assert schedule.index(preview_route) < schedule.index(apply_route) < schedule.index(readback_route)
-    assert 'id="confirmLeave"' in schedule
-    assert 'if (!leaveCandidate || !document.getElementById("confirmLeave").checked)' in schedule
-    assert "preview_fingerprint" in schedule
-    assert '"Idempotency-Key": candidate.idempotencyKey' in schedule
-    assert f"fetch(`{readback_route}`, {{\n      method: \"POST\"" in schedule
-    assert "body: JSON.stringify(identityPayload())" in schedule
-    assert 'fetch("/api/v1/line/staff-self-service/leave-requests", {' not in schedule
+    assert "/api/v1/line/staff-self-service/leave-results/" in schedule
+    assert "leaveResultPost('submit',pending)" in schedule
+    assert '確認原操作結果' in schedule and 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in schedule
+    assert '/leave-requests/preview' not in schedule
+    assert 'confirmLeave' not in schedule
     assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in schedule
-    assert "/api/v1/line/staff-self-service/service-day-logs/preview" in baby_log
+    assert "/api/v1/line/staff-self-service/service-day-logs/preview" not in baby_log
     assert "/api/v1/line/staff-self-service/service-day-logs/apply" in baby_log
     assert "/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query" in baby_log
     assert "/api/v1/line/staff-self-service/service-day-media" in baby_log
-    assert "受控檔案 staging" in baby_log
+    assert "staging_id" in baby_log
     assert "LINE provider" not in schedule
     assert 'params.get("userId")' not in schedule
     assert 'searchParams.get("userId")' not in schedule

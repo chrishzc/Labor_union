@@ -285,54 +285,59 @@ class ActualStartWorkflow:
         request: ActualStartDateOnlyApplyRequest,
     ) -> ActualStartDateOnlyResult:
         with self._unit_of_work_factory() as unit_of_work:
-            facts = self._repository.load_actual_start_query(
-                request.case_no,
-                for_update=True,
-            )
-            if facts.order_version != request.expected_order_version.value:
-                raise _workflow_error(
-                    request,
-                    ErrorCategory.CONFLICT,
-                    "order_version_conflict",
-                    "The Orders root changed after Preview.",
-                    current_version=facts.order_version,
-                )
-            preview = _date_only_preview(
-                facts,
-                request.new_actual_start_date,
-                correlation_id=request.correlation_id,
-            )
-            if preview.fingerprint != request.preview_fingerprint:
-                raise _workflow_error(
-                    request,
-                    ErrorCategory.CONFLICT,
-                    "stale_preview",
-                    "The Actual Start date-only facts changed after Preview.",
-                )
-            changed = facts.current_actual_start_date != request.new_actual_start_date
-            resulting_version = facts.order_version + 1 if changed else facts.order_version
-            if changed:
-                self._repository.save_actual_start_date_only(
-                    ActualStartDateOnlyPersistenceCommand(
-                        request.case_no,
-                        request.new_actual_start_date,
-                        facts.order_version,
-                        resulting_version,
-                        request.correlation_id,
-                    )
-                )
+            result = self.apply_date_only_in_current_unit_of_work(request)
             unit_of_work.commit()
-            return ActualStartDateOnlyResult(
-                request.case_no,
-                request.new_actual_start_date,
-                resulting_version,
-                facts.scheduling_version,
-                facts.scheduling_generation,
-                facts.client_finance_version,
-                facts.payroll_version,
-                preview.fingerprint,
-                changed,
+            return result
+
+    def apply_date_only_in_current_unit_of_work(self, request: ActualStartDateOnlyApplyRequest) -> ActualStartDateOnlyResult:
+        """Borrow the caller's transaction; never commit inside a coordinator."""
+        facts = self._repository.load_actual_start_query(
+            request.case_no,
+            for_update=True,
+        )
+        if facts.order_version != request.expected_order_version.value:
+            raise _workflow_error(
+                request,
+                ErrorCategory.CONFLICT,
+                "order_version_conflict",
+                "The Orders root changed after Preview.",
+                current_version=facts.order_version,
             )
+        preview = _date_only_preview(
+            facts,
+            request.new_actual_start_date,
+            correlation_id=request.correlation_id,
+        )
+        if preview.fingerprint != request.preview_fingerprint:
+            raise _workflow_error(
+                request,
+                ErrorCategory.CONFLICT,
+                "stale_preview",
+                "The Actual Start date-only facts changed after Preview.",
+            )
+        changed = facts.current_actual_start_date != request.new_actual_start_date
+        resulting_version = facts.order_version + 1 if changed else facts.order_version
+        if changed:
+            self._repository.save_actual_start_date_only(
+                ActualStartDateOnlyPersistenceCommand(
+                    request.case_no,
+                    request.new_actual_start_date,
+                    facts.order_version,
+                    resulting_version,
+                    request.correlation_id,
+                )
+            )
+        return ActualStartDateOnlyResult(
+            request.case_no,
+            request.new_actual_start_date,
+            resulting_version,
+            facts.scheduling_version,
+            facts.scheduling_generation,
+            facts.client_finance_version,
+            facts.payroll_version,
+            preview.fingerprint,
+            changed,
+        )
 
     def preview(
         self,

@@ -22,7 +22,8 @@ def test_liff_uses_verified_query_preview_apply_and_never_claims_direct_change()
     assert "正式訂單尚未修改" in page
     assert "服務地址" in page
     assert "下廚需求" in page
-    assert "服務日期／天數" in page
+    assert "服務日期／天數" not in page
+    assert '["service_days",' not in page
     assert "每日服務時段" in page
 
 

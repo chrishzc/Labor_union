@@ -80,7 +80,12 @@ class ClientReconciliationWorkflow:
             self._repository.update_projection(request.selection, receipt.account_version)
             if preview.candidate.status is ReconciliationStatus.OVERAGE:
                 self._repository.establish_overage_refund(preview.candidate, receipt.account_version)
-            (self._repository.append_orders_deposit_intent if preview.candidate.status in {ReconciliationStatus.EXACT, ReconciliationStatus.OVERAGE} and preview.candidate.payment_stage is PaymentStage.DEPOSIT else self._repository.append_anomaly_intent)(preview.candidate)
+            if preview.candidate.payment_stage is PaymentStage.DEPOSIT:
+                self._repository.append_orders_deposit_intent(preview.candidate)
+            # A normal first/second/adjustment receipt is not an anomaly.
+            # Explicit overage disposition retains its real discrepancy event.
+            elif preview.candidate.blockers:
+                self._repository.append_anomaly_intent(preview.candidate)
             self._repository.save_receipt(request.idempotency_key, StoredClientReconciliationReceipt(command, receipt)); unit.commit(); return receipt
 
 def _preview(selection, facts):

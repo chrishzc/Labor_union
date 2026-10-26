@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
 import { lineRuntimeTargetClient } from '../api/line_runtime_targets/line_runtime_target_client';
+import { sessionClient } from '../api/auth/session_client';
 import { customerServiceEscalationClient } from '../api/customer_service_escalations/customer_service_escalation_client';
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import { lineOrderGroupQueryClient } from '../api/line_order_groups/line_order_group_query_client';
@@ -103,7 +104,8 @@ describe('LINE 管理頁真實資料呈現', () => {
   it('人工升級預設只顯示業務欄位，技術校驗資料收在進階區', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} runtimeOnly />);
+    const escalation = { ...customerServiceEscalationClient, previewCreate: vi.fn(), create: vi.fn() };
+    render(<LineManagementPage customerService={customer} lineIdentity={identity} escalation={escalation} runtimeOnly />);
 
     const checksumLabel = screen.getByText('來源資料校驗碼');
     expect(checksumLabel).not.toBeVisible();
@@ -113,11 +115,23 @@ describe('LINE 管理頁真實資料呈現', () => {
     fireEvent.change(screen.getByLabelText('來源案件／事件參考'), {
       target: { value: 'ticket-referral-31' },
     });
-    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能預覽建立。')).toBeVisible();
+    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能建立。')).toBeVisible();
+    const createButton = screen.getByRole('button', { name: '建立人工客服升級' });
+    expect(createButton).toBeDisabled();
+    fireEvent.click(createButton);
+    expect(escalation.previewCreate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText('進階來源資料'));
     expect(checksumLabel).toBeVisible();
     expect(screen.getByLabelText('自動化暫停範圍')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('來源資料校驗碼'), { target: { value: 'b'.repeat(64) } });
+    expect(createButton).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('自動化暫停範圍'), { target: { value: '   ' } });
+    expect(createButton).toBeDisabled();
+    expect(screen.getByText('需先完成來源事件核對並補齊進階來源資料，才能建立。')).toBeVisible();
+    fireEvent.click(createButton);
+    expect(escalation.previewCreate).not.toHaveBeenCalled();
+    expect(escalation.create).not.toHaveBeenCalled();
   });
 
   it('沒有已連結 LINE 的管理員候選時顯示明確原因，不留下無說明的停用控制', async () => {
@@ -143,7 +157,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.queryByRole('button', { name: '➕ 預覽新增通知對象' })).not.toBeInTheDocument();
   });
 
-  it('三方服務群組依 server metadata 翻到第 2 頁並鎖定末頁', async () => {
+  it('案件群組依 server metadata 翻到第 2 頁並鎖定末頁', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     const { customer, identity } = clients();
     vi.spyOn(lineOrderGroupQueryClient, 'workspaceList').mockImplementation(async (query) => ({
@@ -163,20 +177,20 @@ describe('LINE 管理頁真實資料呈現', () => {
     }));
 
     render(<LineManagementPage customerService={customer} lineIdentity={identity} />);
-    fireEvent.click(screen.getByRole('button', { name: '三方服務群組' }));
+    fireEvent.click(screen.getByRole('button', { name: '案件群組' }));
 
     await screen.findByText('CASE-1');
     expect(lineOrderGroupQueryClient.workspaceList).toHaveBeenLastCalledWith(
       { page: 1, pageSize: 25, search: undefined, status: undefined },
       expect.any(Object),
     );
-    fireEvent.click(screen.getByRole('button', { name: '下一頁三方服務群組' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一頁案件群組' }));
     await screen.findByText('CASE-26');
     expect(lineOrderGroupQueryClient.workspaceList).toHaveBeenLastCalledWith(
       { page: 2, pageSize: 25, search: undefined, status: undefined },
       expect.any(Object),
     );
-    expect(screen.getByRole('button', { name: '下一頁三方服務群組' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一頁案件群組' })).toBeDisabled();
   });
 
   it('切離安全分頁會取消未完成 Preview，晚到結果不得重新掛回', async () => {
@@ -193,12 +207,16 @@ describe('LINE 管理頁真實資料呈現', () => {
     const runtimeTarget = {
       listTargets: vi.fn(async () => [{
         target_id: 8,
-        target_kind: 'group' as const,
-        display_label: '跨分頁測試群組',
+        target_kind: 'admin_user' as const,
+        display_label: '跨分頁測試管理員',
         state: 'active' as const,
         minimum_status: 'critical' as const,
         current_version: 'version-8',
         updated_at: '2026-08-25T01:02:03+08:00',
+      }, {
+        target_id: 9, target_kind: 'group' as const, display_label: '已退役群組',
+        state: 'active' as const, minimum_status: 'critical' as const,
+        current_version: 'version-9', updated_at: '2026-08-25T01:02:03+08:00',
       }]),
       listAdminCandidates: vi.fn(async () => []),
       getPreferences: vi.fn(async () => ({
@@ -225,8 +243,10 @@ describe('LINE 管理頁真實資料呈現', () => {
         runtimeOnly
       />
     );
-    await screen.findByText('跨分頁測試群組');
-    fireEvent.click(screen.getByRole('button', { name: '預覽停用' }));
+    await screen.findByText('跨分頁測試管理員');
+    expect(screen.queryByText('已退役群組')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重設群組' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '停用' }));
 
     const requestOptions = vi.mocked(runtimeTarget.previewSetEnabled).mock.calls[0][2];
     expect(requestOptions?.signal?.aborted).toBe(false);
@@ -244,10 +264,12 @@ describe('LINE 管理頁真實資料呈現', () => {
     });
     await Promise.resolve();
     render(<LineManagementPage customerService={customer} lineIdentity={identity} runtimeTarget={runtimeTarget} runtimeOnly />);
-    await screen.findByText('跨分頁測試群組');
+    await screen.findByText('跨分頁測試管理員');
     expect(screen.queryByText(/尚未建立.*停用/)).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /我已確認此通知對象異動/ })).not.toBeInTheDocument();
     expect(runtimeTarget.setEnabled).not.toHaveBeenCalled();
+    expect(runtimeTarget.previewResetGroup).not.toHaveBeenCalled();
+    expect(runtimeTarget.resetGroup).not.toHaveBeenCalled();
   });
 
   it('人工升級 Preview 離頁後的晚到結果不會形成可套用狀態', async () => {
@@ -283,7 +305,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     fireEvent.change(screen.getByLabelText('來源資料校驗碼'), {
       target: { value: 'b'.repeat(64) },
     });
-    fireEvent.click(screen.getByRole('button', { name: /預覽建立人工客服升級/ }));
+    fireEvent.click(screen.getByRole('button', { name: '建立人工客服升級' }));
 
     const requestOptions = vi.mocked(escalation.previewCreate).mock.calls[0][1];
     expect(requestOptions?.signal?.aborted).toBe(false);
@@ -350,6 +372,7 @@ describe('LINE 管理頁真實資料呈現', () => {
   });
 
   it('圖文選單直接進入編輯，移除發布紀錄入口並停止清單查詢', async () => {
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue(null);
     const { customer, identity } = clients();
     const listRichMenuPublications = vi.fn();
     const lineConfiguration: LineConfigurationQueryClient = {
@@ -388,6 +411,7 @@ describe('LINE 管理頁真實資料呈現', () => {
     expect(screen.queryByRole('button', { name: '編輯選單' })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '圖文選單工作頁' })).not.toBeInTheDocument();
     expect(listRichMenuPublications).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '發布' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '發布至 LINE' })).toBeDisabled();
+    expect(screen.getByText(/請先登入/)).toBeInTheDocument();
   });
 });

@@ -36,7 +36,7 @@ def test_non_citizen_uses_350_rate_and_leaves_second_date_pending_first_receipt(
 
 def test_general_citizen_claim_uses_40_hours_times_staff_service_price():
     result = calculate_order_amounts(
-        _terms("115000002", "一般市民"),
+        _terms("115000002", "補助市民"),
         [{"assignment_id": 2, "staff_id": 8, "actual_hours": 180, "hourly_rate": 350, "floor_fee_amount": 0}],
         SCHEDULE,
     )
@@ -52,7 +52,7 @@ def test_general_citizen_claim_uses_40_hours_times_staff_service_price():
 
 def test_full_subsidy_has_zero_client_receivable_and_second_month_staff_due_date():
     result = calculate_order_amounts(
-        _terms("115000003", "補助市民", hours_per_day=6),
+        _terms("115000003", "社福", hours_per_day=6),
         [{"assignment_id": 3, "staff_id": 9, "actual_hours": 120, "hourly_rate": 350, "floor_fee_amount": 0}],
         SCHEDULE,
     )
@@ -67,7 +67,7 @@ def test_full_subsidy_has_zero_client_receivable_and_second_month_staff_due_date
 
 def test_subsidized_order_with_floor_fee_is_not_a_full_subsidy_order():
     result = calculate_order_amounts(
-        _terms("115000003a", "補助市民", hours_per_day=6, floor_fee=900),
+        _terms("115000003a", "社福", hours_per_day=6, floor_fee=900),
         [{"assignment_id": 30, "staff_id": 9, "actual_hours": 120, "hourly_rate": 350, "floor_fee_amount": 900}],
         SCHEDULE,
     )
@@ -84,7 +84,7 @@ def test_subsidized_order_with_floor_fee_is_not_a_full_subsidy_order():
 
 def test_subsidized_excess_is_charged_at_the_fixed_350_client_rate():
     result = calculate_order_amounts(
-        _terms("115000003c", "補助市民", service_days=21, hours_per_day=6),
+        _terms("115000003c", "社福", service_days=21, hours_per_day=6),
         [],
         SCHEDULE,
     )
@@ -95,7 +95,7 @@ def test_subsidized_excess_is_charged_at_the_fixed_350_client_rate():
 
 def test_subsidized_126_hour_case_balances_350_government_and_client_funding():
     result = calculate_order_amounts(
-        _terms("115000003e", "補助市民", service_days=21, hours_per_day=6),
+        _terms("115000003e", "社福", service_days=21, hours_per_day=6),
         [{"assignment_id": 31, "staff_id": 9, "actual_hours": 126, "hourly_rate": 350}],
         SCHEDULE,
     )
@@ -115,7 +115,7 @@ def test_low_income_identity_maps_to_the_subsidized_120_hour_policy():
 
 def test_claim_amount_is_weighted_by_actual_hours_at_the_identity_policy_rate():
     result = calculate_order_amounts(
-        _terms("115000004", "一般市民", floor_fee=900),
+        _terms("115000004", "補助市民", floor_fee=900),
         [
             {"assignment_id": 4, "staff_id": 7, "actual_hours": 45, "hourly_rate": 300, "floor_fee_amount": 300},
             {"assignment_id": 5, "staff_id": 9, "actual_hours": 135, "hourly_rate": 320, "floor_fee_amount": 600},
@@ -133,7 +133,7 @@ def test_claim_amount_is_weighted_by_actual_hours_at_the_identity_policy_rate():
 
 
 def test_claim_stays_unready_until_staff_actual_hours_and_rates_exist():
-    result = calculate_order_amounts(_terms("115000005", "一般市民"), [], SCHEDULE)
+    result = calculate_order_amounts(_terms("115000005", "補助市民"), [], SCHEDULE)
 
     assert result["subsidy_plan"]["claim_amount_ready"] is False
     assert result["subsidy_plan"]["subsidy_claim_amount"] is None
@@ -141,7 +141,7 @@ def test_claim_stays_unready_until_staff_actual_hours_and_rates_exist():
 
 def test_incomplete_assignment_hours_do_not_create_a_full_subsidy_claim():
     result = calculate_order_amounts(
-        _terms("115000005a", "補助市民", hours_per_day=6),
+        _terms("115000005a", "社福", hours_per_day=6),
         [{"assignment_id": 51, "staff_id": 12, "actual_hours": 6, "hourly_rate": 350}],
         SCHEDULE,
     )
@@ -154,7 +154,7 @@ def test_incomplete_assignment_hours_do_not_create_a_full_subsidy_claim():
 
 def test_subsidy_hours_are_capped_by_total_service_hours():
     result = calculate_order_amounts(
-        _terms("115000008", "一般市民", service_days=3, hours_per_day=9),
+        _terms("115000008", "補助市民", service_days=3, hours_per_day=9),
         [{"assignment_id": 8, "staff_id": 10, "actual_hours": 27, "hourly_rate": 350}],
         {"deposit_service_days": 1, "deposit_due_date": "2026-04-01"},
     )
@@ -167,14 +167,14 @@ def test_rejects_unknown_identity_status_and_missing_deposit_date():
     with pytest.raises(ValueError, match="unsupported identity_status"):
         calculate_order_amounts(_terms("115000006", "未知"), [], SCHEDULE)
     with pytest.raises(ValueError, match="deposit_due_date"):
-        calculate_order_amounts(_terms("115000007", "一般市民"), [], {"deposit_service_days": 5})
+        calculate_order_amounts(_terms("115000007", "補助市民"), [], {"deposit_service_days": 5})
 
 
 def test_identity_status_is_returned_with_the_calculation_plan():
     result = calculate_order_amounts(
-        _terms("115000009", "一般市民"),
+        _terms("115000009", "補助市民"),
         [{"assignment_id": 9, "staff_id": 11, "actual_hours": 180, "hourly_rate": 350}],
         SCHEDULE,
     )
 
-    assert result["identity_status"] == "一般市民"
+    assert result["identity_status"] == "補助市民"

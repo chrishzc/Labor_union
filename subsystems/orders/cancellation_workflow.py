@@ -180,6 +180,10 @@ class OrderCancellationWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
 
+    @property
+    def cancellation_date(self) -> date:
+        return self._clock.today()
+
     def preview(self, case_no: str, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
         facts = self._repository.load_for_preview(
             case_no, _confirmed_staff_ids(confirmed_service_days)
@@ -237,7 +241,7 @@ class OrderCancellationWorkflow:
     def _build_preview(self, facts: CancellationWorkflowFacts, confirmed_service_days: tuple[ConfirmedServiceDay, ...]) -> OrderCancellationPreview:
         effective_order = _effective_order_facts(facts, confirmed_service_days)
         try:
-            candidate = build_cancellation_candidate(effective_order, facts.scheduling, self._clock.now().date(), confirmed_service_days)
+            candidate = build_cancellation_candidate(effective_order, facts.scheduling, self.cancellation_date, confirmed_service_days)
             finance, payroll = _build_impacts(facts, candidate)
         except ValueError as error:
             if str(error) != "payroll_rate_policy_not_found":

@@ -167,8 +167,8 @@ def test_preview_projects_before_after_and_has_zero_writes() -> None:
 def test_apply_fresh_locks_and_creates_only_a_manual_ticket_request() -> None:
     application, orders, bindings, customer_service, audit, opened = _fixture()
     preview = application.preview(
-        "U-CUSTOMER", 21, "CASE-001", 7, "service_days",
-        {"start_date": "2026-10-03", "end_date": "2026-10-24", "service_days": "22"},
+        "U-CUSTOMER", 21, "CASE-001", 7, "other",
+        {"details": "希望調整服務內容"},
     )
 
     receipt = application.apply(
@@ -176,7 +176,7 @@ def test_apply_fresh_locks_and_creates_only_a_manual_ticket_request() -> None:
         21,
         "CASE-001",
         7,
-        "service_days",
+        "other",
         preview.requested,
         preview.preview_fingerprint,
         IdempotencyKey("order-change-browser-session-1"),
@@ -241,3 +241,11 @@ def test_stale_order_or_preview_fingerprint_fails_before_ticket_write() -> None:
 
     assert stale.value.code == "order_change_order_version_stale"
     assert customer_service.messages == []
+
+
+def test_retired_customer_date_request_cannot_create_ticket():
+    application,_,_,tickets,audit,opened=_fixture()
+    with pytest.raises(CustomerOrderChangeError,match='order_change_service_dates_retired'):
+        application.preview('U-CUSTOMER',21,'CASE-001',7,'service_days',{'start_date':'2027-01-01'})
+    assert not tickets.messages and not audit.intents
+    assert opened[0].commit_count==0

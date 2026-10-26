@@ -127,6 +127,12 @@ def _resolve(database, row, decision):
 def test_snapshot_outflow_resolves_without_bank_case_reference(
     monkeypatch, database, refund_type, profile_changed
 ):
+    # This SQLite oracle covers frozen-account matching. Funding eligibility has
+    # separate owner tests and the real-MySQL automatic accounting chain.
+    monkeypatch.setattr(
+        'infrastructure.mysql.finance_import_owning_domain_composite.ClientRefundReversalWorkflow.preview',
+        lambda *_args: None,
+    )
     identity = _add_refund(database, refund_type)
     if profile_changed:
         database.execute(

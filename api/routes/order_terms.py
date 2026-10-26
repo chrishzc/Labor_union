@@ -17,9 +17,6 @@ from api.dependencies.order_terms import (
     OrderTermsApplication,
     get_order_terms_application,
 )
-from api.routes.order_intake_terms_bootstrap import (
-    router as intake_terms_bootstrap_router,
-)
 from api.schemas.base import BaseResponse
 from api.schemas.order_terms import (
     OrderTermsPreviewView,
@@ -374,6 +371,3 @@ def _materialize_collection(value):
     if isinstance(value, (tuple, list)):
         return [_materialize(item) for item in value]
     return value
-
-
-router.include_router(intake_terms_bootstrap_router)

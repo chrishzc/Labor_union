@@ -24,7 +24,9 @@ assignments, profiles, payroll obligations, or provider calls.
 
 ## Verification
 - canonical test root: `tests/domains/external-integration/subsystems/line/modules/notification-baseline-bootstrap/`
-- acceptance: exact 26 §1.3 identities, fixture target/actor gate, source digest,
+- acceptance: current catalog excludes retired/anomalous templates; historical fixture target/actor gate, source digest,
   idempotent source identity, and no provider invocation
 
 2026-10-22：零候選固定通知從有效 rules／templates 與 fixture 移除，new candidate validation 拒絕恢復；historical grammar readback 仍可解析舊定義，專用刪除 writer 可取消其 intent／task，歷史不重寫。
+
+目前 message templates 與 fresh bootstrap 僅保留有效內容；三日排程與 14 個已確認殘留模板移除。歷史 synthetic source producer 只保留 immutable provenance，不恢復現行通知。

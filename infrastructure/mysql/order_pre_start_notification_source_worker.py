@@ -1,6 +1,6 @@
 """
 File: order_pre_start_notification_source_worker.py
-Description: 在同一 MySQL transaction 將即將開始服務之案件登錄為 LINE notification source event 並派發通知決策。
+Description: 同一 MySQL transaction 投影正式開工當天群組詢問及第二期款通知決策，不直接寄送。
 """
 
 from __future__ import annotations

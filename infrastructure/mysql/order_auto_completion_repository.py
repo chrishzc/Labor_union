@@ -120,10 +120,26 @@ class MySqlOrderAutoCompletionRepository:
                 )
 
     def append_outbox(self, request, candidate, lifecycle_event_id):
-        payload = {"after_status": "訂單完成", "completion_instant": candidate.completion_instant.isoformat(), "correlation_id": request.correlation_id.value, "resulting_order_version": candidate.resulting_order_version}
+        self.synchronize_completion_accounting(request, lifecycle_event_id)
+        payload = {"after_status": "訂單完成", "completion_instant": candidate.completion_instant.isoformat(), "correlation_id": request.correlation_id.value, "resulting_order_version": candidate.resulting_order_version,
+                   "line_service_completion_notification": True}
         with self._connection.cursor() as cursor:
             payload.update(_terminal_closure_fields(request, candidate, cursor, lifecycle_event_id))
             cursor.execute(_OUTBOX_INSERT_SQL, (request.case_no, lifecycle_event_id, _child_identity(request, "orders-outbox"), "lifecycle_projection_changed", _json(payload)))
+
+    def synchronize_completion_accounting(self, request, lifecycle_event_id):
+        from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
+        from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+        from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
+        with self._connection.cursor() as cursor:
+            synchronize_terminal_subsidy_return(cursor, request.case_no, actor=request.actor,
+                key=request.idempotency_key, correlation_id=request.correlation_id,
+                source_family="service-completion", source_id=lifecycle_event_id)
+            due_date = PayrollRebuildWorkflow(MySqlPayrollRebuildRepository(self._connection), None).synchronize_in_unit_of_work(
+                request.case_no, actor=request.actor, key=request.idempotency_key, correlation_id=request.correlation_id)
+            if due_date is not None:
+                cursor.execute("UPDATE orders SET staff_payment_due_date=%s WHERE case_no=%s AND staff_payment_due_date IS NULL",
+                               (due_date, request.case_no))
 
     def save_receipt(self, receipt: AutoCompletionReceipt) -> None:
         payload = _receipt_payload(receipt)

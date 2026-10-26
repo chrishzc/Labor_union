@@ -8,7 +8,7 @@ from shared_kernel.money import MoneyNTD
 
 def test_three_actual_days_replace_forty_contract_days_for_general_citizen() -> None:
     candidate = build_historical_client_obligation_candidate(
-        identity_status="一般市民",
+        identity_status="補助市民",
         client_policy_version="client-policy:case-19",
         client_hourly_rate=MoneyNTD(275),
         actual_service_days=3,
@@ -23,7 +23,7 @@ def test_three_actual_days_replace_forty_contract_days_for_general_citizen() -> 
 
 def test_subsidized_client_only_owes_hours_beyond_subsidy_plus_floor_fee() -> None:
     candidate = build_historical_client_obligation_candidate(
-        identity_status="補助市民",
+        identity_status="社福",
         client_policy_version="client-policy:subsidized",
         client_hourly_rate=MoneyNTD(350),
         actual_service_days=15,

@@ -1,4 +1,9 @@
-"""Issue #311 focused acceptance for service-day reminder projection and scope."""
+"""Historical projection/lineage and cancellation regression; old log rules stay retired.
+
+Synthetic projection fixtures retain immutable-history mechanics. Current manual
+group-reminder acceptance lives in test_service_day_log_reminders.py and its MySQL
+companion; those fixtures do not authorize automatic private delivery.
+"""
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -92,13 +97,15 @@ class _ProjectionRepository(MySqlLineNotificationRepository):
         assert source_event_id == 51
         return self.existing_decision
 
-    def _rule_source_currently_applicable(self, _source, _rule):
+    def _rule_source_currently_applicable(self, _source, _rule, *, for_update=False):
+        if "baby_log_missing" in _rule.get("predicates", []):
+            return super()._rule_source_currently_applicable(_source, _rule, for_update=for_update)
         return self.fresh_applicable
 
     def _source_has_newer_version(self, _source):
         return False
 
-    def _resolve_recipient(self, selector, facts, *, source_domain="unknown"):
+    def _resolve_recipient(self, selector, facts, *, source_domain="unknown", event_code=""):
         assert selector == "assigned_caregiver"
         assert facts["staff_id"] == 4
         assert source_domain == "scheduling"
@@ -154,7 +161,7 @@ class _ProjectionRepository(MySqlLineNotificationRepository):
         )
 
 
-def test_incomplete_service_day_projects_rule_matched_intent_for_assigned_caregiver():
+def test_incomplete_service_day_never_projects_retired_private_reminder():
     repository = _ProjectionRepository()
     event = _event(baby_log_completed=False, requires_cooking=True)
 
@@ -165,18 +172,10 @@ def test_incomplete_service_day_projects_rule_matched_intent_for_assigned_caregi
     assert len(repository.decisions) == 1
     decision = repository.decisions[0]
     assert decision["revision_id"] == 7
-    assert decision["status"] == "intent_created"
-    assert decision["reason"] == "rule_matched"
-    assert decision["recipient"].recipient_type is LineRecipientType.USER
-    assert decision["recipient"].identity == LineUserId("U-caregiver-4")
-    assert len(repository.intents) == 1
-    intent = repository.intents[0]
-    assert intent["decision_id"] == 61
-    assert intent["occurrence_number"] == 1
-    assert intent["scheduled_at"] == _OCCURRED_AT
-    assert intent["template_revision_id"] == 9
-    assert intent["template_id"] == "service-day-log-reminder"
-    assert intent["rendered"].message_kind is LineMessageKind.TEXT
+    assert decision["status"] == "cancelled_stale"
+    assert decision["reason"] == "notification_source_not_currently_applicable"
+    assert decision["recipient"] is None
+    assert repository.intents == []
 
 
 def test_completed_service_day_is_legally_not_applicable_to_missing_log_rule():
@@ -185,7 +184,7 @@ def test_completed_service_day_is_legally_not_applicable_to_missing_log_rule():
     repository.register_and_project(_event(baby_log_completed=True))
 
     assert [(item["status"], item["reason"]) for item in repository.decisions] == [
-        ("suppressed", "prerequisite_not_satisfied")
+        ("cancelled_stale", "notification_source_not_currently_applicable")
     ]
     assert repository.intents == []
 
@@ -219,7 +218,7 @@ def test_disabled_service_day_rule_is_readable_shadow_suppression():
     repository.register_and_project(_event())
 
     assert [(item["status"], item["reason"]) for item in repository.decisions] == [
-        ("suppressed", "rule_shadow_mode")
+        ("cancelled_stale", "notification_source_not_currently_applicable")
     ]
     assert repository.intents == []
 
@@ -230,7 +229,7 @@ def test_invalid_or_missing_template_is_readable_suppression():
     repository.register_and_project(_event())
 
     assert [(item["status"], item["reason"]) for item in repository.decisions] == [
-        ("suppressed", "template_or_schedule_invalid")
+        ("cancelled_stale", "notification_source_not_currently_applicable")
     ]
     assert repository.intents == []
 
@@ -401,7 +400,9 @@ def test_fresh_applicability_reads_exact_assignment_and_service_date():
     )
     repository = MySqlLineNotificationRepository(connection)
 
-    applicable = repository._rule_source_currently_applicable(_event(), _RULE)
+    # The old missing-log rule is retired; unrelated service-time rules still
+    # use exact assignment/date freshness checks.
+    applicable = repository._rule_source_currently_applicable(_event(), {**_RULE, "predicates": []})
 
     assert applicable is True
     assert len(connection.calls) == 1
@@ -427,6 +428,12 @@ def test_fresh_applicability_blocks_missing_log_rule_after_log_completed():
     )
 
     assert repository._rule_source_currently_applicable(_event(), _RULE) is False
+
+
+def test_old_missing_log_rule_is_retired_even_if_enabled_and_day_incomplete():
+    connection = _CurrentApplicabilityConnection({"id": 8, "service_day_log_id": None})
+    assert MySqlLineNotificationRepository(connection)._rule_source_currently_applicable(_event(), _RULE) is False
+    assert connection.calls == []
 
 
 def test_fresh_log_completion_does_not_block_unrelated_service_time_rule():

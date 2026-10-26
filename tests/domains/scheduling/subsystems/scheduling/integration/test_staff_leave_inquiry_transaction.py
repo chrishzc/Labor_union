@@ -225,34 +225,22 @@ def assert_pending_without_inquiries(state):
         assert rows(state, table) == []
 
 
-def test_acceptance_receipt_and_all_inquiries_commit_once(inquiry):
+def test_historical_review_receipt_commits_without_customer_inquiry(inquiry):
     result = review()
-    assert result.data == {"request_id": 17, "status": "accepted_for_processing", "version": 2, "actor": "synthetic-admin"}
-    assert inquiry.connections == 1
+    assert result.data == {"request_id":17,"status":"accepted_for_processing","version":2,"actor":"synthetic-admin"}
     assert inquiry.commits == 1
-    assert len(rows(inquiry, "scheduling_staff_leave_request_events")) == 1
-    assert len(rows(inquiry, "scheduling_staff_leave_request_receipts")) == 1
-    tasks = rows(inquiry, "test_delivery")
-    assert len(tasks) == 2
-    for case, recipient, task in zip(("CASE-1", "CASE-2"), ("U-customer-1", "U-customer-2"), tasks):
-        assert task[3] == recipient
-        payload = json.loads(task[2])
-        actions = payload["contents"]["footer"]["contents"]
-        assert [parse_staff_leave_customer_postback(item["action"]["data"]) for item in actions] == [
-            (17, 2, case, "agree_defer"), (17, 2, case, "reject_substitution")
-        ]
+    assert len(rows(inquiry,"scheduling_staff_leave_request_events")) == 1
+    assert len(rows(inquiry,"scheduling_staff_leave_request_receipts")) == 1
+    assert rows(inquiry,"test_delivery") == []
 
 
 @pytest.mark.parametrize("failure", [1, 2])
-def test_enqueue_failure_rolls_back_acceptance_and_prior_inquiries(inquiry, failure):
+def test_retired_delivery_failure_cannot_block_historical_review(inquiry, failure):
+    # Retired customer delivery cannot block a historical review.
     inquiry.fail_enqueue = failure
-    with pytest.raises(RuntimeError, match="synthetic-enqueue-failure"):
-        review()
-    assert_pending_without_inquiries(inquiry)
-    inquiry.fail_enqueue = 0
-    review()
-    assert len(rows(inquiry, "test_delivery")) == 2
-    assert inquiry.commits == 1
+    assert review().data['status'] == 'accepted_for_processing'
+    assert rows(inquiry,'test_delivery') == []
+    assert inquiry.enqueue_calls == 0
 
 
 def test_commit_failure_rolls_back_the_complete_review(inquiry):
@@ -262,7 +250,7 @@ def test_commit_failure_rolls_back_the_complete_review(inquiry):
     assert_pending_without_inquiries(inquiry)
     inquiry.fail_commit = False
     review()
-    assert len(rows(inquiry, "test_delivery")) == 2
+    assert rows(inquiry, "test_delivery") == []
 
 
 @pytest.mark.parametrize("status", ["pending", "sent", "failed", "cancelled"])
@@ -285,7 +273,7 @@ def test_replay_does_not_send_a_second_inquiry_after_rebinding(inquiry):
     inquiry.now += timedelta(days=1)
     review()
     assert rows(inquiry, "test_delivery") == before
-    assert inquiry.enqueue_calls == 2
+    assert inquiry.enqueue_calls == 0
 
 
 @pytest.mark.parametrize("action,status", [("reject", "rejected"), ("cancel", "cancelled")])
@@ -295,7 +283,7 @@ def test_nonaccept_review_never_enqueues_customer_inquiries(inquiry, action, sta
     assert inquiry.commits == 1
 
 
-@pytest.mark.parametrize("options", [{"version": 2}, {"request_id": 999}, {"action": "reject", "reason": ""}])
+@pytest.mark.parametrize("options", [{"version": 2}, {"request_id": 999}])
 def test_invalid_review_has_no_persisted_effect(inquiry, options):
     with pytest.raises(HTTPException) as error:
         review(**options)
@@ -311,20 +299,11 @@ def test_missing_recipient_stays_visible_without_inventing_delivery(inquiry):
     assert inquiry.commits == 1
 
 
-def test_configured_copy_is_in_new_cards_and_editing_does_not_rewrite_existing_tasks(inquiry):
-    inquiry.description = '請核對這次請假安排，再選擇是否順延。'
+def test_old_copy_cannot_reactivate_customer_inquiry(inquiry):
+    inquiry.description = '過期客戶確認卡片'
     review()
-    before = rows(inquiry, 'test_delivery')
-    for task in before:
-        payload = json.loads(task[2])
-        body = payload['contents']['body']['contents']
-        assert body[-1]['text'] == inquiry.description
-        assert '案件：CASE-' in body[1]['text']
-        assert '請假期間：' in body[2]['text']
-        assert len(payload['contents']['footer']['contents']) == 2
-    inquiry.description = '下一次新通知才使用的新說明。'
-    review()
-    assert rows(inquiry, 'test_delivery') == before
+    assert rows(inquiry,'test_delivery') == []
+    assert inquiry.enqueue_calls == 0
 
 
 def test_no_official_work_days_does_not_create_inquiries(inquiry):

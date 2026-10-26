@@ -37,6 +37,7 @@ class OrdersAssignmentImpactPayload:
     lifecycle: Any
     client_settlement_fingerprint: PreviewFingerprint
     staff_payment_due_date: date | None = None
+    actual_start_date: date | None = None
 
 
 def build_client_finance_assignment_impact(
@@ -169,7 +170,7 @@ def _assignment_plan_readiness_blockers(
     first_assignment = not facts.assignment_plan.effective_assignments
     if not first_assignment and not waiting_lock_ids:
         return ()
-    if first_assignment and not waiting_lock_ids:
+    if first_assignment and not waiting_lock_ids and not facts.assignment_plan.explicit_service_start_result:
         return ("assignment_plan_bootstrap.waiting_lock_required",)
     blockers: list[str] = []
     if not facts.lifecycle.contract_completed:

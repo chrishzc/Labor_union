@@ -29,6 +29,7 @@ modules:
   historical-service-accounting:
     test_root: tests/domains/client-finance/subsystems/client-finance/modules/historical-service-accounting/
   obligation-planning:
+    automatic_accounting_test: tests/domains/client-finance/subsystems/client-finance/integration/test_automatic_accounting.py
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py
   historical-payment-settlement-presentation:

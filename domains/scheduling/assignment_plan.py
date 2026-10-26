@@ -115,6 +115,7 @@ class AssignmentPlanFacts:
     effective_assignments: tuple[EffectiveAssignmentFact, ...] = ()
     external_occupancy: tuple[StaffOccupancyFact, ...] = ()
     current_waiting_lock_ids: tuple[int, ...] = ()
+    explicit_service_start_result: bool = False
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -417,6 +418,7 @@ def _candidate_payload(
         "contracted_service_days": facts.contracted_service_days,
         "service_hours_per_day": facts.service_hours_per_day,
         "current_waiting_lock_ids": facts.current_waiting_lock_ids,
+        "explicit_service_start_result": facts.explicit_service_start_result,
         "segments": tuple(_segment_payload(item) for item in intent.segments),
         "generation": _generation_payload(scheduling),
     }

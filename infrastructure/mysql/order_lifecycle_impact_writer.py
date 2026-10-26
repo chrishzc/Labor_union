@@ -29,6 +29,7 @@ def persist_order_lifecycle_projection(cursor, command) -> None:
         (
             lifecycle.after_status.value,
             lifecycle.actual_end_date,
+            getattr(command, "actual_start_date", None),
             getattr(command, "staff_payment_due_date", None),
             command.resulting_order_version,
             lifecycle.case_no,
@@ -97,6 +98,7 @@ def _append_orders_outbox(cursor, command, lifecycle_event_id):
 def _lifecycle_payload(command):
     candidate = command.candidate
     return {
+        "actual_start_date": str(command.actual_start_date) if getattr(command, 'actual_start_date', None) else None,
         "staff_payment_due_date": (
             command.staff_payment_due_date.isoformat()
             if getattr(command, "staff_payment_due_date", None) is not None else None
@@ -151,7 +153,7 @@ _LIFECYCLE_EVENT_INSERT_SQL = (
 )
 
 _ORDER_PROJECTION_UPDATE_SQL = (
-    "UPDATE orders SET status=%s,actual_end_date=%s,"
+    "UPDATE orders SET status=%s,actual_end_date=%s,actual_start_date=COALESCE(%s,actual_start_date),"
     "staff_payment_due_date=COALESCE(staff_payment_due_date,%s),lifecycle_version=%s "
     "WHERE case_no=%s AND lifecycle_version=%s"
 )

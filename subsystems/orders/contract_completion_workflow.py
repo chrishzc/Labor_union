@@ -252,6 +252,10 @@ def _build_preview(facts, intent):
         raise ContractCompletionCandidateError(blockers)
     candidate = build_contract_completion_candidate(facts.order, intent)
     finance_impact = build_client_finance_terms_candidate(facts.client_finance, f"contract-completion:{candidate.contract_identity}")
+    if (all(action.action.value == "unchanged" for action in finance_impact.actions)
+            and finance_impact.payment_terms == facts.client_finance.payment_terms):
+        finance_impact = replace(finance_impact, resulting_account_version=finance_impact.expected_account_version,
+                                 payment_terms=None)
     fingerprint = fingerprint_payload({"orders": candidate.fingerprint.value, "client_finance": finance_impact.fingerprint.value})
     return ContractCompletionPreview(candidate, finance_impact, fingerprint)
 
@@ -332,10 +336,10 @@ def _workflow_blockers(facts):
 
 
 def _has_incompatible_obligation_history(client_finance) -> bool:
-    """A precontract deposit is deliberately carried into contract completion."""
+    """All automatically calculated stages survive signing, including prior receipts."""
 
     stages = tuple(item.payment_stage for item in client_finance.existing_obligations)
-    return any(stage is not PaymentStage.DEPOSIT for stage in stages) or len(stages) > 1
+    return len(stages) != len(set(stages))
 
 
 def _established_obligation_count(candidate):

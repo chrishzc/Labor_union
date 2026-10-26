@@ -24,7 +24,7 @@ class LineOrderChangeIdentityRequest(BaseModel):
 class LineOrderChangePreviewRequest(LineOrderChangeIdentityRequest):
     case_no: str = Field(min_length=1, max_length=50)
     expected_order_version: int = Field(ge=0)
-    kind: OrderChangeKind
+    kind: Literal["service_address", "cooking_requirement", "daily_service_window", "other"]
     requested: dict[str, str] = Field(min_length=1, max_length=5)
 
 

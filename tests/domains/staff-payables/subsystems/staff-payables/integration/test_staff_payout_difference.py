@@ -39,25 +39,35 @@ def test_general_payout_remains_exact_only():
         build_staff_payout_candidate((_bank(18_500),), (_payable(),))
 
 
-def test_underpayment_cannot_create_a_formal_payout_candidate():
+def test_underpayment_records_actual_cash_and_preserves_remaining_entitlement():
+    candidate = build_staff_payout_difference_candidate(
+        (_bank(18_500),), (_payable(),), StaffPayoutDifferenceMode.UNDERPAYMENT,
+        bank_accounts=_accounts(), require_primary_account_owner=True,
+    )
+    assert candidate.bank_total == MoneyNTD(18_500)
+    assert candidate.obligation_total == MoneyNTD(20_000)
+    assert candidate.obligation_links[0].allocated_amount == MoneyNTD(18_500)
+    assert candidate.resulting_status is StaffPayableStatus.PARTIALLY_PAID
+    assert candidate.recovery is None
+
+
+def test_supplemental_payout_only_settles_remaining_balance():
+    from domains.staff_payables.reconciliation import StaffPayoutEvent, project_staff_payable
+    payable = StaffPayableFacts("obligation:1", 7, MoneyNTD(20_000), (
+        StaffPayoutEvent("paid:1", StaffPayoutEventType.PAYOUT, MoneyNTD(18_500)),
+    ))
+    assert project_staff_payable(payable).balance == MoneyNTD(1_500)
+    candidate = build_staff_payout_candidate((_bank(1_500),), (payable,))
+    assert candidate.bank_total == candidate.obligation_total == MoneyNTD(1_500)
+    assert candidate.allocations[0].amount == MoneyNTD(1_500)
+    with pytest.raises(ValueError, match="staff_payout_amount_mismatch"):
+        build_staff_payout_candidate((_bank(20_000),), (payable,))
+
+
+@pytest.mark.parametrize("amount", [20_000, 21_000])
+def test_underpayment_mode_rejects_equal_or_excess_outflow(amount):
     with pytest.raises(ValueError, match="staff_payout_difference_mode_invalid"):
-        build_staff_payout_difference_candidate(
-            (_bank(18_500),),
-            (_payable(),),
-            StaffPayoutDifferenceMode.UNDERPAYMENT,
-            bank_accounts=_accounts(),
-            require_primary_account_owner=True,
-        )
-
-
-def test_underpayment_selection_is_rejected_before_repository_access():
-    with pytest.raises(ValueError, match="invalid_staff_payout_intent"):
-        StaffPayoutSelection(
-            StaffPayoutEventType.PAYOUT,
-            ("bank:1",),
-            ("obligation:1",),
-            difference_mode=StaffPayoutDifferenceMode.UNDERPAYMENT,
-        )
+        build_staff_payout_difference_candidate((_bank(amount),), (_payable(),), StaffPayoutDifferenceMode.UNDERPAYMENT)
 
 
 def test_overpayment_records_full_outflow_and_separate_recovery():

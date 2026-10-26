@@ -50,20 +50,14 @@ def test_current_catalog_keeps_only_required_notifications_and_real_reminders() 
     definition = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
     typed_definition = LineNotificationRulesDefinition.model_validate(definition)
     assert tuple(rule.event_code for rule in typed_definition.rules) == (
-        "scheduling.leave.extension_requested",
         "runtime.alert.review_required",
         "complaint.ingress.hold_high_ticket",
-        "service_time_checkpoint",
-        "order.pre_start_reminder",
-        "order.second_payment_reminder",
+        "order.service_start_day",
+        "client.second_payment_due",
+        "client.second_payment_settled",
+        "order.service_completed",
     )
-    baby_log_rule = next(
-        rule for rule in typed_definition.rules
-        if rule.event_code == "service_time_checkpoint"
-    )
-    assert baby_log_rule.recipient_selector == "assigned_caregiver"
-    assert baby_log_rule.schedule.kind == "service_end"
-    assert baby_log_rule.predicates == ("baby_log_missing",)
+    assert all(rule.event_code != "service_time_checkpoint" for rule in typed_definition.rules)
 
 
 def test_historical_task96_fixture_keeps_its_provenance_contract() -> None:
@@ -129,3 +123,23 @@ def test_retired_zero_pool_cannot_be_restored_in_active_configuration(enabled):
     templates["templates"].append(dict(templates["templates"][0], id="LU96-M3-ZERO-POOL-CARD-V1"))
     with pytest.raises(LineMessageConfigurationError, match="已退役"):
         validate_message_templates(templates)
+
+
+def test_bootstrap_templates_and_schedules_contain_only_current_content():
+    from subsystems.line.message_configuration import RETIRED_MESSAGE_TEMPLATE_IDS, validate_message_templates, validate_message_schedules
+    templates = json.loads(Path('config/message_templates.json').read_text(encoding='utf-8'))
+    schedules = json.loads(Path('config/message_schedules.json').read_text(encoding='utf-8'))
+    ids = {item['id'] for item in templates['templates']}
+    assert not ids & (RETIRED_MESSAGE_TEMPLATE_IDS | {'0', 'v', '3qlinvqk0s', 'f3uxqwd09'})
+    assert all(item['content'] for item in templates['templates'])
+    assert schedules['schedules'] == []
+    validate_message_templates(templates)
+    validate_message_schedules(schedules, templates)
+
+
+@pytest.mark.parametrize('identifier', ['new_user_d1', 'LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1', 'LU96-M4-SALARY-PAYABLE-CARD-V1'])
+def test_retired_notifications_cannot_be_reintroduced(identifier):
+    from subsystems.line.message_configuration import validate_message_templates, LineMessageConfigurationError
+    definition = {'templates': [{'id': identifier, 'message_type': 'text', 'content': '舊通知', 'variables': []}]}
+    with pytest.raises(LineMessageConfigurationError, match='已退役'):
+        validate_message_templates(definition)

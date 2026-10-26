@@ -11,7 +11,7 @@ SELECT
         AS global_active_orders_count,
     COUNT(DISTINCT CASE WHEN o.status IN ('服務中', '訂單成立') THEN o.staff_id END)
         AS global_active_staff_count,
-    COALESCE(SUM(CASE WHEN COALESCE(c.identity_status, '') NOT IN ('', '一般身分', '一般市民') THEN 1 ELSE 0 END), 0)
+    COALESCE(SUM(CASE WHEN COALESCE(c.identity_status, '') NOT IN ('', '一般身分', '一般市民', '補助市民') THEN 1 ELSE 0 END), 0)
         AS global_subsidy_orders_count,
     COALESCE(SUM(details.total_employer_self_pay_payable), 0)
         AS global_total_receivable_sum,

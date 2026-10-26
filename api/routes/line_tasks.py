@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import NoReturn
+from typing import Literal, NoReturn
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -113,6 +113,7 @@ def task_list(
     request: Request,
     status: LineDeliveryStatus | None = None,
     source_type: LineDeliveryPublicSourceType | None = None,
+    category: Literal['review', 'reminder', 'support'] | None = None,
     scheduled_from: datetime | None = None,
     scheduled_to: datetime | None = None,
     page: int = Query(default=1, ge=1),
@@ -120,11 +121,15 @@ def task_list(
     principal: AdminPrincipal = Depends(require_line_task_reader),
 ):
     _reject_unsupported_query_params(request)
+    aggregates = _source_aggregate_types(source_type, category)
+    if category is not None and not aggregates:
+        return BaseResponse(data=LineDeliveryPublicPageView(
+            items=[], page=page, page_size=page_size, total=0, total_pages=1))
     try:
         result = get_line_delivery_task_admin_application().list(
             LineDeliveryAdminQuery(
                 statuses=(status,) if status else (),
-                source_aggregate_types=_source_aggregate_types(source_type),
+                source_aggregate_types=aggregates,
                 scheduled_from=scheduled_from,
                 scheduled_to=scheduled_to,
                 page=page,
@@ -234,7 +239,7 @@ _SOURCE_TYPE_GROUPS = {
     LineDeliveryPublicSourceType.RICH_MENU_LINK: ("rich_menu_link",),
     LineDeliveryPublicSourceType.RICH_MENU_UNLINK: ("rich_menu_unlink",),
     LineDeliveryPublicSourceType.WEBHOOK: ("line_webhook_event",),
-    LineDeliveryPublicSourceType.GROUP_INVITATION: ("line_order_group_invitation",),
+    LineDeliveryPublicSourceType.GROUP_INVITATION: ("line_order_group_invitation", "service_start_invitation"),
     LineDeliveryPublicSourceType.RUNTIME: ("runtime_health_event",),
     LineDeliveryPublicSourceType.MATCHING: (
         "matching_notification_intent",
@@ -243,12 +248,25 @@ _SOURCE_TYPE_GROUPS = {
         "candidate_matching_willingness_card",
         "matching_schedule_recipient",
         "matching_schedule_snapshot",
+        "candidate_contact_question",
+        "candidate_contact_answer",
+        "candidate_weekly_service_information",
+        "service_start_inquiry",
     ),
-    LineDeliveryPublicSourceType.ORDER: ("order",),
-    LineDeliveryPublicSourceType.FINANCE: ("client_finance_account",),
+    LineDeliveryPublicSourceType.ORDER: (
+        "order", "order_service_start_day", "order_service_start_day_response",
+        "order_service_completion",
+    ),
+    LineDeliveryPublicSourceType.FINANCE: (
+        "client_finance_account", "client_deposit_reminder", "client_deposit_settled",
+        "manual_payment_overdue_reminder",
+        "client_second_payment_reminder", "client_second_payment_settled",
+    ),
     LineDeliveryPublicSourceType.ASSIGNMENT: (
         "case_staff_assignment",
         "scheduling_staff_leave_request",
+        "manual_service_day_log_reminder",
+        "service_start_schedule",
     ),
 }
 _SOURCE_TYPE_BY_AGGREGATE = {
@@ -260,14 +278,28 @@ _PUBLIC_ATTEMPT_OUTCOMES = frozenset(
     {"success", "retryable_failure", "terminal_failure"}
 )
 _ALLOWED_QUERY_PARAMETERS = frozenset(
-    {"status", "source_type", "scheduled_from", "scheduled_to", "page", "page_size"}
+    {"status", "source_type", "category", "scheduled_from", "scheduled_to", "page", "page_size"}
 )
 
 
 def _source_aggregate_types(
     source_type: LineDeliveryPublicSourceType | None,
+    category: str | None = None,
 ) -> tuple[str, ...]:
-    return () if source_type is None else _SOURCE_TYPE_GROUPS[source_type]
+    aggregates = () if source_type is None else _SOURCE_TYPE_GROUPS[source_type]
+    if category is None:
+        return aggregates
+    return tuple(aggregate for aggregate, kind in _SOURCE_TYPE_BY_AGGREGATE.items()
+                 if _public_source_category(kind) == category
+                 and (source_type is None or aggregate in aggregates))
+
+
+def _public_source_category(source_type: LineDeliveryPublicSourceType) -> str:
+    if source_type.value in {'contract', 'identity', 'identity_review', 'matching', 'group_invitation'}:
+        return 'review'
+    if source_type.value in {'finance', 'assignment', 'follow_schedule', 'order'}:
+        return 'reminder'
+    return 'support'
 
 
 def _public_source_type(source_aggregate_type: str) -> LineDeliveryPublicSourceType:

@@ -43,49 +43,22 @@ def _snapshot() -> StaffLeaveRequestSnapshot:
     )
 
 
-def test_preview_returns_business_fields_and_opaque_transport_fingerprint(monkeypatch):
-    monkeypatch.setattr(
-        staff_leave_intake,
-        "_verified_staff_context",
-        lambda _: (LineUserId("U-private"), STAFF),
-    )
-
-    result = staff_leave_intake.preview_staff_leave_request(
-        StaffLeaveRequestCreate(
-            leave_start_date=date(2026, 8, 20),
-            leave_end_date=date(2026, 8, 21),
-            leave_reason="返鄉",
-        )
-    )
-
-    assert result.data["staff_name"] == "測試月嫂"
-    assert result.data["can_apply"] is True
-    assert len(result.data["preview_fingerprint"]) == 64
-    assert "line_user_id" not in result.data
+def test_old_preview_requires_reopening_current_leave_result_entry(monkeypatch):
+    monkeypatch.setattr(staff_leave_intake,'_verified_staff_context',lambda _:(LineUserId('U-private'),STAFF))
+    body=StaffLeaveRequestApply(leave_start_date=date(2027,1,5),leave_end_date=date(2027,1,6),leave_reason='',preview_fingerprint='a'*64)
+    with pytest.raises(HTTPException) as error:
+        staff_leave_intake.preview_staff_leave_request(body)
+    assert error.value.status_code==410
+    assert error.value.detail["code"]=="leave_intake_replaced"
 
 
-def test_apply_rejects_changed_intent_against_preview(monkeypatch):
-    class FakeApplication:
-        def apply(self, _command, _fingerprint):
-            raise StaffLeaveIntakeWorkflowError("leave_request_preview_stale")
-
-    monkeypatch.setattr(
-        staff_leave_intake,
-        "_verified_staff_context",
-        lambda _: (LineUserId("U-private"), STAFF),
-    )
-
-    body = StaffLeaveRequestApply(
-        leave_start_date=date(2026, 8, 20),
-        leave_end_date=date(2026, 8, 21),
-        leave_reason="返鄉",
-        preview_fingerprint="a" * 64,
-    )
-    with pytest.raises(HTTPException) as captured:
-        staff_leave_intake.apply_staff_leave_request(body, "leave-1", FakeApplication())
-
-    assert captured.value.status_code == 409
-    assert captured.value.detail == {"code": "leave_request_preview_stale"}
+def test_old_apply_cannot_create_pending_requests(monkeypatch):
+    monkeypatch.setattr(staff_leave_intake,'_verified_staff_context',lambda _:(LineUserId('U-private'),STAFF))
+    body=StaffLeaveRequestApply(leave_start_date=date(2027,1,5),leave_end_date=date(2027,1,6),leave_reason='',preview_fingerprint='a'*64)
+    with pytest.raises(HTTPException) as error:
+        staff_leave_intake.apply_staff_leave_request(body,"same-key",object())
+    assert error.value.status_code==410
+    assert error.value.detail["code"]=="leave_intake_replaced"
 
 
 def test_readback_is_scoped_to_verified_staff_and_redacts_line_identity(monkeypatch):

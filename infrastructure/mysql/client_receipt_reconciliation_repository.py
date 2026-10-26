@@ -210,7 +210,12 @@ class MySqlClientReceiptReconciliationRepository:
                 request,
                 settlement_identity,
                 resulting_version,
+                self._obligation_amounts,
             )
+            from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
+            synchronize_terminal_subsidy_return(cursor, selection.case_no, actor=request.actor,
+                key=request.idempotency_key, correlation_id=request.correlation_id,
+                source_family="client-receipt", source_id=resulting_version, advance_version=False)
 
     def establish_overage_refund(self, candidate, resulting_version) -> None:
         if candidate.status is not ReconciliationStatus.OVERAGE:
@@ -786,12 +791,17 @@ def _append_projection_outbox(
     request,
     settlement_identity,
     resulting_version,
+    obligation_amounts,
 ):
     payload = {
         "case_no": request.selection.case_no,
         "settlement_identity": settlement_identity,
         "resulting_account_version": resulting_version,
     }
+    if request.selection.payment_stage is PaymentStage.SECOND:
+        payload.update(line_second_payment_notification=True, payment_stage='second',
+                       obligation_identities=list(request.selection.obligation_identities),
+                       amount_ntd=sum(obligation_amounts.values()))
     cursor.execute(
         _OUTBOX_INSERT_SQL,
         (

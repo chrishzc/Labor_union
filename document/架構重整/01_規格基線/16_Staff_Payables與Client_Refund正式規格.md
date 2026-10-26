@@ -98,7 +98,7 @@ Modules：
 - 來源事件重送不得建立第二筆義務；
 - adjustment 建立新不可變 event／allocation，不修改舊義務歷史。
 - 同一 assignment 的 `total_payable` 只形成一筆整筆應付；不得按補助／自費資金來源拆分 obligation、due date 或 payout。
-- 非全補助案件的月嫂付款資格不依賴 Government Subsidy claim／allocation，也不等待 Client Finance 的客戶補助退還；全補助案件的唯一整筆 due date 為結案後第二曆月 15 日，到期仍不得拆成分次 payout。
+- 非全補助案件的月嫂付款資格不依賴政府入款，也不等待客戶補助退還；全補助案件的唯一整筆 due date 為結案後第二曆月 15 日，不因資金來源拆帳。實際不足額付款依 §2.4.1 先核銷實付，餘額繼續待付。
 
 ### 2.4 Subsystem：Payout Reconciliation
 
@@ -133,7 +133,7 @@ outcome／canonical bank fact 讀回判定。
 
 事件別 guard：
 
-- 一般 payout：選定銀行出款與選定 payable obligation 精確相等；
+- 一般 payout：選定銀行出款與選定 obligation 的當下剩餘款精確相等；
 - payout difference：只允許已確認唯一月嫂、唯一銀行帳戶 snapshot 與同一付款範圍內的
   obligations；銀行總額可以小於或大於 obligation remaining，但每一元銀行出款都必須由
   payout allocation 或 overpayment recovery root 完整表達；
@@ -148,18 +148,23 @@ blocker／anomaly。只有金額差異且 ownership 唯一時，才可使用專�
 
 #### 2.4.1 公會對月嫂付款不足
 
-公會實際出款小於選定 obligation remaining 時，預設作業仍是一次足額支付；不足只作為
-會計執行疏失的補救流程，不是正常分期付款產品。
+公會實際出款小於選定 obligation remaining 時，先核銷實際付款，剩餘款繼續列待付。
+後續補款沿同一 obligation 核銷剩餘款，不修改原應付全額或重複計算薪資。
 
 `ApplyStaffPayoutDifference(mode=underpayment)` 必須在單一 Staff Payables UoW 內：
 
 1. append 每筆 canonical bank outflow 對應的 immutable payout event；
 2. 依 obligation identity 順序 deterministic allocation，allocation 總額必須等於銀行總額；
 3. 計算 `remaining = obligation_amount - net_valid_payout`，不得由 UI 傳入；
-4. remaining 大於零時投影為 `partially_paid`，並建立
-   `staff_payout_underpayment` anomaly；
+4. remaining 大於零時投影為 `partially_paid`，保留待付餘額；
 5. 下一次應付清冊只輸出 remaining，不得重列原 obligation amount；
-6. 後續 canonical outflow 可繼續清償 remaining；歸零才轉 `completed` 並自動解除異常。
+6. 後續新的 canonical outflow 可繼續清償 remaining；歸零才轉 `completed`。
+
+銀行對帳的人工核對清單可從「處理月嫂付款」選取一位月嫂的待付款項，再進入「處理付款不足或超額」。使用已選取的銀行流水，不要求重新輸入流水編號；成功核銷後原流水不再列入人工核對，剩餘款仍列待付。新的足額補款流水按當下剩餘款自動核銷。
+
+畫面可選「足額核銷剩餘款」、「付款不足，先核銷實付」及「付款超額，另列追收」。
+不足額處理成功且重新讀取餘額後，才開放「繼續核銷剩餘款」；結果未明時保留原命令，不開新操作。
+分次付款後的退匯／沖正只重開指定來源付款的金額，保留其他有效付款，再計算剩餘款。
 
 不得因部分出款更新 Payroll obligation 原始金額，也不得建立第二筆薪資義務。清冊生成與
 重新下載不改變 remaining。
@@ -191,6 +196,8 @@ open／partially_recovered ──authorized adjustment──> adjusted
 必須具 `staff_payables.recovery.adjust` capability、不可變 reason/evidence、expected version
 與 idempotency receipt；不得由 UI 直接修改 remaining。
 
+正常匯入的永豐退回入款，若交易參考帳號唯一對應月嫂主帳戶，保留帳號綁定及待人工處理分類，由人員明確配對至既有追償，再核銷實收。不得因舊的退回分類名稱未出現而拒絕正式銀行根事實；不自動收回、不把一般入款轉成月嫂付款，帳號不唯一或已使用的流水仍阻擋。
+
 #### 2.4.3 Staff payout difference typed contract
 
 Preview intent 只接受：bank fact identities、obligation identities、`mode`、evidence references。
@@ -213,7 +220,7 @@ read-only reporting application，不是 Staff Payables Domain。它只能透過
 月嫂應付款與客戶補助退款的建立時點不同：
 
 - 月嫂應付款：排班成功建立時，由 Payroll 計算並保存；僅確認日期或排班作業尚未成功，不視為已建立。後續合法排班／條件修改依同一 owner 重算。
-- 客戶補助退款：排班確認時可以計算預估補助金額，但此時不建立退款單。服務完成，或中途取消且實際服務量已確認，並符合客戶服務費收齊、補助資格等條件後，由 Client Finance 建立客戶補助退款單。
+- 客戶補助退款：案件計價資料及日期足夠時由 Client Finance 自動同步應退 projection，隨有效服務量、條件或取消更新，不等待服務完工或服務費收齊，也沒有人工建立關卡；資料不足仍列待確認。
 - 應付清冊：查詢時才把上述已建立、符合付款日與未清償條件的款項彙整成明細；預估補助金額不能當成待付款明細。
 
 清冊查詢前的來源步驟與納入條件：
@@ -223,7 +230,7 @@ read-only reporting application，不是 Staff Payables Domain。它只能透過
 | 月嫂應付款（一般案件） | 確認服務日期與排班中的排班建立／安排，由 Payroll 同交易計算及保存；換人、代班或相關條件變更沿既有 owner 重算 | Staff Payables 目前應付投影；必須尚待付款、付款日已確定且等於所選目標付款日，並通過帳戶與異常檢查。不因只有前段服務說明而建立，也不以完工狀態單獨判斷是否列入 |
 | 月嫂應付款（歷史完成案件） | 歷史完成訂單採納時依原服務天數建立基準帳務；實際天數設定保存新版後重算 | 不要求重啟精算。缺少 materialized service-pay 帳務的既有採納完成案件，依下列唯讀歷史投影取得金額；已有帳務時不重複投影 |
 | 客戶一般退款 | 取消或帳務更正後，Client Finance 確認已收金額超過應收並建立退款單 | 目前未退完金額、到期日及建單時收款帳戶快照；依目標付款日與正常 review 條件篩選 |
-| 客戶補助退款 | 服務完成，或中途取消且實際服務量已確認，並符合客戶服務費收齊及補助資格條件時，Client Finance 建立退款單 | 已建立的 `subsidy_return` 退款單及未退完金額；只在案件查詢顯示預估補助退款不代表可列入付款清冊 |
+| 客戶補助退款 | 案件資料足夠時 Client Finance 自動同步，取消按已確認實際服務量調整 | 正式 `subsidy_return` projection 及未退完金額；到期列入同份清冊，缺值不當作零 |
 
 來源已存在不代表立即列入所有月份清冊；仍須符合下列 Export 的付款日、未清償、帳戶及異常排除規則。重新查詢讀取最新款項；重新匯出產生新 Excel，舊下載與封存檔不自動改寫。產生清冊不執行匯款，也不將款項改為已付款。
 
@@ -302,7 +309,7 @@ flowchart TD
 - 新案件從「確認服務日期與排班」的排班成功建立開始納入；只有「尋找月嫂與詢問意願」的服務說明、媒合意願或保存服務日期不算已排班。排班以目前有效指派及有效工作日為準，不把已被取代的排班重複計入。
 - 月嫂款項讀取既有 Payroll／Staff Payables 查核資料的未付款金額及付款日；已有應付帳務時標示「已確定」。歷史服務資料計算的項目標示「預估」；已排班但缺少薪資計算依據的月嫂仍保留明細，金額為待確認，不由此查詢建立帳務。已付清或結清者排除。
 - 客戶預估補助退款讀取補助資格與上限、有效排班工作日及每日工時、凍結單價與樓層費，沿用 Client Finance 計算規則。已完成歷史案件有歷史實際服務量時沿用該來源；重新進入一般流程後改讀目前排班，不套用舊歷史服務量。
-- 未完工或客戶服務費尚未收齊，仍可查看預估補助退款，並在明細列出未滿足的建單條件；全補助且客戶無需代墊服務薪資者不估算客戶退款。補助資格不符或計算金額為零者不列預估退款；依據不足時保留未知金額，不以零代替。
+- 完工及客戶款是否收齊不是應退補助的建立關卡；資料足夠即自動同步正式金額。資料不足仍列待確認；社福未先墊的補助部分不產生客戶退款，不以零代替未知金額。
 - 客戶一般退款及補助退款讀取已建立、仍未退完的退款單。補助退款單建立後，改用退款單的未退完金額與付款日，同案不再重複估算；退款已付清後，也不重新產生同案補助退款預估。來源已有未付款項時，即使沒有目前排班仍可追蹤；取消案件不再產生未建單的補助退款預估，已建立未清償款項保留。
 - 未建補助退款單的預估付款日為「目前排班預計結束月份＋兩個曆月的 15 日」；已建退款單與月嫂款項使用各自來源付款日。金額、日期或收款資料不足不套用已確定清冊的排除條件，而是在明細說明原因；未知日期另列，不強塞進所選月份。
 
@@ -313,12 +320,12 @@ flowchart TD
     A["排班成功建立<br/>Payroll 計算並保存月嫂應付款<br/>來源：目前應付帳務與付款日"]
     B["已採納的歷史服務完成案件<br/>來源：既有應付帳務<br/>缺少帳務時依歷史服務資料計算"]
     C["取消或帳務更正後確認溢收<br/>Client Finance 建立客戶一般退款單<br/>來源：未退完金額、付款日、收款帳戶快照"]
-    D["服務完成，或取消後確認實際服務量<br/>符合補助資格、服務費收齊等條件<br/>Client Finance 建立客戶補助退款單<br/>來源：未退完金額、付款日、收款帳戶快照"]
+    D["案件條件及日期足夠<br/>Client Finance 自動同步應退補助<br/>取消按實際服務量更新<br/>來源：未退完金額、付款日、收款帳戶快照"]
     A --> Q
     B --> Q
     C --> Q
     D --> Q
-    Q["查詢時按所選月份 15 日篩選<br/>月嫂：付款日等於該日，未付款或部分付款仍有剩餘款<br/>客戶退款：付款日不晚於該日<br/>且未付清、收款資料完整、通過異常檢查"]
+    Q["查詢所選月份的同份清冊<br/>月嫂：付款日等於該月15日且仍有剩餘款<br/>客戶退款／補助退款：付款日不晚於該月月底<br/>且未付清、收款資料完整、通過異常檢查"]
     Q --> R["已確定款項清冊<br/>列出符合付款條件的目前未付款金額"]
     R --> X["重新讀取來源並產生 Excel<br/>下載與封存同一份檔案<br/>不執行匯款或變更付款狀態"]
     M["排班或帳務更正、退款單變更<br/>或付款核銷完成"]
@@ -331,7 +338,7 @@ flowchart TD
 - 月嫂應付款在排班成功建立時已有資料；只確認日期不會建立應付款。清冊不以訂單是否完工單獨判斷納入，而是讀取應付帳務、付款日、目前付款狀態及收款資料。
 - 已採納的歷史服務完成案件不必重啟精算。已有應付帳務時讀取該帳務；缺少帳務時，沿用 §2.5 的歷史投影：最新歷史實際天數，缺少時使用原服務天數，再沿既有薪資、調整額及付款日規則計算。資料不足或已結清者不列入，查詢不補建帳務。
 - 排班確認只能計算預估客戶補助退款，不會同時建立補助退款單；必須經 Client Finance 完成上述建單條件後，已建立的未退完金額才是清冊來源。客戶一般退款也必須先建立退款單。
-- 畫面所選月份轉換成該月 15 日。月嫂款項只列付款日等於該日的項目，較早月份未付款不混入；客戶退款列付款日不晚於該日且仍未退完的項目，包含以前月份尚未退完的退款。
+- 月嫂款項沿用所選月份 15 日的付款日篩選；客戶一般退款及補助退款納入所選月份月底以前仍未退完的款項，包含 16 日至月底及以前月份餘額。退款依各自 due date 歸屬，不新增付款日期政策或獨立退款清冊。缺日期或收款資料在付款清單保留待確認，不冒充可付款清冊。
 - 月嫂未付款或部分付款且 remaining 為正時可列入，並須有唯一主收款帳戶、收款人及銀行資料；清冊與 Excel 只列目前 remaining，同案查核 API 分開呈現原始應付總額及未付款餘額。客戶退款必須仍開啟且餘額為正，建單時收款帳戶快照完整，並通過退款來源異常檢查。客戶部分退款列目前未退完金額；已付清、結清、缺少收款資料或未通過其他異常檢查者不列入。
 - 「已確定」表示有款項依據，不表示金額永久凍結或已付款。重新匯出會再次查詢來源，因此修改發生在畫面查詢與下載之間時，新 Excel 可能與先前畫面不同；同一次下載及封存使用相同檔案，舊下載及封存檔不自動改寫。
 
@@ -348,7 +355,7 @@ flowchart TD
 | 付款／退款核銷完成 | 下次查詢減少未付款金額或移除付清項目 | 下次查詢更新剩餘款或移除付清項目；月嫂部分付款只列 remaining，仍須符合付款日及其他付款條件 |
 | 重新進入對應頁籤，或工作台「重新整理」 | 重新向 API 查詢 | 重新向 API 查詢 |
 | 「重新查詢預估」 | 重新向 API 查詢 | 不適用 |
-| 切換付款月份 | 只篩選已載入資料，不重新向 API 查詢；未知日期項目仍保留 | 重新向 API 查詢該月份 15 日的清冊 |
+| 切換付款月份 | 只篩選已載入資料，不重新向 API 查詢；未知日期項目仍保留 | 重新查詢同月份清冊；月嫂按 15 日，客戶退款按月底 |
 | 重新下載 Excel | 此頁籤不提供付款清冊匯出 | 重新查詢來源、產生新檔並封存；既有檔案不變 |
 
 流程圖核對來源：`subsystems/staff_payables/cash_requirements_query.py`、`infrastructure/mysql/cash_requirements_repository.py`、`subsystems/staff_payables/accounts_payable_export.py`、`infrastructure/mysql/accounts_payable_export_sources.py`、`api/routes/finance_reports.py`、`ui_react/src/components/CashRequirementsPanel.tsx` 及 `ui_react/src/pages/FinancePage.tsx`。2026-10-15 依使用者後續指示修正月嫂部分付款的查詢篩選與彙整，API 回傳格式、金額公式、帳務建立時點與付款寫入流程沿用既有契約。
@@ -357,7 +364,7 @@ flowchart TD
 |---|---|---|
 | `CASHPLAN-01` 範圍 | 使用者明確選擇從已建立排班開始，納入尚未成立的預估客戶補助退款；媒合中、只有服務說明或只保存服務日期的案件不納入。已排班案件後續完成仍可追蹤未付款項；取消案件不再估算未履約支出，已建立的未清償款項仍保留 | 相同媒合案件在排班建立前不出現，建立後出現；完成／取消不造成已建立未付款項消失 |
 | `CASHPLAN-02` 月嫂來源 | 既有 Payroll／Staff Payables 目前未付款金額及 owner 付款日；不得由前端以預計天數另算一套薪資，不重複列入已付清金額 | 多位月嫂與代班依各自來源合計守恆；已付清排除，更正後重新查詢更新 |
-| `CASHPLAN-03` 補助退款來源 | 需由客戶代墊服務費的補助案件，讀 Client Finance 的補助上限、排班服務量及凍結單價。未建單金額標為「預估」並列出未滿足的建單條件；全補助且客戶無需支付服務薪資的案件不估算客戶退款。已有退款單時使用實際未退完金額，替代同案預估列 | 未完工或尚未收齊客戶款仍可查看預估；建立退款單後只列一筆，不同時加總預估與已確定金額 |
+| `CASHPLAN-03` 補助退款來源 | 讀 Client Finance 的補助上限、有效服務量及凍結單價，資料足夠即自動同步應退 projection；不足時保留待確認。社福未先墊部分不退；已有 projection 使用實際未退完金額，替代同案預估 | 不等待完工或客戶款收齊；同案不重複計算預估與正式金額 |
 | `CASHPLAN-04` 日期與缺值 | 月嫂付款日使用既有 owner 日期。未建客戶補助退款單時，可用目前排班預計結束月份＋兩個曆月的15日顯示「預估付款日」；建單後改讀退款單日期。金額或日期缺足夠來源時標示待確認，不以零或當月代替，也不把預估日期寫入付款條款或退款單 | 預計結束日變更後預估月份更新；日期未知的項目另列待確認；不改寫真正的結案日、到期日或帳務 |
 | `CASHPLAN-05` 呈現與更新 | 付款清單顯示受款人／案件、款項類型、付款狀態、未付款金額及預估／已確定付款日，以月份篩選。付款狀態篩選為「全部／確認待付／待確認服務結束」；確認待付沿用 confirmed，待確認服務結束只納入 estimated 且 owner 原因含「服務尚未完成」的項目。其他預估項目仍保留於全部並顯示「待確認」，不得改列確認待付。狀態欄只顯示簡短標籤，不顯示「待確認事項」與原因清單；待確認原因保留於 typed 查詢（2026-10-15 使用者後續指示）。來源金額保留 typed 查詢，不在列表重複顯示。頂部依正式／預估分開顯示已知金額小計，不顯示「金額待確認」或「付款日期待確認」的筆數統計卡片（2026-10-15 使用者後續指示）。缺金額時不得宣稱完整資金總額；資料確實不足的項目仍在明細標示待確認。查詢唯讀；來源套用後重新查詢更新；已下載檔案不自動更新 | 預估結果不能當作付款指示或造成已付款；與清冊同一已確定項目的金額一致；頂部不再顯示兩張待確認筆數卡片，未知日期／金額仍可從明細查閱 |
 | `CASHPLAN-06` 位置與入口 | 「帳務工作台 → 付款」統一清單；正式待付／預估／待確認為篩選，補助資訊進入共用案件補助明細；不再提供預估與正式清冊兩個主頁籤 | 正式與預估分開合計；同一真實款項只出現一次；會計清冊仍依 §2.5 下載與封存；歷史可從案件／人員明細查閱 |
@@ -411,6 +418,7 @@ package_route:
 依本次人工指示，實際收付款後，帳務清單必須呈現「已收款／已付款」，不得持續顯示待確認。此節取代 §2.5.1、§2.5.2 中付款主清單只列未付項目的呈現限制；會計清冊仍只匯出符合既有條件的未付餘額，不改 writer、交易邊界或銀行外部效果。
 
 - 付款清單保留已付款及歷史已結清項目。既有唯讀 cash requirements 每列增加 `payment_status`：`pending`、`partially_paid`、`paid`、`settled`；與 `certainty` 分開。銀行付款投影 completed 或 exact current 歷史 paid 證據顯示「已付款」；歷史 settled 顯示「已結清」，不能冒稱已匯款。部分付款顯示剩餘款，已付／結清列未付餘額為零，不增加待付小計；款項種類、既有預估及服務結束篩選保留，增加部分付款／已付款／已結清篩選。付款日期沿原來源，不以到期日冒稱實際匯款日。
+- 服務中換人造成超付款時，付款清單顯示已付款、未付額零及追償提示；原帳務負餘額與獨立追償仍保留。不得將負餘額當成待付款，或因該列使整份付款清單無法查詢。
 - 客戶帳務摘要增加 `receipt_status`：`pending`、`unpaid`、`partially_received`、`received`、`settled`。清單分別顯示待確認、待收款、部分收款、已收款、已結清；已收款篩選包含部分收款。canonical receipt／reversal 淨額與 exact current 歷史 paid 證據提供收款依據；歷史 settled 不等於實際收款。`receipt_entry_count` 保持只計 canonical receipt，不能拿其他 ledger 類型當收款證據。
 - 政府補助收款列沿既有 owner `substatus_code` 呈現收款狀態：`paid` 顯示已收款、`partially_paid` 顯示部分收款；服務結束確認仍是獨立欄位，不取代入款狀態。
 - 歷史 owner overlay 只有 obligation identity、金額快照與 obligation version 都符合目前義務時才有效；有效 paid／settled 不再列為未收／未付。沖正或後續版本造成新餘額時，重新查詢須顯示目前狀態，不沿用失效的歷史確認。
@@ -472,7 +480,7 @@ Client Finance 擁有：
 | Operation | 根事實 | 結果 |
 |---|---|---|
 | Customer Refund | 已成立 refund obligation＋正式銀行出款 | 清償退款義務 |
-| Subsidy Return | 非全補助案件服務正式完成後成立的 subsidy-return obligation＋正式銀行出款 | 清償客戶代墊補助退還義務；全補助案件因客戶未出資而不建立；季度第一月結案案件的付款日為結案月加兩曆月 15 日 |
+| Subsidy Return | 依案件資料自動同步的應退補助＋正式銀行出款 | 退還客戶先墊補助；社福未先墊者不退款。所有月份依有效服務結束月加兩曆月 15 日到期，不等待政府入款 |
 | Receipt Reversal | 既有有效 receipt ledger event 失效 | append reversal 並重開原 receivable |
 
 禁止：
@@ -507,12 +515,12 @@ progress reducer。`reversal` 只可用於原 client receipt 的沖正。
 Commands：
 
 - `CreateCustomerRefundObligation`
-- `CreateSubsidyReturnObligation`
+- 案件計價資料保存時，自動同步應退補助；沒有人工建立關卡
 - `AdjustRefundObligation`
 - `ApplyClientReceiptWithOverage`
 - `ApplyClientRefundWithOverage`
 
-root fact 必須來自已提交的 cancellation／financial adjustment／subsidy-return 業務事件。
+一般退款 root fact 來自已提交的 cancellation／financial adjustment；應退補助由案件條件與日期的 owner writer 自動同步，詳規格 04、14。政府入款與代墊回收以整期處理，不逐案銷帳。
 每個 obligation 保存 source event identity、case number、integer amount、reason、
 version 與 immutable creation event。
 

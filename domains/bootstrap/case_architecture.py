@@ -308,7 +308,8 @@ def build_case_architecture_bootstrap_candidate(
 def policy_kind_for_identity(identity_status: str) -> PayrollPolicyKind:
     mappings = {
         "一般市民": PayrollPolicyKind.CITIZEN,
-        "補助市民": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
+        "補助市民": PayrollPolicyKind.CITIZEN,
+        "社福": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "低收入戶": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "中低收入戶": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "非市民": PayrollPolicyKind.NON_CITIZEN,

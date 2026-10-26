@@ -83,7 +83,10 @@ from api.routes import (
     line_identity,
     line_service_help,
     line_staff_self_service,
+    service_start,
     line_mobile_admin,
+    notification_tasks,
+    notification_task_actions,
     line_mobile_staff_leave_coordination,
     line_media_assets,
     line_identity_management,
@@ -92,6 +95,7 @@ from api.routes import (
     line_deposit_payment,
     customer_service,
     line_order_groups,
+    line_payment_overdue_reminders,
     line_rich_menus,
     line_reviews,
     runtime_health,
@@ -276,11 +280,16 @@ app.include_router(line_identity.public_router)
 app.include_router(line_identity.review_router)
 app.include_router(line_identity.page_router)
 app.include_router(line_order_groups.router)
+app.include_router(line_payment_overdue_reminders.router)
 app.include_router(knowledge_retrieval.router)
 app.include_router(line_staff_self_service.router)
+app.include_router(service_start.router)
 app.include_router(staff_leave_intake.router)
 app.include_router(staff_leave_management.router)
 app.include_router(line_mobile_admin.router)
+app.include_router(notification_tasks.router)
+app.include_router(notification_task_actions.router)
+app.include_router(notification_task_actions.mobile_router)
 app.include_router(line_mobile_staff_leave_coordination.router)
 app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
@@ -383,6 +392,8 @@ app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
 app.include_router(operations_reports.router)
 app.include_router(government_subsidy.router)
+from api.routes import government_subsidy_periods
+app.include_router(government_subsidy_periods.router)
 app.include_router(anomaly_necessity_migration.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)

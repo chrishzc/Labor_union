@@ -211,6 +211,14 @@
             const pageResponse = await fetch('/api/config/liff/runtime?page=gateway');
             if (!pageResponse.ok) throw new Error('無法取得目前的服務入口，請稍後重試。');
             const runtime = await pageResponse.json();
+            const root = document.documentElement.style;
+            root.setProperty('--primary', runtime.theme.primary_color);
+            root.setProperty('--primary-hover', runtime.theme.primary_hover_color);
+            root.setProperty('--bg-gradient', runtime.theme.background);
+            root.setProperty('--text-dark', runtime.theme.text_color);
+            root.setProperty('--text-muted', runtime.theme.muted_text_color);
+            document.body.style.fontFamily = runtime.theme.font_family;
+            document.getElementById('pageLogo').textContent = runtime.page.content.logo || '';
             document.getElementById('pageTitle').textContent = runtime.page.title;
             document.getElementById('pageSubtitle').textContent = runtime.page.subtitle;
             actions = runtime.page.actions.map(action => ({...action, isExternal: action.path.startsWith('https://')}));

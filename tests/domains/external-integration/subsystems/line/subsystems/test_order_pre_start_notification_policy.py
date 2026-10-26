@@ -1,147 +1,58 @@
-"""
-File: test_order_pre_start_notification_policy.py
-Description: 驗證服務開始前 3 天提醒事件在 Policy 評估與 Template 渲染時完全符合契約規格。
-"""
-
+"""Current group start-day card and unchanged second-payment reminder contracts."""
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
-
+import pytest
 from subsystems.line.message_configuration import render_message_template
 from subsystems.line.notification_policy import evaluate_notification_rules
-from subsystems.line.notification_source_adapters import from_order_pre_start_checkpoint
+from subsystems.line.notification_source_adapters import from_order_service_start_day
+from subsystems.line.service_start_day import ServiceStartDayCandidate, StartDayCaregiver
 
 
-def test_order_pre_start_rule_evaluates_to_intent_created() -> None:
-    rules_def = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
-
-    event = from_order_pre_start_checkpoint(
-        case_no="CASE-TEST-888",
-        planned_start_date="2026-08-20",
-        first_payment_amount=24000,
-        already_settled=False,
-        occurred_at=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc),
-    )
-
-    decisions = evaluate_notification_rules(event, rules_def)
-
-    matching_decisions = [d for d in decisions if d.rule_id == "LU96-ORDER-PRE-START-REMINDER-V1"]
-    assert len(matching_decisions) == 1
-    assert matching_decisions[0].status == "intent_created"
-    assert matching_decisions[0].reason_code == "rule_matched"
-
-
-def test_order_pre_start_template_renders_properly() -> None:
-    templates_def = json.loads(Path("config/message_templates.json").read_text(encoding="utf-8"))
-
-    event = from_order_pre_start_checkpoint(
-        case_no="CASE-TEST-888",
-        planned_start_date="2026-08-20",
-        first_payment_amount=24000,
-        already_settled=False,
-        occurred_at=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc),
-    )
-
-    rendered = render_message_template(
-        templates_def,
-        "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
-        {
-            "case_no": event.facts["case_no"],
-            "planned_start_date": event.facts["planned_start_date"],
-            "first_payment_amount": event.facts["first_payment_amount"],
-            "first_payment_status": event.facts["first_payment_status"],
-        },
-    )
-
-    payload = json.loads(rendered.payload_json)
-    assert payload["type"] == "text"
-    text = payload["text"]
-    assert "CASE-TEST-888" in text
-    assert "2026-08-20" in text
-    assert "NT$ 24,000" in text
-    assert "寶寶與產婦狀況確認" in text
-    assert "第一期款繳費說明" in text
+@pytest.mark.parametrize('amount',[24000,0])
+def test_start_day_group_rule_and_full_card(amount):
+    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
+    templates=json.loads(Path('config/message_templates.json').read_text(encoding='utf-8'))
+    candidate=ServiceStartDayCandidate('CASE-001',date(2026,8,20),'C_SERVICE',7,amount,(StartDayCaregiver(1,'測試月嫂'),))
+    event=from_order_service_start_day(candidate,occurred_at=datetime(2026,8,20,tzinfo=timezone.utc))
+    rule=next(r for r in rules['rules'] if r['event_code']==event.event_code)
+    assert rule['recipient_selector']=='case_group'
+    assert evaluate_notification_rules(event,rules)[0].status=='intent_created'
+    variables={v['name']:event.facts[v['name']] for v in next(t for t in templates['templates'] if t['id']==rule['template_id'])['variables']}
+    payload=json.loads(render_message_template(templates,rule['template_id'],variables).payload_json)
+    assert payload['type']=='flex'
+    text=payload['contents']['body']['contents'][0]['text']
+    assert '今天是本案的服務開始日' in text and '測試月嫂，請問今天的服務是否順利？' in text
+    assert ('第一期款尚待繳納：24,000 元' in text)==(amount>0)
+    assert '3 天後' not in text and '留言聯繫專員' not in text
+    buttons=payload['contents']['footer']['contents']
+    assert [b['action']['label'] for b in buttons]==['服務正常','需要協助']
+    assert [b['action']['data'] for b in buttons]==[f'start-day:{candidate.token}:normal',f'start-day:{candidate.token}:help']
 
 
-def test_order_pre_start_template_renders_for_already_settled_case() -> None:
-    templates_def = json.loads(Path("config/message_templates.json").read_text(encoding="utf-8"))
-
-    event = from_order_pre_start_checkpoint(
-        case_no="CASE-TEST-999",
-        planned_start_date="2026-08-20",
-        first_payment_amount=0,
-        already_settled=True,
-        occurred_at=datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc),
-    )
-
-    rendered = render_message_template(
-        templates_def,
-        "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
-        {
-            "case_no": event.facts["case_no"],
-            "planned_start_date": event.facts["planned_start_date"],
-            "first_payment_amount": event.facts["first_payment_amount"],
-            "first_payment_status": event.facts["first_payment_status"],
-        },
-    )
-
-    payload = json.loads(rendered.payload_json)
-    text = payload["text"]
-    assert "CASE-TEST-999" in text
-    assert "已結清" in text
-    assert "已核銷完成" in text
+@pytest.mark.parametrize('override',[
+    {'recipient_selector':'client.bound_case'},
+    {'frequency':{'kind':'recurring_bounded','maximum_occurrences':2,'interval_days':1}},
+    {'schedule':{'kind':'relative_service_time','offset_seconds':60}},
+    {'event_code':'order.pre_start_reminder'},
+])
+def test_rule_writer_cannot_restore_private_early_or_repeated_reminders(override):
+    from domains.line.notification_rules import validate_notification_rules, LineNotificationRuleError
+    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
+    rule=next(r for r in rules['rules'] if r['event_code']=='order.service_start_day')
+    rule.update(override)
+    with pytest.raises(LineNotificationRuleError):validate_notification_rules(rules)
 
 
-def test_order_second_payment_rule_evaluates_to_intent_created() -> None:
-    from subsystems.line.notification_source_adapters import from_order_second_payment_checkpoint
-
-    rules_def = json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8"))
-
-    event = from_order_second_payment_checkpoint(
-        case_no="CASE-TEST-777",
-        second_payment_due_date="2026-09-10",
-        second_payment_amount=36000,
-        already_settled=False,
-        occurred_at=datetime(2026, 9, 7, 9, 0, tzinfo=timezone.utc),
-    )
-
-    decisions = evaluate_notification_rules(event, rules_def)
-
-    matching_decisions = [d for d in decisions if d.rule_id == "LU96-ORDER-SECOND-PAYMENT-REMINDER-V1"]
-    assert len(matching_decisions) == 1
-    assert matching_decisions[0].status == "intent_created"
-    assert matching_decisions[0].reason_code == "rule_matched"
-
-
-def test_order_second_payment_template_renders_properly() -> None:
-    from subsystems.line.notification_source_adapters import from_order_second_payment_checkpoint
-
-    templates_def = json.loads(Path("config/message_templates.json").read_text(encoding="utf-8"))
-
-    event = from_order_second_payment_checkpoint(
-        case_no="CASE-TEST-777",
-        second_payment_due_date="2026-09-10",
-        second_payment_amount=36000,
-        already_settled=False,
-        occurred_at=datetime(2026, 9, 7, 9, 0, tzinfo=timezone.utc),
-    )
-
-    rendered = render_message_template(
-        templates_def,
-        "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
-        {
-            "case_no": event.facts["case_no"],
-            "second_payment_due_date": event.facts["second_payment_due_date"],
-            "second_payment_amount": event.facts["second_payment_amount"],
-            "second_payment_status": event.facts["second_payment_status"],
-        },
-    )
-
-    payload = json.loads(rendered.payload_json)
-    assert payload["type"] == "text"
-    text = payload["text"]
-    assert "CASE-TEST-777" in text
-    assert "2026-09-10" in text
-    assert "NT$ 36,000" in text
-    assert "第二期款（尾款）繳款提醒" in text
-    assert "待繳納" in text
+def test_historical_config_is_readable_but_retired_template_cannot_send():
+    from api.schemas.line_notification_rules import LineNotificationRulesDefinition
+    from subsystems.line.message_configuration import LineMessageConfigurationError
+    rules=json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
+    rule=next(r for r in rules['rules'] if r['event_code']=='order.service_start_day')
+    rule['event_code']='order.pre_start_reminder'
+    assert LineNotificationRulesDefinition.model_validate(rules)
+    templates={'templates':[{'id':'LU96-ORDER-PRE-START-REMINDER-CARD-V1','message_type':'text','content':'舊提醒'},
+                             {'id':'unrelated','message_type':'text','content':'其他現行通知'}]}
+    assert json.loads(render_message_template(templates,'unrelated').payload_json)['text']=='其他現行通知'
+    with pytest.raises(LineMessageConfigurationError):
+        render_message_template(templates,'LU96-ORDER-PRE-START-REMINDER-CARD-V1')

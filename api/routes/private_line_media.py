@@ -11,6 +11,7 @@ from infrastructure.runtime.file_transfer_settings import FileTransferSettings
 from api.schemas.line_staff_self_service import (
     StaffServiceDayMediaResponse, StaffServiceDayLogPreviewResponse,
     StaffServiceDayLogApplyResponse, StaffServiceDayLogReadbackResponse,
+    StaffServiceDayLogOptionsResponse,
 )
 
 
@@ -42,6 +43,7 @@ for path, endpoint, schema in (
     ("/service-day-media", media.upload_service_day_meal_photo, StaffServiceDayMediaResponse),
     ("/service-day-logs/preview", logs.preview_service_day_log, StaffServiceDayLogPreviewResponse),
     ("/service-day-logs/apply", logs.apply_service_day_log, StaffServiceDayLogApplyResponse),
+    ("/service-day-logs/options", logs.service_day_log_options, StaffServiceDayLogOptionsResponse),
     ("/service-day-logs/{log_id}/query", logs.query_service_day_log, StaffServiceDayLogReadbackResponse),
 ):
     router.add_api_route(path, endpoint, methods=["POST"], response_model=BaseResponse[schema])

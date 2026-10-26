@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from calendar import monthrange
 from decimal import Decimal
 
 from domains.staff_payables.reconciliation import StaffPayableStatus
@@ -80,7 +81,10 @@ class MySqlClientRefundExportSource:
         target_payment_date: date,
     ) -> tuple[ClientRefundExportFact, ...]:
         with self._connection.cursor() as cursor:
-            cursor.execute(_CLIENT_REFUNDS_SQL, (target_payment_date,))
+            month_end = target_payment_date.replace(
+                day=monthrange(target_payment_date.year, target_payment_date.month)[1]
+            )
+            cursor.execute(_CLIENT_REFUNDS_SQL, (month_end,))
             rows = tuple(cursor.fetchall())
         return tuple(_refund_fact(row) for row in rows)
 
@@ -133,7 +137,8 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
         disposition=disposition,
         reason=reason,
         payment_status=(historical_confirmation if historical_confirmation is not None else
-                        "paid" if payout_status == "completed" else
+                        "paid" if payout_status in {"completed", "recovery_required"}
+                            or _integer(row["export_amount_ntd"], "staff payable balance") < 0 else
                         "partially_paid" if payout_status == "partially_paid" else "pending"),
     )
 

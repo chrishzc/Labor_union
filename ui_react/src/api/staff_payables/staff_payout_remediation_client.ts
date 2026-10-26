@@ -21,7 +21,7 @@ import { mapStaffPayoutRemediationError, StaffPayoutRemediationError } from './s
 
 export interface StaffPayoutRemediationOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface StaffPayoutRemediationCommand { idempotencyKey: string; correlationId: string; signal?: AbortSignal; }
-export interface StaffPayoutSelection { financeImportRowIds: number[]; obligationIdentities: string[]; }
+export interface StaffPayoutSelection { financeImportRowIds: number[]; obligationIdentities: string[]; differenceMode?: 'underpayment' | 'overpayment'; }
 export interface StaffPayoutRemediationClient {
   query(staffId: number, options?: StaffPayoutRemediationOptions): Promise<StaffPayablesQuery>;
   preview(selection: StaffPayoutSelection, options?: StaffPayoutRemediationOptions): Promise<StaffPayoutPreview>;
@@ -65,7 +65,8 @@ function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown, label: string):
   }
 }
 function normalizeSelection(selection: StaffPayoutSelection): StaffPayoutSelection {
-  return { financeImportRowIds: ids(selection.financeImportRowIds, 'finance_import_row_ids'), obligationIdentities: identities(selection.obligationIdentities, 'obligation_identities') };
+  if (selection.differenceMode !== undefined && !['underpayment', 'overpayment'].includes(selection.differenceMode)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_INPUT_INVALID', '核銷方式無效。');
+  return { financeImportRowIds: ids(selection.financeImportRowIds, 'finance_import_row_ids'), obligationIdentities: identities(selection.obligationIdentities, 'obligation_identities'), differenceMode: selection.differenceMode };
 }
 function commandHeaders(command: StaffPayoutRemediationCommand): Record<string, string> {
   if (!command.idempotencyKey.trim() || !command.correlationId.trim()) throw new StaffPayoutRemediationError('STAFF_PAYOUT_COMMAND_INVALID', '命令識別不得為空白。');
@@ -81,7 +82,8 @@ class DefaultStaffPayoutRemediationClient implements StaffPayoutRemediationClien
   async preview(selection: StaffPayoutSelection, options?: StaffPayoutRemediationOptions): Promise<StaffPayoutPreview> {
     const normalized = normalizeSelection(selection);
     try {
-      return decode(StaffPayoutPreviewSchema, await transport.post('/api/v1/staff-payables/payout/preview', {
+      return decode(StaffPayoutPreviewSchema, await transport.post(`/api/v1/staff-payables/${normalized.differenceMode ? 'payout-difference' : 'payout'}/preview`, {
+        ...(normalized.differenceMode ? { mode: normalized.differenceMode } : {}),
         finance_import_row_ids: normalized.financeImportRowIds,
         obligation_identities: normalized.obligationIdentities,
       }, authOptions(options ?? {}, { 'X-Correlation-ID': `staff-payout-preview-${crypto.randomUUID()}` })), 'PAYOUT Preview');
@@ -93,7 +95,8 @@ class DefaultStaffPayoutRemediationClient implements StaffPayoutRemediationClien
     if (normalizedReason.length > 500) throw new StaffPayoutRemediationError('STAFF_PAYOUT_REASON_INVALID', '處理理由不得超過500字。');
     if (!preview.preview_fingerprint || !/^[0-9a-f]{64}$/.test(preview.preview_fingerprint)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_INVALID', 'Preview fingerprint 無效。');
     try {
-      return decode(StaffPayoutJobAcceptedSchema, await transport.post('/api/v1/staff-payables/payout/apply', {
+      return decode(StaffPayoutJobAcceptedSchema, await transport.post(`/api/v1/staff-payables/${normalized.differenceMode ? 'payout-difference' : 'payout'}/apply`, {
+        ...(normalized.differenceMode ? { mode: normalized.differenceMode } : {}),
         finance_import_row_ids: normalized.financeImportRowIds,
         obligation_identities: normalized.obligationIdentities,
         expected_staff_payables_version: preview.staff_payables_version,

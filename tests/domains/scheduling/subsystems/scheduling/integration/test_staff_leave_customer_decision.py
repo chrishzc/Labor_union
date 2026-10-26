@@ -382,143 +382,21 @@ def _rows(connection, table):
     return [dict(row) for row in connection.db.execute(f"SELECT * FROM {table}")]
 
 
-def test_rejection_records_case_specific_need_and_readable_ack_in_one_transaction(transaction_context):
-    connection, application, extra_connections = transaction_context
-    _run_postback(connection, application)
-    tickets = _rows(connection, "customer_service_tickets")
-    assert len(tickets) == 1
-    ticket = tickets[0]
-    assert (ticket["case_no"], ticket["client_id"], ticket["status"]) == ("CASE-1", 11, "waiting")
-    assert extra_connections == []
-    assert connection.commits == 1
-    need = MySqlCustomerServiceRepository(connection).detail(ticket["id"])
-    assert "leave_substitute_required" in need["events"][0]["message_text"]
-    assert "#17／版本 4" in need["events"][0]["message_text"]
-    assert need["ticket"]["case_no"] == "CASE-1"
-    page = MySqlCustomerServiceRepository(connection).list(CustomerServiceListQuery(search="CASE-1"))
-    assert page["total"] == 1
-    assert page["items"][0]["ticket_id"] == ticket["id"]
-    delivery = _rows(connection, "test_deliveries")
-    assert len(delivery) == 1
-    assert (delivery[0]["recipient_type"], delivery[0]["recipient"]) == ("user", "U-customer")
-    assert f'客服單 #{ticket["id"]}' in json.loads(delivery[0]["payload"])["text"]
-    assert _rows(connection, "scheduling_staff_leave_request_aggregates")[0]["request_status"] == "accepted_for_processing"
-    assert len(_rows(connection, "staff_schedule")) == 2
-
-
-@pytest.mark.parametrize("initial_status", ["waiting", "handling", "resolved"])
-def test_rejection_uses_existing_conversation_without_overwriting_its_case(transaction_context, initial_status):
-    connection, application, _ = transaction_context
-    connection.db.execute(
-        "INSERT INTO customer_service_tickets (id,line_user_id,client_id,case_no,category,status) "
-        "VALUES (100,'U-customer',22,'OTHER','service_progress',?)", (initial_status,)
-    )
-    _run_postback(connection, application)
-    tickets = _rows(connection, "customer_service_tickets")
-    assert len(tickets) == 1
-    assert (tickets[0]["id"], tickets[0]["case_no"], tickets[0]["client_id"]) == (100, "OTHER", 22)
-    # This is the existing conversation owner's reopen behavior, not a new policy.
-    assert tickets[0]["status"] == ("handling" if initial_status == "resolved" else initial_status)
-    event = _rows(connection, "customer_service_ticket_events")[0]
-    assert event["ticket_id"] == 100
-    assert "案件 CASE-1" in event["message_text"]
-    assert "#17／版本 4" in event["message_text"]
-    assert "案件 CASE-1" in json.loads(_rows(connection, "test_deliveries")[0]["payload"])["text"]
-
-
-def test_each_case_has_its_own_need_event_within_the_same_customer_conversation(transaction_context):
-    connection, application, _ = transaction_context
-    _run_postback(connection, application)
-    _run_postback(connection, application, _inbox(case_no="CASE-2", event_id="leave-event-2"))
-    tickets = _rows(connection, "customer_service_tickets")
-    assert len(tickets) == 1
-    assert tickets[0]["case_no"] == "CASE-1"
-    events = _rows(connection, "customer_service_ticket_events")
-    assert len(events) == 2
-    assert len({event["event_key"] for event in events}) == 2
-    assert "案件 CASE-1" in events[0]["message_text"]
-    assert "案件 CASE-2" in events[1]["message_text"]
-    assert len(_rows(connection, "scheduling_staff_leave_request_receipts")) == 2
-
-
-def test_exact_replay_does_not_duplicate_need_or_ack_or_reopen_resolved_ticket(transaction_context):
-    connection, application, _ = transaction_context
-    _run_postback(connection, application)
-    connection.db.execute("UPDATE customer_service_tickets SET status='resolved',version=9")
-    tables = ("scheduling_staff_leave_request_receipts", "customer_service_tickets",
-              "customer_service_ticket_events", "test_deliveries")
-    before = {name: _rows(connection, name) for name in tables}
-    application._now = lambda: datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
-    _run_postback(connection, application, _inbox(event_id="another-click"))
-    assert {name: _rows(connection, name) for name in tables} == before
-
-
-@pytest.mark.parametrize("failure", ["ticket", "event", "ack", "consumer"])
-def test_failure_rolls_back_decision_need_and_ack_and_explicit_retry_can_finish(transaction_context, failure):
-    connection, application, _ = transaction_context
-    if failure in {"ticket", "event"}:
-        table = "customer_service_tickets" if failure == "ticket" else "customer_service_ticket_events"
-        connection.db.execute(
-            f"CREATE TRIGGER fail_write BEFORE INSERT ON {table} "
-            "BEGIN SELECT RAISE(ABORT, 'injected-storage-failure'); END"
-        )
-    with pytest.raises((RuntimeError, sqlite3.IntegrityError)):
-        with _LineUnitOfWork(connection) as uow:
-            uow.delivery_tasks.fail = failure == "ack"
-            application.handle_postback(_inbox(), uow)
-            if failure == "consumer":
-                raise RuntimeError("inbox-completion-failed")
-            uow.commit()
-    for table in ("scheduling_staff_leave_request_receipts", "customer_service_tickets",
-                  "customer_service_ticket_events", "test_deliveries"):
-        assert _rows(connection, table) == []
-    connection.db.execute("DROP TRIGGER IF EXISTS fail_write")
-    _run_postback(connection, application)
-    assert len(_rows(connection, "customer_service_tickets")) == 1
-    assert len(_rows(connection, "scheduling_staff_leave_request_receipts")) == 1
-    assert len(_rows(connection, "test_deliveries")) == 1
-
-
-@pytest.mark.parametrize("options", [
-    {"user": "U-wrong"}, {"version": 3}, {"case_no": "OTHER"}, {"source_type": "group"},
-])
-def test_rejected_actor_or_stale_context_cannot_create_need(transaction_context, options):
-    connection, application, _ = transaction_context
-    _run_postback(connection, application, _inbox(**options))
-    for table in ("scheduling_staff_leave_request_receipts", "customer_service_tickets"):
-        assert _rows(connection, table) == []
-    deliveries = _rows(connection, "test_deliveries")
-    if options.get("source_type") == "group":
-        assert deliveries == []
-    else:
-        assert len(deliveries) == 1
-        assert deliveries[0]["identity"].startswith("leave-customer-decision-rejected:")
-
-
-def test_agreement_does_not_create_substitution_need_or_claim_schedule_completed(transaction_context):
-    connection, application, _ = transaction_context
-    _run_postback(connection, application, _inbox("agree_defer"))
-    assert _rows(connection, "customer_service_tickets") == []
-    assert len(_rows(connection, "scheduling_staff_leave_request_receipts")) == 1
-    assert "正式排班流程處理" in json.loads(_rows(connection, "test_deliveries")[0]["payload"])["text"]
-    assert _rows(connection, "scheduling_staff_leave_request_aggregates")[0]["aggregate_version"] == 4
-
-
-def test_conflicting_second_choice_has_no_new_effect(transaction_context):
-    connection, application, _ = transaction_context
-    _run_postback(connection, application)
-    before = _rows(connection, "scheduling_staff_leave_request_receipts")
-    _run_postback(connection, application, _inbox("agree_defer", event_id="conflicting-click"))
-    assert _rows(connection, "scheduling_staff_leave_request_receipts") == before
-    assert len(_rows(connection, "customer_service_tickets")) == 1
-    deliveries = _rows(connection, "test_deliveries")
-    assert len(deliveries) == 2
-    assert deliveries[1]["identity"] == "leave-customer-decision-rejected:conflicting-click"
+@pytest.mark.parametrize('decision',['agree_defer','reject_substitution'])
+@pytest.mark.parametrize('options',[{}, {'user':'U-other'}, {'version':1}, {'source_type':'group'}, {'case_no':'OTHER'}])
+def test_retired_customer_card_has_no_sql_effect_for_actor_scope_stale_and_replay(transaction_context,decision,options):
+    connection,application,extra_connections=transaction_context
+    before={name:_rows(connection,name) for name in ['customer_service_tickets','customer_service_ticket_events','scheduling_staff_leave_request_receipts','test_deliveries']}
+    inbox=_inbox(decision,**options)
+    _run_postback(connection,application,inbox)
+    _run_postback(connection,application,inbox)
+    assert {name:_rows(connection,name) for name in before}==before
+    assert extra_connections==[]
 
 
 def test_fixture_preserves_the_production_active_conversation_uniqueness(transaction_context):
     connection, application, _ = transaction_context
-    _run_postback(connection, application)
+    connection.db.execute("INSERT INTO customer_service_tickets (line_user_id,client_id,case_no,category) VALUES ('U-customer',11,'CASE-1','service_progress')")
     with pytest.raises(sqlite3.IntegrityError, match="UNIQUE constraint failed"):
         connection.db.execute(
             "INSERT INTO customer_service_tickets (line_user_id,client_id,case_no,category) "

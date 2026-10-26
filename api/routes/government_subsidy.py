@@ -10,7 +10,7 @@ from datetime import date
 from enum import Enum
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from api.schemas.jobs import JobAcceptedResponse
 from api.dependencies.jobs import (
     durable_job_conflict_http_error,
@@ -40,6 +40,7 @@ from domains.government_subsidy.claims import (
 )
 from domains.government_subsidy.ledger import (
     AllocationIntent,
+    ClaimItemApproval,
     ClaimBatchIdentity,
     GovernmentSubsidyDomainError,
     ReceiptIntent,
@@ -74,9 +75,17 @@ from subsystems.government_subsidy.overpayment_query import (
     GovernmentSubsidyOverpaymentQueryError,
 )
 
+def _current_government_entry(request: Request):
+    if request.method == 'POST' and any(part in request.url.path for part in ('/claim-batches','/receipts','/overpayments/offset')):
+        from api.error_contracts import typed_http_error
+        raise typed_http_error(410,'validation','government_subsidy_period_entry_required',
+            '請至政府補助選擇月、季或年，核對整期入款；申請與核准作業在系統外辦理。','subsidy-period')
+
+
 router = APIRouter(
     prefix="/api/v1/government-subsidy",
     tags=["Government Subsidy"],
+    dependencies=[Depends(_current_government_entry)],
 )
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
@@ -499,7 +508,7 @@ def _approval_intent(batch_id, approvals):
     return ClaimApprovalIntent(
         batch_id,
         tuple(
-            AllocationIntent(
+            ClaimItemApproval(
                 item.item_id,
                 MoneyNTD(item.approved_amount_ntd),
             )
@@ -781,13 +790,19 @@ def _raise_mysql_error(error, correlation_id):
 def _raise_value_error(error, correlation_id):
     code = str(error) or "government_subsidy_claim_facts_invalid"
     not_found = code == "government_subsidy_batch_not_found"
+    conflicts = {
+        "government_subsidy_overpayment_version_conflict": ErrorCategory.CONFLICT,
+        "government_subsidy_overpayment_preview_stale": ErrorCategory.CONFLICT,
+        "government_subsidy_overpayment_idempotency_mismatch": ErrorCategory.IDEMPOTENCY_MISMATCH,
+    }
+    category = conflicts.get(code, ErrorCategory.NOT_FOUND if not_found else ErrorCategory.VALIDATION)
     typed = TypedError(
-        ErrorCategory.NOT_FOUND if not_found else ErrorCategory.VALIDATION,
+        category,
         code,
         "政府補助請求未通過資料驗證。",
         correlation_id,
     )
-    raise _http_error(404 if not_found else 422, typed) from error
+    raise _http_error(409 if code in conflicts else 404 if not_found else 422, typed) from error
 
 
 def _internal_error(correlation_id):
@@ -853,14 +868,20 @@ def _materialize_collection(value):
 @router.post("/receipts-with-overage/preview")
 def preview_government_subsidy_receipt_with_overage(body: GovernmentSubsidyOverageReceiptPreviewBody, application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application), principal: AdminPrincipal = Depends(require_system_admin)):
     del principal
-    candidate = application.preview_receipt_with_overage(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations))
-    return BaseResponse(data={"batch_id":candidate.batch_id,"allocated_amount_ntd":candidate.allocated_amount_ntd.amount,"overpayment_amount_ntd":candidate.overpayment_amount_ntd.amount,"preview_fingerprint":candidate.fingerprint.value}, message="成功產生政府補助溢撥預覽")
+    return _call_endpoint(
+        lambda: _overage_preview_payload(application.preview_receipt_with_overage(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations))),
+        "成功產生政府補助溢撥預覽", CorrelationId("government-overage-preview"),
+    )
+
+
+def _overage_preview_payload(candidate):
+    return {"batch_id":candidate.batch_id,"batch_version":candidate.expected_batch_version,"allocated_amount_ntd":candidate.allocated_amount_ntd.amount,"overpayment_amount_ntd":candidate.overpayment_amount_ntd.amount,"preview_fingerprint":candidate.fingerprint.value}
 
 
 @router.post("/receipts-with-overage/apply")
 def apply_government_subsidy_receipt_with_overage(body: GovernmentSubsidyOverageReceiptApplyBody, idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ..., correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ..., application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application), principal: AdminPrincipal = Depends(require_system_admin)):
-    request = ReceiptWithOverageApplyRequest(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations), body.intent.evidence_reference, ExpectedVersion(body.expected_batch_version), PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key), _actor(principal), body.reason, CorrelationId(correlation_id))
-    return _call_endpoint(lambda: BaseResponse(data=application.apply_receipt_with_overage(request), message="成功建立政府補助溢撥"), "成功建立政府補助溢撥", request.correlation_id)
+    request = ReceiptWithOverageApplyRequest(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations), body.intent.evidence_reference, ExpectedVersion(body.expected_batch_version), PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key), _actor(principal, CorrelationId(correlation_id)), body.reason, CorrelationId(correlation_id))
+    return _call_endpoint(lambda: application.apply_receipt_with_overage(request), "成功建立政府補助溢撥", request.correlation_id)
 
 
 def _overage_intents(values):
@@ -913,7 +934,7 @@ def _disposition_apply_request(body, idempotency_key, correlation_id, principal)
         body.overpayment_identity, _overpayment_offset_intents(body.targets),
         ExpectedVersion(body.expected_overpayment_version),
         PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
-        _actor(principal), body.reason, body.evidence_reference, CorrelationId(correlation_id),
+        _actor(principal, CorrelationId(correlation_id)), body.reason, body.evidence_reference, CorrelationId(correlation_id),
     )
 
 
@@ -953,7 +974,7 @@ def apply_government_subsidy_overpayment_offset(
         body.overpayment_identity, _overpayment_offset_intents(body.targets),
         ExpectedVersion(body.expected_overpayment_version),
         PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
-        _actor(principal), body.reason, body.evidence_reference,
+        _actor(principal, CorrelationId(correlation_id)), body.reason, body.evidence_reference,
         CorrelationId(correlation_id),
     )
     return _call_endpoint(

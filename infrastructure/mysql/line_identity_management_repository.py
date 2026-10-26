@@ -11,6 +11,8 @@ from subsystems.line.identity_management_contracts import (
     LineIdentityBindingListQuery,
     LineIdentityCandidateQuery,
     LineIdentityCandidatePage,
+    LineIdentityBindingReminder,
+    LineIdentityBindingReminderPage,
     LineIdentitySubjectContext,
     LineIdentityBindingManagementView,
     LineIdentityBindingPage,
@@ -30,6 +32,36 @@ from subsystems.line.identity_management_contracts import (
 class MySqlLineIdentityManagementRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def binding_reminders(self, query: LineIdentityCandidateQuery) -> LineIdentityBindingReminderPage:
+        """Unbound current owners; pending reviews remain in their original queue."""
+        if query.subject_type is LineBindingSubjectType.CUSTOMER:
+            from domains.orders.lifecycle import OrderLifecycleStatus
+            root = 'clients t JOIN orders o ON o.client_id=t.id AND o.case_no=t.case_no'
+            case_column = 'o.case_no'
+            active = 'o.status IN (%s,%s,%s,%s)'
+            parameters = [s.value for s in (OrderLifecycleStatus.PENDING_COMPLETION,
+                OrderLifecycleStatus.DISCUSSION, OrderLifecycleStatus.ESTABLISHED, OrderLifecycleStatus.IN_SERVICE)]
+        elif query.subject_type is LineBindingSubjectType.STAFF:
+            root, case_column, parameters = 'staff t', 'NULL', []
+            active = ("t.status='active' AND NOT EXISTS (SELECT 1 FROM staff_lifecycle_states lifecycle "
+                      "WHERE lifecycle.staff_id=t.id AND lifecycle.lifecycle_state<>'active')")
+        else:
+            raise ValueError('line_binding_reminder_role_invalid')
+        where = (active + " AND (t.line_user_id IS NULL OR t.line_user_id='') "
+            "AND NOT EXISTS (SELECT 1 FROM line_identity_role_bindings rb "
+            "WHERE rb.subject_type=%s AND rb.subject_reference=CAST(t.id AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci "
+            "AND rb.binding_status<>'revoked')")
+        parameters.append(query.subject_type.value)
+        with self._connection.cursor() as cursor:
+            cursor.execute(f'SELECT COUNT(*) AS total FROM {root} WHERE {where}', tuple(parameters))
+            total = int(cursor.fetchone()['total'])
+            cursor.execute(f'SELECT t.id AS subject_reference,t.name AS subject_name,t.phone,{case_column} AS case_no '
+                f'FROM {root} WHERE {where} ORDER BY t.id LIMIT %s OFFSET %s',
+                (*parameters, query.page_size, (query.page - 1) * query.page_size))
+            items = tuple(LineIdentityBindingReminder(str(r['subject_reference']), str(r['subject_name'] or ''),
+                r['phone'] or None, r['case_no']) for r in cursor.fetchall())
+        return LineIdentityBindingReminderPage(items, total)
 
     def list_unbound_pairing_candidates(self) -> UnboundPairingCandidatesView:
         with self._connection.cursor() as cursor:

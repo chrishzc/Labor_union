@@ -17,7 +17,7 @@ def test_gateway_and_mobile_admin_use_canonical_liff_config_without_url_identity
     assert "/api/v1/line/identity/runtime-config" in gateway
     assert "/api/v1/line/identity/runtime-config" in mobile_admin
     assert "/api/line/config" not in gateway
-    assert "/api/config/liff/runtime" not in gateway
+    assert "/api/config/liff/runtime?page=gateway" in gateway  # current DB-backed page/theme configuration
     assert "urlUserId" not in gateway
     assert "?userId=" not in gateway
     assert "/api/line/config" not in mobile_admin

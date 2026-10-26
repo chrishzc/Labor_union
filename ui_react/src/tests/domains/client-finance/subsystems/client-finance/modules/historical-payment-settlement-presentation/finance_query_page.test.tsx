@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 /**
  * File: finance_query_page.test.tsx
- * Description: 驗證FinancePage active-tab query budget、server資料與正常三步匯入邊界。
+ * Description: 驗證FinancePage active-tab query budget、server資料與正常單次操作匯入邊界。
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchPreview, type FinanceImportBatchOutcome } from '../../../../../../../api/finance_import/finance_import_mutation_client';
@@ -305,11 +305,9 @@ function installImportHttp(
   return { applyRequests, fetchSpy };
 }
 
-async function uploadAndPreview(file = IMPORT_FILE): Promise<void> {
+async function importWorkbook(file = IMPORT_FILE): Promise<void> {
   fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
-  fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
   await waitFor(() => expect(document.querySelector('.finance-scope-note')).toHaveTextContent(/需人工處理 \d+/));
 }
 
@@ -320,12 +318,6 @@ function assertPreviewCounts(plan: Pick<FinanceImportBatchPreview, 'counts'>, re
   expect(summary).toHaveTextContent(`需人工處理 ${reviewCount}`);
   expect(summary).toHaveTextContent(`待業務配對 ${plan.counts.business_pending}`);
   expect(summary).toHaveTextContent(`阻擋 ${plan.counts.blocked}`);
-}
-
-function confirmImport(): void {
-  const checkbox = screen.getByRole('checkbox');
-  if (!(checkbox as HTMLInputElement).checked) fireEvent.click(checkbox);
-  fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
 }
 
 describe('Finance import preview and replay boundary', () => {
@@ -342,103 +334,124 @@ describe('Finance import preview and replay boundary', () => {
     sessionClient.clearSession();
   });
 
-  it('keeps decoded Preview values and forwards its version and fingerprint without rewriting', async () => {
+  it('uses one click and forwards unchanged Preview values with an optional blank reason', async () => {
     const plan = await importPreview();
     const { applyRequests } = installImportHttp([plan]);
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
+    await importWorkbook();
+    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
     expect(previewSpy).toHaveBeenCalledOnce();
     await expect(previewSpy.mock.results[0].value).resolves.toEqual(plan);
     assertPreviewCounts(plan, plan.counts.manual_review);
-    confirmImport();
-    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
+    expect(applyRequests).toHaveLength(1);
     expect(applyRequests[0].body).toEqual({ batch_identity: plan.batch_identity,
-      expected_batch_version: plan.batch_version, preview_fingerprint: plan.preview_fingerprint,
-      reason: '已核對銀行交易明細預覽，確認匯入' });
+      expected_batch_version: plan.batch_version, preview_fingerprint: plan.preview_fingerprint, reason: '' });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
-  it('renders server blockers and never offers Apply for a blocked Preview', async () => {
+  it.each(['blocked', 'no-ready-rows'] as const)('does not submit %s', async policy => {
     const plan = await importPreview();
-    plan.apply_allowed = false;
-    plan.blocking_codes = ['fingerprint_collision'];
-    plan.counts.blocked = 2;
-    installImportHttp([plan]);
+    if (policy === 'blocked') { plan.apply_allowed = false; plan.blocking_codes = ['fingerprint_collision']; plan.counts.blocked = 2; }
+    else plan.counts.ready_dispatch = 0;
+    const { applyRequests } = installImportHttp([plan]);
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
+    await importWorkbook();
     assertPreviewCounts(plan, plan.counts.manual_review);
-    expect(screen.getByText(/目前不可匯入：存在可能重複的銀行交易/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
+    if (policy === 'blocked') expect(screen.getByText(/目前不可匯入：存在可能重複的銀行交易/)).toBeInTheDocument();
+    expect(applyRequests).toHaveLength(0);
   });
 
-  it('replays the exact first command after a lost response and binds the displayed reason', async () => {
+  it('retries a lost response with the same command and locks its original reason and file', async () => {
     const { applyRequests } = installImportHttp([await importPreview()], { loseFirstApply: true });
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
-    fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '原始原因' } });
-    confirmImport();
-    await screen.findByText('服務暫時無法使用，請稍後再試。');
-    expect(screen.getByLabelText('正式入帳原因')).toBeDisabled();
-    expect(screen.getByLabelText('正式入帳原因')).toHaveValue('原始原因');
-    confirmImport();
+    fireEvent.change(screen.getByLabelText('正式入帳原因（選填）'), { target: { value: '原始原因' } });
+    await importWorkbook();
+    const retry = await screen.findByRole('button', { name: '以原操作確認匯入結果' });
+    expect(screen.getByLabelText('正式入帳原因（選填）')).toBeDisabled();
+    expect(screen.getByLabelText('正式入帳原因（選填）')).toHaveValue('原始原因');
+    expect(screen.getByLabelText('選擇銀行交易明細工作簿')).toBeDisabled();
+    fireEvent.click(retry);
     await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
     expect(applyRequests).toHaveLength(2);
     expect(applyRequests[1]).toEqual(applyRequests[0]);
   });
 
-  it('returning to a submitted Preview does not use another Preview draft, even when that draft is blank', async () => {
+  it('explains pending subsidy funding and does not submit an ineligible payout', async () => {
     const plan = await importPreview();
-    const otherFile = new File(['other finance fixture'], 'other.xlsx');
-    const { applyRequests } = installImportHttp([plan, await importPreview('c'.repeat(64), otherFile), plan], { loseFirstApply: true });
+    plan.counts.ready_dispatch = 0;
+    plan.rows = [{ row_identity: 'finance-import-row:1', canonical_fact_version: 0,
+      amount_ntd: 12000, classification_type: 'client_subsidy_return', disposition: 'business_pending',
+      target_identities: ['client:7'], evidence: ['subsidy_advance_not_due'], available_actions: [],
+      integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false }];
+    const { applyRequests } = installImportHttp([plan]);
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
-    fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '第一份原因' } });
-    confirmImport();
-    await screen.findByText('服務暫時無法使用，請稍後再試。');
-    await uploadAndPreview(otherFile);
-    expect(screen.getByLabelText('正式入帳原因')).toBeEnabled();
-    fireEvent.change(screen.getByLabelText('正式入帳原因'), { target: { value: '' } });
-    await uploadAndPreview();
-    expect(screen.getByLabelText('正式入帳原因')).toBeDisabled();
-    expect(screen.getByLabelText('正式入帳原因')).toHaveValue('第一份原因');
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(screen.getByRole('button', { name: '確認匯入' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
-    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
-    expect(applyRequests).toHaveLength(2);
-    expect(applyRequests[1]).toEqual(applyRequests[0]);
+    await importWorkbook();
+    await screen.findByText('補助退款尚未符合政府入款或工會代墊條件，已保留待處理。');
+    expect(applyRequests).toHaveLength(0);
   });
 
-  it('does not show a completion receipt during queued or running observations', async () => {
+  it('allows a new workbook only after the previous result is known', async () => {
+    const other = new File(['other finance fixture'], 'other.xlsx');
+    const { applyRequests } = installImportHttp([await importPreview(), await importPreview('c'.repeat(64), other)]);
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+    await importWorkbook();
+    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
+    expect(screen.getByLabelText('選擇銀行交易明細工作簿')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [other] } });
+    expect(screen.getByLabelText('正式入帳原因（選填）')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('正式入帳原因（選填）'), { target: { value: '第二批原因' } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    await waitFor(() => expect(applyRequests).toHaveLength(2));
+    expect(applyRequests[1].body).toMatchObject({ reason: '第二批原因' });
+    expect(applyRequests[1].key).not.toBe(applyRequests[0].key);
+    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
+  });
+
+  it('does not show completion while queued or running', async () => {
     const { applyRequests, fetchSpy } = installImportHttp([await importPreview()], { statuses: ['queued', 'running', 'succeeded'] });
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    await act(async () => { confirmImport(); });
-    expect(screen.getByText('正在完成匯入，系統會自動顯示正式結果。')).toBeInTheDocument();
+    await importWorkbook();
+    await screen.findByText('正在完成匯入，系統會自動顯示正式結果。');
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
-    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
-    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(screen.getByText('匯入完成：核銷 3、既有 2、待處理 5')).toBeInTheDocument();
+    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5', {}, { timeout: 3000 });
     expect(fetchSpy.mock.calls.filter(([path]) => String(path).endsWith('/batch-outcome'))).toHaveLength(3);
     expect(applyRequests).toHaveLength(1);
   });
 
-  it.each(['failed', 'cancelled'] as const)('%s never becomes a successful import receipt', async (status) => {
+  it.each(['failed', 'cancelled'] as const)('%s never becomes a successful receipt', async status => {
     installImportHttp([await importPreview()], { statuses: [status] });
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview();
-    confirmImport();
-    await screen.findByText('未完成正式入帳；請重新預覽並查看本頁人工核對清單。');
+    await importWorkbook();
+    await screen.findByText('未完成正式入帳；請查看本頁人工核對清單，確認原因後重新選檔匯入。');
     expect(document.getElementById('finance-import-review')).toBeInTheDocument();
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
+  });
+
+  it.each([{ batch_identity: 'another-batch' }, { preview_fingerprint: 'f'.repeat(64) }])('rejects a terminal receipt with mismatched identity %j', async outcomeReceiptOverride => {
+    installImportHttp([await importPreview()], { outcomeReceiptOverride });
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+    await importWorkbook();
+    await screen.findByText('匯入結果與原批次預覽不一致；請勿重新提交，請重新查詢結果。');
+    expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
+  });
+
+  it('queries an uncertain outcome without submitting another Apply', async () => {
+    const { applyRequests } = installImportHttp([await importPreview()], { loseFirstOutcome: true });
+    render(<FinancePage />);
+    fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
+    await importWorkbook();
+    fireEvent.click(await screen.findByRole('button', { name: '重新查詢匯入結果' }));
+    await screen.findByText('匯入完成：核銷 3、既有 2、待處理 5');
+    expect(applyRequests).toHaveLength(1);
   });
 
   // Supplied only by the append-only Python test; normal React CI does not claim MySQL coverage.
@@ -464,10 +477,12 @@ describe('Finance import preview and replay boundary', () => {
       if (path.includes('/review-rows')) return importResponse(exchange.review_response.data);
       throw new Error(`Unexpected request in Preview-only proof: ${path}`);
     }));
+    vi.spyOn(financeImportMutationClient, 'apply').mockResolvedValue({ job_id: 'preview-proof', status_url: '/api/v1/jobs/preview-proof', replayed: false });
+    vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockResolvedValue({ job_id: 'preview-proof', status: 'cancelled', attempt_count: 0, max_attempts: 1, result_reference: null, receipt: null });
     const previewSpy = vi.spyOn(financeImportMutationClient, 'preview');
     render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
-    await uploadAndPreview(file);
+    await importWorkbook(file);
     expect(previewSpy).toHaveBeenCalledOnce();
     const decoded = await previewSpy.mock.results[0].value;
     expect(decoded).toEqual(exchange.preview_response.data);
@@ -483,7 +498,7 @@ describe('Finance import preview and replay boundary', () => {
     expect(requests.filter((path) => !path.startsWith('/api/v1/finance-import/'))).toEqual(['/api/v1/staff/summaries?page_size=200']);
     expect(importRequests.slice(0, 2)).toEqual(['/api/v1/finance-import/workbooks/ingest', '/api/v1/finance-import/batches/preview']);
     const batchPath = `/api/v1/finance-import/batches/${encodeURIComponent(exchange.preview_response.data.batch_identity)}`;
-    expect(importRequests.slice(2)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
+    expect(importRequests.slice(2, 4)).toEqual([`${batchPath}/manifest`, `${batchPath}/review-rows?limit=50`]);
     expect(screen.queryByText(/匯入完成：核銷/)).not.toBeInTheDocument();
   });
 });

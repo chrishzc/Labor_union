@@ -7,6 +7,7 @@
 ## Responsibility
 依一致性快照彙整正式月嫂應付與客戶退款／補助退回；歷史案件也只讀相同 Payroll obligation 及其 assignment binding，缺少義務時明示缺件，不在 Query 重算一份歷史薪資或建立假 obligation identity。產生會計 XLSX，下載與封存使用同一份位元組，不執行付款或在 Query 時寫 DB。
 同一 reporting owner 提供已排班案件的資金需求唯讀投影；保留未知金額／日期及受款資料待確認項目，未建客戶補助退款單時沿用 Client Finance 規則預估，不修改帳務或付款。
+同份月清冊的月嫂款項沿用該月 15 日；客戶一般退款及補助退款讀取月底以前仍未清償的款項，包含以前月份餘額及部分退款剩餘款，不重列已退金額。
 
 ## Implementation
 - primary: `subsystems/staff_payables/accounts_payable_export.py`

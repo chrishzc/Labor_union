@@ -229,6 +229,14 @@ def test_manually_reconciled_rows_are_existing_when_original_batch_is_replayed()
     ) is FinanceImportDisposition.EXISTING
 
 
+def test_an_unposted_bank_fact_from_another_workbook_stays_pending():
+    assert _preview_disposition(
+        {'canonical_batch_id': 5, 'disposition': 'business_pending',
+         'latest_dispatch_outcome': None, 'has_reconciliation_receipt': 0},
+        FinanceClassificationType.CLIENT_SUBSIDY_RETURN, 9,
+    ) is FinanceImportDisposition.BUSINESS_PENDING
+
+
 def test_canonical_rows_follow_the_textual_identity_order_required_by_preview() -> None:
     row_ten = CanonicalFinanceImportRow(
         "finance-import-row:10",

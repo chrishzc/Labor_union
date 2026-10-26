@@ -1,0 +1,8 @@
+.payment-overdue-workbench .line-data-table {
+  min-width: 920px;
+}
+
+.payment-overdue-workbench .line-data-table th,
+.payment-overdue-workbench .line-data-table td {
+  white-space: nowrap;
+}

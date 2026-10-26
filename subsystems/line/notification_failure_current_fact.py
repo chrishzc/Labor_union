@@ -93,6 +93,10 @@ class LineNotificationFailureCurrentFactReadback:
     unresolved_source_count: int
     unresolved_reason_codes: tuple[LineNotificationUnresolvedReason, ...]
     predicate_active: bool
+    unresolved_source_ids: tuple[int, ...] = ()
+    replay_in_progress_source_ids: tuple[int, ...] = ()
+    related_task_ids: tuple[int, ...] = ()
+    source_task_ids: tuple[tuple[int, tuple[int, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 191)
@@ -180,6 +184,8 @@ def evaluate_line_notification_failure_current_fact(
         unresolved_source_count=unresolved_count,
         unresolved_reason_codes=reasons,
         predicate_active=predicate_active,
+        unresolved_source_ids=tuple(source.source_event_id for source in applicable if _unresolved_reason(source) is not None),
+        replay_in_progress_source_ids=tuple(source.source_event_id for source in applicable if _unresolved_reason(source) is LineNotificationUnresolvedReason.REPLAY_IN_PROGRESS),
     )
 
 
@@ -266,7 +272,12 @@ def _unresolved_reason(
     if any(status == "failed" for status in statuses):
         return LineNotificationUnresolvedReason.REPLAY_TERMINAL_FAILED
     if any(status in {"pending", "processing", "retryable_failed"} for status in statuses):
-        return None
+        # A later in-flight replay cannot undo an already proven delivery.
+        if any(replay.exact_lineage and replay.fresh_validation_valid is True
+               and replay.delivery_statuses and all(status == 'sent' for status in replay.delivery_statuses)
+               for replay in source.replay_successors):
+            return None
+        return LineNotificationUnresolvedReason.REPLAY_IN_PROGRESS
     if all(status == "sent" for status in statuses):
         return None
     return LineNotificationUnresolvedReason.DELIVERY_OUTCOME_UNKNOWN

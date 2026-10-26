@@ -119,8 +119,8 @@ def test_unscoped_subsidy_amount_asks_which_program_the_customer_means() -> None
     payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
     assert payload["text"] == "為了正確協助您，請選擇較接近的項目。"
     assert [item["action"]["label"] for item in payload["quickReply"]["items"]] == [
-        "一般市民補助",
-        "低收／中低收入戶社福補助",
+        "補助市民（最高40小時）",
+        "社福（最高120小時）",
     ]
 
 
@@ -132,6 +132,40 @@ def test_reply_token_is_never_used_as_a_precommit_provider_call() -> None:
 
     assert len(unit_of_work.delivery_tasks.requests) == 1
     assert "reply-event-2" not in unit_of_work.delivery_tasks.requests[0].payload_json
+
+
+@pytest.mark.parametrize('message', ['問題', '其他問題', '詢問其他問題', '其他', '5', '6'])
+def test_general_questions_open_self_service_without_creating_ticket(message):
+    unit = _unit_of_work()
+    gateway = _EscalationGateway()
+    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc), escalation_gateway=gateway)
+    assert application.handle(_inbox(), unit, LineUserId('U123456789'), message)
+    assert not unit.customer_service.messages and not gateway.create_calls
+    payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
+    assert payload['type'] == 'flex' and '服務與問答' in str(payload)
+
+
+@pytest.mark.parametrize('message', ['問題', '其他問題', '6'])
+def test_general_question_during_active_ticket_is_appended_without_auto_reply(message):
+    unit = _unit_of_work()
+    gateway = _EscalationGateway(HumanEscalationError('domain_blocked', 'automation_hold_active', '自動化暫停中'))
+    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc), escalation_gateway=gateway)
+    assert application.handle(_inbox(), unit, LineUserId('U123456789'), message)
+    assert len(unit.customer_service.messages) == 1
+    assert unit.customer_service.messages[0].message == message
+    assert not unit.delivery_tasks.requests and not gateway.create_calls
+
+
+@pytest.mark.parametrize('message', ['收費與補助', '補助市民（最高40小時）', '社福（最高120小時）'])
+def test_current_subsidy_copy_and_clarification_choices_do_not_open_ticket(message):
+    unit = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
+    assert application.handle(_inbox(), unit, LineUserId('U123456789'), message)
+    payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
+    assert '補助市民（最高40小時）' in payload['text']
+    assert '社福（最高120小時）' in payload['text']
+    assert '實際補助金額依本案服務資料計算' in payload['text']
+    assert '資格需' not in payload['text'] and not unit.customer_service.messages
 
 
 def test_service_help_menu_keeps_all_six_approved_categories(monkeypatch) -> None:
@@ -280,7 +314,11 @@ def test_wrong_answer_with_explicit_human_request_directly_creates_escalation() 
     assert "quickReply" not in json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
 
 
-def test_old_continue_ai_postback_does_not_resume_or_close_ticket() -> None:
+@pytest.mark.parametrize('postback', [
+    'customer-service:handoff:continue-ai',
+    'customer-service:handoff:confirm:answer-rejected',
+])
+def test_old_continue_ai_postback_does_not_resume_or_close_ticket(postback) -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway(resume_receipt=SimpleNamespace(escalation_id=41))
     application = LineServiceHelpApplication(
@@ -288,7 +326,7 @@ def test_old_continue_ai_postback_does_not_resume_or_close_ticket() -> None:
     )
     assert application.handle_postback(
         _inbox("event-continue-ai"), unit_of_work, LineUserId("U123456789"),
-        "customer-service:handoff:continue-ai",
+        postback,
     ) is True
     assert gateway.resume_calls == []
     assert gateway.create_calls == []

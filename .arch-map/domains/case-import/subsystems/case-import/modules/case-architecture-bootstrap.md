@@ -22,11 +22,15 @@
 ## Dependencies
 - inbound: `orders/order-terms` — 完成缺件進件或洽談中完整補件時委派初始化，沿用正式政策與缺漏／partial protection，不修改既有付款與薪資資料。
 - inbound: `contract-signing/external-signing-presentation` — 簽約文件缺少付款條款／薪資初始資料時，只顯示具體原因並導向同案客戶名冊；不在簽約頁嵌入補建 Preview／Apply，也不在 Query 自動補建。
-- outbound: `client-finance/obligation-planning` — 第二期預計日與零金額條件重用 Finance stage plan；bootstrap 不建立正式應付義務。
+- HCM 完整進件沿原 bootstrap adapter 在父命令相同交易同步客戶應收及應退；不另設操作關卡。
+- cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_hcm_automatic_accounting_mysql.py` — real MySQL intake、非零第二期逐期銀行核銷、重播與 rollback。
+- outbound: `client-finance/obligation-planning` — 第二期預計日與零金額條件重用 Finance stage plan；完整正常案件在相同 UoW 自動同步各期客戶應付；不建立實際收付款或月嫂應付。
 - inbound: `case-import/order-information` — BeClass raw survey 僅在 Case Import projection boundary 解析為 named scalar facts。
 - inbound: `clients/client-profile/profile-change` — 客戶名冊只在 owner readback 回報缺少 bootstrap root 時提供既有 Q/P/A 修復入口，不直接寫入 Client Finance、Payroll 或 Scheduling。
 - outbound: `payroll` — rate policy snapshot 是 assignment Payroll terms 的來源。
 - cross-owner evidence: `tests/domains/case-import/subsystems/case-import/integration/test_registry_correction_disposable_mysql.py` — saved effective birth correction survives first-use bootstrap; Case Import subsystem owns this integration proof.
 
 ## Verification
+- layout_status: `custom_current`
+- test_root: `tests/test_case_architecture_bootstrap_workflow.py` — 保留既有跨 owner workflow 測試位置，新增同步 seam；不搬移。
 - test_root: `tests/domains/case-import/subsystems/case-import/modules/case-architecture-bootstrap/`

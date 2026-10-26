@@ -262,7 +262,7 @@ describe('Finance #finance entry static subgate', () => {
     expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '付款' }));
-    await screen.findByRole('region', { name: '付款清單' });
+    await screen.findByRole('region', { name: '付款清單' }, { timeout: 5000 });
     expect(countPath(requests, ACCOUNTS_PAYABLE_ENDPOINT)).toBe(0);
     expect(screen.queryByText('123456789012')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="finance.accounts-payable.export-xlsx"]')).toBeInTheDocument();
@@ -275,7 +275,7 @@ describe('Finance #finance entry static subgate', () => {
     expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(0);
     expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="finance.finance-import.reprocess"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeNull();
     expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
 

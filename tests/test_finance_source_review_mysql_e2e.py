@@ -177,6 +177,7 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert applied['finance_import_source_review_occurrences'] == staged['finance_import_source_review_occurrences']
         assert applied['staff_payout_events'] == staged['staff_payout_events']  # This batch contains no staff payout.
         after_apply_reviews = client.get(url+'/review-rows').json()['data']
+        assert after_apply_reviews['items'] == [], 'posted receipts must leave the owner pending list'
         assert after_apply_reviews['source_reviews'] == page['source_reviews']
         audit_connection = get_connection()
         try:
@@ -188,13 +189,16 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert replay.status_code == reselect.status_code == 200
         assert replay.json()['data']['batch_identity'] == reselect.json()['data']['batch_identity'] == batch
         assert _counts() == applied, 'replay/same-key reselect must not duplicate dispatch, receipts, payout or review occurrences'
-        assert client.get(url+'/manifest').json()['data']['review_count'] == manifest.json()['data']['review_count']
+        assert client.get(url+'/manifest').json()['data']['review_count'] == 0
         # Exact API response crosses the real typed client and page, without DB credentials in the UI process.
         exchange = tmp_path/'review-exchange.json'
         exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json(), 'source_audit': source}, default=str), encoding='utf-8')
         root = Path(__file__).resolve().parents[1]
         ui_report = tmp_path/'typed-ui-report.json'
-        result = subprocess.run(['npm', '--prefix', str(root/'ui_react'), 'test', '--', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root, env={'PATH': os.environ['PATH'], 'HOME': str(tmp_path), 'CI': 'true', 'FI_REVIEW_EXCHANGE': str(exchange)}, capture_output=True, text=True, timeout=60)
+        # Direct Node invocation also works on Windows without shell/npm.cmd lookup.
+        ui_environment = {name: os.environ[name] for name in ('PATH','SystemRoot','TEMP','TMP') if name in os.environ}
+        ui_environment.update(HOME=str(tmp_path), CI='true', FI_REVIEW_EXCHANGE=str(exchange))
+        result = subprocess.run(['node', str(root/'ui_react/node_modules/vitest/vitest.mjs'), 'run', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root/'ui_react', env=ui_environment, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout[-5000:]+result.stderr[-5000:]
         report = json.loads(ui_report.read_text(encoding='utf-8'))
         assert report.get('numPassedTests') == 1 and report.get('numFailedTests') == 0, report

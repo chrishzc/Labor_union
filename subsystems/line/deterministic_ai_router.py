@@ -67,6 +67,8 @@ _SERVICE_ALIASES = {
     "政府補助": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "要付多少": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "2": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
+    "補助市民（最高40小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
+    "社福（最高120小時）": (CustomerServiceCategory.PAYMENT_SUBSIDY, "payment_subsidy"),
     "查詢服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "查詢進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
     "服務進度": (CustomerServiceCategory.SERVICE_PROGRESS, "service_progress"),
@@ -80,19 +82,20 @@ _SERVICE_ALIASES = {
     "電話錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "地址錯誤": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
     "4": (CustomerServiceCategory.PROFILE_UPDATE, "profile_update"),
-    "其他問題": (CustomerServiceCategory.OTHER, "other"),
-    "其他": (CustomerServiceCategory.OTHER, "other"),
-    "不是以上": (CustomerServiceCategory.OTHER, "other"),
-    "問題": (CustomerServiceCategory.OTHER, "other"),
-    "詢問": (CustomerServiceCategory.OTHER, "other"),
-    "5": (CustomerServiceCategory.OTHER, "other"),
-    "6": (CustomerServiceCategory.OTHER, "other"),
+    "其他問題": (None, "service_help_menu"),
+    "詢問其他問題": (None, "service_help_menu"),
+    "其他": (None, "service_help_menu"),
+    "不是以上": (None, "service_help_menu"),
+    "問題": (None, "service_help_menu"),
+    "詢問": (None, "service_help_menu"),
+    "5": (None, "service_help_menu"),
+    "6": (None, "service_help_menu"),
 }
 _SAFE_MENU_OPTIONS = ("服務與問答", "服務登記", "聯絡工會人員")
 _CLARIFICATION_OPTIONS = ("服務與問答", "聯絡工會人員")
 _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
-    "一般市民補助",
-    "低收／中低收入戶社福補助",
+    "補助市民（最高40小時）",
+    "社福（最高120小時）",
 )
 _CONFIRMED_HUMAN_ALIASES = {"聯絡專人服務", "呼叫專員", "聯絡工會專員", "專人客服", "轉接真人客服", "轉真人客服"}
 

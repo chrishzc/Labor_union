@@ -4,7 +4,7 @@
 - domain: `government-subsidy`
 
 ## Responsibility
-編排 subsidy Query／Preview／Apply、allocation/reversal 與 owner receipts，拒絕由 generic finance importer 直接改寫 domain roots。
+編排整期補助 Query／Apply、涵蓋與沖正；月／季／年共用服務結束月份及案件公式。政府申請／核准在系統外，代墊回收依同一期實付 ledger 彙總。
 
 ## Dependencies
 - inbound: `finance-import` — typed owner delegation only。
@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
+- `period-reconciliation` — 整期銀行核銷、跨單位涵蓋與移期防重；path: `modules/period-reconciliation.md`
 - `overpayment-recovery-presentation` — GOVSUB-006既有處置workflow的business-first React projection; path: `modules/overpayment-recovery-presentation.md`
 - `current-anomaly-facts` — retired GOVSUB anomaly validation／migration readback only；path: `modules/current-anomaly-facts.md`
 - `reconciliation-register-query` — 依服務完成期間產生owner-calculated補助核銷rows；path: `modules/reconciliation-register-query.md`

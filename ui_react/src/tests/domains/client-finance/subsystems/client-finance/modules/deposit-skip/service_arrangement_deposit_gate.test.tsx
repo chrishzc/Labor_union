@@ -15,7 +15,7 @@ it('one click reads fresh eligibility, applies and verifies the unpaid gate with
   fireEvent.click(await screen.findByRole('button', { name: '未付款人工放行' }));
   await screen.findByText('已解除・未付款人工放行');
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-  expect(apply).toHaveBeenCalledWith('CASE-001', locked, '服務安排：人工允許未付款繼續排班', expect.stringMatching(/^deposit-skip-CASE-001-/));
+  expect(apply).toHaveBeenCalledWith('CASE-001', locked, '', expect.stringMatching(/^deposit-skip-CASE-001-/));
   expect(screen.getByText(/已核銷 NT\$ 0/)).toBeInTheDocument();
   expect(committed).toHaveBeenCalledOnce();
 });

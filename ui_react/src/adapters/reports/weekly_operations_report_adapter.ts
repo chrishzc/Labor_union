@@ -29,7 +29,7 @@ export function adaptWeeklyOperationsReport(source: WeeklyOperationsReportData) 
     totalAmount: `NT$ ${partition.total_amount_ntd.toLocaleString()}`,
     rows: partition.rows.map((row) => ({
       ...adaptSubsidyRow(row),
-      annualIdentity: `(${row.application_roc_year ?? '—'})${partition.citizen_kind === 'general' ? '一般市民' : '社福補助'}`,
+      annualIdentity: `(${row.application_roc_year ?? '—'})${partition.citizen_kind === 'general' ? '補助市民' : '社福'}`,
       annualEntry: row.serial_number,
       notes: row.notes,
       reconciliationStatus: row.reconciliation_status || '結案',

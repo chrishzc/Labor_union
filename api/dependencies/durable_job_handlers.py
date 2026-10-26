@@ -193,6 +193,8 @@ def government_subsidy_apply_handler(payload: dict[str, Any]) -> tuple[dict[str,
 
 
 def _apply_government_subsidy_action(application, payload):
+    if payload.get('action') in {'claim_plan','claim_submission','claim_approval','receipt'}:
+        raise ValueError('government_subsidy_period_entry_required')
     request = _government_subsidy_request(payload)
     action = payload["action"]
     if action == "claim_plan":
@@ -210,7 +212,7 @@ def _apply_government_subsidy_action(application, payload):
 
 def _government_subsidy_request(payload):
     from domains.government_subsidy.claims import ClaimApprovalIntent, ClaimPlanningIntent
-    from domains.government_subsidy.ledger import AllocationIntent, ClaimBatchIdentity, ReceiptIntent, ReversalIntent
+    from domains.government_subsidy.ledger import AllocationIntent, ClaimItemApproval, ClaimBatchIdentity, ReceiptIntent, ReversalIntent
     from shared_kernel.fingerprints import PreviewFingerprint
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
     from shared_kernel.money import MoneyNTD
@@ -219,7 +221,8 @@ def _government_subsidy_request(payload):
 
     action = payload["action"]
     intent_data = payload["intent"]
-    allocations = tuple(AllocationIntent(item.get("target_identity", item.get("item_id")), MoneyNTD(item.get("amount_ntd", item.get("approved_amount_ntd")))) for item in intent_data.get("allocations", intent_data.get("item_approvals", [])))
+    amount_type = ClaimItemApproval if action == "claim_approval" else AllocationIntent
+    allocations = tuple(amount_type(item.get("target_identity", item.get("item_id")), MoneyNTD(item.get("amount_ntd", item.get("approved_amount_ntd")))) for item in intent_data.get("allocations", intent_data.get("item_approvals", [])))
     arguments = (ExpectedVersion(payload["expected_batch_version"]), PreviewFingerprint(payload["preview_fingerprint"]), IdempotencyKey(payload["idempotency_key"]), ActorContext(payload["actor"]), payload["reason"], CorrelationId(payload["correlation_id"]))
     if action == "claim_plan":
         intent = ClaimPlanningIntent(ClaimBatchIdentity(intent_data["application_year"], intent_data["quarter"], intent_data["revision"]))

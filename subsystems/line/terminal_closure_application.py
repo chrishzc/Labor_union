@@ -49,10 +49,14 @@ def consume_terminal_closure(
 
         case = unit_of_work.identity_management.terminal_closure_case(event.case_no)
         _validate_case(event, case)
+        if event.capability != "staff_default_restore":
+            raise TerminalClosureConsumerError("line_terminal_closure_capability_mismatch")
         bindings = tuple(unit_of_work.identities.list_by_user(line_user_id))
         staff = _staff_binding(bindings)
         if staff is None:
-            raise TerminalClosureConsumerError("line_terminal_closure_staff_binding_missing")
+            return _record_decision(
+                unit_of_work, event, None, TerminalClosureDecision.NOOP_NOT_STAFF,
+            )
         if staff.status in {
             LineIdentityBindingStatus.REVOCATION_PENDING,
             LineIdentityBindingStatus.REVOKED,
@@ -112,9 +116,9 @@ def _staff_binding(bindings: Iterable[object]):
         for binding in bindings
         if binding.subject_type is LineBindingSubjectType.STAFF
     )
-    if len(candidates) != 1:
+    if len(candidates) > 1:
         raise TerminalClosureConsumerError("line_terminal_closure_staff_binding_ambiguous")
-    return candidates[0]
+    return candidates[0] if candidates else None
 
 
 def _validate_case(event, case: Mapping[str, object] | None) -> None:

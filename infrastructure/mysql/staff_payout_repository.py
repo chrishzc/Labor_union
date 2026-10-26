@@ -46,7 +46,7 @@ _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _PAYOUT_CLASSIFICATIONS = frozenset(
     {"staff_payout", "staff_salary", "staff_legacy_subsidy"}
 )
-_RETURN_CLASSIFICATIONS = frozenset({"staff_payout_return", "staff_salary_return"})
+_RETURN_CLASSIFICATIONS = frozenset({"staff_payout_return", "staff_salary_return", "non_business_review"})
 _RETURN_IDENTITY = re.compile(r"^return:row:(\d+):source:(\d+)$")
 _REVERSAL_IDENTITY = re.compile(
     r"^reversal:source:(\d+):on:(\d{4}-\d{2}-\d{2})$"
@@ -171,8 +171,6 @@ class MySqlStaffPayoutRepository:
     def append_outbox(self, candidate) -> None:
         request = self._require_request()
         difference_identity = self._persist_difference_source(candidate, request)
-        if difference_identity is not None:
-            return
         payload = _outbox_payload(candidate, request, difference_identity)
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
@@ -978,8 +976,8 @@ def _validate_projection_rows(rows, expected_status, difference_mode) -> None:
         raise RuntimeError("staff payable projection rows are missing")
     statuses = tuple(_projection_status(row) for row in rows)
     if difference_mode is StaffPayoutDifferenceMode.UNDERPAYMENT:
-        if StaffPayableStatus.PARTIALLY_PAID in statuses and all(
-            status in (StaffPayableStatus.PARTIALLY_PAID, StaffPayableStatus.COMPLETED)
+        if all(
+            status in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID, StaffPayableStatus.COMPLETED)
             for status in statuses
         ):
             return
@@ -988,6 +986,10 @@ def _validate_projection_rows(rows, expected_status, difference_mode) -> None:
         if all(status is StaffPayableStatus.COMPLETED for status in statuses):
             return
         raise RuntimeError("staff payable overpayment projection invariant failed")
+    if expected_status is StaffPayableStatus.PARTIALLY_PAID and all(
+        status in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID) for status in statuses
+    ):
+        return
     if any(status is not expected_status for status in statuses):
         raise RuntimeError("staff payable exact-zero projection invariant failed")
 

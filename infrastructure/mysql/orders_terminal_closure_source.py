@@ -78,14 +78,17 @@ _PENDING_SQL = (
     "SELECT id,case_no,payload_snapshot FROM orders_domain_outbox "
     "WHERE intent_type='lifecycle_projection_changed' AND status='pending' "
     "AND JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$.event_type'))="
-    "'case_terminal_closure' ORDER BY id LIMIT %s"
+    "'case_terminal_closure' AND NOT EXISTS (SELECT 1 FROM line_command_receipts receipt "
+    "WHERE receipt.idempotency_key=JSON_UNQUOTE(JSON_EXTRACT(orders_domain_outbox.payload_snapshot,'$.idempotency_identity'))) "
+    "ORDER BY id LIMIT %s"
 )
 _NEXT_DUE_SQL = (
     "SELECT MIN(CASE WHEN status='pending' THEN "
     "COALESCE(next_attempt_at,created_at) END) AS next_due_at_utc "
     "FROM orders_domain_outbox WHERE intent_type='lifecycle_projection_changed' "
     "AND status='pending' AND JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$.event_type'))="
-    "'case_terminal_closure'"
+    "'case_terminal_closure' AND NOT EXISTS (SELECT 1 FROM line_command_receipts receipt "
+    "WHERE receipt.idempotency_key=JSON_UNQUOTE(JSON_EXTRACT(orders_domain_outbox.payload_snapshot,'$.idempotency_identity')))"
 )
 
 

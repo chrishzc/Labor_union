@@ -1,23 +1,17 @@
 {
   "rules": [
     {
-      "id": "LU96-M1-LEAVE-EXTENSION-RULE-V1",
-      "event_code": "scheduling.leave.extension_requested",
-      "recipient_selector": "client.bound_case",
-      "template_id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
-      "enabled": false,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
-      "predicates": []
-    },
-    {
       "id": "LU96-M4-SAFE-ALERT-RULE-V1",
       "event_code": "runtime.alert.review_required",
       "recipient_selector": "admin.review_actor",
       "template_id": "LU96-M4-SAFE-ALERT-CARD-V1",
       "enabled": false,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
       "predicates": []
     },
     {
@@ -26,38 +20,68 @@
       "recipient_selector": "customer_service.claim_owner",
       "template_id": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
       "enabled": false,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
       "predicates": []
     },
     {
-      "id": "LINE-SERVICE-DAY-LOG-REMINDER-RULE-V1",
-      "event_code": "service_time_checkpoint",
-      "recipient_selector": "assigned_caregiver",
-      "template_id": "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1",
+      "id": "LINE-ORDER-SERVICE-START-DAY-V1",
+      "event_code": "order.service_start_day",
+      "recipient_selector": "case_group",
+      "template_id": "LINE-ORDER-SERVICE-START-DAY-CARD-V1",
       "enabled": true,
-      "schedule": {"kind": "service_end"},
-      "frequency": {"kind": "once"},
-      "predicates": ["baby_log_missing"]
-    },
-    {
-      "id": "LU96-ORDER-PRE-START-REMINDER-V1",
-      "event_code": "order.pre_start_reminder",
-      "recipient_selector": "client.bound_case",
-      "template_id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
-      "enabled": true,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
       "predicates": []
     },
     {
-      "id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-V1",
-      "event_code": "order.second_payment_reminder",
-      "recipient_selector": "client.bound_case",
-      "template_id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
+      "id": "LINE-SECOND-PAYMENT-DUE-V1",
+      "event_code": "client.second_payment_due",
+      "recipient_selector": "case_group",
+      "template_id": "LINE-SECOND-PAYMENT-DUE-TEXT-V1",
       "enabled": true,
-      "schedule": {"kind": "immediate"},
-      "frequency": {"kind": "once"},
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
+      "predicates": []
+    },
+    {
+      "id": "LINE-SECOND-PAYMENT-SETTLED-V1",
+      "event_code": "client.second_payment_settled",
+      "recipient_selector": "case_group",
+      "template_id": "LINE-SECOND-PAYMENT-SETTLED-TEXT-V1",
+      "enabled": true,
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
+      "predicates": []
+    },
+    {
+      "id": "LINE-SERVICE-COMPLETION-V1",
+      "event_code": "order.service_completed",
+      "recipient_selector": "case_group",
+      "template_id": "LINE-SERVICE-COMPLETION-TEXT-V1",
+      "enabled": true,
+      "schedule": {
+        "kind": "immediate"
+      },
+      "frequency": {
+        "kind": "once"
+      },
       "predicates": []
     }
   ]

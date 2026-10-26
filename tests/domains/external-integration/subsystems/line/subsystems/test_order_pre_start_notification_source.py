@@ -1,39 +1,27 @@
 """
 File: test_order_pre_start_notification_source.py
-Description: 驗證服務開始前 3 天投影器正確掃描案件並派發 LINE notification source event。
+Description: 驗證正式開工當天群組投影器正確掃描案件並派發 LINE notification source event。
 """
 
 from datetime import date, datetime, timezone
+from subsystems.line.service_start_day import ServiceStartDayCandidate, StartDayCaregiver
 
 from subsystems.line.order_pre_start_notification_source import (
-    OrderPreStartCandidate,
     OrderPreStartNotificationSourceProjector,
 )
 
 
 def test_projector_runs_scan_and_projects_due_candidates() -> None:
     candidates = (
-        OrderPreStartCandidate(
-            case_no="CASE-101",
-            planned_start_date="2026-08-20",
-            first_payment_amount=30000,
-            already_settled=False,
-            client_line_user_id="U_CLIENT_101",
-        ),
-        OrderPreStartCandidate(
-            case_no="CASE-102",
-            planned_start_date="2026-08-20",
-            first_payment_amount=0,
-            already_settled=True,
-            client_line_user_id="U_CLIENT_102",
-        ),
+        ServiceStartDayCandidate('CASE-101',date(2026,8,20),'C_GROUP',7,30000,(StartDayCaregiver(1,'測試月嫂'),)),
+        ServiceStartDayCandidate('CASE-102',date(2026,8,20),'C_GROUP2',8,0,(StartDayCaregiver(2,'測試月嫂二'),)),
     )
 
     scanned_dates: list[date] = []
     projected_events: list[object] = []
 
     class MockScanner:
-        def find_due_candidates(self, target_date: date) -> tuple[OrderPreStartCandidate, ...]:
+        def find_due_candidates(self, target_date: date) -> tuple[ServiceStartDayCandidate, ...]:
             scanned_dates.append(target_date)
             return candidates
 
@@ -43,7 +31,7 @@ def test_projector_runs_scan_and_projects_due_candidates() -> None:
             return len(projected_events)
 
     projector = OrderPreStartNotificationSourceProjector(MockScanner(), MockRegistry())
-    now = datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 19, 17, 0, tzinfo=timezone.utc)
     count = projector.run_once(now)
 
     assert count == 2
@@ -51,54 +39,30 @@ def test_projector_runs_scan_and_projects_due_candidates() -> None:
     assert len(projected_events) == 2
 
     event1 = projected_events[0]
-    assert event1.event_code == "order.pre_start_reminder"
+    assert event1.event_code == "order.service_start_day"
     assert event1.facts["case_no"] == "CASE-101"
-    assert event1.facts["already_settled"] is False
-    assert event1.facts["line_user_id"] == "U_CLIENT_101"
+    assert event1.facts["first_payment_amount_ntd"] == 30000
+    assert event1.facts["group_id"] == "C_GROUP"
 
     event2 = projected_events[1]
-    assert event2.event_code == "order.pre_start_reminder"
+    assert event2.event_code == "order.service_start_day"
     assert event2.facts["case_no"] == "CASE-102"
-    assert event2.facts["already_settled"] is True
+    assert event2.facts["first_payment_notice"] == ""
 
 
-def test_projector_runs_scan_and_projects_second_payment_candidates() -> None:
-    from subsystems.line.order_pre_start_notification_source import OrderSecondPaymentCandidate
-
-    second_candidates = (
-        OrderSecondPaymentCandidate(
-            case_no="CASE-201",
-            second_payment_due_date="2026-09-10",
-            second_payment_amount=35000,
-            already_settled=False,
-            client_line_user_id="U_CLIENT_201",
-        ),
-    )
-
-    projected_events: list[object] = []
-
-    class MockScanner:
-        def find_due_candidates(self, _target_date: date) -> tuple[OrderPreStartCandidate, ...]:
-            return ()
-
-        def find_second_payment_due_candidates(self, _target_date: date) -> tuple[OrderSecondPaymentCandidate, ...]:
-            return second_candidates
-
-    class MockRegistry:
-        def register_and_project(self, event) -> int:
-            projected_events.append(event)
-            return len(projected_events)
-
-    projector = OrderPreStartNotificationSourceProjector(MockScanner(), MockRegistry())
-    now = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
-    count = projector.run_once(now)
-
-    assert count == 1
-    assert len(projected_events) == 1
-    event = projected_events[0]
-    assert event.event_code == "order.second_payment_reminder"
-    assert event.facts["case_no"] == "CASE-201"
-    assert event.facts["second_payment_due_date"] == "2026-09-10"
-    assert event.facts["second_payment_amount"] == "NT$ 35,000"
-    assert event.facts["already_settled"] is False
-    assert event.facts["line_user_id"] == "U_CLIENT_201"
+def test_projector_uses_today_for_second_payment_and_projects_committed_success():
+    from subsystems.line.second_payment_notifications import SecondPaymentNotification
+    today=date(2026,9,10)
+    due=SecondPaymentNotification('CASE-201','second:201',3,5,today,35000,35000,'C_ORIGINAL')
+    paid=SecondPaymentNotification('CASE-202','second:202',4,6,today,35000,0,'C_ORIGINAL',True,'a'*64,35000)
+    scanned=[];events=[]
+    class Scanner:
+        def find_due_candidates(self,_):return ()
+        def find_second_payment_due_candidates(self,day):scanned.append(day);return (due,)
+        def find_second_payment_settlement_candidates(self):return (paid,)
+    class Registry:
+        def register_and_project(self,event):events.append(event);return len(events)
+    assert OrderPreStartNotificationSourceProjector(Scanner(),Registry()).run_once(datetime(2026,9,9,17,tzinfo=timezone.utc))==2
+    assert scanned==[today]
+    assert [e.event_code for e in events]==['client.second_payment_due','client.second_payment_settled']
+    assert all(e.facts['group_id']=='C_ORIGINAL' and 'line_user_id' not in e.facts for e in events)

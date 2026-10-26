@@ -36,11 +36,10 @@ async function open() {
   await screen.findByText(`目前狀態：${facts.lifecycle_status}`);
 }
 async function confirmPreview() {
-  await screen.findByText(/取消日期：2026-09-05/);
   fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '客戶電話確認取消。' } });
 }
 async function apply() {
-  const button = screen.getByRole('button', { name: /確認取消訂單|確認補登/ });
+  const button = screen.getByRole('button', { name: /^(取消訂單|儲存實際服務事實)$/ });
   await waitFor(() => expect(button).toBeEnabled());
   await act(async () => { fireEvent.click(button); });
 }
@@ -65,9 +64,9 @@ describe('Beta 取消與歷史取消服務補登', () => {
     expect(screen.queryByRole('button', { name: '讀取取消狀態' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '檢查取消影響' })).not.toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
-    expect(mocks.preview).toHaveBeenCalledWith(CASE, [], expect.any(AbortSignal));
-    expect(screen.getByText('客戶 deposit：refund_due NT$ 1000')).toBeInTheDocument();
+    expect(mocks.preview).not.toHaveBeenCalled();
     await apply();
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, [], expect.any(AbortSignal));
     await screen.findByText('訂單取消已完成正式回讀：訂單取消');
     expect(mocks.apply).toHaveBeenCalledWith(CASE, {
       confirmed_service_days: [], expected_order_version: 2, expected_scheduling_version: 3,
@@ -87,28 +86,33 @@ describe('Beta 取消與歷史取消服務補登', () => {
     });
     render(<OrderCancellationPanel caseNo={CASE} />);
     await open(); await confirmPreview();
-    expect(screen.getByText('沒有客戶帳務需要調整。')).toBeInTheDocument();
-    expect(screen.getByText('沒有月嫂薪資需要調整。')).toBeInTheDocument();
     await apply();
     await screen.findByText('訂單取消已完成正式回讀：訂單取消');
     expect(mocks.apply).toHaveBeenCalledTimes(1);
     expect(mocks.apply).toHaveBeenCalledWith(CASE, expect.objectContaining({ expected_scheduling_version: null, expected_client_finance_version: null, expected_payroll_version: null }), expect.anything());
   });
 
-  it('服務中不可清空實際日，修改日期／月嫂需逐日原因且重新 Preview', async () => {
+  it('保留服務日及月嫂修正並以一次點擊送交 owner 驗證', async () => {
     facts = { ...facts, service_started: true, actual_start_date: '2026-09-01',
       confirmed_service_days: [{ service_date: '2026-09-01', staff_id: 8, reason: null }] };
     render(<OrderCancellationPanel caseNo={CASE} />); await open();
     fireEvent.change(screen.getByLabelText('取消實際服務日 1'), { target: { value: '2026-09-02' } });
-    await screen.findByText('新增或變更實際服務日／月嫂，必須填寫該日人工原因。');
     expect(mocks.preview).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('取消實際服務日原因 1'), { target: { value: '核對實際出勤' } });
     await confirmPreview();
+    await apply();
     expect(mocks.preview).toHaveBeenCalledWith(CASE, [{ service_date: '2026-09-02', staff_id: 8, reason: '核對實際出勤' }], expect.any(AbortSignal));
+  });
+
+  it('取消當日確認未服務可移除全部服務日並以零日取消', async () => {
+    facts = { ...facts, service_started: true, actual_start_date: '2026-09-05',
+      confirmed_service_days: [{ service_date: '2026-09-05', staff_id: 8, reason: null }] };
+    render(<OrderCancellationPanel caseNo={CASE} />); await open();
+    expect(screen.getByText(/已自動排除取消日之後的排班/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '移除取消實際服務日 1' }));
-    expect(screen.queryByRole('button', { name: /確認取消訂單|確認補登/ })).not.toBeInTheDocument();
-    await screen.findByText('服務已開始或歷史取消補登，至少保留一日實際服務事實。');
-    expect(mocks.apply).not.toHaveBeenCalled();
+    await apply();
+    expect(mocks.preview).toHaveBeenCalledWith(CASE, [], expect.any(AbortSignal));
+    expect(mocks.apply).toHaveBeenCalledWith(CASE, expect.objectContaining({ confirmed_service_days: [], reason: '' }), expect.anything());
   });
 
   it('歷史取消明確 capability 允許實際日補登，但普通已取消案件不可再取消', async () => {
@@ -116,7 +120,8 @@ describe('Beta 取消與歷史取消服務補登', () => {
       confirmed_service_days: [{ service_date: '2026-09-01', staff_id: 8, reason: '歷史出勤資料' }] };
     const view = render(<OrderCancellationPanel caseNo={CASE} />); await open();
     await screen.findByText('後端允許補登歷史取消的實際服務事實；不是重新取消或重開。');
-    await confirmPreview(); expect(mocks.preview).toHaveBeenCalledWith(CASE, facts.confirmed_service_days, expect.any(AbortSignal));
+    const confirmed = facts.confirmed_service_days;
+    await apply(); expect(mocks.preview).toHaveBeenCalledWith(CASE, confirmed, expect.any(AbortSignal));
     view.unmount(); facts.historical_mid_service_confirmation_available = false;
     render(<OrderCancellationPanel caseNo={CASE} />); await open();
     expect(screen.queryByRole('button', { name: /確認取消訂單|確認補登/ })).not.toBeInTheDocument();
@@ -125,9 +130,9 @@ describe('Beta 取消與歷史取消服務補登', () => {
 
   it('owner blocker 不能 Apply', async () => {
     mocks.preview.mockResolvedValue({ ...preview(), payroll_impact: { case_no: CASE, actions: [], blockers: ['payroll_frozen'] } });
-    render(<OrderCancellationPanel caseNo={CASE} />); await open(); await confirmPreview();
+    render(<OrderCancellationPanel caseNo={CASE} />); await open(); await apply();
     expect(screen.getByText('payroll_frozen')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '確認取消訂單' })).toBeDisabled();
+    expect(screen.getByText('客戶 訂金：應退款 NT$ 1000')).toBeInTheDocument();
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 
@@ -189,28 +194,22 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.apply.mockImplementation(() => new Promise<OrderCancellationReceipt>((resolve) => { finish = resolve; }));
     const onObserved = vi.fn(); const view = render(<OrderCancellationPanel caseNo={CASE} onObserved={onObserved} />);
     await open(); await confirmPreview();
-    const button = screen.getByRole('button', { name: '確認取消訂單' });
+    const button = screen.getByRole('button', { name: '取消訂單' });
     fireEvent.click(button); fireEvent.click(button);
-    expect(mocks.apply).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1));
     view.unmount(); commitFacts();
     await act(async () => { finish(receipt()); });
     expect(onObserved).not.toHaveBeenCalled();
   });
 
-  it('缺少原因維持禁止送出，填原因不重做唯讀預覽', async () => {
+  it('取消原因維持選填，空白也能一次送出且不跳確認視窗', async () => {
     render(<OrderCancellationPanel caseNo={CASE} />);
-    await screen.findByText(/取消日期：2026-09-05/);
-    const button = screen.getByRole('button', { name: '確認取消訂單' });
+    await open();
     window.alert = vi.fn();
-    expect(button).toBeEnabled();
-    fireEvent.click(button);
-    expect(window.alert).toHaveBeenCalled();
-    expect(screen.getByLabelText('取消原因')).toHaveFocus();
-    expect(mocks.apply).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '客戶取消' } });
-    expect(button).toBeEnabled();
+    await apply();
+    expect(window.alert).not.toHaveBeenCalled();
     expect(mocks.preview).toHaveBeenCalledTimes(1);
-    expect(mocks.apply).not.toHaveBeenCalled();
+    expect(mocks.apply).toHaveBeenCalledWith(CASE, expect.objectContaining({ reason: '' }), expect.anything());
   });
 
   it('切換案件後捨棄前一案件的晚到查詢', async () => {
@@ -220,10 +219,9 @@ describe('Beta 取消與歷史取消服務補登', () => {
     mocks.preview.mockImplementation(async (caseNo, days) => preview(days, caseNo));
     const view = render(<OrderCancellationPanel caseNo={CASE} />);
     view.rerender(<OrderCancellationPanel caseNo="CASE-OTHER" />);
-    await screen.findByText(/取消日期：2026-09-05/);
+    await screen.findByLabelText('案件 CASE-OTHER 訂單取消');
     await act(async () => { finish(query()); });
-    expect(mocks.preview).toHaveBeenCalledTimes(1);
-    expect(mocks.preview).toHaveBeenCalledWith('CASE-OTHER', [], expect.any(AbortSignal));
+    expect(mocks.preview).not.toHaveBeenCalled();
     expect(mocks.apply).not.toHaveBeenCalled();
   });
 });

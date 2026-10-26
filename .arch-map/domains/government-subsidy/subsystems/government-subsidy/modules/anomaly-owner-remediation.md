@@ -9,6 +9,8 @@
 `GOVSUB-003/005`均不形成 runtime Anomalies current issue，structural ambiguity與不完整owner facts fail closed。
 
 ## Implementation
+- `domains/government_subsidy/claims.py` — 正式申報、送件及核定候選。
+- `domains/government_subsidy/ledger.py` — 核定明細、收款／沖正 allocation 與批次餘額規則。
 - `domains/government_subsidy/overpayment.py`
 - `domains/government_subsidy/payer_master.py` — receipt／offset 共用的 canonical payer identity 常數，已無退款帳戶模型。
 - `api/dependencies/government_subsidy.py` — receipt／claim／offset 與 owner Query 的 request-scoped composition。

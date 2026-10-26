@@ -45,7 +45,7 @@ const FINANCE_CORRECTION_ACTIONS = new Set([
 ]);
 
 function canCorrectFinanceImportRow(row: FinanceImportReviewSnapshot['items'][number]): boolean {
-  return ['client_receipt', 'staff_payout'].includes(row.classification_type)
+  return ['client_receipt', 'staff_payout', 'client_refund'].includes(row.classification_type)
     && row.available_actions.some((action) => FINANCE_CORRECTION_ACTIONS.has(action));
 }
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
@@ -325,7 +325,7 @@ export const FinancePage: React.FC = () => {
       if (!current('batch-preview', request.sequence, request.controller)) return;
       await applyImportedBatch(preview);
     }
-    catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '匯入預覽未完成，請重新執行預覽。') }); }
+    catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') }); }
   };
   const applyImportedBatch = async (checked: FinanceImportBatchPreview) => {
     if (!checked.apply_allowed || checked.counts.ready_dispatch <= 0) return;
@@ -342,7 +342,7 @@ export const FinancePage: React.FC = () => {
         batchIdentity: checked.batch_identity,
         previewFingerprint: checked.preview_fingerprint,
       });
-    } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '正式匯入未受理，請重新預覽後再試。') }); }
+    } catch (error) { setApplyJob({ kind: 'error', message: financeErrorMessage(error, '匯入是否受理尚未確認，請按「以原操作確認匯入結果」。') }); }
   };
   const observeApplyOutcome = async (
     jobId: string,
@@ -380,7 +380,7 @@ export const FinancePage: React.FC = () => {
       if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
     }
   };
-  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: batchOutcome.kind !== 'ready', busy: importBusy || applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); } });
+  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0)), busy: importBusy || applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); } });
 
 
   return (
@@ -402,7 +402,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>客戶收款資料</h2>
-              <p>正常收款由銀行交易明細匯入自動核銷；不唯一或金額不符時，請到「銀行對帳」查看該批次的人工核對清單。</p>
+              <p>各期應付由完整案件資料自動計算；請至「銀行對帳」核對實際入款並確認核銷，金額或歸屬不符時先核對原因。</p>
             </div>
           </div>
 
@@ -616,7 +616,7 @@ export const FinancePage: React.FC = () => {
           <div className="finance-section-heading">
             <div>
               <h2>銀行對帳</h2>
-              <p>選擇銀行交易明細工作簿、核對預覽，再確認匯入；完成結果會自動顯示。</p>
+              <p>選擇銀行交易明細工作簿後，按「匯入銀行交易明細」；系統自動檢查並提交可入帳款項，完成後顯示結果。</p>
             </div>
           </div>
 
@@ -687,7 +687,7 @@ export const FinancePage: React.FC = () => {
             {ingestion.kind === 'ready' && (
               <div className="finance-meta" style={{ marginTop: '14px', textAlign: 'left' }}>
                 <span>
-                  {ingestion.data.replayed ? '同一工作簿已上傳過，將沿用原上傳結果。' : '檔案上傳完成，系統自動核對並入帳。'}
+                  {ingestion.data.replayed ? '同一工作簿已上傳過，將沿用原上傳結果。' : '檔案上傳完成；是否入帳以下方處理結果為準。'}
                   {' '}共讀取 {ingestion.data.source_row_count} 列，其中 {ingestion.data.canonical_created_count} 列已建立待處理資料。
                 </span>
               </div>
@@ -700,11 +700,17 @@ export const FinancePage: React.FC = () => {
                 <div className="finance-scope-note">
                   可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜需人工處理 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
                   {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0
-                    ? '系統已自動提交可入帳款項。'
+                    ? '系統將依檢查結果提交可入帳款項；實際進度以下方結果為準。'
                     : batchPreview.data.apply_allowed
-                      ? '目前沒有可自動入帳的筆數；請先從帳務異常處理完成配對。'
+                      ? batchPreview.data.counts.existing > 0 && batchPreview.data.counts.manual_review === 0 && batchPreview.data.counts.business_pending === 0
+                        ? '本批次款項已處理，沒有新增入帳。'
+                        : '目前沒有可自動入帳的款項；請核對檔案內容及待處理資訊。'
                     : `目前不可匯入：${financeImportBlockerMessage(batchPreview.data.blocking_codes)}`}
                 </div>
+
+                {batchPreview.data.rows.some(row => row.evidence.includes('subsidy_advance_not_due')) && (
+                  <p role="status">補助退款尚未符合政府入款或工會代墊條件，已保留待處理。</p>
+                )}
 
                 <StateMessage state={sourceReview} empty="目前沒有待人工確認資料。" />
                 {sourceReview.kind === 'ready' && (
@@ -750,7 +756,7 @@ export const FinancePage: React.FC = () => {
                                 <td>{row.direction}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
                                 <td>{row.classification_type}</td>
-                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(row)}>指定正確訂單</button>}</td>
+                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(row)}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -759,10 +765,10 @@ export const FinancePage: React.FC = () => {
                     )}
                     {correctionRow && <section className="finance-detail-block" aria-label="指定銀行入款的正確訂單" style={{ marginTop: '12px' }}>
                       <div className="finance-meta">
-                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}｜指定正確訂單</strong>
+                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}｜{correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</strong>
                         <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(null)}>關閉</button>
                       </div>
-                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} />
+                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onPosted={() => { setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
                     </section>}
                   </div>
                 )}
@@ -811,7 +817,7 @@ export const FinancePage: React.FC = () => {
                 <span>
                   {batchOutcome.data.receipt
                     ? `匯入完成：核銷 ${batchOutcome.data.receipt.reconciled_count}、既有 ${batchOutcome.data.receipt.existing_count}、待處理 ${batchOutcome.data.receipt.pending_count}`
-                    : '未完成正式入帳；請重新預覽並查看本頁人工核對清單。'}
+                    : '未完成正式入帳；請查看本頁人工核對清單，確認原因後重新選檔匯入。'}
                 </span>
                 {batchOutcome.data.receipt && batchOutcome.data.receipt.pending_count > 0 && (
                   <a href="#finance-import-review" className="finance-btn-secondary">查看人工核對清單</a>

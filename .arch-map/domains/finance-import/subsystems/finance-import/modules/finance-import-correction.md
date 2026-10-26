@@ -6,10 +6,13 @@
 
 ## Responsibility
 組合 Finance Import correction 的 typed Query／Preview／Apply 與 durable outcome readback；正式帳務 mutation 仍委派給 owning Domain。
+銀行人工核對提供原流水的客戶退款及部分退款入口，沿 Client Finance typed Query 選取待退款，並以既有 partial flag 委派 owner；核銷結果完成後讀回剩餘款並刷新清單。
+正常補助退款候選在 Preview 先借用 Client Finance owner funding／eligibility 檢查；不符時保留 business pending，不宣稱 ready-dispatch，也不阻擋同批其他合法款項。
 
 ## Implementation
 - primary:
   - `infrastructure/mysql/finance_import_repository.py`
+  - `subsystems/finance_import/query.py` — manifest count and review list use the same owner-ledger predicate: retain matched client receipts and unposted staff payouts/customer refunds for review, exclude posted rows.
   - `infrastructure/mysql/finance_import_owning_domain_composite.py` — 補助退款只委派 Client Finance owner；代墊判斷與人工核銷共用 owner funding facts，不在 importer 重算。
   - `ui_react/src/api/finance_import/finance_import_correction_client.ts`
   - `ui_react/src/components/FinanceImportCorrectionForm.tsx`

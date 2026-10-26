@@ -29,7 +29,7 @@ class AutomaticArrangementProposal:
 class AutomaticArrangementStatus:
     case_no: str
     plan_id: int
-    state: Literal['awaiting_confirmations', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']
+    state: Literal['awaiting_service_start', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']
     blockers: tuple[str, ...] = ()
     job_id: str | None = None
     assignment_count: int = 0
@@ -59,10 +59,6 @@ class AutomaticServiceArrangement:
         return status
 
     def dispatch_case(self, case_no: str, plan_id: int) -> AutomaticArrangementStatus:
-        try:
-            self.source.reserve_waiting_deposit(case_no)
-        except ValueError as error:
-            return AutomaticArrangementStatus(case_no, plan_id, 'awaiting_conditions', (str(error),))
         status, command = self._candidate(case_no, plan_id)
         if command is None or status.state != 'ready':
             return status
@@ -87,9 +83,9 @@ class AutomaticServiceArrangement:
             if proposal.assignment_count:
                 return AutomaticArrangementStatus(case_no, plan_id, 'effective', assignment_count=proposal.assignment_count), None
             if not proposal.confirmed:
-                return AutomaticArrangementStatus(case_no, plan_id, 'awaiting_confirmations'), None
+                return AutomaticArrangementStatus(case_no, plan_id, 'awaiting_service_start'), None
             if proposal.intent is None:
-                raise ValueError('matching_schedule_confirmation_required_for_target_segments')
+                raise ValueError('service_start_result_required')
             preview = self.assignments.preview(AssignmentPlanPreviewRequest(case_no, proposal.intent, CorrelationId('automatic-service-arrangement-query')))
         except AssignmentPlanWorkflowError as error:
             if error.error.category not in {ErrorCategory.DOMAIN_BLOCKED, ErrorCategory.CONFLICT, ErrorCategory.VALIDATION}:
@@ -120,7 +116,7 @@ def build_automatic_arrangement_command(proposal: AutomaticArrangementProposal, 
         'preview_fingerprint': preview.fingerprint.value,
         'idempotency_key': identity,
         'actor': actor,
-        'reason': '客戶與所有月嫂已確認同一份日期表，條件齊備後自動排班',
+        'reason': '月嫂已回報雙方協調結果，條件齊備後自動排班',
         'correlation_id': identity,
     }
     return DurableJobCommand(str(uuid4()), identity, 'assignment_plan_apply', 1, payload, actor, identity)

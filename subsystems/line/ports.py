@@ -8,7 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from subsystems.line.service_day_log_reminders import ServiceDayLogReminderPort
+    from subsystems.line.second_payment_notifications import SecondPaymentNotificationPort
+    from subsystems.line.service_completion_notifications import ServiceCompletionNotificationPort
+    from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
+    from subsystems.line.service_start_day import ServiceStartDayRepositoryPort
 
 
 def unconfigured_connection_factory() -> Any:
@@ -76,6 +83,7 @@ from shared_kernel.validation import (
 from subsystems.line.configuration_contracts import (
     ApplyLineConfigurationCommand,
     ApplyLineConfigurationResult,
+    LineConfigurationHistoryEntry,
 )
 from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
@@ -652,6 +660,10 @@ class LineNotificationRuleRepositoryPort(Protocol):
         self, query: LineNotificationFailureCurrentFactQuery
     ) -> LineNotificationFailureCurrentFactReadback: ...
 
+    def unresolved_delivery_task_ids(
+        self, task_ids: tuple[int, ...]
+    ) -> tuple[int, ...]: ...
+
     def list_line006_recheck_targets(
         self, *, limit: int = 100
     ) -> tuple[LineNotificationFailureRecheckTarget, ...]: ...
@@ -687,6 +699,10 @@ class LineAnomalyRecheckPort(Protocol):
 
 class LineConfigurationRepositoryPort(Protocol):
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot: ...
+
+    def history(self, kind: LineConfigurationKind) -> tuple["LineConfigurationHistoryEntry", ...]: ...
+
+    def get_revision(self, kind: LineConfigurationKind, revision: LineConfigurationRevision) -> LineConfigurationSnapshot | None: ...
 
     def apply(
         self,
@@ -1024,6 +1040,12 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     customer_service: object
     feedback: LineFeedbackRepository
     identity_management: object
+    service_starts: object
+    service_start_days: "ServiceStartDayRepositoryPort"
+    second_payment_notifications: "SecondPaymentNotificationPort"
+    service_completion_notifications: "ServiceCompletionNotificationPort"
+    service_day_log_reminders: "ServiceDayLogReminderPort"
+    payment_overdue_reminders: "PaymentOverdueReminderPort"
 
 
 __all__ = [

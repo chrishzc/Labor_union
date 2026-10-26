@@ -20,13 +20,13 @@ from domains.client_finance.subsidy_coverage import (
 
 MONEY_ZERO = Decimal("0")
 SUBSIDY_HOURS_BY_IDENTITY_STATUS = {
-    "一般市民": Decimal("40"),
-    "補助市民": Decimal("120"),
+    "補助市民": Decimal("40"),
+    "社福": Decimal("120"),
     "非市民": MONEY_ZERO,
 }
 CLIENT_RATE_BY_IDENTITY_STATUS = {
-    "一般市民": Decimal("300"),
-    "補助市民": MONEY_ZERO,
+    "補助市民": Decimal("300"),
+    "社福": MONEY_ZERO,
     "非市民": Decimal("350"),
 }
 SUBSIDIZED_EXCESS_CLIENT_HOURLY_RATE = Decimal("350")
@@ -98,7 +98,7 @@ def _collection_stages(
     if due_dates["deposit"] is None:
         raise ValueError("deposit_due_date is required")
     remaining_subsidy_hours = None
-    if identity_status == "補助市民":
+    if identity_status == "社福":
         remaining_subsidy_hours = Decimal("120")
     stages = []
     for stage, days, floor_fee in (
@@ -133,7 +133,7 @@ def _stage_service_receivable(
     subsidized_excess_hourly_rate: Decimal,
     remaining_subsidy_hours: Decimal | None,
 ) -> tuple[Decimal, Decimal | None]:
-    if identity_status != "補助市民":
+    if identity_status != "社福":
         return service_hours * standard_client_rate, remaining_subsidy_hours
     if remaining_subsidy_hours is None:
         raise ValueError("subsidy coverage state is missing")

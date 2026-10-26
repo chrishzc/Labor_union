@@ -124,7 +124,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
     const typed: ServiceDay[] = days.map((day) => ({ service_date: day.service_date, staff_id: Number(day.staff_id), reason: day.reason.trim() || null }));
     if (new Set(typed.map((day) => day.service_date)).size !== typed.length) { setError('實際服務日期不可重複。'); return; }
     if (!supportsServiceDays && typed.length !== 0) { setError('服務尚未開始，實際服務日必須為 0 天。'); return; }
-    if (supportsServiceDays && typed.length === 0) { setError('服務已開始或歷史取消補登，至少保留一日實際服務事實。'); return; }
+    if (historicalRepair && typed.length === 0) { setError('歷史取消補登至少需一日實際服務事實。'); return; }
     const request = ++sequence.current;
     previewController.current?.abort();
     const controller = new AbortController();
@@ -271,6 +271,7 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
           {alreadyCancelled && <p role="status">案件已取消且無歷史服務補登能力；重新開始請使用受控重開。</p>}
           {historicalRepair && <p role="status">後端允許補登歷史取消的實際服務事實；不是重新取消或重開。</p>}
           {!supportsServiceDays && <p>服務尚未開始，取消實際服務日維持 0 天。</p>}
+          {supportsServiceDays && <p>已自動排除取消日之後的排班。請核對已服務日期與月嫂；取消當日尚未服務可移除此日，確認完全未服務可保留 0 日。</p>}
           {supportsServiceDays && !alreadyCancelled && (
             <fieldset disabled={busy}>
               <legend>實際服務日與月嫂</legend>
@@ -305,8 +306,8 @@ export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyCh
           <section aria-label="取消帳務與薪資影響">
             {preview.client_finance_impact === null && <p>沒有客戶帳務需要調整。</p>}
             {preview.payroll_impact === null && <p>沒有月嫂薪資需要調整。</p>}
-            {preview.client_finance_impact?.actions.map((action, index) => <p key={`client-${index}`}>客戶 {action.payment_stage}：{action.direction} NT$ {action.direction_amount_ntd}</p>)}
-            {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{action.direction} NT$ {action.amount.amount}</p>)}
+            {preview.client_finance_impact?.actions.map((action, index) => <p key={`client-${index}`}>客戶 {({ deposit: '訂金', first: '第一期款', second: '第二期款', adjustment: '調整款' } as Record<string, string>)[action.payment_stage] ?? '款項'}：{({ refund_due: '應退款', additional_charge_due: '應補收', no_finance_change: '無帳務差額' } as Record<string, string>)[action.direction]} NT$ {action.direction_amount_ntd}</p>)}
+            {preview.payroll_impact?.actions.map((action, index) => <p key={`staff-${index}`}>{staffIdentity.label(action.staff_id)}：{({ payable_to_staff: '應付薪資', receivable_from_staff: '應收回款項' } as Record<string, string>)[action.direction] ?? '薪資調整'} NT$ {action.amount.amount}</p>)}
             {[...(preview.client_finance_impact?.blockers ?? []), ...(preview.payroll_impact?.blockers ?? [])].map((blocker, index) => <p role="alert" key={index}>{blocker}</p>)}
           </section>
 

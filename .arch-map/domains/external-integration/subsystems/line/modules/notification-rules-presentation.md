@@ -13,6 +13,8 @@
 
 ## Implementation
 - primary: `ui_react/src/components/LineNotificationWorkbench.tsx`
+  - `ui_react/src/components/LineMessageFlow.tsx`、`ui_react/src/components/LineMessageFlow.css` — 同一 LINE 專區的精簡流程導覽；只讀正式目錄與規則，點選步驟才展開訊息，返回時保留步驟並重新查詢狀態。
+  - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 流程分類引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；不保存文案或業務 gate。
   - `ui_react/src/components/LineMessagePreviewWorkspace.tsx` — 公版欄位值表、abort／generation 與 display-only Flex／carousel renderer。
   - `ui_react/src/api/line_notification_rules/line_message_preview_client.ts` — authenticated closed preview catalog／subjects／preview transport。
   - `subsystems/line/message_preview.py` — LINE-owned typed preview contracts、純渲染協調與移除可執行 action 的 projection。
@@ -22,7 +24,7 @@
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`
   - `ui_react/src/components/LineNotificationWorkbench.css`
-  - `ui_react/src/pages/LineManagementPage.tsx` — 只組裝 push_queue 內容設定；不再掛載獨立歡迎／發送歷程分頁，也不查發送摘要與清單。
+  - `ui_react/src/pages/LineManagementPage.tsx` — 組裝 message_flow 導覽與 push_queue 內容設定，以 message query 定位目前訊息並沿未儲存草稿保護切換；不再掛載獨立歡迎／發送歷程分頁，也不查發送摘要與清單。
   - `ui_react/src/components/LineNotificationRulesMutationPanel.tsx` — scoped settingsOnly 模式保留原規則 mutation。
   - `ui_react/src/components/LineNotificationTemplateEditor.tsx`
   - `ui_react/src/api/line_notification_rules/line_notification_template_client.ts`
@@ -31,6 +33,10 @@
   - `ui_react/src/api/line_onboarding/line_onboarding_client.ts`
   - `subsystems/line/message_configuration.py` — notification_description 消費同一版本化文字設定；genesis 沿用既有設定檔。
   - `subsystems/line/staff_leave_customer_coordination.py` — 新請假確認卡片只替換說明文字，不變更日期、對象或 postback。
+
+服務完工滿意度問卷邀請沿現有流程導覽、可編輯文字模板及公版預覽；問卷網址先留空，不提供無網址按鈕，後續可直接加入文字內容。
+
+流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」公版沿實際自助導覽卡，收費與補助共用現行 40／120 小時文案。
 
 補列 current 身分／登記模板、客服導覽及受理／結案、候選資訊一／二／每週說明、工會詢問／回覆及完整推薦確認包。卡片重用 `subsystems/scheduling/matching_line_cards.py` 純組裝；公版使用明列範例，訂單資訊欄位沿用 Orders owner `subsystems/orders/order_information.py` 的純格式化；既有 record API 透過 Orders／Matching owner 唯讀 projection。工會詢問與回覆接受僅預覽草稿，不提供儲存。D+1～D+3 與未具正式用途的測試模板不列入。零候選固定協調通知已由現行人工協調取代，預覽、有效規則／模板與 bootstrap 均移除，writer 拒絕重新加入。補列訂金、服務群組成功／錯誤、配對回覆、請假回覆、進度與身分入口、完整去敏告警；公版共用原純組裝函式，欄位值明列，record API 對新增純公版項目明示不可用。告警收件者改稱已設定管理員個人對象，不寫死幹部群；群組告警已取消。
 
@@ -49,3 +55,5 @@
 
 ## Change triggers
 Reconcile when unified notification content presentation、welcome composition、configured card copy、Preview／Confirm／Save／Delete gating、closed result/error或focused test location changes。
+
+- test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py`

@@ -22,6 +22,8 @@
   - `subsystems/line/delivery_worker.py`
   - `infrastructure/mysql/line_unit_of_work.py`
 
+- `api/routes/notification_tasks.py`、`api/routes/notification_task_actions.py` — 桌面／LIFF notification_failure 只讀 projection＋fresh owner，原 manual replay 資格及 writer。來源 IDs 為既有事件衍生定位；pending／processing／retryable 保留 predicate，不建立新 state。
+
 ## Contracts
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — LINE-006 owner readback、manual replay與terminal predicate。
 - `manual-replay:{source_event_id}:{idempotency_key}` — 唯一replay lineage。

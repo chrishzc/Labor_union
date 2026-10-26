@@ -41,6 +41,7 @@ class DepositStaffQuery(_Auth):
     page: int = Field(default=1, ge=1, le=10000)
     page_size: int = Field(default=25, ge=1, le=50)
     settled: bool | None = None
+    case_no: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 class DepositPaymentView(BaseModel):
@@ -62,6 +63,19 @@ class DepositStaffItem(BaseModel):
     line_bound: bool
     ready: bool
     delivery_status: str | None
+    unavailable_reason: str | None = None
+
+
+def deposit_reminder_blocker(application, payment, line_bound: bool) -> str | None:
+    reasons = []
+    if not line_bound:
+        reasons.append('客戶尚未綁定 LINE，請先聯絡客戶完成身分綁定。')
+    if not payment.settled:
+        labels = {'due_date':'繳費到期日','virtual_account':'案件虛擬帳號','bank_code':'銀行代碼','liff':'LINE 繳費頁面設定'}
+        missing = application.missing_reminder_fields(payment)
+        if missing:
+            reasons.append('尚未完成：'+'、'.join(labels[field] for field in missing)+'。請核對案件帳務及系統設定。')
+    return ' '.join(reasons) or None
 
 
 class DepositStaffPage(BaseModel):
@@ -107,11 +121,12 @@ def deposit_staff_followups(payload: DepositStaffQuery):
     try:
         application = get_deposit_notifications()
         with open_line_unit_of_work() as uow:
-            result = uow.deposit_notifications.followups(page=payload.page, page_size=payload.page_size, settled=payload.settled)
+            result = uow.deposit_notifications.followups(page=payload.page, page_size=payload.page_size, settled=payload.settled, **({"case_no":payload.case_no} if payload.case_no else {}))
         return BaseResponse(data=DepositStaffPage(items=[DepositStaffItem(
             case_no=item.payment.case_no, amount_ntd=item.payment.amount_ntd, due_date=item.payment.due_date,
             expected_version=item.payment.obligation_version, settled=item.payment.settled,
             line_bound=item.line_bound, ready=application.ready(item.payment), delivery_status=item.delivery_status,
+            unavailable_reason=deposit_reminder_blocker(application,item.payment,item.line_bound),
         ) for item in result.items], page=payload.page, has_next=result.has_next, total=result.page_total,
             pending_total=result.total, unpaid_total=result.unpaid_total, settled_total=result.settled_total))
     except _ERRORS as error:

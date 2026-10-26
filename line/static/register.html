@@ -699,9 +699,9 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         document.body.style.fontFamily = theme.font_family;
         document.getElementById('pageLogo').textContent = page.content.logo || '';
         document.querySelector('.title').textContent = page.title;
-        document.querySelector('.subtitle').textContent = '請填寫服務需求，送出後由工會審核。';
-        document.getElementById('registrationPreviewButton').textContent = '送出資料';
-        document.querySelector('.success-title').textContent = '登記已受理';
+        document.querySelector('.subtitle').textContent = page.subtitle;
+        document.getElementById('registrationPreviewButton').textContent = page.submit_button;
+        document.querySelector('.success-title').textContent = page.success_title;
         document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
         document.getElementById('loaderText').textContent = page.loading_text;
         const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
@@ -1296,12 +1296,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         }
         const successDescription = document.querySelector('.success-desc');
         successDescription.style.whiteSpace = 'pre-line';
-        successDescription.textContent = [
+        successDescription.textContent = [...new Set([
+            runtimePage?.success_description || '',
             receipt.identity_status === 'pending_approval' ? '申請已送出，待工會核准。' : '登記資料已提交。',
             `申請編號：${receipt.registration_id}`,
-        ].join('\n');
-        document.querySelector('.success-title').textContent = receipt.identity_status === 'pending_approval'
-            ? '申請已送出' : '登記已受理';
+        ])].filter(Boolean).join('\n');
+        document.querySelector('.success-title').textContent = runtimePage?.success_title
+            || (receipt.identity_status === 'pending_approval' ? '申請已送出' : '登記已受理');
         document.getElementById('formHeader').style.display = 'none';
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('successCard').style.display = 'block';

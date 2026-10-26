@@ -20,7 +20,7 @@ export function lineOrderGroupStatusLabel(status: LineOrderGroupStatus): string 
 export function lineOrderGroupEventLabel(event: LineOrderGroupWorkspaceEvent): string {
   const person = event.participant_role === 'staff' && event.participant_name ? staffDisplayLabel(event.participant_union_no, event.participant_name) : event.participant_name || (event.participant_role === 'customer' ? '客戶' : event.participant_role === 'staff' ? '月嫂' : '成員');
   const labels: Record<string, string> = {
-    bound: '已綁定服務群組', replaced: '已更換綁定群組', released: '已解除群組綁定',
+    bound: '已綁定案件群組', replaced: '已更換綁定群組', released: '已解除群組綁定',
     invitation_relayed: '邀請已排入發送', member_joined: `${person}已加入群組`,
     member_left: `${person}已離開群組`, group_activated: '群組開始運作',
   };

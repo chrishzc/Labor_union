@@ -508,7 +508,7 @@ def apply_overpayment_recovery_matching(
         IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()),
         body.reason, correlation, _required_evidence(body),
     )
-    return _call_matching_endpoint(lambda: _materialize(workflow.apply(request)), "已建立月嫂追償入款配對", correlation)
+    return _call_matching_endpoint(lambda: _matching_receipt_payload(workflow.apply(request)), "已建立月嫂追償入款配對", correlation)
 
 
 @router.post(
@@ -725,6 +725,11 @@ def _recovery_adjustment_selection(body) -> StaffOverpaymentRecoverySelection:
 
 def _matching_selection(body) -> StaffOverpaymentRecoveryMatchingSelection:
     return StaffOverpaymentRecoveryMatchingSelection(body.recovery_identity.strip(), str(body.finance_import_row_id))
+
+
+def _matching_receipt_payload(receipt):
+    return {name: _materialize(getattr(receipt, name))
+            for name in StaffOverpaymentRecoveryMatchingReceiptView.model_fields}
 
 
 def _matching_preview_payload(preview):

@@ -10,6 +10,7 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- subsidy period policy: `scripts/migrate_subsidy_period_policy.py` — hash-bound one-time identity relabeling and replayable automatic-refund synchronization, selected by the default preserve-data route. Plan binds selected backfill inventory; invalid owner facts remain pending with case/reason evidence, including after verify or replay. Business backfills select the preserve route before schema-only qualification.
 - primary:
   - `db/schema_parts/1053_line_order_group_invitation_url.sql` — nullable 私有群組網址，無資料回填。
   - `db/migration_releases/labor_union_2026_10_22_line_order_group_invitation_url_v1.json`
@@ -147,6 +148,7 @@
 - test_root: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/`
 - integration_root: `tests/test_collect_local_additive_engine_evidence.py`
 - integration_root: `tests/test_local_database_maintenance.py`
+- integration_root: `tests/test_schema_assembly.py` — 既有 fresh assembly 版本與分類驗證，沿原測試入口保存；新增 migration contract 使用 canonical module root。
 - integration_root: `tests/test_order_lifecycle_pending_status_constraint_schema.py`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_registry_owner_mutations_schema.py`
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_order_service_hours_half_precision_schema.py`

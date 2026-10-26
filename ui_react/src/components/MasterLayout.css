@@ -71,6 +71,33 @@
   gap: var(--space-4);
 }
 
+.notification-entry-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--radius-full);
+  background: #fff;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: .875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.notification-entry-button:hover,
+.notification-entry-button.active {
+  color: var(--md-sys-color-primary);
+  background: #fff3ec;
+  border-color: #e8b89f;
+}
+@media (max-width: 1200px) {
+  .notification-entry-button { width: 40px; padding: 7px; }
+  .notification-entry-button > span { display: none; }
+}
+
 .system-status-indicator {
   display: flex;
   align-items: center;

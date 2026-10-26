@@ -426,8 +426,8 @@ def _date_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     version_id = row["confirmed_version_id"]
     source = _source("Orders / Scheduling", f"confirmed-service-date-version:{version_id}" if version_id is not None else None, _optional_int(row, "confirmed_version"))
     if version_id is None:
-        return _unavailable_stage(5, "date_confirmation", "確認實際服務日期", "Orders / Scheduling", "confirmed_service_date_lineage_missing")
-    return _stage(5, "date_confirmation", "確認實際服務日期", "Orders / Scheduling", "completed", source, _optional_datetime(row, "confirmed_at"), actions=(_get("orders.service_dates.query", f"/api/v1/orders/{case_no}/service-dates"),))
+        return _unavailable_stage(5, "date_confirmation", "服務日期與排班結果", "Orders / Scheduling", "confirmed_service_date_lineage_missing")
+    return _stage(5, "date_confirmation", "服務日期與排班結果", "Orders / Scheduling", "completed", source, _optional_datetime(row, "confirmed_at"), actions=(_get("orders.service_dates.query", f"/api/v1/orders/{case_no}/service-dates"),))
 
 
 def _service_stage(row: Mapping[str, object], case_no: str, evaluated_at: datetime) -> StageProjection:
@@ -613,7 +613,7 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         _standalone_step(6, "external_signing_dispatch", "建立契約並送交外部簽署平台", "Contract Signing", dispatch_status, _optional_datetime(row, "external_signing_handoff_at"), "external_signing_handoff_missing" if dispatch_status == "unavailable" else None),
         _standalone_step(7, "external_signing_completion", "雙方完成外部簽署並回收最終 PDF", "Contract Signing / Orders", signing_status, _optional_datetime(row, "final_contract_completed_at"), "external_signing_final_document_missing" if signing_status == "unavailable" else None),
         _standalone_step(8, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _latest(row, "deposit_updated_at", "deposit_gate_override_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else (), warnings=deposit_warnings),
-        _step_from_stage(9, "confirmed_service_dates", "確認事前服務日期（精算）", stage["date_confirmation"]),
+        _step_from_stage(9, "confirmed_service_dates", "協調服務日期與排班", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),
     )

@@ -17,7 +17,6 @@ from infrastructure.archive.contract_documents import archive_contract_document,
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.order_contract_completion_repository import MySqlOrderContractCompletionRepository
 from infrastructure.mysql.order_terms_read_model import load_contract_client_finance_facts, select_order
-from infrastructure.mysql.client_finance_terms_writer import persist_client_finance_terms_impact
 from shared_kernel.clock import SystemBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion
 from domains.orders.contract_completion import ContractCompletionIntent
@@ -45,8 +44,6 @@ def get_staff_contract_signing_application() -> StaffContractSigningApplication:
         discard_document=discard_uncommitted_contract_document,
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
         order_selector=select_order,
-        finance_facts_loader=load_contract_client_finance_facts,
-        finance_terms_writer=persist_client_finance_terms_impact,
     )
 
 

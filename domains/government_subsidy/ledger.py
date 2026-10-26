@@ -233,6 +233,19 @@ class GovernmentBankFact:
 
 
 @dataclass(frozen=True, slots=True)
+class ClaimItemApproval:
+    target_identity: int
+    amount_ntd: MoneyNTD
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.target_identity, "approval item identity")
+        if not isinstance(self.amount_ntd, MoneyNTD):
+            raise TypeError("approval amount must be MoneyNTD")
+        if self.amount_ntd.amount < 0:
+            raise ValueError("approval amount must be nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
 class AllocationIntent:
     target_identity: int
     amount_ntd: MoneyNTD
@@ -389,9 +402,12 @@ def build_claim_item_snapshot(
 
 def validate_approval_amounts(
     items: tuple[ClaimItemSnapshot, ...],
-    approval_amounts: tuple[AllocationIntent, ...],
+    approval_amounts: tuple[ClaimItemApproval | AllocationIntent, ...],
 ) -> MoneyNTD:
-    _validate_allocation_intents(approval_amounts)
+    if not isinstance(approval_amounts, tuple) or any(
+        not isinstance(item, (ClaimItemApproval, AllocationIntent)) for item in approval_amounts
+    ):
+        raise TypeError("approval amounts contain an invalid value")
     approvals = _unique_intent_map(
         approval_amounts,
         GovernmentSubsidyErrorCode.CLAIM_FACTS_INVALID,

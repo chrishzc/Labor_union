@@ -185,12 +185,7 @@ def preview_customer_leave_defer(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
 ):
-    del principal
-    identity = CorrelationId(correlation_id)
-    return _call_endpoint(
-        lambda: _customer_defer_preview_command(application, case_no, body, identity),
-        "成功產生客戶同意順延的正式排班預覽", identity,
-    )
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用月嫂協調結果的順延或代班待辦。'})
 
 
 @router.post(
@@ -209,13 +204,7 @@ def apply_customer_leave_defer(
     principal: AdminPrincipal = Depends(require_system_admin),
     application: LeaveSubstitutionApplication = Depends(get_leave_substitution_application),
 ):
-    identity = CorrelationId(correlation_id)
-    return _call_endpoint(
-        lambda: _receipt_payload(application.apply_customer_defer(_apply_request(
-            case_no, body, idempotency_key, identity, principal,
-        ))),
-        "成功套用本案客戶同意的順延排班；請以收據核對整張請假狀態", identity,
-    )
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用月嫂協調結果的順延或代班待辦。'})
 
 
 def _customer_defer_preview_command(application, case_no, body, correlation_id):

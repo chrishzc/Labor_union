@@ -22,8 +22,11 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
         _persist_projection(cursor, command, action, event_id)
+    changed = False
     if getattr(command.candidate, "subsidy_return_plan", None) is not None:
-        _persist_subsidy_return(cursor, command)
+        changed = persist_subsidy_return_plan(cursor, command)
+    if not command.candidate.actions and command.candidate.payment_terms is None and not changed:
+        return
     _advance_account_version(cursor, command)
     _append_outbox(cursor, command)
 
@@ -83,20 +86,42 @@ def _append_obligation_event(cursor, command, action, ordinal):
     return int(cursor.lastrowid)
 
 
-def _persist_subsidy_return(cursor, command):
+def persist_subsidy_return_plan(cursor, command):
     plan = command.candidate.subsidy_return_plan
+    cursor.execute('SELECT o.obligation_identity,o.amount_due_ntd,o.due_date,e.after_amount_ntd '
+        'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
+        "WHERE o.case_no=%s AND o.obligation_type='subsidy_return' ORDER BY o.obligation_identity FOR UPDATE",
+        (command.candidate.case_no,))
+    existing = tuple(cursor.fetchall())
+    if len(existing) > 1:
+        raise ValueError('subsidy_return_lineage_ambiguous')
+    current = existing[0] if existing else None
+    identity = current['obligation_identity'] if current else plan.obligation_identity
+    cursor.execute('SELECT COALESCE(SUM(CASE WHEN ledger.entry_type IN (\'subsidy_return\',\'subsidy_advance\') '
+        'THEN allocation.amount_ntd WHEN ledger.entry_type IN (\'reversal\',\'subsidy_return_reversal\') THEN -allocation.amount_ntd ELSE 0 END),0) paid '
+        'FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id '
+        'WHERE allocation.obligation_identity=%s', (identity,))
+    paid = int(cursor.fetchone()['paid'])
+    cursor.execute('SELECT COALESCE(SUM(CASE WHEN ledger.entry_type=\'receipt\' THEN allocation.amount_ntd '
+        'WHEN ledger.entry_type=\'reversal\' THEN -allocation.amount_ntd ELSE 0 END),0) recovered '
+        'FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id '
+        'WHERE allocation.obligation_identity=%s',(identity+':difference',))
+    recovered=int(cursor.fetchone()['recovered'])
+    remaining = max(0, plan.amount.amount - paid + recovered)
+    if current and int(current['after_amount_ntd']) == plan.amount.amount and current['due_date'] == plan.due_date:
+        return False
     ordinal = len(command.candidate.actions) + 1
     cursor.execute(
         _EVENT_INSERT_SQL,
         (
-            plan.obligation_identity,
+            identity,
             command.candidate.case_no,
             "subsidy_return",
             "payable_to_client",
-            "established",
-            0,
+            "recalculated" if current else "established",
+            int(current['after_amount_ntd']) if current else 0,
             plan.amount.amount,
-            None,
+            current['due_date'] if current else None,
             plan.due_date,
             _source_event_identity(command, ordinal),
             None,
@@ -107,6 +132,12 @@ def _persist_subsidy_return(cursor, command):
         ),
     )
     event_id = int(cursor.lastrowid)
+    if current:
+        cursor.execute(_PROJECTION_UPDATE_SQL, (remaining,plan.due_date,'open' if remaining else 'cancelled' if plan.amount.amount==0 and paid==0 else 'settled',
+            event_id,command.candidate.resulting_account_version,identity,command.candidate.case_no))
+        # Preserve actual cash; an over-refund is a receivable difference, never a rewritten payment.
+        _persist_subsidy_overrefund(cursor,command,identity,max(0,paid-plan.amount.amount),plan.due_date,ordinal+1)
+        return True
     cursor.execute(
         _PROJECTION_INSERT_SQL,
         (
@@ -115,13 +146,39 @@ def _persist_subsidy_return(cursor, command):
             "subsidy_return",
             "payable_to_client",
             None,
-            plan.amount.amount,
+            remaining,
             plan.due_date,
             "open",
             event_id,
             command.candidate.resulting_account_version,
         ),
     )
+    return True
+
+
+def _persist_subsidy_overrefund(cursor,command,source,amount,due,ordinal):
+    identity = source + ':difference'
+    cursor.execute('SELECT o.amount_due_ntd,e.after_amount_ntd FROM client_obligations o '
+                   'JOIN client_obligation_events e ON e.id=o.current_event_id WHERE o.obligation_identity=%s FOR UPDATE', (identity,))
+    current = cursor.fetchone()
+    if not current and not amount:
+        return
+    already_paid = int(current['after_amount_ntd']) - int(current['amount_due_ntd']) if current else 0
+    amount=max(amount,already_paid)
+    if current and int(current['after_amount_ntd']) == amount:
+        return
+    cursor.execute(_EVENT_INSERT_SQL,(identity,command.candidate.case_no,'adjustment','receivable_from_client',
+        'recalculated' if current else 'established',int(current['after_amount_ntd']) if current else 0,amount,
+        due if current else None,due,_source_event_identity(command,ordinal),source,
+        command.candidate.expected_account_version,_child_identity(command,'event',ordinal),command.actor.actor_id,command.reason))
+    event_id = int(cursor.lastrowid)
+    if current:
+        remaining = max(0,amount-already_paid)
+        cursor.execute(_PROJECTION_UPDATE_SQL,(remaining,due,'open' if remaining else 'settled',event_id,
+            command.candidate.resulting_account_version,identity,command.candidate.case_no))
+    else:
+        cursor.execute(_PROJECTION_INSERT_SQL,(identity,command.candidate.case_no,'adjustment','receivable_from_client',
+            source,amount,due,'open',event_id,command.candidate.resulting_account_version))
 
 
 def _event_values(command, action, ordinal):

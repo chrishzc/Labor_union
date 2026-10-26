@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+import pytest
 
 from openpyxl import load_workbook
 
@@ -8,10 +9,23 @@ from domains.government_subsidy.claim_schedule import project_claim_schedule
 from subsystems.government_subsidy import reconciliation_register_query as register
 
 
+def test_invalid_effective_schedule_is_unknown_and_cannot_be_exported_as_payable_subsidy():
+    source = {"case_no":"SYNTHETIC", "identity_status":"補助市民", "order_status":"服務中",
+              "service_days":6, "service_hours_per_day":8, "payroll_hourly_rate_ntd":300,
+              "actual_start_date":date(2026,10,19), "actual_end_date":date(2026,10,24)}
+    assert register.project_receivable_estimate(source).amount_ntd == 12000
+    invalid = {**source,"scheduling_source_invalid":1}
+    estimate = register.project_receivable_estimate(invalid)
+    assert estimate.amount_ntd is None
+    assert estimate.unavailable_reason == "scheduling_effective_generation_invalid"
+    with pytest.raises(ValueError,match="scheduling_effective_generation_invalid"):
+        register._to_register_row(invalid)
+
+
 def test_receivable_estimate_reuses_caps_and_frozen_rates_and_never_fills_unknowns_with_zero():
-    general = {"identity_status": "一般市民", "order_status": "服務中", "service_days": 20, "service_hours_per_day": 8, "payroll_hourly_rate_ntd": 300}
+    general = {"identity_status": "補助市民", "order_status": "服務中", "service_days": 20, "service_hours_per_day": 8, "payroll_hourly_rate_ntd": 300}
     assert register.project_receivable_estimate(general).amount_ntd == 12000
-    assert register.project_receivable_estimate({**general, "identity_status": "補助市民", "payroll_hourly_rate_ntd": 350}).amount_ntd == 42000
+    assert register.project_receivable_estimate({**general, "identity_status": "社福", "payroll_hourly_rate_ntd": 350}).amount_ntd == 42000
     assert register.project_receivable_estimate({**general, "service_days": 1}).amount_ntd == 2400
     assert register.project_receivable_estimate({**general, "survey_details": {"特殊計費:胎數": "雙胞胎"}}).amount_ntd == 18000
     for key, value, reason in [("payroll_hourly_rate_ntd", None, "rate_snapshot_missing"), ("service_days", None, "service_volume_pending"), ("service_hours_per_day", 0, "service_volume_pending"), ("identity_status", None, "eligibility_pending")]:
@@ -58,7 +72,7 @@ class FakeConnection:
 
 def _order_row(**overrides):
     row = {
-        "case_no": "115000002", "identity_status": "一般市民",
+        "case_no": "115000002", "identity_status": "補助市民",
         "actual_start_date": date(2026, 3, 1), "actual_end_date": date(2026, 3, 20),
         "service_days": 20, "service_hours_per_day": Decimal("8"),
         "order_status": "訂單完成",
@@ -67,7 +81,7 @@ def _order_row(**overrides):
         "payroll_hourly_rate_ntd": Decimal("300"),
     }
     row.update(overrides)
-    if "payroll_hourly_rate_ntd" not in overrides and row["identity_status"] == "補助市民":
+    if "payroll_hourly_rate_ntd" not in overrides and row["identity_status"] == "社福":
         row["payroll_hourly_rate_ntd"] = Decimal("350")
     return row
 
@@ -78,7 +92,7 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
             order_status="歷史訂單－服務完成",
         ),
         _order_row(
-            case_no="115000001", identity_status="補助市民",
+            case_no="115000001", identity_status="社福",
             actual_start_date=date(2025, 12, 1), actual_end_date=date(2026, 1, 1),
             employer_name="陳小美", employer_address="新北市板橋區",
             staff_name="月嫂乙", survey_details='{"身分證字號": "B223456789"}',
@@ -109,16 +123,16 @@ def test_quarterly_register_includes_established_orders_without_claim_batch():
         "訂單成立", "服務中", "訂單完成", "訂單取消",
         "歷史訂單－未服務", "歷史訂單－服務中",
         "歷史訂單－服務完成", "歷史訂單－帳務完成",
-        "一般市民", "補助市民",
+        "補助市民", "社福",
         date(2026, 1, 1), date(2026, 4, 1),
     )
 
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
     worksheet = workbook["\u5206\u5b63\u6838\u92b7"]
-    assert worksheet.cell(row=1, column=1).value == "\u4e00\u822c\u5e02\u6c11"
+    assert worksheet.cell(row=1, column=1).value == "補助市民"
     assert worksheet.cell(row=2, column=15).value == "\u7c3d\u9818"
     assert worksheet.cell(row=3, column=7).number_format == "0.00"
-    assert worksheet.cell(row=5, column=1).value == "\u88dc\u52a9\u5e02\u6c11"
+    assert worksheet.cell(row=5, column=1).value == "社福"
 
 
 def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
@@ -145,7 +159,7 @@ def test_annual_summary_uses_established_orders_and_repairs_legacy_key():
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
     worksheet = workbook["\u5e74\u5ea6\u7e3d\u8868"]
     values = [cell.value for cell in worksheet["A"]]
-    assert "\u88dc\u52a9\u5e02\u6c11" not in values
+    assert "社福" not in values
     assert worksheet.max_column == 10
 
 
@@ -157,7 +171,7 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
         ),
         _order_row(
             case_no="115000002",
-            identity_status="補助市民",
+            identity_status="社福",
             actual_end_date=date(2027, 1, 15),
         ),
         _order_row(
@@ -206,8 +220,8 @@ def test_operations_report_annual_rows_select_current_and_prior_year_carry_in_wi
         "歷史訂單－服務中",
         "歷史訂單－服務完成",
         "歷史訂單－帳務完成",
-        "一般市民",
         "補助市民",
+        "社福",
     )
 
 
@@ -234,7 +248,7 @@ def test_invalid_quarter_is_rejected_before_database_access(monkeypatch):
 
 def test_register_caps_subsidy_hours_at_case_total_service_hours():
     row = register._to_register_row({
-        "case_no": "115000011", "identity_status": "一般市民",
+        "case_no": "115000011", "identity_status": "補助市民",
         "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 3),
         "service_days": 3, "service_hours_per_day": 9,
         "payroll_hourly_rate_ntd": Decimal("300"),
@@ -248,7 +262,7 @@ def test_register_caps_subsidy_hours_at_case_total_service_hours():
 
 def test_cancelled_order_uses_only_confirmed_official_service_hours():
     row = register._to_register_row({
-        "case_no": "115000012", "identity_status": "一般市民",
+        "case_no": "115000012", "identity_status": "補助市民",
         "order_status": "訂單取消",
         "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 4),
         "service_days": 20, "service_hours_per_day": Decimal("8"),
@@ -266,7 +280,7 @@ def test_cancelled_order_uses_only_confirmed_official_service_hours():
 
 def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():
     row = register._to_register_row({
-        "case_no": "I288-TEST-20260911", "identity_status": "一般市民",
+        "case_no": "I288-TEST-20260911", "identity_status": "補助市民",
         "actual_start_date": date(2026, 9, 8), "actual_end_date": date(2026, 9, 11),
         "service_days": 5, "service_hours_per_day": Decimal("8"),
         "payroll_hourly_rate_ntd": Decimal("450"),
@@ -280,7 +294,7 @@ def test_register_uses_case_payroll_snapshot_as_subsidy_unit_price():
 
 def test_register_uses_effective_twin_correction_for_historical_unit_price():
     row = register._to_register_row({
-        "case_no": "HISTORICAL-TWIN", "identity_status": "一般市民",
+        "case_no": "HISTORICAL-TWIN", "identity_status": "補助市民",
         "actual_start_date": date(2026, 9, 8), "actual_end_date": date(2026, 9, 11),
         "service_days": 5, "service_hours_per_day": Decimal("8"),
         "payroll_hourly_rate_ntd": Decimal("300"),
@@ -317,7 +331,7 @@ def test_historical_register_defaults_unconfirmed_volume_to_identity_cap():
     ))
     subsidized = register._to_register_row(_order_row(
         order_status="歷史訂單－服務完成",
-        identity_status="補助市民",
+        identity_status="社福",
         service_days=4,
         service_hours_per_day=Decimal("4"),
     ))
@@ -339,7 +353,7 @@ def test_twin_register_uses_450_even_when_legacy_case_snapshot_is_300():
 def test_register_rejects_missing_payroll_snapshot_instead_of_using_identity_price():
     try:
         register._to_register_row({
-            "case_no": "115000012", "identity_status": "一般市民",
+            "case_no": "115000012", "identity_status": "補助市民",
             "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 3),
             "service_days": 3, "service_hours_per_day": 9,
         })

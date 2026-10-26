@@ -46,6 +46,7 @@ from subsystems.customer_service.matching_coordination_worker import (
     MatchingCoordinationCustomerServiceWorker,
 )
 from subsystems.line.delivery_worker import LineDeliveryWorker
+from subsystems.line.service_start_day import ServiceStartDayPostbackApplication
 from subsystems.line.matching_coordination_delivery_worker import (
     MatchingCoordinationDeliveryWorker,
 )
@@ -185,6 +186,8 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
     default_postback = handlers["postback"]
 
     def handle_postback(inbox, unit_of_work):
+        if ServiceStartDayPostbackApplication().handle(inbox, unit_of_work):
+            return
         if leave_coordination.handle_postback(inbox, unit_of_work):
             return
         return default_postback(inbox, unit_of_work)

@@ -76,14 +76,11 @@ def test_assignment_requires_exact_confirmed_child_dates_instead_of_old_proposed
     assert resolve((date(2026, 9, 14),)) is None
 
 
-def test_automatic_assignment_uses_confirmed_actual_period_for_single_caregiver():
-    row = {'id': 4, 'staff_id': 1, 'assigned_start_date': date(2026, 10, 26), 'assigned_end_date': date(2026, 11, 5), 'actual_start_date': date(2026, 9, 13)}
-    source = MySqlAutomaticServiceArrangementSource(connection(Cursor(many=[[row]])), SimpleNamespace(query=lambda _: SimpleNamespace(assignment_plan=SimpleNamespace(effective_assignments=()))))
-    source.schedules = SimpleNamespace(query=lambda *_: {'gate_passed': True, 'confirmed_service_date_version': 3, 'schedule_preview': {'recipient_schedules': [{'audience_type': 'caregiver', 'segment_id': 4, 'weeks': [{'service_dates': ['2026-09-14', '2026-09-15']}]}]}})
-    intent = source.proposal('CASE', 4).intent.segments[0]
-    assert intent.assigned_start_date == date(2026, 9, 13)
-    assert intent.assigned_end_date == date(2026, 9, 15)
-    assert intent.official_service_dates == (date(2026, 9, 14), date(2026, 9, 15))
+def test_automatic_assignment_reads_explicit_caregiver_result(monkeypatch):
+    monkeypatch.setattr('infrastructure.mysql.service_start_arrangement.current_service_start_execution',
+        lambda *_args,**_kwargs: ({'confirmed_version_id':3},(ExecutionServiceDay(1,date(2027,1,4)),)))
+    source=MySqlAutomaticServiceArrangementSource(connection(Cursor()),SimpleNamespace(query=lambda _:SimpleNamespace(assignment_plan=SimpleNamespace(effective_assignments=()))))
+    assert source.proposal('CASE',4).intent.segments[0].official_service_dates==(date(2027,1,4),)
 
 
 def test_actual_start_shift_preserves_signed_people_and_volume_without_resigning():
@@ -109,17 +106,20 @@ def test_confirmed_date_shift_cannot_bypass_signed_identity_volume_or_confirmati
         require_exact_commitment_execution(4, (plan,), signed, execution, confirmed_days=confirmed_days)
 
 
-def test_conversion_reads_current_confirmed_snapshot_instead_of_trusting_intent_dates():
-    cursor = Cursor(one=[{'id': 11, 'matching_plan_id': 4, 'terminal_event_id': None}, {'id': 8, 'confirmed_version_id': 6}, {'total': 2, 'confirmed': 2}], many=[
-        [{'staff_id': 1, 'service_date': date(2026, 10, 26)}],
-        [{'plan_id': 4}],
-        [{'segment_id': 4, 'staff_id': 1, 'payload_snapshot': {'weeks': [{'service_dates': ['2027-01-04']}]}}],
+def test_conversion_reads_current_service_start_result():
+    cursor=Cursor(one=[{'id':11,'matching_plan_id':4,'terminal_event_id':None}],many=[
+        [{'staff_id':1,'service_date':date(2026,10,26)}],[{'plan_id':4}],
+        [{'id':8,'staff_id':1,'selected_candidate_id':None,'execution_dates':[{'staff_id':1,'dates':['2027-01-04']}],'confirmed_version_id':6}],
     ])
-    assert _require_exact_commitment_days(cursor, 'CASE', (ExecutionServiceDay(1, date(2027, 1, 4)),), (17,), lock=True) == 11
+    assert _require_exact_commitment_days(cursor,'CASE',(ExecutionServiceDay(1,date(2027,1,4)),),(17,),lock=True)==11
 
 
-@pytest.mark.parametrize('snapshot,counts', [(None, None), ({'id': 8}, {'total': 2, 'confirmed': 1})])
-def test_shift_cannot_use_obsolete_or_only_partially_confirmed_snapshot(snapshot, counts):
-    cursor = Cursor(one=[snapshot, counts], many=[[{'segment_id': 4}]])
-    with pytest.raises(CommitmentExecutionMismatch):
-        _current_confirmed_execution(cursor, 'CASE', 4, lock=True)
+def test_no_current_result_cannot_authorize_dates():
+    with pytest.raises(ValueError,match='service_start_result_required'):
+        _current_confirmed_execution(Cursor(many=[[]]),'CASE',4,lock=True)
+
+
+def test_substitute_identity_requires_current_willing_candidate():
+    cursor=Cursor(one=[None],many=[[{'id':8,'staff_id':1,'selected_candidate_id':7,'execution_dates':[{'staff_id':2,'dates':['2027-01-04']}],'confirmed_version_id':6}]])
+    with pytest.raises(ValueError,match='service_start_substitute_invalid'):
+        _current_confirmed_execution(cursor,'CASE',4,lock=True)

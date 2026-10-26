@@ -6,6 +6,7 @@ Description: 定義版本化 LINE 設定命令與不暴露 definition 的安全�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Mapping
 
@@ -19,6 +20,14 @@ from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
 _CONFIGURATION_REASON_MAXIMUM_LENGTH = 1_000
+
+
+@dataclass(frozen=True, slots=True)
+class LineConfigurationHistoryEntry:
+    revision: LineConfigurationRevision
+    created_at: datetime
+    actor_id: str
+    reason: str
 
 
 class LineConfigurationCommandOutcome(StrEnum):
@@ -146,6 +155,7 @@ __all__ = [
     "GetLineConfigurationQuery",
     "GetLineConfigurationSafeQuery",
     "LineConfigurationCommandOutcome",
+    "LineConfigurationHistoryEntry",
     "LineConfigurationQueryContractError",
     "LineConfigurationQueryUnavailableError",
     "LineConfigurationSafeResult",

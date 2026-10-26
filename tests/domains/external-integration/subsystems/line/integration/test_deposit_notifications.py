@@ -101,7 +101,12 @@ def db():
     CREATE TABLE clients(id INTEGER PRIMARY KEY,line_user_id TEXT);
     CREATE TABLE line_identity_role_bindings(line_user_id TEXT,subject_type TEXT,subject_reference TEXT,binding_status TEXT);
     CREATE TABLE client_obligations(obligation_identity TEXT PRIMARY KEY,case_no TEXT,obligation_type TEXT,direction TEXT,
-        status TEXT,projection_version INTEGER,amount_due_ntd INTEGER,due_date TEXT);
+        status TEXT,projection_version INTEGER,amount_due_ntd INTEGER,due_date TEXT,current_event_id INTEGER);
+    CREATE TABLE client_obligation_events(id INTEGER PRIMARY KEY AUTOINCREMENT,obligation_identity TEXT,after_amount_ntd INTEGER);
+    CREATE TRIGGER seed_obligation_lineage AFTER INSERT ON client_obligations BEGIN
+      INSERT INTO client_obligation_events(obligation_identity,after_amount_ntd) VALUES (NEW.obligation_identity,NEW.amount_due_ntd);
+      UPDATE client_obligations SET current_event_id=last_insert_rowid() WHERE obligation_identity=NEW.obligation_identity;
+    END;
     CREATE TABLE client_deposit_settlement_projection(case_no TEXT PRIMARY KEY,deposit_obligation_identity TEXT,
         settlement_state TEXT,settlement_identity TEXT,contracted_amount_ntd INTEGER,allocated_net_amount_ntd INTEGER,latest_ledger_entry_id INTEGER);
     CREATE TABLE client_ledger_entries(id INTEGER PRIMARY KEY,case_no TEXT,entry_type TEXT,occurred_on TEXT);
@@ -120,7 +125,7 @@ def db():
     raw.execute("INSERT INTO orders VALUES (?,1,'洽談中')", (CASE,))
     raw.execute('INSERT INTO clients VALUES (1,?)', (USER,))
     raw.execute("INSERT INTO line_identity_role_bindings VALUES (?,'customer','1','bound')", (USER,))
-    raw.execute("INSERT INTO client_obligations VALUES ('deposit-one',?,'deposit','receivable_from_client','open',2,12000,'2026-11-01')", (CASE,))
+    raw.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-one',?,'deposit','receivable_from_client','open',2,12000,'2026-11-01')", (CASE,))
     raw.commit()
     yield raw
     raw.close()
@@ -130,9 +135,20 @@ def application(db, **kwargs):
     return DepositNotificationApplication(lambda: Uow(db), lambda: NOW, liff_id='synthetic-liff', bank_code=kwargs.get('bank_code', '807'))
 
 
+@pytest.mark.parametrize('liff_id',['','your_liff_id_here'])
+def test_missing_payment_page_disables_reminder_before_enqueue(db,liff_id):
+    app=DepositNotificationApplication(lambda:Uow(db),lambda:NOW,liff_id=liff_id,bank_code='807')
+    payment=MySqlDepositPaymentQueryRepository(Connection(db)).get(CASE)
+    assert not app.ready(payment)
+    before=db.execute('SELECT COUNT(*) FROM line_delivery_tasks').fetchone()[0]
+    with pytest.raises(DepositNotificationConflict):app.send_reminder(CASE,payment.obligation_version,IdempotencyKey('missing-page'),ACTOR)
+    assert db.execute('SELECT COUNT(*) FROM line_delivery_tasks').fetchone()[0]==before
+
+
 def settle(db, *, commit=True):
     db.execute('INSERT INTO client_ledger_entries VALUES (1,?,\'receipt\',\'2026-10-20\')', (CASE,))
     db.execute("INSERT INTO client_deposit_settlement_projection VALUES (?,'deposit-one','settled',?,12000,12000,1)", (CASE, 'a' * 64))
+    db.execute("UPDATE client_obligations SET amount_due_ntd=0,status='settled' WHERE obligation_identity='deposit-one'")
     repository = MySqlClientReceiptReconciliationRepository(Connection(db))
     repository._request = SimpleNamespace(selection=SimpleNamespace(case_no=CASE,payment_stage=PaymentStage.DEPOSIT),
         expected_account_version=SimpleNamespace(value=2), idempotency_key=IdempotencyKey('synthetic-settlement'))
@@ -347,14 +363,14 @@ def test_staff_todo_total_counts_eligible_payments_before_pagination(db, monkeyp
     db.execute("INSERT INTO orders VALUES ('000-AMBIGUOUS',1,'洽談中')")
     for index in range(2):
         db.execute(
-            "INSERT INTO client_obligations VALUES (?, '000-AMBIGUOUS', 'deposit', "
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES (?, '000-AMBIGUOUS', 'deposit', "
             "'receivable_from_client','open',1,1000,'2026-11-01')", (f'ambiguous-{index}',),
         )
     cases = [f'TODO-{index:04d}' for index in range(pending_count)]
     for case_no in cases:
         db.execute("INSERT INTO orders VALUES (?,1,'洽談中')", (case_no,))
         db.execute(
-            "INSERT INTO client_obligations VALUES (?,?,'deposit','receivable_from_client',"
+            "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES (?,?,'deposit','receivable_from_client',"
             "'open',1,1000,'2026-11-01')", ('deposit-' + case_no, case_no),
         )
     db.commit()
@@ -397,7 +413,7 @@ def test_staff_todo_total_counts_eligible_payments_before_pagination(db, monkeyp
 
 def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_leaves(db):
     db.execute("INSERT INTO orders VALUES ('PUBLIC-UNPAID',1,'洽談中')")
-    db.execute("INSERT INTO client_obligations VALUES ('deposit-unpaid','PUBLIC-UNPAID','deposit',"
+    db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-unpaid','PUBLIC-UNPAID','deposit',"
                "'receivable_from_client','open',1,1000,'2026-11-01')")
     db.commit()
     settle(db)
@@ -414,3 +430,50 @@ def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_lea
     completed = repository.followups(settled=True)
     assert completed.items == () and completed.page_total == completed.settled_total == 0
     assert completed.total == completed.unpaid_total == 1
+
+
+def test_same_case_focus_filters_before_paging_and_exits_after_notice_sent(db):
+    db.execute("INSERT INTO orders VALUES ('PUBLIC-OTHER',1,'洽談中')")
+    db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-other','PUBLIC-OTHER','deposit',"
+               "'receivable_from_client','open',1,1000,'2026-11-01')")
+    db.commit();settle(db);application(db).run_once()
+    repository=Uow(db).deposit_notifications
+    selected=repository.followups(case_no=CASE,settled=True,page_size=1)
+    assert selected.page_total==selected.total==1 and selected.items[0].payment.case_no==CASE
+    assert repository.followups(case_no=CASE,settled=False).items==()
+    assert repository.followups(case_no=CASE,settled=True,page=2,page_size=1).items==()
+    before=rows(db,'client_obligations')
+    assert repository.followups(case_no='PUBLIC-OTHER',settled=False).items[0].payment.case_no=='PUBLIC-OTHER'
+    assert rows(db,'client_obligations')==before
+    db.execute("UPDATE line_delivery_tasks SET processing_status='sent'")
+    assert repository.followups(case_no=CASE,settled=True).items==()
+
+
+def test_paid_query_uses_committed_amount_while_partial_payment_uses_remaining(db):
+    db.execute("UPDATE client_obligations SET amount_due_ntd=7000")
+    partial=MySqlDepositPaymentQueryRepository(Connection(db)).get(CASE)
+    assert partial.amount_ntd==7000 and not partial.settled
+    settle(db)
+    paid=MySqlDepositPaymentQueryRepository(Connection(db)).get(CASE)
+    assert paid.amount_ntd==12000 and paid.settled
+    assert db.execute('SELECT amount_due_ntd FROM client_obligations').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('field,label', [('due_date','繳費到期日'),('virtual_account','案件虛擬帳號'),('bank_code','銀行代碼'),('liff','LINE 繳費頁面設定')])
+def test_reminder_blocker_names_exact_missing_item_without_enqueuing(db,field,label):
+    from dataclasses import replace
+    from datetime import date
+    from api.routes.line_deposit_payment import deposit_reminder_blocker
+    payment=MySqlDepositPaymentQueryRepository(Connection(db)).get(CASE)
+    payment=replace(payment,due_date=date(2026,11,1),virtual_account='12345678901234')
+    if field in ('due_date','virtual_account'):
+        payment=replace(payment,**{field:None})
+    app=DepositNotificationApplication(lambda:Uow(db),lambda:NOW,liff_id='' if field=='liff' else 'synthetic-liff',bank_code='' if field=='bank_code' else '807')
+    before=db.execute('SELECT COUNT(*) FROM line_delivery_tasks').fetchone()[0]
+    assert app.missing_reminder_fields(payment)==(field,)
+    assert app.ready(payment) is False
+    reason=deposit_reminder_blocker(app,payment,False)
+    assert label in reason and '客戶尚未綁定 LINE' in reason and '請核對案件帳務及系統設定' in reason
+    for other in ('繳費到期日','案件虛擬帳號','銀行代碼','LINE 繳費頁面設定'):
+        if other!=label:assert other not in reason
+    assert db.execute('SELECT COUNT(*) FROM line_delivery_tasks').fetchone()[0]==before

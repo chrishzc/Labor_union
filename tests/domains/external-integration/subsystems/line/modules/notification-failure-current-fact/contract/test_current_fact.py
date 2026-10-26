@@ -1,4 +1,5 @@
 import json
+import pytest
 from datetime import UTC, datetime
 
 from infrastructure.mysql.line_notification_repository import (
@@ -69,7 +70,7 @@ def test_mysql_disposition_is_bound_to_exact_snapshot_and_preserves_failure_resu
     assert cursor.executed[1][1][-1] == changed.owner_snapshot_token
 
 
-def test_replay_in_progress_is_not_a_new_business_issue() -> None:
+def test_replay_in_progress_does_not_undo_existing_terminal_success() -> None:
     readback = _evaluate(
         _source(
             _replay(20, ("sent",)),
@@ -79,6 +80,14 @@ def test_replay_in_progress_is_not_a_new_business_issue() -> None:
 
     assert readback.predicate_active is False
     assert readback.unresolved_reason_codes == ()
+
+
+def test_initial_replay_in_progress_keeps_original_issue_until_terminal_success() -> None:
+    for status in ('pending','processing','retryable_failed'):
+        readback = _evaluate(_source(_replay(21,(status,))))
+        assert readback.predicate_active is True
+        assert readback.unresolved_reason_codes == (LineNotificationUnresolvedReason.REPLAY_IN_PROGRESS,)
+        assert readback.unresolved_source_ids == readback.replay_in_progress_source_ids == (11,)
 
 
 def test_exact_fresh_replay_with_terminal_delivery_success_is_inactive() -> None:
@@ -157,6 +166,7 @@ def test_mysql_readback_composes_exact_replay_and_delivery_without_raw_payload()
         "rule_id": "rule-a",
         "reason_code": "recipient_unavailable",
         "is_latest_source_version": 1,
+        "source_case_current": 1,
     }
     replay = {
         "replay_source_event_id": 21,
@@ -213,6 +223,7 @@ def test_mysql_readback_includes_terminal_failed_delivery_with_line006_reason() 
         "rule_id": "rule-a",
         "reason_code": "rule_matched",
         "is_latest_source_version": 1,
+        "source_case_current": 1,
     }
     class _TerminalFailureCursor(_Cursor):
         def execute(self, sql, parameters=()):
@@ -358,3 +369,75 @@ def test_provider_send_validation_reads_current_binding_and_rejects_changed_reci
 
     assert failure == "recipient_binding_changed"
     assert any("line_order_group_bindings" in sql for sql, _ in cursor.executed)
+
+
+@pytest.mark.parametrize('remaining,required,configuration_valid,expected', [
+    (10000,10000,True,True), (0,10000,True,False),
+    (0,0,True,False), (10000,10000,False,True),
+])
+def test_failed_second_payment_reuses_current_finance_but_does_not_hide_broken_settings(
+    remaining,required,configuration_valid,expected,
+):
+    from datetime import date
+    from subsystems.line.second_payment_notifications import SecondPaymentNotification
+    original = SecondPaymentNotification('CASE-006','second-006',1,101,date(2026,10,26),10000,10000,'C-synthetic').event(datetime(2026,10,26,tzinfo=UTC))
+    row = {'source_event_id':11,'source_domain':original.source_domain,'event_code':original.event_code,
+        'source_event_identity':original.identity,'source_aggregate_type':original.source_aggregate_type,
+        'source_aggregate_identity':'CASE-006','source_version':1,'facts_snapshot':json.dumps(original.facts),
+        'rule_id':'rule-a','reason_code':'recipient_unavailable','is_latest_source_version':1,'source_case_current':1}
+    rule = {'id':'rule-a','event_code':original.event_code,'enabled':True,'predicates':[],
+        'recipient_selector':'case_group' if configuration_valid else 'client',
+        'schedule':{'kind':'immediate'} if configuration_valid else {'kind':'broken'}}
+    stages = ({'obligation_identity':'second-006','amount_due_ntd':remaining,'current_event_id':101,
+        'status':'settled' if remaining==0 else 'open','after_amount_ntd':required},)
+    cursor = _Cursor(all_rows=((row,),(),stages),one_rows=(
+        {'revision_id':7,'definition_snapshot':json.dumps({'rules':[rule]})},
+        {'status':'服務中'},{'aggregate_version':1,'second_payment_due_date':date(2026,10,26)},
+        {'group_id':'C-synthetic','aggregate_version':0},None))
+    readback = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(QUERY)
+    assert readback.authoritative_complete and readback.predicate_active is expected
+    assert any('client_finance_accounts' in sql for sql,_ in cursor.executed)
+    assert all(sql.lstrip().startswith('SELECT') for sql,_ in cursor.executed)
+
+
+def test_failure_work_is_associated_with_its_original_source_only():
+    original = {'source_event_id':11,'source_domain':'orders','event_code':'deposit_confirmed',
+        'source_event_identity':'orders:11','source_aggregate_type':'order','source_aggregate_identity':'CASE-006',
+        'source_version':1,'facts_snapshot':json.dumps({'case_no':'CASE-006'}),'rule_id':'rule-a',
+        'reason_code':'recipient_unavailable','is_latest_source_version':1,'source_case_current':1,'delivery_task_id':99}
+    other = {**original,'source_event_id':12,'source_event_identity':'orders:12','delivery_task_id':None}
+    replay = {'replay_source_event_id':21,'source_event_identity':'manual-replay:11:one','event_code':'deposit_confirmed',
+        'source_aggregate_type':'order','source_aggregate_identity':'CASE-006','source_version':1,'facts_snapshot':original['facts_snapshot'],
+        'decision_id':31,'decision_status':'intent_created','reason_code':'rule_matched','intent_id':41,
+        'delivery_status':'failed','delivery_task_id':51}
+    cursor = _Cursor(all_rows=((original,other),(replay,)),one_rows=(
+        {'revision_id':7,'definition_snapshot':json.dumps({'rules':[{'id':'rule-a','event_code':'deposit_confirmed','enabled':True,'predicates':[]}]})},None))
+    result = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(QUERY)
+    assert result.related_task_ids == (51,99)
+    assert result.source_task_ids == ((11,(51,99)),(12,()))
+
+
+@pytest.mark.parametrize('status,expected', [('sent',(98,96,94)),('processing',(99,98,97,96,94)),('failed',(99,98,97,96,94))])
+def test_resolved_original_and_replay_tasks_exit_but_unrelated_failures_remain(status,expected):
+    from subsystems.line.notification_failure_current_fact import LineNotificationFailureRecheckTarget
+    rows = tuple({'delivery_task_id':task,'source_event_id':source,'source_event_identity':identity} for task,source,identity in (
+        (99,11,'orders:11'),(98,12,'orders:12'),(97,21,'manual-replay:11:one'),(95,13,'orders:13'),(94,14,'orders:14')))
+    cursor = _Cursor(all_rows=(rows,))
+    repository = MySqlLineNotificationRepository(_Connection(cursor))
+    reads = []
+    current = _evaluate(_source(_replay(21,(status,))),LineNotificationFailedSourceFact(12,True,True,()),LineNotificationFailedSourceFact(13,False,True,()))
+    repository.line006_recheck_targets_for_source = lambda source: () if source==14 else (LineNotificationFailureRecheckTarget('CASE-006',QUERY.notification_reason),)
+    repository.current_failure_fact = lambda query: (reads.append(query) or current)
+    assert repository.unresolved_delivery_task_ids((99,98,97,96,95,94)) == expected
+    assert len(reads)==1, 'same case/reason must reuse one fresh readback within the page'
+    assert all(sql.lstrip().startswith('SELECT') for sql,_ in cursor.executed)
+
+
+def test_delivery_filter_cannot_treat_incomplete_readback_as_completion():
+    from subsystems.line.notification_failure_current_fact import LineNotificationFailureRecheckTarget
+    cursor = _Cursor(all_rows=(({'delivery_task_id':99,'source_event_id':11,'source_event_identity':'orders:11'},),))
+    repository = MySqlLineNotificationRepository(_Connection(cursor))
+    repository.line006_recheck_targets_for_source = lambda _: (LineNotificationFailureRecheckTarget('CASE-006',QUERY.notification_reason),)
+    repository.current_failure_fact = lambda _: _evaluate(_source(),complete=False)
+    with pytest.raises(RuntimeError,match='incomplete'):
+        repository.unresolved_delivery_task_ids((99,))

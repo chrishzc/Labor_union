@@ -34,17 +34,17 @@ def test_eligible_case_without_posted_refund_is_visible_using_frozen_terms():
         ('CASE-A', 12000, date(2027, 1, 15), True), ('CASE-B', 18000, date(2027, 1, 15), True)]
 
 
-def test_excludes_cancelled_full_subsidy_no_entitlement_and_completed_refund():
+def test_cancelled_refund_remains_visible_and_social_welfare_without_customer_advance_is_excluded():
     facts = (
         case('CANCEL', order_status='訂單取消', has_formal_return=True, formal_amount_ntd=12000),
         case('FULL', identity_status='低收入戶', service_hours=Decimal('120')),
         case('NO-ENTITLEMENT', identity_status='非市民'),
         case('PAID', return_settled=True),
-        case('EXCESS', identity_status='補助市民', client_hourly_rate_ntd=350),
+        case('EXCESS', identity_status='社福', client_hourly_rate_ntd=350),
         case('FLOOR', identity_status='中低收入戶', service_hours=Decimal('120'), floor_fee=Decimal('600'), client_hourly_rate_ntd=350),
     )
     result = query_subsidy_returns(Repository(facts))
-    assert [(row.case_no, row.amount_ntd) for row in result.rows] == [('EXCESS', 42000), ('FLOOR', 42000)]
+    assert [(row.case_no, row.amount_ntd) for row in result.rows] == [('CANCEL', 12000)]
 
 
 def test_formal_refund_overrides_estimate_without_recipient_bank_requirements():
@@ -53,12 +53,12 @@ def test_formal_refund_overrides_estimate_without_recipient_bank_requirements():
     assert (row.amount_ntd, row.due_date, row.is_estimate) == (9000, date(2026, 9, 15), False)
 
 
-def test_unknown_amount_and_date_are_not_zero_or_planned_completion():
+def test_missing_amount_is_unknown_and_current_service_end_can_determine_due_date():
     facts = (case('MISSING', service_hours=None, client_hourly_rate_ntd=None),
              case('ONGOING', order_status='服務中'))
     result = query_subsidy_returns(Repository(facts))
     assert result.rows[0].amount_ntd is None
-    assert result.rows[1].due_date is None
+    assert result.rows[1].due_date == date(2027,1,15)
     assert result.rows[1].amount_ntd == 12000
 
 

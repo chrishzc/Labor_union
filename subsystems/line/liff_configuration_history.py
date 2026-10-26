@@ -1,98 +1,17 @@
-"""
-================================================================================
-檔案名稱: services/line_liff_config_service.py
-功能說明: LIFF 頁面設定版本服務，保存修改紀錄並提供安全還原功能
-================================================================================
-"""
-
-from __future__ import annotations
-
+"""LIFF history projection from immutable database configuration revisions."""
 import json
-import os
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-from subsystems.line.configuration_store import config_revision, read_raw_config
+from domains.line.configuration import LineConfigurationKind
+from domains.line.identities import LineConfigurationRevision
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-HISTORY_PATH = PROJECT_ROOT / "config" / "liff_settings_history.json"
-MAX_HISTORY = 20
+def list_liff_history(application, actor):
+    return [{"revision": str(item.revision.value), "created_at": item.created_at.isoformat(),
+             "actor": item.actor_id, "reason": item.reason}
+            for item in application.history(LineConfigurationKind.LIFF, actor)]
 
 
-def _read_history() -> list[dict[str, Any]]:
-    if not HISTORY_PATH.exists():
-        return []
-    with HISTORY_PATH.open("r", encoding="utf-8") as stream:
-        payload = json.load(stream)
-    revisions = payload.get("revisions", []) if isinstance(payload, dict) else []
-    return revisions if isinstance(revisions, list) else []
-
-
-def _write_history(revisions: list[dict[str, Any]]) -> None:
-    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        prefix=".liff-history-",
-        suffix=".tmp",
-        dir=HISTORY_PATH.parent,
-        text=True,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(
-                {"version": 1, "revisions": revisions[:MAX_HISTORY]},
-                stream,
-                ensure_ascii=False,
-                indent=2,
-            )
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp_name, HISTORY_PATH)
-    except Exception:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
-
-
-def snapshot_liff_config(*, actor: str, reason: str) -> str:
-    """Save the current config before a mutation and return its revision."""
-    revision = config_revision("liff")
-    revisions = _read_history()
-    if any(item.get("revision") == revision for item in revisions):
-        return revision
-    revisions.insert(
-        0,
-        {
-            "revision": revision,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "actor": actor,
-            "reason": reason,
-            "config": read_raw_config("liff"),
-        },
-    )
-    _write_history(revisions)
-    return revision
-
-
-def list_liff_history() -> list[dict[str, Any]]:
-    """Return snapshot metadata without exposing duplicate full configs."""
-    return [
-        {key: value for key, value in item.items() if key != "config"}
-        for item in _read_history()
-    ]
-
-
-def get_liff_snapshot(revision: str) -> dict[str, Any] | None:
-    return next(
-        (
-            item.get("config")
-            for item in _read_history()
-            if item.get("revision") == revision
-        ),
-        None,
-    )
+def get_liff_snapshot(revision: str, application, actor):
+    if not revision.isascii() or not revision.isdecimal() or int(revision) < 1:
+        return None
+    snapshot = application.get_revision(LineConfigurationKind.LIFF, LineConfigurationRevision(int(revision)), actor)
+    return None if snapshot is None else json.loads(snapshot.definition_json)

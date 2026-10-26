@@ -58,6 +58,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
   const [obligationIds, setObligationIds] = useState<string[]>([]);
   const [bankIds, setBankIds] = useState<number[]>([]);
   const [reason, setReason] = useState('');
+  const [partialRefund, setPartialRefund] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<'query' | 'preview' | 'apply' | null>('query');
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +108,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
         if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
         const checked: Preview = { kind: 'receivable', value }; setPreview(checked); await applyAction(checked);
       } else {
-        const value = await client.previewPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: false }, requestOptions);
+        const value = await client.previewPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: target.kind === 'refund' && partialRefund }, requestOptions);
         if (value.account_version !== query.account_version) throw new ClientSettlementRemediationError('client_finance_candidate_stale', 'Preview 版本與 Query 不一致。');
         const checked: Preview = { kind: 'payable', value }; setPreview(checked); await applyAction(checked);
       }
@@ -124,7 +125,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       if (target.kind === 'receivable' && preview.kind === 'receivable') {
         await client.applyReceipt(target.caseNo, { payment_stage: stage, finance_import_row_ids: bankIds, obligation_identities: obligationIds, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
       } else if (target.kind !== 'receivable' && preview.kind === 'payable') {
-        await client.applyPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: false, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
+        await client.applyPayable(target.caseNo, target.kind, { finance_import_row_ids: bankIds, obligation_identities: obligationIds, allow_partial_refund_recovery: target.kind === 'refund' && partialRefund, expected_account_version: preview.value.account_version, preview_fingerprint: fingerprint, reason: reason.trim() }, { ...requestOptions, idempotencyKey: command.current.idempotencyKey, correlationId: command.current.correlationId });
       } else throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_BRANCH_MISMATCH', '異常分支與 Preview 不一致。');
       setUnknownOutcome(false); setObligationIds([]); setBankIds([]); setPreview(null);
       await reload(false);
@@ -134,7 +135,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
       setUnknownOutcome(Boolean(typed?.retryable)); setError(settlementErrorMessage(caught));
     } finally { setBusy(null); }
   };
-  useUnsavedDraft('客戶款項核銷', { '期別': stage, '款項項目': obligationIds, '銀行交易資料列': bankIds, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: query });
+  useUnsavedDraft('客戶款項核銷', { '期別': stage, '款項項目': obligationIds, '銀行交易資料列': bankIds, '部分退款': partialRefund, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: query });
 
 
   if (!query) return <section aria-label={`${title(target.kind)}人工處理`}><h3>{title(target.kind)}人工處理</h3>{busy === 'query' && <p role="status">正在讀取客戶帳務資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null || unknownOutcome} onClick={() => void reload(true)}>重新查詢</button></section>;
@@ -143,6 +144,7 @@ export const ClientSettlementRemediationWorkbench: React.FC<Props> = ({
     <p><strong>解除條件：</strong>這類逾期義務餘額全部歸零；電話、LINE 或追蹤狀態都不能代替正式核銷。</p>
 
     {target.kind === 'receivable' && <label>核銷期別 <select value={stage} disabled={busy !== null || unknownOutcome} onChange={(event) => { setStage(event.target.value as ClientPaymentStage); setObligationIds([]); invalidate(); }}><option value="deposit">訂金</option><option value="first">第一期</option><option value="second">第二期</option><option value="adjustment">調整款</option></select></label>}
+    {target.kind === 'refund' && <label>退款核銷方式<select value={partialRefund ? 'partial' : 'exact'} disabled={busy !== null || unknownOutcome} onChange={(event) => { setPartialRefund(event.target.value === 'partial'); invalidate(); }}><option value="exact">足額核銷待退款</option><option value="partial">退款不足，先核銷實退</option></select></label>}
     <fieldset disabled={busy !== null || unknownOutcome}><legend>具體逾期義務</legend>{visibleObligations.map((item, index) => <div key={item.obligation_identity}><label style={{ display: 'block' }}><input type="checkbox" checked={obligationIds.includes(item.obligation_identity)} onChange={() => toggleObligation(item.obligation_identity)} /> 第 {index + 1} 筆｜{'payment_stage' in item ? paymentStageLabel(item.payment_stage) : obligationTypeLabel(item.obligation_type)}｜到期 {item.due_date}｜NT$ {item.amount_due_ntd.toLocaleString('zh-TW')}</label></div>)}{!visibleObligations.length && <p>目前沒有此分支的逾期義務。</p>}</fieldset>
     <fieldset disabled={busy !== null || unknownOutcome}><legend>可核對的銀行流水</legend>{banks.map((item, index) => <div key={item.finance_import_row_id}><label style={{ display: 'block' }}><input type="checkbox" checked={bankIds.includes(item.finance_import_row_id)} onChange={() => toggleBank(item.finance_import_row_id)} /> 第 {index + 1} 筆｜{item.transaction_date}｜NT$ {item.amount_ntd.toLocaleString('zh-TW')}</label></div>)}{!banks.length && <p role="alert">尚無符合方向、分類、對方帳戶與未核銷條件的銀行流水；提醒保留。</p>}</fieldset>
     <label style={{ display: 'block' }}>人工核對理由（選填）<textarea value={reason} disabled={busy !== null || unknownOutcome} maxLength={500} onChange={(event) => { setReason(event.target.value); invalidate(); }} /></label>

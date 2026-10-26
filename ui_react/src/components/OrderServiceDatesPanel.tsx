@@ -42,6 +42,7 @@ interface OrderServiceDatesPanelProps {
   onOpenDates?: () => void;
   onArrangementPendingChange?: (pending: boolean) => void;
   completedCorrection?: boolean;
+  coordinatedStart?: boolean;
 }
 
 type WorkingAction = 'load' | 'preview' | 'apply' | null;
@@ -99,10 +100,12 @@ export const OrderServiceDatesPanel: FC<OrderServiceDatesPanelProps> = (props) =
   ? <OrderOfficialDateCorrectionPanel caseNo={props.caseNo} revision={props.projectionRevision} view={props.view} onOpenArrangement={props.onOpenArrangement} onOpenDates={props.onOpenDates} onObserved={props.onObserved} onBusyChange={props.onBusyChange} />
   : <OrderPreCompletionServiceDatesPanel {...props} />;
 
-const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange }) => {
+const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ caseNo, onObserved, onOpenActualStart, calculationRevision = 0, projectionRevision = 0, onBusyChange, currentAssignmentPlan, view = 'dates', onOpenArrangement, onOpenDates, onArrangementPendingChange, coordinatedStart = false }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [working, setWorking] = useState<WorkingAction>(null);
   const [queryView, setQueryView] = useState<ServiceDateConfirmationQueryView | null>(null);
+  const historicalArrangementCase=useRef<string|null>(null);
+  if(queryView?.case_no===caseNo && queryView.arrangement_pending) historicalArrangementCase.current=caseNo;
   const [precision, setPrecision] = useState<SchedulePrecisionResult | null>(null);
   const initialCalculation = useRef('');
   const [serviceMode, setServiceMode] = useState<ServiceMode | null>(null);
@@ -638,6 +641,13 @@ const OrderPreCompletionServiceDatesPanel: FC<OrderServiceDatesPanelProps> = ({ 
   useUnsavedDraft('服務日期', { '開始日期': startDate, '休息星期': restWeekdays, '服務日期': selectedDates, '原因': reason }, { enabled: !!queryView, resetKey: queryView, busy: saving || startUnresolved || isRecoveryActive });
 
 
+  if (coordinatedStart && queryView && !arrangementPending && historicalArrangementCase.current!==caseNo) return (
+    <section aria-label="服務日期協調結果">
+      <p>客戶與月嫂在原服務群組協調，由月嫂提交約定開始日；通過檢查即自動更新日期、排班及第一期款期限。</p>
+      {queryView.current_dates.length>0 ? <details><summary>查看正式服務日期</summary><p>{queryView.current_dates.join('、')}</p></details> : <p>等待月嫂回報協調結果。</p>}
+      <p>拒絕或檔期衝突的案件，請由下方代班待辦接續處理。</p>
+    </section>
+  );
   return (
     <section className="order-service-dates-panel" aria-label={`案件 ${caseNo} 服務日期設定`}
       hidden={view === 'arrangement' && !arrangementPending && success !== '歷史案件正式安排已建立並回讀。'}>

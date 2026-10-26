@@ -587,6 +587,13 @@
   gap: 20px;
 }
 
+.finance-correction-form fieldset { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--md-sys-color-outline-variant, #eadfd6); border-radius: 10px; }
+.finance-correction-form label { display: grid; gap: 6px; min-width: 0; line-height: 1.5; }
+.finance-correction-form label:has(input[type="checkbox"]) { display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.finance-correction-form input:not([type="checkbox"]), .finance-correction-form select { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid #d9cbbf; border-radius: 8px; background: #fff; font: inherit; }
+.finance-correction-form button { min-height: 40px; padding: 9px 15px; border: 1px solid var(--md-sys-color-primary); border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; cursor: pointer; }
+.finance-correction-form button:disabled { opacity: .55; cursor: not-allowed; }
+
 .finance-detail-block {
   margin-top: 16px;
 }
@@ -721,6 +728,11 @@ td.finance-row-actions button + button { margin-left: 14px; }
 .finance-btn-secondary:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
 .finance-row-actions button:hover:not(:disabled),
 .finance-footer-note button:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
+.subsidy-period-workbench { min-width: 0; }
+.subsidy-period-bank-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 20px; }
+.subsidy-period-bank-actions label { display: flex; flex: 1 1 260px; flex-direction: column; gap: 8px; min-width: 0; }
+.subsidy-period-bank-actions select { width: 100%; min-width: 0; }
+@media (max-width: 600px) { .subsidy-period-bank-actions .finance-btn-primary { width: 100%; } }
 .finance-row-actions button:disabled,
 .finance-footer-note button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
 

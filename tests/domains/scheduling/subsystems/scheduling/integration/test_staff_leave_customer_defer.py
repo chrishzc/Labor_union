@@ -420,63 +420,27 @@ def test_apply_input_cannot_omit_or_null_linked_identity(field):
 
 def test_customer_preview_route_returns_canonical_preview_and_exact_apply_items(fixture, monkeypatch):
     from api.routes import leave_substitution as route
-    candidate = intent(fixture)
-    app = Mock()
-    preview = object()
-    app.preview_customer_defer.return_value = (candidate, preview)
-    monkeypatch.setattr(route, "_preview_payload", lambda value: {"canonical_preview": value is preview})
-    body = CustomerLeaveDeferPreviewBody(leave_request_id=17, expected_leave_request_version=3, original_assignment_id=1)
-    result = route.preview_customer_leave_defer(body, "CASE-001", "request-corr", object(), app)
-    assert result.data["canonical_preview"] is True
-    assert result.data["leave_request_id"] == 17
-    assert result.data["expected_leave_request_version"] == 3
-    assert result.data["original_assignment_id"] == 1
-    assert result.data["items"] == [
-        {"original_schedule_id":11,"work_date":"2026-09-20","resolution_type":"defer_following_assignments",
-         "substitute_staff_id":None,"is_double_pay":False,"replacement_work_date":None},
-        {"original_schedule_id":13,"work_date":"2026-09-22","resolution_type":"defer_following_assignments",
-         "substitute_staff_id":None,"is_double_pay":False,"replacement_work_date":None},
-    ]
-    assert "line_user_id" not in result.data and "decision" not in result.data
-    app.preview_customer_defer.assert_called_once_with("CASE-001",17,3,1,CorrelationId("request-corr"))
+    from fastapi import HTTPException
+    app=Mock()
+    body=CustomerLeaveDeferPreviewBody(leave_request_id=17,expected_leave_request_version=3,original_assignment_id=1)
+    with pytest.raises(HTTPException) as error:route.preview_customer_leave_defer(body,'CASE','corr',object(),app)
+    assert error.value.status_code==410
+    assert app.mock_calls==[]
 
 
 def test_customer_apply_route_passes_exact_versions_fingerprint_identity_and_receipt(monkeypatch):
     from api.routes import leave_substitution as route
-    app = Mock()
-    app.apply_customer_defer.return_value = SimpleNamespace(
-        batch_key="saved-batch",case_no="CASE-001",order_version=2,scheduling_generation=3,
-        scheduling_version=3,client_finance_version=4,payroll_version=5,
-        outcome_event_ids=(101,),preview_fingerprint=PreviewFingerprint("a"*64),linked_request=None,
-    )
-    body = CustomerLeaveDeferApplyBody(
-        leave_request_id=17,expected_leave_request_version=3,original_assignment_id=1,
-        items=[{"original_schedule_id":11,"work_date":"2026-09-20","resolution_type":"defer_following_assignments"}],
-        expected_order_version=1,expected_scheduling_version=2,expected_client_finance_version=3,
-        expected_payroll_version=4,preview_fingerprint="a"*64,reason="confirmed current preview",
-    )
-    result = route.apply_customer_leave_defer(body,"CASE-001","same-apply-key","same-corr",
-                                            SimpleNamespace(username="test-admin"),app)
-    command = app.apply_customer_defer.call_args.args[0]
-    assert command.case_no == "CASE-001" and command.intent == body.to_intent()
-    assert [command.expected_order_version.value,command.expected_scheduling_version.value,
-            command.expected_client_finance_version.value,command.expected_payroll_version.value] == [1,2,3,4]
-    assert command.idempotency_key.value == "same-apply-key"
-    assert command.correlation_id.value == "same-corr"
-    assert command.preview_fingerprint.value == "a"*64
-    assert command.linked_request == LinkedLeaveRequestIntent(17,3)
-    assert result.data["batch_key"] == "saved-batch" and result.data["outcome_event_ids"] == [101]
-    app.apply.assert_not_called()
+    from fastapi import HTTPException
+    app=Mock()
+    with pytest.raises(HTTPException) as error:route.apply_customer_leave_defer(None,'CASE','key','corr',object(),app)
+    assert error.value.status_code==410
+    assert app.mock_calls==[]
 
 
 def test_customer_preview_conflict_has_no_apply_or_success_response():
     from api.routes import leave_substitution as route
     from fastapi import HTTPException
-    app = Mock()
-    app.preview_customer_defer.side_effect = ValueError("leave_customer_binding_conflict")
-    body = CustomerLeaveDeferPreviewBody(leave_request_id=17,expected_leave_request_version=3,original_assignment_id=1)
-    with pytest.raises(HTTPException) as error:
-        route.preview_customer_leave_defer(body,"CASE-001","corr",object(),app)
-    assert error.value.status_code == 409
-    assert error.value.detail["error"]["code"] == "leave_customer_binding_conflict"
-    app.apply_customer_defer.assert_not_called()
+    app=Mock()
+    with pytest.raises(HTTPException) as error:route.preview_customer_leave_defer(None,'CASE','corr',object(),app)
+    assert error.value.status_code==410
+    assert app.mock_calls==[]

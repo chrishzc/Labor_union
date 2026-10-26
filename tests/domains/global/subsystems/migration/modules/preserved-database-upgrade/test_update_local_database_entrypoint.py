@@ -10,6 +10,28 @@ import pytest
 from scripts import update_local_database as update
 
 
+def test_pending_business_backfill_selects_preserve_route_before_earlier_schema_qualification(monkeypatch):
+    migration=update.migration
+    missing={'1054_scheduling_service_start.sql','1055_government_subsidy_periods.sql'}
+    monkeypatch.setattr(migration,'local_additive_target_state',
+        lambda _config,_source,name,*_args,**_kwargs:{'state':'absent' if name in missing else 'exact'})
+    def must_not_qualify(*args,**kwargs):
+        raise AssertionError('schema qualification must not hide a pending business backfill')
+    monkeypatch.setattr(migration,'_local_discover_qualification',must_not_qualify)
+    with pytest.raises(migration.LocalAdditiveBlocked) as raised:
+        migration._local_ordered_chain_plan(object(),'lu_test_subsidy_route',{})
+    assert raised.value.code=='replacement_required'
+    assert raised.value.details['artifact']=='1055_government_subsidy_periods.sql'
+    assert raised.value.details['backfills']==['subsidy-period-policy-v1']
+
+
+def test_preserve_preview_exposes_the_selected_business_backfill_inventory(monkeypatch):
+    backfills=[{'backfill_id':'subsidy-period-policy-v1','artifact':'migrate_subsidy_period_policy.py','sha256':'synthetic'}]
+    monkeypatch.setattr(update.migration,'build_plan',lambda *_args:{
+        'source_objects':{},'release_id':'synthetic-subsidy','backfills':backfills})
+    assert update.build_preview(object(),'lu_test_source','lu_test_candidate')['backfills']==backfills
+
+
 ROOT = Path(__file__).parents[7]
 SCRIPT = (ROOT / "scripts" / "launchers" / "update_local_database.bat").read_text(
     encoding="utf-8"

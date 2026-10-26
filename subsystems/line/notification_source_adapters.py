@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Mapping
 
 from subsystems.line.notification_policy import NotificationSourceEvent
+from subsystems.line.service_start_day import EVENT_CODE, EVENT_PREFIX, SOURCE_TYPE, ServiceStartDayCandidate
 
 
 def from_orders_lifecycle_outbox(
@@ -114,100 +115,24 @@ def from_scheduling_service_day_checkpoint_outbox(
     )
 
 
-def from_order_pre_start_checkpoint(
-    *,
-    case_no: str,
-    planned_start_date: str,
-    first_payment_amount: int,
-    already_settled: bool,
-    occurred_at: datetime,
-    client_line_user_id: str | None = None,
-) -> NotificationSourceEvent:
-    """Adapt a pre-start order checkpoint (3 days before service start) without ad-hoc push side-effects."""
-    _text(case_no, "case number")
-    _text(planned_start_date, "planned start date")
-    if not isinstance(first_payment_amount, int) or isinstance(first_payment_amount, bool) or first_payment_amount < 0:
-        raise ValueError("first payment amount is invalid")
-    if not isinstance(already_settled, bool):
-        raise ValueError("already settled flag is invalid")
-
-    payment_amount_str = f"NT$ {first_payment_amount:,}" if not already_settled else "NT$ 0（已結清）"
-    payment_status_str = "已核銷完成" if already_settled else "待繳納（請於服務開始日繳納）"
-
-    facts: dict[str, object] = {
-        "case_no": case_no,
-        "planned_start_date": planned_start_date,
-        "first_payment_amount": payment_amount_str,
-        "first_payment_status": payment_status_str,
-        "already_settled": already_settled,
-        "service_date": planned_start_date,
-    }
-    if client_line_user_id:
-        facts["line_user_id"] = client_line_user_id
-        facts["recipient_projection"] = {
-            "selector": "client.bound_case",
-            "type": "user",
-            "identity": client_line_user_id,
-        }
-
+def from_order_service_start_day(candidate: ServiceStartDayCandidate, *, occurred_at: datetime) -> NotificationSourceEvent:
+    """Freeze one current group/day/payment snapshot; no payment or service mutation."""
+    notice = ''
+    if candidate.first_payment_amount > 0:
+        notice = (f'第一期款尚待繳納：{candidate.first_payment_amount:,} 元，請於今天完成繳款。'
+                  '若已匯款，請勿重複繳納，待工會核對入帳。')
+    facts = {**candidate.facts(), 'first_payment_notice': notice,
+             'caregiver_names': '、'.join(item.name for item in candidate.caregivers),
+             'response_token': candidate.token}
     return NotificationSourceEvent(
-        identity=f"order-pre-start-reminder:{case_no}:{planned_start_date}",
-        event_code="order.pre_start_reminder",
+        identity=EVENT_PREFIX + candidate.token,
+        event_code=EVENT_CODE,
         historical_silent=False,
         facts=facts,
         source_domain="orders",
-        source_aggregate_type="order",
-        source_aggregate_identity=case_no,
-        source_version=1,
-        occurred_at=occurred_at,
-    )
-
-
-def from_order_second_payment_checkpoint(
-    *,
-    case_no: str,
-    second_payment_due_date: str,
-    second_payment_amount: int,
-    already_settled: bool,
-    occurred_at: datetime,
-    client_line_user_id: str | None = None,
-) -> NotificationSourceEvent:
-    """Adapt a second payment reminder checkpoint (3 days before second payment due date)."""
-    _text(case_no, "case number")
-    _text(second_payment_due_date, "second payment due date")
-    if not isinstance(second_payment_amount, int) or isinstance(second_payment_amount, bool) or second_payment_amount < 0:
-        raise ValueError("second payment amount is invalid")
-    if not isinstance(already_settled, bool):
-        raise ValueError("already settled flag is invalid")
-
-    payment_amount_str = f"NT$ {second_payment_amount:,}" if not already_settled else "NT$ 0（已結清）"
-    payment_status_str = "已核銷完成" if already_settled else "待繳納（請於繳納期限前完成匯款）"
-
-    facts: dict[str, object] = {
-        "case_no": case_no,
-        "second_payment_due_date": second_payment_due_date,
-        "second_payment_amount": payment_amount_str,
-        "second_payment_status": payment_status_str,
-        "already_settled": already_settled,
-        "service_date": second_payment_due_date,
-    }
-    if client_line_user_id:
-        facts["line_user_id"] = client_line_user_id
-        facts["recipient_projection"] = {
-            "selector": "client.bound_case",
-            "type": "user",
-            "identity": client_line_user_id,
-        }
-
-    return NotificationSourceEvent(
-        identity=f"order-second-payment-reminder:{case_no}:{second_payment_due_date}",
-        event_code="order.second_payment_reminder",
-        historical_silent=False,
-        facts=facts,
-        source_domain="orders",
-        source_aggregate_type="order",
-        source_aggregate_identity=case_no,
-        source_version=1,
+        source_aggregate_type=SOURCE_TYPE,
+        source_aggregate_identity=candidate.case_no,
+        source_version=candidate.generation_id,
         occurred_at=occurred_at,
     )
 
@@ -226,8 +151,7 @@ def _text(value: object, name: str) -> str:
 
 __all__ = [
     "from_client_finance_deposit_outbox",
-    "from_order_pre_start_checkpoint",
-    "from_order_second_payment_checkpoint",
+    "from_order_service_start_day",
     "from_orders_lifecycle_outbox",
     "from_scheduling_service_day_checkpoint_outbox",
 ]

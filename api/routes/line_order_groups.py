@@ -24,8 +24,72 @@ from api.schemas.line_order_groups import (
 )
 from domains.line.order_group import LineOrderGroupBindingStatus
 from subsystems.access.authentication_session import AdminPrincipal
+from datetime import date
+from dataclasses import asdict
+from pydantic import BaseModel, ConfigDict, Field
+from api.dependencies.admin_auth import require_customer_service_handler
+from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
+from api.error_contracts import typed_http_error
+from api.schemas.base import BaseResponse
+from subsystems.line.service_day_log_reminders import SendServiceDayLogReminder
 
 router = APIRouter(prefix="/api/v1/line/order-groups", tags=["LINE Order Groups"])
+
+
+class LogReminderSendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    case_no: str = Field(min_length=1, max_length=50)
+    staff_id: int = Field(gt=0)
+    missing_from: date
+    missing_through: date
+    idempotency_key: str = Field(min_length=1, max_length=100)
+
+
+class LogReminderItem(BaseModel):
+    case_no: str
+    staff_id: int
+    missing_from: date
+    missing_through: date
+    consecutive_days: int
+    group_label: str
+    can_send: bool
+
+
+class LogReminderPage(BaseModel):
+    items: list[LogReminderItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class LogReminderReceipt(BaseModel):
+    task_id: int
+    status: str
+
+
+@router.get("/log-reminders", response_model=BaseResponse[LogReminderPage])
+def list_log_reminders(page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
+                       principal: AdminPrincipal = Depends(require_line_order_group_reader),
+                       application=Depends(get_service_day_log_reminders)):
+    items, total = application.list(page, page_size)
+    return BaseResponse(data={"items": [{**asdict(item.gap), "group_label": item.group_label,
+                                         "can_send": item.can_send} for item in items],
+                              "total": total, "page": page, "page_size": page_size})
+
+
+@router.post("/log-reminders/send", response_model=BaseResponse[LogReminderReceipt])
+def send_log_reminder(body: LogReminderSendRequest,
+                      principal: AdminPrincipal = Depends(require_customer_service_handler),
+                      application=Depends(get_service_day_log_reminders)):
+    try:
+        result = application.send(SendServiceDayLogReminder(**body.model_dump()))
+    except (ValueError, RuntimeError) as error:
+        if str(error) not in {"service_day_log_reminder_date_invalid", "service_day_log_reminder_no_longer_applicable",
+                              "line_delivery_idempotency_conflict"}:
+            raise
+        raise typed_http_error(409, "conflict", str(error),
+                               "缺漏或案件群組已更新，請重新整理後再操作。", "service-day-log-reminder") from error
+    return BaseResponse(data={"task_id": result.task_id.value, "status": result.status.value})
 
 
 @router.get("", response_model=LineOrderGroupPageResponse)

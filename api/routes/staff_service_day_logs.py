@@ -14,6 +14,8 @@ from api.schemas.line_staff_self_service import (
     StaffServiceDayLogPreviewRequest,
     StaffServiceDayLogPreviewResponse,
     StaffServiceDayLogReadbackResponse,
+    StaffServiceDayLogOptionsRequest,
+    StaffServiceDayLogOptionsResponse,
 )
 from domains.scheduling.service_day_log import ServiceDayLogIntent
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
@@ -59,7 +61,7 @@ def apply_service_day_log(
                 body.assignment_id,
                 ServiceDayLogIntent(body.service_date, body.baby_log_text, ()),
                 idempotency_key,
-                PreviewFingerprint(body.preview_fingerprint),
+                PreviewFingerprint(body.preview_fingerprint) if body.preview_fingerprint else None,
                 controlled_file_attachments=tuple(
                     _controlled_attachment(item)
                     for item in body.controlled_file_attachments
@@ -69,6 +71,16 @@ def apply_service_day_log(
     except ValueError as error:
         raise _workflow_error(error) from error
     return BaseResponse(data={"receipt": {"log_id": result.log_id, "outcome": result.outcome, "receipt_reference": f"scheduling-service-day-log:{result.log_id}"}, "readback": _readback_data(result)})
+
+
+@router.post("/service-day-logs/options", response_model=BaseResponse[StaffServiceDayLogOptionsResponse])
+def service_day_log_options(body: StaffServiceDayLogOptionsRequest,
+                            application: ServiceDayLogApplication = Depends(get_service_day_log_application)):
+    staff_id, _ = _verified_staff_identity(body)
+    try:
+        return BaseResponse(data={"requires_cooking": application.options(staff_id, body.assignment_id, body.service_date)})
+    except ValueError as error:
+        raise _workflow_error(error) from error
 
 @router.post("/service-day-logs/{log_id}/query", response_model=BaseResponse[StaffServiceDayLogReadbackResponse])
 def query_service_day_log(
@@ -131,6 +143,7 @@ def _controlled_attachment(item: StaffServiceDayLogMediaAttachment) -> Controlle
 
 def _workflow_error(error: ValueError) -> HTTPException:
     code = str(error)
-    return HTTPException(status_code=404 if code == "service_day_log_not_found" else 422, detail={"code": code})
+    status = 404 if code == "service_day_log_not_found" else 409 if code.endswith(("_stale", "_conflict")) else 422
+    return HTTPException(status_code=status, detail={"code": code})
 
 __all__ = ["router"]

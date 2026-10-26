@@ -140,74 +140,132 @@ confirmation、waiting lock、commitment 與排班的 immutable 歷史保留，�
 正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整，以及 Client Finance 提供的訂金已正式核銷或有效的一般市民訂金未付人工放行；放行不得把訂金投影成已核銷或零元；
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
-依第 `21` 份正式規格，存在所有月嫂簽約完成後保存的 commitment 時，第一次 bootstrap 還必須鎖定並驗證
-matching plan/version、staff 與精確日期集合完全相同；實際開始日調整適用下述同日最新裁決。人選、服務量或 current 日期確認不符時回
-`commitment_execution_mismatch` 且零寫入。成功時 assignments、schedules、Payroll impact、
-commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
-與 Government Subsidy 在 conversion 前不得讀取 commitment days。
+依第 `21` 份正式規格，首次 bootstrap 必須驗證 commitment 的方案、人員與每人服務量；
+日期採本節服務開始回覆或工會代班日期登錄所形成的 current owner 結果，不要求客戶／月嫂再按日期表確認。
+原簽約文件與 commitment 歷史不可改寫；換人不得移植原月嫂簽回或以承接意願假造新人的契約資格。
+assignment、schedule、Payroll impact、commitment conversion、outbox 與 receipt 仍由正式 writer 同交易提交。
 
-#### Matching Schedule Confirmation Gate (2026-08-12)
+#### 服務開始、排班與代班（2026-10-23）
 
-Formal Assignment Plan Preview and Apply must fail closed unless a current schedule snapshot is
-bound to the current Orders confirmed-service-date version. The customer must have confirmed the
-parent schedule and every caregiver segment selected for formal conversion must have confirmed
-its own child schedule from that same lineage. The gate blocks only formal assignment/scheduling;
-candidate search, matching communication, willingness, and waiting-deposit lock remain available.
-Any terms, confirmed-date, matching-plan, recipient-binding, or schedule-fingerprint change
-invalidates the lineage. The server enforces this gate for direct API callers as well as the UI.
+本節是正常案件服務開始與本次代班處理的 current contract，Authority 為使用者確認的群組協調／月嫂觸發流程。
+實作狀態：現有程式尚需依下列修改範圍接通；規格完成不代表 API、UI、DB 或 LINE 發送驗收通過。
 
-When confirmed service dates change, the previous snapshot, delivery task and confirmation events
-remain immutable historical evidence, but the current schedule-confirmation Query projects that
-lineage as `sent_outdated`. The change itself creates neither a new snapshot nor an outbound
-delivery intent. The UI must show the current date table and its difference from the previous sent
-table; only an explicit human resend may create a new snapshot and durable delivery task. Previous
-confirmations never satisfy the new version's Assignment Plan gate.
+```mermaid
+flowchart TD
+    A[客戶在原服務群組提出希望開工日期] --> B[客戶與月嫂自行協調]
+    B --> C[月嫂在 LIFF 提交協調結果]
+    C --> D{是否接受}
+    D -->|接受並填入日期| E{系統檢查檔期與正式排班條件}
+    E -->|通過| F[自動更新正式日期與排班／同步第一期款到期日]
+    F --> G[發送日期表至原服務群組／結果紀錄無確認按鈕]
+    D -->|不接受需代班| H[建立工會代班待辦]
+    E -->|檔期衝突需代班| H
+    H --> I[人員確認需替代日期或區段／選定月嫂並詢問意願]
+    I --> J{是否願意}
+    J -->|不願意／改問其他人| I
+    J -->|願意| K[寄送本案群組邀請給該月嫂]
+    K --> L[該月嫂點連結加入原服務群組]
+    L --> M[人員直接填入實際服務日期]
+    M --> E
+```
 
-2026-08-24 人工裁決：LINE 不是日期表確認的唯一入口。缺少 LINE identity／binding，或現場、電話、
-紙本已完成確認時，內部操作者可先對 current confirmed-service-date version 與 current matching plan
-執行人工快照 Preview，明確確認後 Apply 建立 immutable `draft` snapshot 與 customer／caregiver
-recipient snapshots；不得建立或假造 LINE delivery task。每位 recipient 再以非空 reason、actor、
-idempotency identity 記錄 `manually_confirmed`／`manually_revoked`。Assignment Plan gate 僅接受 current
-lineage 中客戶與目標月嫂全數 `confirmed` 或 `manually_confirmed`；日期、方案、segment 或 fingerprint
-異動仍使舊確認失效。若後續改走 LINE，必須保留人工歷史、明確 invalidated 後建立新的 `sent` snapshot。
+- **SSTART-01／入口與責任：** 客戶只在原服務群組提出日期，雙方自行協調；Bot 不監控、解析或推定群組聊天中的日期與同意。客戶訂單異動 LIFF 移除現有「服務日期／天數」日期修改選項、開始日／結束日輸入及對應預覽提交；後端同步停用該新申請種類，不只隱藏畫面。其他訂單異動選項保留；既有日期申請與客服歷史不刪除、不自動轉成新流程。正常案件無人員核准步驟或人工關注待辦。
+- **SSTART-02／月嫂提交：** 透過既有 verified staff LIFF 入口提供「接受，填寫開始日期」與「無法配合，請工會安排代班」。接受時填入雙方約定開始日；不得要求月嫂自行猜算結束日或服務天數。服務量、每日時段、休假與假日規則由原 owner facts 計算。每次提交限本人目前有效案件／負責區段；有效配對已成立但尚無正式 assignment 的本人亦可提交，不能以先有正式班表作資格。檔期無衝突不等於願意；私事等原因可選不接受，不強迫填原因。
+- **SSTART-03／正式更新：** 接受送出即由 server fresh-read／lock 驗證身分、方案／區段、版本、occupancy、契約與訂金等既有正式條件，通過後自動委派 Orders、Scheduling、Client Finance、Payroll 正式 writer，保存實際開始日、正式服務日、班表、結束日及受影響投影。使用既有 durable command／outer UoW，沒有第二次工會確認；不得拆成先保存開始日、等人工確認日期表才補排班。單月嫂日期不可與舊推薦期間取空交集；多月嫂沿明確分段歸屬與各段本人結果處理，不由一人代替其他月嫂同意、不猜測分配。
+- **SSTART-04／例外待辦：** 月嫂不接受或 canonical 檔期衝突需代班時，保存同案同區段可追溯的工會待辦；正式日期、班表及付款條款保持原值。已保存待辦的結果須明確回讀，不能先丟 generic error 令待辦一併回滾。身分、stale version 或資料完整性錯誤仍回 typed rejection／conflict，不誤當月嫂拒絕或一律製造代班待辦。簽約／訂金等條件未齊不得跳過原 gate，也不增加常態人工日期核准。
+- **SSTART-05／人員代班：** 工會確認需替代日期／區段，選定月嫂並詢問意願；不願意就改問其他人，願意才將該人選交給群組邀請。該月嫂點連結加入本案原群組後，人員直接填入實際服務日期，由同一正式流程檢查及保存，不再要求代班月嫂開 LIFF 接受／填日期、不另等客戶或月嫂按日期表確認。候選意願只證明願意，不等於正式指派；既有候選聯繫可重用，選定代班人選與需替代區段由 Scheduling 記錄，不能先建假 assignment 取得邀請資格。
+- **SSTART-06／局部與跨域：** 工會用語可統稱代班，server 仍依正式服務證據分流。尚未服務的整案換人沿 service-before-replacement lineage；已有服務的代班／換人只替換受影響 assignment family，保留已服務日、原月嫂費率與薪資／付款歷史，沿既有 Payroll／Staff Payables 計算，不整案退回媒合、不重跑另一套拆帳公式。只有本案實際開始日改變才依 Client Finance 同步第一期款日期；服務中局部代班不以代班首日覆蓋全案開始日。
+- **SSTART-07／群組結果：** 正式更新成功後，依 committed 日期／排班版本建立一次本案群組日期表通知。內容列案件、實際開始日、各月嫂負責區段與逐日服務日期；只有結果紀錄，無「確認日期表／拒絕日期表」按鈕，也不另索取拒絕原因。日期表送達與否不影響正式排班資格。失敗保留正式結果、呈現寄送異常，僅依既有投遞機制補送，不重跑排班或帳務。群組尚未就緒不改寄個人日期確認卡。額外正式開工通知未定稿，不在本次新增。
+- **SSTART-08／權限與失敗：** 有效工會人員與相應 owner capability 可查待辦、選定人選、邀請及保存代班日期，不限 system_admin；LINE 工會入口驗 current binding／enabled Admin，React 依既有 Access session 驗 capability。Query 零寫入；相同命令重播回原結果，不能重複建待辦、排班、義務或日期表。infra failure 整筆 rollback；outcome unknown 以原操作身分回讀。完成／取消／服務資料已鎖案件不可由此覆寫。
 
-2026-10-15 使用者裁決：正常媒合案件的服務安排介面只保留「設定服務日期／確認排班」兩步。
-日期表先由既有 Orders writer 保存，可在正式指派前顯示日曆；原訂服務方式須顯示於排休選擇旁，
-本次排休星期仍只作試算輸入。人工確認只收一份非空確認紀錄；儲存該紀錄即為人員確認操作，
-若尚無 current snapshot，由相同操作接續既有人工快照 Preview／Apply，再確認指定 recipient。
-不增加確認方式選單或重複勾選，不建立 LINE delivery intent，結果未明時沿用原 command identity 恢復。
+日期表 recipient confirmation 不再是正式排班或 commitment 日期平移的 gate。自動排班 discovery 必須只接續已提交的月嫂接受或人員代班日期結果，不能再以舊 `confirmed`／`manually_confirmed` 卡片事件自動觸發。歷史 snapshot／回覆／receipt 保留不可變；舊卡片不能產生新的有效確認或正式變更，current UI 與訊息不再生產該確認流程。查詢狀態以本人回覆、代班待辦、正式排班與寄送結果呈現，不以 job accepted 或卡片送達冒充生效。
 
-同日後續 UI 裁決：星期選項與「無固定週休」同列。日期設定直接以「儲存服務日期」作為人員確認，
-在同一操作內沿用既有日期／開始日 Preview、Apply 及正式回讀，不再顯示額外預覽確認步驟；
-只有完整日期表正式回讀成功後，才切換至「確認排班」，失敗或結果未明時留在原步驟續辦。
-尚無指派時，可在上方同一日期欄位下單獨「儲存實際開始日」，只呼叫既有 actual-start writer，
-不保存服務日期表、不自動切換步驟；下方不再重複呈現開始日表單。結果未明續辦須保留此單獨保存意圖，
-不得自行升級成日期表保存。有既有班表時的開始日更正仍沿用原分段預覽與原子重排流程。
+##### 前後端修改範圍與方案
 
-current 日期表的客戶及所有目標月嫂確認後，背景 discovery 以 canonical Assignment Plan Preview
-驗證契約、訂金、waiting lock、檔期及精確日期；通過才 enqueue 既有 `assignment_plan_apply`。
-command identity 綁定 case／plan／confirmed-date version／既有 PreviewFingerprint；相同事實只建立
-一份工作，已失敗的同一命令不盲目重送。worker 必須以既有 Apply fresh-read／lock／UoW 完成 conversion，
-不得由 UI 或 discovery 寫 assignments、班表、Orders、Finance 或 Payroll。條件未齊時保留確認證據，
-下一次 discovery 讀取新的 owner facts 後再判定；有效正式指派存在時不得重做 bootstrap。
+下列為後續程式實作範圍，並非已完成變更。優先重用現有 owner 與 transport；新欄位／資料表須先核對現有 schema，不預先指定新表或新增 Orders／付款狀態。
 
-同日實際 UI 修正：尚無正式指派的單一月嫂方案，以 Orders current confirmed-service-date version 的完整日期作為該月嫂日期表及檔期保留來源，不再與原推薦的預計期間取交集而產生 0 天。首次正式指派的開始日必須等於目前實際開始日（未保存時為第一個服務日），結束日及 official dates 必須與已確認 recipient snapshot 完全一致；仍經原 Preview／Apply 檢查占用、契約、訂金與檔期鎖。等待訂金鎖只調整本次 canonical 候選投影，不改寫原推薦期間。既有快照的日期內容不符時，Query 呈現過期並保留 immutable 舊內容；明確人工確認可建立新快照，舊確認不得滿足新日期表。人工準備的 actor／reason 稽核欄位不構成日期差異。多月嫂仍依明確分段歸屬，不推測新分段。
+| 範圍 | 現有位置／必要修改 |
+|---|---|
+| 客戶 LIFF 與日期申請 API | `line/static/order_update.html` 移除 `service_days` 對應「服務日期／天數」選項、起訖日／天數表單、預覽與組裝分支及安全預覽示例；`api/schemas/line_order_change.py`、`api/routes/line_order_change.py`、`subsystems/line/customer_order_change_contracts.py`／`customer_order_change_application.py` 的新申請 allowlist、validation、impact note 與 ticket 組裝同步停用該種類。手造／舊頁的新日期 preview／apply 回 typed rejection，不建新客服需求；歷史事件種類、查閱與正式訂單日期顯示保留，不刪 Orders 日期欄位或其他異動功能。 |
+| 月嫂 LIFF 前端 | `line/static/staff_order_search.html`、`staff_schedule.html` 與 `gateway.html`／`identity.html` 的既有 staff navigation：增加本人案件的協調結果表單、日期輸入、衝突／待辦／成功及結果未明回讀。沿現有 staff 入口，不增加客戶日期申請入口，不為此發布 Rich Menu。 |
+| LIFF API／身分與 schema | `api/routes/line_staff_self_service.py`、`api/schemas/line_staff_self_service.py`、`api/dependencies/line_identity.py`／`infrastructure/mysql/line_unit_of_work.py`：新增 typed 結果提交與回讀；`infrastructure/mysql/customer_service_repository.py` 的既有 staff order read adapter 或 Scheduling typed query 須涵蓋尚未排班的有效本人方案；新 mutation 委派 Scheduling，不由 LINE adapter 寫正式 roots。 |
+| Scheduling 回覆與代班協調 | `subsystems/scheduling/`、既有 `matching_coordination`／candidate contact、`leave_substitution_workflow.py`、`service_before_replacement_workflow.py` 與對應 MySQL adapters：保存月嫂決策／日期、衝突待辦、選定人選與意願、區段及流程進度；明確區分願意承接、入群、正式指派。 |
+| 正式日期／排班 coordinator | `subsystems/orders/actual_start_workflow.py`、`service_date_confirmation_workflow.py`、`subsystems/scheduling/automatic_service_arrangement.py`、`assignment_plan_workflow.py`／`assignment_plan_impacts.py` 及對應 repository／impact ports：接受／人員填日期兩條入口接同一 owner Apply，內部精算、fresh-lock、衝突回待辦、原子保存與正式回讀。 |
+| 舊日期確認 gate | `infrastructure/mysql/matching_schedule_confirmation_repository.py`、`subsystems/scheduling/matching_schedule_confirmation.py`、`infrastructure/mysql/automatic_service_arrangement_repository.py`、`domains/scheduling/commitment_execution.py`、`subsystems/line/matching_postback_application.py` 與相應 API：以新提交結果取代雙方 recipient confirmation；停止生產確認卡、拒絕原因追問及舊事件自動排班。歷史 readback 保留，舊 mutation caller 依 entry-point governance 退役／封閉，不只刪 UI 或逕刪 public route。 |
+| 工會手機與 React 前端 | `line/static/mobile_admin.html`、`api/routes/line_mobile_admin.py`、`ui_react/src/components/OrderWorkbenchV2Drawer.tsx`、`MatchingScheduleAndAssignmentActions.tsx`、`OrderServiceDatesPanel.tsx`、`OrderActualStartPanel.tsx`、`OrderAssignmentPlanPanel.tsx`、`ui_react/src/pages/ServiceHandoverPage.tsx`／`SchedulingPage.tsx`，以及相關 typed clients／flow adapters：正常只顯示結果；例外提供代班待辦、選人詢問意願、邀請及加入狀態、人員日期輸入與回讀。移除「設定日期／確認排班」雙方確認步驟。 |
+| 案件進度與開工時間 | `subsystems/orders/stage_projection_query.py`／`core_stage_projection_query.py`、`infrastructure/mysql/orders_stage_projection_repository.py`、相關 Orders typed schemas／clients、`ui_react/src/api/scheduling/service_arrangement_status_client.ts` 及 durable worker：移除「等待雙方確認日期表」的狀態與錯誤引導，改讀本人提交／代班待辦／正式排班／寄送結果。已確定的實際開工日已到時委派 Orders canonical lifecycle 評估為服務中，不靠人員點擊、不由唯讀頁面寫狀態，也不新增正式開工通知。 |
+| 群組邀請與結果日期表 | `subsystems/line/order_group_application.py`／contracts、`infrastructure/mysql/line_order_group_adapters.py`／`line_media_order_group_repository.py`、delivery worker 與 `config/message_templates.json`：支援對已選定且願意的代班月嫂單獨寄原群組邀請，不重寄全體、不要求假 assignment；membership 不以送出邀請代替加入。正式排班成功後產生無按鈕的群組結果表。管理端 `LineOrderGroupWorkbench.tsx` 依 typed readback 呈現選定代班者與加入結果，維持唯讀。 |
+| 第一期款與相關日期 | `domains/client_finance/obligation_planning.py`、`infrastructure/mysql/client_finance_terms_writer.py`／`automatic_client_accounting.py`、Orders／Scheduling impact ports：第一期到期日採已確定實際開始日，尚未確定才用預計日；沿原 identity 同步未結清日期、第二期既有加 15 日公式及付款查詢，保留已核銷交易、allocation、已簽文件與既定月嫂付款日。既有 `order_pre_start_notification_source` 與通知失效處理使用最新正式日期，不重發失效日期或虛構補發。 |
+| 權限、持久化與部署邊界 | `api/dependencies/admin_auth.py`、上述管理 routes、Access capability 與相關 API schema：取代本流程 system_admin-only gate，範圍限已認證工會人員／本人月嫂。Scheduling-owned 新決策與待辦若現有 schema 無法承接，採 additive migration、preserve-data upgrade 與清楚版本 lineage；不改寫歷史確認證據、不新增付款義務關卡。本次只有規格更新；程式、DB migration、provider 發送、選單 publication 與部署均未執行。 |
 
-`GET /api/v1/orders/{case_no}/matching-plans/{plan_id}/automatic-arrangement` 為唯讀狀態投影，
-區分等待確認、等待條件、準備自動排班、queued／running、已生效及失敗；查詢不得 enqueue。
-UI 以 owner assignments 回讀證明排班生效，不以 job accepted 取代完成。介面移除人工建立正式排班按钮，
-但保留既有 API 及已接受命令的結果未明／回讀恢復入口。
+##### 前端畫面與按鈕逐項對照
 
-2026-10-15 最新人工裁決：實際開始日改變不新增改期或重簽契約流程。首次轉換保留原 commitment、文件與簽回紀錄；同一 plan、同一月嫂及每位月嫂服務天數不變時，execution 日期可採用 current confirmed-service-date version 中客戶與所有目標月嫂最新確認的 immutable recipient 日期。不得由 caller 自稱已確認或改寫原 commitment dates；Preview 唯讀核對，Apply fresh-lock 重驗，轉換事件保存 snapshot／日期版本引用。未確認、不同人選、服務量不符或檔期衝突仍阻擋，既有契約、訂金及等待檔期鎖關卡維持。
+下表是必做功能，不以「調整代班介面」概括。工會手機待辦工作面與 React 代班處理頁都須接通同一 owner-backed 操作與結果；`LineOrderGroupWorkbench` 仍是觀察頁，不把所有 mutation 放進群組清單。未開始且無 assignment 的例外亦須能從此待辦處理，不能被既有「必須先有正式班表」選案條件排除。下列業務進度為 readback，不新增一套前端自管狀態機。
+
+| 畫面／步驟 | 必要內容與操作 | 開放條件與操作後效果 |
+|---|---|---|
+| 客戶「修改訂單資訊」 | 移除「服務日期／天數」選項、日期輸入與預覽／送出分支，同步移除安全預覽中的該選項。保留服務地址、下廚需求、每日時段與其他內容。 | 不再產生結構化日期申請；後端對舊頁、舊 preview 或自行送出的日期 payload 同樣拒絕，不能只靠前端隱藏。 |
+| 月嫂本人案件清單 | 增加「回報服務開始安排」入口；顯示案件、目前安排及本人負責區段。本人已有效配對但尚無正式班表也須可見。 | 已驗證／已綁定本人且方案有效才可進入；不能借用任意案件編號。 |
+| 月嫂協調結果表單 | 選「接受，填寫開始日期」時顯示開始日；另一選項為「無法配合，請工會安排代班」，原因選填。提供「送出協調結果」，不用填結束日與合約天數。 | 接受送出即觸發系統處理；拒絕建立代班待辦。畫面分別呈現已完成、需工會代班、未通過驗證、處理中或結果未明；結果未明只能沿原操作查核，不重複送新命令。 |
+| 工會代班待辦清單／案件入口 | 顯示案號、原月嫂、拒絕或衝突來源、需替代區段、目前處理進度；提供「處理代班」、server 分頁與完整待辦數。 | 只列需工會處理的例外。正常成功不列待辦；邀請排入或入群都不提前結案，正式安排回讀成功才完成該替代區段待辦。 |
+| 替代範圍與人選 | 顯示原服務與已服務日，讓人員記錄需替代日期／區段、選擇有效月嫂。若拒絕時沒提供新日期，明示尚待工會確認，不能猜測群組內容。 | 只編輯本次協調範圍，不先改正式班表或建立假指派。選定人選與本次區段須能保存／回讀。 |
+| 詢問代班意願 | 選人後提供「詢問該月嫂意願」；顯示詢問對象、代班期間、寄送結果及最新本人回覆。詢問重用現有意願通知，但回覆須連到本代班待辦與人選，不混成一般候選池完成。 | 等待回覆時不開放群組邀請；不願意時提供「改問其他月嫂」，保留前人詢問歷史。願意後進下一步。 |
+| 單人群組邀請 | 明確提供「寄送本案群組邀請連結」按鈕，顯示目前選定月嫂及原服務群組是否就緒。點擊直接建立該人的寄送工作，不用複製網址、另回群組輸入全體 `發送邀請`，也無第二次確認視窗。 | server 驗證人選仍選定且已願意、staff binding、目前群組／保存網址及原資格後才可寄；只寄這名月嫂。缺綁定、缺群組／網址或資格已變，顯示具體不能寄送原因。不得順便重寄給客戶與其他月嫂。 |
+| 邀請結果與加入狀態 | 分開顯示已排入、已送達／寄送失敗、待加入、已加入；提供「重新查詢加入狀態」。狀態與錯誤由 server 回傳，前端不取得 raw 群組 ID、邀請網址或完整 provider 錯誤。 | 以目前群組及選定月嫂的 membership 證據判定加入；寄送成功不能冒充已加入。改選人選後舊人的加入不算新人的加入。 |
+| 工會實際服務日期表單 | 選定代班月嫂已加入後，開放人員輸入本次實際服務日期，顯示系統精算的起訖、服務日／天數及受影響區段；提供「儲存並更新排班」。 | 由工會人員直接送出，同步 fresh 檔期驗證與正式保存；不要求代班月嫂再次開 LIFF、不再要求客戶確認。再次衝突保留待辦，不更新半套正式資料，讓人員調整日期或改選。 |
+| 正式保存結果 | 顯示正式人員／日期／班表、第一期付款期限與 owner readback；服務中局部代班保留全案原開始日與已服務紀錄。結果未明提供同一操作查核。 | 不以接受工作、HTTP 202、排入佇列或本機 draft 宣稱保存完成；普通工會人員可依 capability 操作，不限系統管理員。 |
+| 群組日期表／工作台紀錄 | 正式保存後自動寄原群組，畫面顯示結果表寄送狀態；移除「寄送日期確認表」、雙方確認計數、人工補登雙方確認與確認／拒絕按鈕。 | 日期表為結果，不能變成另一個人員送出或核准步驟。寄送失敗沿原投遞機制處理，不撤銷排班或重新儲存日期。 |
+| 訊息預覽與樣本 | 更新 `subsystems/line/message_preview.py`／`message_preview_samples.py`、`ui_react/src/components/LineMessagePreviewWorkspace.tsx` 相關 catalog 與樣本：代班意願、單人邀請、無按鈕群組結果表及必要處理回訊與實際 sender 一致。 | 安全預覽不呼叫 provider；不繼續顯示已退役日期確認卡或把假送達當正式結果。既有模板、schema、preview fixtures 只更新受影響項目。 |
+
+##### 每個前端操作所需的後端能力
+
+前端新按鈕都須有 typed transport、owner command／Query、權限及正式回讀；不得使用 local state 模擬完成。以下是 API 能力邊界，具體路徑在實作時沿現有 owner router 決定，不預先宣稱現有 endpoint 已可用。
+
+| 能力 | 必要後端範圍與資料 |
+|---|---|
+| 客戶日期入口退役 | 新 request kind 與 allowed fields 同步移除現有日期申請，Preview／Apply 都 fail closed；歷史 response/event 仍能解讀舊種類，不能刪共用 enum 後令既有客服歷史無法讀取。其他種類不可夾帶 `start_date`／`end_date`。 |
+| 月嫂案件／提交／回讀 | 本人有效 plan／segment 的 bounded Query、接受／拒絕 command、日期精算、共同 Apply 或代班待辦，以及原命令結果 Query；修改 `line_staff_self_service` schema、route、bindings 與 Scheduling ports／repository。 |
+| 待辦清單／詳情／計數 | Scheduling-owned 全量條件一致的分頁、數量及 case／segment 詳情；工會手機 `line_mobile_admin` 與 React typed client 共用 owner 意義，沒有 assignment 的例外也可查。 |
+| 記錄替代區段／選人 | 保存原區段、擬替代日期、人選與目前 owner version；Query 回可選 active staff 與本次範圍。選人不是正式指派，讀取原安排不變。 |
+| 詢問意願／改選／回覆 | 連結代班待辦、人選與詢問事件；沿現有 durable 意願發送及 verified 本人回覆入口保存最新結果，提供寄送／本人回覆回讀。改選保留歷史，舊人的願意不解鎖新人的邀請。 |
+| 單人邀請 command／結果 | 從代班工作面發起，使用 Scheduling 選定＋願意授權，委派 LINE order-group application 建立單人 committed delivery。不能直接重用目前群組指令的全體 audience；React 管理 session 與工會 LIFF 都可依 capability 操作，不擴張唯讀群組清單 API 的職責。 |
+| 加入狀態 Query | LINE owner 對目前 group binding／selected staff 的 membership 提供受限結果；送達與入群獨立。人員填日期的 Apply 必須 server 再驗加入，不能只靠前端 disabled。 |
+| 人員填日期／正式保存 | server 驗指定人選、區段、意願、入群、owner version 與 occupancy，沿原正式 writer 更新 Orders／Scheduling／Finance／Payroll；回傳完整正式結果與付款期限、待辦完成結果及 committed 群組結果通知 reference。 |
+| UI integration／typed errors | 新增或修改相關 React typed clients、schemas、flow adapters／store、OpenAPI 與工會 routes 的 capability guard；錯誤含邀請資格不符、未加入、日期／版本衝突、處理結果未明，與畫面可執行動作一一對應。 |
+
+##### 本次 DB 變更執行範圍
+
+SSTART 實作使用 Scheduling-owned 服務開始回覆／代班處理紀錄及代班人選詢問紀錄，保存本人決策、日期、來源方案／區段、選定人選、意願與 command replay，不能借用 LINE 日期確認事件冒充。新增 schema-only additive tables，不作 system seed、business-row backfill 或 destructive change；舊 snapshot、客服日期申請、assignment 及 ledger 不改寫。新庫 assembly 與 preserve-data release 同步登錄，驗 absent／exact／partial／drift；重播 exact no-op，未知 partial／drift 關閉。切換前可丟棄候選庫，套用後保留 additive objects 並以前向相容修正，不自行 drop。DB 驗證限 localhost development 的新 lu_test_*，保存 fresh／舊資料 preserve evidence；本輪不做 production、source replacement、provider send 或選單 publication。
+
+##### 驗收與後續實作順序
+
+先完成 owner 決策／區段／待辦與 typed API，再接正式日期＋排班＋Finance 的共同 Apply，接代班意願／單人邀請／入群回讀，最後接月嫂及工會 UI、群組結果表並封閉舊確認 gate。保留現有 canonical test roots，不以重寫快照冒充新語意通過。
+
+| 驗收 | 必須觀察到的結果 |
+|---|---|
+| SSTART-01／02 | 群組一般聊天零業務寫入；客戶頁已移除「服務日期／天數」及日期表單，直接使用舊 preview／apply 或夾帶日期欄位也拒絕且不建新客服需求，其他異動與歷史查閱保持可用；已驗證的本人月嫂可對尚無班表的有效方案提交，跨人／跨案拒絕。 |
+| SSTART-03／07 | 無衝突正常案件不經工會確認：正式日期、逐日班表、第一期款期限與 owner 版本一致；commit 後只建一份群組結果表且無確認按鈕。 |
+| SSTART-03／08 | 未來開工先保存正式班表，至開工日由 canonical lifecycle 更新為服務中；待辦看板、手機狀態與班表回讀一致，不出現舊的雙方日期確認提示。 |
+| SSTART-04 | 拒絕或 occupancy 衝突建立同案同段代班待辦，正式資料零變更；stale／越權／infra 錯誤不偽裝成拒絕或成功。 |
+| SSTART-05 | 實際 UI 按「詢問該月嫂意願」→不願意→「改問其他月嫂」→本人願意→「寄送本案群組邀請連結」→「重新查詢加入狀態」→已加入→人員「儲存並更新排班」。檢查每一步按鈕開放、實際 command 與 readback；未願意／未加入的直接 API 也不得繞過，邀請只寄選定一人，加入前不形成正式指派。 |
+| SSTART-06 | 多月嫂分段、服務前整案換人、服務中局部代班／換人均保存正確服務量、原已服務日、薪資／實付歷史及唯一付款日期；局部代班不改全案開工日。 |
+| SSTART-07／08 | 同鍵重播無重複待辦／排班／應付／通知；實際並行占用與中途失敗 rollback；寄送失敗不回滾正式結果、不重算帳務；舊卡點擊不更新新安排。 |
+| SSTART-08 | 工會人員可處理例外與日期，普通月嫂不可用工會功能；實際 UI 覆蓋正常、拒絕改選、入群、人員填日期、衝突與結果未明恢復。 |
+
+現行服務開始與代班入口為 `POST /api/v1/line/staff-self-service/service-start/*`、工會 `POST /api/v1/line/mobile-admin/service-start/*` 及 `GET/POST /api/v1/scheduling/service-start/*`。月嫂訂單／班表頁與工會手機／React 工作面共用同一流程；舊日期表發送、人工確認及再次確認 mutation 回覆 410，舊卡按鈕不改安排，未寄出的舊確認卡由 delivery worker 取消。未來開始日由既有背景作業週期委派 Orders lifecycle writer 轉入服務中，不重排班或新增開工通知。
+
+首次排班必須有 current 本人回報／工會代班結果、簽約完成、訂金資格及完整服務時段；已存在的等待訂金鎖沿用並轉換，不要求已繳清案件為了正式排班再建立一份等待鎖。多位月嫂先保存各區段結果，全部齊備才以共同 Apply 一次保存正式日期、逐日班表、Finance 及 Payroll。同一承接者連續承接的一段服務日形成同一正式指派；逐日服務、雙薪及來源 outcome 各自保留，不因承接天數多而每天增加一段指派。局部代班以正式 assignment identity 辨識區段；不同區段不得只依案件編號或人員任意取第一筆。
 
 服務安排以唯讀 `GET /api/v1/orders/{case_no}/client-finance/deposit-skip` 顯示 Client Finance 的
 目前訂金應收、已核銷額及已生效的放行狀態，不能使用 Preview 的預期結果冒充現況。「未付款人工放行」一鍵接續
 既有 deposit-skip Preview／Apply，保存標準操作原因且正式回讀。它不把未付款改為已付款，也不釋放
 月嫂 reservation；既有適用條件及正式 writer 不變。契約簽回完成的下一步導向同案服務安排，核銷仍由帳務入口辦理。
 
-名冊實際開始日更正沿用 Orders actual-start writer：無指派只保存日期；有正式指派時預覽各段並以
-同一 Apply 原子更新開始日與班表。成功後導向同案服務安排核對，不能留下已改日期與舊班表等待事後補排。
+名冊的獨立日期更正保留 Orders 既有受控 writer；正常服務開始及本節代班日期則必須經上述共同 Apply，
+同步正式日期、班表與付款期限，不導向另一個人工確認排班步驟。不得留下已改日期與舊班表等待事後補排。
 換人入口導向同案推薦確認並開啟既有換人操作；已服務的既有請假代班裁決不變。
+
+開工、順延與代班未完成需求只在正常有效案件（洽談中、訂單成立、服務中）列入工會待辦；取消、完成及歷史案件不列出，也不能沿既有 Apply 操作。查詢不改寫需求歷史。
 
 ### Schedule Projection
 
@@ -227,12 +285,11 @@ delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review 
 在 canonical repository／outer UoW、capability、typed result 與 entrypoint replacement 完成前
 不得掛入 FastAPI。
 
-2026-08-15 人工裁決：LINE 月嫂請假先寫入 Scheduling request evidence，不自動猜案件、服務日、
-代班人或更動 availability／正式排班。request 的 `pending`、`accepted_for_processing`、`rejected`、
-`cancelled` 與 `resolved` 是獨立狀態機；只有已受理 request 能由唯一 canonical leave-substitution
-receipt 關聯為 `resolved`。receipt 必須證明原 leave outcome 的 staff 與 request staff 相同，且同一
-receipt 不得關聯兩筆 request。正式 Apply 的 locks、跨 Domain impacts 與 receipt 不因 request
-存在而變更；LINE 通知是 committed durable delivery task，失敗不回滾正式結果。
+月嫂請假以本人提交雙方已協調結果為正式入口。順延指定逐日新日期，無衝突即在單一交易套用正式日期、排班及相關帳務，無受理／再次核准；代班或衝突才建立工會工作項。完整互動與 UI 契約見規格 20 §5.3。
+工會只記錄雙方談妥的結果或選人安排代班，不負責溝通協調。代班須願意、寄送原案件群組邀請並確認加入後，才由工會記錄實際日期。指定代班可同時保存明確新服務日，未指定時維持原日；不得重複計算服務日或更動其他日。
+既有 Scheduling result／candidate store 共用於服務開始與請假；請假 `execution_dates` 使用 `{kind:"leave-v1",decision,dates:[{original_date,new_date}],conflict_message?}`，與 service-start execution array／peer 決策隔離。只使用既有 awaiting_peers／substitute_required／applied 狀態；awaiting_peers 僅供同交易施工，不是人工等待。
+舊請假 request 的歷史資料、readback、取消與 canonical linked receipt 證據保留，不再接受新的 pending 請假 intake 或客戶同意順延操作。舊受理／退回入口及舊日常待辦已退役，僅保留歷史查閱及正式處理證據；不建立詢問客戶的工作，也不以退役入口宣稱已完成排班。不需要資料 backfill。
+日期、Scheduling generation、Finance／Payroll impact、immutable leave outcomes、result receipt 及群組寄送工作共用一個 outer commit；衝突或中途失敗不能留下半套結果。原服務日不得已完成，新日期不可空白、重複或冒用他人指派。所有送出與人員操作需 replay 同一 key，內容不同回 typed conflict。
 
 Batch replay：
 
@@ -559,7 +616,7 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
 - 正式 matching-plan create command 必須帶 1–191 字元的 `event_key`，並以案件、依序的完整 segments、actor 與 `as_of` 組成 immutable command fingerprint。Apply 先鎖定案件 root、再以 `event_key` 鎖定並重查 receipt；同一完整原命令只回傳已保存的 plan／version／status／segments receipt，不重新檢查已被原命令改變的 availability，也不得依 current plan 或建立時間推測舊結果。相同 key 搭配任一不同 command fact 必須衝突且零寫入。新的 plan、segments 與 receipt 必須在同一 outer UoW 提交；既有歷史 plan 不得回填或臆造 receipt。receipt Query 只證明原命令 identity，unknown-result recovery 仍須另讀 current matching-plan owner state 後才可結束觀測。
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。
-- 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。
+- 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後依本節服務開始回覆／工會代班日期結果驗證 assignment gate；日期表只在正式保存後作為群組結果紀錄。
 
 ### 人工媒合確認（2026-08-24）
 
@@ -630,7 +687,7 @@ version、idempotency identity 與正式回讀；不得為填滿依據捏造聯�
 手工傳送履歷，但不得把這個系統外動作偽造成受控檔案 delivery。訂單資訊－1、訂單資訊－2、每周服務中
 說明、方案有效性、全體月嫂意願、客戶 LINE 綁定與檔期 fresh validation 仍是寄送 blocker。
 
-客戶點「專人協助／進一步了解」後回覆「已收到您的聯絡需求，請留下您的疑問。」；聯絡需求及後續留言沿既有 Customer Service create-or-append writer 保存，人員從待辦查看並沿原客服 Preview／Apply 回覆，不建立 escalation 或群組通知。客戶仍可由原卡片接受配對。點「接受此配對」後回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，原聯絡待辦改為辦理簽約；契約準備、發起簽署及雙方簽約完成仍由 Contract Signing owner 承接，簽約後才由人員建立本案服務群組。接受配對不等於簽約完成或正式排班。
+客戶點「專人協助／進一步了解」後回覆「已收到您的聯絡需求，請留下您的疑問。」；聯絡需求及後續留言沿既有 Customer Service create-or-append writer 保存，人員從待辦查看並沿原客服 Preview／Apply 回覆，不建立 escalation 或群組通知。客戶仍可由原卡片接受配對。點「接受此配對」後回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，原聯絡待辦改為辦理簽約；契約準備、發起簽署及雙方簽約完成仍由 Contract Signing owner 承接，訂金正式核銷後由人員建立本案案件群組；簽約與訂金付款可先後發生。接受配對不等於簽約完成或正式排班。
 
 推薦確認待辦由 active plan、最新 customer decision、實際 delivery sent time 與雙方簽回事實唯讀投影，不新增待辦 root。成功送達滿 7 天仍未接受只作內部提醒，不關閉按鈕、不自動拒絕、不發逾期訊息；接受後不再列未確認提醒。雙方完成簽回後解除辦理簽約待辦，取消／更換方案不列原方案待辦。仍核對本人、current binding 與有效案件／推薦，既有因協助而標 consumed 的卡片仍可在 current contact_requested 下接受；已取消、更換或最終決定的方案不能重用。履歷 PDF 下載仍沿原短效檔案憑證規則，與客戶回覆期限分開。推薦流程不查詢通知群組、不產生媒合成功群組訊息；既有 pending／retryable_failed 的 matching_plan_decision 投遞由 delivery 前置 worker 取消，已送達歷史不改寫。
 
@@ -673,13 +730,15 @@ Scheduling 正式收納 `Matching Coordination` 為本 Domain 內的 subsystem�
 - 首次建立 criteria snapshot 的 Preview 沒有既存 snapshot 可供瀏覽器取得 source tuple，必須由後端 fresh-read owner facts 並在回應中回傳 canonical tuple；該 Preview 不接受 client source-version assertion。後續 Apply 必須攜帶 Preview 回傳的完整 canonical tuple 與 fingerprint，並重新 fresh-read 驗證。
 - M3 Phase E schema 只屬候選 inventory／spec planning，未授權 DDL、seed、backfill、destructive 或資料庫操作；若需變更，另立 approved schema Work Package 並重跑全部 DB gates。
 
-## 2026-10-21 服務中換人
+## 服務中換人
 
-人工 Authority：使用者核可服務中換人介面並明確指示開始實作。服務安排保留原路徑導向：原案件 → 服務中換人專用頁 → 原案件；臨時代班維持原請假代班頁。不得新增案件處理階段或將已服務案件重置媒合。
+工會只記錄雙方已協調的結果或安排接任人選，不負責協調。服務中換人延續既有代班功能；不新增案件階段、不重置媒合、不增加付款作業關卡。
 
-- 沿用 leave-substitution Query／Preview／Apply 與唯一 outer UoW；command 新增可選 `handover_date`，空值維持既有請假代班語意與歷史 command identity。
-- 換人要求已開始服務。交接日以 Asia/Taipei business clock 驗證，不得早於今日；含交接日，只更換指定原 assignment 尚餘的全部 official service dates。後端驗證完整集合、單一不同接任人及原雙薪標記；不得由 UI 任意漏選或改寫已服務日、其他 assignment、休假政策、服務日或時數。
-- 接任日期集合形成一個 assignment，不逐日新增；仍遵守最多四個有效 assignments、逐日 ownership、檔期與服務量守恆。保留不可變 generation／outcome／lineage。
-- 原月嫂在交接後不新增請假占用。原因選填；畫面一次儲存，內部 fresh Preview 與 Apply 版本／fingerprint 防護保留。結果不明時維持原 command identity 重查，不自動另建命令。
-- 既有合法請假占用隨 generation 承接，immutable outcome 不改寫；服務中換人本身不建立新的請假占用，亦不關聯請假待辦或因此新增 LINE 通知。原服務段已變更時，專用頁可在同案重新選取最新正式段。
-- 金額明細來自 Payroll／Client Finance owner candidate。不能唯一追溯或帳務不相容時顯示 typed blocker，不猜金額、不繼續寫入。
+1. 原案件「服務中換人」帶入指定原月嫂及正式服務區段，唯讀顯示全部剩餘服務日。已開始服務、尚有未完成正式排班且未鎖定的案件才可操作；多月嫂案件必須指定原區段，不能猜測。
+2. 具既有 matching capability 的工會人員可選擇接任月嫂，點「詢問該月嫂意願」才建立共用代班待辦與寄送工作。詢問內容列出原區段全部剩餘服務日；不願意就改問其他人。單純開頁或重新查詢均零寫入。
+3. 願意後，工會點「寄送本案群組邀請連結」，沿既有訂金、案件群組網址、本人 current binding 與單人 recipient 驗證建立寄送工作。需取得接任月嫂真正加入原案件群組且未退出的有效 membership evidence，才開放填寫交接日；不以邀請已寄送代替加入。
+4. 工會填入雙方已協調的交接日。畫面列出交接日（含）起指定原 assignment 的全部剩餘 official service dates，一次「儲存交接日並更新排班與帳務」，不再要求雙方或工會按確認。交接日依 Asia/Taipei business clock 不得早於今日；不能任意漏選日期、改寫已服務日、其他 assignment、原雙薪標記、服務日總數、時數或休假政策。
+5. 共用 service-start result／candidate store 以 `handover-v1` typed envelope 隔離正常服務開始 peers 與 `leave-v1`。不新增表或業務狀態。保存 fresh-lock 原區段、人選、意願與加入證據，委派既有正式 `LeaveSubstitutionBatchIntent.handover_date` Preview／Apply；單一 outer UoW 更新 Scheduling、Orders、Client Finance、Payroll 與 committed delivery。版本、原區段變更、無剩餘日或不相容帳務回 typed blocker，全部 rollback，不猜測來源或金額。
+6. 接任日期形成一個 assignment，仍遵守最多四個有效 assignments、逐日 ownership 與服務量守恆。原月嫂保留已服務段、已付款／匯出／核銷及 immutable generation／outcome／lineage；帳務沿既有 Payroll handover correction 及獨立追償處理，不能拿一般短期代班重建取代。原 actual start 與第一期到期日不重置，僅依既有 owner 更新剩餘排班與相關帳務。
+7. 檔期／不可排班衝突保留工會待辦、原排班與全部帳務，可調整交接日或改選月嫂重新詢問。交接後不新增原月嫂請假占用，也不關聯舊請假待辦。換人儲存結果未明時沿原命令識別確認，不能換新識別重做。
+8. 成功後在同一交易建立原案件群組的日期表寄送工作，列出各月嫂正式服務日，無確認／拒絕按鈕。發送前沿既有 group/version/official schedule 複核；不另外私訊客戶或原月嫂，不另建群組。實際送達失敗不回滾正式排班或重算帳務。React 原案件入口及工會手機共用待辦使用相同意願、邀請、加入與交接日流程；權限不再限定系統管理員。

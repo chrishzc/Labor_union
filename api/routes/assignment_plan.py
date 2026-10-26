@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymysql.err import OperationalError, ProgrammingError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.assignment_plan import (
     AssignmentPlanApplication,
     get_assignment_plan_application,
@@ -68,7 +68,7 @@ _SCHEMA_NOT_READY_MYSQL_CODES = frozenset({1054, 1146})
 def query_automatic_arrangement(
     case_no: str = Path(..., min_length=1, max_length=50),
     plan_id: int = Path(..., gt=0),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: AutomaticServiceArrangement = Depends(get_service_arrangement_automation),
 ):
     del principal
@@ -136,7 +136,7 @@ class AssignmentPlanApplyBody(AssignmentPlanPreviewBody):
 )
 def query_assignment_plan(
     case_no: str = Path(..., min_length=1, max_length=50),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: AssignmentPlanApplication = Depends(
         get_assignment_plan_application
     ),
@@ -160,7 +160,7 @@ def preview_assignment_plan(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = "assignment-plan-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: AssignmentPlanApplication = Depends(
         get_assignment_plan_application
     ),
@@ -192,7 +192,7 @@ def apply_assignment_plan(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = _apply_request(

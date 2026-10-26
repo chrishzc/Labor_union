@@ -12,10 +12,11 @@
 ## Implementation
 - primary:
   - `subsystems/contract_signing/staff_contract_application.py`
+- composition: `api/dependencies/contract_signing.py`
 
 ## Dependencies
 - outbound: `orders` — Contract Completion／contract identity typed owner command。
-- outbound: `client-finance` — precontract deposit／terms impact owner adapter。
+- outbound: `client-finance` — 契約使用 owner 金額投影；簽回只保存 commitment，不再建立訂金或期款。
 - outbound: `scheduling` — matching segment／commitment facts。
 - outbound: `external-integration/line` — verified recipient and delivery task transport。
 

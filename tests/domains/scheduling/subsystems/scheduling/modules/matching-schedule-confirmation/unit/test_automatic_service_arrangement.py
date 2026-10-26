@@ -69,20 +69,16 @@ def test_query_never_enqueues_even_when_ready():
     assert source.reservations == []
 
 
-def test_dispatch_reserves_existing_confirmations_and_keeps_conflicts_out_of_queue():
-    app, source, _, jobs = ports()
-    def conflict(_):
-        raise ValueError('automatic_waiting_deposit_occupancy_conflict')
-    source.reserve_waiting_deposit = conflict
-    status = app.dispatch_case('CASE-1', 7)
-    assert status.state == 'awaiting_conditions'
-    assert status.blockers == ('automatic_waiting_deposit_occupancy_conflict',)
-    assert jobs.commands == []
+def test_dispatch_does_not_recreate_old_waiting_confirmation_locks():
+    app,source,_,jobs=ports()
+    assert app.dispatch_case('CASE-1',7).state=='queued'
+    assert source.reservations==[]
+    assert len(jobs.commands)==1
 
 
 def test_incomplete_confirmations_do_not_preview_or_dispatch():
     app, _, preview, jobs = ports(confirmed=False)
-    assert app.dispatch_case('CASE-1', 7).state == 'awaiting_confirmations'
+    assert app.dispatch_case('CASE-1', 7).state == 'awaiting_service_start'
     assert preview.calls == 0
     assert jobs.commands == []
 

@@ -13,14 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from domains.line.identities import LineDeliveryTaskId
-from domains.client_finance.obligation_planning import (
-    build_precontract_deposit_candidate,
-    precontract_deposit_terms_impact,
-)
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
-from subsystems.orders.contract_completion_workflow import (
-    ContractCompletionClientFinanceCommand,
-)
 from subsystems.contract_signing.document_access import (
     create_document_access_credential,
 )
@@ -44,8 +37,6 @@ def _missing_adapter(*_args, **_kwargs):
 
 archive_contract_document = _missing_adapter
 discard_uncommitted_contract_document = lambda **_kwargs: None
-persist_client_finance_terms_impact = _missing_adapter
-load_contract_client_finance_facts = _missing_adapter
 select_order = _missing_adapter
 
 
@@ -123,8 +114,6 @@ class StaffContractSigningApplication:
         discard_document: Callable[..., None] | None = None,
         line_delivery_repository_factory: Callable[[object], object] | None = None,
         order_selector: Callable[..., object] | None = None,
-        finance_facts_loader: Callable[..., object] | None = None,
-        finance_terms_writer: Callable[..., None] | None = None,
         external_template_facts_loader: Callable[..., tuple[dict[str, object], str]] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
@@ -134,8 +123,6 @@ class StaffContractSigningApplication:
         self._discard_document = discard_document
         self._line_delivery_repository_factory = line_delivery_repository_factory
         self._order_selector = order_selector
-        self._finance_facts_loader = finance_facts_loader
-        self._finance_terms_writer = finance_terms_writer
         self._external_template_facts_loader = external_template_facts_loader
 
     def _archive(self, content: bytes, storage_key: str):
@@ -149,16 +136,6 @@ class StaffContractSigningApplication:
     def _line_delivery_repository(self, connection):
         factory = self._line_delivery_repository_factory or _missing_line_delivery_repository
         return factory(connection)
-
-    def _establish_deposit(self, connection, command, commitment_id: int) -> None:
-        _establish_precontract_deposit(
-            connection,
-            command,
-            commitment_id,
-            order_selector=self._order_selector,
-            facts_loader=self._finance_facts_loader,
-            terms_writer=self._finance_terms_writer,
-        )
 
     def _run_in_application_unit_of_work(self, operation: Callable[[object], object]):
         connection = self._connection_factory()
@@ -315,8 +292,6 @@ class StaffContractSigningApplication:
                 commitment_id = _create_commitment_if_ready(
                     connection, command.case_no, segment["plan_id"], command.actor_id,
                 )
-                if commitment_id is not None:
-                    self._establish_deposit(connection, command, commitment_id)
                 _append_command_outcome(
                     connection,
                     command,
@@ -432,12 +407,6 @@ class StaffContractSigningApplication:
                 document_id = _insert_signed_document(connection, command, segment, source_document_id, archive)
                 event_id = _insert_signed_event(connection, command, segment, document_id)
                 commitment_id = _create_commitment_if_ready(connection, command.case_no, segment["plan_id"], command.actor_id)
-                if commitment_id is not None:
-                    self._establish_deposit(
-                        connection,
-                        command,
-                        commitment_id,
-                    )
                 _append_command_outcome(connection, command, "record_staff_signed_return", document_id, event_id, {"commitment_id": commitment_id})
                 return StaffContractWorkflowReceipt(document_id, event_id, None, commitment_id)
             return self._run_in_application_unit_of_work(persist)
@@ -763,41 +732,6 @@ def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):
                 (commitment_id, segment["id"], segment["staff_id"], service_date),
             )
         return commitment_id
-
-
-def _establish_precontract_deposit(
-    connection,
-    command,
-    commitment_id: int,
-    *,
-    order_selector: Callable[..., object] | None = None,
-    facts_loader: Callable[..., object] | None = None,
-    terms_writer: Callable[..., None] | None = None,
-) -> None:
-    with connection.cursor() as cursor:
-        selector = order_selector or select_order
-        order = selector(cursor, command.case_no, lock=True)
-        loader = facts_loader or load_contract_client_finance_facts
-        facts = loader(cursor, order, lock=True)
-        candidate = build_precontract_deposit_candidate(
-            facts,
-            f"precontract-commitment:{commitment_id}",
-        )
-        if not candidate.mutates:
-            return
-        writer = terms_writer or persist_client_finance_terms_impact
-        writer(
-            cursor,
-            ContractCompletionClientFinanceCommand(
-                precontract_deposit_terms_impact(candidate),
-                command.idempotency_key,
-                ActorContext(command.actor_id),
-                "all staff contract signatures were received",
-                command.correlation_id,
-                "precontract-commitment",
-                commitment_id,
-            ),
-        )
 
 
 def _missing_line_delivery_repository(_connection):

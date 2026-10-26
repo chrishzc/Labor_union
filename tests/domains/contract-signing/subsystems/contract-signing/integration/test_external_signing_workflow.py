@@ -7,8 +7,42 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import json
 
 import pytest
+
+
+@pytest.mark.parametrize('audience', ['client', 'staff', 'document'])
+def test_contract_text_reaches_provider_as_a_valid_line_message(audience):
+    from types import SimpleNamespace
+    from domains.line.delivery import LineRecipient, LineRecipientType
+    from domains.line.identities import LineUserId
+    from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
+    from subsystems.contract_signing.line_delivery import (
+        build_contract_delivery_request, build_external_platform_client_reminder_request,
+        build_external_platform_reminder_request,
+    )
+    recipient = LineRecipient(LineRecipientType.USER, LineUserId('U' + 'a' * 32))
+    common = dict(case_no='SYNTHETIC-CASE', document_version_id=12,
+                  scheduled_at=datetime(2026, 10, 25, tzinfo=timezone.utc),
+                  idempotency_key=IdempotencyKey('synthetic-signing-message'),
+                  correlation_id=CorrelationId('synthetic-signing-message'))
+    if audience == 'document':
+        request = build_contract_delivery_request(recipient, **common, download_url='https://preview.invalid/contract', audience_label='客戶')
+    elif audience == 'client':
+        request = build_external_platform_client_reminder_request(recipient, **common, session_id='synthetic-session')
+    else:
+        request = build_external_platform_reminder_request(recipient, **common, session_id='synthetic-session', matching_segment_id=7)
+    captured = []
+    class LocalSession:
+        def post(self, _url, **kwargs):
+            captured.append(json.loads(kwargs['data']))
+            return SimpleNamespace(status_code=200, headers={}, json=lambda: {'sentMessages': [{'id': 'synthetic-message'}]})
+    LineMessagingApiAdapter('synthetic-token', session=LocalSession()).send(request)
+    assert len(captured) == 1
+    assert captured[0]['to'] == recipient.identity.value
+    assert captured[0]['messages'] == [{'type': 'text', 'text': json.loads(request.payload_json)['text']}]
+    assert captured[0]['messages'][0]['text']
 
 from domains.contract_signing.external_signing import (
     ExternalSigningSessionFacts,

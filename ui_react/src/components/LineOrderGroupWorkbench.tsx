@@ -1,7 +1,7 @@
 import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 /**
  * File: LineOrderGroupWorkbench.tsx
- * Description: 三方服務群組唯讀工作區，以案件清單、加入狀況及可展開歷程呈現正式查詢。
+ * Description: 案件群組唯讀工作區，以案件清單、加入狀況及可展開歷程呈現正式查詢。
  */
 import { useEffect, useRef, useState, type FC } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
@@ -29,10 +29,10 @@ const memberLabels = { joined: '已加入', left: '已離開', pending: '尚未�
 function queryError(error: unknown): string {
   if (error instanceof LineOrderGroupQueryError) {
     if (error.status === 401) return '登入已失效，請重新登入後再試。';
-    if (error.status === 403) return '目前帳號沒有查詢服務群組的權限。';
-    if (error.status === 404) return '找不到此案件的服務群組，請重新整理清單。';
+    if (error.status === 403) return '目前帳號沒有查詢案件群組的權限。';
+    if (error.status === 404) return '找不到此案件的案件群組，請重新整理清單。';
   }
-  return '服務群組資料讀取失敗，請稍後再試。';
+  return '案件群組資料讀取失敗，請稍後再試。';
 }
 function time(value: string | null | undefined, full = false): string {
   if (!value) return '尚無紀錄';
@@ -107,20 +107,20 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
   const clear = () => { onSearchChange(''); onStatusChange('all'); onPageChange(1); };
 
   return <section className="order-group-workbench">
-    <div className="order-group-heading"><div><h2>三方服務群組</h2><p>查看案件的服務群組與加入狀況。</p></div><button type="button" className="order-group-button" disabled={list.loading} onClick={() => setReload(value => value + 1)}><RefreshCw aria-hidden="true" />重新整理</button></div>
+    <div className="order-group-heading"><div><h2>案件群組</h2><p>查看群組與成員加入狀況。</p></div><button type="button" className="order-group-button" disabled={list.loading} onClick={() => setReload(value => value + 1)}><RefreshCw aria-hidden="true" />重新整理</button></div>
     <div className="order-group-card">
       <div className="order-group-filters">
         <label className="order-group-search"><span className="sr-only">搜尋案件編號</span><Search aria-hidden="true" /><input type="search" aria-label="搜尋案件編號" placeholder="搜尋案件編號" maxLength={50} value={search} onChange={event => { onSearchChange(event.target.value); onPageChange(1); }} /></label>
         <label><span className="sr-only">群組狀態</span><select aria-label="群組狀態" value={status} onChange={event => { onStatusChange(event.target.value as Props['status']); onPageChange(1); }}><option value="all">全部狀態</option>{states.map(value => <option key={value} value={value}>{lineOrderGroupStatusLabel(value)}</option>)}</select></label>
       </div>
-      {list.loading && <p className="order-group-empty" role="status">正在載入三方服務群組…</p>}
+      {list.loading && <p className="order-group-empty" role="status">正在載入案件群組…</p>}
       {list.error && <div className="order-group-empty" role="alert"><p>{list.error}</p><button className="order-group-button" type="button" onClick={() => setReload(value => value + 1)}>重試查詢</button></div>}
       {list.value && <>
-        {list.value.items.length === 0 ? <div className="order-group-empty"><h3>{search.trim() || status !== 'all' ? '沒有符合條件的群組' : '目前沒有服務群組綁定紀錄'}</h3><p>{search.trim() || status !== 'all' ? '可調整案件編號或群組狀態再查詢。' : '由工會人員在 LINE 群組內綁定案件後，會顯示在這裡。'}</p>{(search.trim() || status !== 'all') && <button type="button" className="order-group-button" onClick={clear}>清除條件</button>}</div> : <table className="order-group-table" data-control-id="line.order-groups.table"><caption className="sr-only">案件的服務群組與加入狀況</caption><thead><tr><th scope="col">案件</th><th scope="col">群組狀態</th><th scope="col">最近動態</th></tr></thead><tbody>{list.value.items.map(item => <tr key={item.case_no} data-attention={item.status === 'attention'}><td><button type="button" className="order-group-case" data-group-case={item.case_no} aria-label={`查看案件 ${item.case_no} 群組明細`} onClick={() => open(item.case_no)}>{item.case_no}</button><span className="order-group-person">{item.customer_name || '客戶資料待確認'}</span></td><td><Status value={item.status} /><span className={`order-group-secondary ${item.status === 'attention' ? 'order-group-attention' : ''}`}>{lineOrderGroupReason(item)}</span></td><td><span>{item.latest_event ? lineOrderGroupEventLabel(item.latest_event) : '尚無群組動態紀錄'}</span>{item.latest_event && <time className="order-group-secondary" dateTime={item.latest_event.occurred_at}>{time(item.latest_event.occurred_at)}</time>}</td></tr>)}</tbody></table>}
-        {list.value.total > 0 && <div className="order-group-pagination"><span>共 {list.value.total} 筆群組</span>{list.value.total_pages > 1 && <div><button type="button" className="order-group-button" aria-label="上一頁三方服務群組" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>‹</button><span>第 {list.value.page} / {list.value.total_pages} 頁</span><button type="button" className="order-group-button" aria-label="下一頁三方服務群組" disabled={page >= list.value.total_pages} onClick={() => onPageChange(page + 1)}>›</button></div>}</div>}
+        {list.value.items.length === 0 ? <div className="order-group-empty"><h3>{search.trim() || status !== 'all' ? '沒有符合條件的群組' : '目前沒有案件群組綁定紀錄'}</h3><p>{search.trim() || status !== 'all' ? '可調整案件編號或群組狀態再查詢。' : '由工會人員在 LINE 群組內綁定案件後，會顯示在這裡。'}</p>{(search.trim() || status !== 'all') && <button type="button" className="order-group-button" onClick={clear}>清除條件</button>}</div> : <table className="order-group-table" data-control-id="line.order-groups.table"><caption className="sr-only">案件的案件群組與加入狀況</caption><thead><tr><th scope="col">案件</th><th scope="col">群組狀態</th><th scope="col">最近動態</th></tr></thead><tbody>{list.value.items.map(item => <tr key={item.case_no} data-attention={item.status === 'attention'}><td><button type="button" className="order-group-case" data-group-case={item.case_no} aria-label={`查看案件 ${item.case_no} 群組明細`} onClick={() => open(item.case_no)}>{item.case_no}</button><span className="order-group-person">{item.customer_name || '客戶資料待確認'}</span></td><td><Status value={item.status} /><span className={`order-group-secondary ${item.status === 'attention' ? 'order-group-attention' : ''}`}>{lineOrderGroupReason(item)}</span></td><td><span>{item.latest_event ? lineOrderGroupEventLabel(item.latest_event) : '尚無群組動態紀錄'}</span>{item.latest_event && <time className="order-group-secondary" dateTime={item.latest_event.occurred_at}>{time(item.latest_event.occurred_at)}</time>}</td></tr>)}</tbody></table>}
+        {list.value.total > 0 && <div className="order-group-pagination"><span>共 {list.value.total} 筆群組</span>{list.value.total_pages > 1 && <div><button type="button" className="order-group-button" aria-label="上一頁案件群組" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>‹</button><span>第 {list.value.page} / {list.value.total_pages} 頁</span><button type="button" className="order-group-button" aria-label="下一頁案件群組" disabled={page >= list.value.total_pages} onClick={() => onPageChange(page + 1)}>›</button></div>}</div>}
       </>}
     </div>
-    <Drawer isOpen={selected !== null} onClose={() => setSelected(null)} title={selected ? `案件 ${selected}` : '三方服務群組'} className="order-group-drawer" size="normal" closeLabel="關閉群組明細">
+    <Drawer isOpen={selected !== null} onClose={() => setSelected(null)} title={selected ? `案件 ${selected}` : '案件群組'} className="order-group-drawer" size="normal" closeLabel="關閉群組明細">
       {detail.loading && <p role="status">正在載入群組明細…</p>}
       {detail.error && <div role="alert"><p>{detail.error}</p><button className="order-group-button" type="button" onClick={() => setDetailReload(value => value + 1)}>重試明細</button></div>}
       {record && <>
@@ -132,7 +132,7 @@ export const LineOrderGroupWorkbench: FC<Props> = ({ client = lineOrderGroupQuer
           {events.error && <div role="alert"><p>{events.error}</p><button className="order-group-button" type="button" onClick={() => setEventReload(value => value + 1)}>重試歷程</button></div>}
           {events.value && <>{events.value.items.length === 0 ? <p>尚無群組歷程。</p> : <ol>{events.value.items.map(event => <li key={event.event_key}><span>{lineOrderGroupEventLabel(event)}</span><time dateTime={event.occurred_at}>{time(event.occurred_at, true)}</time></li>)}</ol>}{events.value.total_pages > 1 && <div className="order-group-pagination"><span>共 {events.value.total} 筆紀錄</span><div><button className="order-group-button" type="button" aria-label="上一頁群組事件" disabled={eventPage <= 1} onClick={() => setEventPage(value => value - 1)}>‹</button><span>第 {events.value.page} / {events.value.total_pages} 頁</span><button className="order-group-button" type="button" aria-label="下一頁群組事件" disabled={eventPage >= events.value.total_pages} onClick={() => setEventPage(value => value + 1)}>›</button></div></div>}</>}
         </>}</details>
-        <details className="order-group-help"><summary>綁定與邀請方式</summary><p>由已綁定 LINE 且有權限的工會人員，在服務群組內輸入：</p><code>綁定訂單 {record.case_no} 〈本群組邀請網址〉</code><p>請將佔位文字換成從本群組複製的邀請網址。三段之間可用空白或換行，網址中間不能拆行。</p><p>綁定完成後，再於同一群組輸入：</p><code>發送邀請</code><p>更新網址時，重新輸入完整綁定指令；不會自動發送。案件訂金須已確認核銷，客戶與指派月嫂須完成 LINE 身分綁定。</p></details>
+        <details className="order-group-help"><summary>綁定與邀請方式</summary><p>由已綁定 LINE 且有權限的工會人員，在案件群組內輸入：</p><code>綁定訂單 {record.case_no} 〈本群組邀請網址〉</code><p>請將佔位文字換成從本群組複製的邀請網址。三段之間可用空白或換行，網址中間不能拆行。</p><p>綁定完成後，再於同一群組輸入：</p><code>發送邀請</code><p>更新網址時，重新輸入完整綁定指令；不會自動發送。案件訂金須已確認核銷，客戶與指派月嫂須完成 LINE 身分綁定。</p></details>
       </>}
     </Drawer>
   </section>;

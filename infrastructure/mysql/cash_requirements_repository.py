@@ -107,8 +107,8 @@ LEFT JOIN historical_client_payment_projections historical
  AND historical.obligation_projection_version=b.projection_version
 LEFT JOIN (
     SELECT allocation.obligation_identity,
-           SUM(CASE WHEN ledger.entry_type IN ('refund','subsidy_return') THEN allocation.amount_ntd
-                    WHEN ledger.entry_type='reversal' AND target.entry_type IN ('refund','subsidy_return') THEN -allocation.amount_ntd
+           SUM(CASE WHEN ledger.entry_type IN ('refund','subsidy_return','subsidy_advance') THEN allocation.amount_ntd
+                    WHEN ledger.entry_type IN ('reversal','subsidy_return_reversal') AND target.entry_type IN ('refund','subsidy_return','subsidy_advance') THEN -allocation.amount_ntd
                     ELSE 0 END) AS net_paid_ntd
     FROM client_ledger_obligation_allocations allocation
     JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id

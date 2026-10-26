@@ -83,6 +83,34 @@ def _pending_receipt(amount=12000):
     )
 
 
+@pytest.mark.parametrize('blocker', [None, 'subsidy_advance_not_due', 'subsidy_advance_settlement_ambiguous'])
+def test_subsidy_return_ready_requires_owner_funding_preview(monkeypatch, blocker):
+    from dataclasses import replace
+    from unittest.mock import Mock
+    import infrastructure.mysql.finance_import_owning_domain_composite as module
+    from shared_kernel.errors import ErrorCategory, TypedError
+    from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
+    candidate = replace(_pending_receipt(), classification_type=FinanceClassificationType.CLIENT_SUBSIDY_RETURN,
+                        target_identities=('client:7',), evidence=('z-existing-evidence',))
+    monkeypatch.setattr(module, '_load_exact_subsidy_return_targets', lambda *args: ({'obligation_identity':'subsidy:case'},))
+    selection = object()
+    monkeypatch.setattr(module, '_client_subsidy_return_selection', lambda *args: selection)
+    preview = Mock()
+    if blocker:
+        preview.side_effect = ClientRefundReversalError(TypedError(ErrorCategory.DOMAIN_BLOCKED,blocker,'funding pending',CorrelationId('test-funding')))
+    monkeypatch.setattr(module.ClientRefundReversalWorkflow, 'preview', preview)
+    result = module._resolve_client_subsidy_return(object(),candidate)
+    assert preview.call_args.args[0] is selection
+    assert preview.call_count == 1
+    if blocker:
+        assert result.disposition is FinanceImportDisposition.BUSINESS_PENDING
+        assert blocker in result.evidence
+        assert result.evidence == tuple(sorted(set(result.evidence)))
+    else:
+        assert result.disposition is FinanceImportDisposition.CREATE
+        assert result.target_identities == ('subsidy:case',)
+
+
 @pytest.mark.parametrize(("canonical", "reference"), [
     (None, "99781699115150"),
     ("Y", "99781699115150測試甲"),

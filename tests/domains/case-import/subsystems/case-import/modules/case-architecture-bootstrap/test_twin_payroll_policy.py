@@ -20,7 +20,7 @@ from shared_kernel.money import MoneyNTD
 
 @pytest.mark.parametrize(
     ("identity", "deposit_days"),
-    (("一般市民", 5), ("補助市民", 0), ("非市民", 5)),
+    (("補助市民", 5), ("社福", 0), ("非市民", 5)),
 )
 def test_twins_override_every_identity_policy(identity, deposit_days):
     candidate = _candidate(identity, deposit_days, "雙胞胎", PayrollPolicyKind.TWINS)
@@ -31,15 +31,15 @@ def test_twins_override_every_identity_policy(identity, deposit_days):
 
 @pytest.mark.parametrize(
     ("identity", "expected"),
-    (("一般市民", PayrollPolicyKind.CITIZEN), ("補助市民", PayrollPolicyKind.SUBSIDIZED_CITIZEN), ("非市民", PayrollPolicyKind.NON_CITIZEN)),
+    (("補助市民", PayrollPolicyKind.CITIZEN), ("社福", PayrollPolicyKind.SUBSIDIZED_CITIZEN), ("非市民", PayrollPolicyKind.NON_CITIZEN)),
 )
 def test_non_twins_keep_identity_policy(identity, expected):
     assert payroll_policy_kind_for_case(identity, None) is expected
 
 
 def test_twin_fact_changes_bootstrap_fingerprint():
-    twins = _candidate("一般市民", 5, "雙胞胎", PayrollPolicyKind.TWINS)
-    singleton = _candidate("一般市民", 5, None, PayrollPolicyKind.CITIZEN)
+    twins = _candidate("補助市民", 5, "雙胞胎", PayrollPolicyKind.TWINS)
+    singleton = _candidate("補助市民", 5, None, PayrollPolicyKind.CITIZEN)
 
     assert twins.fingerprint != singleton.fingerprint
 
@@ -48,7 +48,7 @@ def test_mysql_bootstrap_uses_case_import_multi_birth_projection():
     facts = _order_facts({
         "case_no": "CASE-1", "lifecycle_version": 0,
         "start_date": date(2026, 1, 1), "service_days": 5,
-        "service_hours_per_day": 8, "identity_status": "一般市民",
+        "service_hours_per_day": 8, "identity_status": "補助市民",
         "survey_details": {"特殊計費:胎數": "雙胞胎"},
     })
 
@@ -59,15 +59,15 @@ def test_mysql_bootstrap_uses_case_import_multi_birth_projection():
 
 
 @pytest.mark.parametrize("days,identity,deposit,fee,hours,expected", [
-    (30, "一般市民", 5, 0, 8, date(2026, 11, 16)),
-    (20, "一般市民", 5, 0, 8, None),
-    (30, "補助市民", 0, 0, 8, date(2026, 11, 16)),
-    (30, "補助市民", 0, 0, 1, None),
-    (30, "補助市民", 0, 1000, 1, date(2026, 11, 16)),
+    (30, "補助市民", 5, 0, 8, date(2026, 11, 16)),
+    (20, "補助市民", 5, 0, 8, None),
+    (30, "社福", 0, 0, 8, date(2026, 11, 16)),
+    (30, "社福", 0, 0, 1, None),
+    (30, "社福", 0, 1000, 1, date(2026, 11, 16)),
 ])
 def test_bootstrap_saves_owner_calculated_second_due_date(days, identity, deposit, fee, hours, expected):
     first = date(2026, 11, 1)
-    kind = PayrollPolicyKind.CITIZEN if identity == "一般市民" else PayrollPolicyKind.SUBSIDIZED_CITIZEN
+    kind = PayrollPolicyKind.CITIZEN if identity == "補助市民" else PayrollPolicyKind.SUBSIDIZED_CITIZEN
     rate = 300 if kind is PayrollPolicyKind.CITIZEN else 350
     facts = CaseArchitectureBootstrapFacts(
         CaseRootFacts("CASE-DATE", 0, first, days, hours, identity, floor_fee=MoneyNTD(fee)),
@@ -111,7 +111,7 @@ def test_later_bootstrap_uses_saved_birth_correction_instead_of_original_survey(
     facts = _order_facts({
         "case_no": "CASE-1", "lifecycle_version": 0,
         "start_date": date(2026, 1, 1), "service_days": 5,
-        "service_hours_per_day": 8, "identity_status": "一般市民",
+        "service_hours_per_day": 8, "identity_status": "補助市民",
         "survey_details": {"特殊計費:胎數": "單胞胎"}, "effective_values_json": correction,
     })
     assert facts.multi_birth_count == "雙胞胎"

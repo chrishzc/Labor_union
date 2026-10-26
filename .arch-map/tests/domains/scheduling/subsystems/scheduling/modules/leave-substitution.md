@@ -18,3 +18,8 @@ integration_root: ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx
 - `ui_react/src/tests/scheduling_leave_substitution_flow.test.tsx` — Query／Preview／Apply／receipt/re-query state machine。
 - `ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx` — LINE leave inbox linkage and completion consistency。
 - `tests/test_scheduling_staff_leave_review_boundary.py` — Scheduling route/application boundary。
+
+- `tests/domains/scheduling/subsystems/scheduling/integration/test_leave_results_mysql.py` — 順延／代班的真實 MySQL 日期、帳務、rollback、入群與重送。
+- `tests/domains/scheduling/subsystems/scheduling/integration/test_leave_results_contract.py` — 本人身分、typed transport 與退役卡片零副作用。
+
+- `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover_mysql.py` — 工會服務中換人完整意願／邀請／入群／交接日流程、剩餘排班、實付保留、rollback 與重送。

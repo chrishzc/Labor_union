@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.leave_substitution import (
@@ -70,16 +70,8 @@ def _require_request_identity(request_id: int, payload_request_id: int) -> None:
 
 
 def _customer_defer_principal(line_id_token: str):
-    principal, _ = _mobile_admin_context(line_id_token, LineCapability.REVIEW_DECIDE)
-    if principal.role != "system_admin":
-        raise typed_http_error(
-            403,
-            "forbidden",
-            "staff_leave_customer_defer_system_admin_required",
-            "客戶同意順延後的正式排班套用僅限系統管理員。",
-            "line-mobile-admin:staff-leave-customer-defer-authority",
-        )
-    return principal
+    _mobile_admin_context(line_id_token, LineCapability.REVIEW_DECIDE)
+    raise HTTPException(status_code=410, detail={'code':'leave_customer_confirmation_retired','message':'請使用請假與代班待辦。'})
 
 
 def _coordination_context(

@@ -1,3 +1,4 @@
+import { ServiceStartSubstituteWorkbench } from '../components/ServiceStartSubstituteWorkbench';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: SchedulingPage.tsx
@@ -2490,6 +2491,7 @@ const SchedulingWorkbench: React.FC = () => {
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
+      <ServiceStartSubstituteWorkbench/>
       {/* Page Header */}
       <header className="page-header-banner scheduling-page-header">
         <div>

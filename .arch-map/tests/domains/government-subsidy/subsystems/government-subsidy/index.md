@@ -5,6 +5,10 @@ test_root: tests/domains/government-subsidy/subsystems/government-subsidy/
 integration_root: tests/domains/government-subsidy/subsystems/government-subsidy/integration/
 fixtures_root: tests/fixtures/
 modules:
+  period-reconciliation:
+    layout_status: custom_current
+    test_root: tests/domains/government-subsidy/subsystems/government-subsidy/modules/period-reconciliation/
+    presentation_test_root: ui_react/src/tests/domains/government-subsidy/subsystems/government-subsidy/modules/period-reconciliation/
   current-anomaly-facts:
     layout_status: custom_current
     test_root: tests/domains/government-subsidy/subsystems/government-subsidy/integration/

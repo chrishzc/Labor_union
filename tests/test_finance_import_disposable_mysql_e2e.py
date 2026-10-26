@@ -772,6 +772,7 @@ def _seed_open_subsidy_return_with_claim_link() -> None:
             cursor.execute("INSERT INTO subsidy_claim_batch_items(batch_id,case_no,assignment_id,staff_id,requested_amount,approved_amount) VALUES (%s,'C-ADV',%s,%s,6000,6000)", (batch_id, assignment_id, staff_id))
             claim_item_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO client_subsidy_return_claim_item_links(obligation_identity,claim_item_id,entitled_amount_ntd) VALUES ('subsidy:C-ADV',%s,6000)", (claim_item_id,))
+            cursor.execute("INSERT INTO government_subsidy_batch_accounts(batch_id,aggregate_version,requested_total_ntd,approved_total_ntd,net_allocated_ntd,outstanding_ntd,status) VALUES (%s,1,6000,6000,0,6000,'approved')", (batch_id,))
             cursor.execute(
                 "INSERT INTO client_refund_recipient_snapshots "
                 "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
@@ -797,8 +798,8 @@ def _append_full_government_receipt_allocation() -> None:
             cursor.execute("INSERT INTO government_subsidy_transactions(claim_batch_id,finance_import_row_id,transaction_type,transaction_status,amount,occurred_at,external_reference) VALUES (%s,%s,'receipt','succeeded',6000,'2026-04-01','lu-test-government-receipt')", (batch_id, incoming_row_id))
             transaction_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO government_subsidy_allocations(transaction_id,claim_batch_id,claim_item_id,allocation_type,allocated_amount) VALUES (%s,%s,%s,'receipt',6000)", (transaction_id, batch_id, claim_item_id))
-            cursor.execute("INSERT INTO government_subsidy_batch_accounts(batch_id,aggregate_version,requested_total_ntd,approved_total_ntd,net_allocated_ntd,outstanding_ntd,status) VALUES (%s,1,6000,6000,6000,0,'paid')", (batch_id,))
-            cursor.execute("INSERT INTO government_subsidy_projection_events(batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,'approved','paid',0,6000,0,0,1,%s,'lu-test-runner','fixture receipt','lu-test-projection')", (batch_id, transaction_id, "c" * 64))
+            cursor.execute("UPDATE government_subsidy_batch_accounts SET aggregate_version=2,net_allocated_ntd=6000,outstanding_ntd=0,status='paid' WHERE batch_id=%s", (batch_id,))
+            cursor.execute("INSERT INTO government_subsidy_projection_events(batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,'approved','paid',0,6000,0,1,2,%s,'lu-test-runner','fixture receipt','lu-test-projection')", (batch_id, transaction_id, "c" * 64))
             projection_event_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO government_subsidy_outbox(batch_id,transaction_id,projection_event_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,%s,'lu-test-subsidy-allocation','government_subsidy_receipt_allocated',%s)", (batch_id, transaction_id, projection_event_id, '{"transaction_id":' + str(transaction_id) + ',"allocations":[{"claim_item_id":' + str(claim_item_id) + ',"case_no":"C-ADV","amount_ntd":6000}]}'))
         connection.commit()

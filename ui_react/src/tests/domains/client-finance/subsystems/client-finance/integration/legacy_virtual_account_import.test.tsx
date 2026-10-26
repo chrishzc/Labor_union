@@ -12,7 +12,7 @@ vi.mock('../../../../../../api/client_finance/legacy_virtual_account_import', ()
 }));
 
 describe('LegacyVirtualAccountImport', () => {
-  it('keeps skipped rows out of errors and applies only after confirmation', async () => {
+  it('keeps skipped rows out of errors and applies from one click', async () => {
     const snapshot = { digest: 'a'.repeat(64) };
     mocks.fromFile.mockResolvedValue(snapshot);
     mocks.preview.mockResolvedValue({
@@ -30,15 +30,10 @@ describe('LegacyVirtualAccountImport', () => {
     fireEvent.change(screen.getByLabelText('選擇虛擬帳號對照表'), {
       target: { files: [new File(['xlsx'], '虛擬帳號對照表.xlsx')] },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽檔案' }));
-
-    expect(await screen.findByText('預覽結果')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '匯入虛擬帳號' }));
+    expect(await screen.findByText('處理筆數')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText('136')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '確認匯入' })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對預覽筆數' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
 
     await waitFor(() => expect(mocks.apply).toHaveBeenCalledWith(
       snapshot,

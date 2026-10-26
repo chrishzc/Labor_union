@@ -84,6 +84,20 @@ def test_second_due_date_is_absent_when_no_second_payment_is_due():
     assert second.due_date is None
 
 
+@pytest.mark.parametrize('original_due', [date(2026, 10, 16), None])
+def test_paid_second_stage_refund_preserves_its_source_due_date(original_due):
+    facts = replace(_rate_correction_facts(5), existing_obligations=(
+        ExistingClientStageObligation('paid-second', PaymentStage.SECOND,
+            MoneyNTD(36000), MoneyNTD(36000), original_due, True),
+    ))
+    candidate = build_client_finance_terms_candidate(facts, 'cancel-paid-second')
+    action = next(item for item in candidate.actions if item.payment_stage is PaymentStage.SECOND)
+    assert action.action is ClientObligationActionKind.CREATE_REFUND
+    assert action.direction is ClientFinanceDirection.REFUND_DUE
+    assert action.direction_amount_ntd == 36000
+    assert action.after_due_date == original_due
+
+
 def test_rate_correction_before_matching_advances_version_without_obligations():
     candidate = build_client_finance_rate_correction_candidate(
         _rate_correction_facts(0), "beclass-rate-correction:9",
@@ -159,7 +173,7 @@ def test_full_subsidy_terms_do_not_create_client_service_principal() -> None:
         ),
         (),
         (),
-        identity_status="補助市民",
+        identity_status="社福",
     )
     terms = OrderTerms(
         dates[0],
@@ -197,7 +211,7 @@ def test_shared_contract_finance_reader_preserves_full_subsidy_waiver() -> None:
         ),
         double_pay_dates=(),
         existing_obligations=(),
-        identity_status="補助市民",
+        identity_status="社福",
     )
 
     facts = _materialize_contract_client_finance_facts(
@@ -363,6 +377,14 @@ class _Cursor:
         self.statements.append((" ".join(statement.split()), parameters))
         if "INSERT INTO client_obligation_events" in statement:
             self.lastrowid += 1
+
+    def fetchall(self):
+        return ()
+
+    def fetchone(self):
+        if ' paid ' in self.statements[-1][0]:return {'paid':0}
+        if ' recovered ' in self.statements[-1][0]:return {'recovered':0}
+        return None
 
 
 class _PaymentTermsCursor(_Cursor):

@@ -360,6 +360,10 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 5. **Read-only plan**：launcher `--dry-run` 只證明 wiring；真正 plan 使用
    `.venv\Scripts\python.exe -m scripts.update_local_database`，必須列 latest release、待套／續跑／exact
    artifacts 與 blocked reason，且零 DB 寫入。
+   本機入口先判斷整條待套 release 是否包含 business backfill，再查 schema-only qualification；
+   含資料轉換時明確導向 preserve-data 路徑，不因較早的 schema qualification 缺件隱藏真正需求。
+   預設 preserve 選取必須包含 current 補助身分／退款 backfill；預覽與 plan fingerprint 均列入
+   實際選取的 backfill id、artifact 及 hash，不能只建表卻漏執行資料轉換。
 6. **Engine verification**：先跑 metadata／manifest／plan focused tests，再以 disposable DB 驗 fresh
    bootstrap，最後以含上一支援版 schema 與代表性舊資料的 source 驗 dump → candidate → apply → verify。
    schema／migration 沒有真 MySQL evidence 時為 `BLOCKED_ENGINE_EVIDENCE`，mock／compile 不能取代。

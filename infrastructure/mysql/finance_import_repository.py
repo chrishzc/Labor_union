@@ -283,7 +283,7 @@ class MySqlFinanceImportRepository:
                     ),
                     _canonical_json(candidate.evidence),
                     actor.actor_id,
-                    candidate.reason,
+                    candidate.reason or "系統記錄銀行流水人工更正",
                 ),
             )
 
@@ -440,9 +440,9 @@ def _preview_disposition(row, classification_type, batch_id):
         "existing",
     }:
         return FinanceImportDisposition.EXISTING
-    if int(row["canonical_batch_id"]) == batch_id:
-        return stored
-    return FinanceImportDisposition.EXISTING
+    # Another workbook occurrence reuses the same bank fact. It is not proof
+    # that the owning Domain posted it; pending facts must remain processable.
+    return stored
 
 
 def _sort_canonical_rows(rows):
@@ -479,7 +479,7 @@ def _load_correction_facts(cursor, selection, for_update):
         int(header["canonical_fact_version"]),
         int(header["classification_version"]),
         MoneyNTD(_integer_bank_amount(header["credit"], header["debit"])),
-        str(header["disposition"]) in {"manual_review", "business_pending"},
+        str(header["disposition"]) in {"manual_review", "business_pending"} and not header.get('period_bank_used'),
         obligations,
         tuple(
             code
@@ -843,8 +843,9 @@ _BATCH_ROWS_SQL = (
     "classification.decision_facts_fingerprint,"
     "classification.target_identities,classification.evidence,"
     "classification.available_actions,dispatch.outcome AS latest_dispatch_outcome,"
-    "EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts AS receipt "
-    "WHERE receipt.finance_import_row_id=bank_fact.id) AS has_reconciliation_receipt "
+    "(EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts AS receipt "
+    "WHERE receipt.finance_import_row_id=bank_fact.id) OR EXISTS(SELECT 1 FROM government_subsidy_period_entries period_entry "
+    "WHERE period_entry.finance_import_row_id=bank_fact.id)) AS has_reconciliation_receipt "
     "FROM finance_import_occurrences AS occurrence "
     "JOIN finance_import_rows AS bank_fact "
     "ON bank_fact.id=occurrence.finance_import_row_id "
@@ -876,7 +877,8 @@ _ACTIVE_INTEGRITY_SQL = (
 _CORRECTION_HEADER_SQL = (
     "SELECT contract.batch_id,contract.batch_identity,contract.batch_version,"
     "classification.canonical_fact_version,classification.classification_version,"
-    "classification.disposition,bank_fact.credit,bank_fact.debit "
+    "classification.disposition,bank_fact.credit,bank_fact.debit,"
+    "EXISTS(SELECT 1 FROM government_subsidy_period_entries period_entry WHERE period_entry.finance_import_row_id=bank_fact.id) period_bank_used "
     "FROM finance_import_rows AS bank_fact "
     "JOIN finance_import_occurrences AS occurrence "
     "ON occurrence.finance_import_row_id=bank_fact.id "

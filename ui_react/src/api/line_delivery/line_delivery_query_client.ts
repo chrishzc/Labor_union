@@ -3,6 +3,7 @@
  * Description: 以 fresh Session 查詢 LINE Delivery canonical summary、bounded page 與 detail，拒絕 aggregate 漂移。
  */
 import { sessionClient } from '../auth/session_client';
+import { z } from 'zod';
 import { ApiDecodeError } from '../shared/typed_errors';
 import { transport } from '../shared/transport';
 import { LineDeliveryQueryError, mapLineDeliveryQueryError } from './line_delivery_query_errors';
@@ -15,6 +16,7 @@ import {
 
 export interface LineDeliveryQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface LineDeliveryListQuery {
+  category?: 'review' | 'reminder' | 'support';
   status?: LineDeliveryStatus;
   sourceType?: LineDeliverySourceType;
   scheduledFrom?: string;
@@ -37,6 +39,7 @@ function decode<T>(schema: { safeParse: (value: unknown) => { success: true; dat
 }
 
 function validateList(query: LineDeliveryListQuery) {
+  if (query.category) z.enum(['review','reminder','support']).parse(query.category);
   if (query.status) LineDeliveryStatusSchema.parse(query.status);
   if (query.sourceType) LineDeliverySourceTypeSchema.parse(query.sourceType);
   if (query.page !== undefined && (!Number.isInteger(query.page) || query.page < 1)) throw new LineDeliveryQueryError('LINE_DELIVERY_VALIDATION', 'page 無效。');
@@ -64,7 +67,7 @@ export const lineDeliveryQueryClient = {
     try {
       validateList(query);
       const data = decode(LineDeliveryPageResponseSchema, await transport.get('/api/v1/line/tasks', {
-        ...options(input), params: { status: query.status, source_type: query.sourceType, scheduled_from: query.scheduledFrom, scheduled_to: query.scheduledTo, page: query.page, page_size: query.pageSize },
+        ...options(input), params: { status: query.status, source_type: query.sourceType, ...(query.category?{category:query.category}:{}), scheduled_from: query.scheduledFrom, scheduled_to: query.scheduledTo, page: query.page, page_size: query.pageSize },
       }));
       data.items.forEach(assertItemIdentity);
       if (data.items.length > data.page_size || data.items.length > data.total) throw new LineDeliveryQueryError('LINE_DELIVERY_PAGE_MISMATCH', 'LINE 發送任務 page aggregate 不一致。');

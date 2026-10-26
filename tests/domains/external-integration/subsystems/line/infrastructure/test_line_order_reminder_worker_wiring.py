@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from subsystems.line.service_start_day import ServiceStartDayCandidate, StartDayCaregiver
 from types import SimpleNamespace
 
 import pytest
@@ -15,14 +16,25 @@ from infrastructure.mysql.order_pre_start_notification_source_worker import (
     MySqlOrderPreStartNotificationSourceWorker,
 )
 from subsystems.line.notification_source_adapters import (
-    from_order_pre_start_checkpoint,
-    from_order_second_payment_checkpoint,
+    from_order_service_start_day,
 )
+from subsystems.line.second_payment_notifications import SecondPaymentNotification
 from subsystems.line.runtime_contracts import LineRuntimeMode
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 
 
 NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
+
+
+def test_canonical_group_postback_routes_to_start_day_application(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(line_worker_operation,'ServiceStartDayPostbackApplication',
+        lambda:SimpleNamespace(handle=lambda event,unit:calls.append((event,unit)) or True))
+    consumer=line_worker_operation._event_consumer('synthetic-group-postback',lambda:NOW)
+    event=SimpleNamespace(event=SimpleNamespace(event_type='postback'))
+    unit=object()
+    assert consumer._dispatcher.dispatch(event,unit).status.value=='processed'
+    assert calls==[(event,unit)]
 
 
 def test_order_reminder_source_worker_is_registered_in_canonical_additional_workers(
@@ -191,22 +203,11 @@ class ExistingReminderConnection:
 @pytest.mark.parametrize(
     "event",
     (
-        from_order_pre_start_checkpoint(
-            case_no="CASE-REPLAY-1",
-            planned_start_date="2026-09-20",
-            first_payment_amount=20000,
-            already_settled=False,
-            client_line_user_id="U_REPLAY_1",
+        from_order_service_start_day(
+            ServiceStartDayCandidate('CASE-REPLAY-1',date(2026,9,20),'C_REPLAY',1,20000,(StartDayCaregiver(1,'測試月嫂'),)),
             occurred_at=NOW,
         ),
-        from_order_second_payment_checkpoint(
-            case_no="CASE-REPLAY-2",
-            second_payment_due_date="2026-09-20",
-            second_payment_amount=30000,
-            already_settled=False,
-            client_line_user_id="U_REPLAY_2",
-            occurred_at=NOW,
-        ),
+        SecondPaymentNotification('CASE-REPLAY-2','second:replay',3,5,date(2026,9,20),30000,30000,'C_REPLAY').event(NOW),
     ),
 )
 def test_exact_reminder_replay_with_existing_decision_creates_no_second_projection(

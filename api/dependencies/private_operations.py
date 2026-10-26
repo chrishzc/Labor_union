@@ -66,6 +66,10 @@ def run_durable_job_cycle(
             _write_durable_job_heartbeat(connection, runtime_identity, 0)
             return 0
         build_service_arrangement_automation(connection).dispatch_pending()
+        from infrastructure.mysql.service_start_lifecycle_repository import MySqlServiceStartLifecycleRepository
+        from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+        from subsystems.orders.service_start_lifecycle import ServiceStartLifecycleWorkflow
+        ServiceStartLifecycleWorkflow(MySqlServiceStartLifecycleRepository(connection),lambda:MySqlUnitOfWork(connection)).advance_due(datetime.now(TAIPEI_TIME_ZONE))
         AutoCompletionJobDispatcher(
             MySqlDueOrderAutoCompletionRepository(connection),
             DurableJobCommandApplication(repository, connection),

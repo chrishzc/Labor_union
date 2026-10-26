@@ -117,7 +117,9 @@ def test_completion_initializes_approved_terms_once_and_preserves_existing_rows(
     assert payroll['policy_kind'] == ('twins' if twins else 'citizen')
     assert payroll['hourly_rate_ntd'] == (450 if twins else 300)
     assert len(saved['client_payment_terms_events']) == 1
-    assert all(not saved[table] for table in ('case_staff_assignments', 'client_obligations', 'staff_obligations'))
+    assert all(not saved[table] for table in ('case_staff_assignments', 'staff_obligations'))
+    assert {item['obligation_type']: int(item['amount_due_ntd']) for item in saved['client_obligations']} == {
+        'deposit': 12000, 'first': 36000, 'second': 24000}
     replay = apply(client, path, body, case)
     assert replay.status_code == 200 and replay.json()['data']['replayed']
     assert snapshot(case) == saved

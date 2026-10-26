@@ -106,7 +106,7 @@ class MySqlOrderCancellationRepository:
                 request.case_no,
                 request.idempotency_key.value,
                 request.actor.actor_id,
-                request.reason,
+                request.reason or "系統記錄取消訂單",
             )
 
     def replace_scheduling_generation(self, command):
@@ -137,7 +137,7 @@ class MySqlOrderCancellationRepository:
                 CancellationControlCommand(
                     "activate",
                     request.actor.actor_id,
-                    request.reason,
+                    request.reason or "系統記錄取消訂單",
                     request.expected_order_version.value,
                     request.idempotency_key.value,
                 ),

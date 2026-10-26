@@ -11,6 +11,7 @@ import { transport } from '../api/shared/transport';
 import { readFileSync } from 'node:fs';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { FinancePage } from '../pages/FinancePage';
+import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 
 const BATCH = 'BATCH-REVIEW-222';
 const PREVIEW: FinanceImportBatchPreview = {
@@ -23,7 +24,7 @@ const PREVIEW: FinanceImportBatchPreview = {
     source_rows: 2,
     canonical_created: 1,
     duplicate_occurrences: 0,
-    ready_dispatch: 1,
+    ready_dispatch: 0,
     existing: 0,
     manual_review: 0,
     business_pending: 0,
@@ -84,9 +85,7 @@ async function showPreview() {
   render(<FinancePage />);
   fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
   fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
-  fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
+  fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
   await screen.findByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
 }
 function reviewCount() {
@@ -132,9 +131,7 @@ describe('Finance source-review owner readback', () => {
 
     const file = new File(['finance-review'], 'finance.xlsx');
     fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
 
     expect(await screen.findByText(BATCH)).toBeInTheDocument();
     const manualReviewSummary = screen.getByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
@@ -197,43 +194,39 @@ describe('Finance source-review owner readback', () => {
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 
-  it.each(['blocked', 'no-ready-rows'] as const)('enforces %s at the Apply handler even when the rendered button is stale', async (policy) => {
+  it.each(['blocked', 'no-ready-rows'] as const)('never auto-submits %s', async policy => {
     const preview = structuredClone(PREVIEW);
+    if (policy === 'blocked') { preview.apply_allowed = false; preview.counts.ready_dispatch = 1; preview.blocking_codes = ['fingerprint_collision']; }
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue(preview);
     await showPreview();
     await waitFor(() => expect(reviewCount()).toBe('1'));
-    fireEvent.click(screen.getByRole('checkbox'));
-    if (policy === 'blocked') preview.apply_allowed = false;
-    else preview.counts.ready_dispatch = 0;
-    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 
-  it('refreshes owner review after terminal Apply and keeps its source row visible', async () => {
+  it('automatically refreshes owner review after terminal Apply', async () => {
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
     await showPreview();
-    await waitFor(() => expect(reviewCount()).toBe('1'));
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認匯入' }));
     await screen.findByText('匯入完成：核銷 1、既有 0、待處理 1');
     await waitFor(() => expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2));
+    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
     expect(reviewCount()).toBe('1');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
   });
 
-  it('does not restore an old preview after another workbook is selected', async () => {
+  it('locks file selection while checking and discards a late response after unmount', async () => {
     let resolve!: (value: FinanceImportBatchPreview) => void;
-    vi.mocked(financeImportMutationClient.preview).mockReturnValue(new Promise((done) => { resolve = done; }));
-    render(<FinancePage />);
+    vi.mocked(financeImportMutationClient.preview).mockReturnValue(new Promise(done => { resolve = done; }));
+    const { unmount } = render(<FinancePage />);
     fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
     const input = screen.getByLabelText('選擇銀行交易明細工作簿');
     fireEvent.change(input, { target: { files: [new File(['first'], 'first.xlsx')] } });
-    fireEvent.click(screen.getByRole('button', { name: '上傳檔案' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '預覽匯入結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '預覽匯入結果' }));
-    fireEvent.change(input, { target: { files: [new File(['second'], 'second.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    await waitFor(() => expect(financeImportMutationClient.preview).toHaveBeenCalledOnce());
+    expect(input).toBeDisabled();
+    unmount();
     await act(async () => { resolve(PREVIEW); });
-    expect(screen.queryByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' })).not.toBeInTheDocument();
     expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
+    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 
   const exchangePath = process.env.FI_REVIEW_EXCHANGE;
@@ -247,6 +240,9 @@ describe('Finance source-review owner readback', () => {
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
     vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(raw.preview.data);
+    // The exchange proves real owner readback; later posting is an explicit test boundary.
+    vi.spyOn(financeImportMutationClient, 'apply').mockResolvedValue({ job_id: 'review-proof', status_url: '/api/v1/jobs/review-proof', replayed: false });
+    vi.spyOn(financeImportMutationClient, 'queryBatchOutcome').mockResolvedValue({ job_id: 'review-proof', status: 'cancelled', attempt_count: 0, max_attempts: 1, result_reference: null, receipt: null });
     const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
       if (path.endsWith('/manifest')) return raw.manifest;
       if (path.endsWith('/review-rows')) return raw.reviews;
@@ -261,6 +257,92 @@ describe('Finance source-review owner readback', () => {
     expect(screen.queryByText(sourceReview.issue_codes[0])).not.toBeInTheDocument();
     expect(get.mock.calls.some(([path]) => String(path).endsWith('/manifest'))).toBe(true);
     expect(get.mock.calls.some(([path]) => String(path).endsWith('/review-rows'))).toBe(true);
+  });
+
+  const refundExchangePath = process.env.FI_REFUND_REVIEW_EXCHANGE;
+  (refundExchangePath ? it : it.skip)('completes same-run refund-review entry, partial payment, balance refresh and top-up through real typed clients', async () => {
+    const raw = JSON.parse(readFileSync(refundExchangePath!, 'utf-8')) as Record<string, any>;
+    vi.restoreAllMocks();
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
+    let phase: 'partial' | 'topup' = 'partial';
+    let posted = false;
+    const get = vi.spyOn(transport, 'get').mockImplementation(async (path: string) => {
+      const evidence = raw[phase];
+      if (path.endsWith('/correction-outcome')) { posted = true; return evidence.correction.outcome; }
+      if (path.endsWith('/batch-outcome')) { posted = true; return evidence.outcome; }
+      const state = evidence[posted ? 'after' : 'before'];
+      if (path.endsWith('/manifest')) return state.manifest;
+      if (path.endsWith('/review-rows')) return state.reviews;
+      if (path.includes('/settlement-remediation')) return state.settlement;
+      if (path.endsWith('/cash-requirements')) return state.cash;
+      throw new Error(`unexpected GET ${path}`);
+    });
+    const post = vi.spyOn(transport, 'post').mockImplementation(async (path: string) => {
+      const evidence = raw[phase];
+      if (path.endsWith('/workbooks/ingest')) return evidence.ingestion;
+      if (path.endsWith('/batches/preview')) return evidence.preview;
+      if (path.endsWith('/corrections/preview')) return evidence.correction.preview;
+      if (path.endsWith('/corrections/apply')) return evidence.correction.accepted;
+      if (path.endsWith('/batches/apply')) return evidence.accepted;
+      throw new Error(`unexpected POST ${path}`);
+    });
+    window.location.hash = '#finance?tab=bank';
+    render(<FinancePage />);
+    const workbook = (stage: 'partial' | 'topup') => new File([Uint8Array.from(atob(raw[stage].workbook_base64), char => char.charCodeAt(0))], `${stage}.xlsx`);
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [workbook('partial')] } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    const entry = await screen.findByRole('button', { name: '處理客戶退款' });
+    expect(reviewCount()).toBe('1');
+    expect(raw.partial.before.manifest.data.review_count).toBe(1);
+    fireEvent.click(entry);
+    expect(screen.getByLabelText('款項用途')).toHaveValue('client_refund');
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 12,000/ }));
+    fireEvent.change(screen.getByLabelText('退款核銷方式'), { target: { value: 'partial' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
+    expect(await screen.findByText('更正已受理，請查詢處理結果；尚未完成核銷。')).toBeInTheDocument();
+    const applied = post.mock.calls.find(([path]) => path.endsWith('/corrections/apply'))!;
+    expect(applied[1]).toMatchObject({
+      row_identity: raw.partial.before.reviews.data.items[0].row_identity,
+      classification_type: 'client_refund', allow_partial_refund_recovery: true,
+      target_obligation_identities: [raw.partial.before.settlement.data.refund_obligations[0].obligation_identity],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢更正結果' }));
+    await waitFor(() => expect(reviewCount()).toBe('0'));
+    expect(screen.queryByRole('button', { name: '處理客戶退款' })).not.toBeInTheDocument();
+    expect(raw.partial.after.settlement.data.refund_obligations[0].amount_due_ntd).toBe(8000);
+    fireEvent.click(screen.getByRole('button', { name: /^付款$/ }));
+    fireEvent.change(screen.getByPlaceholderText('受款人或案件編號'), { target: { value: raw.case_no } });
+    fireEvent.change(screen.getByLabelText('款項類型'), { target: { value: 'client_refund' } });
+    expect(await screen.findByText('NT$ 8,000', { selector: 'td' })).toBeInTheDocument();
+
+    phase = 'topup'; posted = false;
+    fireEvent.click(screen.getByRole('button', { name: /^銀行對帳$/ }));
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [workbook('topup')] } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    fireEvent.click(await screen.findByRole('button', { name: '處理客戶退款' }));
+    expect(reviewCount()).toBe('1');
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 8,000/ }));
+    expect(screen.getByLabelText('退款核銷方式')).toHaveValue('exact');
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
+    expect(await screen.findByText('更正已受理，請查詢處理結果；尚未完成核銷。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢更正結果' }));
+    await waitFor(() => expect(reviewCount()).toBe('0'));
+    expect(screen.queryByRole('button', { name: '處理客戶退款' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^付款$/ }));
+    fireEvent.change(screen.getByPlaceholderText('受款人或案件編號'), { target: { value: raw.case_no } });
+    fireEvent.change(screen.getByLabelText('款項類型'), { target: { value: 'client_refund' } });
+    expect(await screen.findByText('NT$ 0', { selector: 'td' })).toBeInTheDocument();
+    expect(screen.getByText('已付款', { selector: 'span' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'confirmed' } });
+    expect(screen.getByText('沒有符合條件的付款項目。')).toBeInTheDocument();
+    expect(post.mock.calls.filter(([path]) => path.endsWith('/corrections/apply'))).toHaveLength(2);
+    expect(post.mock.calls.filter(([path]) => path.endsWith('/batches/apply'))).toHaveLength(0);
+    expect(get.mock.calls.filter(([path]) => path.includes('/settlement-remediation'))).toHaveLength(4);
+    window.location.hash = '';
   });
 
 });

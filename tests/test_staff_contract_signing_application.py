@@ -164,7 +164,7 @@ def test_manual_staff_attestation_requires_customer_acceptance_for_active_propos
         })
 
 
-def test_manual_staff_attestation_uses_injected_finance_adapters(tmp_path, monkeypatch):
+def test_staff_signing_records_commitment_without_creating_finance(tmp_path, monkeypatch):
     class _ConnectionWithCursor(_Connection):
         @contextmanager
         def cursor(self):
@@ -191,8 +191,6 @@ def test_manual_staff_attestation_uses_injected_finance_adapters(tmp_path, monke
         archive_document=lambda *_args, **_kwargs: SimpleNamespace(storage_key="archive-key"),
         discard_document=lambda **_kwargs: None,
         order_selector=order_selector,
-        finance_facts_loader=facts_loader,
-        finance_terms_writer=terms_writer,
     )
     command = staff_signing.ManualStaffContractAttestationCommand(
         "CASE-1", 9, b"signed-content", "signed.xlsx", "application/octet-stream",
@@ -221,21 +219,10 @@ def test_manual_staff_attestation_uses_injected_finance_adapters(tmp_path, monke
     monkeypatch.setattr(staff_signing, "_insert_signed_event", lambda *_args: 43)
     monkeypatch.setattr(staff_signing, "_create_commitment_if_ready", lambda *_args: 44)
     monkeypatch.setattr(staff_signing, "_append_command_outcome", lambda *_args: None)
-    monkeypatch.setattr(
-        staff_signing,
-        "build_precontract_deposit_candidate",
-        lambda *_args: SimpleNamespace(mutates=True),
-    )
-    monkeypatch.setattr(staff_signing, "precontract_deposit_terms_impact", lambda *_args: "impact")
-
     receipt = application.record_manual_attestation(command)
 
     assert receipt.commitment_id == 44
-    assert finance_calls == [
-        ("order_selector", "CASE-1", True),
-        ("facts_loader", {"case_no": "CASE-1"}, True),
-        ("terms_writer",),
-    ]
+    assert finance_calls == []
     assert connection.committed is True
 
 class _ReplayConnection:

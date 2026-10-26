@@ -58,7 +58,8 @@ def test_receipt_summary_counts_only_actual_receipts_without_join_multiplication
     _assert_summary({row["case_no"]: row for row in response.model_dump()["data"]["cases"]})
 
 
-def test_receipt_summary_authenticated_get_contract(summary_repository):
+def test_receipt_summary_authenticated_get_contract(summary_repository, monkeypatch):
+    monkeypatch.setenv('ENABLE_ADMIN_AUTH', 'true')
     application = ClientFinanceQueryApplication(summary_repository)
     app = FastAPI()
     app.include_router(router)

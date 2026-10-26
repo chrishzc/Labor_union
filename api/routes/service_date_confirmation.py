@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.service_date_confirmation import (
     get_historical_restart_arrangement_workflow,
     get_service_date_confirmation_workflow,
@@ -94,7 +94,7 @@ class HistoricalArrangementApplyBody(HistoricalArrangementPreviewBody):
 )
 def query_service_dates(
     case_no: str = Path(..., min_length=1, max_length=50),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     workflow=Depends(get_service_date_confirmation_workflow),
 ):
     del principal
@@ -112,7 +112,7 @@ def query_service_dates(
 def preview_historical_arrangement(
     body: HistoricalArrangementPreviewBody,
     case_no: str = Path(..., min_length=1, max_length=50),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     workflow=Depends(get_historical_restart_arrangement_workflow),
 ):
     del principal
@@ -132,7 +132,7 @@ def apply_historical_arrangement(
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
     correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     workflow=Depends(get_historical_restart_arrangement_workflow),
 ):
     identity = CorrelationId(correlation_id)
@@ -165,7 +165,7 @@ def preview_service_dates(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = "service-dates-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     workflow=Depends(get_service_date_confirmation_workflow),
 ):
     del principal
@@ -194,7 +194,7 @@ def apply_service_dates(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     workflow=Depends(get_service_date_confirmation_workflow),
 ):
     identity = CorrelationId(correlation_id)

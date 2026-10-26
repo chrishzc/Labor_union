@@ -6,13 +6,22 @@ Description: 協調月嫂已驗證身分、服務日所有權、日誌完成、r
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 import re
 from typing import Callable, Protocol
 
 from domains.scheduling.service_day_log import ServiceDayLogIntent, require_service_day_log_completion
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.controlled_files.workflow import ControlledFileWorkflowError
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceDayLogGap:
+    case_no: str
+    staff_id: int
+    missing_from: date
+    missing_through: date
+    consecutive_days: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +75,7 @@ class ControlledServiceDayLogAttachment:
 @dataclass(frozen=True, slots=True)
 class ApplyServiceDayLog(PreviewServiceDayLog):
     idempotency_key: str
-    preview_fingerprint: PreviewFingerprint
+    preview_fingerprint: PreviewFingerprint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +157,10 @@ class ServiceDayLogWorkflow:
         )
 
     def apply(self, command: ApplyServiceDayLog) -> ServiceDayLogResult:
+        direct_submit = command.preview_fingerprint is None
+        if direct_submit:
+            # One user command: this digest protects replay, not a human preview.
+            command = replace(command, preview_fingerprint=_submission_fingerprint(command))
         replay = self._repository.load_replay(command)
         if replay is not None:
             return replay
@@ -170,7 +183,7 @@ class ServiceDayLogWorkflow:
                 has_meal_photo=_has_meal_photo(command),
             ),
         )
-        if preview.preview_fingerprint != command.preview_fingerprint:
+        if not direct_submit and preview.preview_fingerprint != command.preview_fingerprint:
             raise ServiceDayLogWorkflowError("service_day_log_preview_stale")
         if not preview.can_apply:
             raise ServiceDayLogWorkflowError(preview.blockers[0])
@@ -241,6 +254,12 @@ class ServiceDayLogWorkflow:
             raise ServiceDayLogWorkflowError("service_day_log_not_found")
         return result
 
+    def options(self, staff_id: int, assignment_id: int, service_date) -> bool:
+        assignment = self._repository.load_assignment(staff_id, assignment_id, service_date, for_update=False)
+        if assignment["requires_cooking"] is None:
+            raise ServiceDayLogWorkflowError("service_day_log_cooking_requirement_unresolved")
+        return bool(assignment["requires_cooking"])
+
 
 class ServiceDayLogApplication:
     def __init__(
@@ -263,6 +282,22 @@ class ServiceDayLogApplication:
 
     def query(self, log_id: int, staff_id: int, line_user_id: str) -> ServiceDayLogResult:
         return self._workflow.query(log_id, staff_id, line_user_id)
+
+    def options(self, staff_id: int, assignment_id: int, service_date) -> bool:
+        return self._workflow.options(staff_id, assignment_id, service_date)
+
+
+def _submission_fingerprint(command) -> PreviewFingerprint:
+    return fingerprint_payload({
+        "family": "scheduling-service-day-log-submit",
+        "staff_id": command.staff_id, "line_user_id": command.line_user_id,
+        "assignment_id": command.assignment_id, "service_date": command.intent.service_date.isoformat(),
+        "baby_log_text": command.intent.baby_log_text.strip(),
+        "meal_photo_media_ids": command.intent.meal_photo_media_ids,
+        "attachments": tuple({"staging_id": item.staging_id, "sha256_digest": item.sha256_digest,
+                              "attachment_kind": item.attachment_kind, "sequence": item.sequence}
+                             for item in command.controlled_file_attachments),
+    })
 
 
 def _blockers(

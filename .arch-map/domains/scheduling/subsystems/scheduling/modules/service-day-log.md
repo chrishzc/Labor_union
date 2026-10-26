@@ -5,7 +5,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-月嫂服務日日誌的 typed Query／Preview／Apply、requires_cooking 門禁、服務結束 checkpoint／outbox，以及受控寶寶／餐食照片在同一 Scheduling UoW 的登錄與 fresh readback。餐食照片僅在需要料理時適用，寶寶照片可在不需料理的服務日使用；需要料理時仍必須有餐食照片。
+月嫂服務日日誌 typed options／直接 Apply、requires_cooking 門禁、服務結束 checkpoint／outbox，以及受控寶寶／餐食照片在同一 Scheduling UoW 的登錄與 fresh readback。畫面點送出即保存，無日誌預覽或確認；既有 Preview 只供媒體及 API consumer 驗證。允許提前填寫、提交後不可修改；`missing_runs` 只讀 current generation，輸出 LINE 人工提醒使用的連續缺漏區間。餐食照片僅在需要料理時適用，寶寶照片可在不需料理的服務日使用；需要料理時仍必須有餐食照片。
 
 ## Implementation
 - primary:

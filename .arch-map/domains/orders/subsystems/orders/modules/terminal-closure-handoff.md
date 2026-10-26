@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-在既有 Orders lifecycle event／receipt／outbox 的單一 outer UoW 內，於 terminal status 形成不可變 `case_terminal_closure` JSON handoff；服務完工確認同時形成不可逆服務財務資料鎖。此 Module 只保存 Orders source identity、source subject、producer reference、occurred time、correlation 與 idempotency；LINE consumer 不在此寫入。
+在既有 Orders lifecycle event／receipt／outbox 的單一 outer UoW 內，於 terminal status 形成不可變 `case_terminal_closure` JSON handoff；服務完工確認同時形成不可逆服務財務資料鎖。正常完工 outbox 另明確標記本次 LINE 完工群組通知，LINE 在 commit 後獨立消費；不從舊事件補發。此 Module 只保存 Orders source identity、source subject、producer reference、occurred time、correlation 與 idempotency；LINE consumer 不在此寫入。
 
 ## Implementation
 - `infrastructure/mysql/order_cancellation_repository.py`

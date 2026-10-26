@@ -9,6 +9,10 @@
 
 ## Implementation
 - primary: `ui_react/src/components/LineDeliveryTaskWorkbench.tsx`
+- transport: `api/routes/line_tasks.py` — 現行訂金、各期逾期、日誌、資訊問答與服務日期／代班來源映射到既有公開分類；list／detail 不回傳 raw recipient、payload 或 provider error。未知來源仍 fail closed。
+
+- client: `ui_react/src/api/line_delivery/line_delivery_query_client.ts` — category 審核／款項／客服篩選在伺服器分頁前套用，總數同一集合。
+- 現行來源含 service-start-day／response／completion 與 second-payment reminder／settled，沿原 order／finance 公開分類。
 
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — LINE delivery與provider邊界。

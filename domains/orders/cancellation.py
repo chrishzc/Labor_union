@@ -188,10 +188,8 @@ def _validate_confirmed_days(order, scheduling, cancellation_date, values):
         raise CancellationCandidateError(
             CancellationBlocker.SERVICE_START_FACT_INCONSISTENT
         )
-    if order.service_started and not values:
-        raise CancellationCandidateError(
-            CancellationBlocker.ACTUAL_SERVICE_FACTS_REQUIRED
-        )
+    # A scheduled/recorded start does not prove actual service. The operator may
+    # confirm zero days; the locked/full-service guards above still apply.
     existing_owners = _existing_owner_by_date(scheduling.assignments)
     for item in values:
         _validate_confirmed_day(

@@ -4,6 +4,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bell,
   Bot,
   CalendarDays,
   CircleDollarSign,
@@ -35,6 +36,7 @@ import { sessionClient } from '../api/auth/session_client';
 
 export type SectionType = 'operations' | 'line' | 'finance' | 'audit';
 export type PageType = 
+  | 'notifications'
   | 'order-workbench-v2'
   | 'scheduling'
   | 'staff'
@@ -53,6 +55,7 @@ export type PageType =
   | 'file-settings';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
+  'notifications': 'operations',
   'order-workbench-v2': 'operations',
   'scheduling': 'operations',
   'staff': 'operations',
@@ -276,6 +279,18 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             <span className="system-status-label">{systemOnline === null ? '查詢中' : systemOnline ? '系統在線' : '系統離線'}</span>
             <span className="sr-only">{systemOnline ? `，目前延遲 ${latencyText}` : ''}</span>
           </div>
+
+          <button
+            type="button"
+            className={`notification-entry-button${currentPage === 'notifications' ? ' active' : ''}`}
+            aria-label="開啟通知事項"
+            aria-current={currentPage === 'notifications' ? 'page' : undefined}
+            title="通知事項"
+            onClick={() => onSelectPage('notifications')}
+          >
+            <Bell size={17} aria-hidden="true" />
+            <span>通知事項</span>
+          </button>
 
           <details className="user-profile-menu">
             <summary className="user-profile-capsule">

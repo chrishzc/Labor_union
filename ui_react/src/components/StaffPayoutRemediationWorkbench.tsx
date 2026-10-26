@@ -22,11 +22,15 @@ import type { StaffPayablesQuery } from '../api/staff_payables/staff_payables_qu
 export interface StaffPayoutRemediationTarget {
   staffId: number;
   obligationIdentity: string;
+  obligationIdentities?: readonly string[];
 }
 
 export interface StaffPayoutRemediationWorkbenchProps {
   target: StaffPayoutRemediationTarget;
   onResolved?: () => void | Promise<void>;
+  onPosted?: () => void;
+  financeImportRowId?: number;
+  onBusyChange?: (busy: boolean) => void;
   client?: StaffPayoutRemediationClient;
   requestOptions?: StaffPayoutRemediationOptions;
   pollIntervalMs?: number;
@@ -49,8 +53,15 @@ function parseRowIds(value: string): number[] | null {
   return new Set(values).size === values.length ? values : null;
 }
 
-function activeObligation(query: StaffPayablesQuery | null, target: StaffPayoutRemediationTarget) {
-  return query?.obligations.find((item) => item.obligation_identity === target.obligationIdentity) ?? null;
+function activeObligations(query: StaffPayablesQuery | null, target: StaffPayoutRemediationTarget) {
+  const ids = target.obligationIdentities ?? [target.obligationIdentity];
+  return query?.obligations.filter((item) => ids.includes(item.obligation_identity)) ?? [];
+}
+function targetPresent(query: StaffPayablesQuery, target: StaffPayoutRemediationTarget) {
+  return activeObligations(query, target).length === (target.obligationIdentities ?? [target.obligationIdentity]).length;
+}
+function targetSettled(query: StaffPayablesQuery, target: StaffPayoutRemediationTarget) {
+  return targetPresent(query, target) && activeObligations(query, target).every((item) => item.balance_ntd === 0 && item.payout_status === 'completed');
 }
 
 function displayError(error: unknown): string {
@@ -110,12 +121,15 @@ function previewMatchesTarget(preview: StaffPayoutPreview, target: StaffPayoutRe
   if (preview.staff_payables_version !== query.staff_payables_version) return false;
   if (preview.candidate.staff_id !== target.staffId || !('allocations' in preview.candidate)) return false;
   const obligations = new Set(preview.candidate.allocations.map((item) => item.obligation_identity));
-  return obligations.has(target.obligationIdentity);
+  return obligations.size > 0 && [...obligations].every((id) => (target.obligationIdentities ?? [target.obligationIdentity]).includes(id));
 }
 
 export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWorkbenchProps> = ({
   target,
   onResolved,
+  onPosted,
+  financeImportRowId,
+  onBusyChange,
   client = staffPayoutRemediationClient,
   requestOptions = EMPTY_REQUEST_OPTIONS,
   pollIntervalMs = 500,
@@ -123,6 +137,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
 }) => {
   const [query, setQuery] = useState<StaffPayablesQuery | null>(null);
   const [rowIdsText, setRowIdsText] = useState('');
+  const [differenceMode, setDifferenceMode] = useState<'' | 'underpayment' | 'overpayment'>('');
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<StaffPayoutPreview | null>(null);
   const [job, setJob] = useState<StaffPayoutJob | null>(null);
@@ -146,12 +161,11 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     setError(null);
     try {
       const fresh = await client.query(target.staffId, requestOptions);
-      const obligation = activeObligation(fresh, target);
-      if (!obligation) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
+      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
       if (current === generation.current && mounted.current) {
         setQuery(fresh);
-        if (resolveOnSettled && obligation.balance_ntd === 0 && obligation.payout_status === 'completed') {
-          setNotice('已重新確認原逾期應付款結清。');
+        if (resolveOnSettled && targetSettled(fresh, target)) {
+          setNotice('已重新確認應付款結清。');
           await onResolved?.();
         }
       }
@@ -164,26 +178,26 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   useEffect(() => {
     generation.current += 1;
     setQuery(null); setPreview(null); setJob(null); setAccepted(null);
-    setRowIdsText(''); setReason(''); setError(null); setNotice(null); setUnknownOutcome(false); command.current = null;
+    setRowIdsText(financeImportRowId === undefined ? '' : String(financeImportRowId)); setDifferenceMode(''); setReason(''); setError(null); setNotice(null); setUnknownOutcome(false); command.current = null;
     const current = generation.current;
     void client.query(target.staffId, requestOptions).then((fresh) => {
-      const obligation = activeObligation(fresh, target);
-      if (!obligation) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
+      if (!targetPresent(fresh, target)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_OWNER_MISMATCH', 'owner Query 找不到原異常義務。');
       if (current === generation.current && mounted.current) { setQuery(fresh); setBusy(null); }
     }).catch((caught: unknown) => {
       if (current === generation.current && mounted.current) { setBusy(null); setError(displayError(caught)); }
     });
     return () => { generation.current += 1; };
-  }, [client, requestOptions, target]);
+  }, [client, requestOptions, target, financeImportRowId]);
 
   const invalidatePreview = () => { setPreview(null); setNotice(null); command.current = null; };
-  const obligation = activeObligation(query, target);
-  const active = obligation !== null && obligation.balance_ntd > 0 && obligation.payout_status !== 'completed';
+  const obligations = activeObligations(query, target);
+  const obligation = obligations[0] ?? null;
+  const active = obligations.some((item) => item.balance_ntd > 0 && item.payout_status !== 'completed');
   const payoutCandidate = preview && 'allocations' in preview.candidate ? preview.candidate : null;
   const selection = (): StaffPayoutSelection | null => {
     const financeImportRowIds = parseRowIds(rowIdsText);
-    if (!financeImportRowIds || !active) return null;
-    return { financeImportRowIds, obligationIdentities: [target.obligationIdentity] };
+    if (!financeImportRowIds || !active || (financeImportRowId !== undefined && (financeImportRowIds.length !== 1 || financeImportRowIds[0] !== financeImportRowId))) return null;
+    return { financeImportRowIds, obligationIdentities: obligations.filter((item) => item.balance_ntd > 0).map((item) => item.obligation_identity), ...(differenceMode ? { differenceMode } : {}) };
   };
   const runPreview = async () => {
     const selected = selection();
@@ -200,12 +214,13 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
 
   const readbackAfterSuccess = async (): Promise<void> => {
     const fresh = await loadQuery(true);
-    const current = activeObligation(fresh, target);
-    if (!current || current.balance_ntd !== 0 || current.payout_status !== 'completed') {
-      setNotice(`最新應付款仍未結清（餘額 NT$ ${(current?.balance_ntd ?? 0).toLocaleString('zh-TW')}、狀態 ${payoutStatusLabel(current?.payout_status ?? '')}）；異常仍會保留。`);
+    onPosted?.();
+    const current = activeObligations(fresh, target);
+    if (!targetSettled(fresh, target)) {
+      setNotice(`最新應付款仍未結清（餘額 NT$ ${current.reduce((sum, item) => sum + item.balance_ntd, 0).toLocaleString('zh-TW')}、狀態 ${current.map((item) => payoutStatusLabel(item.payout_status)).join('／')}）；異常仍會保留。`);
       return;
     }
-    setNotice('已重新確認原逾期應付款餘額歸零且完成結清，異常可解除。');
+    setNotice('已重新確認應付款餘額歸零且完成結清，異常可解除。');
   };
 
   const retryOwnerQuery = async (): Promise<void> => {
@@ -283,17 +298,24 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     catch (caught) { setUnknownOutcome(true); setError(displayError(caught)); }
     finally { if (mounted.current) setBusy(null); }
   };
-  useUnsavedDraft('月嫂付款核銷', { '銀行交易資料列': rowIdsText, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: accepted });
+  const continueRemaining = () => {
+    if (busy !== null || unknownOutcome || job?.status !== 'succeeded' || !active) return;
+    setAccepted(null); setJob(null); setPreview(null); setRowIdsText(''); setDifferenceMode(''); setReason(''); setNotice(null); setError(null); command.current = null;
+  };
+  useEffect(() => { onBusyChange?.(busy !== null || unknownOutcome); return () => onBusyChange?.(false); }, [busy, unknownOutcome, onBusyChange]);
+  useUnsavedDraft('月嫂付款核銷', { '銀行交易資料列': rowIdsText, '核銷方式': differenceMode, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: accepted });
 
 
-  if (!query) return <section aria-label="逾期月嫂應付款人工核銷"><h3>逾期月嫂應付款人工核銷</h3>{busy === 'query' && <p role="status">正在讀取最新應付款資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;
+  if (!query) return <section aria-label="月嫂付款核銷"><h3>月嫂付款核銷</h3>{busy === 'query' && <p role="status">正在讀取最新應付款資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;
 
-  return <section aria-label="逾期月嫂應付款人工核銷" data-surface-id="staff-payout-remediation" style={{ display: 'grid', gap: 12, border: '1px solid #dec0b6', borderRadius: 12, padding: 16, background: '#fffaf8' }}>
-    <header><h3 style={{ margin: 0 }}>逾期月嫂應付款人工核銷</h3><p>服務人員：已指定{obligation ? `｜案件 ${obligation.case_no}` : ''}</p></header>
+  return <section aria-label="月嫂付款核銷" data-surface-id="staff-payout-remediation" style={{ display: 'grid', gap: 12, border: '1px solid #dec0b6', borderRadius: 12, padding: 16, background: '#fffaf8' }}>
+    <header><h3 style={{ margin: 0 }}>月嫂付款核銷</h3><p>服務人員：已指定{obligation ? `｜案件 ${obligation.case_no}` : ''}</p></header>
     <p><strong>解除條件：</strong>只核對既有銀行入帳資料，不會發動銀行匯款。核銷處理完成後，系統仍會重新確認此筆應付款已結清。</p>
-    {obligation && <div data-surface-id="staff-payout-obligation"><strong>原逾期應付款</strong><p>到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {payoutStatusLabel(obligation.payout_status)}</p></div>}
+    {obligations.map((obligation) => <div key={obligation.obligation_identity} data-surface-id="staff-payout-obligation"><strong>案件 {obligation.case_no} 應付款</strong><p>到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {payoutStatusLabel(obligation.payout_status)}</p></div>)}
     {error && <div role="alert">{error}</div>}{notice && <div role="status">{notice}</div>}
-    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label><label>人工核對理由（選填）<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection()} onClick={() => void runPreview()}>儲存核銷</button></fieldset>
+    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>核銷方式<select aria-label="核銷方式" value={differenceMode} onChange={(event) => { setDifferenceMode(event.target.value as typeof differenceMode); invalidatePreview(); }}><option value="">足額核銷剩餘款</option><option value="underpayment">付款不足，先核銷實付</option><option value="overpayment">付款超額，另列追收</option></select></label>{financeImportRowId === undefined ? <label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label> : <p>使用已選取的銀行流水。</p>}<label>人工核對理由（選填）<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection()} onClick={() => void runPreview()}>儲存核銷</button></fieldset>
+    {accepted && job?.status === 'succeeded' && !unknownOutcome && active && financeImportRowId === undefined && <button type="button" disabled={busy !== null} onClick={continueRemaining}>繼續核銷剩餘款</button>}
+    {accepted && job?.status === 'succeeded' && active && financeImportRowId !== undefined && <p role="status">剩餘款繼續待付；請由補款流水接續核銷。</p>}
     {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>本次核銷資料</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p></div>}
     {accepted && <div data-surface-id="staff-payout-job"><p>核銷已受理，正在處理並重新確認應付款狀態。</p>{job && <p>處理狀態：{jobStatusLabel(job.status)}</p>}{(unknownOutcome || (job !== null && (job.status === 'queued' || job.status === 'running' || job.status === 'succeeded'))) && <button type="button" disabled={busy !== null} onClick={() => void reconcile()}>重新查詢核銷結果</button>}</div>}
     {unknownOutcome && !accepted && <div role="alert">核銷結果目前無法安全確認，禁止產生新操作。<button type="button" disabled={busy !== null} onClick={() => void runApply()}>使用原操作安全重試</button></div>}

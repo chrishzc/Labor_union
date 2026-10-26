@@ -66,6 +66,74 @@ def test_explicit_role_detail_never_follows_the_other_role_or_its_revocation(rep
     assert (staff.subject_name, staff.version, staff.revocation_request_id) == ('同帳號月嫂', 4, 9)
 
 
+@pytest.fixture
+def reminder_repository():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.executescript('''
+      CREATE TABLE clients(id INTEGER PRIMARY KEY,name TEXT,phone TEXT,case_no TEXT,line_user_id TEXT);
+      CREATE TABLE orders(case_no TEXT,client_id INTEGER,status TEXT);
+      CREATE TABLE staff(id INTEGER PRIMARY KEY,name TEXT,phone TEXT,status TEXT,line_user_id TEXT);
+      CREATE TABLE staff_lifecycle_states(staff_id INTEGER,lifecycle_state TEXT);
+      CREATE TABLE line_identity_role_bindings(subject_type TEXT,subject_reference TEXT,binding_status TEXT);
+    ''')
+    for i, status in enumerate(('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消','歷史訂單－服務中'), 1):
+        conn.execute('INSERT INTO clients VALUES(?,?,?,?,NULL)', (i,f'客戶{i}','0987654321',f'115{i:06}'))
+        conn.execute('INSERT INTO orders VALUES(?,?,?)', (f'115{i:06}',i,status))
+    for i, status in enumerate(('active','active','paused','retired'), 1):
+        conn.execute('INSERT INTO staff VALUES(?,?,?,?,NULL)', (i,f'月嫂{i}','0987654321',status))
+    repo = MySqlLineIdentityManagementRepository(SimpleNamespace(cursor=lambda: ReadCursor(conn)))
+    yield repo, conn
+    conn.close()
+
+
+def test_binding_reminders_only_current_cases_and_active_staff_with_real_pagination(reminder_repository):
+    repo, _ = reminder_repository
+    first = repo.binding_reminders(LineIdentityCandidateQuery(Role.CUSTOMER, page_size=2))
+    second = repo.binding_reminders(LineIdentityCandidateQuery(Role.CUSTOMER, page=2, page_size=2))
+    assert first.total == second.total == 4
+    assert [r.subject_reference for r in first.items + second.items] == ['1','2','3','4']
+    assert first.items[0].phone == '0987654321' and first.items[0].case_no == '115000001'
+    staff = repo.binding_reminders(LineIdentityCandidateQuery(Role.STAFF))
+    assert staff.total == 2 and all(r.case_no is None for r in staff.items)
+
+
+@pytest.mark.parametrize('role', [Role.CUSTOMER, Role.STAFF])
+@pytest.mark.parametrize('status', ['pending_review','bound','revocation_pending','revoked'])
+def test_binding_reminders_follow_canonical_claim_and_return_after_revocation(reminder_repository, role, status):
+    repo, conn = reminder_repository
+    conn.execute('INSERT INTO line_identity_role_bindings VALUES(?,?,?)', (role.value,'1',status))
+    result = repo.binding_reminders(LineIdentityCandidateQuery(role))
+    assert ('1' in {r.subject_reference for r in result.items}) is (status == 'revoked')
+
+
+@pytest.mark.parametrize('role,table', [(Role.CUSTOMER,'clients'),(Role.STAFF,'staff')])
+def test_binding_reminders_disappear_after_binding_and_read_does_not_mutate(reminder_repository, role, table):
+    repo, conn = reminder_repository
+    before = conn.total_changes
+    assert '1' in {r.subject_reference for r in repo.binding_reminders(LineIdentityCandidateQuery(role)).items}
+    assert conn.total_changes == before
+    conn.execute(f"UPDATE {table} SET line_user_id='U-synthetic' WHERE id=1")
+    assert '1' not in {r.subject_reference for r in repo.binding_reminders(LineIdentityCandidateQuery(role)).items}
+
+
+@pytest.mark.parametrize('status', ['訂單取消','訂單完成','歷史訂單－未服務','歷史訂單－服務中','歷史訂單－服務完成','歷史訂單－帳務完成'])
+def test_customer_binding_reminder_disappears_when_case_no_longer_needs_service(reminder_repository, status):
+    repo, conn = reminder_repository
+    assert '2' in {r.subject_reference for r in repo.binding_reminders(LineIdentityCandidateQuery(Role.CUSTOMER)).items}
+    conn.execute('UPDATE orders SET status=? WHERE client_id=2', (status,))
+    page = repo.binding_reminders(LineIdentityCandidateQuery(Role.CUSTOMER))
+    assert page.total == 3 and '2' not in {r.subject_reference for r in page.items}
+    assert conn.execute('SELECT line_user_id FROM clients WHERE id=2').fetchone()[0] is None
+
+
+@pytest.mark.parametrize('state', ['paused','retired'])
+def test_staff_binding_reminders_follow_lifecycle_owner_even_if_legacy_status_active(reminder_repository, state):
+    repo, conn = reminder_repository
+    conn.execute('INSERT INTO staff_lifecycle_states VALUES(1,?)', (state,))
+    assert '1' not in {r.subject_reference for r in repo.binding_reminders(LineIdentityCandidateQuery(Role.STAFF)).items}
+
+
 def test_binding_search_and_real_pagination_are_server_owned(repository):
     result = repository.list(LineIdentityBindingListQuery(search='ORD-001', page=1, page_size=1))
     assert result.total == 1 and result.items[0].subject_type is Role.CUSTOMER

@@ -58,7 +58,8 @@ def test_default_onboarding_message_has_no_stale_ai_text() -> None:
     assert "AI 小幫手" not in DEFAULT_ONBOARDING_WELCOME_MESSAGE
     assert "24 小時為您即時解答" not in DEFAULT_ONBOARDING_WELCOME_MESSAGE
     assert "服務說明" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
-    assert "轉真人客服" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
+    assert "聯絡專人服務" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
+    assert "本帳號採自助服務，一般留言不會有專員回覆" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
     assert "{url}" in DEFAULT_ONBOARDING_WELCOME_MESSAGE
 
 

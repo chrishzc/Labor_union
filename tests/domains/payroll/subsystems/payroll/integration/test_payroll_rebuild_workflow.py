@@ -88,6 +88,35 @@ def _request(preview, *, version=4, key="payroll-rebuild-1"):
     )
 
 
+def test_mysql_service_facts_crossing_decimal_id_boundary_can_be_calculated():
+    from domains.payroll.calculation import build_case_payroll_candidate
+    facts = mysql_rebuild._service_facts(
+        ({"id": 9, "staff_id": 17}, {"id": 10, "staff_id": 18}),
+        {9: ({"work_date": date(2026, 10, 1)},), 10: ({"work_date": date(2026, 10, 2)},)}, {},
+    )
+    result = build_case_payroll_candidate(facts,
+        tuple(rate_snapshot(item.assignment_identity, "policy-1", PayrollPolicyKind.CITIZEN) for item in facts),
+        PayrollTerms(2, 8, MoneyNTD(0)), ())
+    assert {item.staff_id: item.total_payable.amount for item in result.assignments} == {17: 2400, 18: 2400}
+
+
+@pytest.mark.parametrize("effective_amount,allowed", [(3400, True), (3500, False)])
+def test_automatic_completion_accepts_only_unchanged_handover_entitlement(effective_amount, allowed):
+    existing = ExistingStaffObligation("assignment:8", "original", MoneyNTD(effective_amount), True,
+        date(2026, 9, 15), handover_corrections_exist=True)
+    repository = _Repository(_facts((existing,)))
+    repository.resolve_handover_obligations = lambda facts: facts
+    workflow = PayrollRebuildWorkflow(repository, None)
+    arguments = {"actor": ActorContext("admin"), "key": IdempotencyKey("completion"), "correlation_id": CorrelationId("test")}
+    if allowed:
+        assert workflow.synchronize_in_unit_of_work("CASE-1", **arguments) == date(2026, 9, 15)
+    else:
+        with pytest.raises(ValueError, match="payroll_handover_settlement_required"):
+            workflow.synchronize_in_unit_of_work("CASE-1", **arguments)
+    assert repository.persisted == []
+    assert repository.load_modes == [True]
+
+
 def test_generic_rebuild_blocks_handover_roots_instead_of_recreating_their_full_paid_amount():
     from shared_kernel.fingerprints import PreviewFingerprint
 
@@ -194,9 +223,9 @@ def test_apply_rejects_stale_preview_version_with_typed_conflict():
 
 
 @pytest.mark.parametrize('identity,amount,hours,expected', [
-    ('一般市民',24000,8,date(2026,11,15)),
     ('補助市民',24000,8,date(2026,11,15)),
-    ('補助市民',0,8,date(2026,12,15)),
+    ('社福',24000,8,date(2026,11,15)),
+    ('社福',0,8,date(2026,12,15)),
 ])
 def test_official_schedule_can_form_missing_payment_date_without_waiting_for_completion(identity,amount,hours,expected):
     root={'staff_payment_due_date':None,'order_status':'訂單完成','actual_end_date':date(2026,10,12),'client_payable_ntd':amount,'identity_status':identity,'service_days':10,'service_hours_per_day':hours,'floor_fee':0}

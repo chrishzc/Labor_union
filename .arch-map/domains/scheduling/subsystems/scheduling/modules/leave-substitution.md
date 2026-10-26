@@ -4,7 +4,7 @@
 - subsystem: `scheduling`
 
 ## Responsibility
-協調正式排班案件在服務完成前的請假／代班 Query、Preview、Apply 與 committed-result readback；案件選單取 server-owned 進行中集合與有效正式排班日的交集，包含尚未開始服務的案件。完成後以 server-owned、case-bound 的 Scheduling→Payroll→Staff Payables typed lineage readback 顯示受影響服務人員的本案應付款與版本證據。
+處理月嫂提交雙方已協調的請假結果；無衝突順延自動套用，衝突／代班才列工會待辦。正式排班案件在服務完成前的請假／代班 Query、Preview、Apply 與 committed-result readback；案件選單取 server-owned 進行中集合與有效正式排班日的交集，包含尚未開始服務的案件。完成後以 server-owned、case-bound 的 Scheduling→Payroll→Staff Payables typed lineage readback 顯示受影響服務人員的本案應付款與版本證據。
 
 ## Implementation
 - `domains/scheduling/leave_substitution.py`
@@ -13,8 +13,14 @@
 - `subsystems/scheduling/substitution_payables_lineage.py`
 - `subsystems/scheduling/service_handover_accounting.py` — 服務中換人的 owner-derived 前後薪資、實付、追償與客戶帳款比較。
 - `api/routes/staff_leave_management.py`
-- `api/routes/staff_leave_intake.py` — 月嫂請假 Preview／Apply 與本人待辦回讀。
-- `line/static/staff_schedule.html` — 既有請假表單在結果未明時保留同一操作並提供查核入口。
+- `api/routes/staff_leave_intake.py` — 本人 leave-results Query／Submit；舊 pending intake 回 410，歷史 readback 保留。
+- `domains/scheduling/leave_result.py` — 明確原日／新日與順延／代班 typed intent。
+- `infrastructure/mysql/leave_result_repository.py` — 現有 Scheduling result store 的 leave-v1 envelope、本人日期與版本驗證。
+- `subsystems/scheduling/service_start_workflow.py` — 共用代班意願、邀請、加入與單一外層交易；請假獨立於 service-start peer 決策。
+- `infrastructure/mysql/service_start_arrangement.py` — 請假委派 canonical Leave/Substitution writer。
+- `line/static/staff_schedule.html` — 月嫂直接提交協調結果，結果未明以同一命令查核。
+- `ui_react/src/components/ServiceStartSubstituteWorkbench.tsx` — 工會記錄新協議日期、詢問意願、單人邀請及加入後保存日期。
+- `line/static/mobile_admin.html` — 相同工會例外操作。
 - `api/routes/leave_substitution.py`
 - `api/schemas/leave_substitution.py`
 - `api/dependencies/leave_substitution.py`
@@ -29,13 +35,15 @@
 - `ui_react/src/adapters/scheduling/leave_substitution_flow_adapter.ts`
 - `ui_react/src/adapters/scheduling/leave_substitution_flow_store.ts` — 依已登入帳號與案件隔離尚未確認的 Apply；本機只保存原命令、預覽與操作識別，不保存登入憑證，重新開啟後沿原識別確認結果，觀察成功後清除。
 - `ui_react/src/pages/SchedulingPage.tsx`
-- `ui_react/src/pages/ServiceHandoverPage.tsx` — 原案件／指定服務段導向的換人專用頁，一次儲存並返回同案服務安排。
+- `ui_react/src/pages/ServiceHandoverPage.tsx` — 原案件／指定原服務段帶入剩餘日期，重用代班意願、邀請與加入，工會填交接日一次保存正式 handover 與帳務。
 - `ui_react/src/adapters/scheduling/service_handover_navigation.ts`
+
+- `infrastructure/mysql/service_handover_repository.py` — 原區段換人 Query／初次意願命令，沿共用 result store 的 handover-v1 envelope，不新增表或狀態。
 
 ## Dependencies
 - outbound: `payroll` — Apply 由既有 outer Unit of Work 提交 payroll obligations；lineage 只讀其 immutable event/version。
 - outbound: `staff-payables` — lineage 只讀 projection/evidence；換人經 typed owner application 同交易銜接合法 Payroll correction 的 projection／獨立追償，不擁有付款、匯出或 payout state。
-- outbound: `external-integration/line` — 僅消費已關聯請假待辦與 notification intent readback。
+- outbound: `external-integration/line` — 共用代班意願、單人原案件群組邀請、加入證據與無按鈕正式日期表，僅建立 committed delivery。
 
 ## Verification routing
 - default_boundary: Subsystem
@@ -50,3 +58,8 @@
 - integration_root: `ui_react/src/tests/scheduling_staff_leave_inbox_flow.test.tsx`
 - layout_status: `custom_current`
 - routing: `.arch-map/tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution.md`
+
+- integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_leave_results_mysql.py`
+- test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/service-start/service_start_workbench.test.tsx`
+
+- integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover_mysql.py`

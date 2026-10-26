@@ -222,6 +222,14 @@ def classify_finance_transaction(
         if direction == "incoming":
             if _valid_client_virtual_account(row):
                 return _result("client_receipt", [], "sinopac_valid_virtual_account")
+            reference_key = "transaction_reference" if format_id == "legacy" else "交易參考編號"
+            account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
+            staff_ids = _ids_for_account(staff_accounts, account)
+            if len(staff_ids) == 1:
+                return _result("non_business_review", staff_ids,
+                               "sinopac_staff_return_requires_matching", account)
+            if staff_ids:
+                return _review("sinopac_staff_account_identity_ambiguous")
             heuristic_result = _classify_client_receipt_heuristic(
                 row, client_receipt_candidates
             )

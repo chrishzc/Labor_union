@@ -12,7 +12,7 @@ const obligation = {
 describe('HistoricalClientPaymentWorkbench', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('runs owner Query, Preview, confirmed Apply and fresh readback without an Anomalies mutation', async () => {
+  it('runs owner Query, automatic Preview/Apply and fresh readback without an Anomalies mutation', async () => {
     sessionClient.setSession('historical-client-payment-test', {
       id: 1, username: 'operator', display_name: 'Operator', role: 'admin',
     });
@@ -35,11 +35,8 @@ describe('HistoricalClientPaymentWorkbench', () => {
 
     render(<HistoricalClientPaymentWorkbench caseNo="CASE-1" />);
     fireEvent.click(await screen.findByLabelText(/client-obligation:1/));
-    fireEvent.click(screen.getByRole('button', { name: '預覽歷史付款影響' }));
-    expect(await screen.findByText(/金額快照：NT\$ 12,000/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '核對歷史付款' } });
-    fireEvent.click(screen.getByLabelText(/我已核對方向/));
-    fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
+    fireEvent.change(screen.getByLabelText('原因（選填）'), { target: { value: '核對歷史付款' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存歷史付款' }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/已重新讀取付款結果：客戶款項已結清/)).toBeInTheDocument();

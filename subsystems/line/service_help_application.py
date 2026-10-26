@@ -44,7 +44,7 @@ _CATEGORY_ALIASES = {
     CustomerServiceCategory.PAYMENT_SUBSIDY: {"收費與補助", "收費", "費用", "價格", "補助", "政府補助", "要付多少", "2"},
     CustomerServiceCategory.SERVICE_PROGRESS: {"查詢服務進度", "查詢進度", "服務進度", "案件進度", "訂單進度", "目前狀態", "3"},
     CustomerServiceCategory.PROFILE_UPDATE: {"修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "4"},
-    CustomerServiceCategory.OTHER: {"其他問題", "其他", "不是以上", "問題", "詢問", "聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人", "5", "6"},
+    CustomerServiceCategory.OTHER: {"聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人"},
 }
 _HANDOFF_CONFIRM_POSTBACK = "customer-service:handoff:confirm"
 _HANDOFF_WRONG_ANSWER_POSTBACK = "customer-service:handoff:confirm:answer-rejected"
@@ -180,16 +180,9 @@ class LineServiceHelpApplication:
             return False
         if line_user_id is None:
             return True
-        if postback_data in {
-            _HANDOFF_CONFIRM_POSTBACK,
-            _HANDOFF_WRONG_ANSWER_POSTBACK,
-        }:
+        if postback_data == _HANDOFF_CONFIRM_POSTBACK:
             event_id = inbox.event.event_id.value
-            reason_code = (
-                "answer_rejected"
-                if postback_data == _HANDOFF_WRONG_ANSWER_POSTBACK
-                else "explicit_human_request"
-            )
+            reason_code = "explicit_human_request"
             referral = TicketReferral(
                 CustomerServiceCategory.OTHER,
                 reason_code,
@@ -197,10 +190,11 @@ class LineServiceHelpApplication:
                 IdempotencyKey(f"line-service-help:other:{event_id}"),
             )
             self._create_manual_ticket(
-                inbox, unit_of_work, line_user_id, "使用者確認轉接真人客服", referral
+                inbox, unit_of_work, line_user_id, "使用者呼叫工會專員", referral
             )
             return True
         if postback_data in {
+            _HANDOFF_WRONG_ANSWER_POSTBACK,
             _HANDOFF_RESUME_POSTBACK,
             _HANDOFF_CONTINUE_POSTBACK,
         }:
@@ -349,12 +343,14 @@ class LineServiceHelpApplication:
             payload = _text_payload(_PAYMENT_REPLY)
         elif category is CustomerServiceCategory.SERVICE_PROGRESS:
             payload = self._progress_payload(inbox, unit_of_work, line_user_id)
-        else:
+        elif category is CustomerServiceCategory.PROFILE_UPDATE:
             ticket = unit_of_work.customer_service.create_or_append(
                 CreateCustomerServiceMessage(line_user_id.value, category, text, _event_key(inbox, category.value))
             )
             payload = _text_payload(_TICKET_ACKNOWLEDGEMENTS[category])
             unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
+        else:
+            payload = _service_menu_payload()
         self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
 
     def _create_order_update_ticket(self, inbox, unit_of_work, line_user_id, text):
@@ -678,10 +674,9 @@ def _navigation_button(label, action_text, style):
 
 
 _SERVICE_FLOW_REPLY = "服務流程如下：\n1. 完成服務登記。\n2. 工會確認資料與服務期程。\n3. 系統篩選可配合的月嫂。\n4. 月嫂同意接案後，工會提供資料給您確認。\n5. 雙方確認後，進入媒合與簽約流程。\n\n如您尚未登記，請點選下方「服務登記」。"
-_PAYMENT_REPLY = "收費會依服務天數、每日時數、身分資格與樓層費計算。補助資格需由工會依您的登記資料確認；在資料確認完成前，系統僅提供初步說明，實際金額以工會確認結果為準。\n\n如您尚未登記，請先點選「服務登記」完成資料填寫。"
+_PAYMENT_REPLY = "服務費依服務天數、每日時數及樓層費計算。補助分為補助市民（最高40小時）及社福（最高120小時），實際補助金額依本案服務資料計算。\n\n如您尚未登記，請先點選「服務登記」完成資料填寫。"
 _TICKET_ACKNOWLEDGEMENTS = {
     CustomerServiceCategory.PROFILE_UPDATE: "已收到修改資料需求，工會人員確認後會聯絡您核對要修改的內容。",
-    CustomerServiceCategory.OTHER: "已建立客服需求，工會人員將透過 LINE 與您確認問題內容。",
 }
 _ORDER_UPDATE_ACKNOWLEDGEMENT = (
     "已收到訂單資訊修改需求。此需求可能影響訂單內容或月嫂接案意願，"

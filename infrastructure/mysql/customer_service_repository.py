@@ -426,6 +426,7 @@ WHEN SUBSTR(e.event_key,1,LENGTH('binding-failure:'))='binding-failure:' THEN 'b
 WHEN EXISTS (SELECT 1 FROM customer_service_escalations sx WHERE sx.ticket_id=e.ticket_id
     AND sx.source_event_identity=e.event_key AND sx.trigger_code IN ('explicit_human_request','explicit_wrong_answer')) THEN 'handoff'
 WHEN SUBSTR(e.event_key,1,LENGTH('line-service-help:profile_update:'))='line-service-help:profile_update:'
+    OR SUBSTR(e.event_key,1,LENGTH('start-day-response:'))='start-day-response:'
     OR SUBSTR(e.event_key,1,LENGTH('line-service-help:contact_union:'))='line-service-help:contact_union:'
     OR SUBSTR(e.event_key,1,LENGTH('line-service-help:other:'))='line-service-help:other:' THEN 'service'
 ELSE NULL END"""

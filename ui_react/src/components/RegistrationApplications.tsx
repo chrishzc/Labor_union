@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { registrationApplicationsClient as client, type RegistrationApplication } from '../api/registration_applications/client';
 import type { RegistryEditState } from './ClientRegistryDetailEditor';
 
-export function RegistrationApplications({ onEditStateChange }: { onEditStateChange: (state: RegistryEditState) => void }) {
+export function RegistrationApplications({ onEditStateChange, initialId, onCommitted }: { onEditStateChange: (state: RegistryEditState) => void; initialId?: number; onCommitted?: () => Promise<void> }) {
   const [items, setItems] = useState<RegistrationApplication[]>([]);
   const [selected, setSelected] = useState<RegistrationApplication | null>(null);
   const [busy, setBusy] = useState(false);
@@ -18,6 +18,9 @@ export function RegistrationApplications({ onEditStateChange }: { onEditStateCha
   };
   const refresh = () => run(async () => { const next = await client.pending(); setItems(next); setHasMore(next.length === 50); });
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (initialId && Number.isSafeInteger(initialId) && initialId > 0) void run(async () => setSelected(await client.detail(initialId)));
+  }, [initialId]);
   const approve = () => {
     if (!selected || busy || selected.approved) return;
     const submitted = selected;
@@ -25,6 +28,7 @@ export function RegistrationApplications({ onEditStateChange }: { onEditStateCha
       const result = await client.approve(submitted); setSelected(result);
       setItems(previous => previous.filter(item => item.registration_id !== result.registration_id));
       setMessage('需求申請已核准，正式客戶資料已建立。');
+      await onCommitted?.();
     });
   };
   return <section aria-label="待核准需求申請">

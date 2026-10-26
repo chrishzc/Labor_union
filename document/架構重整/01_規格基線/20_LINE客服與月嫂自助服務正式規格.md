@@ -94,44 +94,36 @@ waiting → handling → resolved
 
 重用 `subsystems.scheduling.staff_monthly_calendar_query`，以 assignment-owned `staff_schedule` 與正式 availability lock 投影。不得新增另一套排班 SQL writer。
 
-### 5.3 請假
+### 5.2A 服務開始與代班結果
 
-LIFF 不得直接改正式排班。已驗證、已綁定月嫂可提交起訖日與去敏說明，僅建立
-Scheduling-owned 的 `pending` 請假待辦、immutable event 與 idempotency receipt；不得輸入案件、
-正式服務日、代班人或帳務資料。管理人員的受理、拒絕、取消只處理該待辦，受理一律顯示為
-「已受理處理」，不是正式核准。
+完整業務與驗收由規格 02「服務開始、排班與代班」SSTART-01～08 擁有；本節只定義 LIFF／工會 presentation 邊界。
 
-管理人員須以一次性 request context 前往既有案件行事曆，重新執行 Leave/Substitution
-Preview／Apply；其版本、fingerprint、mutex 與跨 Domain impact 不得省略。只有 canonical Apply
-receipt 已提交、且確定原月嫂與 request 相同並尚未被其他 request 關聯時，request 才能標為
-`resolved`，再排入 canonical LINE delivery task 通知月嫂。delivery 失敗不回滾已提交的排班或
-request 結案；timeout／5xx 只由既有 worker 重試。
+1. 正常入口是客戶在服務群組提出、與月嫂自行協調；Bot 不讀群組對話判斷意願或日期，客戶訂單異動 LIFF 必須移除現有「服務日期／天數」選項、日期表單與新申請 API allowlist，不只移除本流程箭頭；既有客服日期歷史保留。
+2. 月嫂從既有 verified staff LIFF 選本人有效案件／區段，選「接受，填寫開始日期」或「無法配合，請工會安排代班」。接受後填約定開始日並送出；系統檢查正式條件與檔期，通過即更新正式日期、排班及第一期款到期日，不要求人員核准。尚無正式 assignment 的有效方案本人亦可提交。
+3. 不接受或檔期衝突需代班時才出工會待辦。工會確認區段、選定月嫂並詢問意願；不願意改問其他人，願意才寄該人的原群組邀請。加入原群組後，工會直接填日期接共同正式保存；不讓代班月嫂再提交接受／日期，不新增客戶確認關卡。
+4. 工會 LINE 工作面與 React 正式日期／代班操作均採既有 capability 授權，不限 system_admin。正常案件只顯示結果，不列人工日期核准待辦。工作面呈現待辦、意願、選定人選、投遞與入群證據、日期處理及正式回讀，不由前端推算成功。
+工會手機及 React 代班畫面必須逐項提供：替代區段／人選、詢問意願、最新本人回覆、不願意改問其他人、願意後「寄送本案群組邀請連結」、邀請及加入狀態／重新查詢、加入後人員日期表單及「儲存並更新排班」、結果未明查核與正式回讀。加入前不得保存正式代班；按寄送只針對該人，不要求回群組輸入全體邀請指令。詳細畫面與 API 對照由規格 02 同節擁有。
 
-請假審核 API、管理 client 與 UI caller 屬 Scheduling；不得附加到 LINE identity review route
-或 `LineAdminApiClient`。LINE Integration 只接受已提交的通知 intent 並回報 delivery outcome。
+5. 正式保存成功後自動建立本案群組日期表寄送工作，內容為各月嫂區段與服務日，無確認／拒絕按鈕。投遞失敗只呈現寄送異常，不能回滾正式結果或重算帳務；開工當天群組提醒依 §6.8。服務開始與請假協調結果使用不同 typed intent，共用代班意願、原案件群組邀請與正式結果記錄機制。
 
-月嫂 LIFF 的提交 transport 固定為 Scheduling-owned 的
-`POST /api/v1/line/staff-self-service/leave-requests/preview` → 使用者確認 →
-`POST /api/v1/line/staff-self-service/leave-requests/apply` →
-staff-scoped typed readback。Preview 必須零寫入，僅接受起訖日與去敏說明，並重新驗證 LIFF token
-與正式 staff binding；Apply 必須以同一 intent、opaque preview fingerprint 與 idempotency key
-重新驗證後才可建立 `pending` 待辦。fingerprint、binding/version 與 LINE user identity 只供契約驗證，
-一般 LIFF 畫面不得顯示。readback 必須再次驗證同一綁定月嫂，只回傳申請期間、去敏說明、
-業務狀態與必要申請編號；不得讓月嫂讀取他人的申請。既有直接提交 endpoint 不得成為新 UI caller，
-也不得作為略過 Preview／確認的正式路徑。
+### 5.2B 服務中換人
 
-Scheduling Matching Coordination 可唯讀引用已提交的 canonical Leave/Substitution receipt 作為 rematch
-source fact；Preview不得寫入，Apply須在自己的單一outer UoW內fresh-read該immutable receipt並驗證case、
-leave version與original staff。M3只保存receipt reference與自己的lineage，不得改寫請假、排班或代班根事實。
+業務與帳務由規格 02「服務中換人」及既有正式 handover writer 擁有。原案件按鈕帶入原月嫂 assignment 與剩餘服務日，工會主動選人並詢問意願；不願意改問其他人，願意才寄送該人加入原案件群組的邀請。取得實際加入證據後，工會填交接日，畫面列出交接日起原區段全部剩餘服務日，一次儲存更新正式排班與帳務，再建立無按鈕日期表到原案件群組的寄送工作。無再次確認、無新群組、無客戶日期申請，工會不負責協調。
 
-Typed errors：
+沿用既有代班詢問文案與「願意代班／無法代班」按鈕、單人群組邀請與手機工會待辦。工會具有 matching capability 即可操作，不限 system_admin；本人綁定、enabled Admin 與 current membership 不省略。開頁唯讀，點詢問／邀請才建立工作；交接日儲存時 fresh-read，排程衝突保留原資料及工會待辦，可改日期或改選人。已服務日、已收付款、actual start 與第一期到期日保留，不能以一般短期代班的帳務重建替代正式 handover correction。結果未明保留相同操作識別確認，不盲目新增命令。
 
-- `liff_token_invalid`
-- `line_staff_binding_not_found`
-- `staff_order_not_visible`
-- `staff_schedule_query_invalid`
-- `leave_request_preview_stale`
-- `leave_request_not_found`
+### 5.3 請假、順延與代班
+
+1. 不論客戶或月嫂請假，雙方自行在案件群組協調。工會只記錄協議結果或安排代班，不負責協調；Bot 不監控一般聊天。
+2. 入口為月嫂與工會官方帳號的一對一聊天室，沿用「排班資訊與請假」選單的 `staff_schedule` LIFF，不須發布選單或輸入聊天指令。本人綁定由伺服器驗證，案件、正式指派與可選服務日由 Scheduling Query 提供。
+3. 月嫂選案件及受影響原服務日，選「已協調順延」並逐日填入談妥的新日期，或選「需要安排代班」。直接送出，不需要工會受理或客戶同意卡片。
+4. 順延由同一 outer transaction fresh-read／lock 正式資料、執行 canonical Leave/Substitution writer、更新正式日期／排班／Client Finance 與 Payroll，再建立原案件群組日期表工作。無衝突即完成，不產生工會核准待辦。日期表沒有再次確認按鈕。
+5. 需要代班或排程衝突才進工會待辦；衝突時回滾排班與帳務變更，保留原資料與衝突提示。工會可記錄雙方重新談妥的逐日順延日期並重檢；工會不代雙方協調。
+6. 代班沿既有 Scheduling nominee／LINE committed-delivery 機制：工會選人詢問意願 → 不願意改問他人 → 願意才寄送該月嫂本案群組邀請 → current membership evidence 確認加入原案件群組 → 工會填實際逐日服務日期 → fresh conflict check → canonical 更新日期、排班及帳務 → 群組日期表。不得以寄出邀請冒充已加入。
+7. `leave-results/cases`／`leave-results/submit` 使用 staff-scoped transport；無權、stale、錯誤日期或 same-key/different-command 回 typed conflict。結果未明只用同一命令／key 查核，不能建立重複排班或工作；已完成服務的原服務日不可改動；日誌不新增審核或確認關卡。
+8. 共用現有 Scheduling result／candidate 持久化；`execution_dates` 的 `leave-v1` envelope 保存原服務日、新日期、決策與衝突說明，與 service-start peer 結果明確隔離，不增加 schema 或人工審核關卡。工會 React／手機依既有 owner capability 可操作。
+9. 舊 pending 請假建立與客戶同意順延入口已由新流程取代，回 410；歷史資料與唯讀查閱保留。舊客戶卡片點擊不再寫入或回覆，尚未投遞的舊客戶確認工作不得寄送。不存在新增客戶 LIFF 日期入口、私訊客戶確認或人員群組通知。
+10. 群組日期表只記錄已提交結果。缺少案件群組時不退回私訊；結果顯示尚缺群組設定。寄送失敗不回滾已提交日期／帳務。
 
 ### 5.4 寶寶日誌與餐食照片
 
@@ -149,25 +141,103 @@ Rich Menu 的「寶寶日誌」開啟月嫂 LIFF。LIFF 只可用 server-side �
 object reference、digest、MIME、size、版本與狀態。LIFF／管理端只顯示檔案清單投影，不暴露 NAS 路徑、
 storage locator 或公開 URL；查看使用 authenticated download，重新處理後以受控上傳或指定投放區形成
 新版本，不提供 Web 資料夾瀏覽或原地修改。月嫂即時新增照片仍須經 verified identity、assignment／
-service-day 驗證、staging、Preview／確認／Apply；不能因 NAS watcher 發現檔案就建立日誌完成事實或發送通知。
+service-day 驗證、staging 與直接 Apply；不能因 NAS watcher 發現檔案就建立日誌完成事實或發送通知。
 
-Current 執行拆分（2026-08-26）：`requires_cooking=false` 的純文字日誌可先沿用既有 Scheduling
-assignment／service-day roots 與日誌 persistence，補齊 verified LIFF Query → zero-write Preview →
-明確確認 → Apply → receipt/readback，且不得接受 media reference。`requires_cooking=true`、unknown、
-餐食照片與其他附件仍 fail closed，等待 NAS staging、digest、版本、cleanup／reconciliation 與下載投影；
-純文字完成不代表媒體 lane 完成。
+月嫂目前由獨立 `staff_baby_log.html` 選月份及本人正式服務日，填寫 1–5000 字日誌，直接點「送出日誌」。
+不再要求日誌預覽、勾選確認或跨 request 的預覽指紋；選檔仍可本機預覽。需要下廚時附一張餐食照，
+不需要下廚可不附照片或附一張寶寶照，僅接受 JPG／PNG 並遵守現行檔案容量限制。不顯示「尚未確定」
+條件分類；既有必要資料缺失時以一般資料錯誤處理，不建立完成紀錄。後端保留本人身分、正式服務日、
+附件與檔案驗證、fresh-lock、單一 outer UoW 及同操作重試保障。允許提前填寫，送出後不能修改。
+畫面直接依已提交結果顯示成功及照片，讀取失敗不要求重送；結果未知只能以原操作重試。
+既有 Preview API 保留媒體 staging 與既有 API consumer 的唯讀驗證用途，不構成目前畫面的送出前置關卡。
 
-純文字 lane runtime 狀態（2026-08-26）：`completed`。`staff_schedule.html` 由正式班表工作日選取
-assignment/date，依序執行 verified staff Query、零寫入 Preview、人工確認、fresh-lock Apply、receipt 與
-owner-filtered readback；Apply 的 terminal replay 先回既有 receipt，不因後續根事實漂移改判 stale。focused
-Domain／repository／API／static LIFF 共 53 項通過，內嵌 JavaScript 語法通過。verified-token Chrome 仍由
-`CUR-LIFF-E2E` 列管並為 `not_run`；照片／附件仍由 NAS blocker 列管。
+### 5.5 服務日誌內部提醒與案件群組發送
 
-媒體 lane 執行狀態（2026-08-26）：`approved`。人工已授權在 `CUR-FILE-NAS-01` controlled-file
-capability 通過後，完成 verified LIFF staging、Preview／確認／Apply、digest／版本、cleanup／reconciliation、
-receipt 與 authenticated download。不得另建 direct upload、公開 URL 或 watcher-owned completion path。
+- 正式服務時段結束後才計入缺漏，依台北時區及跨日結束時間判斷。依案件及月嫂分開計算，
+  日曆日期相連且未填的正式服務日連續超過 3 日（至少 4 日）才顯示；已填日、非服務日均切斷連續區間。
+  零散缺漏不得累計達門檻，不同月嫂不得混算；排班重建、代班及補填後依 current facts 即時重算。
+- 工會 LINE 管理端「案件群組」內提供「服務日誌提醒」，列出案件群組及連續缺漏幾日，server 分頁。
+  Query 零寫入，不新增付款、案件或待辦狀態，不自動私訊月嫂，也不自動通知群組。
+- 工會人員自行決定是否點「發送提醒」；點擊即以既有 LINE durable delivery 建立寄送工作，不再確認。
+  文案為 `請 {月嫂姓名} 補上尚未填寫的服務日誌，謝謝。`，收件人固定為該案目前案件群組。
+  缺少可用群組時列出內部提醒但停用發送，不改寄私人或其他群組。
+- 建立工作與 provider 發送前皆重新核對所選連續缺漏區間及群組。補填造成區間失效、取消／換人／
+  排班變更造成不適用或群組異動時，尚未寄出的提醒取消。同操作重試不重複建立工作。
+- 退役每日服務結束自動私訊日誌提醒：移除預設通知規則與文字模板，既有 active 設定不得旁路建立
+  新提醒，已排入的舊自動提醒在 provider 前攔下。歷史日誌、事件及寄送結果不刪除。
+- 全部現行使用者介面與正式規格採「案件群組」名稱。日誌完成不自動發送內容給客戶或群組，
+  不直接改正式排班、訂單與付款狀態。
+- LINE 流程圖的「日誌連續缺漏－工會決定提醒」連到「通知與發送」的人工日誌提醒公版。
+  預覽與人工寄送共用同一文案組裝，列出範例月嫂姓名及帶入值；狀態顯示「由流程控制」，
+  由工會逐次決定是否提醒，沒有獨立啟用開關或可儲存的文案設定，不連回退役自動私訊規則。
+
+### 5.6 服務完工與滿意度問卷邀請
+
+正常案件由既有 Orders command 成功提交服務完工後，在原案件群組通知一次，不等客戶與月嫂帳務全數結清。時段維持既有前置驗證；本流程不新增完工補件、空白時段日終放行、人工完工按鈕或問卷系統。
+
+- 預設文案：「本案服務已完成，感謝您的配合。請填寫服務滿意度問卷，讓我們了解您的服務體驗。」不提帳務、不宣稱帳務結清。
+- 問卷網址依人工指示先留空。目前使用既有可編輯文字模板 `LINE-SERVICE-COMPLETION-TEXT-V1`，沒有空白網址按鈕或假連結；人員日後直接於通知內容加入正式問卷網址，新工作採用新內容，既有工作快照保持不變。不要求填答才能完工、結算或恢復身分選單。
+- 收件人固定原案件群組，規則為即時／單次 `order.service_completed`。只消費 Orders 明確標記的 committed completion outbox，取消／歷史與舊事件不補發；不掃描日期或日誌猜測完工，不私訊客戶或月嫂。
+- source／decision／intent／delivery 沿既有 LINE 管線。發送前複核同一有效完工證據、原群組及綁定版本；已曾投遞的同一完工事件不因群組重綁再次通知。缺群組保留既有 LINE 內部處理項目，不改寄私人聊天室。
+- 一般客戶沒有月嫂身分時，選單恢復保存正常略過 receipt，群組通知獨立建立；有效雙重身分仍沿規格 23 §9.5 的資格檢查。通知成功、失敗、點連結或問卷填答均不改 Orders／Scheduling／帳務狀態，不解散案件群組。
+- LINE 訊息流程及統一通知內容清單均可定位此模板，提供公版預覽及既有內容編輯。設定更新不代表發送，也不發布 Rich Menu。
+
+完工規則與模板沿現有版本化 Query／Preview／Apply 補齊既有資料庫，先備份目前設定並確認寄送程序停用。只新增缺少的完工項目、移除退役請假規則／模板，保留其他人員文案與歷史快照；重跑已齊備設定不新增版本。設定同步不建立寄送工作、不補發歷史案件或發布選單。流程圖缺少規則／模板時顯示「缺少訊息設定」，不能假顯示可用公版。
+
+### 5.7 月嫂薪資請款明細
+
+已驗證且綁定月嫂的本人由圖文選單「薪資請款明細」選擇目標付款月份，唯讀查詢逐案應付、已付、剩餘待付金額、目標付款日、實際付款日及交易紀錄。月份依正式 `due_date` 歸屬；金額與狀態直接取 Staff Payables 目前帳務。部分付款顯示「部分付款」及剩餘待付金額，補款付清或退匯／沖正後，重新查詢反映最新結果。查詢不建立請款、不改帳務；薪資結算與付款成功均不另發 LINE 通知。
+
+### 5.8 取消訂單與退款
+
+正式取消與退款結果僅由後台操作、查詢及 receipt／owner readback 呈現，不提供「取消成功」或「退款成功」LINE 通知、文案、訊息按鈕或發送工作。取消沿既有 terminal closure 依身分資格處理選單恢復，與通知及退款核銷分開。
 
 ## 6. UI 與人工入口
+
+### 通知事項工作台與管理員待辦 LIFF
+
+後台 `#notifications` 的入口位於右上系統狀態旁；以「需要處理／寄送紀錄」接續原功能。待辦集中服務登記、身分／客戶資料審核、月嫂資訊與條件協調、24 小時／7 天內部跟進、推薦與簽約、服務日期／請假／代班、訂金通知、已付訂金尚未建群、各期逾期款、連續日誌缺漏、客服協助、LINE 寄送及系統異常。只依現行 owner Query 顯示，不建立新通知狀態、已讀表或人工結案關卡；相同聯絡需求以 ticket identity 合併，既有客服紀錄不得把簽約入口改成客服回覆。
+
+桌面與管理員待辦 LIFF 共用 `notification-tasks` 的來源目錄及逐來源唯讀 projection。每次請求只讀一個來源的原查詢；通知異常重用既有 current projection 與 LINE owner 複核。保留 bounded 分頁／cursor 與原 total；畫面明示已載入範圍，搜尋只對已載入事項，不將第一批資料冒充完整清單。載入中、失敗、尚有後頁、搜尋無結果與真正零筆分開呈現，失敗來源可單獨重試。判斷以目前分類為範圍；有來源失敗時不能宣稱已無待辦，有下一頁時保留載入更多，兩者同時發生須保留重試及載入更多。寄送紀錄使用自己的讀取與錯誤狀態。查詢、開頁及同步不 enqueue、不喚醒 worker、不呼叫 provider。
+
+「客戶綁定人工提醒／月嫂綁定人工提醒」由 LINE Identity 原查詢 owner 即時投影：僅列待補件、洽談中、訂單成立或服務中案件的客戶，以及啟用中的月嫂；owner 尚無 LINE 綁定且沒有待審核、已綁定或解除中的 canonical role binding 才列入。待審核身分仍在原審核待辦，不重複列入綁定提醒；取消、完工、歷史案件與停用月嫂不列入。桌面與 LIFF 顯示姓名、可用聯絡電話、案件及綁定方式，提供電話聯絡與複製提醒文字；客戶核對姓名與電話，月嫂核對姓名、身分證字號與生日。此為人工聯絡事項，不向未綁定者發送 LINE，不新增已提醒／已讀／完成狀態；完成綁定或不再符合條件後，重新查詢自動移除。沿用 `line.identity.binding.read` 能力與既有來源分頁，不新增表或寄送工作。
+
+提醒按鈕沿原訂金、各期逾期及日誌 command，一次點擊建立 durable 寄送工作；只稱已建立工作，不宣稱送達。人員文案、客戶新條件審核、重新詢問、客服及代班重用原 Query／Preview／Apply 與 writer；審核／簽約／帳務進入同案原工作區。原版本、送前複核、同操作識別及唯一 outer commit 保留。未綁定 LINE、未建案件群組或資料不足時顯示原因與補齊入口，原待辦不因此假完成；失敗寄送可查閱及依原工作狀態重試／取消，不重做核銷。
+
+LIFF 指定事項以事項 ID／案件編號定位；身分審核沿原 owner 單筆 Query，訂金沿原 followups 的同案、同核銷狀態篩選，其他來源先重查 eligibility，再只顯示相同 identity 的原操作卡片。通知頁 cursor 只作查詢位置提示，不能把同頁其他事項當成選取結果。原事項已處理、移動或不再符合時顯示更新提示並要求重新整理，不改選另一筆。面板每頁筆數或先前篩選不影響指定事項。
+
+手機的 24 小時月嫂回覆待跟進提供「查看本案狀態」及「複製案件編號」，前者接既有手機狀態追蹤並帶入案號，後者明示回後台同案媒合工作區查看回覆及接續。查看／複製不移除待辦、不自動催覆、不交換後台登入。原 owner 判斷已回覆、由新詢問取代或媒合輪次結束時才退出；桌面仍沿原同案媒合入口。
+
+返回、切換事項或離開待辦面板即使前一查詢失效；晚到的內容、錯誤或操作回應不得插回已離開事項或覆寫目前畫面。返回時重新讀取共用來源及 owner 狀態，原操作提交與未知結果查詢沿用既有識別，不因切換畫面重送。
+
+舊請假 source 退出現行來源目錄，直接呼叫舊待辦或受理／退回入口回 410；既有歷史 Query 與正式處理證據保留。現行協調結果與例外沿既有 service-start／leave-result store，不建立轉換、搬移、人工結案或新的通知狀態。
+
+LIFF 每次查詢／操作仍驗證 LINE token、有效工會身分及原 capability，不接收後台 Session、不自動轉入密碼登入。手機的簡易審核、客服、提醒與代班接回原手機面板；正式推薦及簽約提示原後台作業並可複製案號。案件結果或寄送狀態更新後重新讀取 owner，不以本機扣數標記完成。通知事項新增／返回不為每件待辦增加管理員私人推播。
+
+「需要處理」的移除條件由原 owner 的最新狀態決定；從原流程返回或重新整理即重新查詢，不以按過提醒代替完成：
+
+| 事項 | 不再顯示的條件 |
+| --- | --- |
+| 客戶／月嫂綁定人工提醒 | 已有有效角色申請或綁定；客戶案件取消、完工或成為歷史案件；月嫂停用、暫停或退役。待審核者轉由原審核待辦處理。 |
+| 服務登記、身分審核、客戶資料異動 | 原申請已不在待處理狀態；三者各依其原流程，不以案件取消一律刪除申請。 |
+| 確認資訊、調整條件、24 小時月嫂回覆跟進 | 原需求已被後續回覆／更新取代，或案件不再開放該媒合輪次；取消案件不繼續催問。 |
+| 推薦確認、專人協助、待簽約 | 依最新決定及原客服／簽署結果推進；接受後由推薦跟進改列簽約，簽署齊全後移除簽約待辦；取消或離開適用階段後移除該階段提醒。獨立客服需求仍須依客服狀態結束。 |
+| 日期、順延與代班 | 原需求已處理／被新需求取代，或案件已取消／完工；人員不再處理已取消案件的服務排程。 |
+| 舊請假申請 | 僅保留歷史查閱，不列入桌面或 LIFF 現行待辦，不提供舊受理／退回操作。現行請假例外沿「開工、順延與代班」來源處理；退役入口不代表已完成排班。 |
+| 訂金通知、尚未建群 | 訂金核銷後，繳費提醒改為原核銷通知；核銷通知已送達即移除。建群完成即移除尚未建群；取消、完工及歷史案件不再催訂金或建群。 |
+| 各期款項逾期 | 該期餘額歸零、取消、無需該期或到期日更正為未逾期；取消及歷史案件不列原服務款逾期。完工但仍有合法未清款項時保留，不把完工當結清。退款仍由原帳務清冊處理。 |
+| 日誌連續缺漏 | 補齊後不再連續缺漏超過 3 日，或案件不再適用日誌提醒（如取消／完工）；不以已按發送當作日誌已補齊。 |
+| 客服、LINE 寄送異常、系統事項 | 客服依原案件處理狀態結束；寄送工作不再是失敗／待重試，或同一原通知已由有效補送成功處理／業務來源已不適用；監控恢復正常；通知對象設定待辦須有啟用對象、啟用管理員及目前有效且一致的 Admin LINE 綁定才移除。寄送歷史仍保留於寄送紀錄，不因退出待處理而刪除。 |
+
+通知建立前受阻的 `recipient_unavailable`／`template_or_schedule_invalid` 沿既有 LINE-006 current-only projection 及 LINE owner fresh readback，列入「LINE 通知建立異常」來源；保留原 keyset cursor，不把來源頁號當游標。只投影案件、原因、原來源 ID 與可用動作，不輸出收件身分、訊息 payload 或 owner snapshot。已被此事項涵蓋的確切寄送工作 ID 不重複列入寄送異常；其他寄送失敗仍保留原 task 重試／取消入口；已合併的工作在同一異常明細呈現原控制，不因去重而失去入口。同一原來源有可接續工作時不另建補送，不限制同案其他來源；原工作已取消且 source 仍適用時可沿原流程重新補送。沒有新增通知表、完成旗標或自動補送。
+
+設定修復本身不解除通知異常。人員重新核對後，原 source 仍適用、收件人及設定通過原補送驗證才可點「補送原通知」；補送薄轉接既有 manual replay writer，保留原 source lineage、操作識別與 original commit owner。排隊、寄送中及等待重試時仍列原待辦，禁止再次補送；terminal success、原通知不再適用或原 owner 的合法略過結果才依既有 predicate 退出。取消及歷史案件不繼續處理原服務通知。
+
+寄送異常待處理清單由共用後端逐筆核對原通知及 exact replay lineage；同一來源已成功或業務來源不再適用時，不因原失敗歷史仍存在而回流。其他來源的失敗不受影響，原工作狀態與寄送紀錄保持不變。來源複核不完整時回傳可重試的無法讀取狀態，不當作零事項。fresh 複核後可有空候選頁；兩端沿原分頁繼續載入，不將未篩選候選總數當有效總數。手機件數只計算實際卡片；有下一頁時不宣稱已無事項，載入後移除舊空清單提示。
+
+桌面與 LIFF 按本次操作的實際收件人及必要資料限制發送；缺綁定、群組或繳費資料時停用發送，但保留查看、聯絡及補齊入口。每個阻塞操作都須在畫面直接說明原因與下一步，不能只停用按鈕或只顯示錯誤碼。未綁定須指出客戶或月嫂；繳費資料須列出原 ready 判斷實際缺少的項目；原工作仍在排隊／寄送／待重試時說明應接續原工作；權限不足須提示核對登入身分或由有權限工會人員處理。案件／帳務、身分、群組及通知內容各接既有工作面；銀行代碼等部署設定不可在畫面編輯時明示需補項目，不能導向無關綁定頁充當修復。提醒資格仍在提交前由原 command fresh-read。確認資訊與條件協調中，客戶未綁定只阻擋發給客戶，不阻擋原本可用的月嫂回覆；兩端提供綁定方式及重新核對，重新核對不清除尚未寄送的文案。無法完成核對時保留草稿並明示原因，不將無法讀取當作可寄送。
+
+手機管理端客服、身分及資料異動審核一次點擊提交，必要 Preview／Apply 由程式依序呼叫，不要求第二次人工確認；備註選填，原 writer 需要稽核原因時以系統操作說明保存。未知 Apply 結果保留原冪等鍵，不因重按而另建操作。成功後重查共用來源、數量及卡片；仍待客戶回答、欠款或缺日誌時保留。條件審核後保留原面板供選擇月嫂重新詢問。查詢、預覽、Apply 的成功及失敗回應均核對目前事項／畫面序號，離開後不得覆寫新畫面；再次進入讀回正式結果。
 
 ### React 客服案件提醒清單（2026-10-15 人工裁決）
 
@@ -200,39 +270,20 @@ React「客服與營運」的客服案件頁只提醒與追蹤未結案客服，
   typed target 的模擬頁，不送訊息、不開 provider mutation。另保留獨立 server Preview、確認與 Apply。
 - React 管理端固定保留「客服與選單」、「AI 事件工作室」、「LIFF 卡片工作室」、「群組與安全」四個獨立入口；
   API adoption 不得以未接線為由刪除既有設計功能、控制項或業務說明。
-- LIFF 卡片工作室保留 8 個 LIFF 與 4 個 Flex 原始資產。已有 canonical route 的項目可產生不含 identity／token
-  的真實測試連結；缺 route／typed owner 的項目保留設計並明示 contract gap，不得以 demo token、樣本個資、
+- LIFF 卡片工作室保留現行 LIFF 入口與 4 個訊息公版項目。已有 canonical route 的項目可產生不含 identity／token
+  的真實測試連結；案件專屬入口缺少必要識別碼時不產生通用連結，不得以 demo token、樣本個資、
   假 provider payload 或不存在的 URL 補空。真實測試連結的 origin 由既有 LIFF runtime-config 回傳經驗證的
   `LINE_PUBLIC_BASE_URL`／`BASE_URL`；不得由 React 硬編 localhost、夾帶帳密、query、fragment 或身分資訊。
 - LIFF 卡片工作室中央手機模擬器必須維持可閱讀的正常手機比例與最小內容寬度，不得被左右工作區 flex/grid
-  壓縮成狹長欄；窄螢幕改為堆疊或可捲動配置。移除黃色區域中「原始 8 個 LIFF 與 4 個 Flex 功能均保留」等
-  實作／盤點說明，該資訊只留在正式規格，不作為一般操作者畫面內容；移除說明不得刪除、隱藏或停用任何
-  8 個 LIFF、4 個 Flex 資產與其既有操作入口。
-- legacy `/static/bind.html` 僅作相容資產路徑；正式客戶入口為 `/line-bind`，經 Customer Preview／Apply 處理。query string 可帶往 canonical
-  頁面作導航及可修改預填，但不得參與身分或授權判斷。`profile_update.html` 在正式異動契約完成前只保留唯讀設計與
-  人工補登指引，不得呼叫不存在的 API、接受 client-supplied `line_user_id` 或呈現假成功。
-
-LIFF 資產入口對齊狀態（2026-08-25）：`completed`。工作室保留 8 個 LIFF 與 4 個 Flex；
-現行 `/line-gateway`、`/line-bind` 與 `/line-identity` 分別提供導流、客戶核對及跨角色驗證 presentation，共用 canonical LINE Identity typed application，其餘已存在入口由
-runtime `public_base_url` 產生公開網址。Chrome 已由工作室逐一實點並核對正式頁面；
-`profile_update.html` 仍明確顯示待建且不導向假頁面，其正式 Query／Preview／Apply 工作仍由 §6.1 列管，
-不因本項入口對齊完成而視為完成。Staff verified-token 與 provider delivery 亦不包含在本項完成範圍。
-手機模擬器在桌面與窄視窗均維持 360px 正常寬度，窄容器改為工作區內局部水平捲動；8 個 LIFF、
-4 個 Flex 仍可達，且一般畫面不再顯示資產盤點說明。本項 responsive UI 驗收亦為 `completed`。
-- AI 事件工作室在正式 catalog contract 完成前，只允許零寫入草稿編輯與 deterministic 本機預覽；未命中固定
-  轉人工 fallback。滿意度調查按鈕與統計槽位不可因 API 尚缺而刪除；正式 feedback Query／record／receipt 完成前
-  只顯示本機預覽，不保存回饋、不增加硬編統計、不假造人工工單。正式規則 Query／Preview／Apply／receipt
-  與客戶 `profile_update` Query／Preview／Apply／receipt目前仍是 required contract gap；四個 Flex 原始資產的
-  去敏 presentation contract 已由 §6.2 收斂，但不代表 projection composition、delivery 或 provider 已完成；
-  不得誤用 notification schedule、legacy client-supplied `line_user_id` writer 或 delivery raw payload 取代。
+  壓縮成狹長欄；窄螢幕改為堆疊或可捲動配置。一般畫面不顯示歷史資產盤點說明；現行項目與正式操作入口保留。
+- legacy `/static/bind.html` 僅為相容導向；正式入口 `/line-bind` 沿 canonical Customer Preview／Apply。網址預填不作身分依據。
+- `/line-profile-update` 已提供 verified LIFF 資料異動 Query／Preview／Apply 與 applicant receipt；送出只建立待審申請，工會核准後才更新 owner 資料並讀回。契約見 §6.1，不再列為待建頁面。
+- LIFF 工作室沿既有正常手機比例、資產入口與公開 runtime origin；模擬預覽不代表真實 verified-token、provider 送達或發布驗收。
+- AI／常見問答僅在獨立 LIFF 提供。一般聊天室未知輸入回自助導覽，不啟動 AI 或自動開客服單；主動點「需要專人協助」才沿正式 Feedback／Customer Service owner 建立需求，不使用本機假統計或假工單。
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
-- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、狀態追蹤與營運摘要。四個入口以 server-verified LIFF identity 與 current role-scoped LINE admin binding 取得既有 Admin owner 的 actor ID、角色與 capability；不得要求另一個 React／密碼／MFA Session，也不得把 LINE 憑證交換成可供一般後台使用的 Admin Session。各 owner 的 Query／Preview／Confirm／Apply 仍須以該 actor 重新驗證所需 capability。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 請假代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆；狀態追蹤只讀取 Orders 的 current operational-stage projection，依案件編號查詢未完成訂單的目前階段、最後更新與下一步，不建立或改寫訂單 root；營運摘要仍只讀取其 owner 的 current Query。舊 `anomalies_center` target 僅作既有連結相容別名並導向 `order_tracking`。QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
-
-AI feedback 執行狀態（2026-08-26）：`approved-for-contract-first`。人工已授權補齊正式 feedback owner、
-root facts、privacy、typed Query／record／receipt／readback 與 durable manual-ticket linkage；只有 formal
-contract closure gate 通過後才可實作，不得把 blanket approval 解讀成 local counter、假統計或假工單可發布。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 的獨立 target surface 使用待辦工作台、客服中心、狀態追蹤與營運摘要。四個入口以 server-verified LIFF identity 與 current role-scoped LINE admin binding 取得既有 Admin owner 的 actor ID、角色與 capability；不得要求另一個 React／密碼／MFA Session，也不得把 LINE 憑證交換成可供一般後台使用的 Admin Session。各 owner 的 Query／Preview／Confirm／Apply 仍須以該 actor 重新驗證所需 capability。待辦工作台依 `29` 分組呈現 Client 資料異動、LINE Identity 客戶／月嫂重綁與身分異常、Scheduling 現行請假協調結果及代班／改期，以及 Matching／Scheduling 媒合指派／重新媒合；各組只呼叫原 owner 的 bounded Query／Preview／Confirm／Apply，不建立 LINE-owned 共用 approval root。客服保留既有查看／回覆；狀態追蹤只讀取 Orders 的 current operational-stage projection，依案件編號查詢未完成訂單的目前階段、最後更新與下一步，不建立或改寫訂單 root；營運摘要仍只讀取其 owner 的 current Query。舊 `anomalies_center` target 僅作既有連結相容別名並導向 `order_tracking`。QA／Knowledge 審核留在 AI 事件工作室；其 server-side ID token、binding、version、receipt 與 outbox 規則不因共用 LIFF runtime 而改變。
 
 ### 6.3 LINE Feedback正式契約（2026-08-31 人工裁決）
 
@@ -247,17 +298,12 @@ optional Customer Service ticket reference；不得保存raw prompt、provider p
 Service owner建立或exact-link正式ticket。Feedback root、receipt及ticket linkage由唯一outer UoW協調；若現行
 架構不能同transaction安全完成，改用committed durable intent並明示`ticket_link_pending`，不得回報假完整成功。
 正式surface至少包含feedback Query/readback、zero-write Preview、Apply、immutable receipt/readback與bounded
-aggregate statistics Query。此契約已解除owner／identity／privacy／receipt／ticket linkage Authority gap，但依
-Task 96 current priority尚未進入implementation順位。
+aggregate statistics Query。獨立 LIFF 已沿正式 Feedback owner 提交及讀回；`unresolved` 對應使用者明確點選「需要專人協助」，不從一般留言或查無答案自動推定。
 
-### 6.4 自然語言語意工具路由（2026-08-31 current contract）
+### 6.4 聊天室與獨立 LIFF 問答邊界
 
-LINE輸入先匹配exact deterministic commands與security aliases；無命中才可進LLM semantic tool router。
-router只能從closed、versioned typed tool catalog選擇既有核准工具，例如`fixed_message`、`faq_answer`、
-`open_liff`、`query_case`、`query_schedule`、`open_customer_service`。正式結果只能由工具自己的owner contract
-產生，再進LINE durable delivery。LLM不得直接產生business answer、寫owner root、擴張catalog、繞過權限／
-fresh validation，或把模型文字當provider delivery success；unsupported、ambiguous或tool unavailable一律轉
-durable manual fallback。本段不授權AI provider、Phase 2 implementation或新的business tool。
+聊天室先處理核准的 deterministic commands／security aliases；一般留言及未知輸入回自助導覽，不執行自由文字 AI、不自動開客服單。明確呼叫專員才直接建立或沿用同一客服案件。舊 AI 按鈕只提示停用，不結案或解除 hold。
+AI 智慧問答與常見問答在專用 LIFF 提供；無唯一核准答案回主題選單，系統不可用如實顯示失敗。模型不產生業務承諾、不寫 root、不自行發布內容。使用者明確點選「需要專人協助」才走正式人工需求。
 
 ### 6.5 Scheduling mobile LINE 綁定授權（2026-09-09 人工裁決）
 
@@ -269,14 +315,20 @@ LINE token不得進query、fragment、LINE message或postback。mobile adapter�
 Scheduling root；正式mutation仍完整沿用Scheduling Query／Preview／Confirm／Apply、version、lock、fingerprint、
 receipt與fresh readback。
 
-LINE 管理 surface 驗收狀態（2026-08-25）：`completed`。三方服務群組與事件使用 additive
+LINE 管理 surface 驗收狀態（2026-08-25）：`completed`。案件群組與事件使用 additive
 numbered Query，舊 `limit` API 保留；執行中的 FastAPI 更新至 current route 後，Chrome 實點群組頁
 顯示合法零筆狀態，未再出現 `resource_not_found`。發送任務明細已實點開啟並立即關閉，晚到結果未重開
 Drawer。Rich Menu 依 typed bounds 顯示本機幾何初檢，明示正式路由仍須 server Preview；Diff 在缺少
 active typed snapshot 時明示 blocker，不猜 Before。外觀與 action 同時修改後，取消 action 仍保留外觀
 candidate，再取消外觀可完整復原，且全程未送出 mutation。Focused React 3 files／20 tests、Python 4 tests
-與 TypeScript 均通過。測試 DB 目前沒有三方群組，因此群組／事件正向翻頁為 `not_run`，由 focused
+與 TypeScript 均通過。測試 DB 目前沒有案件群組，因此群組／事件正向翻頁為 `not_run`，由 focused
 numbered pagination regression 覆蓋；不得為取得 Chrome 正向頁面而偽造 owner root fact。
+
+### 6.0 LIFF 頁面設定的唯一來源
+
+登記、綁定、導流頁及管理端設定統一讀寫 MySQL 的 versioned `liff` configuration。`config/liff_settings.json` 僅供明確 fresh bootstrap；執行中不得 fallback 讀檔。設定缺失、格式錯誤或資料庫不可用回 503；頁面不存在或停用回 404。
+既有 `/api/config/liff`、`runtime`、`state`、主題／頁面／欄位儲存、history 與 rollback 保留入口，改經同一 configuration Query／Apply。ETag／If-Match 使用資料庫 revision；讀取後遭並行更新回 409，不能盲目覆蓋。共用 typed LIFF validation 同時約束管理 API 與通用 configuration writer。
+歷史讀不可變資料庫版本；還原是在目前 revision 上新增一版，不修改舊版本或回寫檔案。舊檔案歷史不自動匯入或作現行還原來源。設定操作只產生設定版本與稽核，不建立訊息、排程投遞或選單發布工作。
 
 ### 6.1 LIFF 資料異動申請與管理核准（2026-08-25 人工裁決）
 
@@ -313,21 +365,20 @@ allowlist、version、repository contract 與必要 `lu_test_*` schema release�
 客戶 Rich Menu「修改訂單資訊」改為 verified LIFF URI。它是結構化人工確認申請，不是 Orders writer：
 
 1. Query 只依 server 驗證的 LINE ID token 與 current customer binding 讀取本人有效訂單；不得接受 client-supplied user ID 或跨客戶 case number。
-2. 第一版 allowlist 為服務地址、下廚需求、服務日期／天數、每日服務時段與其他訂單內容。服務地址 intake 包含 Client owner 的 `city`、`address`、`residence_type` current values，但不移轉其 root ownership。
+2. 新申請 allowlist 為服務地址、下廚需求、每日服務時段與其他訂單內容。移除原「服務日期／天數」選項及其起訖日／天數輸入、preview 與提交分支；新 request 不再接受 `service_days` 日期申請種類或其他種類夾帶 `start_date`／`end_date`，不能只隱藏前端。舊申請、客服事件及訂單日期唯讀查閱保留，不刪資料。服務地址 intake 包含 Client owner 的 `city`、`address`、`residence_type` current values，但不移轉其 root ownership。
 3. 流程固定為 Query／Preview／human Confirm／Apply。Preview 顯示 before／requested diff 與影響提醒且零寫入；Apply fresh-lock binding 與 selected Order，校驗 order version、Client profile version 所形成的 fingerprint 與 idempotency identity。
 4. Apply 只在 caller-owned outer UoW 建立／延續 Customer Service ticket event，回傳 ticket readback。畫面只能顯示「待工會確認／正式訂單尚未修改」；後續正式改單、費用、排班、媒合與月嫂同意均不在本流程 Authority。
 5. 「修改登記資料」verified applicant allowlist 移除 `city`、`address`、`residence_type`；這三欄改由訂單異動 LIFF 提出影響性申請。Client owner 仍保留 canonical values 與後續核准寫入責任。
 6. stale、binding drift、order 不屬本人、已終結 order、非法欄位、fingerprint mismatch、same-key different-payload 或 transaction failure 固定 fail closed；exact replay 回同一客服需求。
 
-### 6.2 四個 Flex 原始資產的 presentation contract（2026-08-25 人工原圖同步）
+### 6.2 工作室公版預覽與候選回應契約
 
-第 6 節較早將「去敏 Flex design preview」列為 required contract gap 的文字，由本節取代。
-依 26 的 Eraser M1～M4 逐節點轉錄，四張卡的真實業務用途與 owner source 固定如下：
+工作室訊息預覽重用既有公版目錄、純訊息組裝與對話預覽元件；公版不查真實案件、不建立憑證或投遞，按鈕僅顯示動作說明。預覽不宣稱實際流程或投遞已接通。現行項目如下：
 
 | Asset | 原圖節點／業務作用 | Current owner source | 設計預覽邊界 |
 |---|---|---|---|
 | flex_dispatch | M1 Staff_Order_View 與 M3 派案意願調查：讓候選月嫂去敏查閱正式案件資訊；主動作為「願意承接」，另一動作固定為「提出疑問或無法承接」並開啟 recipient-bound LIFF | Scheduling Candidate Contact Pool、Orders case projection；LINE 只 render／deliver | 不代表已建立聯繫事件、delivery task 或送達；不得攜帶客戶姓名、電話、詳細地址；LIFF 不接受 query-string LINE 身分 |
-| flex_leave_confirm | M1 Client_Extension_Push 與 M3 Client_Leave_Notice：請客戶確認月嫂請假後順延或不同意並轉代班 | Scheduling leave request／canonical leave receipt／assignment service dates | 點擊只可形成 recipient-bound typed decision；卡片文字不得直接改 end_date、班表或代班 |
+| flex_leave_confirm | 案件群組服務日期表，記錄已確定的排班，無再次確認按鈕 | Scheduling 正式排班與日期表 renderer | 公版 service-start-result；不發客戶同意順延卡 |
 | flex_alert_critical | M4 Step3_Push_Alert：將 committed HIGH escalation 的去敏摘要與需驗證身分的客服處理入口通知已設定的管理員個人對象 | Customer Service escalation；runtime alert target owner只提供 current recipient target；LINE負責delivery | 不顯示完整姓名、電話或 raw 摘要；不代表通知對象已設定、task 已送達或案件已被 claim |
 | flex_negotiation | 人工條件協調詢問：月嫂提出調整條件後，由人員查看原文並自行輸入文案詢問客戶，客戶提供新條件後由工會審核 | Scheduling Candidate Contact Response／staff-authored question／customer answer／adjustment review | 不自動套用條件、不直接改 Orders；客戶回覆後仍走 fresh owner Preview／Apply |
 
@@ -344,27 +395,11 @@ allowlist、version、repository contract 與必要 `lu_test_*` schema release�
 9. 工會人員已通過 LINE current binding、enabled Admin 及 matching capability 驗證即可協調、審核與改單，不限 system_admin；一般未綁定使用者不得使用人員入口。人員待辦是唯一提醒介面，不建立新的協調群組通知；既有未送出的自動調整／群組通知由 worker 取消，已送達歷史不改寫。
 10. 審核通過並讀回新案件版本後，人員選擇目前有效的候選月嫂重新詢問。重送綁定同一 customer-answer 與 candidate 的冪等 identity，並檢查審核後案件版本未漂移。服務日期改變時，由既有 Scheduling writer 使用 current Orders 起訖日 fresh-read、重驗 availability、更新 contact period／coverage 並保留前後日期事件，不能沿用舊期間；重送不等於月嫂願意或正式指派。
 
-客戶推薦由人員選定願意承接者並主動寄送確認資訊。專人協助回覆「已收到您的聯絡需求，請留下您的疑問。」，人員從待辦查看與回覆，原卡片仍可接受配對；接受時回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，待辦改為辦理簽約，雙方完成簽約後才由人員建立本案服務群組。成功送達滿 7 天未接受僅作內部提醒，不阻擋回覆、不發群組通知。本人、current binding 與有效方案驗證不省略，取消、更換或最終決定的方案不能重用；履歷下載仍沿原短效憑證規則。
+客戶推薦由人員選定願意承接者並主動寄送確認資訊。專人協助回覆「已收到您的聯絡需求，請留下您的疑問。」，人員從待辦查看與回覆，原卡片仍可接受配對；接受時回覆「已收到您接受配對的回覆，後續由工會安排簽約。」，待辦改為辦理簽約，訂金正式核銷後由人員建立案件群組；簽約與付款可先後發生，建群不以雙方簽約完成為門檻。成功送達滿 7 天未接受僅作內部提醒，不阻擋回覆、不發群組通知。本人、current binding 與有效方案驗證不省略，取消、更換或最終決定的方案不能重用；履歷下載仍沿原短效憑證規則。
 
-工作室可持有 closed asset identity、design revision、去敏固定文案與 owner-fact availability
-狀態，並在 owner facts 缺失時顯示明確 blocker。它不是 Flex 素材資料庫、provider payload API
-或發送入口，不需要為純設計預覽建立 generic Flex Query。現有 Scheduling matching renderer、
-leave decision、Customer Service escalation 與 M3 zero-candidate public contracts各自維持唯一 owner；
-不得為四張設計稿另建競爭 writer。
+LIFF 圖例與正式入口依目前流程呈現：客戶無實際服務日期修改選項；日誌直接送出；月嫂填入已協調的順延日期，無衝突即更新，需代班或衝突才交工會。三個可設定頁面套用資料庫目前版本的主題、一般文字、按鈕與成功提示；正式結果狀態及申請編號始終由實際回執顯示。
 
-因此，四張卡的「closed typed design preview contract」已由本節回答；尚未完成的是真實 owner
-projection composition、exact recipient intent、delivery／postback、provider 與 Chrome E2E。依
-2026-08-25 人工裁決，原圖缺失需求在 96 完成前只登記於 26 的 deferred-after-96 清單；此句僅保留
-當時 provenance。2026-09-01 26 §1.1／§1.2 已取代其排除效果：Task 96 必須驗證所有非 FAQ 原圖
-節點／箭頭，但仍不得由本節擴張 owner-safe boundary、schema、public route、provider 或 production
-施工。
-
-四卡 presentation 驗收狀態（2026-08-25）：completed。Focused Vitest 2 passed、TypeScript
-passed；Chrome fresh reload 後實點派案通知、服務日順延確認、重大異常通報與媒合條件溝通，
-均顯示對應去敏文案、明確 owner-fact blocker 與「不建立發送工作」邊界。頁面沒有 application
-error／warn；僅觀察到第三方 Chrome 擴充套件自身 listener warning。此完成事實不包含真實
-projection composition、postback、delivery、provider 或 26 的 deferred-after-96（僅歷史 provenance，
-現由 2026-09-01 Task96 direct-flow acceptance 取代排除效果）缺口。
+閒置客服的營業時間、自動分派、閒置結束與預設訊息設定停用：目前設定清空、初始化不再載入、舊維護 API 回 410，設定 writer 只允許空定義以防還原復活。設定歷史與客服案件保留，不新增自動化。
 
 ### 6.6 通知內容統一維護（2026-10-15 人工裁決）
 
@@ -372,11 +407,19 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
 
 清單呈現通知名稱、對象、內容摘要與編輯入口，搜尋涵蓋名稱／內容。文字儲存沿用既有 manager 權限及 MESSAGE_TEMPLATES revision；任何內容儲存後重新 Query 全部內容以取得共用的新版本，stale／查詢或儲存失敗不得假裝成功或盲目重試。歡迎訊息仍由原加好友流程發送，不增加延後引導。
 
-人工已一併授權將請假、媒合與告警的說明文字接通至實際通知組裝。新請假確認卡片與 M3 協調卡片只以已保存的文字設定取代原說明欄；原案件資訊、日期、recipient、互動憑證、按鈕及流程判定不變。M4 客訴／runtime critical 告警在原去敏摘要與管理入口之前加入對應設定說明，維持原發送格式；一般轉真人通知不套用這兩則說明。本文不授權把既有文字告警改成新的 Flex／安全連結流程。
+人工已一併授權將請假、媒合與告警的說明文字接通至實際通知組裝。條件詢問由工會自行輸入文案；已退役的客戶順延確認卡不再組裝或發送。M4 客訴／runtime critical 告警在原去敏摘要與管理入口之前加入對應設定說明，維持原發送格式；一般轉真人通知不套用這兩則說明。本文不授權把既有文字告警改成新的 Flex／安全連結流程。
 
 設定更新只影響之後新組裝的通知；已提交的 intent／outbox／delivery payload 沿用 immutable snapshot，不能在 retry 時套用新文案或因儲存而重新送出。規則欄位收在次要發送設定，仍沿用既有 Preview／Confirm／Apply、取消待發工作的 owner 及效果上限；流程管理通知不得把 shadow rule 的停用狀態冒充實際流程關閉。
 
+2026-10-24 人工確認：LINE 專區新增「LINE 流程圖」，沿用精簡版預覽。首頁僅顯示登記與身分、媒合到服務、客服與支援三組流程的步驟及正式目錄訊息數；點選步驟後才展開訊息，多則訊息可再選定個別項目。流程順序供導覽，不建立新的業務前置或改變 owner gate。流程圖只讀取既有訊息預覽目錄與通知規則 Query，以正式 descriptor／template 引用解析目前訊息 ID，不複製文案、假造啟用狀態或建立投遞。選擇訊息後定位「通知與發送」的對應項目，網址保留 `tab=push_queue&message=<目前訊息ID>` 供重新整理；清除會遮蔽該項目的搜尋／格式／狀態篩選。不存在或查詢失敗時明示不可用，不改選其他訊息。返回流程圖及切換仍沿既有未儲存草稿保護；返回時重新讀取正式規則，保留所選流程步驟。規則型通知呈現 current enabled；固定回覆及業務流程管理訊息標示「由流程控制」，不得以 shadow rule 狀態提供開關。編輯、啟用設定、權限與 stale 保護仍由原通知工作台 writer 承接；圖文選單發布、provider 發送與業務資料寫入不屬於流程圖操作。
+
 服務群組由工會人員在群內輸入 `綁定訂單 案件編號 邀請網址`，三段以空白、全形空白或換行分隔；網址自身不可拆行。設定只保存，不寄邀請。之後同群只輸入 `發送邀請`，以保存網址及目前核銷／身分資格排入私人邀請，無再次確認。更新網址重輸完整設定指令，保留成員歷史。格式錯誤回覆原因與正確範例，不保存或寄送；發送前資格或網址有變則取消舊工作。完整文案與錯誤提示依規格 17「服務群組設定與邀請指令」。
+
+通知事項頁提交既有操作成功後，重新讀取相關來源與寄送紀錄，避免共用客服事項或舊寄送狀態殘留；條件審核後仍保留原操作面板供接續選擇月嫂。失敗來源保留明確錯誤與重試入口，不假裝處理完成。
+
+寄送紀錄按原公開來源分類：契約、身分審核、媒合及群組邀請歸「審核與協調」；帳務、排班、日期與完工歸「款項與日誌」；其他歸「客服與異常」。分類在伺服器查詢及分頁前套用，回傳該分類完整總數；未查詢的分類顯示「—」。服務當天、服務狀況回覆、完工通知與第二期款提醒／核銷均沿用既有公開類別，不新增業務狀態；未知來源仍拒絕。
+
+系統通知對象可用性同時核對通知設定啟用、管理員目前啟用及其目前有效的 canonical Admin LINE 綁定與主檔一致；沒有符合上述條件的對象時，顯示「系統通知尚無可用對象」待辦。只讀檢查不修改對象設定，也不發送測試通知。
 
 ### 6.7 訂金繳費提醒與核銷成功通知
 
@@ -391,6 +434,7 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
 - 提醒文案：`案件〈{case_no}〉訂金 NT${amount}，請於{due_date}前完成匯款。`
   「查看繳費資訊」開啟客戶 LIFF；「專人協助」直接建立或接續 Customer Service 需求，
   回覆 `已收到您的聯絡需求，請留下您的疑問。`，後續聊天室留言加入同一客服案件，不發群組通知。
+- 訂金核銷後待收餘額為零屬正常狀態；已核銷通知及繳費狀態 Query 以同案 current 義務事件的原額與正式 settlement projection 核對，不將零餘額視為無訂金而漏列。未結清提醒仍讀目前待收餘額，查詢不改帳務。
 - 正式訂金核銷提交帶 `line_deposit_notification=true` 的既有財務 outbox 事件後，worker 自動建立成功通知：
   `案件〈{case_no}〉訂金 NT${amount}已確認入帳，謝謝您。`；「查看繳費狀態」開啟同案 LIFF，
   顯示已入帳金額及銀行實際入帳日期。同一 settlement identity 僅建立一個工作；不補發歷史核銷。
@@ -405,6 +449,43 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
   寄送前 fresh-read 財務來源及收件者綁定；已入帳的催繳、條件已更新、已取消或失效綁定的工作取消。
   未實際 provider 成功前只顯示已排入／處理中，不能標為已送達。
 
+### 6.8 服務當天群組繳款提醒與月嫂服務狀況詢問
+
+- 觸發：以台北時區正式 `actual_start_date` 當天為準，讀目前有效班表的當日工作月嫂及本案目前有效綁定原服務群組（`bound／inviting／active／attention`）。未確定正式日期、沒有當日工作班、無原群組或案件已取消／完成時不建立提醒，不改用客戶私訊。不要求工會再次確認；同一案件／日期不因重跑或已發送後付款變動重複通知。
+- 群組卡片文案：`【服務開始提醒】
+案件編號：{case_no}
+今天是本案的服務開始日，祝服務順利！`；第一期尚欠大於零時加上 `第一期款尚待繳納：{amount} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。`；結尾為 `{caregiver_names}，請問今天的服務是否順利？`。已結清／零應付省略繳款段落，仍詢問服務狀況。
+- 按鈕為「服務正常」「需要協助」。server 以可信 webhook 的群組及使用者身分，重新核對原群組、正式開始日、有效 generation、當日工作班及 current bound staff 身分；客戶、工會人員、其他月嫂、其他群組、私訊或失效卡片不得代答。不把卡片中的案號、按鈕 token 或角色文字當授權。
+- 「服務正常」記錄回覆並在原群組回覆 `已收到，祝您服務順利。`；「需要協助」沿 Customer Service 正式 writer 建立／接續工會服務進度待辦，記錄案件及日期，原群組回覆 `已收到您的協助需求，請留下遇到的狀況。`。不額外建立管理員私人或案件群組告警。人員查看原服務群組；不監聽、抓取群組的一般討論內容。
+- 每位合資格月嫂對同一詢問／同一選項只記錄及回覆一次；重複 webhook 或不同 event ID 重按不重開待辦、不重複致謝。正常回覆後仍可提出協助需求。回覆、待辦、ack task 與 receipt 共用 webhook consumer 的 outer transaction，失敗完整回滾。
+- LINE 來源與回覆沿既有 source event／receipt／committed delivery task 保存，不新增 Orders、Client Finance 或 Scheduling 狀態、不建立出勤或核銷事實。第一期款不是開工新增關卡；核銷維持既有正式帳務流程。
+- provider 前重新核對日期、群組、班表及未繳金額；改期、換群、換班、付款改變的未寄快照取消，當天掃描可建立新快照；已嘗試投遞者不因條件變動自動另建通知。舊服務前三日私訊來源／模板／待寄工作停止使用，不補發歷史提醒。第二期款依下節到期當天原群組流程。
+
+### 6.9 第二期款到期群組提醒與核銷成功通知
+
+- 先核對 Client Finance 正式第二期應付：付款條款有第二期到期日，且有唯一有效、原應付金額大於零的第二期應收。金額為零、無第二期或資料不足時，不產生第二期提醒來源、寄送工作或核銷成功通知；不把「已繳清」誤認成「不需第二期」。不新增人工計算、付款義務或案件狀態。
+- 到期日仍由第一期到期日加 15 個曆日計算。台北時區到期當天、仍有未繳金額且案件未取消，才建立原服務群組提醒；不在前三日或客戶私訊催款。文案為 `案件 {case_no} 第二期款尚待繳納 {amount} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。`，純文字無按鈕。
+- 發送前重新讀取案件、第二期需求、期限、未繳金額及目前有效原群組（bound／inviting／active／attention）。已結清、取消、不需第二期、日期不為今天或來源失效時取消；金額／日期／群組變更取消舊快照，由當天新條件重新投影。新到期日尚未到則等待；同日已成功／已嘗試寄送不因重掃另建另一筆提醒，既有同工作 retry 維持原投遞契約。
+- Finance 正式第二期核銷在原 outer UoW 的既有 `projection_refresh` payload 保存 `line_second_payment_notification=true`、settlement identity、選定第二期 obligation identities 與本次正式分配金額。交易 rollback 無通知；只有新標記事件可觸發，不補發歷史核銷，不改 Finance outbox status、不增加 enum／schema。
+- 提交後才投影成功通知：`案件 {case_no} 第二期款 {amount} 元已確認入帳，謝謝。`，純文字無按鈕，發原服務群組。送前確認本案仍需第二期、原核銷分配及正式收款仍有效、無撤銷且第二期已結清；本次核銷 identity 去重。失效或撤銷取消通知；未核銷或僅有截圖／留言不通知。
+- 缺少有效原群組，沿既有 LINE-006 `recipient_unavailable` 工會待辦留存；不猜群組、不改用私人通知。群組設定就緒時可重新按目前資料投影；一般群組談話不監聽。未實際 provider 成功不得宣稱已送達。
+- 正常精確核銷不產生財務 `anomaly_review_required`；真正金額異常依既有拒絕／明示超收處理保留。提醒及入帳通知不變更 Orders／排班／出勤，也不以第二期款新增停工或完工關卡。
+
+### 6.10 各期繳款逾期待辦與人工提醒
+
+- 訂金、第一期、第二期使用各自正式到期日及同一期未核銷餘額，台灣日期到期日隔天起且餘額為正才列入工會內部待辦；不等待服務完工。不需第二期、金額零、未到期、已結清、已取消義務及歷史案件不列入。工會應退給客戶的退款不屬於本提醒。
+- LINE「客服與營運 → 日常作業 → 繳款逾期」呈現各筆案件、期別、到期日、逾期天數、餘額、提醒對象與上次提醒／寄送結果。同案多期逾期分列，不跨期合計；載入或重新整理只查詢；通知事項頁重用同一待辦與發送入口，沒有全域彈窗或另一套通知狀態。
+- 工會人員自行決定是否點「發送提醒」；一次點擊直接建立既有 durable delivery task，不設再次確認視窗，不自動定期重發。同次操作重播沿用原工作；寄送未完成時不建立第二筆。收到結果不明時保留原操作供確認，不顯示成功或另建工作。
+- 訂金提醒只寄本案客戶已綁定的私人聊天室；第一、二期只寄本案有效案件群組。缺少客戶綁定或群組時保留待辦、禁用發送並顯示原因；不得改送其他對象。既有到期當天第一、二期群組通知及訂金 LIFF 提醒保持原流程，不由逾期提醒重播。
+- 文案為純文字、無按鈕：「本案{期別}尚有 NT$ {該期未核銷餘額} 未確認入帳，請協助確認繳款，謝謝。」期別僅為「訂金」「第一期款」「第二期款」，不用全案金額或未來期款；銀行資料未匯入不能宣稱客戶未繳款。
+- 點擊時 fresh-read 同案、同一義務、期別、projection version、event、到期日及餘額；任一改變回 typed conflict，重查後由人員重新決定。只依當期真實餘額形成工作，不接受前端指定收件人。已提交工作在 provider 前再次核對該筆款項及收件綁定／群組版本；結清、不再逾期或來源變更時取消舊工作，不發錯期別、舊金額或舊收件對象。
+- 發送後仍列待辦與提醒紀錄，直到該期正式核銷餘額歸零才不再列入；尚未寄出的提醒在 delivery gate 取消。提醒不建立收款、付款義務或財務異常，不修改 Finance／Orders／Scheduling，亦不代表退款或客戶端結算完成。沿用既有 LINE task、audit 與 worker，無新資料表或財務狀態。
+- 驗收：訂金逾期而第一二期未到期只列訂金；第一期結清只保留真正逾期第二期；同案多期各自列示／核銷；到期日當天不列、台灣隔天列；零第二期不列；缺綁定／群組保留；Query 零寫入；錯期別、金額／日期／版本變更被拒絕；重播不重寄；核銷後待辦消失且 pending 工作不越過假 provider；工會角色可操作，未授權拒絕；React 入口與實際畫面可查詢、發送及核對銀行入款。
+
+### 工會手機提醒待辦
+
+已驗證且具有對應能力的工會人員，可在 LINE 手機待辦查看「繳款逾期」與「日誌連續缺漏」，含 owner 完整總數、分頁、重新整理與讀取失敗狀態。手機薄轉接既有提醒 Query／Send，不建立第二套日期、餘額、連續缺漏或寄送判斷。各期逾期隔天獨立列入，訂金寄客戶私人聊天室、第一／二期寄案件群組；日誌列案件群組與連續缺漏天數，超過 3 日才列入。人員點擊才建立寄送工作，發送前仍沿既有 owner 複核。未明結果保留同一操作識別查詢，不以重新整理重複寄送。手機不交換一般後台 Session，也不發布選單。
+
 ## 7. 第一版驗收
 
 1. 服務說明回覆六分類且 exact replay 不重複建立 task。
@@ -418,7 +499,7 @@ projection composition、postback、delivery、provider 或 26 的 deferred-afte
 ## 2026-08-21 M2／M4 routing and escalation amendment
 
 - 明確呼叫專員優先於自助路由，直接受理而不再確認；一般提及客服、錯誤或無法解決不自動開單。聊天室不啟動 AI／Knowledge 問答，既有 exact protected identity alias 仍由身分流程處理。
-- production full AI 現在不核准；Phase 1 僅允許 deterministic harness、source-cited typed outcome 與 durable manual fallback，Phase 2 維持 proposed。active automation hold 時連 deterministic auto-reply 也禁止。
+- 聊天室 AI 停用；一般留言回自助導覽，明確呼叫專員才建立或沿用客服案件。獨立 LIFF 問答沿核准 Knowledge 查詢；無答案回主題選單，系統失敗如實顯示，不自動開單。active hold 的留言只加入原客服案件。
 - Customer Service 是 HIGH escalation／ticket／hold／人工處理的 owner；Anomaly 僅提供 source projection。escalation 透過 typed `TicketReferral`／escalation port，不競寫 M2 `service_help` 或 M4 `runtime_alert_application`；Scheduling 不在 escalation transaction。
 - production composition必須注入automation hold／escalation gateway；active hold會在任何deterministic reply、ticket或
   delivery intent前fail closed。human escalation採`create → claim → handling → resolve`，每步驗證version、

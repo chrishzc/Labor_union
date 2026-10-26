@@ -8,6 +8,7 @@ import pytest
 from infrastructure.mysql.accounts_payable_export_sources import (
     _STAFF_PAYABLES_SQL,
     MySqlStaffPayableExportSource,
+    MySqlClientRefundExportSource,
     _staff_fact,
 )
 from subsystems.staff_payables.accounts_payable_export import aggregate_accounts_payable_rows
@@ -107,7 +108,7 @@ def test_partial_staff_balance_is_included_by_mysql_without_relisting_paid_or_bl
                     "INSERT INTO staff_obligations VALUES (%s,'CASE-P',%s,20000,%s,'payable_to_staff',%s,1)",
                     (identity, staff_id, due, state),
                 )
-                cursor.execute("INSERT INTO staff_payable_projections VALUES (%s,%s,%s)",
+                cursor.execute("INSERT INTO staff_payable_projections(obligation_identity,balance_ntd,status) VALUES (%s,%s,%s)",
                                (identity, balance, payout_status))
             cursor.execute(_STAFF_PAYABLES_SQL, (date(2026, 10, 15),))
             result = cursor.fetchall()
@@ -136,6 +137,53 @@ def test_partial_staff_balance_is_included_by_mysql_without_relisting_paid_or_bl
         _drop_database()
 
 
+def test_monthly_refunds_include_month_end_and_overdue_remaining_with_staff_payables():
+    _create_database()
+    connection = _connection()
+    try:
+        _create_minimum_schema(connection)
+        with connection.cursor() as cursor:
+            for statement in (
+                'CREATE TABLE clients(case_no VARCHAR(50) PRIMARY KEY,name VARCHAR(100))',
+                'CREATE TABLE client_obligations(obligation_identity VARCHAR(191) PRIMARY KEY,case_no VARCHAR(50),obligation_type VARCHAR(30),amount_due_ntd INT,due_date DATE,direction VARCHAR(30),status VARCHAR(30))',
+                'CREATE TABLE client_refund_recipient_snapshots(refund_obligation_identity VARCHAR(191),bank_code VARCHAR(10),bank_account VARCHAR(50))',
+                'CREATE TABLE client_ledger_entries(id BIGINT PRIMARY KEY,entry_type VARCHAR(40))',
+                'CREATE TABLE client_ledger_obligation_allocations(ledger_entry_id BIGINT,obligation_identity VARCHAR(191),amount_ntd INT)',
+            ):
+                cursor.execute(statement)
+            cursor.execute("INSERT INTO clients VALUES ('REFUND-1','Synthetic customer')")
+            for identity, due, amount, status in (
+                ('overdue', '2026-09-30', 300, 'open'),
+                ('midmonth', '2026-10-16', 600, 'open'),
+                ('monthend', '2026-10-31', 1800, 'open'),
+                ('nextmonth', '2026-11-01', 900, 'open'),
+                ('paid', '2026-10-15', 0, 'settled'),
+            ):
+                cursor.execute("INSERT INTO client_obligations VALUES (%s,'REFUND-1','refund',%s,%s,'payable_to_client',%s)", (identity, amount, due, status))
+                cursor.execute("INSERT INTO client_refund_recipient_snapshots VALUES (%s,'004','synthetic-account')", (identity,))
+            cursor.execute("INSERT INTO client_ledger_entries VALUES (1,'refund')")
+            cursor.execute("INSERT INTO client_ledger_obligation_allocations VALUES (1,'monthend',1200)")
+            cursor.execute("INSERT INTO staff VALUES (7,'Synthetic caregiver','')")
+            cursor.execute("INSERT INTO staff_bank_accounts VALUES (1,7,1,'012','synthetic-staff')")
+            cursor.execute("INSERT INTO staff_obligations VALUES ('staff:1','STAFF-1',7,4200,'2026-10-15','payable_to_staff','open',1)")
+        refunds = MySqlClientRefundExportSource(connection).load(date(2026, 10, 15))
+        staff = MySqlStaffPayableExportSource(connection).load(date(2026, 10, 15))
+        assert {item.obligation_identity for item in refunds} == {'overdue', 'midmonth', 'monthend'}
+        assert {row.payment_type for row in aggregate_accounts_payable_rows(staff, refunds)} == {'staff_payable', 'client_refund'}
+        assert sum(item.amount.amount for item in refunds) == 2700
+        # A later refund clears only its remaining amount; a return reopens that amount.
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE client_obligations SET amount_due_ntd=0,status='settled' WHERE obligation_identity='monthend'")
+        assert {item.obligation_identity for item in MySqlClientRefundExportSource(connection).load(date(2026, 10, 15))} == {'overdue', 'midmonth'}
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE client_obligations SET amount_due_ntd=500,status='open' WHERE obligation_identity='monthend'")
+        reopened = MySqlClientRefundExportSource(connection).load(date(2026, 10, 15))
+        assert next(item.amount.amount for item in reopened if item.obligation_identity == 'monthend') == 500
+    finally:
+        connection.close()
+        _drop_database()
+
+
 def _create_minimum_schema(connection):
     statements = (
         "CREATE TABLE staff(id BIGINT PRIMARY KEY,name VARCHAR(100),identity_card VARCHAR(20))",
@@ -150,7 +198,7 @@ def _create_minimum_schema(connection):
         "amount_due_ntd INT,due_date DATE,direction VARCHAR(50),status VARCHAR(30),"
         "payroll_version INT)",
         "CREATE TABLE staff_payable_projections("
-        "obligation_identity VARCHAR(191) PRIMARY KEY,balance_ntd INT,status VARCHAR(30))",
+        "obligation_identity VARCHAR(191) PRIMARY KEY,balance_ntd INT,status VARCHAR(30),obligation_amount_ntd INT NULL)",
         "CREATE TABLE historical_staff_payout_projections("
         "id BIGINT AUTO_INCREMENT PRIMARY KEY,obligation_identity VARCHAR(191),"
         "amount_snapshot_ntd INT,obligation_payroll_version INT,"

@@ -59,12 +59,10 @@ def query_subsidy_returns(repository: SubsidyReturnQueryRepository, *, page_size
                                    search=search, limit=page_size + 1)
     rows = []
     for fact in facts[:page_size]:
-        if fact.order_status == OrderLifecycleStatus.CANCELLED:
-            continue
         projection = project_subsidy_return(
             identity_status=fact.identity_status, service_hours=fact.service_hours,
             floor_fee=fact.floor_fee, client_hourly_rate_ntd=fact.client_hourly_rate_ntd,
-            completed_on=fact.actual_end_date if fact.order_status in _COMPLETED else None,
+            completed_on=fact.actual_end_date,
             has_formal_return=fact.has_formal_return, formal_amount_ntd=fact.formal_amount_ntd,
             formal_due_date=fact.formal_due_date, return_settled=fact.return_settled,
         )

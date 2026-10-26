@@ -65,8 +65,9 @@ const NOTIFICATION_RULE_LABELS: Record<LineNotificationEventCode, string> = {
   'service_time_checkpoint': '提醒上傳寶寶日誌',
   'beclass_completion_changed': 'BeClass 完成狀態變更',
   'deposit_confirmed': '訂金確認',
-  'order.pre_start_reminder': '服務開始前 3 天提醒',
-  'order.second_payment_reminder': '第二期款（尾款）繳款提醒',
+  'order.service_start_day': '服務當天群組繳款與服務狀況',
+  'client.second_payment_due': '第二期款到期當天原群組提醒',
+  'client.second_payment_settled': '第二期款核銷成功原群組通知',
 };
 const RECIPIENT_OPTIONS: ReadonlyArray<{
   value: LineNotificationRecipientSelector;

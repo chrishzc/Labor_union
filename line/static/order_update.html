@@ -183,7 +183,6 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
   const kinds = [
     ["service_address", "服務地址", "可能影響交通、樓層費與接案意願"],
     ["cooking_requirement", "下廚需求", "可能影響服務內容"],
-    ["service_days", "服務日期／天數", "可能影響費用與月嫂檔期"],
     ["daily_service_window", "每日服務時段", "需確認月嫂是否能配合"],
     ["other", "其他訂單內容", "由工會協助判定影響範圍"]
   ];
@@ -288,7 +287,6 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
     const templates = {
       service_address: `<label class="field">服務縣市<input name="service_city" maxlength="20" value="${escapeHtml(current.service_city || "")}" autocomplete="address-level1" required></label><label class="field">新的服務地址<input name="service_address" maxlength="255" value="${escapeHtml(current.service_address || "")}" autocomplete="street-address" required></label><label class="field">居住型態<input name="residence_type" maxlength="50" value="${escapeHtml(current.residence_type || "")}" required></label><label class="field">樓層／電梯補充說明（選填）<textarea name="floor_elevator_notes" maxlength="500"></textarea></label>`,
       cooking_requirement: `<label class="field">是否需要下廚<select name="requires_cooking" required><option value="">請選擇</option><option>需要</option><option>不需要</option></select></label><label class="field">需求說明（選填）<textarea name="cooking_notes" maxlength="500"></textarea></label>`,
-      service_days: `<label class="field">新的服務開始日<input type="date" name="start_date" value="${escapeHtml(current.start_date || "")}" required></label><label class="field">新的服務結束日<input type="date" name="end_date" value="${escapeHtml(current.end_date || "")}" required></label><label class="field">新的服務天數<input type="number" name="service_days" min="1" value="${escapeHtml(current.service_days || "")}" inputmode="numeric" required></label>`,
       daily_service_window: `<label class="field">每日開始時間<input type="time" name="service_start_time" value="${escapeHtml(shortTime(current.service_start_time))}" required></label><label class="field">每日結束時間<input type="time" name="service_end_time" value="${escapeHtml(shortTime(current.service_end_time))}" required></label><label class="field">結束日<select name="service_end_day_offset" required><option value="0">同一天</option><option value="1">隔天</option></select></label>`,
       other: `<label class="field">請說明想修改的內容<textarea name="details" maxlength="1000" required></textarea></label>`
     };
@@ -366,7 +364,6 @@ Description: 由 verified LIFF 客戶查詢訂單、預覽異動，並送出待�
     const beforeFields = {
       service_address: ["service_city", "service_address", "residence_type"],
       cooking_requirement: ["requires_cooking"],
-      service_days: ["start_date", "end_date", "service_days"],
       daily_service_window: ["service_start_time", "service_end_time", "service_end_day_offset"],
       other: []
     };

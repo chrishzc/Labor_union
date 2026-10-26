@@ -75,7 +75,7 @@ type WorkGroup = typeof WORK_GROUPS[number]['id'];
 
 const SERVICE_WORK_VIEWS = [
   { id: 'dates', label: '設定服務日期' },
-  { id: 'assignment', label: '確認排班' },
+  { id: 'assignment', label: '排班結果與代班' },
 ] as const;
 type ServiceWorkView = typeof SERVICE_WORK_VIEWS[number]['id'];
 
@@ -157,7 +157,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     () => branchType === 'historical' ? loading<HistoricalServiceAccountingQuery>() : { status: 'skipped' },
   );
   const [historicalRestart, setHistoricalRestart] = useState<HistoricalRestartState>({ status: 'idle', message: null });
-  const [selectedGroup, setSelectedGroup] = useState<WorkGroup | null>(() => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('work') === 'service' ? 'service' : null);
+  const [selectedGroup, setSelectedGroup] = useState<WorkGroup | null>(() => { const requested = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('work'); return WORK_GROUPS.find(group => group.id === requested)?.id ?? null; });
   const [visitedGroups, setVisitedGroups] = useState<WorkGroup[]>([]);
   const [addingCandidates, setAddingCandidates] = useState(false);
   const [candidateAddState, setCandidateAddState] = useState({ dirty: false, busy: false });
@@ -394,11 +394,12 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
                 <nav className="service-arrangement-steps" aria-label="服務安排步驟">
                   {SERVICE_WORK_VIEWS.map((view, index) => <button type="button" key={view.id} aria-current={serviceView === view.id ? 'step' : undefined} disabled={navigationLocked || factsRefreshing} onClick={() => setServiceView(view.id)}><span>{index + 1}</span>{view.label}</button>)}
                 </nav>
-                <h3 className="order-case-service-title">{completedService ? (serviceView === 'dates' ? '設定服務日期' : '確認排班') : serviceView === 'dates' && assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0 ? '現行服務日期' : serviceView === 'assignment' ? '客戶與月嫂確認排班' : SERVICE_WORK_VIEWS.find(view => view.id === serviceView)!.label}</h3>
+                <h3 className="order-case-service-title">{completedService ? (serviceView === 'dates' ? '現行服務日期' : '排班結果與代班') : serviceView === 'dates' && assignmentPlan.status === 'ready' && assignmentPlan.data.assignments.length > 0 ? '現行服務日期' : serviceView === 'assignment' ? '排班結果與代班' : SERVICE_WORK_VIEWS.find(view => view.id === serviceView)!.label}</h3>
                 <div hidden={serviceView !== 'dates' && serviceView !== 'assignment'}>
                 <OrderServiceDatesPanel
                   caseNo={caseNo}
                   completedCorrection={completedService}
+                  coordinatedStart={currentBranch === 'normal'}
                   view={serviceView === 'assignment' ? 'arrangement' : 'dates'}
                   onOpenArrangement={() => setServiceView('assignment')}
                   onOpenDates={() => setServiceView('dates')}

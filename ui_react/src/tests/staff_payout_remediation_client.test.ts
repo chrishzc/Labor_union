@@ -41,6 +41,17 @@ describe('PAYOUT-001 remediation client', () => {
     expect(calls[1][1]?.headers).toMatchObject({ Authorization: 'Bearer payout-token', 'Idempotency-Key': 'payout.apply:one', 'X-Correlation-ID': 'payout-correlation' });
   });
 
+  it.each(['underpayment', 'overpayment'] as const)('差額模式 %s 使用明確入口且理由選填', async (differenceMode) => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(response(preview)).mockResolvedValueOnce(response({ job_id: 'job-diff', status_url: '/api/v1/jobs/job-diff' }, 202));
+    const selected = { financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'], differenceMode };
+    const received = await staffPayoutRemediationClient.preview(selected);
+    await staffPayoutRemediationClient.apply(received, selected, '', { idempotencyKey: 'payout.difference:one', correlationId: 'difference-test' });
+    const calls = vi.mocked(globalThis.fetch).mock.calls;
+    expect(calls[0][0]).toBe('/api/v1/staff-payables/payout-difference/preview');
+    expect(calls[1][0]).toBe('/api/v1/staff-payables/payout-difference/apply');
+    expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ mode: differenceMode, reason: '' });
+  });
+
   it('Job terminal 嚴格解碼並拒絕錯誤 command 或 identity', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(response({ job_id: 'job-1', status: 'succeeded', command_type: 'staff_payout_apply', attempt_count: 1, max_attempts: 3, outcome: { kind: 'success', schema_version: 1, result_reference: 'staff_payout:11' } }));
     await expect(staffPayoutRemediationClient.queryJob('job-1')).resolves.toMatchObject({ status: 'succeeded' });
@@ -53,11 +64,11 @@ describe('PAYOUT-001 remediation client', () => {
     await expect(staffPayoutRemediationClient.queryJob('job-1')).resolves.toMatchObject({ status: 'failed', outcome: { error: { category } } });
   });
 
-  it('拒絕空白／重複 selection、無 reason 與無登入，且不發送 request', async () => {
+  it('拒絕空白／重複 selection、超長理由與無登入，且不發送 request', async () => {
     const fetch = vi.fn(); globalThis.fetch = fetch;
     await expect(staffPayoutRemediationClient.preview({ financeImportRowIds: [91, 91], obligationIdentities: ['obligation:11:CASE-1'] })).rejects.toBeInstanceOf(StaffPayoutRemediationError);
     await expect(staffPayoutRemediationClient.preview({ financeImportRowIds: [91], obligationIdentities: ['  '] })).rejects.toBeInstanceOf(StaffPayoutRemediationError);
-    await expect(staffPayoutRemediationClient.apply(preview, { financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] }, ' ', { idempotencyKey: 'x', correlationId: 'y' })).rejects.toBeInstanceOf(StaffPayoutRemediationError);
+    await expect(staffPayoutRemediationClient.apply(preview, { financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] }, 'x'.repeat(501), { idempotencyKey: 'x', correlationId: 'y' })).rejects.toBeInstanceOf(StaffPayoutRemediationError);
     sessionClient.clearSession();
     await expect(staffPayoutRemediationClient.preview({ financeImportRowIds: [91], obligationIdentities: ['obligation:11:CASE-1'] })).rejects.toMatchObject({ code: 'STAFF_PAYOUT_UNAUTHENTICATED' });
     expect(fetch).not.toHaveBeenCalled();

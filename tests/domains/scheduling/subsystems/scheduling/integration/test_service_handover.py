@@ -100,3 +100,14 @@ def test_handover_preserves_prior_leave_occupancy_even_when_the_temporary_replac
     assert cursor.calls[-1][1] == (2, 1)
     assert "SET generation_id=%s" in cursor.calls[-1][0]
     assert not any("cancelled" in sql for sql, _ in cursor.calls)
+
+
+def test_long_substitute_period_groups_successor_and_keeps_daily_outcome_lineage():
+    source=facts()
+    result=build_leave_substitution_candidate(source,replace(intent(source),handover_date=None))
+    successor=[a for a in result.scheduling.assignments if a.staff_id==8]
+    assert len(successor)==1 and len(successor[0].service_dates)==18
+    assert len(result.scheduling.assignments)==3
+    assert successor[0].lineage_source_assignment_ids==(1,)
+    assert len(result.outcomes)==18
+    assert {o.original_schedule_id for o in result.outcomes}=={i.original_schedule_id for i in intent(source).items}

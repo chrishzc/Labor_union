@@ -15,6 +15,94 @@ from api.routes import line_mobile_admin, order_terms
 from subsystems.anomalies.current_issue_query import CurrentIssueListRequest
 
 
+@pytest.mark.parametrize('stage', ['deposit', 'first', 'second'])
+def test_mobile_payment_reminders_delegate_exact_period_and_preserve_conflicts(monkeypatch, stage):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.payment_overdue_reminders import get_payment_overdue_reminders
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.line.payment_overdue_reminders import PaymentOverdueTodo, PaymentOverdueReminderConflict
+    from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+    from subsystems.line.capabilities import LineCapability
+    from api.dependencies.admin_auth import admin_actor_context
+    principal = AdminPrincipal(7, 'union-test', '合成工會人員', 'admin')
+    capabilities, calls = [], []
+    monkeypatch.setattr(line_mobile_admin, '_mobile_admin_context', lambda token, capability: (
+        capabilities.append((token, capability)) or principal, admin_actor_context(principal)))
+    payment = OverdueClientPayment('SYNTHETIC', stage, 'synthetic:'+stage, 3, 9, date(2026,10,1), 1200)
+    class Application:
+        def list(self, page, size):
+            calls.append(('query',page,size))
+            return ((PaymentOverdueTodo(payment, 1, '客戶私人聊天室' if stage=='deposit' else '案件群組', True, None, None),), 26)
+        def send(self, expected, key, actor):
+            assert expected == payment and key == 'same-operation' and actor.actor_id == 'admin:7'
+            calls.append(('send',stage))
+            raise PaymentOverdueReminderConflict('payment_overdue_changed')
+    app=FastAPI();app.include_router(line_mobile_admin.router)
+    app.dependency_overrides[get_payment_overdue_reminders]=lambda:Application()
+    with TestClient(app) as client:
+        response=client.post('/api/v1/line/mobile-admin/payment-overdue-reminders',json={'line_id_token':'synthetic-liff','page':2,'page_size':25})
+        assert response.status_code == 200 and response.json()['data']['total']==26
+        assert calls==[('query',2,25)], 'query must not create reminder tasks'
+        snapshot=response.json()['data']['items'][0]['payment']
+        response=client.post('/api/v1/line/mobile-admin/payment-overdue-reminders/send',json={**snapshot,'line_id_token':'synthetic-liff','idempotency_key':'same-operation'})
+        assert response.status_code==409 and '款項或收件對象已更新' in response.text
+    assert [capability for _,capability in capabilities] == [LineCapability.CUSTOMER_SERVICE_HANDLE]*2
+
+
+def test_mobile_log_reminders_share_owner_gap_and_receipt_without_exposing_liff_token(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.service_day_log_reminders import get_service_day_log_reminders
+    from subsystems.access.authentication_session import AdminPrincipal
+    from api.dependencies.admin_auth import admin_actor_context
+    from subsystems.line.service_day_log_reminders import ServiceDayLogReminder
+    from subsystems.scheduling.service_day_log_workflow import ServiceDayLogGap
+    from subsystems.line.capabilities import LineCapability
+    principal=AdminPrincipal(7,'union-test','合成人員','admin'); capabilities=[]; calls=[]
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda token,capability:(capabilities.append(capability) or principal,admin_actor_context(principal)))
+    gap=ServiceDayLogGap('SYNTHETIC',9,date(2026,10,1),date(2026,10,4),4)
+    class Application:
+        def list(self,page,size):
+            calls.append(('query',page,size));return ((ServiceDayLogReminder(gap,'合成案件群組',True),),1)
+        def send(self,command):
+            assert command.case_no==gap.case_no and command.staff_id==gap.staff_id
+            assert command.missing_from==gap.missing_from and command.missing_through==gap.missing_through
+            assert command.idempotency_key=='same-operation'
+            calls.append(('send',));return SimpleNamespace(task_id=SimpleNamespace(value=42),status=SimpleNamespace(value='pending'))
+    app=FastAPI();app.include_router(line_mobile_admin.router);app.dependency_overrides[get_service_day_log_reminders]=lambda:Application()
+    with TestClient(app) as client:
+        response=client.post('/api/v1/line/mobile-admin/log-reminders',json={'line_id_token':'synthetic-liff'})
+        assert response.status_code==200 and response.json()['data']['items'][0]['consecutive_days']==4
+        assert calls==[('query',1,25)]
+        item=response.json()['data']['items'][0]
+        response=client.post('/api/v1/line/mobile-admin/log-reminders/send',json={key:item[key] for key in ('case_no','staff_id','missing_from','missing_through')}|{'line_id_token':'synthetic-liff','idempotency_key':'same-operation'})
+        assert response.status_code==200 and response.json()['data']=={'task_id':42,'status':'pending'}
+        assert 'synthetic-liff' not in response.text
+    assert capabilities==[LineCapability.ORDER_GROUP_READ,LineCapability.CUSTOMER_SERVICE_HANDLE]
+
+
+@pytest.mark.parametrize('route', ['payment-overdue-reminders','payment-overdue-reminders/send','log-reminders','log-reminders/send'])
+def test_mobile_reminder_denied_binding_never_reaches_owner(monkeypatch,route):
+    def deny(*_):raise HTTPException(403,'synthetic forbidden')
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',deny)
+    class Application:
+        def list(self,*_):pytest.fail('denied query reached owner')
+        def send(self,*_):pytest.fail('denied send reached owner')
+    body={'line_id_token':'synthetic-liff'}
+    if route=='payment-overdue-reminders/send':
+        body.update(case_no='SYNTHETIC',payment_stage='deposit',obligation_identity='deposit:SYNTHETIC',projection_version=1,obligation_event_id=1,due_date='2026-10-01',remaining_amount_ntd=1200,idempotency_key='operation')
+        request=line_mobile_admin._MobileOverdueReminderSend(**body); function=line_mobile_admin.mobile_send_payment_overdue_reminder
+    elif route=='log-reminders/send':
+        body.update(case_no='SYNTHETIC',staff_id=9,missing_from='2026-10-01',missing_through='2026-10-04',idempotency_key='operation')
+        request=line_mobile_admin._MobileLogReminderSend(**body); function=line_mobile_admin.mobile_send_log_reminder
+    else:
+        request=line_mobile_admin._MobileTodoPageRequest(**body)
+        function=line_mobile_admin.mobile_payment_overdue_reminders if route.startswith('payment') else line_mobile_admin.mobile_log_reminders
+    with pytest.raises(HTTPException) as error:function(request,Application())
+    assert error.value.status_code==403
+
+
 ROOT = next(
     parent
     for parent in Path(__file__).resolve().parents
@@ -58,22 +146,24 @@ def test_mobile_todo_runtime_refreshes_pending_counts_and_removes_answered_cards
     import subprocess
     script = r'''
 import fs from 'node:fs'; import vm from 'node:vm'; import assert from 'node:assert/strict';
-const source=fs.readFileSync('line/static/mobile_admin.html','utf8');
+const source=fs.readFileSync('line/static/mobile_admin.html','utf8').replace(/\r\n/g,'\n');
 const extract=h=>{const i=source.indexOf(h);assert(i>=0);return source.slice(i,source.indexOf('\n}\n',i)+2)};
 class Element {
-  constructor(tag='div'){this.tag=tag;this.dataset={};this.children=[];this.listeners={};this.value='';this.textContent='';this.classList={add(){},remove(){}}}
+  constructor(tag='div'){this.tag=tag;this.isConnected=true;this.dataset={};this.children=[];this.listeners={};this.value='';this.textContent='';this.classList={add(){},remove(){}}}
   append(...x){this.children.push(...x)} appendChild(x){this.children.push(x);return x}
   replaceChildren(...x){this.children=[...x]} addEventListener(k,f){this.listeners[k]=f} setAttribute(){}
 }
 const nodes=new Map(); const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id)};
 const ctx=vm.createContext({document:{getElementById:get,createElement:t=>new Element(t)},crypto});
-for(const id of ['identityReviewCount','profileReviewCount','leaveReviewCount','matchingFollowupCount','candidateInformationCount','customerRecommendationCount','depositCount','groupTodoCount'])get(id).dataset.pendingCount='0';
+for(const id of ['identityReviewCount','profileReviewCount','leaveReviewCount','serviceStartCount','matchingFollowupCount','candidateInformationCount','customerRecommendationCount','depositCount','groupTodoCount','paymentOverdueCount','logReminderCount'])get(id).dataset.pendingCount='0';
 vm.runInContext(`let reviewQuerySequence=0,candidateInformationQuerySequence=0,candidateInformationPage=1; const target='staff_review';
- const reviewPageState={page:1,pageSize:50}; let pendingTotal=1;
- let questionReads=0;
+ let notificationSequence=0;let notificationSelection=null;const focusNotificationItems=(source,items)=>items;const reviewPageState={page:1,pageSize:50}; let pendingTotal=1;
+ let questionReads=0;let commonReads=0;const loadReviewWorkbench=async()=>{commonReads++;await loadCandidateInformation();};
  const postJson=async(url,body)=>url.endsWith('identity-reviews')?{items:body.review_status==='pending'&&pendingTotal?[{}]:[],total:body.review_status==='pending'?pendingTotal:0,page:body.page,page_size:body.page_size}:url.endsWith('candidate-information')?(questionReads++,{items:[],total:0,page:1,page_size:25}):url.endsWith('/recontact/apply')?[]:{status:'queued'};
  const reviewCard=()=>({});const showEmpty=()=>{};const showStatus=()=>{};const openMatchingFollowup=()=>{};`,ctx);
-for(const header of ['function updateReviewTotal()','function setWorkstreamCount(','function requireReviewPage(','function requireTodoPage(','function renderPagination(','async function loadIdentityReviews()','async function loadCandidateInformation()','function candidateInformationCard('])vm.runInContext(extract(header),ctx);
+vm.runInContext(source.slice(source.indexOf('function notificationText('),source.indexOf('function updateNotificationCards(')),ctx);
+vm.runInContext(extract('function notificationButton('),ctx);
+for(const header of ['function notificationViewCurrent(','function updateReviewTotal()','function setWorkstreamCount(','function requireReviewPage(','function requireTodoPage(','function renderPagination(','async function loadIdentityReviews()','async function loadCandidateInformation()','function candidateInformationCard('])vm.runInContext(extract(header),ctx);
 get('reviewStatus').value='pending';await vm.runInContext('loadIdentityReviews()',ctx);assert.equal(get('identityReviewCount').textContent,'1');
 vm.runInContext('pendingTotal=0',ctx);get('reviewStatus').value='approved';await vm.runInContext('loadIdentityReviews()',ctx);assert.equal(get('identityReviewCount').textContent,'0');
 get('candidateInformationCount').dataset.pendingCount='1';
@@ -85,11 +175,12 @@ await all(card).find(x=>x.textContent==='發送給月嫂').listeners.click();
 assert.equal(get('candidateInformationCount').textContent,'0');
 assert.equal(get('candidateInformationQuestions').children.filter(x=>x.tag==='article').length,0);
 assert.equal(get('reviewTotal').textContent,'0');
+assert.equal(vm.runInContext('commonReads',ctx),1);
 vm.runInContext("let matchingOperation={pool_id:1,case_no:'PUBLIC',customer_answer_event_id:1};let matchingRecontactPreview=[{candidate_id:1,preview_fingerprint:'public'}];let reminderReads=0;const loadMatchingFollowups=async()=>{reminderReads++};const renderMatchingOperation=()=>{};",ctx);
 vm.runInContext(extract('async function applyMatchingRecontact()'),ctx);
 await vm.runInContext('applyMatchingRecontact()',ctx);
 assert.equal(vm.runInContext('questionReads',ctx),2);
-assert.equal(vm.runInContext('reminderReads',ctx),1);
+assert.equal(vm.runInContext('commonReads',ctx),2);
 '''
     subprocess.run(['node', '--input-type=module', '-e', script], cwd=ROOT, check=True, capture_output=True, text=True, timeout=20)
 
@@ -200,18 +291,21 @@ def test_union_staff_targets_are_isolated_and_have_real_mobile_queries() -> None
     assert "/api/v1/line/mobile-admin/order-statuses" in source
     assert "/api/v1/line/mobile-admin/operations-summary" in source
     assert "/api/v1/line/mobile-admin/client-profile/requests" in source
-    assert "/api/v1/line/mobile-admin/staff-leave-requests" in source
+    assert "/api/v1/line/mobile-admin/staff-leave-requests" not in source
     assert "/api/v1/line/mobile-admin/matching-followups" in source
     assert "客戶資料異動" in source
     assert "客戶／月嫂身分重綁與異常" in source
-    assert "請假、代班與改期" in source
+    assert "服務開始、請假、代班與換人" in source
     assert "月嫂回覆提醒" in source
     assert "月嫂確認與條件協調" in source
     assert "待提醒" in source
     assert "開啟正式排班調整" not in source
     assert 'review_type: null' in source
     assert "待辦數量僅包含月嫂身分驗證申請" not in source
-    assert "客服、異常與 QA 內容審核不會在這裡重複列入" in source
+    assert "/api/v1/line/mobile-admin/notification-tasks" in source
+    assert 'id="notificationSources"' in source
+    assert 'id="notificationOperations"' in source
+    assert "openNotificationItem" in source
     assert "這不是案件條件修改後的下一步" in source
     assert 'class="workstream-trigger"' in source
     assert 'id="reviewTotal"' in source
@@ -618,3 +712,12 @@ def test_mobile_operations_summary_fails_closed_when_owner_query_is_unavailable(
         == "mobile_operations_summary_internal_error"
     )
     assert "storage unavailable" not in str(captured.value.detail)
+
+
+def test_mobile_tracking_compares_database_and_aware_instants_in_utc():
+    from datetime import timezone
+    stages=(SimpleNamespace(ordinal=1,code='intake_validation',label='進件',status='in_progress',occurred_at=datetime(2026,10,26,10)),
+            SimpleNamespace(ordinal=2,code='matching_pool',label='媒合',status='completed',occurred_at=datetime.fromisoformat('2026-10-26T17:00:00+08:00')))
+    item=SimpleNamespace(case_no='SYNTHETIC',core_stages=stages,current_core_stage_ordinal=1,
+                         lifecycle_status=SimpleNamespace(value='洽談中'))
+    assert line_mobile_admin._mobile_order_tracking_item(item)['updated_at']==datetime(2026,10,26,10,tzinfo=timezone.utc)

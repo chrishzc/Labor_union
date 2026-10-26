@@ -51,6 +51,9 @@ class BootstrapWorkflowRepository:
         self.existing_event_lookups.append(case_no)
         return 72
 
+    def synchronize_client_charges(self, command, candidate, event_id):
+        return 1
+
     def save_receipt(self, _key, stored):
         self.saved_receipt = stored
 

@@ -62,12 +62,15 @@ def test_preview_candidate_is_a_strict_typed_union_not_raw_dict():
     assert StaffPayoutPreviewView.model_fields["candidate"].annotation is not dict
 
 
-def test_payout_difference_request_contract_rejects_underpayment():
+def test_payout_difference_request_contract_accepts_underpayment_but_rejects_unknown_mode():
+    assert PayoutDifferencePreviewBody(
+        finance_import_row_ids=[8], obligation_identities=["obligation:8"], mode="underpayment",
+    ).mode == "underpayment"
     with pytest.raises(ValidationError):
         PayoutDifferencePreviewBody(
             finance_import_row_ids=[8],
             obligation_identities=["obligation:8"],
-            mode="underpayment",
+            mode="unknown",
         )
 
 

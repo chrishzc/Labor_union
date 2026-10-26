@@ -1,8 +1,6 @@
-"""Customer-facing LINE coordination for accepted Scheduling staff leave requests.
+"""Historical leave review and no-effect consumption of retired customer cards.
 
-This adapter owns no leave or scheduling facts. It projects the current accepted
-leave context into the existing LINE delivery-task owner and records a verified
-customer postback through the existing Staff Leave receipt owner.
+New leave results belong to the verified caregiver coordination entrypoint.
 """
 
 from __future__ import annotations
@@ -54,145 +52,18 @@ class StaffLeaveCustomerCoordinationApplication:
         self._now = now
 
     def review(self, command: ReviewStaffLeaveRequest) -> StaffLeaveRequestSnapshot:
-        """Commit a new acceptance and its customer inquiries in one transaction."""
         with self._line_unit_of_work_factory() as unit_of_work:
             repository = MySqlStaffLeaveIntakeRepository(unit_of_work._connection)
-            # Serialize acceptance with review/replay. The existing workflow
-            # still owns validation, transition, event and receipt persistence.
-            before = repository.load_for_update(command.request_id)
             result = StaffLeaveIntakeWorkflow(repository).review(command)
-            if (
-                before is not None
-                and before.status is StaffLeaveRequestStatus.PENDING
-                and result.status is StaffLeaveRequestStatus.ACCEPTED_FOR_PROCESSING
-            ):
-                context = repository.coordination_context(result.request_id, result.version)
-                self._enqueue_inquiries(context, unit_of_work)
-            # Replayed reviews never recreate a request with a new scheduled_at
-            # under an already-used delivery key, even if recipients changed.
             unit_of_work.commit()
             return result
 
     def _enqueue_inquiries(self, context, unit_of_work) -> None:
-        request_id = context["request_id"]
-        version = context["request_version"]
-        leave_start_date = _date_text(context["leave_start_date"])
-        leave_end_date = _date_text(context["leave_end_date"])
-        targets = tuple(context["targets"])
-        description = None
-
-        for target in targets:
-            case_no = str(target["case_no"])
-            recipient_value = target.get("client_line_user_id")
-            # Keep an affected case visible in coordination_context even when
-            # there is no current customer binding; never invent or fall back
-            # to a legacy/group recipient.
-            if not isinstance(recipient_value, str) or not recipient_value.strip():
-                continue
-            recipient_value = recipient_value.strip()
-            if description is None:
-                description = notification_description(
-                    unit_of_work.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES),
-                    "LU96-M1-LEAVE-EXTENSION-CARD-V1",
-                )
-            identity = _interaction_identity(request_id, version, case_no)
-            unit_of_work.delivery_tasks.enqueue(
-                LineDeliveryRequest(
-                    LineRecipient(LineRecipientType.USER, LineUserId(recipient_value)),
-                    LineMessageKind.FLEX,
-                    canonical_line_payload_json(
-                        _inquiry_payload(
-                            request_id,
-                            version,
-                            case_no,
-                            leave_start_date,
-                            leave_end_date,
-                            description=description,
-                        )
-                    ),
-                    self._now(),
-                    IdempotencyKey(f"leave-customer-inquiry:{identity}"),
-                    CorrelationId(f"leave-request:{request_id}:v{version}"),
-                    "staff_leave_customer_coordination",
-                    identity,
-                )
-            )
+        raise RuntimeError('leave_customer_confirmation_retired')
 
     def handle_postback(self, inbox, unit_of_work) -> bool:
-        parsed = parse_staff_leave_customer_postback(_postback_data(inbox))
-        if parsed is None:
-            return False
-        request_id, expected_version, case_no, decision = parsed
-        source = getattr(inbox.event, "source", None)
-        line_user_id = getattr(source, "user_id", None)
-        source_type = getattr(source, "source_type", None)
-        if line_user_id is None or getattr(source_type, "value", None) != "user":
-            return True
-
-        identity = _interaction_identity(request_id, expected_version, case_no)
-        # The webhook consumer owns the outer transaction. Decision, customer
-        # service need and acknowledgement must commit or roll back together.
-        try:
-            workflow = StaffLeaveIntakeWorkflow(
-                MySqlStaffLeaveIntakeRepository(unit_of_work._connection),
-            )
-            receipt = workflow.record_customer_decision(
-                RecordStaffLeaveCustomerDecision(
-                    request_id=request_id,
-                    expected_version=expected_version,
-                    case_no=case_no,
-                    line_user_id=line_user_id.value,
-                    decision=decision,
-                    # One terminal choice per accepted leave version/case. The
-                    # decision is deliberately absent from this key so a later
-                    # conflicting click cannot create a second terminal fact.
-                    idempotency_key=f"leave-customer-decision:{identity}",
-                )
-            )
-        except StaffLeaveIntakeWorkflowError as error:
-            # Business-stale or conflicting postbacks are terminal inputs, not
-            # transient provider failures. Still give the clicking user a safe,
-            # non-case-specific result so "handled" is never silent.
-            event_identity = inbox.event.event_id.value
-            unit_of_work.delivery_tasks.enqueue(
-                _decision_rejection_acknowledgement(
-                    str(error),
-                    line_user_id,
-                    event_identity,
-                    _event_time_or_now(inbox, self._now),
-                )
-            )
-            return True
-        ticket_id = None
-        if receipt.decision == "reject_substitution":
-            # Customer Service owns one active conversation per user/category.
-            # The immutable event identifies this exact leave request and case;
-            # do not create another ticket root or overwrite an existing case.
-            ticket = unit_of_work.customer_service.create_or_append(
-                CreateCustomerServiceMessage(
-                    line_user_id=receipt.line_user_id,
-                    category=CustomerServiceCategory.SERVICE_PROGRESS,
-                    message=(
-                        f"代班需求（leave_substitute_required）：案件 {receipt.case_no}，"
-                        f"請假申請 #{receipt.request_id}／版本 {receipt.request_version}。"
-                        "客戶不同意順延，請工會安排代班；正式班表尚未變更。"
-                    ),
-                    event_key=f"leave-substitute-required:{identity}",
-                    case_no=receipt.case_no,
-                )
-            )
-            ticket_id = ticket.ticket_id
-
-        # A repeated click reuses the saved decision/need, not a new delivery
-        # with a different scheduled_at under the same idempotency identity.
-        if not receipt.replayed:
-            unit_of_work.delivery_tasks.enqueue(
-                _decision_acknowledgement(
-                    receipt, line_user_id, inbox.event.event_id.value,
-                    self._now(), ticket_id=ticket_id,
-                )
-            )
-        return True
+        # Old cards must never create consent, cases, acknowledgements or schedule writes.
+        return _postback_data(inbox).startswith(_POSTBACK_PREFIX)
 
 
 def parse_staff_leave_customer_postback(

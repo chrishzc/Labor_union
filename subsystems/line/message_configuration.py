@@ -16,6 +16,16 @@ from domains.line.delivery import LineMessageKind
 _VARIABLE = re.compile(r"\{([a-zA-Z][a-zA-Z0-9_]*)\}")
 _SEND_TIME = re.compile(r"^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d)$")
 
+RETIRED_MESSAGE_TEMPLATE_IDS = frozenset({
+    "new_user_d1", "new_user_d2", "new_user_d3",
+    "LU96-M1-GATEWAY-RETRY-FAIL-CARD-V1", "LU96-M1-STAFF-RETIRE-CARD-V1",
+    "LU96-M2-ROUTER-REPLY-CARD-V1", "LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1",
+    "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1", "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
+    "LU96-M4-SALARY-PAYABLE-CARD-V1", "LU96-M3-ZERO-POOL-CARD-V1",
+    "LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1",
+    "LU96-M3-LEAVE-DISAGREE-CARD-V1",
+})
+
 
 class LineMessageConfigurationError(ValueError):
     """Raised when a template or schedule definition is invalid."""
@@ -63,8 +73,8 @@ def validate_message_templates(definition: Mapping[str, object]) -> None:
     identifiers: set[str] = set()
     for template in templates:
         identifier = _identifier(template.get("id"), "template id")
-        if identifier == "LU96-M3-ZERO-POOL-CARD-V1":
-            raise LineMessageConfigurationError("候選池為空通知已退役，請使用人工條件協調流程。")
+        if identifier in RETIRED_MESSAGE_TEMPLATE_IDS:
+            raise LineMessageConfigurationError("此通知模板已退役，不可加入目前設定。")
         if identifier in identifiers:
             raise LineMessageConfigurationError("message template ids must be unique")
         identifiers.add(identifier)
@@ -124,6 +134,8 @@ def render_message_template(
     template_id: str,
     variables: Mapping[str, object] | None = None,
 ) -> RenderedLineMessage:
+    if template_id in {'LU96-ORDER-PRE-START-REMINDER-CARD-V1', 'LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1'}:
+        raise LineMessageConfigurationError('前三日私訊提醒已退役，請使用本案當天群組提醒。')
     validate_message_templates(definition)
     template = next(
         (

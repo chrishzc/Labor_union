@@ -159,7 +159,11 @@ class MySqlCaseImportRepository:
     def create_architecture_bootstrap(self, command, candidate) -> int:
         if candidate.bootstrap is None:
             return None
-        return self._bootstrap.create_bootstrap(command, candidate.bootstrap)
+        event_id = self._bootstrap.create_bootstrap(command, candidate.bootstrap)
+        # Borrow the same accounting writer as the normal bootstrap workflow.
+        # The Case Import outer transaction also owns these subsequent events.
+        self._bootstrap.synchronize_client_charges(command, candidate.bootstrap, event_id)
+        return event_id
 
     # Kept cohesive because this is one immutable event serialization boundary.
     def append_import_event(

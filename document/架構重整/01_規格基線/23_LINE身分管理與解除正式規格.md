@@ -187,8 +187,9 @@ correlation 與 idempotency identity。事件不得由 LINE、UI、worker 或付
 直接建立；若退款／歸檔由其他 owner 完成，Orders 只攜帶該 owner 的 typed receipt reference，
 不得跨域直寫其 root。
 
-LINE Identity consumer 收到事件後必須 fresh-read 同一 LINE User ID 的所有 role-scoped
-bindings 與 client-role active-case Query。只有同時滿足以下條件，才可在既有 LINE Identity
+LINE Identity consumer 收到事件後先核對 source subject、Orders 版本與 capability，再讀取同一 LINE User ID 的 role-scoped bindings。一般客戶沒有 staff binding 是合法情況，保存 `noop_not_staff` receipt 並正常完成，不查詢月嫂選單、不建立 menu intent、不要求人員操作。這裡判斷的是客戶本人角色，不是案件有沒有服務月嫂。多筆 staff binding、身分不符及版本衝突仍為真正錯誤。
+
+只有存在有效 staff binding 時才讀 client-role active-case Query 與月嫂選單 publication。只有同時滿足以下條件，才可在既有 LINE Identity
 outer Unit of Work 內建立一次 `staff_default_restore` menu intent／receipt：
 
 1. staff binding 仍為 `active`；
@@ -206,5 +207,5 @@ stale Orders／binding／menu version、subject mismatch 或 capability mismatch
 failure 並零寫入。storage transient failure 可 bounded retry；其餘 failure 只能由 LINE
 Identity Query／既有人工 review reconcile，必要時建立 manual recovery reference，不得盲目
 重播。Readback 必須回 source event identity、Orders version、binding version、case-scope
-decision（`restored | blocked_active_client_case | blocked_revoked_staff | noop_replay`）、
-menu intent／receipt 與 typed failure。
+decision（`restored | noop_not_staff | blocked_active_client_case | blocked_revoked_staff | noop_replay`）、
+menu intent／receipt 與 typed failure。已保存 LINE receipt 的 source 不再列入待處理或下次喚醒，不能反覆掃描同一批舊事件；LINE 不更新 Orders outbox 狀態。一般客戶的選單 no-op 不阻擋規格 20 §5.6 的原案件群組完工通知，兩者使用各自既有 receipt／notification intent。

@@ -113,9 +113,12 @@ _LEAVE = "LU96-M1-LEAVE-EXTENSION-CARD-V1"
 _STAFF_VARIABLES = {"staff_name", "caregiver_name"}
 _CASE_VARIABLES = {"name", "client_name", "case_no", "planned_start_date", "service_date",
                    "first_payment_amount", "first_payment_due_date", "second_payment_amount",
-                   "second_payment_due_date", "first_payment_status", "second_payment_status"}
+                   "second_payment_due_date", "first_payment_status", "second_payment_status",
+                   "first_payment_notice", "caregiver_names", "response_token"}
 
-_RETIRED = {"new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1"}
+_RETIRED = {"LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1", "LU96-M3-LEAVE-DISAGREE-CARD-V1","new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1",
+            "LU96-ORDER-PRE-START-REMINDER-CARD-V1", "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
+            "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1"}
 _IDENTITY_TEMPLATES = (
     "staff_switch_success", "staff_switch_fail", "staff_menu_not_set", "esc_success", "esc_fail",
     "bind_link_msg", "register_success", "bind_success_new_order", "bind_success_existing",
@@ -123,12 +126,20 @@ _IDENTITY_TEMPLATES = (
     "staff_verification_requested", "staff_verification_rejected",
 )
 _CURRENT_FLOW_PREVIEWS = (
+    ("contract-signing-client", "簽署提醒－客戶", "text"),
+    ("contract-signing-staff", "簽署提醒－月嫂", "text"),
+    ("payment-overdue-deposit", "訂金逾期－人工提醒客戶", "text"),
+    ("payment-overdue-first", "第一期款逾期－人工提醒案件群組", "text"),
+    ("payment-overdue-second", "第二期款逾期－人工提醒案件群組", "text"),
+    ("service-day-log-reminder", "服務日誌－工會發送案件群組提醒", "text"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
     ("deposit-settled", "訂金已確認入帳卡", "flex"),
     ("deposit-assistance", "訂金專人協助－受理回覆", "text"),
     ("group-bound", "服務群組－設定完成", "text"),
     ("group-invitations-queued", "服務群組－邀請排入發送", "text"),
     ("group-invitation-customer", "服務群組邀請卡－客戶", "flex"),
+    ("service-start-inquiry", "服務開始－代班接案意願詢問", "flex"),
+    ("service-start-result", "服務開始－群組日期結果紀錄", "text"),
     ("group-invitation-staff", "服務群組邀請卡－月嫂", "flex"),
     ("group-error-invitation-url", "服務群組－尚未設定邀請網址", "text"),
     ("group-format-invite", "群組指令－發送邀請格式錯誤", "text"),
@@ -151,11 +162,6 @@ _CURRENT_FLOW_PREVIEWS = (
     ("matching-customer-accepted", "客戶推薦－接受配對回覆", "text"),
     ("matching-customer-assistance", "客戶推薦－專人協助回覆", "text"),
     ("matching-customer-response", "客戶推薦－選擇受理回覆", "text"),
-    ("leave-agreed", "請假確認－同意順延回覆", "text"),
-    ("leave-substitution", "請假確認－代班需求受理", "text"),
-    ("leave-stale", "請假確認－已失效提示", "text"),
-    ("leave-locked", "請假確認－無法更改提示", "text"),
-    ("leave-unavailable", "請假確認－無法使用提示", "text"),
     ("service-progress", "服務進度查詢結果", "text"),
     ("service-progress-unbound", "服務進度－未綁定提示", "text"),
     ("service-registration", "服務登記入口訊息", "text"),
@@ -183,7 +189,7 @@ _BUILTINS = (
     ("service-payment", "收費與補助說明", "text", False, False, False),
     ("service-profile-update", "登記資料修改受理", "text", False, False, False),
     ("service-order-update", "訂單資訊修改受理", "text", False, False, False),
-    ("service-other", "其他客服需求受理", "text", False, False, False),
+    ("service-other", "其他問題－自助服務導覽", "flex", False, False, False),
     ("identity-pending", "身分申請受理通知", "text", False, False, False),
     ("identity-bound", "身分綁定完成通知", "text", False, False, False),
 )
@@ -247,6 +253,10 @@ class LineMessagePreviewApplication:
         descriptor = next((d for d in self._catalog(templates, rules) if d.id == key), None)
         if descriptor is None:
             raise MessagePreviewNotFound("message")
+        if descriptor.template_id in {'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
+                'LINE-SECOND-PAYMENT-DUE-TEXT-V1', 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1',
+                'LINE-SERVICE-COMPLETION-TEXT-V1'} and not sample:
+            return PreviewResult('unavailable', '此群組通知請使用公版預覽；正式內容由本案流程結果帶入。', descriptor.format)
         reader_factory = self._reader_factory
         if sample:
             from subsystems.line.message_preview_samples import CASE, STAFF, VALUES, DEFAULT_DRAFT, public_preview_reader
@@ -330,16 +340,15 @@ class LineMessagePreviewApplication:
             from subsystems.scheduling.matching_line_cards import candidate_customer_question_card, candidate_caregiver_answer_card
             payload = json.loads(candidate_customer_question_card(case.case_no, content, "https://preview.invalid/question")
                 if key == "card-union-question" else candidate_caregiver_answer_card(case.case_no, content, "preview-only", "https://preview.invalid/answer"))
-        elif key in {"service-menu", "order-update-menu"}:
+        elif key in {"service-menu", "service-other", "order-update-menu"}:
             from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
-            payload = _service_menu_payload() if key == "service-menu" else _order_update_menu_payload()
-        elif key in {"service-flow", "service-payment", "service-profile-update", "service-order-update", "service-other"}:
+            payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
+        elif key in {"service-flow", "service-payment", "service-profile-update", "service-order-update"}:
             from domains.customer_service.ticket import CustomerServiceCategory
             from subsystems.line.service_help_application import _SERVICE_FLOW_REPLY, _PAYMENT_REPLY, _TICKET_ACKNOWLEDGEMENTS, _ORDER_UPDATE_ACKNOWLEDGEMENT
             payload = {"type": "text", "text": {"service-flow": _SERVICE_FLOW_REPLY, "service-payment": _PAYMENT_REPLY,
                 "service-profile-update": _TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
-                "service-order-update": _ORDER_UPDATE_ACKNOWLEDGEMENT,
-                "service-other": _TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.OTHER]}[key]}
+                "service-order-update": _ORDER_UPDATE_ACKNOWLEDGEMENT}[key]}
         elif key in {"service-contact", "service-resolved", "identity-pending", "identity-bound"}:
             from subsystems.line.message_copy import CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING, IDENTITY_BOUND
             payload = {"type": "text", "text": {"service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,

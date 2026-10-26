@@ -78,11 +78,8 @@ describe('client settlement anomaly remediation', () => {
     expect(screen.queryByText(/來源資料列：11/)).not.toBeInTheDocument();
     const checkboxes = screen.getAllByRole('checkbox');
     fireEvent.click(checkboxes[0]); fireEvent.click(checkboxes[2]);
-    fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '客戶以電話確認退款帳戶，已核對銀行流水' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await waitFor(() => expect(screen.getByText(/預覽核銷金額/)).toBeInTheDocument());
-    fireEvent.click(screen.getByLabelText(/我已核對案件、逾期義務/));
-    fireEvent.click(screen.getByRole('button', { name: '確認並套用' }));
+    fireEvent.change(screen.getByLabelText('人工核對理由（選填）'), { target: { value: '客戶以電話確認退款帳戶，已核對銀行流水' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     await waitFor(() => expect(screen.getByText(/第 1 筆｜調整款/)).toBeInTheDocument());
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByText(/若仍有其他同類逾期義務/)).toBeInTheDocument();
@@ -95,9 +92,8 @@ describe('client settlement anomaly remediation', () => {
     render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} onResolved={onResolved} />);
     await waitFor(() => expect(screen.getByText(/第 1 筆｜一般退款/)).toBeInTheDocument());
     const checkboxes = screen.getAllByRole('checkbox'); fireEvent.click(checkboxes[0]); fireEvent.click(checkboxes[2]);
-    fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '電話補充帳戶後已核對正式出款' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await waitFor(() => screen.getByText(/預覽核銷金額/)); fireEvent.click(screen.getByLabelText(/我已核對案件、逾期義務/)); fireEvent.click(screen.getByRole('button', { name: '確認並套用' }));
+    fireEvent.change(screen.getByLabelText('人工核對理由（選填）'), { target: { value: '電話補充帳戶後已核對正式出款' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/已無這類逾期未清義務/)).toBeInTheDocument();
   });
@@ -109,5 +105,20 @@ describe('client settlement anomaly remediation', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('客戶帳務目前無法完成，請稍後再試。');
     expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
+  });
+
+  it('records the actual partial refund and retains the fresh remaining obligation', async () => {
+    const partial = { ...firstQuery, account_version: 4,
+      refund_obligations: [{ ...firstQuery.refund_obligations[0], amount_due_ntd: 200 }], refund_bank_facts: [] };
+    const client = owner(partial);
+    const onResolved = vi.fn();
+    render(<ClientSettlementRemediationWorkbench target={{ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 }} client={client} onResolved={onResolved} />);
+    await screen.findByText(/第 1 筆｜一般退款/);
+    const boxes = screen.getAllByRole('checkbox'); fireEvent.click(boxes[0]); fireEvent.click(boxes[2]);
+    fireEvent.change(screen.getByLabelText('退款核銷方式'), { target: { value: 'partial' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+    await waitFor(() => expect(client.applyPayable).toHaveBeenCalledWith('CASE-1', 'refund', expect.objectContaining({ allow_partial_refund_recovery: true }), expect.anything()));
+    expect(await screen.findByText(/第 1 筆｜一般退款.*200/)).toBeInTheDocument();
+    expect(onResolved).not.toHaveBeenCalled();
   });
 });

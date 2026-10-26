@@ -24,6 +24,7 @@ class OffsetApplyRequest:
 
 class Repository(Protocol):
     def load_overage_receipt_context(self, row_id: int, batch_id: int, *, lock: bool): ...
+    def find_overage_receipt(self, key: IdempotencyKey, command_fingerprint: PreviewFingerprint): ...
     def persist_receipt_with_overage(self, request, candidate, bank, batch) -> dict: ...
     def load_overpayment(self, identity: str, *, lock: bool) -> GovernmentSubsidyOverpayment: ...
     def load_offset_targets(self, intents: tuple[GovernmentSubsidyOffsetIntent, ...], *, lock: bool): ...
@@ -44,6 +45,9 @@ class GovernmentSubsidyOverpaymentWorkflow:
     def apply_receipt_with_overage(self, request):
         with self._uow() as unit_of_work:
             bank, batch = self._repository.load_overage_receipt_context(request.finance_import_row_id, request.batch_id, lock=True)
+            replay = self._repository.find_overage_receipt(request.idempotency_key, receipt_with_overage_command_fingerprint(request))
+            if replay is not None:
+                return replay
             candidate = build_receipt_with_overage_candidate(bank, batch, request.allocations)
             if request.expected_version.value != batch.aggregate_version: raise ValueError("government_subsidy_overpayment_version_conflict")
             if request.preview_fingerprint != candidate.fingerprint: raise ValueError("government_subsidy_overpayment_preview_stale")
@@ -105,3 +109,14 @@ def _command_fingerprint(request, command_kind):
 @dataclass(frozen=True, slots=True)
 class ReceiptWithOverageApplyRequest:
     finance_import_row_id: int; batch_id: int; allocations: tuple[GovernmentSubsidyOffsetIntent, ...]; evidence_reference: str; expected_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint; idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; correlation_id: CorrelationId
+
+
+def receipt_with_overage_command_fingerprint(request):
+    return fingerprint_payload({
+        "kind": "receipt_with_overage", "finance_import_row_id": request.finance_import_row_id,
+        "batch_id": request.batch_id, "expected_version": request.expected_version.value,
+        "preview_fingerprint": request.preview_fingerprint.value,
+        "allocations": tuple((item.claim_item_id, item.amount_ntd.amount) for item in request.allocations),
+        "actor": request.actor.actor_id, "reason": request.reason,
+        "evidence_reference": request.evidence_reference,
+    })

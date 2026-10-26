@@ -117,7 +117,7 @@ function money(value) {
 }
 
 function statusLabel(status) {
-  return ({pending: "待付款", payable: "待付款", completed: "已完成", paid: "已付款", anomaly: "需工會確認"})[status] || status;
+  return ({pending: "待付款", payable: "待付款", partially_paid: "部分付款", completed: "已完成", paid: "已付款", anomaly: "需工會確認"})[status] || status;
 }
 
 function detailRow(list, label, value) {
@@ -155,6 +155,7 @@ function renderPayouts(page) {
     const details = document.createElement("dl");
     detailRow(details, "應付金額", money(item.total_payable));
     detailRow(details, "已付金額", money(item.amount_paid));
+    detailRow(details, "剩餘待付金額", money(item.amount_remaining));
     detailRow(details, "目標付款日", item.due_date || "尚未核定");
     detailRow(details, "實際付款日", item.paid_at || "尚未付款");
     article.append(summary, details);

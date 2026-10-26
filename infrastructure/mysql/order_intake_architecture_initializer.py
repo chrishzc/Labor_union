@@ -15,6 +15,7 @@ from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersio
 
 class MySqlOrderIntakeArchitectureInitializer:
     def __init__(self, connection):
+        self._connection = connection
         self._status = CaseArchitectureBootstrapStatusService(connection)
         self._workflow = CaseArchitectureBootstrapWorkflow(
             MySqlCaseArchitectureBootstrapRepository(connection), self._no_nested_transaction,
@@ -27,7 +28,12 @@ class MySqlOrderIntakeArchitectureInitializer:
     def ensure(self, facts: OrderIntakeTermsBootstrapFacts, actor: str, reason: str, key: str) -> None:
         status = self._status.query(facts.case_no)
         if status.ready:
-            return  # Existing amounts, versions and policy snapshots remain untouched.
+            from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
+            with self._connection.cursor() as cursor:
+                synchronize_client_charges(cursor, facts.case_no, actor=ActorContext(actor.strip()),
+                    key=IdempotencyKey(key), correlation_id=CorrelationId(key),
+                    source_family="intake-completed", source_id=facts.lifecycle_version)
+            return
         if status.domain_blockers or status.recommendation is None:
             raise OrderIntakeTermsBootstrapError('order_intake_initialization_blocked',
                 blockers=status.domain_blockers or ('case_architecture_bootstrap_recommendation_unavailable',))

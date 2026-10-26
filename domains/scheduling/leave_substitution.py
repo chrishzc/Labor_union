@@ -221,8 +221,6 @@ def _validate_resolution(item: LeaveSubstitutionItem) -> None:
         raise TypeError("double-pay marker must be bool")
     if item.resolution_type is LeaveResolutionType.SUBSTITUTE:
         require_positive_integer(item.substitute_staff_id, "substitute staff id")
-        if item.replacement_work_date is not None:
-            _raise_invalid("substitute leave cannot specify a replacement work date")
         return
     if item.substitute_staff_id is not None:
         _raise_invalid("deferred leave cannot specify substitute staff")
@@ -493,7 +491,7 @@ def _build_source_assignment(
     )
 
 
-# Substitute rows retain one-to-one schedule lineage while building assignments.
+# Consecutive substitute service rows share one assignment; each outcome keeps its own schedule lineage.
 def _substitute_assignment_candidates(
     facts: LeaveSubstitutionFacts,
     intent: LeaveSubstitutionBatchIntent,
@@ -514,33 +512,30 @@ def _substitute_assignment_candidates(
             lineage_source_assignment_ids=(intent.original_assignment_id,),
             double_pay_dates=tuple(row.service_date for row in selected if row.is_double_pay),
         ),)
-    schedule_by_id = {
-        item.schedule_id: item for item in facts.official_schedules
-    }
-    transformed_by_id = {item.source_schedule_id: item for item in rows}
-    result = []
-    for item in intent.items:
-        if item.resolution_type is not LeaveResolutionType.SUBSTITUTE:
+    selected_ids={item.original_schedule_id for item in intent.items
+                  if item.resolution_type is LeaveResolutionType.SUBSTITUTE}
+    runs=[]
+    current=[]
+    for row in rows:
+        if row.source_schedule_id not in selected_ids:
+            if current:runs.append(tuple(current));current=[]
             continue
-        source = schedule_by_id[item.original_schedule_id]
-        transformed = transformed_by_id[item.original_schedule_id]
-        result.append(
-            AssignmentCandidate(
-                candidate_key="pending-sequence",
-                source_assignment_id=source.assignment_id,
-                staff_id=item.substitute_staff_id,
-                sequence=1,
-                assigned_start_date=transformed.service_date,
-                assigned_end_date=transformed.service_date,
-                service_dates=(transformed.service_date,),
-                actual_hours=facts.assignment_plan.service_hours_per_day,
-                lineage_source_assignment_ids=(source.assignment_id,),
-                double_pay_dates=(
-                    (transformed.service_date,) if transformed.is_double_pay else ()
-                ),
-            )
-        )
-    return tuple(result)
+        if current and (current[-1].staff_id,current[-1].source_assignment_id)!=(row.staff_id,row.source_assignment_id):
+            runs.append(tuple(current));current=[]
+        current.append(row)
+    if current:runs.append(tuple(current))
+    return tuple(AssignmentCandidate(
+        candidate_key="pending-sequence",
+        source_assignment_id=run[0].source_assignment_id,
+        staff_id=run[0].staff_id,
+        sequence=1,
+        assigned_start_date=run[0].service_date,
+        assigned_end_date=run[-1].service_date,
+        service_dates=tuple(row.service_date for row in run),
+        actual_hours=len(run)*facts.assignment_plan.service_hours_per_day,
+        lineage_source_assignment_ids=(run[0].source_assignment_id,),
+        double_pay_dates=tuple(row.service_date for row in run if row.is_double_pay),
+    ) for run in runs)
 
 
 def _assignment_sort_key(assignment: AssignmentCandidate):

@@ -33,8 +33,14 @@ _EVENT_CODES = frozenset(
         "runtime.alert.review_required",
         "complaint.ingress.hold_high_ticket",
         "payroll.substitute.obligation_projected",
+        # Historical revisions remain readable; validate_notification_rules
+        # below forbids saving/reactivating this retired source.
         "order.pre_start_reminder",
+        "order.service_start_day",
         "order.second_payment_reminder",
+        "client.second_payment_due",
+        "client.second_payment_settled",
+        "order.service_completed",
     }
 )
 _RECIPIENT_SELECTORS = frozenset(
@@ -71,6 +77,12 @@ def validate_notification_rules(definition: Mapping[str, object]) -> None:
     """Validate a configuration snapshot without evaluating business facts."""
     normalized = materialize_notification_rules_definition(definition)
     for rule in normalized["rules"]:
+        if rule['event_code'] in {'order.pre_start_reminder', 'order.second_payment_reminder'}:
+            raise LineNotificationRuleError('前三日私訊提醒已退役，請使用到期當天原服務群組提醒。')
+        if rule['event_code'] in {'order.service_start_day', 'client.second_payment_due', 'client.second_payment_settled', 'order.service_completed'} and (
+                rule['recipient_selector'] != 'case_group' or rule['frequency']['kind'] != 'once'
+                or rule['schedule']['kind'] != 'immediate'):
+            raise LineNotificationRuleError('本案群組通知限原服務群組、即時、單次發送。')
         if (rule["event_code"] == "matching.zero_pool.preview_applied" or rule["id"] == "LU96-M3-ZERO-POOL-RULE-V1"
                 or rule["template_id"] == "LU96-M3-ZERO-POOL-CARD-V1"):
             raise LineNotificationRuleError("候選池為空通知已退役，請使用人工條件協調流程。")

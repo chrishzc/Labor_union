@@ -223,3 +223,39 @@ def test_terminal_closure_worker_bridges_read_only_orders_source_once_and_replay
     assert source.limits == [25, 25]
     assert len(uow.outbox.items) == 1
     assert uow.receipts.get(_event().idempotency_key).result_reference.endswith(":restored")
+
+
+@pytest.mark.parametrize('bindings', [(), (LineIdentityBindingSnapshot(
+    LineUserId('U-M1'), LineIdentityBindingStatus.BOUND, ExpectedVersion(3),
+    LineBindingSubjectType.CUSTOMER, 'client-42'),)])
+def test_ordinary_customer_closure_is_recorded_noop_without_staff_menu_lookup(bindings):
+    uow = _Uow(bindings, _case('訂單完成'))
+    def unavailable():
+        raise AssertionError('ordinary customer must not query a staff menu')
+    uow.identity_management.staff_menu_publication = unavailable
+    first = consume_terminal_closure(_factory(uow), _event(terminal_kind='completion'))
+    replay = consume_terminal_closure(_factory(uow), _event(terminal_kind='completion'))
+    assert first.decision is TerminalClosureDecision.NOOP_NOT_STAFF
+    assert first.binding_version is None and first.menu_intent_identity is None
+    assert replay.decision is TerminalClosureDecision.NOOP_REPLAY
+    assert replay.replay_of is TerminalClosureDecision.NOOP_NOT_STAFF
+    assert not uow.outbox.items and uow.commits == 1
+
+
+def test_multiple_staff_bindings_remain_an_error_not_an_ordinary_customer_noop():
+    uow = _Uow([_binding(), _binding()], _case())
+    with pytest.raises(TerminalClosureConsumerError, match='staff_binding_ambiguous'):
+        consume_terminal_closure(_factory(uow), _event())
+    assert not uow.receipts.items and not uow.outbox.items
+
+
+def test_ordinary_customer_still_checks_source_subject_version_and_capability():
+    for case, event, error in [
+        ({**_case(), 'lifecycle_version': 5}, _event(), 'orders_stale'),
+        ({**_case(), 'line_user_id': 'U-other'}, _event(), 'subject_mismatch'),
+        (_case(), _event(capability='wrong'), 'capability_mismatch'),
+    ]:
+        uow = _Uow([], case)
+        with pytest.raises(TerminalClosureConsumerError, match=error):
+            consume_terminal_closure(_factory(uow), event)
+        assert not uow.receipts.items and not uow.outbox.items

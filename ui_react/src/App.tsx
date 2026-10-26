@@ -33,6 +33,7 @@ import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccoun
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { StorageManagementPage } from './pages/StorageManagementPage';
 import { FileSettingsPage } from './pages/FileSettingsPage';
+import { NotificationTasksPage } from './pages/NotificationTasksPreviewPage';
 import './pages/LineManagementPage.css';
 
 export const HASH_ALIASES: Record<string, PageType> = {
@@ -161,6 +162,7 @@ const AppContent: React.FC = () => {
       >
         <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'historical-service-accounting', 'line-management'].includes(currentPage)}>
         {/* Operations Section */}
+        {currentPage === 'notifications' && <NotificationTasksPage />}
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page homeNavigationRequest={workbenchHomeRequest} />}
         {currentPage === 'scheduling' && <SchedulingPage />}
         {currentPage === 'staff' && <StaffPage />}

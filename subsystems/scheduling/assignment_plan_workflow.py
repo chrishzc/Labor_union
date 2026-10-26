@@ -234,6 +234,12 @@ class AssignmentPlanWorkflow:
         except Exception as exception:
             raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "The Assignment Plan transaction failed and was rolled back.") from exception
 
+    def apply_in_current_unit_of_work(self, request: AssignmentPlanApplyRequest) -> AssignmentPlanReceipt:
+        """Reuse fresh-lock validation within an already active owner transaction."""
+        fingerprint = _command_fingerprint(request)
+        staff = _canonical_staff_ids(self._repository.preflight_impacted_staff_ids(request.case_no, request.intent))
+        return self._replay_or_apply(request, fingerprint, staff)
+
     def _apply_transaction(self, request: AssignmentPlanApplyRequest) -> AssignmentPlanReceipt:
         command_fingerprint = _command_fingerprint(request)
         preflight = _canonical_staff_ids(self._repository.preflight_impacted_staff_ids(request.case_no, request.intent))

@@ -114,40 +114,52 @@ class ServiceDateConfirmationWorkflow:
         if replay is not None:
             return replay
         with self._unit_of_work_factory() as unit_of_work:
-            locked_staff_ids = self._scheduling_snapshot_invalidation.lock_waiting_deposit_staff(case_no)
-            facts = self._repository.load(case_no, lock=True)
-            # Another identical command may have committed while this one waited
-            # for the Orders lock. Read its receipt from current committed facts.
-            replay = self._repository.replay(
-                idempotency_key,
-                command_fingerprint,
-                actor=actor,
-                reason=reason,
-                for_update=True,
-            )
-            if replay is not None:
-                return replay
-            if (facts.order_version, facts.scheduling_version) != (
-                expected_order_version,
-                expected_scheduling_version,
-            ):
-                raise ValueError("service_date_confirmation_stale_version")
-            candidate = _candidate(facts, service_dates)
-            if candidate.fingerprint.value != preview_fingerprint:
-                raise ValueError("service_date_confirmation_preview_stale")
-            receipt = self._repository.save(
-                candidate,
-                actor=actor,
-                reason=reason,
-                idempotency_key=idempotency_key,
-                command_fingerprint=command_fingerprint,
-            )
-            self._scheduling_snapshot_invalidation.invalidate_current_snapshot(
-                candidate.case_no
-            )
-            self._scheduling_snapshot_invalidation.reserve_waiting_deposit(candidate.case_no, actor, locked_staff_ids)
+            result = self.apply_in_current_unit_of_work(case_no, service_dates,
+                expected_order_version=expected_order_version, expected_scheduling_version=expected_scheduling_version,
+                preview_fingerprint=preview_fingerprint, actor=actor, reason=reason, idempotency_key=idempotency_key)
             unit_of_work.commit()
-            return receipt
+            return result
+
+    def apply_in_current_unit_of_work(self, case_no, service_dates, *, expected_order_version,
+              expected_scheduling_version, preview_fingerprint, actor, reason, idempotency_key,
+              reserve_waiting_deposit=True):
+        """Save canonical dates without finalizing the service coordinator transaction."""
+        command_fingerprint = _command_fingerprint(case_no, service_dates, expected_order_version,
+                                                   expected_scheduling_version, preview_fingerprint)
+        locked_staff_ids = self._scheduling_snapshot_invalidation.lock_waiting_deposit_staff(case_no)
+        facts = self._repository.load(case_no, lock=True)
+        # Another identical command may have committed while this one waited
+        # for the Orders lock. Read its receipt from current committed facts.
+        replay = self._repository.replay(
+            idempotency_key,
+            command_fingerprint,
+            actor=actor,
+            reason=reason,
+            for_update=True,
+        )
+        if replay is not None:
+            return replay
+        if (facts.order_version, facts.scheduling_version) != (
+            expected_order_version,
+            expected_scheduling_version,
+        ):
+            raise ValueError("service_date_confirmation_stale_version")
+        candidate = _candidate(facts, service_dates)
+        if candidate.fingerprint.value != preview_fingerprint:
+            raise ValueError("service_date_confirmation_preview_stale")
+        receipt = self._repository.save(
+            candidate,
+            actor=actor,
+            reason=reason,
+            idempotency_key=idempotency_key,
+            command_fingerprint=command_fingerprint,
+        )
+        self._scheduling_snapshot_invalidation.invalidate_current_snapshot(
+            candidate.case_no
+        )
+        if reserve_waiting_deposit:
+            self._scheduling_snapshot_invalidation.reserve_waiting_deposit(candidate.case_no, actor, locked_staff_ids)
+        return receipt
 
 
 def _candidate(facts, service_dates):

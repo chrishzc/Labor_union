@@ -111,6 +111,13 @@ class MySqlCaseArchitectureBootstrapRepository:
             )
             return bootstrap_event_id
 
+    def synchronize_client_charges(self, command, candidate, event_id: int) -> int:
+        from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
+        with self._connection.cursor() as cursor:
+            return synchronize_client_charges(cursor, candidate.case_no, actor=command.actor,
+                key=command.idempotency_key, correlation_id=command.correlation_id,
+                source_family="case-bootstrap", source_id=event_id)
+
     def existing_bootstrap_event_id(self, case_no: str) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -241,7 +248,7 @@ def _components_consistent(rows, root_event) -> bool:
     client_account, client_terms, payroll_account, payroll_policy, scheduling = rows
     return all(
         (
-            int(client_account["aggregate_version"]) == 0,
+            int(client_account["aggregate_version"]) >= 0,
             _client_terms_are_consistent(client_terms, root_event),
             int(payroll_account["aggregate_version"]) == 0,
             _payroll_policy_is_consistent(payroll_policy, root_event),

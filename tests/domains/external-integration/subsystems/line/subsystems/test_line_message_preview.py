@@ -89,6 +89,17 @@ def test_render_uses_selected_facts_and_ephemeral_copy_without_saving():
     assert ("客戶", "林小姐") in [(f.id, f.label) for f in result.facts]
 
 
+def test_general_question_preview_is_current_self_service_menu_and_subsidy_copy():
+    from subsystems.line.service_help_application import _PAYMENT_REPLY
+    application = app()
+    other = application.render('service-other', None, None, None, actor(), sample=True)
+    menu = application.render('service-menu', None, None, None, actor(), sample=True)
+    assert other.format == 'flex' and other.bubbles == menu.bubbles
+    payment = application.render('service-payment', None, None, None, actor(), sample=True)
+    assert payment.text == _PAYMENT_REPLY
+    assert '最高40小時' in payment.text and '最高120小時' in payment.text
+
+
 def test_case_not_found_is_not_replaced_with_other_case():
     with pytest.raises(MessagePreviewNotFound):
         app().render("notice", None, "missing", None, actor())
@@ -109,19 +120,10 @@ def test_canonical_flex_preview_strips_all_executable_actions():
     assert "不會執行" in public
 
 
-def test_real_leave_dates_are_required_and_used():
+def test_retired_customer_leave_confirmation_is_not_renderable():
     application = app(Configuration("LU96-M1-LEAVE-EXTENSION-CARD-V1", (), "請確認安排"))
-    result = application.render("notice", "新的說明", "CASE-1", None, actor())
-    public = json.dumps(asdict(result), ensure_ascii=False)
-    assert "2026-11-05" in public and "2026-11-06" in public and "新的說明" in public
-    class NoLeave(Reader):
-        def leave(self, *_):
-            return None
-    @contextmanager
-    def no_leave():
-        yield NoLeave()
-    missing = app(application._configuration, no_leave).render("notice", None, "CASE-1", None, actor())
-    assert missing.status == "unavailable" and missing.bubbles == ()
+    with pytest.raises(MessagePreviewNotFound):
+        application.render("notice", None, None, None, actor(), sample=False)
 
 
 def test_payment_render_consumes_owner_formatted_values():
@@ -216,6 +218,42 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
             "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound",
             "template-register_success", "template-staff_verification_requested"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
+
+
+def test_start_day_group_card_public_preview_has_copy_and_inert_buttons_only():
+    from pathlib import Path
+    class CurrentConfiguration:
+        def get(self,kind,_actor):
+            definition=json.loads(Path(f'config/{kind.value}.json').read_text(encoding='utf-8'))
+            return LineConfigurationSnapshot(kind,LineConfigurationRevision(1),canonical_line_payload_json(definition))
+    def forbidden_reader():
+        pytest.fail('public preview must not access real identities or create an inquiry')
+    application=LineMessagePreviewApplication(CurrentConfiguration(),forbidden_reader)
+    result=application.render('LINE-ORDER-SERVICE-START-DAY-V1',None,None,None,actor(),sample=True)
+    public=json.dumps(asdict(result),ensure_ascii=False)
+    assert result.status=='ready'
+    assert '今天是本案的服務開始日' in public and '服務正常' in public and '需要協助' in public
+    assert '3 天後' not in public and 'start-day:' not in public
+    assert application.render('LINE-ORDER-SERVICE-START-DAY-V1',None,None,None,actor()).status=='unavailable'
+
+
+@pytest.mark.parametrize('key,phrase',[
+    ('LINE-SECOND-PAYMENT-DUE-V1','第二期款尚待繳納 24,000 元'),
+    ('LINE-SECOND-PAYMENT-SETTLED-V1','第二期款 24,000 元已確認入帳'),
+    ('LINE-SERVICE-COMPLETION-V1','請填寫服務滿意度問卷'),
+])
+def test_second_payment_public_preview_is_short_group_copy_without_actions(key,phrase):
+    from pathlib import Path
+    class CurrentConfiguration:
+        def get(self,kind,_actor):
+            definition=json.loads(Path(f'config/{kind.value}.json').read_text(encoding='utf-8'))
+            return LineConfigurationSnapshot(kind,LineConfigurationRevision(1),canonical_line_payload_json(definition))
+    def forbidden_reader():pytest.fail('sample must not access identities, create jobs or call a provider')
+    application=LineMessagePreviewApplication(CurrentConfiguration(),forbidden_reader)
+    result=application.render(key,None,None,None,actor(),sample=True)
+    assert result.status=='ready' and result.format=='text' and phrase in result.text
+    assert not result.bubbles
+    assert application.render(key,None,None,None,actor()).status=='unavailable'
 
 
 @pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound", "service-flow", "service-payment", "service-profile-update", "service-order-update", "service-other"])
@@ -315,14 +353,10 @@ def test_public_template_bindings_match_only_used_fields_and_substitution_values
     assert len(result.facts) == 3
 
 
-def test_public_leave_uses_explicit_example_dates_and_copy():
-    result = app(Configuration("LU96-M1-LEAVE-EXTENSION-CARD-V1", (), "請確認本次安排。")) \
-        .render("notice", "公版測試說明", None, None, actor(), sample=True)
-    assert result.status == "ready"
-    bindings = {fact.id: fact.label for fact in result.facts}
-    assert bindings["請假開始日（leave_start_date）"] == "2026-11-10"
-    assert bindings["通知說明（description）"] == "公版測試說明"
-    assert "2026-11-10" in json.dumps(asdict(result), ensure_ascii=False)
+def test_retired_customer_leave_confirmation_has_no_public_example():
+    application = app(Configuration("LU96-M1-LEAVE-EXTENSION-CARD-V1", (), "請確認安排"))
+    with pytest.raises(MessagePreviewNotFound):
+        application.render("notice", None, None, None, actor(), sample=True)
 
 
 def test_http_public_sample_ignores_subjects_and_never_opens_record_reader(monkeypatch):
@@ -379,3 +413,16 @@ def test_deposit_and_service_progress_disclose_actual_public_substitutions():
     progress = application.render("service-progress", None, None, None, actor(), sample=True)
     assert "DEMO-CASE-001" in progress.text and "訂單成立" in progress.text
     assert len(progress.facts) == 4
+
+
+def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_period_amounts():
+    application=app()
+    client=application.render('contract-signing-client',None,None,None,actor(),sample=True)
+    staff=application.render('contract-signing-staff',None,None,None,actor(),sample=True)
+    assert client.text == staff.text and '外部簽約平台' in client.text
+    assert any(fact.label=='客戶私人聊天室' for fact in client.facts)
+    assert any(fact.label=='月嫂私人聊天室' for fact in staff.facts)
+    for stage,label,amount,recipient in [('deposit','訂金','6,000','客戶私人聊天室'),('first','第一期款','12,000','案件群組'),('second','第二期款','8,000','案件群組')]:
+        result=application.render('payment-overdue-'+stage,None,None,None,actor(),sample=True)
+        assert label in result.text and amount in result.text
+        assert any(fact.label==recipient for fact in result.facts)

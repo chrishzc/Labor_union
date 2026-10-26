@@ -70,13 +70,7 @@ Description: 提供已驗證月嫂依正式服務日提交寶寶日誌與受控�
     </div>
     <p id="photoLimit" class="hint"></p>
     <figure id="photoPreview" hidden><img id="selectedPhoto" class="photo" alt="準備提交的日誌照片"><figcaption id="selectedPhotoName"></figcaption></figure>
-    <button id="previewLog" class="primary" type="button" disabled>預覽寶寶日誌</button>
-    <div id="logPreview" class="message" hidden></div>
-    <label id="confirmLogLabel" class="field" hidden>
-      <input id="confirmLog" type="checkbox" disabled>
-      我已核對服務日與日誌內容，並要正式送出。
-    </label>
-    <button id="applyLog" class="primary" type="button" disabled>確認送出日誌</button>
+    <button id="applyLog" class="primary" type="button" disabled>送出日誌</button>
     <div id="logStatus" class="message" hidden></div>
   </section>
   <section id="savedLog" class="panel" aria-labelledby="savedLogTitle" hidden>
@@ -96,6 +90,8 @@ let serviceDays = [];
 let selectedServiceDay = null;
 let mediaCandidate = null;
 let logCandidate = null;
+let logOptions = null;
+let logSubmitted = false;
 let transferSettings = null;
 let selectedPhotoUrl = null;
 let savedPhotoUrl = null;
@@ -141,7 +137,8 @@ function responseMessage(data, fallback) {
   if (code.endsWith('_too_large') && transferSettings) return data.detail?.message || data.detail?.error?.message || `照片超過目前上限 ${fileSizeLabel(transferSettings.photo_max_bytes)}。本次未保存，請選擇較小檔案或請管理者調整上限。`;
   if (code === 'service_day_log_photo_not_found') return '找不到這張照片，或目前身分無法讀取，請重新讀取日誌。';
   if (code.includes('content_type') || code.endsWith('_is_empty')) return '請選擇有效且非空白的 JPG 或 PNG 圖片。';
-  if (code.endsWith('_stale')) return '服務資料或預覽已更新，請重新預覽後確認。';
+  if (code === 'service_day_log_idempotency_conflict') return '這個服務日已有日誌，送出後不能修改。';
+  if (code === 'service_day_log_meal_photo_required') return '請附上一張餐食照片。';
   if (code.includes('unavailable')) return '檔案服務目前無法使用，請稍後重試；已保存的資料不會因此刪除。';
   return data.message || data.detail?.message || data.detail?.error?.message || data.error?.message || fallback;
 }
@@ -161,11 +158,12 @@ async function transferRequest(url, options, binary = false) {
 
 function setBusy(value) {
   busy = value;
-  for (const id of ['monthInput', 'loadServiceDays', 'serviceDay', 'babyLog', 'mealPhoto', 'previewLog']) {
-    document.getElementById(id).disabled = value || applyOutcomeUnknown || (['babyLog', 'mealPhoto', 'previewLog'].includes(id) && !selectedServiceDay);
+  for (const id of ['monthInput', 'loadServiceDays', 'serviceDay', 'babyLog', 'mealPhoto']) {
+    document.getElementById(id).disabled = value || applyOutcomeUnknown ||
+      (['babyLog', 'mealPhoto'].includes(id) && (!selectedServiceDay || logSubmitted));
   }
-  document.getElementById('applyLog').disabled = value || !logCandidate || !document.getElementById('confirmLog').checked;
-  document.getElementById('applyLog').textContent = applyOutcomeUnknown ? '以原操作重試' : '確認送出日誌';
+  document.getElementById('applyLog').disabled = value || logSubmitted || !selectedServiceDay || !logOptions;
+  document.getElementById('applyLog').textContent = applyOutcomeUnknown ? '以原操作重試' : '送出日誌';
 }
 
 function clearSelectedPhoto() {
@@ -176,7 +174,7 @@ function clearSelectedPhoto() {
 }
 
 function selectPhoto() {
-  clearSelectedPhoto(); mediaCandidate = null; uploadIdentity = null; invalidateLogPreview();
+  clearSelectedPhoto(); mediaCandidate = null; uploadIdentity = null; invalidateSubmission();
   const file = document.getElementById('mealPhoto').files?.[0];
   if (!file) return;
   if (!['image/jpeg', 'image/png'].includes(file.type) || file.size === 0) {
@@ -304,10 +302,10 @@ function resetServiceDaySelection(message = "請先載入服務日") {
   document.getElementById("selectedServiceDay").textContent = "尚未選擇正式服務日。";
   document.getElementById("babyLog").disabled = true;
   document.getElementById("mealPhoto").disabled = true;
-  document.getElementById("previewLog").disabled = true;
+  logOptions = null; logSubmitted = false;
   document.getElementById("mealPhoto").value = "";
   mediaCandidate = null; uploadIdentity = null; clearSelectedPhoto();
-  invalidateLogPreview();
+  invalidateSubmission();
 }
 
 function renderServiceDays(schedule) {
@@ -364,29 +362,34 @@ async function loadServiceDays() {
   }
 }
 
-function selectServiceDay() {
+async function selectServiceDay() {
   const rawIndex = document.getElementById("serviceDay").value;
   selectedServiceDay = rawIndex === "" ? null : serviceDays[Number(rawIndex)] || null;
-  document.getElementById("babyLog").disabled = !selectedServiceDay;
-  document.getElementById("mealPhoto").disabled = !selectedServiceDay;
-  document.getElementById("previewLog").disabled = !selectedServiceDay;
+  const selected = selectedServiceDay;
+  logOptions = null; logSubmitted = false;
   document.getElementById("mealPhoto").value = "";
-  mediaCandidate = null; uploadIdentity = null; clearSelectedPhoto();
-  invalidateLogPreview();
-  document.getElementById("selectedServiceDay").textContent = selectedServiceDay
-    ? `已選擇 ${selectedServiceDay.work_date}${selectedServiceDay.case_no ? `｜案件 ${selectedServiceDay.case_no}` : ""}`
+  document.getElementById("babyLog").value = "";
+  mediaCandidate = null; uploadIdentity = null; clearSelectedPhoto(); invalidateSubmission();
+  document.getElementById("selectedServiceDay").textContent = selected
+    ? `已選擇 ${selected.work_date}${selected.case_no ? `｜案件 ${selected.case_no}` : ""}`
     : "尚未選擇正式服務日。";
-}
-
-function requireLogPreview(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value) ||
-      typeof value.case_no !== "string" || !Number.isInteger(value.assignment_id) ||
-      typeof value.service_date !== "string" || typeof value.baby_log_text !== "string" ||
-      ![true, false, null].includes(value.requires_cooking) || typeof value.can_apply !== "boolean" ||
-      !Array.isArray(value.blockers) || !/^[0-9a-f]{64}$/.test(value.preview_fingerprint)) {
-    throw new Error("寶寶日誌預覽格式錯誤");
-  }
-  return value;
+  if (!selected) { setBusy(false); return; }
+  setBusy(true);
+  try {
+    const {response, data} = await transferRequest('/api/v1/line/staff-self-service/service-day-logs/options', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...identityPayload(), assignment_id:selected.assignment_id, service_date:selected.work_date}),
+    });
+    if (!response.ok || typeof data.data?.requires_cooking !== 'boolean') {
+      showReauthenticationFor(data);
+      throw new Error(responseMessage(data, '服務資料不完整，請聯絡工會人員。'));
+    }
+    if (selectedServiceDay !== selected) return;
+    logOptions = data.data;
+    document.querySelector('label[for="mealPhoto"]').textContent = logOptions.requires_cooking ? '餐食照片（必填）' : '寶寶照片（選填）';
+    hide('logStatus');
+  } catch (error) { show('logStatus', error.message || '服務資料讀取失敗，請重新選擇服務日。', true); }
+  finally { setBusy(false); }
 }
 
 function requireMealPhotoStage(value) {
@@ -411,22 +414,10 @@ function requireLogReadback(value) {
   return value;
 }
 
-function invalidateLogPreview() {
-  const hadCandidate = Boolean(logCandidate);
+function invalidateSubmission() {
+  if (applyOutcomeUnknown) return;
   logCandidate = null;
-  hide("logPreview");
-  document.getElementById("confirmLogLabel").hidden = true;
-  document.getElementById("confirmLog").checked = false;
-  document.getElementById("confirmLog").disabled = true;
-  document.getElementById("applyLog").disabled = true;
-  if (hadCandidate) show("logStatus", "內容已變更，請重新預覽後再確認送出。");
-}
-
-function logBlockerMessage(blockers) {
-  if (blockers.includes("service_day_log_meal_photo_required")) return "此案件需要餐食照片；請選擇 JPG 或 PNG 後重新預覽。";
-  if (blockers.includes("service_day_log_meal_photo_forbidden")) return "此案件不需要餐食照片；請移除照片後重新預覽。";
-  if (blockers.includes("service_day_log_cooking_requirement_unresolved")) return "此案件的下廚需求尚未確定，請先由工會人員補齊訂單資料。";
-  return "目前無法送出，請聯絡工會人員確認。";
+  setBusy(busy);
 }
 
 async function stageMealPhoto(attachmentKind) {
@@ -467,86 +458,36 @@ async function stageMealPhoto(attachmentKind) {
   return mediaCandidate;
 }
 
-async function previewServiceDayLog() {
-  if (busy) return;
-  const text = document.getElementById("babyLog").value.trim();
-  if (!selectedServiceDay || !text) {
-    show("logStatus", "請先選擇正式服務日並填寫寶寶日誌。", true);
-    return;
-  }
-  setBusy(true);
-  invalidateLogPreview();
-  show("logStatus", "正在準備寶寶日誌預覽...");
-  try {
-    const previewRequest = async (attachments) => transferRequest("/api/v1/line/staff-self-service/service-day-logs/preview", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({...identityPayload(), assignment_id: selectedServiceDay.assignment_id, service_date: selectedServiceDay.work_date, baby_log_text: text, controlled_file_attachments: attachments}),
-    });
-    const {response: initialResponse, data: initialResult} = await previewRequest([]);
-    if (!initialResponse.ok || initialResult.success === false || !initialResult.data) {
-      show("logStatus", responseMessage(initialResult, "寶寶日誌預覽失敗，請稍後重試。"), true);
-      showReauthenticationFor(initialResult);
-      return;
-    }
-    const initialPreview = requireLogPreview(initialResult.data);
-    const photoSelected = Boolean(document.getElementById("mealPhoto").files?.[0]);
-    if (!photoSelected || initialPreview.requires_cooking === null) {
-      setLogCandidate(initialPreview, [], text);
-      return;
-    }
-    const kind = initialPreview.requires_cooking ? 'meal_photo' : 'baby_log_photo';
-    const stagedAttachment = mediaCandidate || await stageMealPhoto(kind);
-    const {response, data: result} = await previewRequest(stagedAttachment ? [stagedAttachment] : []);
-    if (!response.ok || result.success === false || !result.data) {
-      show("logStatus", responseMessage(result, "寶寶日誌預覽失敗，請稍後重試。"), true);
-      showReauthenticationFor(result);
-      return;
-    }
-    setLogCandidate(requireLogPreview(result.data), stagedAttachment ? [stagedAttachment] : [], text);
-  } catch (error) {
-    show("logStatus", error instanceof Error ? error.message : "無法載入寶寶日誌預覽，請稍後重試。", true);
-  } finally {
-    setBusy(false);
-  }
-}
-
-function setLogCandidate(preview, attachments, text) {
-  logCandidate = {
-    assignmentId: preview.assignment_id,
-    serviceDate: preview.service_date,
-    text,
-    controlledFileAttachments: attachments,
-    previewFingerprint: preview.preview_fingerprint,
-    idempotencyKey: `service-day-log-${crypto.randomUUID()}`,
-  };
-  show("logPreview", `${preview.service_date}｜案件 ${preview.case_no}｜${preview.baby_log_text}`);
-  document.getElementById("confirmLogLabel").hidden = false;
-  document.getElementById("confirmLog").disabled = !preview.can_apply;
-  show("logStatus", preview.can_apply ? "請核對預覽內容並勾選確認。" : logBlockerMessage(preview.blockers), !preview.can_apply);
-}
 
 async function applyServiceDayLog() {
   if (busy) return;
-  if (!logCandidate || !document.getElementById("confirmLog").checked) {
-    show("logStatus", "請先預覽並勾選確認。", true);
-    return;
+  const text = document.getElementById('babyLog').value.trim();
+  if (!selectedServiceDay || !logOptions || (!applyOutcomeUnknown && !text)) {
+    show('logStatus', '請選擇服務日並填寫日誌。', true); return;
   }
-  const candidate = logCandidate;
+  if (!applyOutcomeUnknown && logOptions.requires_cooking && !document.getElementById('mealPhoto').files?.[0]) {
+    show('logStatus', '請附上一張餐食照片。', true); return;
+  }
   let applyCommitted = false;
   setBusy(true);
-  show("logStatus", "正在送出寶寶日誌...");
+  show('logStatus', '正在送出寶寶日誌...');
   try {
+    if (!logCandidate) {
+      const photo = mediaCandidate || await stageMealPhoto(logOptions.requires_cooking ? 'meal_photo' : 'baby_log_photo');
+      logCandidate = {assignmentId:selectedServiceDay.assignment_id, serviceDate:selectedServiceDay.work_date,
+        text, controlledFileAttachments:photo ? [photo] : [], idempotencyKey:`service-day-log-${crypto.randomUUID()}`};
+    }
+    const candidate = logCandidate;
     const {response, data: result} = await transferRequest("/api/v1/line/staff-self-service/service-day-logs/apply", {
       method: "POST",
       headers: {"Content-Type": "application/json", "Idempotency-Key": candidate.idempotencyKey},
-      body: JSON.stringify({...identityPayload(), assignment_id: candidate.assignmentId, service_date: candidate.serviceDate, baby_log_text: candidate.text, controlled_file_attachments: candidate.controlledFileAttachments, preview_fingerprint: candidate.previewFingerprint}),
+      body: JSON.stringify({...identityPayload(), assignment_id: candidate.assignmentId, service_date: candidate.serviceDate, baby_log_text: candidate.text, controlled_file_attachments: candidate.controlledFileAttachments}),
     });
     if (!response.ok || result.success === false || !result.data?.receipt || !result.data?.readback) {
       const unknown = responseErrorCode(result) === "service_day_log_apply_outcome_unknown" || response.status >= 500;
       applyOutcomeUnknown = unknown;
       if (!unknown) logCandidate = null;
-      show("logStatus", unknown ? "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。" : responseMessage(result, "寶寶日誌送出失敗；請重新預覽後再操作。"), true);
+      show("logStatus", unknown ? "送出結果尚未確認。請勿重複送出，並聯絡工會人員查核。" : responseMessage(result, "寶寶日誌送出失敗，請核對內容後重試。"), true);
       showReauthenticationFor(result);
       return;
     }
@@ -556,7 +497,7 @@ async function applyServiceDayLog() {
     if (selectedPhotoUrl) document.getElementById('selectedPhotoName').textContent = '照片已隨本次日誌保存。';
     renderSavedLog(committed);
     logCandidate = null;
-    document.getElementById("confirmLog").disabled = true;
+    logSubmitted = true;
     const {response: readbackResponse, data: readbackResult} = await transferRequest(`/api/v1/line/staff-self-service/service-day-logs/${committed.log_id}/query`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -618,16 +559,12 @@ async function init() {
 
 document.getElementById("loadServiceDays").addEventListener("click", loadServiceDays);
 document.getElementById("serviceDay").addEventListener("change", selectServiceDay);
-document.getElementById("previewLog").addEventListener("click", previewServiceDayLog);
 document.getElementById("applyLog").addEventListener("click", applyServiceDayLog);
-document.getElementById("babyLog").addEventListener("input", invalidateLogPreview);
+document.getElementById("babyLog").addEventListener("input", invalidateSubmission);
 document.getElementById('mealPhoto').addEventListener('change', selectPhoto);
 document.getElementById('reloadLog').addEventListener('click', reloadSavedLog);
 window.addEventListener('pagehide', () => {
   clearSelectedPhoto(); if (savedPhotoUrl) URL.revokeObjectURL(savedPhotoUrl);
-});
-document.getElementById("confirmLog").addEventListener("change", event => {
-  document.getElementById("applyLog").disabled = !logCandidate || !event.currentTarget.checked;
 });
 document.getElementById("monthInput").addEventListener("change", () => resetServiceDaySelection());
 document.getElementById("reauthenticate").addEventListener("click", reauthenticateLine);

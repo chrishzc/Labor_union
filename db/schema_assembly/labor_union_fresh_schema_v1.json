@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "b38b85a2674d355ee87031df7a8f545846fc38c83ae9a8ed341bf2e2a26a67eb",
+  "active_artifacts_sha256": "ca5787f54e1e1a5e9a22502cb2c7cd621e108540dba6c7572e4c9db04d0cec8f",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -182,7 +182,9 @@
     "db/schema_parts/231_staff_union_number.sql",
     "db/schema_parts/232_candidate_weekly_information.sql",
     "db/schema_parts/1052_nas_registration_approval.sql",
-    "db/schema_parts/1053_line_order_group_invitation_url.sql"
+    "db/schema_parts/1053_line_order_group_invitation_url.sql",
+    "db/schema_parts/1054_scheduling_service_start.sql",
+    "db/schema_parts/233_government_subsidy_periods.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -211,7 +213,9 @@
     "db/schema_parts/1048_order_cancellation_optional_downstream.sql": "migration-only",
     "db/schema_parts/1049_client_hcm_email.sql": "migration-only",
     "db/schema_parts/1050_staff_union_number.sql": "migration-only",
-    "db/schema_parts/1051_candidate_weekly_information.sql": "migration-only"
+    "db/schema_parts/1051_candidate_weekly_information.sql": "migration-only",
+    "db/schema_parts/233_government_subsidy_periods.sql": "active-bootstrap",
+    "db/schema_parts/1055_government_subsidy_periods.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -456,6 +460,15 @@
       "replay": "exact predecessor permits apply; exact successor is no-op",
       "rollback": "discard candidate before switch; retain enum and use compatible forward release after apply",
       "unresolved_policy": "unknown enum ordering, nullability, default or other metadata blocks apply"
+    },
+    "db/schema_parts/1055_government_subsidy_periods.sql": {
+      "source_object": "databases before whole-period subsidy receipt roots",
+      "successor": "db/schema_parts/233_government_subsidy_periods.sql",
+      "terminal_schema_evidence": "fresh 233 creates the same tables and canonical policy marker; preserve 1055 runs separate authorized backfill",
+      "data_effect": "schema_only; identity and refund backfill is a separately hash-bound operation",
+      "replay": "absent permits apply; exact objects are no-op",
+      "rollback": "discard candidate before switch; retain additive receipt evidence after apply",
+      "unresolved_policy": "partial or drift metadata blocks apply"
     }
   }
 }

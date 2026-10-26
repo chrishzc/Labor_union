@@ -6,6 +6,7 @@
 
 ## Responsibility
 定位既有客戶應付、一般退款與補助退還的owner Query／Preview／Apply工作台及其測試。Source／test仍保留三碼exact dispatcher、partial-retain與fresh terminal readback；這是既有實作證據，不代表三碼仍屬current Anomalies runtime產品。一般畫面呈現案件、義務類型、日期、金額、可核對銀行流水、處理結果與安全錯誤；account version、obligation identity與bank row identity不在一般操作畫面顯示。Owner allocation與settlement以Client Finance正式契約為準；Anomalies current範圍以第06份規格為準。
+一般退款提供既有 partial-refund 選項；typed Query 的 `include_not_due=true` 供銀行核對選取未到期退款，預設仍只讀逾期款項。補退沿同一退款 owner，不新增後端付款能力。
 
 ## Implementation
 - primary: `ui_react/src/components/ClientSettlementRemediationWorkbench.tsx`

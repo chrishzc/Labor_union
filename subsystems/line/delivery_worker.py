@@ -12,18 +12,41 @@ from typing import Callable
 from domains.line.delivery import LineDeliveryStatus, LineDeliveryTaskSnapshot
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.delivery_contracts import (
+    CancelLineDeliveryTaskCommand,
     ClaimLineDeliveryTasksQuery,
     LineProviderOutcome,
     LineProviderOutcomeType,
     LineReplyOpportunity,
     RecordLineDeliveryAttemptCommand,
 )
+from shared_kernel.identities import ActorContext
 from subsystems.line.ports import LineMessagingProviderPort, LineUnitOfWorkPort
 from subsystems.line.deposit_notifications import deposit_delivery_is_current
+from subsystems.line.service_start_day import start_day_delivery_is_current
+from subsystems.line.second_payment_notifications import second_payment_delivery_is_current
+from subsystems.line.service_completion_notifications import service_completion_delivery_is_current
+from subsystems.line.service_day_log_reminders import service_day_log_reminder_delivery_is_current
+from subsystems.line.payment_overdue_reminders import payment_overdue_delivery_is_current
 from subsystems.line.order_group_application import group_invitation_delivery_is_current
 from subsystems.line.notification_failure_current_fact import (
     append_line_notification_failure_rechecks,
 )
+
+
+def service_start_delivery_is_current(unit, task):
+    if task.request.source_aggregate_type=='matching_schedule_recipient':
+        unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(task.task_id,ActorContext('service-start-worker'),
+            IdempotencyKey(f'retired-schedule:{task.task_id.value}'),task.request.correlation_id))
+        unit.commit()
+        return False
+    if task.request.source_aggregate_type not in {'service_start_inquiry','service_start_invitation','service_start_schedule'}:
+        return True
+    valid=unit.service_starts.delivery_is_current(task)
+    if not valid:
+        unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(task.task_id,ActorContext('service-start-worker'),
+            IdempotencyKey(f'service-start-stale:{task.task_id.value}'),task.request.correlation_id))
+        unit.commit()
+    return valid
 
 
 class LineDeliveryWorker:
@@ -171,12 +194,22 @@ class LineDeliveryWorker:
                 and self._now() < current.lease.expires_at
             )
             return (lease_valid
+                    and service_completion_delivery_is_current(unit_of_work, task)
+                    and payment_overdue_delivery_is_current(unit_of_work, task, self._now())
+                    and service_day_log_reminder_delivery_is_current(unit_of_work, task, self._now())
+                    and second_payment_delivery_is_current(unit_of_work, task, self._now())
+                    and start_day_delivery_is_current(unit_of_work, task, self._now())
                     and deposit_delivery_is_current(unit_of_work, task, self._now())
-                    and group_invitation_delivery_is_current(unit_of_work, task))
+                    and group_invitation_delivery_is_current(unit_of_work, task)
+                    and service_start_delivery_is_current(unit_of_work, task))
 
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
+        if task.request.source_aggregate_type in {'staff_leave_customer_coordination', 'staff_leave_customer_decision'}:
+            return 'leave_customer_confirmation_retired'
+        if task.request.source_aggregate_type=='matching_schedule_recipient':
+            return 'schedule_confirmation_retired'
         if (task.request.source_aggregate_type == "matching_coordination_outbox"
                 and task.request.source_aggregate_identity.endswith(":zero-candidate:client-decision")):
             return "matching_zero_pool_notification_retired"

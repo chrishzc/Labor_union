@@ -46,35 +46,59 @@ describe('PAYOUT-001 remediation workbench', () => {
     await screen.findByText(/餘額 NT\$ 12,000/);
     fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } });
     fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '電話核對後核銷' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await screen.findByText('核銷影響已確認，尚未寫入');
-    fireEvent.click(screen.getByRole('checkbox', { name: '確認核銷影響' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認並提交核銷' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+
+
+
     await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(client.apply).toHaveBeenCalledTimes(1); expect(client.queryJob).toHaveBeenCalledTimes(1); expect(client.query).toHaveBeenCalledTimes(2);
   });
 
-  it('輸入改變會使 Preview 失效，且不允許 double submit', async () => {
-    const client = clientFor({});
-    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} pollIntervalMs={0} />);
+  it('不足額核銷保留餘額，確認成功後才允許下一筆補款', async () => {
+    const partial = { ...initial, staff_payables_version: 5, obligations: [{ ...initial.obligations[0], net_paid_ntd: 4000, balance_ntd: 8000, payout_status: 'partially_paid' }] };
+    const client = clientFor({ settled: partial }); const onResolved = vi.fn(); const onPosted = vi.fn();
+    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} onResolved={onResolved} onPosted={onPosted} pollIntervalMs={0} />);
     await screen.findByText(/餘額 NT\$ 12,000/);
-    fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' }));
-    await screen.findByText('核銷影響已確認，尚未寫入'); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '修改後理由' } });
-    expect(screen.queryByText('核銷影響已確認，尚未寫入')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查核銷影響' })).toBeEnabled(); expect(client.apply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('核銷方式'), { target: { value: 'underpayment' } });
+    fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+    await screen.findAllByText(/餘額 NT\$ 8,000/);
+    expect(client.preview).toHaveBeenCalledWith(expect.objectContaining({ differenceMode: 'underpayment' }), expect.anything());
+    expect(onPosted).toHaveBeenCalledTimes(1);
+    expect(onResolved).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '繼續核銷剩餘款' }));
+    expect(screen.getByLabelText('銀行流水紀錄編號')).toHaveValue('');
+    expect(screen.getByLabelText('核銷方式')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '儲存核銷' })).toBeDisabled();
+  });
+
+  it('綁定銀行流水核銷多筆款項時，其他款項未清償就保留待付', async () => {
+    const second = { ...initial.obligations[0], obligation_identity: 'obligation:11:CASE-2', case_no: 'CASE-2' };
+    const combined = { ...initial, obligations: [...initial.obligations, second] };
+    const partial = { ...settled, obligations: [...settled.obligations, second] };
+    const client = clientFor({ query: combined, settled: partial }); const onResolved = vi.fn();
+    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1', obligationIdentities: combined.obligations.map(item => item.obligation_identity) }} financeImportRowId={91} client={client} onResolved={onResolved} pollIntervalMs={0}/>);
+    await screen.findAllByText(/餘額 NT\$ 12,000/);
+    expect(screen.queryByLabelText('銀行流水紀錄編號')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('核銷方式'), { target: { value: 'underpayment' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+    await screen.findByText('剩餘款繼續待付；請由補款流水接續核銷。');
+    expect(client.preview).toHaveBeenCalledWith(expect.objectContaining({ financeImportRowIds: [91], obligationIdentities: combined.obligations.map(item => item.obligation_identity), differenceMode: 'underpayment' }), expect.anything());
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '繼續核銷剩餘款' })).not.toBeInTheDocument();
   });
 
   it('Job succeeded 但 result reference 或 fresh root 不符合時，異常保留且不通知解除', async () => {
     const client = clientFor({ job: { job_id: 'job-1', status: 'succeeded', command_type: 'staff_payout_apply', attempt_count: 1, max_attempts: 3, outcome: { kind: 'success', schema_version: 1, result_reference: 'staff_payout:99' } } }); const onResolved = vi.fn();
     render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} onResolved={onResolved} pollIntervalMs={0} />);
-    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' })); await screen.findByText('核銷影響已確認，尚未寫入'); fireEvent.click(screen.getByRole('checkbox', { name: '確認核銷影響' })); fireEvent.click(screen.getByRole('button', { name: '確認並提交核銷' }));
+    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('應付款核銷目前無法完成')); expect(screen.getByRole('alert')).not.toHaveTextContent('STAFF_PAYOUT_JOB_RESULT_MISMATCH'); expect(onResolved).not.toHaveBeenCalled();
   });
 
   it('Job succeeded 但 fresh root 尚未結清時仍提供 owner readback，不形成永久死路', async () => {
     const client = clientFor({}); const onResolved = vi.fn();
     render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} onResolved={onResolved} pollIntervalMs={0} />);
-    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' })); await screen.findByText('核銷影響已確認，尚未寫入'); fireEvent.click(screen.getByRole('checkbox', { name: '確認核銷影響' })); fireEvent.click(screen.getByRole('button', { name: '確認並提交核銷' }));
+    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     await screen.findByText(/最新應付款仍未結清/);
     const readback = screen.getByRole('button', { name: '重新查詢核銷結果' });
     fireEvent.click(readback);
@@ -90,7 +114,7 @@ describe('PAYOUT-001 remediation workbench', () => {
     const client: StaffPayoutRemediationClient = { ...base, apply };
     const onResolved = vi.fn();
     render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} onResolved={onResolved} pollIntervalMs={0} />);
-    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' })); await screen.findByText('核銷影響已確認，尚未寫入'); fireEvent.click(screen.getByRole('checkbox', { name: '確認核銷影響' })); fireEvent.click(screen.getByRole('button', { name: '確認並提交核銷' }));
+    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     const retry = await screen.findByRole('button', { name: '使用原操作安全重試' });
     fireEvent.click(retry); await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(apply).toHaveBeenCalledTimes(2); expect(apply.mock.calls[0][3]).toBe(apply.mock.calls[1][3]);
@@ -106,11 +130,11 @@ describe('PAYOUT-001 remediation workbench', () => {
       apply: vi.fn(async () => { throw new StaffPayoutRemediationError('staff_payable_candidate_stale', 'stale'); }),
     };
     render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1' }} client={client} pollIntervalMs={0} />);
-    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '檢查核銷影響' })); await screen.findByText('核銷影響已確認，尚未寫入'); fireEvent.click(screen.getByRole('checkbox', { name: '確認核銷影響' })); fireEvent.click(screen.getByRole('button', { name: '確認並提交核銷' }));
+    await screen.findByText(/餘額 NT\$ 12,000/); fireEvent.change(screen.getByLabelText('銀行流水紀錄編號'), { target: { value: '91' } }); fireEvent.change(screen.getByLabelText('人工核對理由'), { target: { value: '理由' } }); fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
     await screen.findByText(/應付款資料已更新/);
     expect(client.query).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('核銷影響已確認，尚未寫入')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查核銷影響' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '儲存核銷' })).toBeEnabled();
     expect(client.apply).toHaveBeenCalledTimes(1);
   });
 });

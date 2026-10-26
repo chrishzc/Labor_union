@@ -74,7 +74,7 @@ class PayrollObligationView(_StrictModel):
     obligation_kind: str
     direction: str
     source_obligation_identity: str | None
-    amount_due_ntd: int = Field(gt=0)
+    amount_due_ntd: int = Field(ge=0)
     due_date: date | None
     status: str
     payout_history_exists: bool

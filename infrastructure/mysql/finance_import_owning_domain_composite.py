@@ -271,24 +271,7 @@ class MySqlFinanceImportOwningDomainComposite:
         return _client_subsidy_return_result(candidate, receipt)
 
     def _post_government_subsidy(self, candidate, context):
-        intent = ReceiptIntent(
-            int(_row_id(candidate.row_identity)),
-            _government_subsidy_batch_id(candidate),
-        )
-        repository = MySqlGovernmentSubsidyRepository(self._connection)
-        workflow = GovernmentSubsidyLedgerWorkflow(
-            repository,
-            BorrowedTransactionUnitOfWork,
-        )
-        preview = workflow.preview_receipt(intent)
-        request = _government_subsidy_request(
-            candidate,
-            intent,
-            preview,
-            context,
-        )
-        receipt = workflow.apply_receipt_borrowed(request)
-        return _government_subsidy_result(candidate, receipt)
+        raise ValueError('government_subsidy_period_entry_required')
 
     def _require_context(self) -> _PostingContext:
         if self._context is None:
@@ -379,11 +362,24 @@ def _resolve_client_subsidy_return(connection, candidate):
     )
     if len(rows) != 1:
         return candidate
-    return _ready_candidate(
+    ready = _ready_candidate(
         candidate,
         (str(rows[0]["obligation_identity"]),),
         "exact-open-client-subsidy-return-obligation",
     )
+    workflow = ClientRefundReversalWorkflow(
+        MySqlClientRefundReversalRepository(connection), BorrowedTransactionUnitOfWork,
+    )
+    try:
+        workflow.preview(_client_subsidy_return_selection(connection, ready),
+                         CorrelationId(f"finance-import-subsidy-preview:{candidate.row_identity}"))
+    except ClientRefundReversalError as error:
+        if error.error.category is not ErrorCategory.DOMAIN_BLOCKED:
+            raise
+        # Funding/eligibility is owned by Client Finance. Leave this bank fact
+        # pending so unrelated valid candidates can still post in the same batch.
+        return replace(candidate, evidence=tuple(sorted(set((*candidate.evidence, error.error.code)))))
+    return ready
 
 
 def _resolve_client_refund(connection, candidate):
@@ -473,7 +469,7 @@ def _resolve_staff_payout(connection, candidate):
             "AND obligation.direction='payable_to_staff' "
             "AND obligation.status<>'cancelled' "
             "AND obligation.amount_due_ntd>0 "
-            "AND (projection.status IS NULL OR projection.status='payable') "
+            "AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid')) "
             "ORDER BY obligation.obligation_identity",
             (staff_id,),
         )
@@ -490,24 +486,9 @@ def _resolve_staff_payout(connection, candidate):
 
 
 def _resolve_government_subsidy(connection, candidate):
-    repository = MySqlGovernmentSubsidyRepository(connection)
-    workflow = GovernmentSubsidyLedgerWorkflow(
-        repository,
-        BorrowedTransactionUnitOfWork,
-    )
-    intent = ReceiptIntent(int(_row_id(candidate.row_identity)), None)
-    try:
-        preview = workflow.preview_receipt(intent)
-    except GovernmentSubsidyDomainError as error:
-        if error.code is GovernmentSubsidyErrorCode.REVIEW_REQUIRED:
-            return candidate
-        return _blocked_candidate(candidate, error.code.value)
-    batch_identity = f"government-subsidy-batch:{preview.candidate.batch_id}"
-    return _ready_candidate(
-        candidate,
-        (batch_identity,),
-        "unique-approved-government-subsidy-batch",
-    )
+    # A bank date/amount cannot identify the government's month/quarter/year.
+    # Staff selects the entire period in the owning workbench; importer keeps the fact pending.
+    return candidate
 
 
 def _single_prefixed_identity(candidate, prefix):
@@ -754,7 +735,7 @@ def _staff_request(candidate, selection, preview, context):
 def _government_subsidy_request(candidate, intent, preview, context):
     return GovernmentSubsidyReceiptApplyRequest(
         intent,
-        ExpectedVersion(preview.batch_version),
+        ExpectedVersion(preview.candidate.expected_batch_version),
         preview.fingerprint,
         _child_key(context, candidate, "government-subsidy-receipt"),
         context.actor,

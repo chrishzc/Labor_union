@@ -1,5 +1,5 @@
 """File: staff_leave_management.py
-Description: 提供工會人員處理 Scheduling 請假待辦的管理 API。"""
+Description: 保留舊請假歷史查閱；舊受理／退回操作已退役。"""
 
 from typing import Annotated, Literal
 
@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
 from api.schemas.base import BaseResponse
-from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.staff_leave_management import (
     StaffLeaveCoordinationContextView,
     StaffLeaveInboxItemView,
@@ -19,13 +17,6 @@ from api.schemas.staff_leave_management import (
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.line.staff_leave_customer_coordination import (
-    StaffLeaveCustomerCoordinationApplication,
-)
-from subsystems.scheduling.staff_leave_intake_workflow import (
-    ReviewStaffLeaveRequest,
-    StaffLeaveIntakeWorkflowError,
-)
 
 
 router = APIRouter(prefix="/api/v1/scheduling/staff-leave-requests", tags=["Scheduling Staff Leave Intake"])
@@ -89,32 +80,6 @@ def review_staff_leave_request(
     body: ReviewBody,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)],
     principal: AdminPrincipal = Depends(require_admin),
-    application: StaffLeaveCustomerCoordinationApplication = Depends(get_staff_leave_customer_coordination_application),
 ):
-    try:
-        result = application.review(
-            ReviewStaffLeaveRequest(request_id, body.expected_version, body.action, body.reason, False, str(principal.username), idempotency_key)
-        )
-    except StaffLeaveIntakeWorkflowError as error:
-        messages = {
-            "leave_request_stale": "這筆請假待辦已由其他人更新；請按「重新整理」，再使用「狀態」篩選核對最新處理結果。",
-            "leave_request_not_found": "找不到這筆請假待辦；請按「重新整理」讀取目前清單。",
-            "leave_request_transition_invalid": "請假待辦目前的狀態無法執行此操作；請按「重新整理」核對最新狀態。",
-        }
-        raise _review_error(str(error), messages.get(str(error), "請假待辦目前無法執行此操作；請重新整理並核對狀態與處理原因。")) from error
-    except ValueError as error:
-        if str(error) != "leave_request_idempotency_conflict":
-            raise
-        raise _review_error(str(error), "此審核操作識別已用於不同內容；請重新整理待辦，核對狀態後重新操作。") from error
-
-    return BaseResponse(data={"request_id": result.request_id, "status": result.status.value, "version": result.version, "actor": str(principal.username)})
-
-
-def _review_error(code: str, message: str) -> HTTPException:
-    error = GlobalTypedErrorView(
-        category=GlobalErrorCategory.IDEMPOTENCY_MISMATCH if code == "leave_request_idempotency_conflict" else GlobalErrorCategory.CONFLICT,
-        code=code, message=message,
-        field_errors=[], domain_blockers=[], retryable=False,
-        correlation_id="staff-leave-review", current_version=None,
-    )
-    return HTTPException(status_code=409, detail={"error": error.model_dump(mode="json")})
+    raise HTTPException(status_code=410,detail={'code':'legacy_leave_review_retired',
+        'message':'舊請假申請僅供歷史查閱；現行協調結果與代班請使用原案件流程。'})

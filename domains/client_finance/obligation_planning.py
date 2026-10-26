@@ -111,6 +111,7 @@ class ClientFinanceTermsFacts:
     existing_obligations: tuple[ExistingClientStageObligation, ...]
     open_nonstage_obligation_count: int = 0
     client_service_charge_waived: bool = False
+    identity_status: str | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -141,6 +142,7 @@ class ClientFinanceTermsSourceFacts:
     deposit_gate_override_active: bool = False
     identity_status: str | None = None
     existing_subsidy_return_count: int = 0
+    effective_start_date: date | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -224,7 +226,7 @@ class ClientSubsidyReturnPlan:
 
     def __post_init__(self) -> None:
         _validate_identity(self.obligation_identity, "subsidy return identity")
-        _require_positive_money(self.amount, "subsidy return amount")
+        _require_nonnegative_money(self.amount, "subsidy return amount")
         _require_date(self.due_date, "subsidy return due date")
 
 
@@ -381,7 +383,7 @@ def build_client_finance_terms_impact(
     change_identity: str,
 ) -> ClientFinanceTermsCandidate:
     source_facts = replace(source_facts, payment_terms=_payment_terms_for_order(
-        source_facts.payment_terms, order_terms,
+        source_facts.payment_terms, order_terms, source_facts.effective_start_date,
     ))
     facts = _materialize_terms_facts(source_facts, order_terms, scheduling)
     return build_client_finance_terms_candidate(facts, change_identity)
@@ -393,9 +395,9 @@ def payment_terms_inputs_changed(before: OrderTerms, after: OrderTerms) -> bool:
     ))
 
 
-def _payment_terms_for_order(terms, order_terms):
+def _payment_terms_for_order(terms, order_terms, effective_start_date=None):
     return replace(
-        terms, first_payment_due_date=order_terms.planned_start_date,
+        terms, first_payment_due_date=effective_start_date or order_terms.planned_start_date,
         deposit_due_date=min(terms.deposit_due_date, order_terms.planned_start_date),
     )
 
@@ -413,37 +415,35 @@ def build_preassignment_client_finance_terms_impact(
         return build_preassignment_client_finance_noop(
             source_facts, after, scheduling, change_identity,
         )
-    terms = _payment_terms_for_order(source_facts.payment_terms, after)
+    terms = _payment_terms_for_order(source_facts.payment_terms, after, source_facts.effective_start_date)
     dates = service_dates if service_dates is not None else tuple(
         after.planned_start_date + timedelta(days=i) for i in range(after.service_days)
     )
     facts = _terms_facts_from_service_dates(
         replace(source_facts, payment_terms=terms), after, dates,
     )
-    plans = _build_stage_plans(facts)
-    if source_facts.existing_obligations:
-        existing = {item.payment_stage: item for item in source_facts.existing_obligations}
-        actions = tuple(
-            _build_stage_action(facts.case_no, change_identity, stage, existing[stage.payment_stage])
-            for stage in plans if stage.payment_stage in existing
-        )
-        return _candidate(facts, plans, actions)
-    noop = build_preassignment_client_finance_noop(
-        source_facts, after, scheduling, change_identity,
-    )
-    second = next(stage for stage in plans if stage.payment_stage is PaymentStage.SECOND)
-    terms = replace(terms, second_payment_due_date=second.due_date)
-    changed = terms != source_facts.payment_terms
-    return replace(
-        noop, stage_plans=plans, payment_terms=terms if changed else None,
-        resulting_account_version=source_facts.account_version + int(changed),
-        fingerprint=fingerprint_payload({
-            "preassignment_terms": noop.fingerprint.value,
-            "stage_plans": tuple(_stage_payload(stage) for stage in plans),
-            "payment_terms": _payment_terms_payload(terms),
-            "mutates": changed,
-        }),
-    )
+    # All stages follow complete terms, independently of signing or assignment.
+    return build_client_finance_terms_candidate(facts, change_identity)
+
+
+def automatic_subsidy_return_plan(facts: ClientFinanceTermsFacts, *, identity_status: str | None,
+                                  completed_on: date | None, existing_return_count: int) -> ClientSubsidyReturnPlan | None:
+    if completed_on is None:
+        return None
+    identity = normalize_subsidy_policy_identity(str(identity_status or ""))
+    if identity == '社福' and existing_return_count:
+        return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",MoneyNTD(0),subsidy_advance_due_date(completed_on))
+    if identity != "補助市民":
+        return None
+    coverage = derive_subsidy_coverage(identity,
+        Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day)), Decimal(facts.floor_fee.amount))
+    if coverage.is_full_subsidy_order or coverage.subsidy_hours == 0:
+        return None
+    amount = coverage.subsidy_hours * facts.payment_terms.client_hourly_rate.amount
+    if amount <= 0 or amount != amount.to_integral_value():
+        raise ValueError("subsidy return amount must be positive whole NTD")
+    return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",
+                                 MoneyNTD(int(amount)), subsidy_advance_due_date(completed_on))
 
 
 def _payment_terms_payload(terms):
@@ -545,23 +545,18 @@ def _cancellation_subsidy_return_plan(
     service_dates,
     candidate,
 ):
-    if not service_dates or source_facts.existing_subsidy_return_count:
+    if not service_dates:
+        if source_facts.existing_subsidy_return_count:
+            return ClientSubsidyReturnPlan(f"client-subsidy-return:{source_facts.case_no}:terminal",MoneyNTD(0),
+                subsidy_advance_due_date(order_terms.planned_start_date))
         return None
     identity_status = normalize_subsidy_policy_identity(
         str(source_facts.identity_status or "")
     )
     hour_cap = {
-        "一般市民": Decimal("40"),
-        "補助市民": Decimal("120"),
+        "補助市民": Decimal("40"),
     }.get(identity_status)
     if hour_cap is None:
-        return None
-    customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
-    received = sum(
-        item.net_settled_amount.amount
-        for item in source_facts.existing_obligations
-    )
-    if received < customer_payable:
         return None
     actual_hours = Decimal(len(service_dates)) * Decimal(
         str(order_terms.service_hours_per_day)
@@ -636,6 +631,7 @@ def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
         source_facts.existing_obligations,
         source_facts.open_nonstage_obligation_count,
         client_service_charge_waived,
+        source_facts.identity_status,
     )
 
 
@@ -713,6 +709,11 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 
 def _daily_charge(facts, charge_day):
+    if normalize_subsidy_policy_identity(facts.identity_status or '') == '社福':
+        index = facts.charge_days.index(charge_day)
+        remaining = max(0,120-index*facts.service_hours_per_day)
+        billed = max(0,facts.service_hours_per_day-remaining)
+        return MoneyNTD(_whole_ntd(billed*facts.payment_terms.client_hourly_rate.amount*(2 if charge_day.is_double_pay else 1)))
     if facts.client_service_charge_waived:
         return MoneyNTD(0)
     multiplier = 2 if charge_day.is_double_pay else 1
@@ -804,7 +805,9 @@ def _settled_stage_action(change_identity, stage_plan, existing):
         stage_plan.amount,
         abs_money(difference),
         None,
-        stage_plan.due_date,
+        stage_plan.due_date if stage_plan.due_date is not None else (
+            existing.due_date if action is ClientObligationActionKind.CREATE_REFUND else None
+        ),
         existing.obligation_identity,
         *_expected_direction(action, existing.contracted_amount, stage_plan.amount),
     )
@@ -874,6 +877,10 @@ def _candidate(facts, stage_plans, actions):
     second = next(stage for stage in stage_plans if stage.payment_stage is PaymentStage.SECOND)
     payment_terms = replace(facts.payment_terms, second_payment_due_date=second.due_date)
     payload["payment_terms"] = _payment_terms_payload(payment_terms)
+    subsidy_return = automatic_subsidy_return_plan(facts, identity_status=facts.identity_status,
+        completed_on=max((day.service_date for day in facts.charge_days), default=None), existing_return_count=0)
+    if subsidy_return is not None:
+        payload['subsidy_return'] = {'amount_ntd': subsidy_return.amount.amount, 'due_date': subsidy_return.due_date.isoformat()}
     return ClientFinanceTermsCandidate(
         facts.case_no,
         facts.account_version,
@@ -884,6 +891,7 @@ def _candidate(facts, stage_plans, actions):
         (),
         fingerprint_payload(payload),
         payment_terms=payment_terms,
+        subsidy_return_plan=subsidy_return,
     )
 
 

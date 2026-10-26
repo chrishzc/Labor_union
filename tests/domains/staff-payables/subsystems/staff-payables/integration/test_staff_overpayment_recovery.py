@@ -235,6 +235,29 @@ def test_matching_schema_reserves_bank_row_once():
     assert "UNIQUE KEY uq_staff_recovery_matching_bank_row" in schema
 
 
+def test_matching_http_receipt_obeys_the_strict_public_contract():
+    from fastapi import FastAPI
+    from api.routes.staff_payout import router
+    from api.dependencies.admin_auth import require_system_admin
+    from api.dependencies.staff_payout import get_staff_overpayment_recovery_matching_application
+    from subsystems.access.authentication_session import AdminPrincipal
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(1, "test", "Test", "system_admin")
+    app.dependency_overrides[get_staff_overpayment_recovery_matching_application] = lambda: StaffOverpaymentRecoveryMatchingWorkflow(_MatchingRepository(), _UnitOfWork)
+    with TestClient(app) as client:
+        body = {"recovery_identity": "staff-overpayment-recovery:1", "finance_import_row_id": 11, "evidence_reference": "synthetic matching evidence"}
+        preview = client.post('/api/v1/staff-payables/overpayment-recoveries/matching/preview', json=body)
+        assert preview.status_code == 200, preview.text
+        plan = preview.json()['data']
+        body.update(expected_recovery_version=plan['recovery_version'], expected_staff_payables_version=plan['staff_payables_version'], preview_fingerprint=plan['preview_fingerprint'], reason='')
+        response = client.post('/api/v1/staff-payables/overpayment-recoveries/matching/apply', json=body,
+            headers={'Idempotency-Key': 'matching-http', 'X-Correlation-ID': 'matching-http'})
+        assert response.status_code == 200, response.text
+        assert response.json()['data']['staff_id'] == 7
+        assert 'preview_fingerprint' not in response.json()['data']
+
+
 class _MatchingRepository:
     def load_matching(self, _selection, *, for_update):
         return StaffOverpaymentRecoveryMatchingFacts(7, 4, 9, True)

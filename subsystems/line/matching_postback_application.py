@@ -35,37 +35,22 @@ class LineMatchingPostbackApplication:
         if line_user_id is None:
             return
         postback_data = _postback_data(inbox)
+        service_start_match = re.fullmatch(r"service-start:([A-Za-z0-9_-]{20,191}):(willing|unwilling)",postback_data)
+        if service_start_match is not None:
+            unit_of_work.service_starts.record_willingness(service_start_match.group(1),line_user_id.value,
+                service_start_match.group(2),f"service-start-reply:{event.event_id.value}")
+            return
+
         if handle_deposit_assistance(postback_data, event, unit_of_work):
             return
         match = _MATCHING_POSTBACK.fullmatch(postback_data)
         if match is not None:
             self._handle_matching_postback(match, line_user_id, event, unit_of_work)
             return
-        schedule_match = _SCHEDULE_POSTBACK.fullmatch(postback_data)
-        if schedule_match is None:
-            return
-        try:
-            unit_of_work.matching_schedule_confirmations.confirm_line_postback(
-                schedule_match.group(1), schedule_match.group(2), line_user_id,
-                f"matching-schedule-postback:{event.event_id.value}",
-            )
-        except (LookupError, ValueError):
-            return
+        # Retired date-confirmation cards cannot authorize any new arrangement.
+        return
 
     def handle_message(self, inbox, unit_of_work, line_user_id, text) -> bool:
-        event_key = f"matching-schedule-rejection-reason:{inbox.event.event_id.value}"
-        try:
-            handled = bool(
-                unit_of_work.matching_schedule_confirmations.confirm_line_rejection_reason(
-                    line_user_id,
-                    text,
-                    event_key,
-                )
-            )
-        except (LookupError, ValueError):
-            handled = False
-        if handled:
-            return True
         return self._matching_application.append_customer_assistance_message_in_unit_of_work(
             unit_of_work, line_user_id, text,
             f"matching-assistance-message:{inbox.event.event_id.value}",

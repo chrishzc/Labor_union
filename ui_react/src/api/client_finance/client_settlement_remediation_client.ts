@@ -16,10 +16,10 @@ import {
 } from './client_settlement_remediation_schemas';
 
 export type ClientSettlementPayableKind = 'refund' | 'subsidy_return';
-export interface ClientSettlementOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
+export interface ClientSettlementOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; includeNotDue?: boolean; }
 export interface ClientSettlementApplyOptions extends ClientSettlementOptions { idempotencyKey: string; correlationId: string; }
 export interface ReceiptSelection { payment_stage: ClientPaymentStage; finance_import_row_ids: number[]; obligation_identities: string[]; }
-export interface PayableSelection { finance_import_row_ids: number[]; obligation_identities: string[]; allow_partial_refund_recovery: false; }
+export interface PayableSelection { finance_import_row_ids: number[]; obligation_identities: string[]; allow_partial_refund_recovery: boolean; }
 
 export class ClientSettlementRemediationError extends ApiError {
   public readonly name = 'ClientSettlementRemediationError';
@@ -68,7 +68,7 @@ export interface ClientSettlementRemediationClient {
 class DefaultClient implements ClientSettlementRemediationClient {
   async query(caseNo: string, request: ClientSettlementOptions = {}) {
     try {
-      const raw = await transport.get<unknown>(`${base(caseNo)}/settlement-remediation`, options(request, `client-settlement-query-${crypto.randomUUID()}`));
+      const raw = await transport.get<unknown>(`${base(caseNo)}/settlement-remediation${request.includeNotDue ? '?include_not_due=true' : ''}`, options(request, `client-settlement-query-${crypto.randomUUID()}`));
       const data = decode(ClientSettlementQueryResponseSchema, raw).data;
       if (data.case_no !== caseNo.trim()) throw new ClientSettlementRemediationError('CLIENT_SETTLEMENT_IDENTITY_MISMATCH', 'Query 案件 identity 不一致。');
       return data;

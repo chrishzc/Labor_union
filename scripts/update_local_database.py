@@ -250,6 +250,7 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
             )
         ],
         "source_policy": "no_ddl_before_verified_same_name_replacement",
+        "backfills": plan.get("backfills", []),
         "plan": plan,
     }
 

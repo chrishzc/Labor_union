@@ -1,47 +1,37 @@
 """
 File: order_pre_start_notification_source.py
-Description: 掃描服務開始前 3 天之有效案件，將其投影為 LINE immutable source event，並由 Notification Registry 派發決策。
+Description: 投影正式開工當天群組提醒與既有第二期款提醒；不直接發送。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Protocol
+from shared_kernel.clock import TAIPEI_TIME_ZONE
+from subsystems.line.service_start_day import ServiceStartDayCandidate
+from subsystems.line.second_payment_notifications import SecondPaymentNotification
+from subsystems.line.service_completion_notifications import ServiceCompletionNotification
 
 from subsystems.line.notification_policy import NotificationSourceEvent
 from subsystems.line.notification_source_adapters import (
-    from_order_pre_start_checkpoint,
-    from_order_second_payment_checkpoint,
+    from_order_service_start_day,
 )
 
 
-@dataclass(frozen=True, slots=True)
-class OrderPreStartCandidate:
-    case_no: str
-    planned_start_date: str
-    first_payment_amount: int
-    already_settled: bool
-    client_line_user_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OrderSecondPaymentCandidate:
-    case_no: str
-    second_payment_due_date: str
-    second_payment_amount: int
-    already_settled: bool
-    client_line_user_id: str | None = None
-
-
 class OrderPreStartScannerPort(Protocol):
-    def find_due_candidates(self, target_date: date) -> tuple[OrderPreStartCandidate, ...]:
-        """Find active orders scheduled to start on target_date with their payment facts."""
+    def find_due_candidates(self, target_date: date) -> tuple[ServiceStartDayCandidate, ...]:
+        """Read the formal start day, original group and effective day assignments."""
         ...
 
-    def find_second_payment_due_candidates(self, target_date: date) -> tuple[OrderSecondPaymentCandidate, ...]:
-        """Find active orders with second payment due on target_date."""
+    def find_second_payment_due_candidates(self, target_date: date) -> tuple[SecondPaymentNotification, ...]:
+        """Only required, unpaid second payments due today; missing group remains a staff todo."""
         ...
+
+    def find_second_payment_settlement_candidates(self) -> tuple[SecondPaymentNotification, ...]:
+        """Only explicitly marked, committed and still-valid second-stage settlements."""
+        ...
+
+    def find_service_completion_candidates(self) -> tuple[ServiceCompletionNotification, ...]: ...
 
 
 class NotificationSourceRegistryPort(Protocol):
@@ -60,20 +50,16 @@ class OrderPreStartNotificationSourceProjector:
         self._registry = registry
 
     def run_once(self, now: datetime, *, target_date: date | None = None) -> int:
-        effective_target = target_date or (now.date() + timedelta(days=3))
+        if now.tzinfo is None:
+            raise ValueError('notification scan requires timezone-aware time')
+        local_day = now.astimezone(TAIPEI_TIME_ZONE).date()
+        effective_target = target_date or local_day
         processed = 0
 
-        # 1. First payment pre-start candidates
+        # 1. Start-day group notice. Never fall back to a customer private chat.
         candidates = self._scanner.find_due_candidates(effective_target)
         for candidate in candidates:
-            event = from_order_pre_start_checkpoint(
-                case_no=candidate.case_no,
-                planned_start_date=candidate.planned_start_date,
-                first_payment_amount=candidate.first_payment_amount,
-                already_settled=candidate.already_settled,
-                occurred_at=now,
-                client_line_user_id=candidate.client_line_user_id,
-            )
+            event = from_order_service_start_day(candidate, occurred_at=now)
             self._registry.register_and_project(event)
             processed += 1
 
@@ -82,24 +68,25 @@ class OrderPreStartNotificationSourceProjector:
         if callable(find_second):
             second_candidates = find_second(effective_target)
             for sc in second_candidates:
-                event = from_order_second_payment_checkpoint(
-                    case_no=sc.case_no,
-                    second_payment_due_date=sc.second_payment_due_date,
-                    second_payment_amount=sc.second_payment_amount,
-                    already_settled=sc.already_settled,
-                    occurred_at=now,
-                    client_line_user_id=sc.client_line_user_id,
-                )
-                self._registry.register_and_project(event)
+                self._registry.register_and_project(sc.event(now))
                 processed += 1
 
+        find_settlements = getattr(self._scanner, 'find_second_payment_settlement_candidates', None)
+        if callable(find_settlements):
+            for settlement in find_settlements():
+                self._registry.register_and_project(settlement.event(now))
+                processed += 1
+
+        find_completions = getattr(self._scanner, 'find_service_completion_candidates', None)
+        if callable(find_completions):
+            for completion in find_completions():
+                self._registry.register_and_project(completion.event(now))
+                processed += 1
         return processed
 
 
 __all__ = [
     "NotificationSourceRegistryPort",
-    "OrderPreStartCandidate",
     "OrderPreStartNotificationSourceProjector",
     "OrderPreStartScannerPort",
-    "OrderSecondPaymentCandidate",
 ]

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 import json
@@ -100,6 +101,26 @@ class MySqlPayrollRebuildRepository:
             cursor.execute(_RECEIPT_SELECT_SQL, (key.value,))
             row = cursor.fetchone()
         return None if row is None else _stored_receipt(row)
+
+    def resolve_handover_obligations(self, facts: PayrollRebuildFacts) -> PayrollRebuildFacts:
+        """Match immutable paid roots to their current same-caregiver family."""
+        from infrastructure.mysql.order_terms_read_model import _select_payroll_assignment_ancestry
+        assignments = tuple({"id": _parse_assignment_identity(item.assignment_identity), "staff_id": item.staff_id}
+                            for item in facts.service_facts)
+        with _cursor(self._connection) as cursor:
+            ancestry = _select_payroll_assignment_ancestry(cursor, facts.case_no, assignments, True)
+        resolved = []
+        for obligation in facts.existing_obligations:
+            source = _parse_assignment_identity(obligation.assignment_identity)
+            matches = [item["id"] for item in assignments
+                       if source == item["id"] or source in ancestry[item["id"]]]
+            if len(matches) == 1:
+                resolved.append(replace(obligation, assignment_identity=_assignment_identity(matches[0])))
+            elif not matches and obligation.amount_due.is_zero:
+                resolved.append(obligation)
+            else:
+                raise ValueError("payroll_handover_settlement_required")
+        return replace(facts, existing_obligations=tuple(resolved))
 
     def persist_rebuild(self, persistence: PayrollRebuildPersistence) -> None:
         with _cursor(self._connection) as cursor:
@@ -348,7 +369,7 @@ def _service_facts(assignments, schedules, special_dates):
             ),
             double_pay_dates=special_dates.get(int(row["id"]), ()),
         )
-        for row in assignments
+        for row in sorted(assignments, key=lambda item: _assignment_identity(item["id"]))
     )
 
 

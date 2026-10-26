@@ -21,6 +21,7 @@ from api.dependencies.order_cancellation import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.order_cancellation import (
+    CancellationPayrollImpactView,
     ClientFinanceImpactView,
     OrderCancellationPreviewView,
     OrderCancellationQueryView,
@@ -225,12 +226,12 @@ def _query_payload(result) -> dict[str, Any]:
         "scheduling_generation": facts.scheduling.generation_number,
         "client_finance_version": facts.client_finance.account_version if facts.client_finance else None,
         "payroll_version": facts.payroll.payroll_version if facts.payroll else None,
-        "confirmed_service_days": _current_service_days(facts.scheduling),
+        "confirmed_service_days": _current_service_days(facts.scheduling, result.cancellation_date),
         "caregiver_options": list(result.caregiver_options),
     }
 
 
-def _current_service_days(scheduling):
+def _current_service_days(scheduling, cancellation_date):
     days = (
         {
             "service_date": service_date,
@@ -239,6 +240,7 @@ def _current_service_days(scheduling):
         }
         for assignment in scheduling.assignments
         for service_date in assignment.service_dates
+        if service_date <= cancellation_date
     )
     return sorted(days, key=lambda item: (item["service_date"], item["staff_id"]))
 
@@ -250,7 +252,7 @@ def _preview_payload(preview) -> dict[str, Any]:
         **_preview_version_payload(preview),
         "scheduling": _materialize(candidate.scheduling),
         "client_finance_impact": _client_finance_impact_payload(preview.client_finance_impact),
-        "payroll_impact": _materialize(preview.payroll_impact),
+        "payroll_impact": _payroll_impact_payload(preview.payroll_impact),
         "lifecycle_impact": _materialize(preview.lifecycle_impact),
         "preview_fingerprint": preview.fingerprint.value,
     }
@@ -262,6 +264,12 @@ def _client_finance_impact_payload(impact):
     # Internal owner plans are persisted by the workflow. The HTTP projection
     # contains only the fields owned by its existing public response contract.
     return {name: _materialize(getattr(impact, name)) for name in ClientFinanceImpactView.model_fields}
+
+
+def _payroll_impact_payload(impact):
+    if impact is None:
+        return None
+    return {name: _materialize(getattr(impact, name)) for name in CancellationPayrollImpactView.model_fields}
 
 
 def _preview_business_payload(candidate):
@@ -406,7 +414,7 @@ def _materialize(value):
     if isinstance(value, (date, datetime, time)):
         return value.isoformat()
     if isinstance(value, Decimal):
-        return str(value)
+        return int(value) if value == value.to_integral_value() else float(value)
     return _materialize_collection(value)
 
 

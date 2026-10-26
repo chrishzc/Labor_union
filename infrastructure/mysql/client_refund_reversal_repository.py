@@ -404,42 +404,25 @@ def _load_subsidy_payout_funding(cursor, selection, bank_rows, lock):
         raise ValueError('subsidy_advance_settlement_ambiguous')
     suffix = ' FOR UPDATE' if lock else ''
     cursor.execute(
-        'SELECT link.id link_id,link.entitled_amount_ntd,item.id claim_item_id,item.case_no claim_case_no,'
-        'item.batch_id,account.aggregate_version batch_version,obligation.due_date,orders.actual_end_date '
+        'SELECT obligation.amount_due_ntd,obligation.due_date,COALESCE(orders.actual_end_date,orders.end_date) service_end_date '
         'FROM client_obligations obligation JOIN orders ON orders.case_no=obligation.case_no '
-        'JOIN client_subsidy_return_claim_item_links link ON link.obligation_identity=obligation.obligation_identity '
-        'JOIN subsidy_claim_batch_items item ON item.id=link.claim_item_id '
-        'JOIN government_subsidy_batch_accounts account ON account.batch_id=item.batch_id '
-        'WHERE obligation.obligation_identity=%s AND obligation.case_no=%s ORDER BY link.id' + suffix,
-        (selection.obligation_identities[0], selection.case_no),
-    )
-    rows = tuple(cursor.fetchall())
-    if len(rows) != 1 or rows[0]['claim_case_no'] != selection.case_no:
+        "WHERE obligation.obligation_identity=%s AND obligation.case_no=%s AND obligation.obligation_type='subsidy_return'" + suffix,
+        (selection.obligation_identities[0],selection.case_no))
+    obligation = cursor.fetchone()
+    if obligation is None:
         raise ValueError('subsidy_advance_settlement_ambiguous')
-    row = rows[0]
     paid_on = bank_rows[0]['transaction_date']
-    if not isinstance(paid_on, date):
+    cursor.execute('SELECT entry.id FROM government_subsidy_period_members member '
+        'JOIN government_subsidy_period_entries entry ON entry.id=member.receipt_id '
+        'WHERE member.case_no=%s AND entry.paid_on<=%s AND entry.reversal_of_id IS NULL '
+        'AND NOT EXISTS(SELECT 1 FROM government_subsidy_period_entries reversal WHERE reversal.reversal_of_id=entry.id '
+        'AND reversal.paid_on<=%s)' + suffix, (selection.case_no,paid_on,paid_on))
+    covered = tuple(cursor.fetchall())
+    if len(covered)>1:
         raise ValueError('subsidy_advance_settlement_ambiguous')
-    cursor.execute(
-        'SELECT allocation.id,allocation.allocation_type,allocation.allocated_amount '
-        'FROM government_subsidy_allocations allocation '
-        'JOIN government_subsidy_transactions transaction_root ON transaction_root.id=allocation.transaction_id '
-        'AND transaction_root.claim_batch_id=allocation.claim_batch_id '
-        "WHERE allocation.claim_item_id=%s AND allocation.claim_batch_id=%s AND transaction_root.transaction_status='succeeded' "
-        'AND DATE(transaction_root.occurred_at)<=%s ORDER BY allocation.id' + suffix,
-        (row['claim_item_id'], row['batch_id'], paid_on),
-    )
-    allocated = 0
-    for allocation in cursor.fetchall():
-        if allocation['allocation_type'] not in {'receipt', 'reversal'}:
-            raise ValueError('subsidy_advance_settlement_ambiguous')
-        amount = _integer_money(allocation['allocated_amount']).amount
-        allocated += amount if allocation['allocation_type'] == 'receipt' else -amount
-    return SubsidyPayoutFundingFacts(
-        row['actual_end_date'], row['due_date'], paid_on,
-        _integer_money(row['entitled_amount_ntd']).amount, allocated,
-        int(row['link_id']), int(row['claim_item_id']), int(row['batch_version']),
-    )
+    amount = _integer_money(obligation['amount_due_ntd']).amount
+    return SubsidyPayoutFundingFacts(obligation['service_end_date'],obligation['due_date'],paid_on,
+        amount,amount if covered else 0,0,0,int(covered[0]['id']) if covered else 0)
 
 
 def _load_refund_obligation_rows(cursor, selection, lock):

@@ -291,7 +291,7 @@ def _matching_plan_payroll_estimates(
         "matching_plan_client_payment_estimate_not_whole_ntd",
     )
     full_subsidy = (
-        str(case.get("client_identity_status") or "").strip() == "補助市民"
+        str(case.get("client_identity_status") or "").strip() == "社福"
         and contracted_days * hours_per_day <= 120
         and client_payable == 0
     )

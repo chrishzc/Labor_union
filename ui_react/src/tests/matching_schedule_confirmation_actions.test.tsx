@@ -2,19 +2,13 @@
  * File: matching_schedule_confirmation_actions.test.tsx
  * Description: 保護 M3 current 日期表 recipient 發送入口與 fresh readback。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  matchingScheduleConfirmationClient,
-  type MatchingScheduleState,
-} from '../api/scheduling/matching_schedule_confirmation_client';
+import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { transport } from '../api/shared/transport';
 import { MatchingScheduleAndAssignmentActions } from '../components/MatchingScheduleAndAssignmentActions';
 import { assignmentPlanMutationClient } from '../api/scheduling/assignment_plan_mutation_client';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
-import { serviceArrangementStatusClient } from '../api/scheduling/service_arrangement_status_client';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
 
 describe('正式排班 canonical job failure transport', () => {
   afterEach(() => sessionClient.clearSession());
@@ -28,236 +22,12 @@ describe('正式排班 canonical job failure transport', () => {
   });
 });
 
-beforeEach(() => { vi.spyOn(serviceArrangementStatusClient, 'arrangement').mockResolvedValue({ case_no: 'CASE-M3-RECIPIENT-001', plan_id: 12, state: 'awaiting_confirmations', blockers: [], job_id: null, assignment_count: 0 }); });
-
-afterEach(() => {
-  orderMutationFlowStore.clearAll();
-  vi.restoreAllMocks();
-});
-
-const schedulePreview: MatchingScheduleState['schedule_preview'] = {
-  week_grouping_policy: 'calendar_week_sunday_to_saturday_v1',
-  total_service_days: 2,
-  total_weeks: 1,
-  weeks: [{
-    week_number: 1,
-    period_start: '2026-08-02',
-    period_end: '2026-08-08',
-    service_dates: ['2026-08-03', '2026-08-05'],
-    service_day_count: 2,
-  }],
-  recipient_schedules: [
-    {
-      audience_type: 'customer',
-      segment_id: null,
-      total_service_days: 2,
-      total_weeks: 1,
-      weeks: [{
-        week_number: 1,
-        period_start: '2026-08-02',
-        period_end: '2026-08-08',
-        service_dates: ['2026-08-03', '2026-08-05'],
-        service_day_count: 2,
-      }],
-    },
-    {
-      audience_type: 'caregiver',
-      segment_id: 17,
-      total_service_days: 2,
-      total_weeks: 1,
-      weeks: [{
-        week_number: 1,
-        period_start: '2026-08-02',
-        period_end: '2026-08-08',
-        service_dates: ['2026-08-03', '2026-08-05'],
-        service_day_count: 2,
-      }],
-    },
-  ],
-};
-
-const notSent: MatchingScheduleState = {
-  case_no: 'CASE-M3-RECIPIENT-001',
-  plan_id: 12,
-  confirmed_service_date_version: 3,
-  snapshot_id: null,
-  snapshot_status: 'not_sent',
-  schedule_preview: schedulePreview,
-  outdated_schedule_preview: null,
-  recipients: [],
-  gate_passed: false,
-};
-
-const sent: MatchingScheduleState = {
-  ...notSent,
-  snapshot_id: 31,
-  snapshot_status: 'sent',
-  recipients: [
-    {
-      recipient_snapshot_id: 41,
-      audience_type: 'customer',
-      segment_id: null,
-      delivery_status: 'queued',
-      confirmation_status: 'pending',
-      confirmation_source: null,
-      confirmation_reason: null,
-      confirmation_occurred_at_utc: null,
-    },
-    {
-      recipient_snapshot_id: 42,
-      audience_type: 'caregiver',
-      segment_id: 17,
-      delivery_status: 'queued',
-      confirmation_status: 'pending',
-      confirmation_source: null,
-      confirmation_reason: null,
-      confirmation_occurred_at_utc: null,
-    },
-  ],
-};
-
-describe('M3 日期表 recipient 確認', () => {
-  it('retains the accepted job after parent readback failure and retries only observation', async () => {
-    vi.spyOn(matchingScheduleConfirmationClient, 'query').mockResolvedValue({ ...sent, gate_passed: true });
-    const originalPreview = {
-      case_no: sent.case_no, order_version: 4, scheduling_version: 7, scheduling_generation: 2,
-      client_finance_version: 3, payroll_version: 2, cancelled_assignment_ids: [],
-      assignments: [{
-        assignment_id: null, candidate_key: null, sequence: 1, staff_id: 9,
-        assigned_start_date: '2026-08-03', assigned_end_date: '2026-08-05',
-        official_service_dates: ['2026-08-03', '2026-08-05'], actual_hours: null, lineage_source_assignment_ids: [],
-      }], buffers: [], client_finance_impact: {}, payroll_impact: {}, orders_impact: {},
-      preview_fingerprint: 'a'.repeat(64),
-    } as Awaited<ReturnType<typeof assignmentPlanMutationClient.preview>>;
-    const apply = vi.spyOn(assignmentPlanMutationClient, 'apply').mockResolvedValue({ job_id: 'job-1' } as Awaited<ReturnType<typeof assignmentPlanMutationClient.apply>>);
-    const queryJob = vi.spyOn(assignmentPlanMutationClient, 'queryJob').mockResolvedValue({
-      job_id: 'job-1', status: 'succeeded', command_type: 'assignment_plan_apply', attempt_count: 1, max_attempts: 3,
-      outcome: { kind: 'success', schema_version: 1, result_reference: `assignment_plan:${sent.case_no}` },
-    });
-    vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue({
-      case_no: sent.case_no, scheduling_version: 8, scheduling_generation: 2,
-      assignments: [{
-        staff_id: 9, assigned_start_date: '2026-08-03', assigned_end_date: '2026-08-05',
-        official_service_dates: ['2026-08-03', '2026-08-05'],
-      }],
-    } as Awaited<ReturnType<typeof ordersQueryClient.getAssignmentPlan>>);
-    const onCompleted = vi.fn().mockRejectedValueOnce(new Error('父頁回讀失敗')).mockResolvedValueOnce(undefined);
-    orderMutationFlowStore.setAssignmentPlan(sent.case_no, 12, { status: 'receipt_received', command: { caseNo: sent.case_no, planId: 12, segments: [{ staff_id: 9, assigned_start_date: '2026-08-03', assigned_end_date: '2026-08-05', official_service_dates: ['2026-08-03', '2026-08-05'] }], preview: originalPreview, reason: '原已確認排班', identity: { idempotencyKey: 'original-assignment', correlationId: 'original-correlation' } }, acceptedJob: { job_id: 'job-1', status_url: '' }, job: null, readbackStatus: 'not_started', error: null });
-    render(<MatchingScheduleAndAssignmentActions caseNo={sent.case_no} planId={12}
-      planSegments={[{ segmentId: 17, sequence: 1, staffId: 9, assignedStartDate: '2026-08-03', assignedEndDate: '2026-08-05' }]}
-      waitingLockAcquired assignmentExists={false} onAssignmentCompleted={onCompleted} />);
-    fireEvent.click(await screen.findByRole('button', { name: /^重新查詢(?:正式)?排班結果$/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('父頁回讀失敗');
-    expect(screen.queryByText('正式排班已完成並回讀一致。')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認套用正式排班' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '檢查建立正式排班影響' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^重新查詢(?:正式)?排班結果$/ }));
-    expect(await screen.findByText(/(?:正式)?排班已完成並回讀一致。/)).toBeInTheDocument();
-    expect(apply).not.toHaveBeenCalled();
-    expect(queryJob).toHaveBeenCalledTimes(2);
-  });
-
-  it('以 authenticated typed client 建立單次 send intent 並驗證 identity readback', async () => {
-    vi.spyOn(sessionClient, 'getToken').mockReturnValue('volatile-token');
-    const post = vi.spyOn(transport, 'post').mockResolvedValue({
-      success: true,
-      message: '日期表已排入發送佇列',
-      data: sent,
-      error: null,
-    });
-
-    await expect(
-      matchingScheduleConfirmationClient.send('CASE-M3-RECIPIENT-001', 12),
-    ).resolves.toEqual(sent);
-    expect(post).toHaveBeenCalledWith(
-      '/api/v1/orders/CASE-M3-RECIPIENT-001/matching-plans/12/schedule-confirmation/send',
-      undefined,
-      {
-        token: 'volatile-token',
-        headers: {
-          'Idempotency-Key': expect.stringMatching(
-            /^matching-schedule-send-CASE-M3-RECIPIENT-001-12-/,
-          ),
-        },
-      },
-    );
-  });
-
-  it('由 current Query 明確發送後顯示 backend fresh recipient readback', async () => {
-    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
-    vi.spyOn(matchingScheduleConfirmationClient, 'query').mockResolvedValueOnce(notSent).mockResolvedValue(sent);
-    const send = vi.spyOn(matchingScheduleConfirmationClient, 'send').mockResolvedValue(sent);
-
-    render(
-      <MatchingScheduleAndAssignmentActions
-        caseNo="CASE-M3-RECIPIENT-001"
-        planId={12}
-        staffNames={{ 9: '月嫂 #9' }}
-        planSegments={[{
-          segmentId: 17,
-          sequence: 1,
-          staffId: 9,
-          assignedStartDate: '2026-08-03',
-          assignedEndDate: '2026-08-05',
-        }]}
-        waitingLockAcquired={false}
-        assignmentExists={false}
-        onAssignmentCompleted={vi.fn()}
-      />,
-    );
-
-    await screen.findByRole('heading', { name: '客戶與各段月嫂確認日期表' });
-    fireEvent.click(screen.getByRole('button', { name: '寄送日期表' }));
-
-    await waitFor(() => expect(send).toHaveBeenCalledWith(
-      'CASE-M3-RECIPIENT-001', 12,
-      expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^schedule-send-/),
-        expectedActor: 'operator-1',
-      }),
-    ));
-    expect((await screen.findByText('客戶')).closest('article')).toHaveTextContent('尚未確認日期');
-    expect(screen.getByText('月嫂 #9').closest('article')).toHaveTextContent('尚未確認日期');
-    expect(screen.getByText('等待客戶與所有月嫂確認目前日期表。')).toBeInTheDocument();
-  });
-  it.each([
-    { label: '未寄送、不填備註', initial: 'not_sent', note: '' },
-    { label: '未寄送、選填備註', initial: 'not_sent', note: '電話確認日期表' },
-    { label: '日期過期、不填備註', initial: 'sent_outdated', note: '' },
-    { label: '日期過期、選填備註', initial: 'sent_outdated', note: '已核對新版日期' },
-  ] as const)('新版單擊確認：$label，僅確認選定對象並完成回讀', async ({ initial, note }) => {
-    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
-    const manual = { ...sent, snapshot_status: 'manual_ready' as const };
-    const confirmed = { ...manual, recipients: manual.recipients.map(recipient => recipient.audience_type === 'customer'
-      ? { ...recipient, confirmation_status: 'manually_confirmed' as const, confirmation_reason: note } : recipient) };
-    let current: MatchingScheduleState = initial === 'not_sent' ? notSent : { ...sent, snapshot_status: 'sent_outdated' };
-    vi.spyOn(matchingScheduleConfirmationClient, 'query').mockImplementation(async () => current);
-    vi.spyOn(matchingScheduleConfirmationClient, 'previewManual').mockResolvedValue({ case_no: sent.case_no, plan_id: 12, confirmed_service_date_version: 3, schedule_preview: schedulePreview, preview_fingerprint: 'b'.repeat(64) });
-    const prepare = vi.spyOn(matchingScheduleConfirmationClient, 'applyManual').mockImplementation(async () => { current = manual; return current; });
-    const confirm = vi.spyOn(matchingScheduleConfirmationClient, 'confirmManual').mockImplementation(async () => { current = confirmed; return current; });
-    const send = vi.spyOn(matchingScheduleConfirmationClient, 'send');
-    render(<MatchingScheduleAndAssignmentActions caseNo={sent.case_no} planId={12} planSegments={[{ segmentId: 17, sequence: 1, staffId: 9, assignedStartDate: '2026-08-03', assignedEndDate: '2026-08-05' }]} waitingLockAcquired assignmentExists={false} onAssignmentCompleted={vi.fn()} />);
-    const direct = (await screen.findAllByRole('button', { name: '手動記錄確認' }))[0]!;
-    await waitFor(() => expect(direct).toBeEnabled());
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    if (note) {
-      fireEvent.click(screen.getAllByRole('button', { name: '編輯選填備註' })[0]!);
-      fireEvent.change(screen.getByLabelText('客戶確認紀錄'), { target: { value: note } });
-      expect(prepare).not.toHaveBeenCalled();
-      expect(confirm).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole('button', { name: '儲存確認紀錄' }));
-    } else {
-      fireEvent.click(direct);
-    }
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByText('1 / 2 位已確認目前日期表')).toBeInTheDocument());
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(prepare).toHaveBeenCalledWith(sent.case_no, 12, expect.anything(), note, expect.objectContaining({ expectedActor: 'operator-1' }));
-    expect(confirm).toHaveBeenCalledWith(41, note, expect.objectContaining({ expectedActor: 'operator-1' }));
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.getAllByText('尚未確認日期')).toHaveLength(1);
-    expect(screen.queryByLabelText('客戶確認紀錄')).not.toBeInTheDocument();
-  });
-
+afterEach(()=>vi.restoreAllMocks());
+it('只顯示協調結果與代班，不再顯示再次確認日期表的操作',async()=>{
+ vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[],total:0,page:1,page_size:25});
+ vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
+ render(<MatchingScheduleAndAssignmentActions caseNo="CASE" planId={1} planSegments={[]} waitingLockAcquired={false} assignmentExists={false} onAssignmentCompleted={async()=>{}}/>);
+ await screen.findByText('目前沒有需要工會介入的服務開始代班。');
+ expect(screen.queryByRole('button',{name:/發送日期表|人工確認|確認排班/})).not.toBeInTheDocument();
+ expect(screen.getByText(/由月嫂提交開始日期/)).toBeInTheDocument();
 });

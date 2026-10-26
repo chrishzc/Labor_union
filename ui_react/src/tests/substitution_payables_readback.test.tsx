@@ -8,6 +8,7 @@ import { ordersQueryClient } from '../api/orders/order_query_client';
 import { staffLeaveInboxClient } from '../api/scheduling/staff_leave_inbox_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { substitutionPayablesLineageClient, type SubstitutionPayablesLineage } from '../api/scheduling/substitution_payables_lineage_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
@@ -132,6 +133,8 @@ describe('Scheduling substitution Staff Payables readback', () => {
     vi.restoreAllMocks();
     coreStageProjectionMocks.loadAll.mockResolvedValue({ items: [{ case_no: LEAVE_CASE_NO }] });
     leaveSubstitutionFlowStore.clearAll();
+    vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({items:[],total:0,page:1,page_size:25});
+    vi.spyOn(serviceStartClient, 'options').mockResolvedValue({items:[]});
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [
         { id: 11, name: '月嫂甲', phone: null, education: null },

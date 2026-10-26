@@ -1792,6 +1792,21 @@ CREATE TABLE `client_subsidy_advance_recoveries` (
   CONSTRAINT `chk_client_subsidy_recovery_amount` CHECK ((`recovered_amount_ntd` > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `client_subsidy_identity_label_changes` (
+  `client_id` int NOT NULL,
+  `before_identity` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `after_identity` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `changed_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`client_id`),
+  CONSTRAINT `fk_subsidy_identity_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `client_subsidy_policy_migrations` (
+  `policy_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `completed_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`policy_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `client_subsidy_return_claim_item_links` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -3295,6 +3310,49 @@ CREATE TABLE `government_subsidy_overpayments` (
   CONSTRAINT `fk_government_subsidy_overpayment_bank_row` FOREIGN KEY (`source_finance_import_row_id`) REFERENCES `finance_import_rows` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_government_subsidy_overpayment_transaction` FOREIGN KEY (`source_transaction_id`) REFERENCES `government_subsidy_transactions` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_government_subsidy_overpayment_amount` CHECK (((`original_amount_ntd` > 0) and (`remaining_amount_ntd` >= 0) and (`remaining_amount_ntd` <= `original_amount_ntd`) and ((`remaining_amount_ntd` > 0) or (`status` in (_utf8mb4'offset_applied',_utf8mb4'returned')))))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `government_subsidy_period_entries` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `period_unit` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_year` int NOT NULL,
+  `period_index` int NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `finance_import_row_id` bigint NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  `reversal_of_id` bigint DEFAULT NULL,
+  `paid_on` date NOT NULL,
+  `idempotency_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `actor` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_subsidy_period_bank` (`finance_import_row_id`),
+  UNIQUE KEY `uq_subsidy_period_key` (`idempotency_key`),
+  UNIQUE KEY `uq_subsidy_period_reversal` (`reversal_of_id`),
+  KEY `ix_subsidy_period_range` (`period_start`,`period_end`),
+  CONSTRAINT `fk_subsidy_period_bank` FOREIGN KEY (`finance_import_row_id`) REFERENCES `finance_import_rows` (`id`),
+  CONSTRAINT `fk_subsidy_period_reversal` FOREIGN KEY (`reversal_of_id`) REFERENCES `government_subsidy_period_entries` (`id`),
+  CONSTRAINT `ck_subsidy_period_amount` CHECK ((`amount_ntd` > 0)),
+  CONSTRAINT `ck_subsidy_period_range` CHECK ((`period_end` > `period_start`)),
+  CONSTRAINT `ck_subsidy_period_unit` CHECK ((`period_unit` in (_utf8mb4'month',_utf8mb4'quarter',_utf8mb4'year')))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `government_subsidy_period_members` (
+  `receipt_id` bigint NOT NULL,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `service_end_date` date NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  PRIMARY KEY (`receipt_id`,`case_no`),
+  KEY `ix_subsidy_period_case` (`case_no`),
+  CONSTRAINT `fk_subsidy_period_member` FOREIGN KEY (`receipt_id`) REFERENCES `government_subsidy_period_entries` (`id`),
+  CONSTRAINT `ck_subsidy_period_member_amount` CHECK ((`amount_ntd` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `government_subsidy_period_years` (
+  `period_year` int NOT NULL,
+  `aggregate_version` bigint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`period_year`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `government_subsidy_projection_events` (
@@ -6857,6 +6915,54 @@ CREATE TABLE `scheduling_service_day_logs` (
   CONSTRAINT `chk_scheduling_service_day_log_text` CHECK ((char_length(trim(`baby_log_text`)) > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `scheduling_service_start_candidates` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `request_id` bigint NOT NULL,
+  `staff_id` int NOT NULL,
+  `proposed_start_date` date NOT NULL,
+  `proposed_end_date` date NOT NULL,
+  `willingness` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `interaction_hash` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `response_event_key` varchar(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `invitation_identity` varchar(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_service_start_interaction` (`interaction_hash`),
+  UNIQUE KEY `uq_service_start_response_event` (`response_event_key`),
+  KEY `ix_service_start_candidates` (`request_id`,`id`),
+  CONSTRAINT `fk_service_start_candidate_request` FOREIGN KEY (`request_id`) REFERENCES `scheduling_service_start_requests` (`id`),
+  CONSTRAINT `ck_service_start_period` CHECK ((`proposed_end_date` >= `proposed_start_date`)),
+  CONSTRAINT `ck_service_start_willingness` CHECK ((`willingness` in (_utf8mb4'pending',_utf8mb4'willing',_utf8mb4'unwilling')))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `scheduling_service_start_requests` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `staff_id` int NOT NULL,
+  `plan_id` bigint DEFAULT NULL,
+  `segment_id` bigint DEFAULT NULL,
+  `assignment_id` bigint DEFAULT NULL,
+  `decision` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `requested_start_date` date DEFAULT NULL,
+  `source_order_version` bigint NOT NULL,
+  `status` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `aggregate_version` bigint NOT NULL DEFAULT '1',
+  `selected_candidate_id` bigint DEFAULT NULL,
+  `execution_dates` json DEFAULT NULL,
+  `confirmed_version_id` bigint DEFAULT NULL,
+  `result_snapshot` json DEFAULT NULL,
+  `submit_key` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `submit_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updated_at_utc` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_service_start_submit` (`submit_key`),
+  KEY `ix_service_start_case` (`case_no`,`id`),
+  KEY `ix_service_start_pending` (`status`,`id`),
+  CONSTRAINT `ck_service_start_decision` CHECK ((`decision` in (_utf8mb4'accepted',_utf8mb4'declined'))),
+  CONSTRAINT `ck_service_start_status` CHECK ((`status` in (_utf8mb4'awaiting_peers',_utf8mb4'substitute_required',_utf8mb4'applied')))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `scheduling_staff_availability_aggregates` (
   `staff_id` int NOT NULL,
   `aggregate_version` bigint unsigned NOT NULL DEFAULT '0',
@@ -7915,6 +8021,8 @@ CREATE TABLE `weekly_report_metrics` (
   CONSTRAINT `chk_weekly_report_metrics_inquiry_nonnegative` CHECK (((`inquiry_count` is null) or (`inquiry_count` >= 0))),
   CONSTRAINT `chk_weekly_report_metrics_promotion_nonnegative` CHECK (((`promotion_count` is null) or (`promotion_count` >= 0)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `client_subsidy_policy_migrations` (`policy_key`) VALUES ('subsidy-period-policy-2026-10-24-v1');
 
 INSERT INTO `government_payers` (`payer_identity`,`payer_name`,`incoming_memo_match`,`is_active`) VALUES ('hccg','新竹市政府','新竹市政府',1);
 

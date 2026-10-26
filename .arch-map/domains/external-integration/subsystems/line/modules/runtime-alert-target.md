@@ -12,8 +12,11 @@
 - contract: `subsystems/line/runtime_alert_target_contracts.py`
 - transport: `api/routes/runtime_health.py`
 - presentation: `ui_react/src/pages/line_management/AlertGroupSecurity.tsx`
+- presentation: `ui_react/src/pages/LineManagementPage.tsx` — runtimeOnly 管理員個人通知對象；同樣排除退役群組。
 - client: `ui_react/src/api/line_runtime_targets/`
 - persistence dependency: `infrastructure/mysql/runtime_monitor_repository.py`
+
+- `has_available_admin_target` 唯讀核對 enabled target、enabled Admin 與一致 canonical bound Admin LINE；失效對象不消除通知設定待辦。
 
 ## Contracts
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — runtime target 與 NAS-LINE-03。

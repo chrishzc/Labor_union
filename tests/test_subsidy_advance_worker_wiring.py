@@ -20,7 +20,7 @@ class _Result:
         self.failed_count = failed_count
 
 
-def test_architecture_worker_delivers_subsidy_advance_recovery_events(monkeypatch):
+def test_architecture_worker_keeps_other_consumers_without_per_case_subsidy_recovery(monkeypatch):
     connection = _Connection()
     class _Runtime:
         def connection(self):
@@ -44,12 +44,11 @@ def test_architecture_worker_delivers_subsidy_advance_recovery_events(monkeypatc
         "consume_historical_order_review_remediation_events",
         lambda *_args, **_kwargs: _Result(0, 0),
     )
-    monkeypatch.setattr(outbox_worker, "consume_government_subsidy_advance_events", lambda *_args, **_kwargs: (5, 2))
     monkeypatch.setattr(outbox_worker, "consume_client_finance_orders_events", lambda *_args, **_kwargs: (11, 13))
     monkeypatch.setattr(outbox_worker, "consume_security_alert_outbox", lambda *_args, **_kwargs: _Result(12, 5))
     monkeypatch.setattr(outbox_worker, "_consume_sources_if_due", lambda *_: (7, 3))
 
     result = outbox_worker._consume_once()
 
-    assert (result.delivered_count, result.failed_count) == (58, 31)
+    assert (result.delivered_count, result.failed_count) == (53, 29)
     assert connection.closed is True

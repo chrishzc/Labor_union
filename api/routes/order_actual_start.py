@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.order_actual_start import (
     ActualStartApplication,
     get_actual_start_application,
@@ -97,7 +97,7 @@ class ActualStartApplyBody(ActualStartPreviewBody):
 )
 def query_actual_start(
     case_no: str = Path(..., min_length=1, max_length=50),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: ActualStartApplication = Depends(get_actual_start_application),
 ):
     del principal
@@ -119,7 +119,7 @@ def preview_actual_start(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = "actual-start-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: ActualStartApplication = Depends(get_actual_start_application),
 ):
     del principal
@@ -149,7 +149,7 @@ def apply_actual_start(
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
     application: ActualStartApplication = Depends(get_actual_start_application),
 ):
     request = _apply_request(

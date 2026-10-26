@@ -296,8 +296,6 @@ def build_staff_payout_difference_candidate(
 ) -> StaffPayoutCandidate:
     if not isinstance(mode, StaffPayoutDifferenceMode):
         raise TypeError("staff payout difference mode is invalid")
-    if mode is not StaffPayoutDifferenceMode.OVERPAYMENT:
-        raise ValueError("staff_payout_difference_mode_invalid")
     staff_id = _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies)
     _validate_primary_account_owners(bank_facts, bank_accounts, staff_id, require_primary_account_owner)
     ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
@@ -334,17 +332,17 @@ def build_staff_payout_reopen_candidate(
         _reopen_link(reopen_fact, payable) for payable in ordered_payables
     )
     _validate_reopen_total(reopen_fact, links)
-    return _reopen_candidate(reopen_fact, links)
+    return _reopen_candidate(reopen_fact, links, ordered_payables)
 
 
 def _build_exact_payout(staff_id, ordered_banks, ordered_payables):
     bank_total = MoneyNTD(sum(item.amount.amount for item in ordered_banks))
     obligation_total = MoneyNTD(
-        sum(item.amount_due.amount for item in ordered_payables)
+        sum(project_staff_payable(item).balance.amount for item in ordered_payables)
     )
     if bank_total != obligation_total:
         raise ValueError("staff_payout_amount_mismatch")
-    allocations = _allocate(ordered_banks, ordered_payables)
+    allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
     _validate_exact_allocation(ordered_banks, ordered_payables, allocations)
     return _payout_candidate(
         staff_id,
@@ -366,11 +364,15 @@ def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
     return StaffPayoutCandidate(
         staff_id, bank_total, remaining_total, allocations,
         fingerprint_payload(_candidate_payload(staff_id, allocations, events, mode, recovery)),
-        events, links, StaffPayableStatus.RECOVERY_REQUIRED, mode, recovery,
+        events, links,
+        StaffPayableStatus.PARTIALLY_PAID if mode is StaffPayoutDifferenceMode.UNDERPAYMENT else StaffPayableStatus.RECOVERY_REQUIRED,
+        mode, recovery,
     )
 
 
 def _validate_difference_mode(mode, bank_total, remaining_total) -> None:
+    if mode is StaffPayoutDifferenceMode.UNDERPAYMENT and 0 < bank_total.amount < remaining_total.amount:
+        return
     if mode is StaffPayoutDifferenceMode.OVERPAYMENT and bank_total.amount > remaining_total.amount:
         return
     raise ValueError("staff_payout_difference_mode_invalid")
@@ -433,14 +435,14 @@ def _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies) -
     staff_ids = {*(item.staff_id for item in bank_facts), *(item.staff_id for item in payable_facts)}
     if len(staff_ids) != 1:
         raise ValueError("cross_staff_allocation_forbidden")
-    if any(project_staff_payable(item).status is not StaffPayableStatus.PAYABLE for item in payable_facts):
+    if any(project_staff_payable(item).status not in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID) for item in payable_facts):
         raise ValueError("staff_obligation_not_exactly_settled")
     return next(iter(staff_ids))
 
 
 def _validate_payable_statuses(payable_facts) -> None:
     if any(
-        project_staff_payable(item).status is not StaffPayableStatus.PAYABLE
+        project_staff_payable(item).status not in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID)
         for item in payable_facts
     ):
         raise ValueError("staff_obligation_not_exactly_settled")
@@ -545,7 +547,7 @@ def _validate_exact_allocation(bank_facts, payable_facts, allocations) -> None:
     if any(bank_totals[item.identity] != item.amount for item in bank_facts):
         raise ValueError("staff_obligation_not_exactly_settled")
     if any(
-        payable_totals[item.obligation_identity] != item.amount_due
+        payable_totals[item.obligation_identity] != project_staff_payable(item).balance
         for item in payable_facts
     ):
         raise ValueError("staff_obligation_not_exactly_settled")
@@ -567,6 +569,8 @@ def _payable_status(amount_due: MoneyNTD, net_paid: MoneyNTD):
         return StaffPayableStatus.PAYABLE
     if net_paid == amount_due:
         return StaffPayableStatus.COMPLETED
+    if 0 < net_paid.amount < amount_due.amount:
+        return StaffPayableStatus.PARTIALLY_PAID
     return StaffPayableStatus.ANOMALY
 
 
@@ -620,7 +624,7 @@ def _validate_reopen_inputs(reopen_fact, payable_facts):
 
 
 def _validate_reopen_payable(reopen_fact, payable) -> None:
-    if project_staff_payable(payable).status is not StaffPayableStatus.COMPLETED:
+    if project_staff_payable(payable).status not in (StaffPayableStatus.COMPLETED, StaffPayableStatus.PARTIALLY_PAID):
         raise ValueError("staff_payout_reversal_invalid")
     source_events = tuple(
         event
@@ -628,7 +632,7 @@ def _validate_reopen_payable(reopen_fact, payable) -> None:
         if event.identity == reopen_fact.source_payout_event_identity
         and event.event_type is StaffPayoutEventType.PAYOUT
     )
-    if len(source_events) != 1 or source_events[0].amount != payable.amount_due:
+    if len(source_events) != 1 or source_events[0].amount.amount > project_staff_payable(payable).net_paid.amount:
         raise ValueError("staff_payout_reversal_invalid")
     if any(
         event.reversal_of_event_identity
@@ -659,7 +663,7 @@ def _validate_reopen_total(reopen_fact, links) -> None:
         raise ValueError("staff_payout_reversal_invalid")
 
 
-def _reopen_candidate(reopen_fact, links) -> StaffPayoutReopenCandidate:
+def _reopen_candidate(reopen_fact, links, payables) -> StaffPayoutReopenCandidate:
     event = StaffPayoutLedgerEventCandidate(
         reopen_fact.identity,
         reopen_fact.event_type,
@@ -672,7 +676,10 @@ def _reopen_candidate(reopen_fact, links) -> StaffPayoutReopenCandidate:
         reopen_fact.staff_id,
         event,
         links,
-        StaffPayableStatus.PAYABLE,
+        StaffPayableStatus.PARTIALLY_PAID if any(
+            project_staff_payable(payable).net_paid.amount > link.allocated_amount.amount
+            for payable, link in zip(payables, links, strict=True)
+        ) else StaffPayableStatus.PAYABLE,
         fingerprint_payload(_reopen_payload(event, links)),
     )
 

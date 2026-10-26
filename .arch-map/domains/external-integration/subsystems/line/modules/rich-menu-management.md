@@ -24,7 +24,8 @@
   - `ui_react/src/pages/LineManagementPage.tsx`
   - `ui_react/src/pages/line_management/LiffCardStudio.tsx`
   - `ui_react/src/pages/line_management/LiffCardStudio.css` — 用途分組與兩欄預覽，保留既有正式／安全展示入口及案件專屬連結限制。
-  - `ui_react/src/components/LineFlexDesignPreview.tsx` — 本頁採用精簡狀態呈現；通知設定頁保留完整狀態摘要。
+  - `ui_react/src/components/LineFlexDesignPreview.tsx` — 既有 standalone 規則面板的圖例；工作室已改用共用公版。
+  - `ui_react/src/components/LineMessagePreviewWorkspace.tsx` — 工作室共用現行公版及 display-only 操作說明，不保留另一套卡片組裝。
   - `config/line_menu.json` — bootstrap definition only; published/current drafts remain versioned persistence.
 
 ## Contracts
@@ -49,4 +50,4 @@
 ## Change triggers
 Reconcile when role menu draft editability, publication state gating, Preview／Apply／Queue flow, management presentation or focused verification paths change.
 
-Management presentation opens the editor directly, with 發布 beside the common draft save action and explicit confirmation in a Drawer; publication history has no UI entry or list query. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.
+Management presentation opens the editor directly, with 發布 beside the common draft save action and one-click publication; the Drawer tracks queued status without another confirmation; publication history has no UI entry or list query. Appearance and button fields share one in-memory definition; button names are edited only in the button editor. The common save action verifies a fresh server Query after Apply. Queued publication status and retryable failures remain in the publication Drawer.

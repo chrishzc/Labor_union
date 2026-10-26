@@ -1,0 +1,198 @@
+{
+  "contract": "subsidy-period-implementation-verification/v1",
+  "date": "2026-10-24",
+  "base_ref": "a1db37a3d40131d91bdae32cac094cf69a3fd506",
+  "implementation": "passed",
+  "current_spec": "document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md",
+  "authority": "User approved whole-period subsidy implementation, backup and verified preserve-data replacement of existing localhost development union_db; also approved correcting payroll query response validation for legitimate cancelled/settled zero-amount records. No LINE sends, menu publication, transfers or production deployment.",
+  "release": {
+    "path": "db/migration_releases/labor_union_2026_10_24_government_subsidy_periods_v1.json",
+    "sha256": "4887a90d015ceb5dfadbe8bd94015dabc96769b43cd68ec2471467d42208ad27"
+  },
+  "verification": {
+    "client_finance_payroll_reports_bootstrap": {
+      "status": "passed",
+      "tests": 92
+    },
+    "government_owner_and_retired_recovery": {
+      "status": "passed",
+      "tests": 65,
+      "native_tests_not_enabled_in_this_run": 20
+    },
+    "subsidy_and_migration_actual_mysql": {
+      "status": "passed",
+      "tests": 20,
+      "native_flow_cases": 16,
+      "migration_cases": 4
+    },
+    "existing_accounting_event_matrix": {
+      "status": "passed",
+      "event_categories": 13,
+      "execution": "11 original categories plus 2 corrected whole-period categories; separate fresh disposable runs"
+    },
+    "cash_query_worker_and_policy": {
+      "status": "passed",
+      "tests": 36
+    },
+    "schema_catalog_and_query_contracts": {
+      "status": "passed",
+      "tests": 28
+    },
+    "frontend": {
+      "status": "passed",
+      "tests": 6,
+      "failures": 0,
+      "scope": "SubsidyPeriodWorkbench including invalid-scheduling and unknown-amount state"
+    },
+    "frontend_build": "passed",
+    "actual_desktop_and_mobile": {
+      "status": "passed",
+      "units": [
+        "month",
+        "quarter",
+        "year"
+      ],
+      "desktop_and_mobile": true,
+      "screenshots": 2,
+      "state_unchanged": true,
+      "mutation_requests": [],
+      "external_requests": [],
+      "page_errors": []
+    },
+    "architecture_closure": "passed",
+    "structural_receipt": "scratch/subsidy-apply-20261024/06a04806/structural-change.json",
+    "diff_check": "passed",
+    "upgrade_static_and_register": {
+      "status": "passed",
+      "tests": 66,
+      "native_checks_skipped_in_this_run": 2,
+      "native_checks_verified_separately": true
+    },
+    "architecture_closure_fingerprint": "1276ccfa1e71c975cf5a74fe7da1cd1ecd1c73672085556b905f501530f663be",
+    "architecture_closure_evidence": "scratch/subsidy-apply-20261024/06a04806/architecture-closure.json",
+    "existing_database_upgrade": {
+      "status": "passed",
+      "backup_hashes_verified": true,
+      "candidate_preservation_verified": true,
+      "same_name_replacement_verified": true,
+      "operation_receipt": "scratch/subsidy-apply-20261024/06a04806/receipts/lu_test_subsidy_upgrade_20261024_06a04806/operation.receipt.json",
+      "replacement_receipt": "scratch/subsidy-apply-20261024/06a04806/receipts/lu_test_subsidy_upgrade_20261024_06a04806/replacement.receipt.json"
+    },
+    "actual_existing_database_read_smokes": {
+      "status": "passed",
+      "checks": 12,
+      "all_connections_read_only": true,
+      "data_unchanged": true,
+      "evidence": "scratch/subsidy-apply-20261024/06a04806/post-upgrade-verification.json"
+    },
+    "payroll_query_regression": {
+      "status": "passed",
+      "tests": 9,
+      "scope": "Case/staff queries accept cancelled/settled zero records, preserve positive records and reject negatives; existing adjustment workflow unchanged.",
+      "test_paths": [
+        "tests/domains/payroll/subsystems/payroll/modules/payroll-adjustment/test_payroll_query_contract.py",
+        "tests/domains/payroll/subsystems/payroll/integration/test_payroll_adjustment_workflow.py"
+      ]
+    },
+    "api_restart_and_health": {
+      "status": "passed",
+      "lifespan": "off",
+      "payroll_response_minimum": 0,
+      "environment_file_unchanged": true,
+      "workers_started": 0,
+      "evidence": "scratch/subsidy-apply-20261024/06a04806/api-health.json"
+    }
+  },
+  "database_gate": {
+    "scope_and_mutation_inventory": "PASS",
+    "static_release_chain": "PASS",
+    "exact_descriptors_and_negative_metadata_cases": "PASS",
+    "read_only_existing_database_plan": "PASS",
+    "read_only_plan_evidence": "scratch/subsidy-apply-20261024/06a04806/preview.json",
+    "read_only_plan_strategy": "Verified source backup -> restored candidate -> full default schema/backfill chain -> preservation verification -> same-name replacement -> exact verification",
+    "read_only_plan_pending_parts": [
+      "1053_line_order_group_invitation_url.sql",
+      "1054_scheduling_service_start.sql",
+      "1055_government_subsidy_periods.sql"
+    ],
+    "default_daily_additive_route": {
+      "status": "PASS",
+      "schema_status": "current",
+      "note": "Prior replacement-required guard resolved through the authorized preserve-data upgrade; current source schema readiness passed.",
+      "evidence": "scratch/subsidy-apply-20261024/06a04806/post-upgrade-verification.json"
+    },
+    "focused_contracts": "PASS",
+    "actual_fresh_bootstrap": "PASS",
+    "source_backup_candidate_restore_upgrade_verify": "PASS",
+    "preserved_candidate_status": "verified",
+    "existing_database_apply": "PASS",
+    "entry_switch": "PASS",
+    "existing_database_developer_acceptance": "PASS",
+    "overall": "PASS",
+    "default_preserve_backfill_selection": "PASS",
+    "selected_backfills": [
+      "twins-payroll-rate-snapshots-v1",
+      "subsidy-period-policy-v1"
+    ],
+    "entry_switch_details": "Verified same-name localhost union_db replacement; .env unchanged; original API restored with lifespan off.",
+    "source_backup_candidate_restore_upgrade_verify_evidence": "scratch/subsidy-apply-20261024/06a04806/receipts/lu_test_subsidy_upgrade_20261024_06a04806/operation.receipt.json"
+  },
+  "preserved_data": {
+    "source_unchanged_until_verified_replacement": true,
+    "original_records_preserved_except_declared_backfill_changes": true,
+    "client_identity_labels_converted_on_existing_database": 95,
+    "automatic_subsidy_refund_projections_added": 27,
+    "actual_customer_payouts_added": 0,
+    "pending_existing_invalid_schedule_cases": 17,
+    "pending_reason": "scheduling_effective_generation_invalid",
+    "pending_cases_classification": "confirmed_synthetic_test_data",
+    "pending_reasons_visible_in_apply_and_verify": true,
+    "no_refunds_for_synthetic_pending_cases": true,
+    "cash_signed_and_payroll_history_unchanged": true,
+    "operation_receipt": "scratch/subsidy-apply-20261024/06a04806/receipts/lu_test_subsidy_upgrade_20261024_06a04806/operation.receipt.json",
+    "source_backup_metadata": "scratch/subsidy-apply-20261024/06a04806/receipts/lu_test_subsidy_upgrade_20261024_06a04806/backup.receipt.json",
+    "rollback_backup_retained": true
+  },
+  "external_effects": {
+    "real_line_messages": 0,
+    "rich_menu_publications": 0,
+    "bank_transfers": 0,
+    "workers_started": 0
+  },
+  "ui_evidence": [
+    "scratch/subsidy-followup/invalid-schedule-desktop.png",
+    "scratch/subsidy-followup/invalid-schedule-mobile.png"
+  ],
+  "test_data_classification": {
+    "status": "passed",
+    "cases": 17,
+    "evidence": "scratch/subsidy-followup/test-provenance.json",
+    "exact_live_case_set_matched": true,
+    "all_creation_records_confirm_synthetic": true,
+    "action": "preserve records; no deletion, restoration to actual service, payout or reconciliation",
+    "periods_affected": [
+      "2026-10",
+      "2026-11",
+      "2026-12",
+      "2026-Q4",
+      "2026"
+    ],
+    "amounts_after_fix": "unknown; whole-period reconciliation blocked, never silently zeroed or omitted",
+    "readback": "scratch/subsidy-apply-20261024/06a04806/post-upgrade-verification.json"
+  },
+  "regressions_fixed": [
+    "Invalid current Scheduling pointer cannot authorize government subsidy receipt or export",
+    "Fresh Apply rechecks and locks current schedule source",
+    "Identity marker prevents relabeling while repaired refunds remain resynchronizable",
+    "Unknown subsidy amount is not reported as a known bank mismatch",
+    "Pending-chain business backfill selects preserve route before qualification",
+    "Default preserve route executes subsidy policy backfill and binds inventory to plan",
+    "Payroll read response accepts legitimate cancelled/settled zero obligations without changing payroll amounts or payments"
+  ],
+  "non_scope_actions": {
+    "production_deployment": "NOT_RUN",
+    "background_workers": "NOT_RUN",
+    "line_delivery": "NOT_RUN",
+    "menu_publication": "NOT_RUN"
+  }
+}

@@ -69,6 +69,7 @@ Finance Import 不使用單一巨大狀態欄位：
    bounded fresh recheck 直接刪除 row。不存在 `open／claimed／resolved／reopen` lifecycle。
 
 Occurrence outcome 不得寫入 classification 或 reconciliation。正式退匯、退款、adjustment 與 reversal 是 owning Finance Domain 的 append-only ledger event，不把 Finance Import reconciliation 改回 pending。
+同一未入帳銀行列出現在另一份工作簿時，只新增 occurrence、沿用 canonical bank identity，仍須依目前 owner facts 重新檢查待處理資格；不得僅因 canonical row 首次來自別批次就顯示「已存在／已處理」。只有正式核銷 receipt 或已成功 dispatch 結果才能判定已處理，並阻擋第二次入帳。
 
 ## 4. Subsystems
 
@@ -362,7 +363,7 @@ stale plan、fingerprint collision 或正式交易不一致則阻擋 Apply。
    - Finance Import 介面不得直接改其他 Domain 根事實。
 4. Classification／關聯目標有歧義：
    - 在 Finance Import Correction Workbench 選擇明確 classification 與既有 target；
-   - 必填 actor、reason 與 evidence；
+   - actor 與 evidence 必填，reason 選填；
    - server 產生新的 manual decision candidate 與完整 batch Preview；
    - 最終 Apply 才原子寫入 append-only classification decision event 與正式 ledger。
 5. 正式帳務已 Apply：
@@ -388,6 +389,7 @@ Modules：
 - 所有通過完整驗證的正式帳務 candidates 一次 Apply；
 - `non_business_review` 與 business pending 保留待處理，不建立正式 ledger；
 - integrity、collision、stale 或 formal-reference conflict 阻擋整批 Apply；
+- 補助退款的資金與代墊資格在正常 Preview 即由 Client Finance owner 檢查；尚未符合者保留 business pending，補齊合法資金事實後重新檢查，不先標示可入帳而到背景工作才拒絕，也不阻擋其他合法 candidates。
 - 不提供任意勾選略過一筆「其實已完整驗證」的 candidate。
 
 若人員認為某筆 candidate 不應入帳，必須先使用 Correction Workbench 提供原因與合法
@@ -415,14 +417,14 @@ Finance owner review 顯示：
 - affected obligations、預計核銷結果與 available actions；
 - current fact version、review version 與 idempotency identity。
 
-人員在同一帳務工作區選擇 classification、合法 target、reason 及 evidence。Server
-立即回傳 correction impact Preview；按下「確認修正並入帳」後執行
+人員在同一帳務工作區選擇 classification、合法 target 及 evidence，reason 選填。點擊「儲存更正並核銷」後，系統串接 correction impact Preview 與 Apply，不另要求人工預覽或再次確認；保留 selected allocation、版本與對象驗證。正式執行
 `CorrectAndPostFinanceImportRow`：
 
 已判定為客戶收款但因虛擬帳號重複、正式義務多候選或疑似重匯而停在
 `business_pending` 的銀行列，也必須留在同一待處理清單並提供逐列的「指定正確訂單」入口；
 待處理清單只投影虛擬帳號可對應到既有案件、但無法自動核銷的客戶入款；查無案件、缺少有效虛擬帳號或僅有來源格式警示的其他銀行流水仍保留匯入稽核，但不載入此預覽清單。
 不得只顯示待配對筆數而沒有可完成的人工操作。
+同一銀行列已有 Client Finance 正式 receipt 時，批次待處理筆數及人工核對清單必須一併排除該列；以 owner immutable ledger 為準，不因舊分類事件仍是 business pending 或相容 reconciliation 欄位未更新，就重新列為待核銷。正常核銷、人工核銷及同檔重播後均由 Query 自動反映，不改寫銀行原始資料。
 
 ```text
 lock canonical bank fact、review version、target obligations
@@ -564,7 +566,11 @@ Stable errors：
 
 ### 9.1 React 正常匯入 terminal receipt
 
-React 正常匯入固定為 `Upload/Ingest → Batch Preview → confirmed durable Apply → terminal receipt`。Ingest
+React 正常匯入由人員選擇工作簿後點擊一次「匯入銀行交易明細」，系統依序執行 `Upload/Ingest → Batch Preview → durable Apply → terminal receipt`；不提供額外人工預覽、確認勾選或純確認視窗。原因選填，空白不阻擋。內部 Preview 零寫入；只有 `apply_allowed` 且存在 ready-dispatch candidates 時自動提交 Apply，阻擋或零筆候選不提交。
+
+處理中鎖定檔案及原因；受理結果未明時使用「以原操作確認匯入結果」重送相同命令，工作已受理但結果未明則只重新查詢，不建立另一筆 Apply。終態後自動回讀人工核對清單及帳務資料；重新選檔才能開始下一次操作。畫面不得在收到受理或正式結果前宣稱已入帳。
+
+Ingest
 與 Apply 的相同 idempotency key 必須分別回原 receipt／同一 job，並以 server-authoritative `replayed`
 明示重播；不得以新的 command identity 偽裝 retry。Apply 的 `202 Accepted` 只代表 durable job 受理，
 只有 batch job 進入 `succeeded` 且由 `finance_import_apply_receipts` 的 immutable typed receipt 查回

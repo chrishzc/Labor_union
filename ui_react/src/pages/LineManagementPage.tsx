@@ -56,6 +56,7 @@ import {
 import { lineDeliveryQueryClient } from '../api/line_delivery/line_delivery_query_client';
 import { LineDeliveryQueryError } from '../api/line_delivery/line_delivery_query_errors';
 import { LineOrderGroupWorkbench } from '../components/LineOrderGroupWorkbench';
+import { ServiceDayLogReminderWorkbench } from '../components/ServiceDayLogReminderWorkbench';
 import type { LineOrderGroupStatus } from '../api/line_order_groups/line_order_group_query_schemas';
 import {
   adaptLineSafeConfig,
@@ -76,7 +77,6 @@ import { lineRuntimeTargetClient } from '../api/line_runtime_targets/line_runtim
 import { LineRuntimeTargetError } from '../api/line_runtime_targets/line_runtime_target_errors';
 import type {
   LineRuntimeAdminTargetRequest,
-  LineRuntimeGroupResetRequest,
   LineRuntimeTargetEnabledRequest,
   LineRuntimeTargetPreview,
 } from '../api/line_runtime_targets/line_runtime_target_schemas';
@@ -98,6 +98,8 @@ import type {
 import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
+import { LineMessageFlow } from '../components/LineMessageFlow';
+import { PaymentOverdueReminderWorkbench } from '../components/PaymentOverdueReminderWorkbench';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
@@ -117,7 +119,7 @@ import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSav
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
-type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'order_groups' | 'runtime';
+type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'message_flow' | 'order_groups' | 'payment_overdue' | 'runtime';
 
 function currentHashParams(): URLSearchParams {
   return new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '');
@@ -163,7 +165,6 @@ interface QueryState<T> {
 
 type RuntimePendingOperation =
   | { kind: 'add'; request: LineRuntimeAdminTargetRequest; preview: LineRuntimeTargetPreview }
-  | { kind: 'reset'; request: LineRuntimeGroupResetRequest; preview: LineRuntimeTargetPreview }
   | { kind: 'toggle'; targetId: number; request: LineRuntimeTargetEnabledRequest; preview: LineRuntimeTargetPreview };
 
 type EscalationPendingOperation =
@@ -209,15 +210,17 @@ function displayQueryError(error: unknown, fallback: string): string {
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['tickets', '客服案件', 'line.tab.tickets'],
+  ['payment_overdue', '繳款逾期', 'line.tab.payment-overdue'],
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
-  ['order_groups', '三方服務群組', 'line.tab.order-groups'],
+  ['message_flow', 'LINE 流程圖', 'line.tab.message-flow'],
+  ['order_groups', '案件群組', 'line.tab.order-groups'],
 ];
 
 const SAFE_CONFIGURATION_KINDS: readonly LineSafeConfigKind[] = [
   'message_templates', 'message_schedules', 'rich_menus', 'liff',
-  'customer_service', 'notification_rules',
+  'notification_rules',
 ];
 
 function LineErrorMessage({ error }: { error?: string | null }) {
@@ -303,7 +306,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   runtimeOnly = false,
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
-  const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'order_groups'], 'tickets'));
+  const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'message_flow', 'order_groups', 'payment_overdue'], 'tickets'));
+  const [notificationMessageId, setNotificationMessageId] = useState<string | null>(initialHashParams.get('message')?.slice(0, 191) || null);
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
 
@@ -385,6 +389,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     params.delete('rich_page');
     setParam('rule_q', notificationRuleSearch, '');
     setParam('rule_state', notificationRuleEnabled, 'all');
+    setParam('message', notificationMessageId ?? '', '');
     if (activeTab === 'push_queue') ['notice', 'rule_event', 'rule_recipient', 'rule_page'].forEach(key => params.delete(key));
     setParam('group_page', orderGroupPageNumber, 1);
     setParam('group_q', orderGroupSearch, '');
@@ -398,6 +403,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
     activeTab,
     notificationRuleEnabled,
     notificationRuleSearch,
+    notificationMessageId,
     orderGroupPageNumber,
     orderGroupSearch,
     orderGroupStatus,
@@ -494,7 +500,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         if (cancelled) return;
         if (configResult.status === 'fulfilled') setSafeConfigurations(loadedState(configResult.value.map(adaptLineSafeConfig)));
         else setSafeConfigurations(errorState(displayQueryError(configResult.reason, 'LINE 安全設定載入失敗')));
-        if (targetResult.status === 'fulfilled') setRuntimeTargets(loadedState(targetResult.value.map(adaptLineRuntimeTarget)));
+        if (targetResult.status === 'fulfilled') setRuntimeTargets(loadedState(targetResult.value.filter((target) => target.target_kind === 'admin_user').map(adaptLineRuntimeTarget)));
         else setRuntimeTargets(errorState(displayQueryError(targetResult.reason, '異常通知對象載入失敗')));
         if (candidateResult.status === 'fulfilled') setRuntimeCandidates(loadedState(candidateResult.value.map(adaptLineRuntimeAdminCandidate)));
         else setRuntimeCandidates(errorState(displayQueryError(candidateResult.reason, '管理員候選載入失敗')));
@@ -524,9 +530,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
   const refreshRuntime = () => setRuntimeReload((value) => value + 1);
 
-  const previewRuntimeMutation = async (operation: 'add' | 'reset' | 'toggle', target?: LineRuntimeTargetModel) => {
+  const previewRuntimeMutation = async (operation: 'add' | 'toggle', target?: LineRuntimeTargetModel) => {
     if (operation === 'add' && selectedRuntimeCandidate === null) return;
-    if (operation !== 'add' && !target) return;
+    if (operation !== 'add' && target?.targetKind !== 'admin_user') return;
     runtimePreviewController.current?.abort();
     const controller = new AbortController();
     runtimePreviewController.current = controller;
@@ -547,11 +553,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         const request = { admin_user_id: selectedRuntimeCandidate, minimum_status: 'warning' as const, reason: runtimeReason.trim(), correlation_id: correlationId, idempotency_key: idempotencyKey };
         const preview = await runtimeTarget.previewAddAdminTarget(request, { signal: controller.signal });
         pending = { kind: 'add', request, preview };
-      } else if (operation === 'reset') {
-        if (!target) return;
-        const request = { expected_version: target.currentVersion, reason: runtimeReason.trim(), correlation_id: correlationId, idempotency_key: idempotencyKey };
-        const preview = await runtimeTarget.previewResetGroup(request, { signal: controller.signal });
-        pending = { kind: 'reset', request, preview };
       } else {
         if (!target) return;
         const request = { expected_version: target.currentVersion, enabled: target.state !== 'active', reason: runtimeReason.trim(), correlation_id: correlationId, idempotency_key: idempotencyKey };
@@ -574,11 +575,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       let receipt;
       if (runtimePending.kind === 'add') {
         receipt = await runtimeTarget.addAdminTarget({
-          ...runtimePending.request,
-          preview_fingerprint: runtimePending.preview.preview_fingerprint,
-        });
-      } else if (runtimePending.kind === 'reset') {
-        receipt = await runtimeTarget.resetGroup({
           ...runtimePending.request,
           preview_fingerprint: runtimePending.preview.preview_fingerprint,
         });
@@ -749,7 +745,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         <div>
           <p className="line-hub-eyebrow">LINE 專區</p>
           <h1 className="page-title">客服與營運工作台</h1>
-          <p className="page-subtitle">處理客服案件、圖文選單、身分、通知與服務群組。</p>
+          <p className="page-subtitle">處理客服案件、圖文選單、身分、通知與案件群組。</p>
         </div>
 
       </header>}
@@ -761,6 +757,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       </nav>}
 
       {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
+      {activeTab === 'payment_overdue' && <PaymentOverdueReminderWorkbench />}
 
       {activeTab === 'richmenu' && (() => {
         const menus = localRichMenuConfiguration?.menus ?? [];
@@ -1211,6 +1208,13 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
       {activeTab === 'binding' && <LineIdentityWorkbench client={lineIdentity} />}
 
+      {!runtimeOnly && <LineMessageFlow active={activeTab === 'message_flow'} configuration={lineConfiguration} onOpenMessage={id => requestLeave(() => {
+        setNotificationMessageId(id);
+        setNotificationRuleSearch('');
+        setNotificationRuleEnabled('all');
+        setActiveTab('push_queue');
+      })} />}
+
       {activeTab === 'push_queue' && <LineNotificationWorkbench
         configuration={lineConfiguration}
         onboarding={onboardingClient}
@@ -1219,16 +1223,19 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         enabled={notificationRuleEnabled}
         onSearchChange={setNotificationRuleSearch}
         onEnabledChange={setNotificationRuleEnabled}
+        selectedEntryId={notificationMessageId}
+        onSelectedEntryChange={setNotificationMessageId}
+        onReturnToFlow={() => setActiveTab('message_flow')}
       />}
 
-      {activeTab === 'order_groups' && <LineOrderGroupWorkbench
+      {activeTab === 'order_groups' && <><ServiceDayLogReminderWorkbench /><LineOrderGroupWorkbench
         page={orderGroupPageNumber}
         search={orderGroupSearch}
         status={orderGroupStatus}
         onPageChange={setOrderGroupPageNumber}
         onSearchChange={setOrderGroupSearch}
         onStatusChange={setOrderGroupStatus}
-      />}
+      /></>}
 
       {activeTab === 'runtime' && (
         <div className="line-runtime-workspace">
@@ -1266,8 +1273,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
           <section className="line-workspace-card">
             <div className="line-section-heading">
               <div>
-                <h3>異常通知對象與群組</h3>
-                <p>查詢並調整群組或管理員通知對象；送出時會自動核對最新狀態並避免重複處理。</p>
+                <h3>管理員個人異常通知對象</h3>
+                <p>查詢並調整管理員個人通知對象；儲存時會自動核對最新狀態並避免重複處理。</p>
               </div>
             </div>
 
@@ -1333,16 +1340,6 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                               >
                                 {target.state === 'active' ? '停用' : '啟用'}
                               </button>
-                              {target.targetKind === 'group' && (
-                                <button
-                                  type="button"
-                                  className="line-secondary-btn line-compact-button"
-                                  disabled={runtimeMutation === 'loading'}
-                                  onClick={() => void previewRuntimeMutation('reset', target)}
-                                >
-                                  重設群組
-                                </button>
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -1472,7 +1469,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 </div>
               </details>
               <div className="line-grid-full">
-                {escalationSourceIdentity.trim() && !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) && (
+                {escalationSourceIdentity.trim() && (!/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim()) && (
                   <div className="line-scope-note line-bottom-spacing" role="status">
                     需先完成來源事件核對並補齊進階來源資料，才能建立。
                   </div>
@@ -1480,7 +1477,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
                 <button
                   type="button"
                   className="line-primary-btn line-full-action"
-                  disabled={!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || escalationMutation === 'loading'}
+                  disabled={!escalationSourceIdentity.trim() || !/^[0-9a-f]{64}$/.test(escalationSourceFingerprint) || !escalationHoldScope.trim() || escalationMutation === 'loading'}
                   onClick={() => void previewCreateEscalation()}
                 >
                   建立人工客服升級

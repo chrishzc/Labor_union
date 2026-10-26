@@ -16,6 +16,9 @@ import type { LineOnboardingClient } from '../api/line_onboarding/line_onboardin
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import type { LineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
+import { lineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
+import { LineMessageFlow } from '../components/LineMessageFlow';
+import { LineManagementPage } from '../pages/LineManagementPage';
 
 const FINGERPRINT = '0123456789abcdef'.repeat(4);
 const CATALOG: LineNotificationRulesCatalog = {
@@ -67,6 +70,217 @@ function templateClient(overrides: Partial<LineNotificationTemplateClient> = {})
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+function flowWorkbench() {
+  const catalog = { revision: 11, definition: { rules: [
+    { id: 'current-payment-rule', event_code: 'client.second_payment_due', recipient_selector: 'case_group', template_id: 'LINE-SECOND-PAYMENT-DUE-TEXT-V1', enabled: false, schedule: { kind: 'immediate' }, frequency: { kind: 'once' }, predicates: [] },
+  ] } } satisfies LineNotificationRulesCatalog;
+  const clients = contentWorkbench(catalog);
+  vi.mocked(clients.templates.get).mockImplementation(async id => ({ rule_id: id, template_id: id === 'current-payment-rule' ? 'LINE-SECOND-PAYMENT-DUE-TEXT-V1' : 'LU96-M1-LEAVE-EXTENSION-CARD-V1', name: id === 'current-payment-rule' ? '目前正式第二期款提醒' : '目前正式請假卡', content: '目前正式文案 {case_no}', revision: 19, variables: ['case_no'], sample_preview: '目前正式文案 DEMO-CASE-001' }));
+  const builtin = (id: string, name: string) => ({ id, name, template_id: null, format: 'flex' as const, requires_case: false, requires_staff: false, builtin: true, allows_draft: false });
+  vi.mocked(clients.previews.catalog).mockResolvedValue([
+    { ...builtin('welcome', '新好友歡迎訊息'), template_id: 'customer_onboarding_welcome', builtin: false, format: 'text' },
+    ...catalog.definition.rules.map(rule => ({ ...builtin(rule.id, rule.id === 'current-payment-rule' ? '目前正式第二期款提醒' : '目前正式請假卡'), template_id: rule.template_id, builtin: false })),
+    { ...builtin('service-day-log-reminder', '服務日誌－工會發送案件群組提醒'), format: 'text' },
+    builtin('service-start-inquiry', '服務開始－代班接案意願詢問'),
+    builtin('card-candidate-information-1', '目前訂單資訊一'), builtin('card-candidate-information-2', '目前訂單資訊二'), builtin('card-candidate-information-3', '目前每週說明'),
+    builtin('deposit-reminder', '目前訂金提醒卡'), builtin('deposit-settled', '目前訂金入帳卡'),
+  ]);
+  return { ...clients, catalog };
+}
+
+describe('LINE 精簡流程圖與正式訊息定位', () => {
+
+  it('完整列出簽約、日期自助、各期人工提醒與共用換人流程，查閱不發送或儲存', async () => {
+    const { configuration, previews, templates } = flowWorkbench(); const onOpen=vi.fn();
+    const current=await previews.catalog();
+    const additions=[['contract-signing-client','簽署提醒－客戶'],['contract-signing-staff','簽署提醒－月嫂'],
+      ['payment-overdue-deposit','訂金逾期－人工提醒客戶'],['payment-overdue-first','第一期款逾期－人工提醒案件群組'],['payment-overdue-second','第二期款逾期－人工提醒案件群組']];
+    vi.mocked(previews.catalog).mockResolvedValue([...current,...additions.map(([id,name])=>({id,name,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen}/>);
+    expect(screen.getByText(/簽約與訂金付款可先後交錯/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button',{name:/3 簽約/}));
+    fireEvent.click(screen.getByRole('button',{name:/人工發送簽署提醒/}));
+    fireEvent.click(screen.getByRole('button',{name:/簽署提醒－客戶/}));
+    expect(onOpen).toHaveBeenCalledWith('contract-signing-client');
+    fireEvent.click(screen.getByRole('button',{name:/4 收款與建群/}));
+    expect(screen.getByRole('button',{name:/訂金逾期－工會決定提醒/})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:/5 開始服務/}));
+    expect(screen.getByText('月嫂提交已協調的開始日')).toBeInTheDocument();
+    expect(screen.getByText('自助／內部操作')).toBeInTheDocument();
+    expect(screen.getByText(/無衝突即更新正式日期/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/第一期款逾期－工會決定提醒/}));
+    expect(onOpen).toHaveBeenCalledWith('payment-overdue-first');
+    fireEvent.click(screen.getByRole('button',{name:/6 持續服務與異動/}));
+    expect(screen.getByRole('button',{name:/第二期款逾期－工會決定提醒/})).toBeEnabled();
+    expect(screen.getByRole('button',{name:/請假、順延、代班與換人（共用流程）/})).toBeEnabled();
+    expect(previews.render).not.toHaveBeenCalled(); expect(templates.update).not.toHaveBeenCalled();
+  });
+
+  it('缺少完工規則或模板時清楚標示設定缺漏，不提供假的可用訊息', async () => {
+    const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(await screen.findByRole('button', { name: '7 完工與結案 缺少訊息設定' }));
+    expect(screen.getByRole('button', { name: /服務完工與滿意度問卷邀請 缺少訊息設定/ })).toBeDisabled();
+    expect(screen.getByText('此訊息的規則或模板尚未設定，請先同步通知設定。')).toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled(); expect(previews.render).not.toHaveBeenCalled();
+  });
+
+  it('客服流程說明明確呼叫門檻與目前補助分類，導向實際預覽', async () => {
+    const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
+    const current = await previews.catalog();
+    vi.mocked(previews.catalog).mockResolvedValue([...current, ...['service-menu','service-other','service-payment'].map(id => ({id,name:id,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(screen.getByRole('tab', { name: '客服與支援' }));
+    await screen.findByText(/一般留言不啟動聊天室 AI/);
+    fireEvent.click(await screen.findByRole('button', { name: '1 開啟服務 3 則訊息' }));
+    expect(screen.getByText(/補助市民最高40小時，社福最高120小時/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /收費與補助說明.*調整訊息/ }));
+    expect(onOpen).toHaveBeenCalledWith('service-payment');
+  });
+
+  it('服務完工通知沿既有流程導向可編輯問卷邀請，網址可後續加入', async () => {
+    const { configuration, previews, catalog } = flowWorkbench();
+    const onOpen = vi.fn();
+    const descriptor = { id: 'LINE-SERVICE-COMPLETION-V1', template_id: 'LINE-SERVICE-COMPLETION-TEXT-V1',
+      name: '服務完工－滿意度問卷邀請', format: 'text' as const, requires_case: false, requires_staff: false, builtin: false, allows_draft: false };
+    const descriptors = await previews.catalog();
+    vi.mocked(previews.catalog).mockResolvedValue([...descriptors, descriptor]);
+    vi.mocked(configuration.getNotificationRules).mockResolvedValue({ ...catalog, definition: { rules: [...catalog.definition.rules,
+      { id: descriptor.id, event_code: 'order.service_completed', recipient_selector: 'case_group', template_id: descriptor.template_id,
+        enabled: true, schedule: { kind: 'immediate' }, frequency: { kind: 'once' }, predicates: [] }] } });
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(await screen.findByRole('button', { name: '7 完工與結案 1 則訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '服務完工與滿意度問卷邀請 已啟用 調整訊息' }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(descriptor.id);
+    expect(previews.render).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('.line-flow-step')).toHaveLength(7);
+  });
+
+  it('預設顯示完整七個步驟；展開後使用目前目錄名稱，選定多則中的正確訊息', async () => {
+    const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    const first = await screen.findByRole('button', { name: '1 詢問月嫂 3 則訊息' });
+    expect(screen.queryByRole('button', { name: /目前訂單資訊/ })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.line-flow-step')).toHaveLength(7);
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole('button', { name: '寄送案件資訊 3 則訊息 查看訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: /目前訂單資訊二/ }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith('card-candidate-information-2');
+    expect(previews.render).not.toHaveBeenCalled(); expect(previews.subjects).not.toHaveBeenCalled();
+  });
+
+  it('依正式規則呈現停用，shadow rule 關閉仍顯示流程控制，並用目前 rule ID 導覽', async () => {
+    const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
+    expect(screen.getByRole('button', { name: '日誌連續缺漏－工會決定提醒 由流程控制 調整訊息' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '請假、順延、代班與換人（共用流程） 由流程控制 調整訊息' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith('current-payment-rule');
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  });
+
+  it('返回流程時重查啟用狀態並保留步驟', async () => {
+    const { configuration, previews, catalog } = flowWorkbench(); const onOpen = vi.fn();
+    const ui = (active: boolean) => <LineMessageFlow active={active} configuration={configuration} previews={previews} onOpenMessage={onOpen} />;
+    const { rerender } = render(ui(true));
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
+    expect(screen.getByText('已停用')).toBeInTheDocument();
+    rerender(ui(false));
+    vi.mocked(configuration.getNotificationRules).mockResolvedValue({ ...catalog, definition: { rules: catalog.definition.rules.map(rule => ({ ...rule, enabled: true })) } });
+    rerender(ui(true));
+    await screen.findByText('已啟用');
+    expect(screen.getByRole('button', { name: '6 持續服務與異動 3 則訊息' })).toHaveAttribute('aria-expanded', 'true');
+    expect(configuration.getNotificationRules).toHaveBeenCalledTimes(2);
+  });
+
+  it('查詢失敗不顯示假件數或舊狀態，重試成功後才可操作', async () => {
+    const { configuration, previews } = flowWorkbench();
+    vi.mocked(configuration.getNotificationRules).mockRejectedValueOnce(new Error('raw mysql private detail'));
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('流程訊息暫時無法載入');
+    expect(document.body).not.toHaveTextContent('raw mysql');
+    expect(document.querySelector('.line-flow-step')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重新載入流程訊息' }));
+    await screen.findByRole('button', { name: '1 詢問月嫂 3 則訊息' });
+  });
+
+  it('人工日誌提醒跳到共用公版，顯示工會決定及流程控制，不提供儲存或啟用開關', async () => {
+    const { configuration, previews, templates, onboarding } = flowWorkbench();
+    vi.mocked(previews.render).mockResolvedValue({ status: 'ready', note: '公版範例', format: 'text',
+      text: '請 範例月嫂 補上尚未填寫的服務日誌，謝謝。', bubbles: [], facts: [{ id: '月嫂姓名（staff_name）', label: '範例月嫂' }] });
+    vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
+    vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
+    window.history.replaceState(null, '', '#line-management?tab=message_flow');
+    const { unmount } = render(<UnsavedChangesProvider><LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '日誌連續缺漏－工會決定提醒 由流程控制 調整訊息' }));
+    expect(window.location.hash).toContain('message=service-day-log-reminder');
+    await screen.findByText('請 範例月嫂 補上尚未填寫的服務日誌，謝謝。');
+    expect(screen.getByRole('region', { name: '帶入欄位與值' })).toHaveTextContent('月嫂姓名（staff_name）範例月嫂');
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
+    expect(screen.getByText('案件群組', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('由流程控制', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText('由工會逐次決定，點「發送提醒」後建立寄送工作')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '啟用此規則' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '修改發送設定' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: '啟用狀態' }), { target: { value: 'enabled' } });
+    expect(screen.queryByRole('button', { name: '查看服務日誌－工會發送案件群組提醒內容' })).not.toBeInTheDocument();
+    expect(templates.update).not.toHaveBeenCalled();
+    expect(onboarding.update).not.toHaveBeenCalled();
+    expect(previews.subjects).not.toHaveBeenCalled();
+    unmount(); window.history.replaceState(null, '', '/');
+  });
+
+  it('從頁面流程跳到正式文案與停用設定，網址保留精確 ID，返回沿未儲存保護且不寫入', async () => {
+    const { configuration, previews, templates, onboarding } = flowWorkbench();
+    vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
+    vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
+    window.history.replaceState(null, '', '#line-management?tab=message_flow&rule_q=遮蔽條件&rule_state=enabled');
+    const { unmount } = render(<UnsavedChangesProvider><LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' }));
+    expect(await screen.findByRole('textbox', { name: '通知內容' })).toHaveValue('目前正式文案 {case_no}');
+    expect(window.location.hash).toContain('tab=push_queue'); expect(window.location.hash).toContain('message=current-payment-rule');
+    expect(screen.getByRole('searchbox')).toHaveValue(''); expect(screen.getByRole('combobox', { name: '啟用狀態' })).toHaveValue('all');
+    fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
+    expect(screen.getByText('已停用', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '修改發送設定' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '內容與測試' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '通知內容' }), { target: { value: '尚未儲存的內容' } });
+    fireEvent.click(screen.getByRole('button', { name: '返回 LINE 流程圖' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('尚未儲存的內容');
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+    expect(screen.getByRole('textbox', { name: '通知內容' })).toHaveValue('尚未儲存的內容');
+    expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
+    unmount(); window.history.replaceState(null, '', '/');
+  });
+
+  it('重新載入 message 連結會等正式查詢完成並打開正確內容；失效 ID 不改選其他訊息', async () => {
+    const { configuration, previews, templates, onboarding } = flowWorkbench();
+    let resolveCatalog!: (value: Awaited<ReturnType<LineMessagePreviewClient['catalog']>>) => void;
+    const rows = await previews.catalog();
+    vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(() => new Promise(resolve => { resolveCatalog = resolve; }));
+    vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
+    window.history.replaceState(null, '', '#line-management?tab=push_queue&message=deposit-reminder');
+    const { unmount } = render(<LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
+    await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' });
+    expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
+    await act(async () => resolveCatalog(rows));
+    await screen.findByRole('heading', { name: '目前訂金提醒卡' });
+    await waitFor(() => expect(previews.render).toHaveBeenCalledWith({ id: 'deposit-reminder', data_source: 'sample' }, expect.any(Object)));
+    unmount();
+    vi.mocked(lineMessagePreviewClient.catalog).mockResolvedValue(rows);
+    window.history.replaceState(null, '', '#line-management?tab=push_queue&message=removed-message');
+    const view = render(<LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
+    await screen.findByText(/找不到指定訊息/);
+    expect(screen.queryByRole('textbox', { name: '通知內容' })).not.toBeInTheDocument();
+    view.unmount(); window.history.replaceState(null, '', '/');
+  });
+});
 
 describe('LINE notification rules mutation panel', () => {
   it.each(['', '核准訂金通知事件更新'])('一次點擊儲存，內部檢查後套用同一候選；原因可選填：%s', async reason => {
@@ -259,6 +473,29 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
 }
 
 describe('通知內容統一工作區', () => {
+  it('服務當天結構化卡片不把不支援文字編輯誤報為版本衝突，保留正式預覽與啟用設定', async () => {
+    const id = 'LINE-ORDER-SERVICE-START-DAY-V1';
+    const { Harness, previews, templates, onboarding } = contentWorkbench({ revision: 3, definition: { rules: [{
+      id, event_code: 'order.service_start_day', enabled: true,
+      schedule: { kind: 'immediate' }, frequency: { kind: 'once' }, predicates: [],
+      recipient_selector: 'case_group', template_id: 'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
+    }] } });
+    vi.mocked(templates.get).mockRejectedValue(new ApiHttpError(409, 'HTTP_409', '此規則使用的訊息格式目前不支援文字編輯。'));
+    vi.mocked(previews.catalog).mockResolvedValue([{ id, template_id: 'LINE-ORDER-SERVICE-START-DAY-CARD-V1', name: '服務當天', format: 'flex', requires_case: true, requires_staff: false, builtin: false, allows_draft: false }]);
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: /查看服務當天/ }));
+    expect(await screen.findByText('此卡片使用結構化內容，請查看右側預覽；可在「發送設定」調整啟用狀態。')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    await waitFor(() => expect(previews.render).toHaveBeenCalledWith({ id, data_source: 'sample' }, expect.any(Object)));
+    fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
+    expect(screen.getByText('已啟用', { selector: 'dd' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '修改發送設定' }));
+    expect(screen.getByRole('checkbox', { name: '啟用此規則' })).toBeChecked();
+    expect(templates.update).not.toHaveBeenCalled();
+    expect(onboarding.update).not.toHaveBeenCalled();
+  });
+
   it('補列正式訊息與卡片，詢問文案只能預覽，不提供儲存或正式動作', async () => {
     const { Harness, previews, templates, onboarding } = contentWorkbench();
     vi.mocked(previews.catalog).mockResolvedValue([
@@ -307,14 +544,20 @@ describe('通知內容統一工作區', () => {
   });
 
   it('卡片說明可編輯，原流程的對象與排程不可在此改寫', async () => {
-    const { Harness, templates } = contentWorkbench(CARD_CATALOG); render(<Harness />);
-    fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
+    const { Harness, templates } = contentWorkbench({ revision: 3, definition: { rules: [{
+      id: 'alert-review', event_code: 'runtime.alert.review_required', recipient_selector: 'admin.review_actor',
+      template_id: 'alert-review-card', enabled: false, schedule: { kind: 'immediate' }, frequency: { kind: 'once' }, predicates: [],
+    }] } });
+    vi.mocked(templates.get).mockResolvedValue({ rule_id: 'alert-review', template_id: 'alert-review-card',
+      name: '告警待審核通知', content: '請查看本次告警。', revision: 7, variables: [], sample_preview: '請查看本次告警。' });
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '編輯告警待審核通知內容' }));
     const editor = screen.getByRole('textbox', { name: '通知說明文字' });
     expect(editor).toBeEnabled();
     expect(screen.queryByRole('button', { name: '修改發送設定' })).not.toBeInTheDocument();
-    fireEvent.change(editor, { target: { value: '請確認本次請假安排。' } });
+    fireEvent.change(editor, { target: { value: '請查看本次告警並處理。' } });
     fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
-    await waitFor(() => expect(templates.update).toHaveBeenCalledWith('leave_confirmation', expect.objectContaining({ content: '請確認本次請假安排。' }), expect.any(Object)));
+    await waitFor(() => expect(templates.update).toHaveBeenCalledWith('alert-review', expect.objectContaining({ content: '請查看本次告警並處理。' }), expect.any(Object)));
   });
 
   it('儲存失敗保留修改，不輸出後端 raw detail，也不假裝成功', async () => {

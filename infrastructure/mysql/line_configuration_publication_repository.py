@@ -39,6 +39,7 @@ from subsystems.line.configuration_contracts import (
     ApplyLineConfigurationCommand,
     ApplyLineConfigurationResult,
     LineConfigurationCommandOutcome,
+    LineConfigurationHistoryEntry,
 )
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
@@ -73,6 +74,25 @@ class MySqlLineConfigurationRepository:
         if row is None:
             return LineConfigurationSnapshot(kind, LineConfigurationRevision(0), "{}")
         return _configuration_snapshot(row)
+
+    def history(self, kind: LineConfigurationKind) -> tuple[LineConfigurationHistoryEntry, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT revision,created_at_utc,actor_id,reason FROM line_configuration_revisions "
+                "WHERE configuration_kind=%s ORDER BY revision DESC LIMIT 20", (kind.value,),
+            )
+            rows = cursor.fetchall()
+        return tuple(LineConfigurationHistoryEntry(LineConfigurationRevision(int(row['revision'])),
+            aware_utc(row['created_at_utc']), str(row['actor_id']), str(row['reason'])) for row in rows)
+
+    def get_revision(self, kind: LineConfigurationKind, revision: LineConfigurationRevision) -> LineConfigurationSnapshot | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT configuration_kind,revision,definition_snapshot FROM line_configuration_revisions "
+                "WHERE configuration_kind=%s AND revision=%s", (kind.value, revision.value),
+            )
+            row = optional_row(cursor.fetchone())
+        return None if row is None else _configuration_snapshot(row)
 
     def apply(
         self,

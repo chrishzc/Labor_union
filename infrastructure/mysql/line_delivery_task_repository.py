@@ -420,7 +420,7 @@ class MySqlLineDeliveryTaskRepository:
     def retry_failed(self, task_id: LineDeliveryTaskId, now) -> LineDeliveryTaskSnapshot:
         with self._connection.cursor() as cursor:
             row = self._locked_task(cursor, task_id)
-            if str(row["source_aggregate_type"]) == "line_order_group_invitation":
+            if str(row["source_aggregate_type"]) in {"line_order_group_invitation", "service_start_invitation"}:
                 raise ValueError("line_group_invitation_requires_new_command")
             status = LineDeliveryStatus(str(row["processing_status"]))
             transition_delivery_status(status, LineDeliveryStatus.PENDING)
@@ -587,7 +587,7 @@ def _optional_text(value: object) -> str | None:
 
 def _is_expired_invitation(row: dict[str, object], now) -> bool:
     return (
-        str(row.get("source_aggregate_type")) == "line_order_group_invitation"
+        str(row.get("source_aggregate_type")) in {"line_order_group_invitation", "service_start_invitation"}
         and aware_utc(row["created_at_utc"]) + timedelta(hours=24) <= now
     )
 
@@ -597,7 +597,7 @@ def _admin_record(row: object) -> LineDeliveryAdminRecord:
         row = dict(row)
     _require_row_shape(row, _ADMIN_ROW_KEYS)
     payload = canonical_json_value(row["payload_snapshot"])
-    if str(row["source_aggregate_type"]) == "line_order_group_invitation":
+    if str(row["source_aggregate_type"]) in {"line_order_group_invitation", "service_start_invitation"}:
         payload = _redact_invitation_payload(payload)
     return LineDeliveryAdminRecord(
         LineDeliveryTaskId(int(row["id"])),
@@ -744,7 +744,7 @@ _EXPIRE_INVITATIONS_SQL = (
     "'$.contents.footer.contents[0].action.uri','[REDACTED]'),"
     "error_code='invitation_expired',error_message='LINE group invitation expired',"
     "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
-    "WHERE source_aggregate_type='line_order_group_invitation' "
+    "WHERE source_aggregate_type IN ('line_order_group_invitation','service_start_invitation') "
     "AND processing_status IN ('pending','retryable_failed') "
     "AND DATE_ADD(created_at_utc,INTERVAL 24 HOUR)<=%s"
 )
@@ -861,7 +861,7 @@ _RETRY_FAILED_SQL = (
 _REDACT_INVITATION_SQL = (
     "UPDATE line_delivery_tasks SET payload_snapshot=JSON_SET(payload_snapshot,"
     "'$.contents.footer.contents[0].action.uri','[REDACTED]') WHERE id=%s "
-    "AND source_aggregate_type='line_order_group_invitation'"
+    "AND source_aggregate_type IN ('line_order_group_invitation','service_start_invitation')"
 )
 
 

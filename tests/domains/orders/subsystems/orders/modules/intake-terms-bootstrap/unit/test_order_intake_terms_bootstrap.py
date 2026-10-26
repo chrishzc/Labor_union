@@ -23,6 +23,27 @@ _START = date(2026, 9, 10)
 _DAYS = 30
 
 
+def test_terms_and_intake_composition_exposes_only_the_six_canonical_intake_operations():
+    from fastapi import FastAPI
+    from api.routes.order_terms import router as terms_router
+    from api.routes.order_intake_terms_bootstrap import router as intake_router
+
+    app = FastAPI()
+    app.include_router(terms_router)
+    app.include_router(intake_router)
+    paths = app.openapi()["paths"]
+    expected = {
+        f"/api/v1/orders/{{case_no}}/{operation}/{phase}"
+        for operation in ("intake-terms-bootstrap", "intake-completion/client-name", "intake-completion")
+        for phase in ("preview", "apply")
+    }
+    for path in expected:
+        assert "post" in paths[path]
+    assert not any("/api/v1/orders/api/v1/orders/" in path for path in paths)
+    intake_paths = {path for path in paths if "/intake-" in path}
+    assert intake_paths == expected
+
+
 @pytest.mark.parametrize("note", ["", "   ", "confirmed eight service hours"])
 def test_missing_service_time_preserves_dates_and_days_and_replays_original_receipt(note):
     repository = _Repository(start_date=_START, service_days=_DAYS)

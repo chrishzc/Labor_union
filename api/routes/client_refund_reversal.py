@@ -11,7 +11,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 
 from api.dependencies.admin_auth import require_capability, require_system_admin
 from api.dependencies.client_refund_reversal import (
@@ -128,6 +128,7 @@ def query_refund_reversal(
 )
 def query_settlement_remediation(
     case_no: str = Path(..., min_length=1, max_length=191),
+    include_not_due: Annotated[bool, Query()] = False,
     principal: AdminPrincipal = Depends(require_system_admin),
     refund_application: ClientRefundReversalApplication = Depends(
         get_client_refund_reversal_application
@@ -152,17 +153,17 @@ def query_settlement_remediation(
             "receivable_obligations": [
                 item
                 for item in receivable["obligations"]
-                if item["due_date"] is not None and item["due_date"] < as_of
+                if item["due_date"] is not None and (include_not_due or item["due_date"] < as_of)
             ],
             "refund_obligations": [
                 item
                 for item in payable["refund_obligations"]
-                if item["due_date"] is not None and item["due_date"] < as_of
+                if item["due_date"] is not None and (include_not_due or item["due_date"] < as_of)
             ],
             "subsidy_return_obligations": [
                 item
                 for item in payable["subsidy_return_obligations"]
-                if item["due_date"] is not None and item["due_date"] < as_of
+                if item["due_date"] is not None and (include_not_due or item["due_date"] < as_of)
             ],
             "incoming_bank_facts": [
                 {

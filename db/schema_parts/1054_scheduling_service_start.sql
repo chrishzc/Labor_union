@@ -1,0 +1,48 @@
+-- Scheduling-owned customer/caregiver coordination results. Schema only.
+CREATE TABLE IF NOT EXISTS scheduling_service_start_requests (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    plan_id BIGINT NULL,
+    segment_id BIGINT NULL,
+    assignment_id BIGINT NULL,
+    decision VARCHAR(20) NOT NULL,
+    requested_start_date DATE NULL,
+    source_order_version BIGINT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    aggregate_version BIGINT NOT NULL DEFAULT 1,
+    selected_candidate_id BIGINT NULL,
+    execution_dates JSON NULL,
+    confirmed_version_id BIGINT NULL,
+    result_snapshot JSON NULL,
+    submit_key VARCHAR(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    submit_fingerprint CHAR(64) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_start_submit (submit_key),
+    KEY ix_service_start_case (case_no, id),
+    KEY ix_service_start_pending (status, id),
+    CONSTRAINT ck_service_start_decision CHECK (decision IN ('accepted','declined')),
+    CONSTRAINT ck_service_start_status CHECK (status IN ('awaiting_peers','substitute_required','applied'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_start_candidates (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    request_id BIGINT NOT NULL,
+    staff_id INT NOT NULL,
+    proposed_start_date DATE NOT NULL,
+    proposed_end_date DATE NOT NULL,
+    willingness VARCHAR(20) NOT NULL DEFAULT 'pending',
+    interaction_hash CHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+    response_event_key VARCHAR(191) NULL,
+    invitation_identity VARCHAR(191) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_service_start_interaction (interaction_hash),
+    UNIQUE KEY uq_service_start_response_event (response_event_key),
+    KEY ix_service_start_candidates (request_id, id),
+    CONSTRAINT fk_service_start_candidate_request FOREIGN KEY (request_id) REFERENCES scheduling_service_start_requests(id),
+    CONSTRAINT ck_service_start_willingness CHECK (willingness IN ('pending','willing','unwilling')),
+    CONSTRAINT ck_service_start_period CHECK (proposed_end_date >= proposed_start_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

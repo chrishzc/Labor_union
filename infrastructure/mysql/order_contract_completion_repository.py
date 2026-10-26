@@ -115,6 +115,8 @@ class MySqlOrderContractCompletionRepository:
         self,
         command: ContractCompletionClientFinanceCommand,
     ) -> None:
+        if command.candidate.resulting_account_version == command.candidate.expected_account_version:
+            return
         with self._connection.cursor() as cursor:
             persist_client_finance_terms_impact(cursor, command)
 

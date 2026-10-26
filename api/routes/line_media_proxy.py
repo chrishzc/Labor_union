@@ -13,6 +13,7 @@ from api.schemas.line_staff_self_service import (
     StaffLiffRequest, StaffServiceDayMediaResponse, StaffServiceDayLogPreviewRequest,
     StaffServiceDayLogApplyRequest, StaffServiceDayLogPreviewResponse,
     StaffServiceDayLogApplyResponse, StaffServiceDayLogReadbackResponse,
+    StaffServiceDayLogOptionsRequest, StaffServiceDayLogOptionsResponse,
 )
 from infrastructure.http.line_media_client import LineMediaError
 from infrastructure.runtime.file_transfer_settings import FileTransferSettings, size_label
@@ -102,6 +103,12 @@ async def apply(body: StaffServiceDayLogApplyRequest,
     require_line_media_token(body.line_id_token)
     await _policy(client, body.model_dump(mode="json"))
     return await _forward(client.apply(body.model_dump(mode="json"), idempotency_key), StaffServiceDayLogApplyResponse)
+
+
+@router.post("/service-day-logs/options", response_model=BaseResponse[StaffServiceDayLogOptionsResponse])
+async def log_options(body: StaffServiceDayLogOptionsRequest, client=Depends(get_line_media_client)):
+    require_line_media_token(body.line_id_token)
+    return await _forward(client.options(body.model_dump(mode="json")), StaffServiceDayLogOptionsResponse)
 
 
 @router.post("/service-day-logs/{log_id}/query", response_model=BaseResponse[StaffServiceDayLogReadbackResponse])

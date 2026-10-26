@@ -10,7 +10,7 @@ class MySqlSubsidyReturnQueryRepository:
         self._connection = connection
 
     def query_facts(self, *, after_case_no, case_no, search, limit):
-        conditions = ["o.status <> '訂單取消'", "c.identity_status IN ('一般市民','補助市民','低收入戶','中低收入戶')"]
+        conditions = ["c.identity_status IN ('一般市民','補助市民','社福','低收入戶','中低收入戶')"]
         values = []
         if after_case_no:
             conditions.append('o.case_no > %s')
@@ -50,7 +50,7 @@ SELECT o.case_no,c.name AS client_name,o.status AS order_status,c.identity_statu
        o.service_days,o.service_hours_per_day,
        COALESCE(day_event.historical_floor_fee_ntd,o.floor_fee) AS floor_fee,
        day_projection.total_actual_service_hours AS actual_service_hours,
-       terms.client_hourly_rate_ntd,o.actual_end_date,
+       terms.client_hourly_rate_ntd,COALESCE(o.actual_end_date,o.end_date) AS actual_end_date,
        COALESCE(payable.return_count,0) AS return_count,
        COALESCE(payable.open_return_count,0) AS open_return_count,
        COALESCE(payable.settled_return_count,0) AS settled_return_count,

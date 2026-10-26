@@ -6,6 +6,8 @@ import { orderMutationFlowStore } from '../../../../../../../adapters/orders/ord
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
 
+vi.mock('../../../../../../../api/scheduling/service_start_client',()=>({serviceStartClient:{todos:vi.fn(async()=>({items:[],total:0,page:1,page_size:25})),options:vi.fn(async()=>({items:[]}))}}));
+
 const calls = vi.hoisted(() => ({ core: vi.fn(), detail: vi.fn(), terms: vi.fn(), assignment: vi.fn(),
   start: vi.fn(), matching: vi.fn(), queryDates: vi.fn(), previewDates: vi.fn(), applyDates: vi.fn(),
   previewArrangement: vi.fn(), applyArrangement: vi.fn() }));
@@ -103,7 +105,7 @@ it('日期保存後接續排班；正式排班沿用既定月嫂，明確確認�
   await waitFor(() => expect(saveDates).toBeEnabled());
   fireEvent.click(saveDates);
   await waitFor(() => expect(screen.getByLabelText('已確認服務日期回讀')).toHaveTextContent('日期確認版本#3'));
-  expect(screen.getByRole('button', { name: /確認排班/ })).toHaveAttribute('aria-current', 'step');
+  expect(screen.getByRole('button', { name: /排班結果與代班/ })).toHaveAttribute('aria-current', 'step');
   expect(calls.applyArrangement).not.toHaveBeenCalled();
   expect(calls.previewArrangement).not.toHaveBeenCalled();
 
@@ -112,7 +114,7 @@ it('日期保存後接續排班；正式排班沿用既定月嫂，明確確認�
   fireEvent.click(datesStep);
   await waitFor(() => expect(screen.getByRole('button', { name: '前往排班' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '前往排班' }));
-  expect(screen.getByRole('button', { name: /確認排班/ })).toHaveAttribute('aria-current', 'step');
+  expect(screen.getByRole('button', { name: /排班結果與代班/ })).toHaveAttribute('aria-current', 'step');
   expect(screen.getByLabelText('待建立正式安排摘要')).toHaveTextContent('既定月嫂');
   expect(screen.queryByText(/請至「推薦確認」確認人選/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
@@ -151,7 +153,7 @@ it('建立安排期間鎖定案件導覽；切回日期再返回仍保留原操�
   await screen.findByText('網路中斷');
   fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
   expect(screen.getByLabelText('實際開始日')).toHaveValue(dates[0]);
-  fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
+  fireEvent.click(screen.getByRole('button', { name: /排班結果與代班/ }));
   fireEvent.click(screen.getByRole('button', { name: '以原操作確認結果' }));
   await screen.findByText('歷史案件正式安排已建立並回讀。');
   expect(calls.applyArrangement).toHaveBeenCalledTimes(2);
@@ -164,11 +166,22 @@ it('開始日尚未確認時不能切到正式排班建立舊日期，返回後�
   await screen.findByRole('button', { name: '前往排班' });
   fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: '' } });
   expect(screen.getByRole('button', { name: '前往排班' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
+  fireEvent.click(screen.getByRole('button', { name: /排班結果與代班/ }));
   expect(screen.getByText('開始日或服務日期尚未完成保存與回讀，請先回到「確認日期」接續確認。')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
   expect(calls.applyArrangement).not.toHaveBeenCalled();
   expect(calls.previewArrangement).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
   expect(screen.getByLabelText('實際開始日')).toHaveValue('');
+});
+
+
+it('正常服務開始只顯示月嫂協調結果，不再由人員手動填日期啟動',async()=>{
+ calls.queryDates.mockImplementation(async()=>({...query(),arrangement_pending:false}));
+ render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()}/>);
+ fireEvent.click(await screen.findByRole('button',{name:/設定服務日期/}));
+ await screen.findByLabelText('服務日期協調結果');
+ expect(screen.queryByRole('button',{name:'儲存服務日期'})).not.toBeInTheDocument();
+ expect(calls.applyDates).not.toHaveBeenCalled();
+ expect(calls.applyArrangement).not.toHaveBeenCalled();
 });

@@ -1,0 +1,263 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-scheduling-service-start-2026-10-23-v1",
+  "descriptors": {
+    "1054_scheduling_service_start.sql": {
+      "tables": {
+        "scheduling_service_start_requests": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "plan_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "segment_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "assignment_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "decision": {
+            "column_type": "varchar(20)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "requested_start_date": {
+            "column_type": "date",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "source_order_version": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "status": {
+            "column_type": "varchar(30)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "aggregate_version": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          },
+          "selected_candidate_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "execution_dates": {
+            "column_type": "json",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_version_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "result_snapshot": {
+            "column_type": "json",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "submit_key": {
+            "column_type": "varchar(150)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "submit_fingerprint": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated"
+          },
+          "updated_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated on update current_timestamp(6)"
+          }
+        },
+        "scheduling_service_start_candidates": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "request_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "staff_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "proposed_start_date": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "proposed_end_date": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "willingness": {
+            "column_type": "varchar(20)",
+            "is_nullable": "NO",
+            "column_default": "pending",
+            "extra": ""
+          },
+          "interaction_hash": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "response_event_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "invitation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp(6)",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "scheduling_service_start_requests.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_start_requests.uq_service_start_submit": {
+          "non_unique": 0,
+          "columns": [
+            "submit_key"
+          ]
+        },
+        "scheduling_service_start_requests.ix_service_start_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "scheduling_service_start_requests.ix_service_start_pending": {
+          "non_unique": 1,
+          "columns": [
+            "status",
+            "id"
+          ]
+        },
+        "scheduling_service_start_candidates.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "scheduling_service_start_candidates.uq_service_start_interaction": {
+          "non_unique": 0,
+          "columns": [
+            "interaction_hash"
+          ]
+        },
+        "scheduling_service_start_candidates.uq_service_start_response_event": {
+          "non_unique": 0,
+          "columns": [
+            "response_event_key"
+          ]
+        },
+        "scheduling_service_start_candidates.ix_service_start_candidates": {
+          "non_unique": 1,
+          "columns": [
+            "request_id",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "scheduling_service_start_candidates.fk_service_start_candidate_request": {
+          "columns": [
+            "request_id"
+          ],
+          "referenced_table": "scheduling_service_start_requests",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "scheduling_service_start_requests.ck_service_start_decision": "atom(decisionin('accepted','declined'))",
+        "scheduling_service_start_requests.ck_service_start_status": "atom(statusin('awaiting_peers','substitute_required','applied'))",
+        "scheduling_service_start_candidates.ck_service_start_willingness": "atom(willingnessin('pending','willing','unwilling'))",
+        "scheduling_service_start_candidates.ck_service_start_period": "atom(proposed_end_date>=proposed_start_date)"
+      },
+      "triggers": [],
+      "parent_columns": {},
+      "views": {}
+    }
+  }
+}

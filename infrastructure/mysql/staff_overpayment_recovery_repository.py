@@ -187,7 +187,7 @@ class MySqlStaffOverpaymentRecoveryRepository:
         if row is None:
             return False
         eligible = (row["direction"] == "incoming" and row["currency"] == "TWD"
-                    and row["classification_type"] in ("staff_payout_return", "staff_salary_return")
+                    and row["classification_type"] in ("staff_payout_return", "staff_salary_return", "non_business_review")
                     and row["reconciliation_status"] == "pending" and row["credit"] is not None)
         if not eligible:
             return False
@@ -325,7 +325,7 @@ class MySqlStaffOverpaymentRecoveryRepository:
                 raise ValueError("staff_overpayment_recovery_matching_stale")
         cursor.execute("SELECT id,credit,transaction_date,direction,currency,classification_type,reconciliation_status,resolved_counterparty_account FROM finance_import_rows WHERE id=%s" + suffix, (row_id,))
         row = cursor.fetchone()
-        if row is None or row["direction"] != "incoming" or row["currency"] != "TWD" or row["classification_type"] not in ("staff_payout_return", "staff_salary_return") or row["reconciliation_status"] != "pending" or row["credit"] is None:
+        if row is None or row["direction"] != "incoming" or row["currency"] != "TWD" or row["classification_type"] not in ("staff_payout_return", "staff_salary_return", "non_business_review") or row["reconciliation_status"] != "pending" or row["credit"] is None:
             raise ValueError("bank_fact_not_eligible")
         cursor.execute("SELECT COUNT(*) AS count FROM staff_bank_accounts WHERE staff_id=%s AND account_no=%s AND is_primary=1", (staff_id, row["resolved_counterparty_account"]))
         if int(cursor.fetchone()["count"]) != 1:

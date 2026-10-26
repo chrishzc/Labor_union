@@ -11,13 +11,14 @@ describe('FinancePage query safety', () => {
     expect(source).not.toContain('error instanceof Error ? error.message');
   });
 
-  it('keeps normal import three-step and routes row recovery out of Finance Import', () => {
+  it('keeps normal import single-click and routes row recovery out of Finance Import', () => {
     const source = readFileSync('src/pages/FinancePage.tsx', 'utf8');
     expect(source).toContain('銀行對帳');
     expect(source).toContain('finance-stepper');
     expect(source).toContain('上傳檔案');
-    expect(source).toContain('預覽匯入結果');
-    expect(source).toContain('確認匯入');
+    expect(source).toContain('匯入銀行交易明細');
+    expect(source).toContain('await previewImportedBatch(receipt)');
+    expect(source).toContain('await applyImportedBatch(preview)');
     expect(source).toContain('observeApplyOutcome(accepted.job_id,');
     expect(source).not.toContain('finance.finance-import.correction');
     expect(source).not.toContain('帳務更正義務識別');

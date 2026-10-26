@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
+from dataclasses import replace
 import json
 from typing import Any
 
@@ -66,22 +67,11 @@ def _require_schedule_confirmation_gate(
     *,
     lock: bool = False,
 ) -> None:
-    lock_clause = " FOR UPDATE" if lock else ""
-    cursor.execute(
-        "SELECT s.id FROM matching_schedule_snapshots s "
-        "JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id "
-        "WHERE s.case_no=%s AND s.current_marker=1 AND s.status IN ('sent','draft') AND v.is_current=1"
-        + lock_clause,
-        (case_no,),
-    )
-    snapshot = cursor.fetchone()
-    if not snapshot:
-        raise ValueError("matching_schedule_confirmation_required")
-    required_segments = _matching_schedule_segments(cursor, snapshot["id"], intent)
-    if required_segments is None:
-        raise ValueError("matching_schedule_confirmation_required_for_target_segments")
-    if not _confirmed_schedule_recipients(cursor, snapshot["id"], required_segments):
-        raise ValueError("matching_schedule_two_party_confirmation_required")
+    _, days = _current_confirmed_execution(cursor, case_no, None, lock=lock)
+    expected = {(day.staff_id, day.service_date) for day in days}
+    actual = {(segment.staff_id, day) for segment in intent.segments for day in segment.official_service_dates}
+    if actual != expected or sum(len(s.official_service_dates) for s in intent.segments) != len(expected):
+        raise ValueError("service_start_execution_mismatch")
 
 
 def _matching_schedule_segments(cursor, snapshot_id, intent):
@@ -256,7 +246,8 @@ class MySqlAssignmentPlanRepository:
                 lock=False,
             )
             facts = build_assignment_plan_workflow_facts(source, occupancy, lock_ids)
-            if not facts.assignment_plan.effective_assignments and lock_ids:
+            facts=replace(facts,assignment_plan=replace(facts.assignment_plan,explicit_service_start_result=True))
+            if not facts.assignment_plan.effective_assignments:
                 _require_exact_commitment_days(cursor, case_no, tuple(
                     ExecutionServiceDay(segment.staff_id, service_date)
                     for segment in intent.segments for service_date in segment.official_service_dates
@@ -317,6 +308,7 @@ class MySqlAssignmentPlanRepository:
         facts = build_assignment_plan_workflow_facts(
             source, occupancy, waiting_lock_ids
         )
+        facts=replace(facts,assignment_plan=replace(facts.assignment_plan,explicit_service_start_result=True))
         return AssignmentPlanApplyEvidence(facts, claim_state, stored_receipt)
 
     def claim_command(
@@ -577,57 +569,24 @@ def _require_exact_commitment_days(cursor, case_no, execution_days, lock_ids, *,
         for row in cursor.fetchall()
     )
     lock_plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids, lock=lock)
-    confirmed_days = None
-    if (
-        sorted(day.staff_id for day in commitment_days) == sorted(day.staff_id for day in execution_days)
-        and {(day.staff_id, day.service_date) for day in commitment_days} != {(day.staff_id, day.service_date) for day in execution_days}
-    ):
-        _, confirmed_days = _current_confirmed_execution(
-            cursor, case_no, int(commitment["matching_plan_id"]), lock=lock
-        )
+    proof, confirmed_days = _current_confirmed_execution(
+        cursor, case_no, int(commitment["matching_plan_id"]), lock=lock
+    )
     require_exact_commitment_execution(
         int(commitment["matching_plan_id"]),
         lock_plan_ids,
         commitment_days,
         execution_days,
         confirmed_days=confirmed_days,
+        authorized_substitutions=tuple(proof["substitutions"].items()),
+        service_start_plan_id=int(commitment["matching_plan_id"]),
     )
     return commitment_id
 
 
 def _current_confirmed_execution(cursor, case_no, plan_id, *, lock):
-    cursor.execute(
-        "SELECT s.id,s.confirmed_version_id FROM matching_schedule_snapshots s "
-        "JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id "
-        "WHERE s.case_no=%s AND s.plan_id=%s AND s.current_marker=1 "
-        "AND s.status IN ('sent','draft') AND v.is_current=1" + _lock_suffix(lock),
-        (case_no, plan_id),
-    )
-    snapshot = cursor.fetchone()
-    if snapshot is None:
-        raise CommitmentExecutionMismatch("matching_schedule_confirmation_required")
-    cursor.execute(
-        "SELECT r.segment_id,p.staff_id,r.payload_snapshot "
-        "FROM matching_schedule_recipient_snapshots r "
-        "JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
-        "WHERE r.parent_snapshot_id=%s AND r.audience_type='caregiver' AND p.plan_id=%s "
-        "ORDER BY r.id" + _lock_suffix(lock),
-        (snapshot["id"], plan_id),
-    )
-    rows = cursor.fetchall()
-    segments = tuple(row["segment_id"] for row in rows)
-    if not segments or not _confirmed_schedule_recipients(cursor, snapshot["id"], segments):
-        raise CommitmentExecutionMismatch("matching_schedule_two_party_confirmation_required")
-    days = []
-    for row in rows:
-        payload = row["payload_snapshot"]
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        days.extend(
-            ExecutionServiceDay(int(row["staff_id"]), date.fromisoformat(value))
-            for week in payload["weeks"] for value in week["service_dates"]
-        )
-    return snapshot, tuple(days)
+    from infrastructure.mysql.service_start_arrangement import current_service_start_execution
+    return current_service_start_execution(cursor, case_no, plan_id, lock=lock)
 
 
 def _locked_waiting_lock_plan_ids(cursor, lock_ids, *, lock=True) -> tuple[int, ...]:
@@ -656,7 +615,7 @@ def _append_commitment_conversion(cursor, command, result, context, commitment_i
     cursor.execute("SELECT matching_plan_id FROM precontract_service_commitments WHERE id=%s", (commitment_id,))
     plan = cursor.fetchone()
     snapshot, _ = _current_confirmed_execution(cursor, command.candidate.case_no, plan["matching_plan_id"], lock=True)
-    payload["schedule_snapshot_id"] = snapshot["id"]
+    payload["service_start_response_ids"] = snapshot["service_start_response_ids"]
     payload["confirmed_service_date_version_id"] = snapshot["confirmed_version_id"]
     cursor.execute(
         "INSERT INTO precontract_service_commitment_events "

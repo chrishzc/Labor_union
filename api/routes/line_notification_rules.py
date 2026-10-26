@@ -61,6 +61,7 @@ from subsystems.line.message_configuration import (
 )
 from subsystems.line.notification_manual_replay_application import LineNotificationWarningSkipConflict
 from infrastructure.mysql.current_anomaly_issue_repository import CurrentIssueOwnerSnapshotUnavailable
+from infrastructure.mysql.line_notification_repository import LineNotificationManualReplayValidationError
 
 
 router = APIRouter(prefix="/api/v1/line/notification-rules", tags=["LINE Notification Rules"])
@@ -222,7 +223,7 @@ def preview_notification_manual_replay(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return BaseResponse(data=PreviewLineNotificationManualReplayView.model_validate(result))
+    return BaseResponse(data=PreviewLineNotificationManualReplayView.model_validate({key: result[key] for key in PreviewLineNotificationManualReplayView.model_fields}))
 
 
 @router.post(
@@ -242,6 +243,15 @@ def apply_notification_manual_replay(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except LineNotificationManualReplayValidationError as error:
+        messages = {
+            'notification_replay_in_progress':'原通知已有待完成的寄送工作，請查看寄送狀況。',
+            'recipient_unavailable':'收件對象尚不可用，請核對 LINE 綁定或案件群組。',
+            'template_or_schedule_invalid':'通知內容或排程設定需要修正。',
+            'notification_configuration_unavailable':'通知設定暫時無法完整核對，請稍後重試。',
+        }
+        raise typed_http_error(409, 'conflict', error.code, messages.get(error.code,
+            '案件或通知狀態已更新，請重新整理後操作。'), 'notification-manual-replay') from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     request.state.audit_action = "line.notification_rule.manual_replay"

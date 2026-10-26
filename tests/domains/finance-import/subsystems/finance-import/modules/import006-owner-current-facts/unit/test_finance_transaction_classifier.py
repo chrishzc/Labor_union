@@ -93,6 +93,16 @@ def test_legacy_incoming_does_not_use_raw_bank_reference_fallback():
     }
 
 
+@pytest.mark.parametrize("identities,resolved", [([7], True), ([7, 8], False), ([], False)])
+def test_staff_incoming_retains_unique_bank_binding_for_explicit_recovery_matching(identities, resolved):
+    account = "88888888880007"
+    result = classify_finance_transaction(
+        _row(bank_references={"交易參考編號": account}), {}, {account: identities})
+    assert result["classification_type"] == "non_business_review"
+    assert result["resolved_counterparty_account"] == (account if resolved else None)
+    assert result["matched_identity_ids"] == ([7] if resolved else [])
+
+
 def test_sinopac_incoming_uses_cancellation_reference_instead_of_correction_marker():
     result = classify_finance_transaction(
         _row(

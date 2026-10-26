@@ -180,6 +180,7 @@ def _materialize_contract_client_finance_facts(
         existing_obligations=source.existing_obligations,
         open_nonstage_obligation_count=source.open_nonstage_obligation_count,
         client_service_charge_waived=client_service_charge_waived,
+        identity_status=source.identity_status,
     )
 
 
@@ -192,6 +193,30 @@ def _contract_charge_days(cursor, case_no, schedule_rows, lock):
     if scheduled_days:
         return scheduled_days
     return _committed_charge_days(cursor, case_no, lock)
+
+
+def load_calculable_client_finance_facts(cursor, order_row, *, lock: bool, allow_planned: bool = True):
+    """Price confirmed/planned days without creating official Scheduling facts."""
+    case_no = str(order_row["case_no"])
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=lock)
+    generation = _select_generation(cursor, aggregate, lock)
+    schedules = _select_schedules(cursor, generation, lock)
+    days = (_contract_charge_days(cursor, case_no, schedules, lock) if allow_planned else
+            tuple(ClientChargeDay(row["work_date"], bool(row["is_double_pay"]))
+                  for row in schedules if bool(row["is_work_day"])))
+    if not days and not allow_planned:
+        return None, None
+    if not days:
+        _, dates = _select_confirmed_service_dates(cursor, case_no, lock)
+        if not dates:
+            dates = tuple(order_row["start_date"] + timedelta(days=i) for i in range(int(order_row["service_days"])))
+        days = tuple(ClientChargeDay(value, False) for value in dates)
+    source = _load_client_finance(cursor, order_row, schedules, lock)
+    if order_row.get("actual_start_date") is not None:
+        from dataclasses import replace
+        source = replace(source, effective_start_date=order_row["actual_start_date"],
+            payment_terms=replace(source.payment_terms, first_payment_due_date=order_row["actual_start_date"]))
+    return _materialize_contract_client_finance_facts(order_row, days, source), source
 
 
 def _committed_charge_days(cursor, case_no, lock):
@@ -630,9 +655,10 @@ def _load_client_finance(cursor, order_row, schedule_rows, lock):
     rate_override = load_explicit_case_service_rate(
         cursor, str(order_row["case_no"]), lock=lock
     )
-    return _client_finance_source(
+    source = _client_finance_source(
         terms_row, obligation_rows, double_pay_dates, rate_override
     )
+    return replace(source,effective_start_date=order_row.get('actual_start_date'))
 
 
 def _select_client_payment_terms(cursor, case_no, lock):
@@ -1142,7 +1168,7 @@ def _mysql_time(value: Any) -> time | None:
 
 
 _ORDER_SQL = (
-    "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.end_date,o.service_days,"
+    "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.end_date,o.actual_end_date,o.service_days,"
     "o.service_hours_per_day,o.requires_cooking,o.floor_fee,o.service_start_time,"
     "o.service_end_time,o.service_end_day_offset,o.actual_start_date,"
     "o.staff_payment_due_date,clients.identity_status AS client_identity_status,"
@@ -1173,7 +1199,7 @@ _CLIENT_PAYMENT_TERMS_SQL = (
     "t.first_payment_due_date,t.second_payment_due_date,"
     "(SELECT COUNT(*) FROM client_obligations o "
     "WHERE o.case_no=a.case_no AND o.status='open' "
-    "AND o.obligation_type NOT IN ('deposit','first','second')) "
+    "AND o.obligation_type NOT IN ('deposit','first','second','subsidy_return')) "
     "AS open_nonstage_obligation_count,"
     "(SELECT COUNT(*) FROM client_obligations subsidy_return "
     "WHERE subsidy_return.case_no=a.case_no "

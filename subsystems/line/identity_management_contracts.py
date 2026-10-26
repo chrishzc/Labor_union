@@ -183,6 +183,20 @@ class LineIdentityCandidatePage:
 
 
 @dataclass(frozen=True, slots=True)
+class LineIdentityBindingReminder:
+    subject_reference: str
+    subject_name: str
+    phone: str | None
+    case_no: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class LineIdentityBindingReminderPage:
+    items: tuple[LineIdentityBindingReminder, ...]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
 class LineIdentityBindingPage:
     items: tuple[LineIdentityBindingManagementView, ...]
     total: int

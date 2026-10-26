@@ -5,7 +5,7 @@ import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 
 const arrangementSchema = z.strictObject({
   case_no: z.string().min(1), plan_id: z.number().int().positive(),
-  state: z.enum(['awaiting_confirmations', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']),
+  state: z.enum(['awaiting_service_start', 'awaiting_conditions', 'ready', 'queued', 'running', 'effective', 'failed']),
   blockers: z.array(z.string()), job_id: z.string().nullable(), assignment_count: z.number().int().nonnegative(),
 });
 const completionSchema = z.strictObject({

@@ -89,55 +89,20 @@ def test_client_profile_mobile_adapter_authorizes_line_binding_before_owner_quer
     assert events[1][1]["application"] is application
 
 
-def test_staff_leave_mobile_adapter_passes_line_bound_principal_and_idempotency(monkeypatch) -> None:
-    principal = SimpleNamespace(id=7)
-    application = SimpleNamespace()
-    captured = {}
-    monkeypatch.setattr(
-        line_mobile_admin,
-        "_mobile_admin_context",
-        lambda token, capability: (
-            captured.update(token=token, capability=capability) or principal,
-            SimpleNamespace(actor_id="admin:7"),
-        ),
-    )
-
-    def owner_review(request_id, body, idempotency_key, owner_principal, owner_application):
-        captured.update(
-            request_id=request_id,
-            body=body,
-            idempotency_key=idempotency_key,
-            principal=owner_principal,
-            application=owner_application,
-        )
-        return "owner-response"
-
-    monkeypatch.setattr(
-        line_mobile_admin.staff_leave_management_routes,
-        "review_staff_leave_request",
-        owner_review,
-    )
-
-    response = line_mobile_admin.mobile_staff_leave_review(
-        19,
-        line_mobile_admin._MobileStaffLeaveReviewRequest(
-            line_id_token="verified-token",
-            expected_version=2,
-            action="accept",
-            reason="手機端受理",
-            idempotency_key="mobile-leave-review:19:one",
-        ),
-        application,
-    )
-
-    assert response == "owner-response"
-    assert captured["token"] == "verified-token"
-    assert captured["capability"] is line_mobile_admin.LineCapability.REVIEW_DECIDE
-    assert captured["request_id"] == 19
-    assert captured["body"].expected_version == 2
-    assert captured["idempotency_key"] == "mobile-leave-review:19:one"
-    assert captured["principal"] is principal
-    assert captured["application"] is application
+def test_retired_staff_leave_review_still_validates_line_bound_actor_without_writer(monkeypatch):
+    captured=[]
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda token,cap:(captured.append((token,cap)) or (SimpleNamespace(id=7),None)))
+    monkeypatch.setattr(line_mobile_admin,'get_staff_leave_intake_application',lambda:pytest.fail('retired action must not create writer'))
+    with pytest.raises(HTTPException) as failure:
+        line_mobile_admin.mobile_staff_leave_review(19,line_mobile_admin._MobileStaffLeaveReviewRequest(
+            line_id_token='verified-token',expected_version=2,action='accept',reason='',idempotency_key='legacy'))
+    assert failure.value.status_code==410
+    assert captured==[('verified-token',line_mobile_admin.LineCapability.REVIEW_DECIDE)]
+    monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda *args:(_ for _ in ()).throw(HTTPException(403,'unbound')))
+    with pytest.raises(HTTPException) as unbound:
+        line_mobile_admin.mobile_staff_leave_review(19,line_mobile_admin._MobileStaffLeaveReviewRequest(
+            line_id_token='unbound',expected_version=2,action='accept',reason='',idempotency_key='legacy'))
+    assert unbound.value.status_code==403
 
 
 def _assignment_plan_query_payload(case_no="CASE-1"):

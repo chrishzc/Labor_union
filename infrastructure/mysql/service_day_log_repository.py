@@ -21,6 +21,7 @@ from subsystems.scheduling.service_day_log_workflow import (
     ApplyServiceDayLog,
     ControlledServiceDayLogAttachment,
     ServiceDayLogResult,
+    ServiceDayLogGap,
 )
 
 
@@ -34,10 +35,48 @@ class MySqlServiceDayLogRepository:
             or MySqlControlledFileReferenceFinalizeRepository(connection)
         )
 
+    def missing_runs(self, now, *, minimum_days=4, page=1, page_size=25, case_no=None, staff_id=None):
+        """Calendar-consecutive ended workdays; filled days and off-days break a run.
+
+        Read Scheduling facts only. The LINE owner decides whether to enqueue a reminder.
+        """
+        from shared_kernel.clock import TAIPEI_TIME_ZONE
+        params = (case_no, case_no, staff_id, staff_id,
+                  now.astimezone(TAIPEI_TIME_ZONE).replace(tzinfo=None), minimum_days)
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MISSING_RUNS_CTE + " SELECT COUNT(*) AS total FROM runs WHERE consecutive_days>=%s", params)
+            total = int(cursor.fetchone()["total"])
+            cursor.execute(_MISSING_RUNS_CTE + " SELECT * FROM runs WHERE consecutive_days>=%s "
+                           "ORDER BY case_no,staff_id,missing_from LIMIT %s OFFSET %s",
+                           (*params, page_size, (page - 1) * page_size))
+            rows = cursor.fetchall()
+        return tuple(ServiceDayLogGap(str(row["case_no"]), int(row["staff_id"]), row["missing_from"],
+                                      row["missing_through"], int(row["consecutive_days"])) for row in rows), total
+
+    def interval_is_missing(self, case_no, staff_id, start, end, now) -> bool:
+        from shared_kernel.clock import TAIPEI_TIME_ZONE
+        days = (end - start).days + 1
+        if days < 4:
+            return False
+        with self._connection.cursor() as cursor:
+            # A locking read is essential: the delivery task read may already
+            # have established an older REPEATABLE READ snapshot in this UoW.
+            cursor.execute(_MISSING_INTERVAL_LOCK_SQL, (case_no, staff_id, start, end,
+                           now.astimezone(TAIPEI_TIME_ZONE).replace(tzinfo=None)))
+            rows = cursor.fetchall()
+        return len({row["work_date"] for row in rows}) == days
+
     def load_assignment(
         self, staff_id: int, assignment_id: int, service_date, *, for_update: bool
     ):
         with self._connection.cursor() as cursor:
+            if for_update:
+                # Match the manual reminder/service-arrangement Orders-first
+                # lock order before locking the assignment and service day.
+                cursor.execute("SELECT o.case_no FROM orders o WHERE o.case_no=(SELECT case_no "
+                               "FROM case_staff_assignments WHERE id=%s AND staff_id=%s) FOR UPDATE",
+                               (assignment_id, staff_id))
+                cursor.fetchone()
             query = _ASSIGNMENT_LOCK_SQL if for_update else _ASSIGNMENT_QUERY_SQL
             cursor.execute(query, (staff_id, assignment_id, service_date))
             row = cursor.fetchone()
@@ -266,6 +305,46 @@ def _result_from_row(row, *, outcome: str, attachments=()) -> ServiceDayLogResul
         tuple(attachments),
     )
 
+
+_MISSING_INTERVAL_LOCK_SQL = """
+SELECT ss.work_date FROM orders o
+JOIN case_staff_assignments csa ON csa.case_no=o.case_no
+JOIN staff_schedule ss ON ss.assignment_id=csa.id
+JOIN scheduling_aggregates g ON g.case_no=csa.case_no
+  AND g.effective_generation_id=ss.generation_id AND g.effective_generation_id=csa.generation_id
+LEFT JOIN scheduling_service_day_logs log ON log.assignment_id=csa.id AND log.service_date=ss.work_date
+WHERE csa.case_no=%s AND csa.staff_id=%s AND ss.work_date BETWEEN %s AND %s
+  AND ss.is_work_day=1 AND (csa.status IS NULL OR csa.status NOT IN ('cancelled','replaced'))
+  AND o.status IN ('訂單成立','服務中') AND log.id IS NULL
+  AND o.service_start_time IS NOT NULL AND o.service_end_time IS NOT NULL AND o.service_end_day_offset IS NOT NULL
+  AND TIMESTAMP(DATE_ADD(ss.work_date,INTERVAL o.service_end_day_offset DAY),o.service_end_time)<=%s
+FOR UPDATE
+"""
+
+_MISSING_RUNS_CTE = """
+WITH missing_days AS (
+  SELECT DISTINCT csa.case_no,csa.staff_id,ss.work_date
+  FROM staff_schedule ss
+  JOIN case_staff_assignments csa ON csa.id=ss.assignment_id
+  JOIN scheduling_aggregates g ON g.case_no=csa.case_no
+    AND g.effective_generation_id=ss.generation_id AND g.effective_generation_id=csa.generation_id
+  JOIN orders o ON o.case_no=csa.case_no
+  LEFT JOIN scheduling_service_day_logs log ON log.assignment_id=csa.id AND log.service_date=ss.work_date
+  WHERE ss.is_work_day=1 AND (csa.status IS NULL OR csa.status NOT IN ('cancelled','replaced'))
+    AND o.status IN ('訂單成立','服務中') AND log.id IS NULL
+    AND (%s IS NULL OR csa.case_no=%s) AND (%s IS NULL OR csa.staff_id=%s)
+    AND o.service_start_time IS NOT NULL AND o.service_end_time IS NOT NULL
+    AND o.service_end_day_offset IS NOT NULL
+    AND TIMESTAMP(DATE_ADD(ss.work_date,INTERVAL o.service_end_day_offset DAY),o.service_end_time)<=%s
+), numbered AS (
+  SELECT *,TO_DAYS(work_date)-ROW_NUMBER() OVER (PARTITION BY case_no,staff_id ORDER BY work_date) AS island
+  FROM missing_days
+), runs AS (
+  SELECT case_no,staff_id,MIN(work_date) AS missing_from,MAX(work_date) AS missing_through,
+         COUNT(*) AS consecutive_days
+  FROM numbered GROUP BY case_no,staff_id,island
+)
+"""
 
 _ASSIGNMENT_QUERY_SQL = (
     "SELECT csa.case_no,o.requires_cooking FROM staff_schedule ss "

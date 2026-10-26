@@ -258,7 +258,7 @@ def _cancel_assignment_with_formal_rebuild(connection, case_no: str, assignment_
         unit_of_work.commit()
 
 
-def test_service_day_reminder_native_mysql_lineage_stop_rebuild_and_replay() -> None:
+def test_historical_service_day_reminder_native_mysql_stop_rebuild_and_replay() -> None:
     from domains.line.configuration import LineConfigurationKind
     from domains.line.identities import LineConfigurationRevision, LineDeliveryTaskId
     from infrastructure.mysql.line_configuration_publication_repository import (
@@ -291,6 +291,14 @@ def test_service_day_reminder_native_mysql_lineage_stop_rebuild_and_replay() -> 
     bootstrap(_arguments(database))
     connect = _connection_factory(database)
     connection = connect()
+    # Fresh disposable schemas need the same canonical cancellation procedure
+    # as the existing service-start fixture before a formal rebuild can run.
+    from infrastructure.mysql.nas_mutations import PROCEDURES
+    arguments, body, _ = PROCEDURES["lu_nas_cancel_occupancy_v1"]
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE PROCEDURE lu_nas_cancel_occupancy_v1 ({arguments}) "
+                       f"SQL SECURITY INVOKER BEGIN {body} END")
+    connection.commit()
     completion_case = "REMINDER-COMPLETE-325"
     rebuild_case = "REMINDER-REBUILD-325"
     try:
@@ -316,10 +324,13 @@ def test_service_day_reminder_native_mysql_lineage_stop_rebuild_and_replay() -> 
         assert "assigned_caregiver" in rules.definition_json
 
         assert MySqlServiceDayCheckpointWorker(connect, lambda: _NOW).run_once() == 2
-        assert (
-            MySqlSchedulingCheckpointNotificationSourceWorker(connect, lambda: _NOW).run_once()
-            == 2
-        )
+        # Synthetic historical pending jobs from before the automatic-private
+        # policy retired. Current production policy must never create these.
+        # Keep the unique interleaved stop/rebuild/replay oracle for old rows.
+        from unittest.mock import patch
+        from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
+        with patch.object(MySqlLineNotificationRepository, "_rule_source_currently_applicable", return_value=True):
+            assert MySqlSchedulingCheckpointNotificationSourceWorker(connect, lambda: _NOW).run_once() == 2
         connection.rollback()
         lineage = _lineage(connection)
         assert _counts(connection) == (2, 2, 2, 2)

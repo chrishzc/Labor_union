@@ -148,6 +148,8 @@ class PayrollRebuildRepository(Protocol):
 
     def persist_rebuild(self, persistence: PayrollRebuildPersistence) -> None: ...
 
+    def resolve_handover_obligations(self, facts: PayrollRebuildFacts) -> PayrollRebuildFacts: ...
+
 
 class PayrollRebuildError(Exception):
     def __init__(self, error: TypedError) -> None:
@@ -187,6 +189,28 @@ class PayrollRebuildWorkflow:
             self._persist(request, preview, command_fingerprint, receipt)
             unit_of_work.commit()
             return receipt
+
+    def synchronize_in_unit_of_work(self, case_no, *, actor, key, correlation_id):
+        """Automatic source-fact synchronization; the caller owns commit/rollback."""
+        facts = self._repository.load(case_no, for_update=True)
+        if any(item.handover_corrections_exist for item in facts.existing_obligations):
+            facts = self._repository.resolve_handover_obligations(facts)
+            payroll = build_case_payroll_candidate(facts.service_facts, facts.rate_snapshots, facts.terms, facts.adjustments)
+            actions = _build_actions(payroll, facts.existing_obligations, facts.staff_payment_due_date)
+            if any(action.action is not StaffObligationActionKind.UNCHANGED for action in actions):
+                raise ValueError("payroll_handover_settlement_required")
+            return facts.staff_payment_due_date
+        preview = _build_preview(facts)
+        if all(action.action is StaffObligationActionKind.UNCHANGED for action in preview.actions):
+            return facts.staff_payment_due_date
+        request = PayrollRebuildRequest(case_no, ExpectedVersion(facts.payroll_version), preview.fingerprint,
+            key, actor, "系統依已確認服務資料同步月嫂應付", correlation_id)
+        command = _command_fingerprint(request)
+        replay = self._find_replay(request, command)
+        if replay is not None:
+            return facts.staff_payment_due_date
+        self._persist(request, preview, command, _receipt(request, preview))
+        return facts.staff_payment_due_date
 
     def _find_replay(self, request, command_fingerprint):
         stored = self._repository.find_receipt(request.idempotency_key)

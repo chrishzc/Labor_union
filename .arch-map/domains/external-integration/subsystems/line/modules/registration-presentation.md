@@ -14,6 +14,8 @@
   - `/api/v1/line/identity/registration/preview`
   - `/api/v1/line/identity/registration/apply`
 
+一般文字、按鈕與成功提示套用目前 LIFF 設定；正式結果狀態及申請編號由實際回執顯示。
+
 ## Dependencies
 - outbound: `case-import` — 只經既有 typed registration Preview／Apply contract 建立或讀取 provisional registration。
 - outbound: `external LINE LIFF runtime` — 已驗證身分的瀏覽器 transport；不得以 query string user ID 作身分證明。

@@ -29,7 +29,7 @@ def project_subsidy_return(
     instruction or evidence that the customer's fees have been collected.
     """
     identity = normalize_subsidy_policy_identity(identity_status)
-    if identity not in {'一般市民', '補助市民'} or return_settled:
+    if identity != '補助市民' or return_settled:
         return None
     if has_formal_return:
         return SubsidyReturnProjection(formal_amount_ntd, formal_due_date, False)

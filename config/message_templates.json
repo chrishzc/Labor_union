@@ -165,42 +165,6 @@
       ]
     },
     {
-      "id": "new_user_d1",
-      "name": "新好友 D+1 服務須知",
-      "category": "scheduled_push",
-      "message_type": "text",
-      "enabled": true,
-      "content": "【新手爸媽照護指南 🌸】\n您好！坐月子是媽媽產後休養的重要時期。\n\n如果您已在市府月子平台登記，別忘了點選下方選單【服務登記】完成 60 題需求問卷，工會將為您精準媒合最合適的優質月嫂！\n\n如有任何問題，直接在對話框輸入「服務說明」即可隨時查詢。",
-      "variables": [],
-      "usage": [
-        "schedule"
-      ]
-    },
-    {
-      "id": "new_user_d2",
-      "name": "新好友 D+2 履約保證",
-      "category": "scheduled_push",
-      "message_type": "text",
-      "enabled": true,
-      "content": "【工會月嫂三大安心保證 🛡️】\n1. 專業合格證照與定期健康檢查。\n2. 定型化契約保障與市府定額補助核銷。\n3. 請假安心調休與專人代班制度支援。\n\n讓您在家坐月子更放心！您可隨時透過下方選單查詢最新進度與常見問答。",
-      "variables": [],
-      "usage": [
-        "schedule"
-      ]
-    },
-    {
-      "id": "new_user_d3",
-      "name": "新好友 D+3 專人諮詢",
-      "category": "scheduled_push",
-      "message_type": "text",
-      "enabled": true,
-      "content": "【產前準備與專人諮詢 ✨】\n距離預產期還有一段時間嗎？建議提早準備產婦母嬰必備用品清單。\n\n如需諮詢客製化天數、時段調配或特殊照護需求，歡迎直接輸入「轉真人客服」，工會專員將竭誠為您服務！",
-      "variables": [],
-      "usage": [
-        "schedule"
-      ]
-    },
-    {
       "id": "client_rebind_approved",
       "name": "客戶重新綁定核准",
       "category": "webhook_reply",
@@ -257,174 +221,6 @@
       ]
     },
     {
-      "id": "0",
-      "name": "0",
-      "category": "push",
-      "message_type": "text",
-      "enabled": true,
-      "content": "",
-      "variables": [],
-      "usage": []
-    },
-    {
-      "id": "v",
-      "name": "`캇%lå·UÌ!÷\u0005iq­±򤖬\u0000",
-      "category": "scheduled_push",
-      "message_type": "text",
-      "enabled": true,
-      "content": "",
-      "variables": [],
-      "usage": [
-        "customer_service",
-        "push",
-        "customer_service",
-        "webhook",
-        "schedule",
-        "webhook",
-        "webhook",
-        "schedule",
-        "webhook",
-        "customer_service",
-        "customer_service",
-        "customer_service",
-        "schedule",
-        "webhook",
-        "schedule",
-        "webhook"
-      ]
-    },
-    {
-      "id": "3qlinvqk0s",
-      "name": "􎼺󏸭𺶵ûÿî𗨴񣚤",
-      "category": "customer_service",
-      "message_type": "text",
-      "enabled": true,
-      "content": "»ë",
-      "variables": [],
-      "usage": []
-    },
-    {
-      "id": "f3uxqwd09",
-      "name": "\b¼wKs>¯",
-      "category": "scheduled_push",
-      "message_type": "text",
-      "enabled": false,
-      "content": " 󁄴Ð򪣧Ù󶥔\u0007S񌺠\tWD",
-      "variables": [],
-      "usage": []
-    },
-    {
-      "id": "LU96-M1-GATEWAY-RETRY-FAIL-CARD-V1",
-      "name": "Task96 M1 gateway retry baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: gateway retry review.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LU96-M1-LEAVE-EXTENSION-CARD-V1",
-      "name": "月嫂請假－請客戶確認",
-      "category": "leave_coordination",
-      "message_type": "text",
-      "enabled": true,
-      "content": "月嫂已提出請假／調休申請，服務日期可能需要順延。請在 LINE 通知中確認是否同意；若不同意，工會將協助安排代班月嫂。",
-      "variables": [],
-      "usage": [
-        "leave_coordination",
-        "notification"
-      ]
-    },
-    {
-      "id": "LU96-M1-STAFF-RETIRE-CARD-V1",
-      "name": "Task96 M1 staff retirement baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: staff retirement.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LU96-M2-ROUTER-REPLY-CARD-V1",
-      "name": "Task96 M2 router reply baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: deterministic router reply.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LU96-M2-FEEDBACK-UNRESOLVED-CARD-V1",
-      "name": "Task96 M2 feedback baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: unresolved feedback.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LU96-M3-MATCH-SUCCESS-CLIENT-CARD-V1",
-      "name": "媒合成功－客戶",
-      "category": "matching_result",
-      "message_type": "text",
-      "enabled": true,
-      "content": "媒合已完成，工會已確認本案的服務月嫂。請查看最新服務安排；如需協助，請直接於官方 LINE 留言。",
-      "variables": [],
-      "usage": [
-        "matching_result",
-        "notification"
-      ]
-    },
-    {
-      "id": "LU96-M3-MATCH-SUCCESS-STAFF-CARD-V1",
-      "name": "媒合成功－月嫂",
-      "category": "matching_result",
-      "message_type": "text",
-      "enabled": true,
-      "content": "您已完成本案媒合指派，請查看最新服務日期與案件安排；如資料有誤，請儘速聯繫工會專員。",
-      "variables": [],
-      "usage": [
-        "matching_result",
-        "notification"
-      ]
-    },
-    {
-      "id": "LU96-M3-LEAVE-AGREE-CARD-V1",
-      "name": "Task96 M3 leave agree baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: leave extension agreed.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LU96-M3-LEAVE-DISAGREE-CARD-V1",
-      "name": "Task96 M3 leave disagree baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: leave extension rejected.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
       "id": "LU96-M4-SAFE-ALERT-CARD-V1",
       "name": "系統重大異常",
       "category": "runtime_alert",
@@ -451,43 +247,51 @@
       ]
     },
     {
-      "id": "LU96-M4-SALARY-PAYABLE-CARD-V1",
-      "name": "Task96 M4 payroll baseline",
-      "category": "task96_baseline",
-      "message_type": "text",
-      "enabled": true,
-      "content": "Task96 baseline notification: payable anomaly review.",
-      "variables": [],
-      "usage": [
-        "task96_baseline"
-      ]
-    },
-    {
-      "id": "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1",
-      "name": "提醒上傳寶寶日誌",
-      "category": "service_day",
-      "message_type": "text",
-      "enabled": true,
-      "content": "提醒您完成 {service_date} 的服務紀錄，請至 LINE 選單的「寶寶日誌」上傳當日紀錄；如本案包含下廚服務，也請一併上傳餐食照片。",
-      "variables": [
-        {
-          "name": "service_date",
-          "required": true,
-          "description": "服務日期"
-        }
-      ],
-      "usage": [
-        "service_day",
-        "notification"
-      ]
-    },
-    {
-      "id": "LU96-ORDER-PRE-START-REMINDER-CARD-V1",
-      "name": "服務開始前3天提醒（確認寶寶狀況與第一期款）",
+      "id": "LINE-ORDER-SERVICE-START-DAY-CARD-V1",
+      "name": "服務當天群組繳款提醒與月嫂服務狀況詢問",
       "category": "order_lifecycle",
-      "message_type": "text",
+      "message_type": "flex",
       "enabled": true,
-      "content": "【新竹市月子工會・服務即將開始貼心提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n您的月子照護服務即將於 3 天後（{planned_start_date}）正式開始！\n\n📋 案件編號：{case_no}\n\n1️⃣ 寶寶與產婦狀況確認：\n・請確認寶寶目前健康狀況（出生體重、是否已返家等）。\n・若時間或生產日期有變動，請儘速在官方 LINE 留言聯繫專員。\n\n2️⃣ 服務動線與餐食溝通：\n・服務人員將於前 1~2 天與您再次確認動線、食材及用具準備。\n\n3️⃣ 第一期款繳費說明：\n・應繳金額：{first_payment_amount}\n・繳款期限：服務開始日（{planned_start_date}）\n・繳費狀態：{first_payment_status}\n\n如有任何問題，歡迎隨時於此對話框留言詢問，工會將竭誠為您服務！❤️",
+      "content": {
+        "type": "flex",
+        "altText": "服務開始提醒與服務狀況詢問",
+        "contents": {
+          "type": "bubble",
+          "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+              {
+                "type": "text",
+                "text": "【服務開始提醒】\n案件編號：{case_no}\n今天是本案的服務開始日，祝服務順利！\n\n{first_payment_notice}\n\n{caregiver_names}，請問今天的服務是否順利？",
+                "wrap": true
+              }
+            ]
+          },
+          "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+              {
+                "type": "button",
+                "action": {
+                  "type": "postback",
+                  "label": "服務正常",
+                  "data": "start-day:{response_token}:normal"
+                }
+              },
+              {
+                "type": "button",
+                "action": {
+                  "type": "postback",
+                  "label": "需要協助",
+                  "data": "start-day:{response_token}:help"
+                }
+              }
+            ]
+          }
+        }
+      },
       "variables": [
         {
           "name": "case_no",
@@ -495,19 +299,19 @@
           "description": "案件編號"
         },
         {
-          "name": "planned_start_date",
+          "name": "first_payment_notice",
           "required": true,
-          "description": "預計服務開始日"
+          "description": "未結清時的繳款段落；已結清為空字串"
         },
         {
-          "name": "first_payment_amount",
+          "name": "caregiver_names",
           "required": true,
-          "description": "第一期款應繳金額"
+          "description": "當日排班月嫂姓名"
         },
         {
-          "name": "first_payment_status",
+          "name": "response_token",
           "required": true,
-          "description": "第一期款繳費狀態"
+          "description": "系統建立的群組當日詢問識別"
         }
       ],
       "usage": [
@@ -516,12 +320,12 @@
       ]
     },
     {
-      "id": "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
-      "name": "第二期款（尾款）繳款提醒",
+      "id": "LINE-SECOND-PAYMENT-DUE-TEXT-V1",
+      "name": "第二期款到期當天原群組提醒",
       "category": "order_lifecycle",
       "message_type": "text",
       "enabled": true,
-      "content": "【新竹市月子工會・第二期款（尾款）繳款提醒】🤱✨\n\n親愛的產婦媽媽/家屬您好：\n感謝您對新竹市月子工會服務人員的信任與支持！\n您的到府坐月子服務即將圓滿完成，在此貼心提醒您第二期款（尾款）結清事宜：\n\n📋 案件編號：{case_no}\n📅 繳納期限：{second_payment_due_date}\n💰 應繳金額：{second_payment_amount}\n📌 繳費狀態：{second_payment_status}\n\n💡 繳費說明：\n・若款項已完成匯款或已由專員核銷，系統將自動更新，無需重複繳款。\n・如有任何帳務或服務相關疑問，歡迎隨時於此官方 LINE 留言聯繫專員。祝您與寶寶健康平安！❤️",
+      "content": "案件 {case_no} 第二期款尚待繳納 {second_payment_amount} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
       "variables": [
         {
           "name": "case_no",
@@ -529,21 +333,48 @@
           "description": "案件編號"
         },
         {
-          "name": "second_payment_due_date",
+          "name": "second_payment_amount",
           "required": true,
-          "description": "第二期款繳納期限"
+          "description": "第二期款尚欠金額"
+        }
+      ],
+      "usage": [
+        "order_lifecycle",
+        "notification"
+      ]
+    },
+    {
+      "id": "LINE-SECOND-PAYMENT-SETTLED-TEXT-V1",
+      "name": "第二期款核銷成功原群組通知",
+      "category": "order_lifecycle",
+      "message_type": "text",
+      "enabled": true,
+      "content": "案件 {case_no} 第二期款 {second_payment_amount} 元已確認入帳，謝謝。",
+      "variables": [
+        {
+          "name": "case_no",
+          "required": true,
+          "description": "案件編號"
         },
         {
           "name": "second_payment_amount",
           "required": true,
-          "description": "第二期款應繳金額"
-        },
-        {
-          "name": "second_payment_status",
-          "required": true,
-          "description": "第二期款繳費狀態"
+          "description": "本次第二期款正式核銷金額"
         }
       ],
+      "usage": [
+        "order_lifecycle",
+        "notification"
+      ]
+    },
+    {
+      "id": "LINE-SERVICE-COMPLETION-TEXT-V1",
+      "name": "服務完工－滿意度問卷邀請",
+      "category": "order_lifecycle",
+      "message_type": "text",
+      "enabled": true,
+      "content": "本案服務已完成，感謝您的配合。請填寫服務滿意度問卷，讓我們了解您的服務體驗。",
+      "variables": [],
       "usage": [
         "order_lifecycle",
         "notification"

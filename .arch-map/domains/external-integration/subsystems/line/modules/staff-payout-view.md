@@ -6,6 +6,7 @@
 
 ## Responsibility
 提供已驗證月嫂依 canonical staff role binding，唯讀查詢本人指定目標付款月份的逐案薪資、應付日、實付日、狀態與交易摘要。月份依 Staff Payables 正式契約的 target payment month（`due_date`）歸屬；LINE 不重算或改寫應付事實。
+直接呈現 Staff Payables 的 `amount_remaining` 與「部分付款」狀態；薪資結算及付款成功均不另發通知。
 
 ## Implementation
 - entrypoints:

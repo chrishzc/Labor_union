@@ -97,8 +97,10 @@ const RULE_NAMES: Record<string, string> = {
   'LU96-M4-COMPLAINT-HIGH-RULE-V1': 'M4：重大客訴 HIGH 急件告警',
   'LU96-M4-SALARY-PAYABLE-RULE-V1': 'M4：代班薪資自動拆帳通報',
   'LINE-SERVICE-DAY-LOG-REMINDER-RULE-V1': '提醒上傳寶寶日誌',
-  'LU96-ORDER-PRE-START-REMINDER-V1': '服務前 3 天：寶寶狀況與第一期款提醒',
-  'LU96-ORDER-SECOND-PAYMENT-REMINDER-V1': '第二期款（尾款）繳款提醒',
+  'LINE-ORDER-SERVICE-START-DAY-V1': '服務當天：群組繳款提醒與月嫂服務狀況詢問',
+  'LINE-SECOND-PAYMENT-DUE-V1': '第二期款到期當天原群組提醒',
+  'LINE-SECOND-PAYMENT-SETTLED-V1': '第二期款核銷成功原群組通知',
+  'LINE-SERVICE-COMPLETION-V1': '服務完工－滿意度問卷邀請',
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -116,8 +118,10 @@ const EVENT_LABELS: Record<string, string> = {
   'service_time_checkpoint': '提醒上傳寶寶日誌',
   'beclass_completion_changed': 'BeClass 完成狀態變更',
   'deposit_confirmed': '訂金確認',
-  'order.pre_start_reminder': '服務開始前 3 天提醒（第一期款）',
-  'order.second_payment_reminder': '第二期款（尾款）繳款提醒',
+  'order.service_start_day': '服務當天群組繳款與服務狀況',
+  'client.second_payment_due': '第二期款到期當天原群組提醒',
+  'client.second_payment_settled': '第二期款核銷成功原群組通知',
+  'order.service_completed': '服務完工後原群組邀請填寫滿意度問卷',
 };
 
 const RECIPIENT_LABELS: Record<string, string> = {
@@ -204,7 +208,11 @@ function publicationStatusLabel(value: LineRichMenuPublicationStatus): string {
 export function adaptLineNotificationRulesCatalog(
   catalog: LineNotificationRulesCatalog
 ): LineNotificationRulesCatalogModel {
-  const rules = 'rules' in catalog.definition ? catalog.definition.rules : [];
+  const rules = ('rules' in catalog.definition ? catalog.definition.rules : []).filter(rule =>
+    !['scheduling.leave.extension_requested','client.leave.extension_agreed','client.leave.extension_rejected'].includes(rule.event_code) &&
+    rule.id !== 'LINE-SERVICE-DAY-LOG-REMINDER-RULE-V1' &&
+    rule.template_id !== 'LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1' &&
+    !(rule.event_code === 'service_time_checkpoint' && rule.predicates?.includes('baby_log_missing')));
   return {
     revision: catalog.revision,
     rules: rules.map((rule) => ({

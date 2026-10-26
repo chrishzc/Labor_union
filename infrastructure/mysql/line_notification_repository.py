@@ -6,6 +6,7 @@ Description: 管理 LINE 通知意圖的可取消狀態，確保刪除規則不�
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -268,8 +269,13 @@ class MySqlLineNotificationRepository:
             sources.append(
                 LineNotificationFailedSourceFact(
                     source_event_id=source_id,
-                    currently_applicable=bool(row["is_latest_source_version"])
-                    and current_rule_applies,
+                    currently_applicable=bool(row["is_latest_source_version"]) and bool(row["source_case_current"])
+                    and current_rule_applies and self._source_currently_applicable(NotificationSourceEvent(
+                        identity=str(row['source_event_identity']), event_code=str(row['event_code']),
+                        historical_silent=False, facts=facts, source_domain=str(row['source_domain']),
+                        source_aggregate_type=str(row['source_aggregate_type']),
+                        source_aggregate_identity=str(row['source_aggregate_identity']),
+                        source_version=int(row['source_version']))),
                     applicability_complete=authoritative_complete,
                     replay_successors=tuple(replay_by_original[source_id]),
                 )
@@ -280,7 +286,60 @@ class MySqlLineNotificationRepository:
             owner_version=maximum_version,
             authoritative_complete=authoritative_complete,
         )
+        unresolved_ids = set(readback.unresolved_source_ids)
+        source_tasks = []
+        for original_id in sorted(unresolved_ids):
+            task_ids = {int(row['delivery_task_id']) for row in source_rows[original_id]
+                        if row.get('delivery_task_id') is not None}
+            exact_replays = {replay.source_event_id for replay in replay_by_original[original_id] if replay.exact_lineage}
+            task_ids.update(int(row['delivery_task_id']) for row in replay_rows
+                            if int(row['replay_source_event_id']) in exact_replays and row.get('delivery_task_id') is not None)
+            source_tasks.append((original_id, tuple(sorted(task_ids))))
+        readback = replace(readback, source_task_ids=tuple(source_tasks),
+            related_task_ids=tuple(sorted({task for _, tasks in source_tasks for task in tasks})))
         return self._apply_warning_disposition(readback)
+
+    def unresolved_delivery_task_ids(self, task_ids: tuple[int, ...]) -> tuple[int, ...]:
+        """Filter one bounded failure page; immutable delivery history is unchanged."""
+        if not task_ids:
+            return ()
+        if len(task_ids) > 25 or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in task_ids):
+            raise ValueError('LINE failure task page is invalid')
+        placeholders = ','.join('%s' for _ in task_ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT intent.delivery_task_id,source.id AS source_event_id,source.source_event_identity '
+                'FROM line_notification_intents intent '
+                'JOIN line_notification_decisions decision ON decision.id=intent.decision_id '
+                'JOIN line_notification_source_events source ON source.id=decision.source_event_id '
+                f'WHERE intent.delivery_task_id IN ({placeholders})', task_ids)
+            rows = _strict_dict_rows(tuple(cursor.fetchall() or ()), 'line_failure_task_source_invalid')
+        original_by_task = {int(row['delivery_task_id']):
+            _manual_replay_original_source_id(str(row['source_event_identity'])) or int(row['source_event_id'])
+            for row in rows}
+        targets_by_source = {}
+        readbacks = {}
+        unresolved = []
+        for task_id in task_ids:
+            original_id = original_by_task.get(task_id)
+            if original_id is None:
+                unresolved.append(task_id)
+                continue
+            if original_id not in targets_by_source:
+                targets_by_source[original_id] = self.line006_recheck_targets_for_source(original_id)
+            targets = targets_by_source[original_id]
+            needs_attention = not targets
+            for target in targets:
+                query = LineNotificationFailureCurrentFactQuery(target.case_no, target.notification_reason)
+                if query not in readbacks:
+                    readbacks[query] = self.current_failure_fact(query)
+                current = readbacks[query]
+                if not current.authoritative_complete:
+                    raise RuntimeError('line_failure_task_readback_incomplete')
+                needs_attention = needs_attention or original_id in current.unresolved_source_ids
+            if needs_attention:
+                unresolved.append(task_id)
+        return tuple(unresolved)
 
     def _apply_warning_disposition(self, readback):
         from dataclasses import replace
@@ -391,7 +450,7 @@ class MySqlLineNotificationRepository:
         if rule is None:
             return "notification_source_not_currently_applicable"
         recipient = self._resolve_recipient(
-            str(rule.get("recipient_selector")), original.facts, source_domain=original.source_domain
+            str(rule.get("recipient_selector")), original.facts, source_domain=original.source_domain, event_code=original.event_code
         )
         if recipient is None:
             return "recipient_unavailable"
@@ -497,12 +556,20 @@ class MySqlLineNotificationRepository:
             1 for rule in rules
             if isinstance(rule, dict) and rule.get("event_code") == source.event_code
         ) if isinstance(rules, list) else 0
+        unavailable = None
+        try:
+            from shared_kernel.clock import SystemBusinessClock
+            self._validate_manual_replay(source_event_id, source, SystemBusinessClock().now())
+        except LineNotificationManualReplayValidationError as error:
+            unavailable = str(error)
         return {
             "source_event_id": source_event_id,
             "event_code": source.event_code,
             "historical_silent": source.historical_silent,
             "matching_rule_count": matching,
             "will_create_new_immutable_source": True,
+            "can_replay": unavailable is None,
+            "unavailable_reason": unavailable,
         }
 
     def manual_replay_source(
@@ -571,6 +638,12 @@ class MySqlLineNotificationRepository:
             raise LineNotificationManualReplayValidationError(
                 "notification_source_not_currently_applicable"
             )
+        for target in self.line006_recheck_targets_for_source(source_event_id):
+            current = self.current_failure_fact(LineNotificationFailureCurrentFactQuery(target.case_no, target.notification_reason))
+            if not current.authoritative_complete:
+                raise LineNotificationManualReplayValidationError('notification_configuration_unavailable')
+            if source_event_id in current.replay_in_progress_source_ids:
+                raise LineNotificationManualReplayValidationError('notification_replay_in_progress')
         rule_snapshot = self._current_configuration("notification_rules")
         template_snapshot = self._current_configuration("message_templates")
         if rule_snapshot is None or template_snapshot is None:
@@ -595,7 +668,7 @@ class MySqlLineNotificationRepository:
         for rule in matching:
             selector = rule.get("recipient_selector")
             recipient = self._resolve_recipient(
-                str(selector), source.facts, source_domain=source.source_domain
+                str(selector), source.facts, source_domain=source.source_domain, event_code=source.event_code
             )
             if recipient is None:
                 raise LineNotificationManualReplayValidationError(
@@ -619,45 +692,53 @@ class MySqlLineNotificationRepository:
                     "template_or_schedule_invalid"
                 )
 
+    def _source_currently_applicable(
+        self, source: NotificationSourceEvent, *, for_update: bool = False,
+    ) -> bool:
+        """Business applicability only; broken notification settings remain repairable."""
+        if source.event_code == 'order.service_completed':
+            from infrastructure.mysql.service_completion_notification_repository import MySqlServiceCompletionNotificationRepository
+            return bool(source.source_domain == 'orders' and
+                MySqlServiceCompletionNotificationRepository(self._connection).source_is_current(source.facts, lock=for_update))
+        if source.event_code in {'client.second_payment_due', 'client.second_payment_settled'}:
+            from infrastructure.mysql.second_payment_notification_repository import MySqlSecondPaymentNotificationRepository
+            return MySqlSecondPaymentNotificationRepository(self._connection).source_is_current(
+                source.facts, source.event_code, lock=for_update)
+        if source.event_code in {'order.pre_start_reminder', 'order.second_payment_reminder',
+                'scheduling.leave.extension_requested', 'client.leave.extension_agreed', 'client.leave.extension_rejected'}:
+            return False
+        if source.event_code != 'service_time_checkpoint':
+            return True
+        if source.source_aggregate_type != 'case_staff_assignment' or not isinstance(source.facts, dict):
+            return False
+        assignment_id = source.facts.get('assignment_id')
+        service_date = source.facts.get('service_date')
+        if (not isinstance(assignment_id, int) or isinstance(assignment_id, bool) or assignment_id <= 0
+                or not isinstance(service_date, str) or not service_date
+                or source.source_aggregate_identity != str(assignment_id)):
+            return False
+        with self._connection.cursor() as cursor:
+            cursor.execute(_SERVICE_TIME_SOURCE_CURRENT_SQL, (service_date, assignment_id))
+            return isinstance(cursor.fetchone(), dict)
+
     def _rule_source_currently_applicable(
         self,
         source: NotificationSourceEvent,
         rule: dict[str, object],
+        *, for_update: bool = False,
     ) -> bool:
-        if source.event_code != "service_time_checkpoint":
-            return True
-        if (
-            source.source_aggregate_type != "case_staff_assignment"
-            or not isinstance(source.facts, dict)
-        ):
+        if source.event_code in {'order.service_completed', 'order.service_start_day',
+                'client.second_payment_due', 'client.second_payment_settled'}:
+            configured = (rule.get('recipient_selector') == 'case_group'
+                and rule.get('schedule') == {'kind': 'immediate'}
+                and rule.get('frequency', {'kind': 'once'}) == {'kind': 'once'})
+            return configured and self._source_currently_applicable(source, for_update=for_update)
+        if source.event_code == 'service_time_checkpoint' and (
+                'baby_log_missing' in rule.get('predicates', [])
+                or rule.get('id') == 'LINE-SERVICE-DAY-LOG-REMINDER-RULE-V1'
+                or rule.get('template_id') == 'LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1'):
             return False
-        assignment_id = source.facts.get("assignment_id")
-        service_date = source.facts.get("service_date")
-        if (
-            not isinstance(assignment_id, int)
-            or isinstance(assignment_id, bool)
-            or assignment_id <= 0
-            or not isinstance(service_date, str)
-            or not service_date
-            or source.source_aggregate_identity != str(assignment_id)
-        ):
-            return False
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                _SERVICE_TIME_SOURCE_CURRENT_SQL,
-                (service_date, assignment_id),
-            )
-            row = cursor.fetchone()
-        if not isinstance(row, dict):
-            return False
-        predicates = rule.get("predicates")
-        if (
-            isinstance(predicates, list)
-            and "baby_log_missing" in predicates
-            and row.get("service_day_log_id") is not None
-        ):
-            return False
-        return True
+        return self._source_currently_applicable(source, for_update=for_update)
 
     def _source_has_newer_version(self, source: NotificationSourceEvent) -> bool:
         with self._connection.cursor() as cursor:
@@ -777,7 +858,13 @@ class MySqlLineNotificationRepository:
         selector = rule.get("recipient_selector")
         if not isinstance(rule_id, str) or not isinstance(selector, str):
             return
-        if not self._rule_source_currently_applicable(event, rule):
+        policy_event = event
+        if event.source_domain == 'manual_replay':
+            original_id = _manual_replay_original_source_id(event.identity)
+            policy_event = self._source_event(original_id) if original_id is not None else None
+            if policy_event is None:
+                raise LineNotificationManualReplayValidationError('manual_replay_source_must_be_original')
+        if not self._rule_source_currently_applicable(policy_event, rule, for_update=True):
             self._record_decision(
                 source_event_id,
                 rule_revision_id,
@@ -799,7 +886,7 @@ class MySqlLineNotificationRepository:
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "prerequisite_not_satisfied", event)
             return
         recipient = self._resolve_recipient(
-            selector, event.facts, source_domain=event.source_domain
+            selector, event.facts, source_domain=policy_event.source_domain, event_code=event.event_code
         )
         if recipient is None:
             self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None, "suppressed", "recipient_unavailable", event)
@@ -835,7 +922,7 @@ class MySqlLineNotificationRepository:
         return int(row["revision_id"]), definition
 
     def _resolve_recipient(
-        self, selector: str, facts: Any, *, source_domain: str = "unknown"
+        self, selector: str, facts: Any, *, source_domain: str = "unknown", event_code: str = ""
     ):
         # Manual replay preserves the original facts verbatim, so its immutable
         # source domain is intentionally ``manual_replay``.  The only replay
@@ -889,7 +976,13 @@ class MySqlLineNotificationRepository:
             if not isinstance(case_no, str) or not case_no:
                 return None
             with self._connection.cursor() as cursor:
-                cursor.execute(_ACTIVE_CASE_GROUP_SQL, (case_no,))
+                if ((event_code in {'order.service_start_day','order.service_completed'} and source_domain == 'orders')
+                        or (event_code in {'client.second_payment_due', 'client.second_payment_settled'}
+                            and source_domain == 'client_finance')):
+                    cursor.execute("SELECT group_id FROM line_order_group_bindings WHERE case_no=%s "
+                                   "AND binding_status IN ('bound','inviting','active','attention') AND group_id=%s", (case_no, facts.get('group_id')))
+                else:
+                    cursor.execute(_ACTIVE_CASE_GROUP_SQL, (case_no,))
                 row = cursor.fetchone()
             if not isinstance(row, dict) or not isinstance(row.get("group_id"), str):
                 return None
@@ -1106,7 +1199,10 @@ _LINE006_FAILED_SOURCES_SQL = (
     "SELECT source.id AS source_event_id,source.source_domain,source.event_code,"
     "source.source_event_identity,source.source_aggregate_type,"
     "source.source_aggregate_identity,source.source_version,source.facts_snapshot,"
-    "decision.rule_id,decision.reason_code,"
+    "decision.rule_id,decision.reason_code,task.id AS delivery_task_id,"
+    "CASE WHEN source.source_domain IN ('orders','client_finance','scheduling') THEN EXISTS ("
+    "SELECT 1 FROM orders case_root WHERE case_root.case_no=JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.case_no')) "
+    "AND case_root.status IN ('待補件','洽談中','訂單成立','服務中','訂單完成')) ELSE 1 END AS source_case_current,"
     "NOT EXISTS (SELECT 1 FROM line_notification_source_events newer "
     "WHERE newer.source_domain=source.source_domain AND newer.event_code=source.event_code "
     "AND newer.source_aggregate_type=source.source_aggregate_type "

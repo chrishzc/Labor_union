@@ -5,6 +5,8 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from api.routes import line_staff_self_service
 from api.schemas.line_staff_self_service import StaffLiffRequest
 from domains.line.identities import LineUserId
@@ -18,17 +20,24 @@ ROOT = next(
 )
 
 
-def test_staff_payout_query_uses_verified_binding_and_due_month(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("amount_paid", "amount_remaining", "payment_status"),
+    [(0, 3000, "payable"), (1200, 1800, "partially_paid"), (3000, 0, "completed")],
+)
+def test_staff_payout_query_uses_verified_binding_and_due_month(
+    monkeypatch, amount_paid, amount_remaining, payment_status
+) -> None:
     recorded = {}
     payment = StaffPayoutItemView(
         assignment_id=17,
         case_no="CASE-7",
         staff_id=3,
         total_payable=Decimal("3000"),
-        amount_paid=Decimal("3000"),
+        amount_paid=Decimal(amount_paid),
+        amount_remaining=Decimal(amount_remaining),
         due_date=date(2026, 8, 15),
         paid_at=date(2026, 8, 14),
-        payment_status="completed",
+        payment_status=payment_status,
     )
 
     class PaymentQueries:
@@ -69,6 +78,9 @@ def test_staff_payout_query_uses_verified_binding_and_due_month(monkeypatch) -> 
     assert recorded["query"] == (3, 2026, 8)
     assert response.data.staff_id == 3
     assert response.data.items[0].case_no == "CASE-7"
+    assert response.data.items[0].amount_paid == Decimal(amount_paid)
+    assert response.data.items[0].amount_remaining == Decimal(amount_remaining)
+    assert response.data.items[0].payment_status == payment_status
 
 
 def test_staff_payout_page_is_safe_and_shows_required_payment_fields() -> None:
@@ -79,6 +91,8 @@ def test_staff_payout_page_is_safe_and_shows_required_payment_fields() -> None:
     assert "目標付款日" in source
     assert "實際付款日" in source
     assert "已付金額" in source
+    assert "剩餘待付金額" in source
+    assert 'partially_paid: "部分付款"' in source
     assert "payment_status" in source
     assert "replaceChildren" in source
     assert ".innerHTML" not in source

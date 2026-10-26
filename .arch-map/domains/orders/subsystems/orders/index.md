@@ -7,6 +7,7 @@
 將 Orders root facts 組成 read-only Query、zero-write Preview 與 fresh-lock Apply；負責 workflow composition，不重複定義 Domain rules。
 
 ## Modules
+- `form-management-query` — 表單及身分統計的唯讀來源；path: `modules/form-management-query.md`
 - `historical-adoption` — 既有 Order 的 historical workbook adoption／replay; path: `modules/historical-adoption.md`
 - `historical-service-accounting` — 歷史逐月嫂服務天數、單薪帳務與跨 owner Q/P/A; path: `modules/historical-service-accounting.md`
 - `historical-precision-restart` — 歷史未服務／服務中案件撤銷 current 服務根並回到正常訂單成立的單交易 Q/P/A; path: `modules/historical-precision-restart.md`

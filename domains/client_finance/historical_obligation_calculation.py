@@ -60,7 +60,7 @@ def build_historical_client_obligation_candidate(
         Decimal(total_hours),
         Decimal(historical_floor_fee.amount),
     )
-    if policy_identity == "補助市民":
+    if policy_identity == "社福":
         service_receivable = MoneyNTD(
             _whole_ntd(
                 coverage.self_pay_service_hours

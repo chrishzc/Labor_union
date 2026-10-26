@@ -73,15 +73,18 @@ def test_staff_schedule_mutations_use_typed_preview_apply_readback() -> None:
 
     assert "function requireStaffSchedule" in schedule
     assert ".innerHTML" not in schedule and ".innerHTML" not in baby_log
-    assert "/leave-requests/preview" in schedule
-    assert "/leave-requests/apply" in schedule
-    assert "/leave-requests/${result.data.request_id}/query" in schedule
-    assert schedule.index("/leave-requests/preview") < schedule.index("/leave-requests/apply")
-    assert "confirmLeave" in schedule
-    assert 'idempotencyKey: `staff-leave-${crypto.randomUUID()}`' in schedule
-    assert '"Idempotency-Key": candidate.idempotencyKey' in schedule
+    assert "/leave-results/" in schedule
+    assert "leaveResultPost('submit',pending)" in schedule
+    assert "已協調順延" in schedule and "需要安排代班" in schedule
+    assert "/leave-requests/preview" not in schedule
+    assert "confirmLeave" not in schedule
+    assert 'leave-result-submit:' in schedule and 'idempotency_key:crypto.randomUUID()' in schedule
+    assert 'sessionStorage.setItem(storageKey,JSON.stringify(pending))' in schedule
     assert "/service-day-logs/preview" not in schedule
-    assert "/service-day-logs/preview" in baby_log
+    assert "/service-day-logs/preview" not in baby_log
+    assert "/service-day-logs/options" in baby_log
+    assert 'id="confirmLog"' not in baby_log
+    assert 'id="previewLog"' not in baby_log
     assert "/service-day-logs/apply" in baby_log
     assert "/service-day-logs/${committed.log_id}/query" in baby_log
     assert "送出結果尚未確認。請勿重複送出" in baby_log

@@ -12,6 +12,7 @@ import type { LineIdentityClient } from '../../../../../../api/line_identity/lin
 import type { LineConfigurationQueryClient } from '../../../../../../api/line_configuration/line_configuration_query_client';
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type { LineOnboardingClient } from '../../../../../../api/line_onboarding/line_onboarding_client';
+import { lineMessagePreviewClient } from '../../../../../../api/line_notification_rules/line_message_preview_client';
 import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
@@ -42,6 +43,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
   });
 
   it('未授權控制項不進入畫面，合法流程在未操作前維持零 mutation', async () => {
+    const catalogQuery = vi.spyOn(lineMessagePreviewClient, 'catalog').mockResolvedValue([]);
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -135,23 +137,27 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉身分明細' }));
 
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
-    const ruleWorkspace = (await screen.findByRole('heading', { name: '通知設定' })).closest('section');
+    const ruleWorkspace = (await screen.findByRole('heading', { name: '通知與發送' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
     await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯新好友歡迎訊息內容' });
     expect(within(ruleWorkspace as HTMLElement).queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
     expect(within(ruleWorkspace as HTMLElement).queryByText(/多日排程關懷設定/)).not.toBeInTheDocument();
     fireEvent.click(await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯訂金確認通知內容' }));
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉通知內容' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
     expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '三方服務群組' }));
-    expect(screen.queryByRole('button', { name: /建立三方群組/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '案件群組' }));
+    expect(screen.queryByRole('button', { name: /建立案件群組/ })).not.toBeInTheDocument();
 
     expect(previewResolve).not.toHaveBeenCalled();
     expect(applyResolve).not.toHaveBeenCalled();
     expect(previewRevocation).not.toHaveBeenCalled();
     expect(applyRevocation).not.toHaveBeenCalled();
+    expect(catalogQuery).toHaveBeenCalledTimes(1);
+    expect(richMenuDraft.preview).not.toHaveBeenCalled();
+    expect(richMenuDraft.apply).not.toHaveBeenCalled();
+    expect(onboardingClient.update).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

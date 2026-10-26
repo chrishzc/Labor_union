@@ -17,15 +17,16 @@ def test_runtime_copy_describes_review_instead_of_promising_matching():
     runtime_function = "function applyRuntime(runtime)" + source.split("function applyRuntime(runtime)", 1)[1].split("function applySystemField", 1)[0]
     settings = json.loads((ROOT / "config/liff_settings.json").read_text(encoding="utf-8"))
     runtime = {"theme": settings["theme"], "page": settings["pages"]["registration"]}
+    runtime["page"].update(subtitle="測試副標題", submit_button="設定送出文字", success_title="設定成功標題")
     script = r"""
 const nodes = new Map();
 function element(id) {if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id);}
 const document = {documentElement: {style: {setProperty(){}}}, body: {style: {}}, getElementById: element, querySelector: element};
 function applySystemField() {}
 function renderCustomFields() {}
-""" + runtime_function + "\napplyRuntime(" + json.dumps(runtime, ensure_ascii=False) + ");\nconsole.log(JSON.stringify(element('.subtitle').textContent));"
+""" + runtime_function + "\napplyRuntime(" + json.dumps(runtime, ensure_ascii=False) + ");\nconsole.log(JSON.stringify([element('.subtitle').textContent,element('registrationPreviewButton').textContent,element('.success-title').textContent]));"
     result = subprocess.run(["node"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=10, check=True)
-    assert json.loads(result.stdout) == "請填寫服務需求，送出後由工會審核。"
+    assert json.loads(result.stdout) == ["測試副標題", "設定送出文字", "設定成功標題"]
     assert "即刻啟動媒合" not in source
     assert "【市府案件已建立】" not in source
     assert "預填案件編號：${caseNo}（待工會核對）" in source
@@ -41,6 +42,7 @@ const assert = require('node:assert/strict');
 const nodes = new Map();
 const element = id => {if(!nodes.has(id))nodes.set(id,{style:{display:'block'},textContent:''});return nodes.get(id)};
 const document={getElementById:element,querySelector:element};
+let runtimePage = null;
 ''' + renderer + r'''
 const pending={registration_id:42,identity_status:'pending_approval',client_id:null,beclass_record_id:null};
 renderRegistrationSuccess(pending);
@@ -62,6 +64,10 @@ for(const invalid of [null,{}, {...pending,registration_id:0},{...pending,regist
   assert.equal(element('successCard').style.display,'none');
   assert.equal(element('registerForm').style.display,'block');
 }
+runtimePage={success_title:'設定成功標題',success_description:'設定成功說明'};
+renderRegistrationSuccess(pending);
+assert.equal(element('.success-title').textContent,'設定成功標題');
+assert.equal(element('.success-desc').textContent,'設定成功說明\n申請已送出，待工會核准。\n申請編號：42');
 console.log('registration receipt rendering passed');
 '''
     result = subprocess.run(["node"], input=script, capture_output=True, text=True,

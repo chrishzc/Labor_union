@@ -88,7 +88,7 @@ def subsidy_payout_is_advance(facts: SubsidyPayoutFundingFacts, payout_amount: i
         raise ValueError('subsidy_advance_settlement_ambiguous')
     if facts.completed_on is None or facts.due_on != subsidy_advance_due_date(facts.completed_on):
         raise ValueError('subsidy_advance_settlement_ambiguous')
-    if not is_first_month_of_quarter(facts.completed_on) or facts.paid_on < facts.due_on:
+    if facts.paid_on < facts.due_on:
         raise ValueError('subsidy_advance_not_due')
     return True
 
@@ -99,8 +99,6 @@ def build_subsidy_advance_decision(
 ) -> SubsidyAdvanceDecision:
     _require_date(business_date, "business date")
     due_on = subsidy_advance_due_date(facts.completed_on)
-    if not is_first_month_of_quarter(facts.completed_on):
-        return _decision(facts, due_on, SubsidyAdvanceDecisionKind.NOT_FIRST_QUARTER_MONTH)
     if business_date < due_on:
         return _decision(facts, due_on, SubsidyAdvanceDecisionKind.NOT_DUE)
     if facts.government_receipt_allocated.amount == 0:

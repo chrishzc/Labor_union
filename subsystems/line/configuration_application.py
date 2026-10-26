@@ -75,6 +75,16 @@ class LineConfigurationApplication:
         except Exception as error:
             raise LineConfigurationQueryContractError() from error
 
+    def history(self, kind: LineConfigurationKind, actor: ActorContext):
+        require_line_capability(actor, LineCapability.CONFIG_READ)
+        with self._unit_of_work_factory() as unit:
+            return unit.configurations.history(kind)
+
+    def get_revision(self, kind: LineConfigurationKind, revision: LineConfigurationRevision, actor: ActorContext):
+        require_line_capability(actor, LineCapability.CONFIG_READ)
+        with self._unit_of_work_factory() as unit:
+            return unit.configurations.get_revision(kind, revision)
+
     def preview(
         self,
         kind: LineConfigurationKind,
@@ -291,7 +301,6 @@ class LineConfigurationApplication:
             LineConfigurationKind.MESSAGE_SCHEDULES,
             LineConfigurationKind.RICH_MENUS,
             LineConfigurationKind.LIFF,
-            LineConfigurationKind.CUSTOMER_SERVICE,
             LineConfigurationKind.NOTIFICATION_RULES,
         )
         results = []
@@ -374,6 +383,11 @@ class LineConfigurationApplication:
                 )
             )
             validate_message_schedules(definition, templates)
+        elif kind is LineConfigurationKind.LIFF:
+            from subsystems.line.liff_models import LiffSettingsConfig
+            LiffSettingsConfig.model_validate(definition)
+        elif kind is LineConfigurationKind.CUSTOMER_SERVICE and definition:
+            raise ValueError('customer_service configuration is retired; only an empty definition is allowed')
         elif kind is LineConfigurationKind.NOTIFICATION_RULES:
             validate_notification_rules(definition)
 

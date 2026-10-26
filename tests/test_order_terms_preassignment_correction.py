@@ -218,7 +218,7 @@ class _Clock:
     ({"service_hours_per_day": 4}, date(2026, 9, 25), 12000, False),
     ({"floor_fee": MoneyNTD(1000)}, date(2026, 9, 25), 24000, False),
 ])
-def test_precontract_terms_replan_payment_dates_without_creating_obligations(
+def test_complete_precontract_terms_automatically_calculate_all_stages(
     updates, second_due, second_amount, mutates,
 ):
     before = _terms(requires_cooking=False, service_days=30)
@@ -234,10 +234,10 @@ def test_precontract_terms_replan_payment_dates_without_creating_obligations(
     second = next(stage for stage in impact.stage_plans if stage.payment_stage is PaymentStage.SECOND)
     assert second.due_date == second_due
     assert second.amount.amount == second_amount
-    assert impact.actions == ()
+    assert len(impact.actions) == 3
     assert preview.payroll_impact is None
     assert preview.scheduling.assignments == ()
-    assert preview.requires_formal_apply is mutates
+    assert preview.requires_formal_apply is True
     if mutates:
         assert impact.payment_terms.first_payment_due_date == preview.after.planned_start_date
         assert impact.payment_terms.deposit_due_date == min(source.payment_terms.deposit_due_date, preview.after.planned_start_date)
@@ -282,7 +282,7 @@ def test_existing_preassignment_obligations_replan_and_repair_saved_payment_date
     assert source.existing_obligations == obligations
 
 
-def test_existing_deposit_only_does_not_create_unsigned_first_and_second_obligations():
+def test_existing_paid_deposit_is_preserved_while_missing_installments_are_automatically_calculated():
     before = _terms(requires_cooking=False, service_days=30)
     deposit = ExistingClientStageObligation(
         "existing:deposit", PaymentStage.DEPOSIT, MoneyNTD(12000), MoneyNTD(12000),
@@ -297,7 +297,7 @@ def test_existing_deposit_only_does_not_create_unsigned_first_and_second_obligat
         facts.order.case_no, replace(before, service_hours_per_day=6),
     )
     impact = preview.client_finance_impact
-    assert len(impact.actions) == 1
+    assert len(impact.actions) == 3
     assert impact.actions[0].payment_stage is PaymentStage.DEPOSIT
     assert impact.actions[0].action is ClientObligationActionKind.CREATE_REFUND
     assert impact.actions[0].source_obligation_identity == deposit.obligation_identity
@@ -605,7 +605,7 @@ def test_preassignment_start_date_shift_replaces_confirmed_service_dates():
     finance_command = next(item for item in repository.saved
                            if isinstance(item, terms_workflow.ClientFinanceImpactPersistenceCommand))
     assert finance_command.candidate.payment_terms.first_payment_due_date == date(2026, 9, 13)
-    assert finance_command.candidate.actions == ()
+    assert len(finance_command.candidate.actions) == 3
     assert replacement.order_version == 1
     assert preview.scheduling_replacement_required is False
     assert replacement.scheduling_version == 0

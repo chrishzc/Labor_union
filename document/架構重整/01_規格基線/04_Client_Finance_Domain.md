@@ -16,7 +16,7 @@
 | 收款／退款／adjustment／reversal | immutable client ledger |
 | transaction allocation | append-only M:N allocations |
 | current balance／settled at | obligation 與 ledger reducer |
-| 客戶代墊／補助退還／資金回收 | 一般服務費 receivable 與 receipt、服務完成後的 immutable `subsidy_return` obligation／payout，以及 Government Subsidy receipt-allocation fact 的 M:N settlement link |
+| 客戶代墊／補助退還／資金回收 | 一般服務費 receivable 與 receipt、案件資料齊全即自動同步的 `subsidy_return` 應退及 immutable payout，以及 Government Subsidy receipt-allocation fact 的 M:N settlement link |
 | `client_payments` | current／compatibility projection |
 | review status | root-derived projection，不可人工直接修改 |
 
@@ -26,9 +26,11 @@
 
 ### Payment Terms／Obligation Planning
 
-簽約與應收用詞依第 `21` 份正式規格 §1.1：使用「所有月嫂簽約完成」與「客戶簽約完成」；應收不分正式／非正式，尚未建立應收時僅稱預估金額。
+簽約與應收用詞依第 `21` 份正式規格 §1.1：使用「所有月嫂簽約完成」與「客戶簽約完成」；案件計算資料齊全即由系統同步客戶應付；缺值顯示待確認，不以簽約或另行建立付款義務作為計算／核銷門檻。
 
 依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
+
+第一期款到期日依 Orders 已正式確定的 `actual_start_date`；尚未確定實際開始日時才採預計開始日。規格 02 SSTART-03／05 的月嫂接受或工會代班日期保存，在同一正式處理中委派 Client Finance 同步 `first_payment_due_date`、未結清期款到期日與付款條款事件，不增加「建立付款義務」操作或狀態。只改日期不新增本金、收款、退款或 allocation；既有已核銷交易與已簽文件保持不可變。服務中局部代班沒有改變全案實際開始日，不得以代班首日重設第一期到期日。第二期有金額時仍依下述既有加 15 日公式同步，正常查詢零寫入。
 
 2026-10-13 第二期繳款日人工裁決：第二期有應付金額時，Client Finance stage plan 的預計繳款日
 固定為第一期款預計入帳日（`first_payment_due_date`）加 15 個曆日；第二期金額為零時不產生日期。
@@ -41,25 +43,11 @@ owner 計算結果；既有保存的第二期日期不取代本公式。預覽�
 同一 outer Unit of Work 同步此欄位與新的 immutable payment-terms event，並使用同一 stage plan
 寫入義務日期。第二期金額為零時保存 NULL；查詢與預覽保持零寫入，既有日期補正須走正式 writer。
 
-2026-10-13 條件變更同步裁決：已有付款條款且尚無正式指派／既有帳務義務的案件，修改預計開始日、
-服務天數、每日時數或樓層費時，Terms Preview 以新條件重算預計付款階段；正式 Apply 同步有變化的
-付款條款與 immutable event。第一期預計日隨預計開始日更新，訂金沿用已保存期限且不得晚於新開始日；
-第二期有金額時為第一期預計日＋15 天，無金額時保存 NULL。對尚無既有應收的案件，此條件變更只保存條款，不提前建立應收；
-預估金額讀取最新 Orders 與 Finance facts。已有正式指派的條款異動沿用既有應收重算流程，
-同步使用新的預計日期，不覆寫既有收款、核銷或簽署 evidence。Finance 日期有異動時納入版本／fingerprint
-與同一 outer Unit of Work；與付款計算無關的修改不新增 Finance／Payroll 依賴。
+完整進件與服務條件保存後，在原 outer Unit of Work 依目前付款條款、服務天數、每日時數、單價與樓層費，自動同步訂金、第一期與第二期客戶應付。未簽約或未建立執行指派，不阻擋金額計算與核銷；不要求人員另行建立付款義務。
 
-既有案件修改付款相關條件時，即使尚未建立執行 assignment、但已有客戶期款應收，也須經同一
-Terms Preview／Apply 重算既有期款及保存付款條款日期。優先沿用 current confirmed service dates
-或此次正式替代日期；尚無確認日期時使用 Orders 約定服務量。只異動已存在的期款，不因補正
-提前建立應於客戶簽約完成時才建立的第一期／第二期應收。未核銷期款沿原 identity 更新金額及日期；已核銷
-依既有 owner 差額規則追加 adjustment／refund，保留 ledger、allocation 與已簽 evidence。
-缺漏／過期的第二期條款日期在此次 Apply 由同一公式補正；日期事件、Finance 版本、Terms receipt
-與 Orders 更新同交易保存。未指派案件的差額 identity 綁定此次 Orders 版本，不因空 generation 重用。
-不完整 Finance roots、未指派卻已有 Payroll 義務及既有 nonstage 帳務限制仍維持 typed conflict。
-修改後的候選付款 Query 使用 current Orders 確認／預計服務日期與同一 Finance stage plan，
-不因舊媒合方案期間已過期而抹除付款資訊，也不借用舊 commitment 的服務量。一般完整契約
-查詢與正式簽署保留其原有方案／commitment 過期驗證；Query 不寫入日期、義務或簽署資料。
+付款相關條件變動沿用既有 Terms Preview／Apply、Finance aggregate version 與正式 writer。日期優先使用本次正式替代／目前確認日期；尚未確認時只供計價使用約定服務量，不建立 Scheduling 服務事實。既有未結清期款沿原 identity 更新；已核銷交易、allocation 與簽署文件不得覆寫，差額沿既有 adjustment／refund 規則承接。非計價修改、歷史實際服務補正及 nonstage 完整性保護維持各 owner 契約。
+
+所有 Query／Preview 零寫入；自動同步只發生在有授權的資料保存交易。初始化回條仍記錄政策 roots 的初始版本，後續帳務同步使用 Client Finance 自己的版本與事件，與父命令同交易提交及回滾。重播不重複計算或建立款項；缺少必要資料不填零、也不偽造服務或付款。
 
 使用者介面一律稱為「客戶應付」，意思是客戶應付給工會的金額；內部既有 accounting
 `receivable` 型別可保留。服務本金公式固定為 `有效正式服務時數 × 有效服務單價`，雙胞胎為
@@ -68,7 +56,7 @@ Terms Preview／Apply 重算既有期款及保存付款條款日期。優先沿�
 
 一般市民遇工會突發狀況時，system admin 可經專用 Preview／Apply 人工允許案件在訂金尚未付清時繼續後續流程。此入口不得自動執行，且不適用低收入戶、中低收入戶或非市民；Apply 必須保存 actor、明確原因、idempotency receipt 與 immutable payment-terms event。放行不修改訂金服務天數、金額、義務或 `deposit_settled`，而是以獨立 typed override 經 durable outbox 交由 Orders 正式 writer 將仍在 `洽談中` 的案件推進為 `訂單成立`；Scheduling 只讀此 override，不得自行改寫 Orders。Operational Stage 必須將訂金關卡標為完成並顯示「定金未付，已人工放行」，不得誤標為已核銷。後續付款仍走既有核銷流程，payment terms 的下一次正式變更會使既有放行失效並要求重新確認。
 
-LINE 第三方服務群組不接受上述未付款放行取代核銷；只有
+LINE 案件群組不接受上述未付款放行取代核銷；只有
 `client_deposit_settlement_projection.settlement_state = settled` 才能綁定群組或發送邀請。
 
 第 `27` 份正式規格的歷史 lifecycle branch 可用每位月嫂已確認 `actual_service_days` 的總和取代逐日
@@ -76,10 +64,7 @@ LINE 第三方服務群組不接受上述未付款放行取代核銷；只有
 與核銷。歷史服務量可少於或大於原合約天數，既有已核銷金額差異只能追加 adjustment／refund，不得
 覆寫 immutable ledger。
 
-依第 `21` 份正式規格，所有月嫂簽約完成時建立訂金應收（deposit obligation），只建立一次，
-使用同時保存的 commitment 精確服務日、時數、費率與樓層費計算。客戶簽約完成時，
-Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，建立其餘尚未建立的
-期款應收；不得重建、重複計入或因客戶晚簽而撤銷已合法核銷的 deposit。
+簽約只記錄文件與簽回進度，不再觸發訂金或其餘期款的建立。客戶簽約前已合法核銷的款項保持原 identity、金額、ledger 與 allocation；簽約時不重建或撤銷。先收款仍依 Finance Import 保存銀行事實與人工核對／確認核銷；資料未齊時保留待處理，不推定已核銷。資料齊全後即可使用既有核銷入口，不另建立付款義務。
 
 ### 取消帳務 impact 的公開 direction（2026-08-27 人工裁決）
 
@@ -133,10 +118,10 @@ direction amount。
 顯示 schema-drift／unavailable。相同 idempotency identity 的結果重查後，receipt／readback 必須
 保留同一 direction。
 
-2026-09-11 人工裁決把補助市民訂單分為兩條互斥路徑：
+現行補助及客戶負擔分為下列路徑：
 
-- **全補助案件**：補助市民訂單的有效正式服務時數不超過 120 小時，且沒有樓層費或其他客戶應付，故衍生 `client_payable_amount = 0`；客戶不需代墊或支付服務薪資，也不建立 `subsidy_return`。實務申請通常排滿 120 小時，但不是必要條件。
-- **非全補助的補助市民訂單**：客戶依正常付款條款先代墊完整服務薪資及其他客戶應付項目；補助額不得在服務前或服務中抵減 client receivable。服務正式完成後，才依補助資格、有效服務時數上限與凍結補助單價另建退給客戶的 `subsidy_return`。
+- **全補助案件**：社福訂單的有效正式服務時數不超過 120 小時，且沒有樓層費或其他客戶應付，故衍生 `client_payable_amount = 0`；客戶不需代墊或支付服務薪資，不退還未先墊的補助部分。
+- **補助市民案件**：客戶依付款條款先代墊服務費；應退補助按有效服務量、40 小時上限及凍結單價自動同步，不等待完工或款項收齊，也沒有人工「建立付款義務」關卡。取消同步縮減未服務部分，並與取消溢收的一般退款分開。
 
 兩條路徑都不得把同一月嫂報酬拆成「政府補助／雇主自費」兩段。超過 120 小時或仍有任何客戶應付，就不是全補助案件。樓層費及其他非補助項目永遠由客戶負擔，且不計入補助退還額。
 
@@ -150,6 +135,8 @@ Modules：
 
 ### Reconciliation Preview／Apply
 
+客戶各期逾期查詢供 LINE 規格 20 §6.10 工會待辦使用：每筆訂金／第一期／第二期獨立讀取正式 due date、current event、projection version 及未核銷餘額，台灣到期日隔天起、同筆餘額為正才逾期，不以訂金到期日觸發後續期款或合計全案應付。不需／零金額第二期不列；提醒不建立新義務、收款或異常。核銷與條款日期變更沿既有 writer 更新，待辦重新查詢即反映，已排入寄送的舊快照由 LINE 在 provider 前取消。
+
 鎖定銀行 facts、account version 與 obligations；驗證方向、案件、external reference、ownership 與完整 allocation。Preview 零寫入；Apply 建立正式 ledger、allocation、projection、audit 與 outbox。
 
 正式訂金核銷在原 outer Unit of Work 保存 `orders_deposit_reconciled` outbox intent，
@@ -160,6 +147,8 @@ LINE 只讀此已提交事件及 current settled projection，不消費或變更
 訂金通知／客戶繳費查詢共用 typed `DepositPayment` 唯讀投影：既有 deposit obligation 的金額、
 期限、版本及專屬虛擬帳號，入帳狀態以正式 settled projection 為準，日期讀對應 receipt ledger 的
 `occurred_on`。客戶留言、付款截圖、提醒與客服需求均不得建立或修改入帳事實。
+
+第二期款群組通知依規格 20 §6.9。正式第二期核銷沿原 `projection_refresh` outbox 保存 `line_second_payment_notification=true`、`payment_stage=second`、settlement identity、所選 obligation identities 及本次分配金額。與 ledger／allocation／receipt 同交易，零新資料表或 enum；LINE 只讀已提交事件及 current Finance facts，不消費該 outbox status。未需第二期、金額為零或第二期資料不足不通知；已付只省略催繳，合法新核銷仍可通知。正常精確核銷不因階段不是訂金而產生異常事件；真正超收處理依既有 discrepancy 契約保留。
 
 Modules：
 
@@ -201,70 +190,26 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 
 義務合法下降造成有效實收大於新義務時，差額形成 `over_receipt` 與退款義務。退款後淨應收與淨實收同減；銀行撤銷原收款而義務未降低則是 reversal，重新形成應收。退款不取消已完成訂單，也不解除服務資料鎖。
 
+取消自動產生的一般退款與月嫂薪資、補助退款共用每月應付帳款清冊；退款依本身 due date 納入所選月份月底以前仍未退完的款項，包含以前月份餘額。原期款取消歸零時若不再產生新期款到期日，其已收款退款保留來源義務既有到期日，不清空為未知日期；來源本來缺日期時仍列待確認。人工核對提供足額或「退款不足，先核銷實退」，沿既有 `allow_partial_refund_recovery` 保存實付並保留剩餘款；補退不重建退款，退匯／沖正重開對應餘額。銀行核對可依原流水選取客戶退款，不限逾期；一般逾期查詢仍保留原預設。取消與退款成功不發送 LINE 通知。
+
 ### Client Subsidy Return
 
 功能已啟用，且與客戶服務費 ledger 分離。它是「工會對客戶的應付」，不是
 政府對工會的應收，也不得以 `client_payments.subsidy_refund_*` 作為事實來源。
 
-本節只適用於已由客戶代墊的非全補助案件；全補助案件因客戶未支付服務薪資，不建立 `subsidy_return`。客戶先支付的完整服務薪資是一般 Client Finance receivable／receipt；在服務尚未終結前不得建立、預付或核銷 `subsidy_return`。正式完工，或中途取消且實際服務時數已確認後，待該次重算的客戶服務費已收齊、補助資格可唯一確認，才建立一筆對客戶的補助退還義務。這筆退款不改寫原客戶收款、不抵銷月嫂應付，也不代表政府已撥款。
+補助市民最高 40 小時由客戶先墊，社福最高 120 小時由補助涵蓋；社福未先墊補助部分不產生客戶退款。應退補助依有效服務天數／每日時數與凍結客戶時薪自動計算，雙倍日不增加補助返還額。案件計價資料足夠即在既有 owner writer 的同一交易保存並隨日期／條件變更更新，不等待服務完工、客戶款收齊或另行「建立付款義務」。Query 零寫入，缺值顯示待確認。
 
-```text
-退還義務
-= min(補助時數上限, 有效正式服務時數) × 凍結補助單價
-```
+既有目前排班關聯失效時，不猜填應退金額。升級回條列出待確認案件及原因；身分轉換完成標記只保護舊身分不被再次轉換，不阻止透過既有 owner writer 重新同步已修復案件的退款。重播相同有效資料不新增重複退款、事件或實付。
 
-雙倍日不增加退還額。只有服務已完工，或中途取消的實際時數已確認，且客戶服務費收齊、資格符合時建立；帳戶不唯一、
-少退、超退、退匯／沖正都進異常，不改義務。
+應退款日依目前有效服務結束月加兩個曆月的 15 日；尚未正式確定時採目前服務日期計算，正式日期變動同步更新。中途取消採實際服務量，不能沿用原預計服務總量。歷史案件保持既有 actual-service owner，不用預定量改寫歷史。
 
-#### 客戶補助退款案件查詢（2026-10-01 人工裁決）
+退款到期即可作業，不限季度首月，不等待政府入款，也不要求逐案 claim item／核准／政府分配。實際銀行出款核銷沿用收款人帳號 snapshot、完整金額與 concurrency 驗證。到期前不可當作代墊出款。
 
-「客戶補助退款」是案件查詢，不是僅限已建立 `subsidy_return` 的付款清單。所有具補助資格、需由客戶先付款的未取消案件都可查詢；全補助且客戶不需付款、非補助資格、已完成補助退款的案件不列入待退清單。使用者不需逐案手動建立退款義務才能查詢。此查詢不更改前述正式退款建立、客戶款收齊、銀行出款或取消帳務規則。
+`subsidy_return` 是自動更新的對客戶應付 projection；已付 ledger／allocation 不改寫，條件變動以累計目標減已退款計算餘額，超退沿既有差額應收規則。案件沒有額外「估計轉正式」操作。缺必要資料的查詢仍保留待確認；已退清者不列待付。
 
-- 已存在正式退款帳務時，金額與日期以 Client Finance owner projection 為準；缺少收款帳戶不使案件從查詢消失。
-- 尚未建立正式退款帳務時，使用既有補助時數上限、有效服務條件及案件凍結付款條款單價呈現明示的「預估」金額；歷史實際服務量已有正式 projection 時優先使用。無足夠條件時保留案件並呈現金額待確認，不以零冒充。
-- 日期只有已結案的實際結案日期或正式退款日期可提供；依既有結案月加兩曆月的 15 日規則呈現。未結案為待結案，不使用預定結束日期冒充實際日期。
-- 預估清單不是正式應付帳款或已收款證據。正式退款仍需經既有 owner writer；查詢零寫入、無 commit、無外部效果。每次退款一次全額退清，不顯示已退／剩餘金額或自行推算到期狀態。
-- `GET /api/v1/finance-reports/client-subsidy-returns` 使用管理員權限，支援 bounded `page_size`（1～200）、`after_case_no`、案件／客戶搜尋、exact `case_no` 與選用的應退款月份；預設不以月份隱藏案件，月份篩選只列已確定日期。typed view 僅輸出案件、客戶名稱、訂單狀態、金額、日期、預估標記與下一頁游標，不輸出銀行帳戶或其他個資。
-- 畫面一次顯示全部符合篩選條件的結果與完整筆數／合計，不讓使用者逐頁查閱。前端自動取得既有 bounded API 的所有批次；例如同月 11＋2 筆須合併顯示 13 筆。任一批次失敗不把部分結果當成完整結果，條件變更或離開頁面須取消整次載入。
+出款時依付款當日政府整期涵蓋判定 `subsidy_advance` 或 `subsidy_return`。政府晚入款不抹除先前代墊；政府整期核銷在同一 UoW 彙總回收，不逐案銷帳、不新增客戶 payout。整期與涵蓋規則以規格 14 為準。
 
-此案件查詢的 bounded implementation scope 為 Domain projection、Client Finance query、MySQL 唯讀 adapter、Finance Reports transport 與既有 FinancePage 補助頁籤，不改 schema、正式 writer 或付款流程。驗收須覆蓋無退款義務仍可查、取消與全補助排除、凍結單價／補助時數、未知金額日期、正式帳務優先、分頁搜尋與月份切換、實際 localhost GET／Browser 案件金額 readback。其 test roots 與 implementation paths 由 `client-subsidy-return-query` Arch Map leaf 及既有 presentation leaf 管理；完成上述驗收即停止此 slice。
-
-#### 季度撥款與客戶補助退還
-
-政府補助的申請與撥款是 Government Subsidy Domain 的季度流程；客戶補助退還仍由本
-Domain 擁有。兩者的金流方向不同，永遠不得互相抵銷或改寫對方 ledger：
-
-```text
-Government Subsidy: 政府 → 工會 → claim-item allocation
-Client Finance:      工會 → 客戶 → subsidy-return obligation / payout
-```
-
-若客戶在其 claim quarter 的第一個曆月實際結案，補助退款日期固定為「實際結案月份
-加兩個曆月的 15 日」。該日相關 claim item 尚未有政府入帳 allocation 時，系統建立
-`subsidy_advance_due` read-only reminder；人員核對銀行對帳單與應付資料後，在銀行系統
-完成付款。系統不產生付款指令，也不因到期直接寫入 client ledger。付款後匯入的唯一
-canonical outgoing bank fact 才可經 Preview／Apply 核銷已建立、未清償的
-`subsidy_return` 義務；這是客戶 payout，不是客戶收款、也不是政府 receipt。
-
-之後政府整季款項入帳時，Government Subsidy 先完成 receipt → claim-item allocation，
-再透過 committed outbox 提供不可變 allocation fact。Client Finance 只可依該 fact 對
-既有墊付建立 `subsidy_advance_recovery` settlement link。每個 `subsidy_return`
-obligation 必須先以不可變 entitlement link 對應 claim item；不得以 case number 或金額
-模糊猜配。recovery 不得新增第二筆客戶 payout，也不得把已結清的客戶 obligation 重開。未墊付案件則可依同一 eligibility 走正常
-`subsidy_return` payout。
-
-政府核准額、政府實收額與已墊付款任一不一致，或 claim item／客戶 payout 對應非唯一
-時，禁止自動打平，建立 typed anomaly 與人工 Preview。`subsidy_refund_*` 與
-`subsidy_return_*` 的 legacy projection 欄位只允許 preserve-data migration 讀取；
-不再是正式 writer 或 query SSOT。
-
-#### 代墊補助款銷帳頁面（2026-10-15 使用者要求）
-
-- `ADVREC-01`：於「收款 → 政府補助 → 工會墊款與回收紀錄」及共用「案件補助明細」提供銷帳操作（依最新核准預覽整合，不再設獨立主頁籤），處理政府補助入帳後回收工會先前墊付款；列出正式 `subsidy_advance`、政府入款分配、既有回收金額及待入款／可銷帳／已銷帳／需核對狀態，支援案件或客戶搜尋與狀態篩選。預估退款不是墊款事實，不納入。
-- `ADVREC-02`：只能依既有不可變 obligation → claim item link、正式政府 receipt allocation 及其 committed outbox fact 回收。對應必須唯一，核准、入款、entitlement 與墊款金額一致，且無沖正；條件不符顯示原因，不得猜配或任意輸入銷帳金額。既有自動 recovery 繼續有效，人工與自動不得重複建立回收。
-- `ADVREC-03`：人工操作使用 Query → Preview → Confirm → Apply → fresh readback。Apply 鎖定 current facts，檢查 Client Finance account／Government Subsidy batch version 及 human Preview fingerprint；同一交易只追加既有 recovery link、推進 Client Finance version、保存 actor／reason／來源 evidence、冪等 receipt 與 projection-refresh outbox。資料變更回 typed conflict，同 key 不同 command 拒絕，不新增客戶 payout 或改寫政府 ledger。
-- `ADVREC-04`：管理員使用 `GET /api/v1/client-finance/subsidy-advance-recoveries`（bounded cursor list）、`POST /api/v1/client-finance/subsidy-advance-recoveries/{advance_id}/preview`、`POST .../{advance_id}/apply`；沿用既有資料表，不包含 schema migration、銀行付款或 external provider effect。頁面逐批完整載入、失敗不顯示部分合計；結果不明先重新查詢，不能僅以 HTTP receipt 宣稱已銷帳。
-- `ADVREC-05`（2026-10-15 銜接確認）：銀行匯入及人工客戶補助退款核銷一律由 Client Finance owner 依正式 entitlement、銀行實際付款日及當日政府淨分配判斷 payout 類型。符合既有季度第一月結案、退款到期與全額規則，且付款當日尚無政府資金者，同一次核銷建立 `subsidy_advance` ledger 與原補助退還義務 allocation，立即納入銷帳清冊；不再新增另一筆客戶 payout。政府已足額分配者維持 `subsidy_return`，部分款、對應缺失或非唯一者 typed review；政府於客戶出款後才入帳，不因較晚核銷而抹除先前代墊事實。前端 strict preview 必須接受兩種正式 payout 類型。代墊退匯／沖正重開原 payable，不重開客戶 receivable。舊已提交 ledger 不由本次修正改寫或 backfill。
+`GET /api/v1/finance-reports/client-subsidy-returns` 保留 bounded cursor、exact case、搜尋及退款月份條件。日期及金額來自 current owner projection；缺值不是零，缺收款帳戶不使案件消失。
 
 一般退款與客戶補助退還不得共用 ledger transaction type 或 reversal type：
 

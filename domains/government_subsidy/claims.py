@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from domains.government_subsidy.ledger import (
     AllocationIntent,
+    ClaimItemApproval,
     ClaimBatchFacts,
     ClaimBatchIdentity,
     GovernmentSubsidyBatchStatus,
@@ -96,7 +97,7 @@ class ClaimSubmissionCandidate:
 @dataclass(frozen=True, slots=True)
 class ClaimApprovalIntent:
     batch_id: int
-    item_approvals: tuple[AllocationIntent, ...]
+    item_approvals: tuple[ClaimItemApproval | AllocationIntent, ...]
 
     def __post_init__(self) -> None:
         require_positive_integer(self.batch_id, "batch id")

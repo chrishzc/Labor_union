@@ -88,14 +88,16 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             reasons.append("月嫂應付金額缺少計算依據，待確認")
         if item.effective_due_date is None and item.payment_status not in {"paid", "settled"}:
             reasons.append("月嫂付款日尚未確定")
-        if item.disposition == "blocked":
+        if item.balance is not None and item.balance.amount < 0:
+            reasons.append("已有超付款，請至人員帳務處理追償")
+        elif item.disposition == "blocked":
             reasons.append("月嫂付款狀態或受款資料待確認")
         source = {"formal_obligation": "staff_obligation", "historical_projection": "historical_payroll", "order_facts": "missing_payroll"}[item.source]
         rows.append(CashRequirementRow(
             item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}", case.case_no, item.recipient_name,
             "staff_payable", "confirmed" if item.source == "formal_obligation" else "estimated", source,
             None if item.amount_due is None else item.amount_due.amount,
-            None if item.balance is None else item.balance.amount, item.effective_due_date, False, tuple(reasons), item.staff_id,
+            None if item.balance is None else max(0, item.balance.amount), item.effective_due_date, False, tuple(reasons), item.staff_id,
             item.payment_status,
         ))
     for refund in case.refunds:
@@ -118,11 +120,7 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
     )
     if projection is None or projection.amount_ntd == 0:
         return tuple(rows)
-    reasons = ["客戶補助退款單尚未建立"]
-    if case.order_status not in {"訂單完成", "歷史訂單－服務完成", "歷史訂單－帳務完成"}:
-        reasons.append("服務尚未完成")
-    if case.service_fees_collected is not True:
-        reasons.append("客戶服務費尚未收齊" if case.service_fees_collected is False else "客戶服務費收款狀態待確認")
+    reasons = ["補助退款計算資料待確認"]
     if projection.amount_ntd is None:
         reasons.append("補助退款金額缺少服務量、費用或凍結單價，待確認")
     due_date = subsidy_advance_due_date(case.planned_end_date) if case.planned_end_date else None

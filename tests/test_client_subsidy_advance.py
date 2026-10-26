@@ -28,12 +28,13 @@ def test_first_quarter_month_advance_is_due_on_second_following_month_15th():
     assert decision.payout_amount == MoneyNTD(6000)
 
 
-def test_second_quarter_month_never_qualifies_for_this_advance_policy():
+def test_second_quarter_month_also_refunds_when_due():
     facts = SubsidyAdvanceFacts("CASE-002", date(2026, 2, 1), MoneyNTD(6000), MoneyNTD(0))
 
     decision = build_subsidy_advance_decision(facts, date(2026, 4, 15))
 
-    assert decision.kind is SubsidyAdvanceDecisionKind.NOT_FIRST_QUARTER_MONTH
+    assert decision.kind is SubsidyAdvanceDecisionKind.READY
+    assert decision.payout_amount == MoneyNTD(6000)
 
 
 def test_advance_is_not_available_before_the_fixed_refund_date():

@@ -76,6 +76,7 @@ class CaseArchitectureBootstrapRepository(Protocol):
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool) -> StoredCaseArchitectureBootstrapReceipt | None: ...
     def create_bootstrap(self, command: EnsureCaseArchitectureBootstrap, candidate: CaseArchitectureBootstrapCandidate) -> int: ...
     def existing_bootstrap_event_id(self, case_no: str) -> int: ...
+    def synchronize_client_charges(self, command, candidate, event_id: int) -> int: ...
     def save_receipt(self, key: IdempotencyKey, stored: StoredCaseArchitectureBootstrapReceipt) -> None: ...
 
 
@@ -152,6 +153,9 @@ class CaseArchitectureBootstrapWorkflow:
         event_id = self._persist_candidate(command, candidate)
         receipt = _build_receipt(candidate, event_id)
         self._repository.save_receipt(command.idempotency_key, StoredCaseArchitectureBootstrapReceipt(command_fingerprint, receipt))
+        # The bootstrap receipt describes initial policy roots (version zero).
+        # Finance posts its own subsequent owner events in this same outer UoW.
+        self._repository.synchronize_client_charges(command, candidate, event_id)
         return receipt
 
     def _persist_candidate(self, command: EnsureCaseArchitectureBootstrap, candidate: CaseArchitectureBootstrapCandidate) -> int:

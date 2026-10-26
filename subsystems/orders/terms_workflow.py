@@ -235,6 +235,7 @@ class LifecycleImpactPersistenceCommand:
     correlation_id: Any
     trigger_event: str
     staff_payment_due_date: date | None = None
+    actual_start_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

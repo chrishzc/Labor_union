@@ -7,6 +7,8 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `liff-configuration` — database-owned LIFF page/theme read/write/history/rollback; path: `modules/liff-configuration.md`
+- `payment-overdue-reminders` — 各期獨立的繳款逾期待辦、人工提醒及寄送前複核；path: `modules/payment-overdue-reminders.md`
 - `deposit-notifications` — 訂金繳費提醒、正式核銷成功通知及本人繳費 LIFF；path: `modules/deposit-notifications.md`
 - `runtime-alert-target` — 告警對象既有 Query／Preview／Apply、固定分類與管理介面；path: `modules/runtime-alert-target.md`
 - `customer-service-reminders` — React 客服案件唯讀提醒、來源投影與未結案分頁；path: `modules/customer-service-reminders.md`
@@ -20,7 +22,7 @@
 - `notification-rules-presentation` — LINE通知規則維護的business-facing presentation；path: `modules/notification-rules-presentation.md`
 - `notification-failure-current-fact` — LINE-006 typed zero-write group readback、manual replay lineage與bounded recheck；path: `modules/notification-failure-current-fact.md`
 - `notification-baseline-bootstrap` — Task96 M1–M4 versioned notification catalog與development-only source fixture producer；path: `modules/notification-baseline-bootstrap.md`
-- `order-pre-start-notification-source` — 服務開始前三日首期款提醒與第二期款到期提醒的唯讀候選掃描、immutable source-event投影及worker UoW；path: `modules/order-pre-start-notification-source.md`
+- `order-pre-start-notification-source` — 正式開工當天原群組繳款／月嫂服務狀況詢問、工會協助待辦及第二期款提醒的來源投影與 worker UoW；path: `modules/order-pre-start-notification-source.md`
 - `test-fixture-bootstrap` — development-only LINE 身分、訂單情境與 Rich Menu 測試前置資料；path: `modules/test-fixture-bootstrap.md`
 - `feedback` — M2 immutable LINE feedback root／receipt／aggregate與Customer Service ticket linkage；path: `modules/feedback.md`
 - `complaint-ingress` — M4 canonical complaint normalization、Customer Service hold／HIGH escalation、masked empathy、告警與客戶結案通知的分離投遞；path: `modules/complaint-ingress.md`
@@ -31,7 +33,7 @@
 - `safe-review-link` — 短效一次性review-link transport、runtime owner 版本重驗、masked readback、receipt與committed local intent；不執行provider send；path: `modules/safe-review-link.md`
 - `staff-order-view` — 已驗證月嫂查看自己有效指派的訂單摘要與可選篩選；path: `modules/staff-order-view.md`
 - `staff-service-day-media` — 已驗證月嫂餐食照片 controlled-file staging；path: `modules/staff-service-day-media.md`
-- `service-day-reminder` — Scheduling checkpoint 的日誌提醒投影、完成／重建精確停催與 pre-delivery gate；path: `modules/service-day-reminder.md`
+- `service-day-reminder` — Scheduling current 連續缺漏清單、工會人工案件群組提醒、完成／重建停催及發送前複核；path: `modules/service-day-reminder.md`
 - `staff-payout-view` — 已驗證月嫂依本人綁定與目標付款月份查詢逐案薪資明細；path: `modules/staff-payout-view.md`
 - `rich-menu-management` — Rich Menu typed draft editing, publication preparation and role-scoped management presentation; path: `modules/rich-menu-management.md`
 
@@ -57,17 +59,9 @@
 
 首次與封鎖後重新加好友，只接續既有即時歡迎訊息及身分入口，語意以 `29` §4.1 為準。canonical 組裝不掛入退役的 follow scheduler；舊 D+N 設定／模組不構成恢復功能或三日推送驗收的依據。現有好友事件時間判定、歡迎去重、保存／投遞失敗回讀仍沿用原 owner；source 修正不代表已部署或手機送達通過。付款、服務日與日誌通知不受此裁決影響。
 
-### 同群告警重新綁定（2026-09-13 使用者明確指示）
+### 告警對象
 
-既有 owner `subsystems/line/runtime_alert_target_application.py::register_group` 承接
-`order_group_application.py` 中已驗證管理員送出的「設定異常通知群組」。正式 reset 保留
-歷史並停用 target；其後同群的新指令可重新啟用原 row，保留 target id／minimum_status，
-並保存前後 state／version 的 receipt及audit。此變更不授權清除歷史或自動取代另一啟用群組。
-
-同群已 active 時不重做 target mutation；已處理的舊 event 重播只回既有 receipt，不把
-後來停用的群組復活。另一群 active 或多群 active 時拒絕；沿用 advisory lock、caller UoW、
-既有 receipt／audit，不新增 writer。管理入口仍為 `api/routes/runtime_health.py` 的
-`/api/v1/runtime/line-alert-targets`，reset及enable／disable仍走各自Preview／Apply。
+告警只使用已設定管理員個人對象；群組登錄、重設與啟用已退役，不從歷史群組設定復活。正式行為依規格 17 與 20。
 
 ### 投遞與好友事件的既有修正
 

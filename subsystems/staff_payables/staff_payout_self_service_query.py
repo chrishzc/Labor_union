@@ -23,6 +23,7 @@ class StaffPayoutItemView:
     staff_id: int
     total_payable: Decimal
     amount_paid: Decimal
+    amount_remaining: Decimal
     due_date: date
     paid_at: date | None
     payment_status: str

@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-React 客服案件的唯讀提醒呈現及 Customer Service owner-backed bounded query projection；不接管 ticket／escalation root、手機客服、回覆或結案 writer。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。
+React 客服案件的唯讀提醒呈現及 Customer Service owner-backed bounded query projection；不接管 ticket／escalation root、手機客服、回覆或結案 writer。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。服務開始日群組按鈕建立的 `start-day-response:` 客服事件歸服務需求來源，供工會待辦查閱。
 
 ## Implementation
 - primary: `ui_react/src/components/LineCustomerServiceReminderWorkbench.tsx`

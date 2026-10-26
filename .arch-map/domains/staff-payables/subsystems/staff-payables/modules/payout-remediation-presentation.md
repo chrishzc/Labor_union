@@ -5,7 +5,7 @@
 - subsystem: `staff-payables`
 
 ## Responsibility
-呈現逾期應付款核銷的既有 Query／Preview／Apply、背景處理與 fresh owner readback。一般畫面只顯示應付款、銀行入帳、處理狀態與安全重試等業務語意，不顯示 staff／obligation identity、owner version、job ID、idempotency key或raw error。不得改寫Staff Payables完成predicate或發動銀行匯款。
+呈現月嫂付款核銷的既有 Query／Preview／Apply、背景處理與 fresh owner readback。一般畫面只顯示應付款、銀行入帳、處理狀態與安全重試等業務語意，不顯示 staff／obligation identity、owner version、job ID、idempotency key或raw error。銀行對帳的 `FinanceImportCorrectionForm` 可帶入固定流水與同一月嫂的選定款項，處理不足額／超額；選定款項全數結清才通知解除。不得改寫Staff Payables完成predicate或發動銀行匯款。
 
 ## Implementation
 - primary: `ui_react/src/components/StaffPayoutRemediationWorkbench.tsx`

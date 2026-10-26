@@ -40,6 +40,21 @@ def query(*cases, **options):
     return query_cash_requirements(Repository(cases), **options)
 
 
+@pytest.mark.parametrize("payout_status", ["recovery_required", "anomaly"])
+def test_handover_overpayment_keeps_audit_credit_but_does_not_break_payment_list(payout_status):
+    from infrastructure.mysql.accounts_payable_export_sources import _formal_case_audit_item
+    item = _formal_case_audit_item({
+        "case_no": "C-01", "staff_id": 1, "recipient_name": "月嫂甲", "obligation_identity": "original",
+        "amount_due_ntd": 16800, "export_amount_ntd": -19200, "payout_status": payout_status,
+        "due_date": date(2026, 11, 15), "order_due_date": date(2026, 11, 15),
+    }, date(2026, 11, 15))
+    result = query(case(staff_items=(item,), has_subsidy_return=True)).rows[0]
+    assert item.balance.amount == -19200
+    assert result.source_amount_ntd == 16800 and result.unpaid_amount_ntd == 0
+    assert result.payment_status == "paid"
+    assert result.pending_reasons == ("已有超付款，請至人員帳務處理追償",)
+
+
 def test_unarranged_case_has_no_estimate_and_arrangement_enables_capped_refund_before_completion():
     assert query(case(has_arrangement=False, staff_items=())).rows == ()
     rows = query(case()).rows
@@ -48,8 +63,9 @@ def test_unarranged_case_has_no_estimate_and_arrangement_enables_capped_refund_b
     assert estimate.unpaid_amount_ntd == 40 * 300
     assert estimate.payment_date == date(2027, 1, 15)
     assert estimate.certainty == "estimated" and estimate.date_is_estimate
-    assert "服務尚未完成" in estimate.pending_reasons
-    assert "客戶服務費尚未收齊" in estimate.pending_reasons
+    assert "補助退款計算資料待確認" in estimate.pending_reasons
+    assert "服務尚未完成" not in estimate.pending_reasons
+    assert "客戶服務費尚未收齊" not in estimate.pending_reasons
 
 
 def test_staff_amounts_preserve_each_owner_balance_and_show_paid_or_settled():
@@ -150,7 +166,7 @@ def test_cancelled_case_retains_established_unpaid_but_does_not_forecast_unperfo
     assert rows[1].payment_date is None
 
 
-@pytest.mark.parametrize("identity", ["補助市民", "低收入戶", "中低收入戶", "非市民"])
+@pytest.mark.parametrize("identity", ["社福", "低收入戶", "中低收入戶", "非市民"])
 def test_full_subsidy_without_client_payment_or_ineligible_identity_has_no_refund_estimate(identity):
     assert query(case(identity_status=identity, service_hours=Decimal(80), staff_items=())).rows == ()
 

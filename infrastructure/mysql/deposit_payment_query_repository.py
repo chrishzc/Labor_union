@@ -16,9 +16,11 @@ class MySqlDepositPaymentQueryRepository:
             if cursor.fetchone() is None:
                 return None
             cursor.execute(
-                "SELECT obligation_identity,projection_version,amount_due_ntd,due_date "
-                "FROM client_obligations WHERE case_no=%s AND obligation_type='deposit' "
-                "AND direction='receivable_from_client' AND status<>'cancelled'" + suffix, (case_no,),
+                "SELECT d.obligation_identity,d.projection_version,d.status,d.due_date, "
+                "CASE WHEN d.status='settled' THEN e.after_amount_ntd ELSE d.amount_due_ntd END AS amount_due_ntd "
+                "FROM client_obligations d JOIN client_obligation_events e ON e.id=d.current_event_id "
+                "WHERE d.case_no=%s AND d.obligation_type='deposit' "
+                "AND d.direction='receivable_from_client' AND d.status<>'cancelled'" + suffix, (case_no,),
             )
             rows = tuple(cursor.fetchall())
             if len(rows) != 1 or int(rows[0]['amount_due_ntd']) <= 0:
@@ -33,6 +35,8 @@ class MySqlDepositPaymentQueryRepository:
                 (case_no, obligation['obligation_identity'], obligation['amount_due_ntd']),
             )
             settlement = cursor.fetchone()
+            if obligation['status']=='settled' and settlement is None:
+                return None
             account = resolve_case_virtual_account(cursor, case_no)
         return DepositPayment(
             case_no, str(obligation['obligation_identity']), int(obligation['projection_version']),

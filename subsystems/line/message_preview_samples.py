@@ -18,7 +18,9 @@ VALUES = {
     "staff_name": STAFF.name, "caregiver_name": STAFF.name, "service_date": "2026-11-03",
     "url": "［公版服務申請連結；不建立實際連結］", "bind_url": "［公版身分綁定連結；不建立實際連結］",
     "first_payment_amount": "NT$ 12,000", "first_payment_status": "尚未繳納（範例）",
-    "first_payment_due_date": "2026-10-30", "second_payment_amount": "NT$ 24,000",
+    "first_payment_notice": "第一期款尚待繳納：12,000 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
+    "caregiver_names": STAFF.name, "response_token": "0" * 64,
+    "first_payment_due_date": "2026-10-30", "second_payment_amount": "24,000",
     "second_payment_status": "尚未繳納（範例）", "second_payment_due_date": "2026-11-20",
     "leave_start_date": LEAVE.start_date, "leave_end_date": LEAVE.end_date,
     "week_number": 1, "serial_number": 1, "week_start_date": "2026-11-02", "week_end_date": "2026-11-08",
@@ -31,6 +33,7 @@ LABELS = {
     "staff_name": "月嫂姓名", "caregiver_name": "月嫂姓名", "service_date": "服務日期",
     "url": "服務申請連結", "bind_url": "身分綁定連結", "first_payment_amount": "第一期款金額",
     "first_payment_status": "第一期款狀態", "first_payment_due_date": "第一期款期限",
+    "first_payment_notice": "第一期款繳款段落", "caregiver_names": "當日排班月嫂", "response_token": "服務狀況回覆識別",
     "second_payment_amount": "第二期款金額", "second_payment_status": "第二期款狀態", "second_payment_due_date": "第二期款期限",
     "leave_start_date": "請假開始日", "leave_end_date": "請假結束日", "week_number": "週數", "serial_number": "序號",
     "week_start_date": "每週開始日", "week_end_date": "每週結束日", "service_hours_per_day": "每日服務時數",
@@ -160,18 +163,40 @@ def current_message_sample(key):
         return value
     def case(): return field("案件編號", "case_no", CASE.case_no)
     def text(value): return {"type": "text", "text": value}
-    if key in {"deposit-reminder", "deposit-settled"}:
+    if key in {"contract-signing-client", "contract-signing-staff"}:
+        from subsystems.contract_signing.line_delivery import external_platform_staff_reminder_text
+        field("收件人", "recipient", "客戶私人聊天室" if key.endswith("client") else "月嫂私人聊天室")
+        payload = text(external_platform_staff_reminder_text(case()))
+    elif key.startswith("payment-overdue-"):
+        from datetime import date
+        from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+        from subsystems.line.payment_overdue_reminders import reminder_text, STAGE_LABELS
+        stage = key.removeprefix("payment-overdue-")
+        field("期別", "payment_stage", STAGE_LABELS[stage])
+        field("收件人", "recipient", "客戶私人聊天室" if stage == "deposit" else "案件群組")
+        amount = field("剩餘待繳金額", "remaining_amount_ntd", {"deposit": 6000, "first": 12000, "second": 8000}[stage])
+        payload = text(reminder_text(OverdueClientPayment(case(), stage, "preview-only", 1, 1, date(2026,11,1), amount)))
+    elif key in {"deposit-reminder", "deposit-settled"}:
         from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER, SETTLED
         amount = field("訂金金額（新臺幣）", "amount_ntd", 6000)
         due = field("繳費期限", "due_date", "2026-11-01") if key == "deposit-reminder" else None
         entry = field("繳費頁面", "payment_entry", "https://preview.invalid/deposit")
         payload = deposit_notification_payload(case(), amount, due, SETTLED if key == "deposit-settled" else REMINDER, entry)
+    elif key == "service-day-log-reminder":
+        from subsystems.line.service_day_log_reminders import reminder_text
+        payload = text(reminder_text(field("月嫂姓名", "staff_name", STAFF.name)))
     elif key == "deposit-assistance":
         from subsystems.line.deposit_notifications import ASSISTANCE_ACK
         payload = text(ASSISTANCE_ACK)
     elif key == "group-bound":
         from subsystems.line.order_group_application import group_binding_acknowledgement
         payload = text(group_binding_acknowledgement(case()))
+    elif key == "service-start-inquiry":
+        from subsystems.line.service_start_messages import substitute_inquiry
+        payload=substitute_inquiry(case(),CASE.start_date,CASE.end_date,'preview-only-no-operation')
+    elif key == "service-start-result":
+        from subsystems.line.service_start_messages import service_date_record
+        payload=service_date_record(case(),[{'staff_name':STAFF.name,'service_dates':['2026-11-02','2026-11-03']}])
     elif key == "group-invitations-queued":
         from subsystems.line.order_group_application import group_invitation_acknowledgement
         count = field("邀請對象人數", "recipient_count", 2)

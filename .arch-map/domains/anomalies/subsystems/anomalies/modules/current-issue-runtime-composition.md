@@ -19,4 +19,7 @@ mutation、business predicate或public entry。
 - `subsystems/anomalies/government_return_outbound_overage_anomaly_source.py`
 
 ## Verification
+- layout_status: `custom_current`
+- layout_basis: Existing outbox composition regression keeps its original entrypoint; new owner tests use the canonical module root.
+- integration_root: `tests/test_subsidy_advance_worker_wiring.py`
 - test_root: `tests/domains/anomalies/subsystems/anomalies/modules/current-issue-runtime-composition/`

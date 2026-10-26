@@ -26,8 +26,8 @@ actual hours、費率、薪資或樓層費結果，也不得把該天數偽造�
 
 費率政策：
 
-- 一般市民：300
-- 補助市民：350
+- 補助市民：300
+- 社福：350
 - 非市民：320
 - 雙胞胎案件：450；優先於身分費率，並由 Case Import 的正式胎數事實決定
 
@@ -39,7 +39,7 @@ actual hours、費率、薪資或樓層費結果，也不得把該天數偽造�
 費率事實的更正：同一 outer Unit of Work 必須以 450 重算 open Payroll obligation，後續 Query、
 rebuild 與新 assignment 也必須優先採用此 effective correction；原 assignment 快照及已付款事件
 維持不可變，差額以既有 adjustment／replacement 規則表達。正式服務開始後不得變更胎數。
-- 低收入戶／中低收入戶先映射為補助市民政策
+- 低收入戶／中低收入戶映射為社福政策
 
 ### Assignment replacement rate snapshot carry-forward（2026-09-23）
 
@@ -59,6 +59,8 @@ Actual Start 只改日期並由 Scheduling cancel-old／create-new 時，success
 上述規則只處理已有 source assignment 的日期 replacement。歷史 Precision Restart 後首次建立正式安排，
 若 pairing 原本沒有 source assignment／snapshot，仍依 Orders §3.4.1 在真正建立安排時使用案件已存在的
 case payroll policy；不得在 confirmed-date 保存階段建立 snapshot，也不得自行產生政策。
+
+依正式指派／服務資料的既有 writer 自動同步月嫂應付；服務完成時再依實際服務與付款日政策同步金額及日期，不要求人員另建付款義務或先執行薪資重建。沿用 aggregate version、不可變事件及既有差額規則；已付款紀錄不覆寫，來源不完整不得推定為零。
 
 ## 3. Subsystems
 
@@ -93,9 +95,9 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 
 未核銷的 `staff_obligations` current projection 可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 immutable adjustment／reversal obligation event。`staff_payments` 若存在只可由這些 canonical obligation 投影為 compatibility read model，不得回寫 Payroll SSOT。
 
-2026-09-11 人工裁決：Payroll 對同一 assignment 只建立一筆 `total_payable` 月嫂應付，不得按「政府補助／雇主自費」資金來源拆成兩筆 obligation 或兩次 payout。非全補助的補助市民訂單由客戶依一般 Client Finance 付款條款先代墊完整服務薪資，服務完成後再退符合資格的補助款；多位月嫂或代班仍各自依其 assignment 與實際服務量形成獨立整筆義務，並非補助分段。
+2026-09-11 人工裁決：Payroll 對同一 assignment 只建立一筆 `total_payable` 月嫂應付，不得按「政府補助／雇主自費」資金來源拆成兩筆 obligation 或兩次 payout。非全補助的補助市民訂單由客戶依一般 Client Finance 付款條款先代墊完整服務薪資，應退補助隨案件資料自動更新，於有效結束月加兩月 15 日退款；多位月嫂或代班仍各自依其 assignment 與實際服務量形成獨立整筆義務，並非補助分段。
 
-Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立唯一 `staff_payment_due_date`。一般案件及非全補助的補助市民訂單為結案後次一曆月 15 日；只有「全補助案件」為結案後第二曆月 15 日。全補助案件必須同時是補助市民、訂單有效正式服務時數不超過 120 小時，且 Client Finance 衍生客戶應付為 0；客戶不需代墊或支付服務薪資。實務申請通常排滿 120 小時，但「剛好 120 小時」不是必要判定條件。補助資格本身、超過 120 小時、或仍有任何客戶應付，都不得套用全補助付款日。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。非全補助案件的客戶補助退還由 Client Finance 在服務完成後另建 `subsidy_return` 義務，與本 Domain 的月嫂應付完全分離。
+Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立唯一 `staff_payment_due_date`。一般案件及非全補助的補助市民訂單為結案後次一曆月 15 日；只有「全補助案件」為結案後第二曆月 15 日。全補助案件必須同時是社福、訂單有效正式服務時數不超過 120 小時，且 Client Finance 衍生客戶應付為 0；客戶不需代墊或支付服務薪資。實務申請通常排滿 120 小時，但「剛好 120 小時」不是必要判定條件。補助資格本身、超過 120 小時、或仍有任何客戶應付，都不得套用全補助付款日。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。非全補助案件的客戶補助退還由 Client Finance 隨案件資料自動同步 `subsidy_return`，與本 Domain 的月嫂應付完全分離。
 
 ### PAYOUT-002 late obligation disposition（2026-08-31 人工裁決）
 
@@ -129,6 +131,8 @@ Anomalies 不得自行計算 delta 或寫 Payroll／Staff Payables root。
 - `DueDateProjection`
 
 ## 5. Ports 與交易
+
+案件／月嫂薪資唯讀查詢保留已取消及已結清的 0 元紀錄，回應金額為非負整數。既有 open 義務仍依 owner invariant 必須大於 0；Query 不改寫狀態、金額或付款紀錄。新增調整命令沿用既有非零驗證。
 
 輸入 ports：`OfficialServiceFactsPort`、`OrdersTermsPort`、`PayrollTermsPort`、`AdjustmentLedgerPort`。
 
@@ -210,4 +214,5 @@ Stable errors：
 - 重複交接須沿 Scheduling ancestry 找回原 obligation；既有差額只計一次。已存在不同來源的已付 adjustment、義務來源不唯一、或需沖減既有追償時，回明確 blocker，交由原帳務處理流程核對，不自動抵銷。
 - 付款家族的 ancestry 只延續同一月嫂；經過其他月嫂後再接任屬新付款家族，不承接該月嫂早期其他家族的 adjustment／付款／追償。薪資雙薪根事實與正式服務日標記不一致時阻擋，不猜算。
 - 已含換人差額的後續代班／條款影響使用相同來源承接與 Staff Payables typed coordination。尚未支援此來源的通用薪資重建入口須回 `payroll_handover_settlement_required`，不得另建原全額義務。歷史付款／結清 overlay 不得當成未付款重開。
+- 服務完成的自動帳務同步，沿同月嫂 assignment ancestry 核對原應付加換人差額與目前正式服務薪資；金額及付款日均未改變時直接沿用，不重建已付義務、不重複追償。無法唯一對應或仍有金額／付款日差異時，保留上述帳務核對 blocker。
 - 已形成的付款日保留。Preview 零寫入；Apply 在 sorted staff-account locks 下重新讀實付與版本，Payroll 差額、Staff Payables projection／追償、排班與 receipt 同一交易提交；不執行銀行付款或對外通知。

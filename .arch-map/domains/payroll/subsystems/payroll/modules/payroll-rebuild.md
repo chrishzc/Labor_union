@@ -8,8 +8,11 @@
 依正式 Scheduling assignment 與 Orders terms 重建 Payroll projection；不得反向改寫來源排班或條款。
 既有正式排班缺漏應付日時，以正式 actual_end_date、Client Finance 衍生客戶應付與補助資格套用既有付款日政策；保留已形成日期，建立 obligation 時保存 candidate 日期。
 
+服務完成可在 Orders 既有 UoW 呼叫 `synchronize_in_unit_of_work`，只有金額或日期變更時保存；不建立新人工步驟、不自行 commit。
+
 ## Implementation
 - primary:
+  - `subsystems/payroll/rebuild_workflow.py`
   - `infrastructure/mysql/payroll_rebuild_repository.py`
   - `api/schemas/payroll_rebuild.py`
 

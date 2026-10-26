@@ -98,6 +98,7 @@ class StaffPayoutItemView(BaseModel):
     case_no: str
     total_payable: Decimal
     amount_paid: Decimal
+    amount_remaining: Decimal
     due_date: date | None = None
     paid_at: date | None = None
     payment_status: str
@@ -193,7 +194,18 @@ class StaffServiceDayLogPreviewRequest(StaffLiffRequest):
 
 
 class StaffServiceDayLogApplyRequest(StaffServiceDayLogPreviewRequest):
-    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    preview_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class StaffServiceDayLogOptionsRequest(StaffLiffRequest):
+    model_config = ConfigDict(extra="forbid")
+    assignment_id: int = Field(gt=0)
+    service_date: date
+
+
+class StaffServiceDayLogOptionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requires_cooking: bool
 
 
 class StaffServiceDayLogPreviewResponse(BaseModel):
