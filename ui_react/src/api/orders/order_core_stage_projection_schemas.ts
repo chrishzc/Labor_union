@@ -311,8 +311,9 @@ export const CoreStageCountsSchema = z.strictObject({
   staff_payout: NonnegativeIntSchema,
 });
 
+// Keep enum keys partial in both the installed Zod 3 and declared Zod 4.
 const CoreStageSubstatusCountsSchema = z.record(
-  CoreStageSubstatusCodeSchema,
+  CoreStageSubstatusCodeSchema.or(z.never()),
   NonnegativeIntSchema,
 ).superRefine((counts, context) => {
   const keys = Object.keys(counts).sort();

@@ -20,6 +20,7 @@
   - `subsystems/line/message_preview.py` — LINE-owned typed preview contracts、純渲染協調與移除可執行 action 的 projection。
   - `subsystems/line/message_preview_samples.py` — 明列的公版值、無 DB sample port、卡片範例與帶入欄位對照。
   - `subsystems/line/message_copy.py` — 正式客服與身分固定文案，供實際通知與唯讀預覽共用。
+  - shared dependency: `subsystems/line/service_start_day.py::start_day_response_text` — 服務當天群組受理回覆由原 owner 提供純文案；代班／群組日期公版明列指定日期及月嫂欄位。
   - `infrastructure/mysql/line_message_preview_repository.py` — readonly transaction、參數化分頁、owner facts 與既有付款 source 轉接。
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`

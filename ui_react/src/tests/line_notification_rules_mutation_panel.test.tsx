@@ -91,6 +91,40 @@ function flowWorkbench() {
 
 describe('LINE 精簡流程圖與正式訊息定位', () => {
 
+  it('服務當天受理回覆、進度查詢與管理員個人告警在既有步驟次層精確定位', async () => {
+    const { configuration, previews, catalog } = flowWorkbench(); const onOpen = vi.fn();
+    const current = await previews.catalog();
+    const fixed = [
+      ['service-start-normal-received', '服務當天－服務正常受理回覆'],
+      ['service-start-help-received', '服務當天－協助需求受理回覆'],
+      ['service-progress', '服務進度查詢結果'],
+      ['service-progress-unbound', '服務進度－未綁定提示'],
+      ['runtime-system-health', '系統健康異常－管理員通知'],
+    ].map(([id, name]) => ({ id, name, template_id: null, format: 'text' as const, requires_case: false, requires_staff: false, builtin: true, allows_draft: false }));
+    const alerts = [
+      { ...catalog.definition.rules[0], id: 'current-safe-alert', event_code: 'runtime.alert.review_required', template_id: 'LU96-M4-SAFE-ALERT-CARD-V1', recipient_selector: 'admin.review_actor' },
+      { ...catalog.definition.rules[0], id: 'current-complaint-alert', event_code: 'complaint.ingress.hold_high_ticket', template_id: 'LU96-M4-COMPLAINT-HIGH-CARD-V1', recipient_selector: 'customer_service.claim_owner' },
+    ];
+    vi.mocked(configuration.getNotificationRules).mockResolvedValue({ ...catalog, definition: { rules: [...catalog.definition.rules, ...alerts] } });
+    vi.mocked(previews.catalog).mockResolvedValue([...current, ...fixed, ...alerts.map(rule => ({ ...fixed[0], id: rule.id, name: rule.id, template_id: rule.template_id, builtin: false }))]);
+    render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
+    fireEvent.click(await screen.findByRole('button', { name: /5 開始服務/ }));
+    fireEvent.click(screen.getByRole('button', { name: '服務開始當天 2 則訊息 查看訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: /服務當天－協助需求受理回覆/ }));
+    expect(onOpen).toHaveBeenLastCalledWith('service-start-help-received');
+    fireEvent.click(screen.getByRole('tab', { name: '客服與支援' }));
+    fireEvent.click(screen.getByRole('button', { name: /1 開啟服務/ }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢服務進度 2 則訊息 查看訊息' }));
+    fireEvent.click(screen.getByRole('button', { name: /服務進度查詢結果/ }));
+    expect(onOpen).toHaveBeenLastCalledWith('service-progress');
+    fireEvent.click(screen.getByRole('button', { name: /3 人工處理/ }));
+    fireEvent.click(screen.getByRole('button', { name: '管理員個人告警 3 則訊息 查看訊息' }));
+    expect(within(document.querySelector('.line-flow-nested') as HTMLElement).getAllByText('由流程控制')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: /current-safe-alert/ }));
+    expect(onOpen).toHaveBeenLastCalledWith('current-safe-alert');
+    expect(previews.render).not.toHaveBeenCalled(); expect(previews.subjects).not.toHaveBeenCalled();
+  });
+
   it('完整列出簽約、日期自助、各期人工提醒與共用換人流程，查閱不發送或儲存', async () => {
     const { configuration, previews, templates } = flowWorkbench(); const onOpen=vi.fn();
     const current=await previews.catalog();
@@ -473,6 +507,31 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
 }
 
 describe('通知內容統一工作區', () => {
+  it('固定流程回覆和歡迎訊息不混入啟停篩選，與流程圖共用狀態且沒有獨立開關', async () => {
+    const { Harness, previews, templates, onboarding } = contentWorkbench();
+    const current = await previews.catalog();
+    vi.mocked(previews.catalog).mockResolvedValue([...current, {
+      id: 'service-start-normal-received', template_id: null, name: '服務當天－服務正常受理回覆',
+      format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false,
+    }]);
+    render(<Harness />);
+    const replyName = '查看服務當天－服務正常受理回覆內容';
+    await screen.findByRole('button', { name: replyName });
+    const stateFilter = screen.getByRole('combobox', { name: '啟用狀態' });
+    fireEvent.change(stateFilter, { target: { value: 'enabled' } });
+    expect(screen.queryByRole('button', { name: replyName })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '編輯新好友歡迎訊息內容' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '編輯訂金確認通知內容' })).toBeInTheDocument();
+    fireEvent.change(stateFilter, { target: { value: 'disabled' } });
+    expect(screen.getByText('沒有符合條件的通知')).toBeInTheDocument();
+    fireEvent.change(stateFilter, { target: { value: 'all' } });
+    fireEvent.click(screen.getByRole('button', { name: replyName }));
+    fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
+    expect(screen.getByText('由流程控制', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '修改發送設定' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
+  });
   it('服務當天結構化卡片不把不支援文字編輯誤報為版本衝突，保留正式預覽與啟用設定', async () => {
     const id = 'LINE-ORDER-SERVICE-START-DAY-V1';
     const { Harness, previews, templates, onboarding } = contentWorkbench({ revision: 3, definition: { rules: [{

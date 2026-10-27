@@ -193,10 +193,18 @@ def current_message_sample(key):
         payload = text(group_binding_acknowledgement(case()))
     elif key == "service-start-inquiry":
         from subsystems.line.service_start_messages import substitute_inquiry
-        payload=substitute_inquiry(case(),CASE.start_date,CASE.end_date,'preview-only-no-operation')
+        dates = ['2026-11-02', '2026-11-04', '2026-11-06']
+        field("服務日期", "service_dates", '、'.join(dates))
+        payload=substitute_inquiry(case(),dates[0],dates[-1],'preview-only-no-operation',service_dates=dates)
     elif key == "service-start-result":
         from subsystems.line.service_start_messages import service_date_record
-        payload=service_date_record(case(),[{'staff_name':STAFF.name,'service_dates':['2026-11-02','2026-11-03']}])
+        dates = ['2026-11-02', '2026-11-04', '2026-11-06']
+        name = field("月嫂姓名", "assignments[0].staff_name", STAFF.name)
+        field("服務日期", "assignments[0].service_dates", '、'.join(dates))
+        payload=service_date_record(case(),[{'staff_name':name,'service_dates':dates}])
+    elif key in {"service-start-normal-received", "service-start-help-received"}:
+        from subsystems.line.service_start_day import start_day_response_text
+        payload = text(start_day_response_text('normal' if key == "service-start-normal-received" else 'help'))
     elif key == "group-invitations-queued":
         from subsystems.line.order_group_application import group_invitation_acknowledgement
         count = field("邀請對象人數", "recipient_count", 2)

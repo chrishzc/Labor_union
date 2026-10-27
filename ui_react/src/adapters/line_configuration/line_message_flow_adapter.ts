@@ -8,7 +8,7 @@ export const FLOW_MANAGED_NOTIFICATION_EVENTS = new Set([
 ]);
 
 export type MessageFlowStatus = 'enabled' | 'disabled' | 'flow' | 'unavailable';
-export function messageFlowStatus(descriptor: PreviewDescriptor, rule?: LineNotificationRuleModel): MessageFlowStatus {
+export function messageFlowStatus(descriptor: Pick<PreviewDescriptor, 'id' | 'builtin'>, rule?: LineNotificationRuleModel): MessageFlowStatus {
   if (rule) return FLOW_MANAGED_NOTIFICATION_EVENTS.has(rule.eventCode) ? 'flow' : rule.enabled ? 'enabled' : 'disabled';
   return descriptor.builtin || descriptor.id === 'welcome' ? 'flow' : 'unavailable';
 }
@@ -43,7 +43,7 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     { title: '開始服務', nodes: [
       { id: 'coordinated-dates', title: '月嫂提交已協調的開始日', internal: true, summary: '客戶與月嫂在案件群組自行協調；月嫂由訂單查詢或排班資訊與請假提交日期。無衝突即更新正式日期、排班與第一期款到期日；需要代班或衝突才交工會。' },
       { id: 'start-date-record', title: '正式日期表記錄到案件群組', ids: ['service-start-result'], summary: '正式保存成功後寄送群組日期表，僅記錄結果，沒有再次確認或拒絕按鈕。' },
-      { id: 'service-start', title: '服務開始當天', templates: ['LINE-ORDER-SERVICE-START-DAY-CARD-V1'] },
+      { id: 'service-start', title: '服務開始當天', templates: ['LINE-ORDER-SERVICE-START-DAY-CARD-V1'], ids: ['service-start-normal-received', 'service-start-help-received'], summary: '查看當天卡片，以及「服務正常」「需要協助」後寄到原案件群組的受理回覆。' },
       { id: 'first-overdue', title: '第一期款逾期－工會決定提醒', ids: ['payment-overdue-first'], summary: '第一期款逾期隔天才列待辦，人員選擇發送至案件群組；已結清不提醒。' },
     ] },
     { title: '持續服務與異動', nodes: [
@@ -67,9 +67,10 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     { title: '開啟服務', nodes: [
       { id: 'service-menu', title: '查看服務導覽', ids: ['service-menu', 'service-other'] },
       { id: 'service-payment', title: '收費與補助說明', ids: ['service-payment'], summary: '補助市民最高40小時，社福最高120小時；實際補助金額依本案服務資料計算。' },
+      { id: 'service-progress', title: '查詢服務進度', ids: ['service-progress', 'service-progress-unbound'], summary: '查看已綁定案件的進度回覆，以及尚未綁定時的入口提示。' },
     ] },
     { title: '聯絡專人', nodes: [{ id: 'contact', title: '聯絡專人服務', ids: ['service-contact'], summary: '明確呼叫即建立或接續客服需求，不再要求轉真人確認。既有資料異動與訂單申請仍走原受理流程。' }] },
-    { title: '人工處理', nodes: [] },
+    { title: '人工處理', nodes: [{ id: 'admin-alerts', title: '管理員個人告警', ids: ['runtime-system-health'], templates: ['LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'], summary: '系統健康、重大異常及重大客訴依正式流程通知已設定的管理員個人對象。' }] },
     { title: '案件完成', nodes: [{ id: 'resolved', title: '客服正式結案', ids: ['service-resolved'] }] },
   ] },
 ];

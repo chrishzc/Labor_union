@@ -22,6 +22,14 @@ EVENT_PREFIX = 'order-service-start-day:'
 _POSTBACK = re.compile(r'^start-day:([0-9a-f]{64}):(normal|help)$')
 
 
+def start_day_response_text(decision: str) -> str:
+    """The committed group acknowledgement and its display-only preview share copy."""
+    return {
+        'normal': '已收到，祝您服務順利。',
+        'help': '已收到您的協助需求，請留下遇到的狀況。',
+    }[decision]
+
+
 @dataclass(frozen=True, slots=True)
 class StartDayCaregiver:
     staff_id: int
@@ -85,8 +93,7 @@ class ServiceStartDayPostbackApplication:
                 event_key=key.value, case_no=context.case_no,
             ))
             ticket_id = ticket.ticket_id
-        message = ('已收到，祝您服務順利。' if decision == 'normal'
-                   else '已收到您的協助需求，請留下遇到的狀況。')
+        message = start_day_response_text(decision)
         unit.delivery_tasks.enqueue(LineDeliveryRequest(
             LineRecipient(LineRecipientType.GROUP, source.group_id), LineMessageKind.TEXT,
             canonical_line_payload_json({'type': 'text', 'text': message}), event.occurred_at,

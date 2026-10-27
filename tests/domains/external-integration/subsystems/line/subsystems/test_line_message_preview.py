@@ -415,6 +415,41 @@ def test_deposit_and_service_progress_disclose_actual_public_substitutions():
     assert len(progress.facts) == 4
 
 
+@pytest.mark.parametrize('key,decision', [
+    ('service-start-normal-received', 'normal'),
+    ('service-start-help-received', 'help'),
+])
+def test_start_day_acknowledgement_preview_reuses_committed_group_copy(key, decision, monkeypatch):
+    from subsystems.line import service_start_day
+    expected = service_start_day.start_day_response_text(decision)
+    application = app(factory=lambda: pytest.fail('fixed reply must not open a real reader'))
+    result = application.render(key, None, None, None, actor(), sample=True)
+    assert result.status == 'ready' and result.text == expected and result.facts == ()
+    monkeypatch.setattr(service_start_day, 'start_day_response_text', lambda actual: f'共用回覆：{actual}')
+    assert application.render(key, None, None, None, actor(), sample=True).text == f'共用回覆：{decision}'
+
+
+def test_substitute_and_date_record_preview_disclose_sparse_dates_and_caregiver():
+    application = app()
+    dates = '2026-11-02、2026-11-04、2026-11-06'
+    inquiry = application.render('service-start-inquiry', None, None, None, actor(), sample=True)
+    public = json.dumps(asdict(inquiry), ensure_ascii=False)
+    assert '服務日期：' + dates in public and '服務期間：' not in public
+    assert '2026-11-03' not in public
+    assert {fact.id: fact.label for fact in inquiry.facts}['服務日期（service_dates）'] == dates
+    record = application.render('service-start-result', None, None, None, actor(), sample=True)
+    fields = {fact.id: fact.label for fact in record.facts}
+    assert fields['服務日期（assignments[0].service_dates）'] == dates
+    assert fields['月嫂姓名（assignments[0].staff_name）'] in record.text
+    assert dates in record.text
+
+
+def test_current_group_preview_names_use_case_group_terminology():
+    names = [item.name for item in app().catalog(actor()) if item.id.startswith('group-')]
+    assert names and all('服務群組' not in name for name in names)
+    assert '案件群組－設定完成' in names
+
+
 def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_period_amounts():
     application=app()
     client=application.render('contract-signing-client',None,None,None,actor(),sample=True)

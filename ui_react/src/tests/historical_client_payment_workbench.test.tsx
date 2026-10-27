@@ -3,11 +3,36 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { historicalClientPaymentClient } from '../api/client_finance/historical_client_payment_client';
 import { sessionClient } from '../api/auth/session_client';
+import { transport } from '../api/shared/transport';
 
 const obligation = {
   obligation_identity: 'client-obligation:1', case_no: 'CASE-1', obligation_type: 'deposit',
   direction: 'receivable_from_client' as const, amount_due_ntd: 12000, projection_version: 4, status: 'open' as const,
 };
+
+describe('Historical client payment transport contract', () => {
+  const query = { case_no: 'CASE-1', account_version: 4, adoption_receipt_id: null,
+    adopted: false, normal_bank_candidate_identities: [], obligations: [obligation] };
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps explicit nullable adoption facts without inventing owner data', async () => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('historical-test');
+    vi.spyOn(transport, 'get').mockResolvedValue({ success: true, message: 'Success', data: query });
+    expect(await historicalClientPaymentClient.query('CASE-1')).toEqual(query);
+  });
+
+  it.each([
+    { success: true, message: 'Success' },
+    { success: true, message: 'Success', data: null },
+    { success: true, message: 'Success', data: { ...query, account_version: undefined } },
+    { success: true, message: 'Success', data: { ...query, unexpected: true } },
+    { success: false, message: 'Rejected', data: query },
+  ])('rejects unusable query envelopes', async (raw) => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('historical-test');
+    vi.spyOn(transport, 'get').mockResolvedValue(raw);
+    await expect(historicalClientPaymentClient.query('CASE-1')).rejects.toMatchObject({ code: 'HISTORICAL_CLIENT_SCHEMA_MISMATCH' });
+  });
+});
 
 describe('HistoricalClientPaymentWorkbench', () => {
   afterEach(() => vi.restoreAllMocks());

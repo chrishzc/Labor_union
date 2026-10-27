@@ -22,14 +22,14 @@ export type HandoverContext=z.infer<typeof handoverContextSchema>;
 export interface HandoverInquiry {case_no:string;assignment_id:number;staff_id:number;expected_order_version:number;expected_scheduling_version:number;idempotency_key:string}
 export interface StartCommand {expected_version:number;idempotency_key:string;staff_id?:number;start_date?:string;end_date?:string;dates?:{original_date:string;new_date:string}[];date_changes?:{original_date:string;new_date:string}[]}
 
-async function call<T>(path:string,schema:z.ZodType<T,z.ZodTypeDef,unknown>,body?:StartCommand|HandoverInquiry):Promise<T> {
+async function call<T extends z.ZodTypeAny>(path:string,schema:T,body?:StartCommand|HandoverInquiry):Promise<z.output<T>> {
   const token=sessionClient.getToken();
   if(!token) throw new ApiHttpError(401,'UNAUTHENTICATED','請先登入。');
   const raw=body ? await transport.post<unknown>(path,body,{token}) : await transport.get<unknown>(path,{token});
   const envelope=z.object({success:z.boolean(),data:schema.nullable(),message:z.string()}).safeParse(raw);
   if(!envelope.success) throw new ApiDecodeError('服務安排資料格式錯誤。');
   if(!envelope.data.success || envelope.data.data===null) throw new ApiDecodeError(envelope.data.message);
-  return envelope.data.data as T;
+  return envelope.data.data;
 }
 const base='/api/v1/scheduling/service-start';
 export const serviceStartClient={

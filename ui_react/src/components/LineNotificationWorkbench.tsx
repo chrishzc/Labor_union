@@ -7,7 +7,7 @@ import { useSaveValidation } from './useSaveValidation';
  */
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { ArrowLeft, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS } from '../adapters/line_configuration/line_message_flow_adapter';
+import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
 import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { LineNotificationRulesMutationPanel } from './LineNotificationRulesMutationPanel';
@@ -276,10 +276,12 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   }, [selected?.id]);
   const query = search.trim().toLowerCase();
   const formatOf = (entry: NotificationEntry) => descriptors.find(item => item.id === entry.id)?.format ?? 'text';
+  const statusOf = (entry: NotificationEntry) => messageFlowStatus({ id: entry.id, builtin: entry.kind === 'card' }, entry.rule);
   const visible = allEntries.filter(entry => (!query || `${entry.name} ${entry.data?.content ?? ''}`.toLowerCase().includes(query))
     && (formatFilter === 'all' || formatOf(entry) === formatFilter)
-    && (enabled === 'all' || !MANUAL_FLOW_DETAILS[entry.id] && (!entry.rule || !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode)) && (entry.rule?.enabled ?? true) === (enabled === 'enabled')));
+    && (enabled === 'all' || statusOf(entry) === enabled));
   const managed = selected?.rule ? FLOW_MANAGED_EVENTS.has(selected.rule.eventCode) : false;
+  const flowControlled = selected ? statusOf(selected) === 'flow' : false;
   const manualFlow = selected ? MANUAL_FLOW_DETAILS[selected.id] : undefined;
   const descriptor = descriptors.find(item => item.id === selected?.id);
 
@@ -312,7 +314,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
             <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>
             {editingSettings && catalog ? <LineNotificationRulesMutationPanel catalog={catalog} selectedRuleId={selected.id} settingsOnly onEditingStateChange={settingsState} onCommitted={() => { setSelected(null); onSelectedEntryChange?.(null); setSettingsDirty(false); setReload(value => value + 1); }} /> : deliveryTab ? <section className="notification-delivery-settings" aria-label="發送設定">
-              <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : selected.kind === 'welcome' ? '加入或重新加入好友時' : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{manualFlow && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
+              <dl><div><dt>通知對象</dt><dd>{selected.recipient}</dd></div><div><dt>發送時機</dt><dd>{manualFlow ? manualFlow.trigger : selected.kind === 'welcome' ? '加入或重新加入好友時' : managed || selected.kind === 'card' ? '由正式業務流程觸發' : selected.rule?.scheduleLabel}</dd></div>{flowControlled && <div><dt>狀態</dt><dd>由流程控制</dd></div>}{selected.rule && !managed && <><div><dt>狀態</dt><dd>{selected.rule.enabled ? '已啟用' : '已停用'}</dd></div><div><dt>頻率</dt><dd>{selected.rule.frequencyLabel}</dd></div></>}</dl>
               {selected.rule && !managed && <button type="button" className="notification-text-button" disabled={dirty || saving} onClick={() => setEditingSettings(true)}>修改發送設定</button>}
               {(managed || !selected.rule) && <p className="notification-help">由業務流程控制，沒有獨立啟用開關。</p>}
               {contentDirty && <p className="notification-help">請先儲存或取消內容修改，再調整發送設定。</p>}
