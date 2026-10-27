@@ -2,6 +2,8 @@
  * File: line_configuration_query_fixtures.ts
  * Description: 提供去敏且完整的 LINE 設定唯讀契約測試資料，不作 production fallback。
  */
+import type { LineNotificationRulesCatalog, LineRichMenuConfiguration } from '../../api/line_configuration/line_configuration_query_schemas';
+
 export const LINE_NOTIFICATION_RULES_CATALOG_FIXTURE = {
   revision: 7,
   definition: {
@@ -18,7 +20,7 @@ export const LINE_NOTIFICATION_RULES_CATALOG_FIXTURE = {
       },
     ],
   },
-} as const;
+} satisfies LineNotificationRulesCatalog;
 
 export const LINE_NOTIFICATION_RULES_ENVELOPE_FIXTURE = {
   success: true,
@@ -70,7 +72,7 @@ export const LINE_RICH_MENU_CONFIGURATION_FIXTURE = {
       },
     ],
   },
-} as const;
+} satisfies LineRichMenuConfiguration;
 
 export const LINE_RICH_MENU_DRAFT_FIXTURE = {
   ...LINE_RICH_MENU_CONFIGURATION_FIXTURE,

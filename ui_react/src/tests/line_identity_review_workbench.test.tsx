@@ -1,8 +1,8 @@
 /**
  * File: line_identity_review_workbench.test.tsx
- * Description: 驗證 LINE 身分人工審核的 list／detail／Preview／確認／Apply／receipt／readback 流程。
+ * Description: 驗證 LINE 身分人工審核一次提交時的 list／detail／內部 Preview／Apply／receipt／readback 流程。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   LineIdentityReviewWorkbench,
@@ -65,13 +65,13 @@ function reviewClient() {
     getReview: vi.fn()
       .mockResolvedValueOnce(PENDING_REVIEW)
       .mockResolvedValue(APPROVED_REVIEW),
-    previewReviewDecision: vi.fn().mockResolvedValue(REVIEW_PREVIEW),
-    applyReviewDecision: vi.fn().mockResolvedValue(APPROVED_REVIEW),
+    previewReviewDecision: vi.fn<LineIdentityReviewClient['previewReviewDecision']>().mockResolvedValue(REVIEW_PREVIEW),
+    applyReviewDecision: vi.fn<LineIdentityReviewClient['applyReviewDecision']>().mockResolvedValue(APPROVED_REVIEW),
   } satisfies LineIdentityReviewClient;
 }
 
 describe('LINE 身分人工審核工作台', () => {
-  it('依序完成 Preview、明確確認、Apply、receipt 與 GET readback', async () => {
+  it('一次提交依序完成內部 Preview、Apply、receipt 與 GET readback', async () => {
     const client = reviewClient();
     render(<LineIdentityReviewWorkbench client={client} />);
 
@@ -81,17 +81,18 @@ describe('LINE 身分人工審核工作台', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: '審核 #71｜月嫂身分驗證' });
 
-    fireEvent.change(screen.getByRole('textbox', { name: '審核原因' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '審核原因（選填）' }), {
       target: { value: '管理員已人工核對資料' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽審核決定' }));
-    await screen.findByRole('heading', { name: '預覽：核准' });
-    expect(screen.getByRole('button', { name: '提交審核決定' })).toBeDisabled();
     expect(client.applyReviewDecision).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認審核對象與決定' }));
     fireEvent.click(screen.getByRole('button', { name: '提交審核決定' }));
     await screen.findByText('審核決定已受理');
+    expect(screen.getByRole('button', { name: '提交審核決定' })).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: '我已確認審核對象與決定' })).not.toBeInTheDocument();
+    expect(client.previewReviewDecision).toHaveBeenCalledExactlyOnceWith(
+      71, 'approve', { expected_version: 3, reason: '管理員已人工核對資料' }, expect.any(Object),
+    );
+    expect(client.previewReviewDecision.mock.invocationCallOrder[0]).toBeLessThan(client.applyReviewDecision.mock.invocationCallOrder[0]);
     expect(screen.getByText('已建立')).toBeInTheDocument();
 
     expect(client.applyReviewDecision).toHaveBeenCalledWith(
@@ -116,18 +117,23 @@ describe('LINE 身分人工審核工作台', () => {
 
   it('修改 reason 後廢止既有 Preview，不可使用 stale fingerprint Apply', async () => {
     const client = reviewClient();
+    const pending = (() => { let resolve!: (value: typeof REVIEW_PREVIEW) => void; const promise = new Promise<typeof REVIEW_PREVIEW>(done => { resolve = done; }); return { promise, resolve }; })();
+    client.previewReviewDecision.mockReturnValueOnce(pending.promise);
     render(<LineIdentityReviewWorkbench client={client} />);
     await screen.findByText('未設定 待審月嫂甲');
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: /審核 #71/ });
-    const reason = screen.getByRole('textbox', { name: '審核原因' });
+    const reason = screen.getByRole('textbox', { name: '審核原因（選填）' });
     fireEvent.change(reason, { target: { value: '第一次人工確認' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽審核決定' }));
-    await screen.findByRole('heading', { name: '預覽：核准' });
+    fireEvent.click(screen.getByRole('button', { name: '提交審核決定' }));
+    await waitFor(() => expect(client.previewReviewDecision).toHaveBeenCalledOnce());
+    const signal = client.previewReviewDecision.mock.calls[0][3]?.signal;
 
     fireEvent.change(reason, { target: { value: '第二次人工確認' } });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { pending.resolve(REVIEW_PREVIEW); });
     expect(screen.queryByRole('heading', { name: '預覽：核准' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '提交審核決定' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '提交審核決定' })).toBeEnabled();
     expect(client.applyReviewDecision).not.toHaveBeenCalled();
   });
 
@@ -172,10 +178,10 @@ describe('LINE 身分人工審核工作台', () => {
     await screen.findByText('未設定 待審月嫂甲');
     fireEvent.click(screen.getByRole('button', { name: '查看審核 #71' }));
     await screen.findByRole('heading', { name: /審核 #71/ });
-    fireEvent.change(screen.getByRole('textbox', { name: '審核原因' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '審核原因（選填）' }), {
       target: { value: '管理員已人工核對資料' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽審核決定' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交審核決定' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('LINE 身分審核服務目前無法安全完成這項操作，請稍後再試。');
     expect(document.body.textContent).not.toContain('BACKEND_REJECTED');

@@ -46,7 +46,7 @@ function maintenanceClient(overrides: Partial<MaintenanceClient> = {}): Maintena
 }
 
 describe('LINE 身分維護操作', () => {
-  it('更正必須先 Preview、填寫原因並確認，Apply 使用唯一 caller identities', async () => {
+  it('更正一次提交並串接內部 Preview／Apply，保留選填原因與唯一 caller identities', async () => {
     const client = maintenanceClient();
     const onBindingChanged = vi.fn();
     render(
@@ -61,16 +61,13 @@ describe('LINE 身分維護操作', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '更正對象識別值' }), {
       target: { value: 'CLIENT-TARGET-002' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽對象更正' }));
-    await screen.findByText('更正客戶乙');
-    const applyButton = screen.getByRole('button', { name: '提交對象更正' });
-    expect(applyButton).toBeDisabled();
-
-    fireEvent.change(screen.getByRole('textbox', { name: '更正原因' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '更正原因（選填）' }), {
       target: { value: '先前綁定到錯誤客戶' },
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已核對目前綁定與更正對象' }));
-    fireEvent.click(applyButton);
+    expect(client.applyReplacement).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '儲存對象更正' }));
+    expect(screen.queryByRole('button', { name: '提交對象更正' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '我已核對目前綁定與更正對象' })).not.toBeInTheDocument();
 
     await screen.findByText(/綁定對象已更正為 更正客戶乙/);
     expect(client.previewReplacement).toHaveBeenCalledWith(
@@ -111,7 +108,7 @@ describe('LINE 身分維護操作', () => {
 
     expect(screen.getByText(/身分授權已停止/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /人工.*解除/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole('textbox', { name: '維護原因' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '維護原因（選填）' }), {
       target: { value: 'provider 回復已永久失敗' },
     });
     fireEvent.click(screen.getByRole('button', { name: '重新排入訪客選單回復' }));
@@ -140,7 +137,7 @@ describe('LINE 身分維護操作', () => {
     );
 
     expect(screen.getByText(/LINE 圖文選單尚未確認回復/)).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('textbox', { name: '修復原因' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '修復原因（選填）' }), {
       target: { value: '訪客選單已重新發布' },
     });
     fireEvent.click(screen.getByRole('button', { name: '重新排入訪客選單回復' }));
@@ -191,7 +188,7 @@ describe('LINE 身分維護操作', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '更正對象識別值' }), {
       target: { value: 'CLIENT-TARGET-002' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽對象更正' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存對象更正' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('LINE 身分維護服務目前無法安全完成這項操作，請稍後再試。');
     expect(document.body.textContent).not.toContain('BACKEND_REJECTED');

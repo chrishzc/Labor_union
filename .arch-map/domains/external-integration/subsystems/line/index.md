@@ -99,3 +99,6 @@ layout_status: `custom_current`
 須分別核對；本索引不把尚缺的請假客戶決策或告警到一次性review link證據標為superseded／passed。
 
 - [LINE identity workspace](modules/line-identity-workspace.md) — 三任務 React 身分管理 presentation。
+
+- integration_root: `ui_react/src/tests/line_customer_service_actions.test.tsx` — 保留的 standalone 客服結案 Query／Preview／Apply 元件與 owner readback 測試。
+- integration_root: `ui_react/src/tests/fixtures/line_configuration_query_fixtures.ts` — 通知規則、Rich Menu 草稿與發布的既有共用 typed projection fixture；共同 consumer 皆歸 LINE subsystem。

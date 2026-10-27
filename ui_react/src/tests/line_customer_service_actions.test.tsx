@@ -87,11 +87,12 @@ describe('LINE 客服完整操作面板', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '預覽開始處理' }));
-    await screen.findByText('待處理 → 處理中');
-    expect(applyUpdate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認狀態與備註內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用客服操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '開始處理' }));
+    await waitFor(() => expect(previewUpdate).toHaveBeenCalledOnce());
+    await waitFor(() => expect(applyUpdate).toHaveBeenCalledOnce());
+    expect(previewUpdate.mock.invocationCallOrder[0]).toBeLessThan(applyUpdate.mock.invocationCallOrder[0]);
+    expect(screen.queryByRole('checkbox', { name: '我已確認狀態與備註內容' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用客服操作' })).not.toBeInTheDocument();
     await screen.findByText('工單已進入處理中。');
     expect(previewUpdate).toHaveBeenCalledWith(
       31,
@@ -120,11 +121,12 @@ describe('LINE 客服完整操作面板', () => {
       target: { value: '工會已完成處理，謝謝您的等候。' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: '回覆後結案' }));
-    fireEvent.click(screen.getByRole('button', { name: '預覽 LINE 回覆' }));
-    await screen.findByText('處理中 → 已結案');
-    expect(applyReply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認回覆內容與工單狀態' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認建立 LINE 回覆任務' }));
+    fireEvent.click(screen.getByRole('button', { name: '送出 LINE 回覆' }));
+    await waitFor(() => expect(previewReply).toHaveBeenCalledOnce());
+    await waitFor(() => expect(applyReply).toHaveBeenCalledOnce());
+    expect(previewReply.mock.invocationCallOrder[0]).toBeLessThan(applyReply.mock.invocationCallOrder[0]);
+    expect(screen.queryByRole('checkbox', { name: '我已確認回覆內容與工單狀態' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認建立 LINE 回覆任務' })).not.toBeInTheDocument();
 
     await screen.findByText('客服回覆已保存並建立 delivery task，工單已結案；LINE 尚未送達。');
     expect(previewReply).toHaveBeenCalledWith(
@@ -185,15 +187,15 @@ describe('LINE 客服完整操作面板', () => {
       />
     );
 
-    expect(screen.getByRole('button', { name: '預覽更新內部備註' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '預覽 LINE 回覆' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存內部備註' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '送出 LINE 回覆' })).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: '內部備註' }), {
       target: { value: '持續追蹤客戶資料' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽更新內部備註' }));
-    await screen.findByText('處理中 → 處理中');
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認狀態與備註內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用客服操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存內部備註' }));
+    await waitFor(() => expect(previewUpdate).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('checkbox', { name: '我已確認狀態與備註內容' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用客服操作' })).not.toBeInTheDocument();
     await screen.findByText('內部備註已更新。');
     expect(previewUpdate).toHaveBeenCalledWith(
       31,

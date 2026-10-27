@@ -45,10 +45,9 @@ describe('LINE 手動歸戶工作台', () => {
     fireEvent.click(within(provisionalTable).getByRole('button', { name: '選取' }));
 
     expect(screen.getByText('U123••••••cdef')).toBeInTheDocument();
-    const submit = screen.getByRole('button', { name: '確認手動配對並綁定' });
-    expect(submit).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /我已核對兩側姓名/ }));
+    const submit = screen.getByRole('button', { name: '手動配對並綁定' });
+    expect(pairProvisionalRegistration).not.toHaveBeenCalled();
+    expect(screen.queryByRole('checkbox', { name: /我已核對兩側姓名/ })).not.toBeInTheDocument();
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
 

@@ -1,13 +1,35 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { serviceStartClient, type ServiceStartView, type StartCommand, type HandoverContext, type HandoverInquiry } from '../api/scheduling/service_start_client';
+import { ordersQueryClient } from '../api/orders/order_query_client';
 import './ServiceStartSubstituteWorkbench.css';
 
 interface Props {caseNo?:string;onCompleted?:()=>Promise<void>}
-interface Pending {id:number;action:'inquire'|'invite'|'dates'|'defer';body:StartCommand}
+interface Pending {id:number;action:'inquire'|'invite'|'dates'|'defer';body:StartCommand;observeOnly?:boolean}
 const storageKey=(id:number)=>`service-start-command:${id}`;
 const willingness={pending:'等待月嫂回覆',willing:'願意代班',unwilling:'無法代班'};
 const invitationLabels:Record<string,string>={pending:'待寄送',processing:'寄送中',sent:'已寄送',failed:'寄送失敗',cancelled:'已取消'};
+
+async function verifyCompletedAssignment(result:ServiceStartView, initial:ServiceStartView, signal:AbortSignal) {
+  const receipt=result.result;
+  if(result.request_id!==initial.request_id || result.case_no!==initial.case_no || result.staff_id!==initial.staff_id
+    || result.workflow_kind!==initial.workflow_kind || result.status!=='applied' || !receipt || receipt.assignments.length===0
+    || (initial.selected_staff_id!==null && result.selected_staff_id!==initial.selected_staff_id)
+    || (result.selected_staff_id!==null && !receipt.assignments.some(row=>row.staff_id===result.selected_staff_id))) {
+    throw new Error('排班結果尚未完成正式回讀。');
+  }
+  const plan=await ordersQueryClient.getAssignmentPlan(initial.case_no,{signal});
+  const grouped=(rows:readonly {staff_id:number;dates:readonly string[]}[])=>{
+    const byStaff=new Map<number,string[]>();
+    for(const row of rows) byStaff.set(row.staff_id,[...(byStaff.get(row.staff_id)??[]),...row.dates]);
+    return JSON.stringify([...byStaff].sort(([a],[b])=>a-b).map(([id,days])=>[id,days.sort()]));
+  };
+  if(plan.case_no!==initial.case_no || plan.order_version<receipt.order_version
+    || grouped(plan.assignments.map(row=>({staff_id:row.staff_id,dates:row.official_service_dates})))
+      !==grouped(receipt.assignments.map(row=>({staff_id:row.staff_id,dates:row.service_dates})))) {
+    throw new Error('排班結果尚未完成正式回讀。');
+  }
+}
 
 export function ServiceHandoverWorkbench({caseNo,assignmentId}:{caseNo:string;assignmentId?:number}) {
   const [context,setContext]=useState<HandoverContext|null>(null);
@@ -87,7 +109,11 @@ export function ServiceStartSubstituteWorkbench({caseNo,onCompleted}:Props) {
 
 function SubstituteCard({initial,options,onCompleted}:{initial:ServiceStartView;options:{staff_id:number;name:string}[];onCompleted?:()=>Promise<void>}) {
   const [item,setItem]=useState(initial);
-  useEffect(()=>setItem(initial),[initial]);
+  const [observed,setObserved]=useState(false);
+  const mounted=useRef(true);
+  const inFlight=useRef(false);
+  const observation=useRef<AbortController|null>(null);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;observation.current?.abort();};},[]);
   const [staffId,setStaffId]=useState('');
   const [keyword,setKeyword]=useState('');
   const [found,setFound]=useState<typeof options|null>(null);
@@ -103,19 +129,73 @@ function SubstituteCard({initial,options,onCompleted}:{initial:ServiceStartView;
   const [notice,setNotice]=useState('');
   const [choosing,setChoosing]=useState(false);
   const [recordDefer,setRecordDefer]=useState(Boolean(initial.conflict_message));
+  const savePending=(value:Pending|null)=>{
+    if(mounted.current) setPending(value);
+    if(value) sessionStorage.setItem(storageKey(initial.request_id),JSON.stringify(value));
+    else sessionStorage.removeItem(storageKey(initial.request_id));
+  };
+  useEffect(()=>{
+    setItem(initial);setObserved(false);
+    if(initial.status!=='applied') return;
+    if(pending && !pending.observeOnly) savePending({...pending,observeOnly:true});
+    const controller=new AbortController();
+    void verifyCompletedAssignment(initial,initial,controller.signal).then(()=>{
+      if(!controller.signal.aborted){setObserved(true);setError('');}
+    }).catch(()=>{if(!controller.signal.aborted) setError('排班結果尚未完成正式回讀。');});
+    return()=>controller.abort();
+  },[initial]);
   const command=async(saved:Pending)=>{
+    if(inFlight.current) return;
+    inFlight.current=true;
     setBusy(true);setError('');setNotice('');
-    setPending(saved);sessionStorage.setItem(storageKey(item.request_id),JSON.stringify(saved));
-    try {const result=await serviceStartClient.command(saved.id,saved.action,saved.body);
-      setItem(result);setPending(null);sessionStorage.removeItem(storageKey(item.request_id));setChoosing(false);
+    let current=saved;
+    savePending(current);
+    try {const result=saved.observeOnly?await serviceStartClient.detail(saved.id):await serviceStartClient.command(saved.id,saved.action,saved.body);
+      if(result.status==='applied') {current={...saved,observeOnly:true};savePending(current);}
+      if(!mounted.current) return;
+      if(result.request_id!==initial.request_id || result.case_no!==initial.case_no || result.staff_id!==initial.staff_id
+        || result.workflow_kind!==initial.workflow_kind || (saved.observeOnly && result.status!=='applied')) {
+        throw new Error('排班結果尚未完成正式回讀。');
+      }
+      if(result.status==='applied') {
+        const controller=new AbortController();observation.current=controller;
+        await verifyCompletedAssignment(result,initial,controller.signal);
+        if(controller.signal.aborted || !mounted.current) return;
+        await onCompleted?.();
+        if(controller.signal.aborted || !mounted.current) return;
+        setObserved(true);
+      }
+      setItem(result);savePending(null);setChoosing(false);
       setNotice(result.status==='applied'?(result.result?.group_record_queued?'服務日期與排班已更新，日期表已交付寄送。':'正式排班已更新；本案尚缺服務群組，請先完成群組設定。'):saved.action==='invite'?'群組邀請已排入寄送，請等待月嫂加入。':saved.action==='inquire'?'代班意願詢問已排入寄送。':'仍需處理代班，請核對日期與檔期。');
-      if(result.status==='applied') await onCompleted?.();
-    } catch(e) {setError(e instanceof Error?e.message:'尚無法確認處理結果。');
-      if(e instanceof ApiHttpError && e.status>=400 && e.status<500) {setPending(null);sessionStorage.removeItem(storageKey(item.request_id));}
-    } finally {setBusy(false);}
+    } catch(e) {if(mounted.current) setError(current.observeOnly?'排班結果尚未完成正式回讀。':e instanceof Error?e.message:'尚無法確認處理結果。');
+      if(!current.observeOnly && e instanceof ApiHttpError && e.status>=400 && e.status<500) savePending(null);
+    } finally {inFlight.current=false;if(mounted.current) setBusy(false);}
   };
   const run=(action:Pending['action'],fields:Partial<StartCommand>={})=>void command({id:item.request_id,action,body:{expected_version:item.version,idempotency_key:crypto.randomUUID(),...fields}});
-  const refresh=async()=>{setBusy(true);setError('');setNotice('');try {setItem(await serviceStartClient.detail(item.request_id));}catch(e){setError(e instanceof Error?e.message:'無法查詢最新結果。');}finally{setBusy(false);}};
+  const refresh=async()=>{
+    if(pending?.observeOnly){await command(pending);return;}
+    if(inFlight.current) return;
+    inFlight.current=true;setBusy(true);setError('');setNotice('');
+    let completed=false;
+    try {
+      const result=await serviceStartClient.detail(initial.request_id);
+      completed=result.status==='applied';
+      if(completed && pending) savePending({...pending,observeOnly:true});
+      if(result.request_id!==initial.request_id || result.case_no!==initial.case_no || result.staff_id!==initial.staff_id
+        || result.workflow_kind!==initial.workflow_kind) throw new Error('回讀的服務安排與目前案件不一致。');
+      if(result.status==='applied') {
+        const controller=new AbortController();observation.current=controller;
+        await verifyCompletedAssignment(result,initial,controller.signal);
+        if(controller.signal.aborted || !mounted.current) return;
+        await onCompleted?.();
+        if(controller.signal.aborted || !mounted.current) return;
+        setObserved(true);
+        savePending(null);
+      }
+      if(mounted.current) setItem(result);
+    }catch(e){if(mounted.current) setError(completed?'排班結果尚未完成正式回讀。':e instanceof Error?e.message:'無法查詢最新結果。');}
+    finally{inFlight.current=false;if(mounted.current) setBusy(false);}
+  };
   const frozen=busy || pending!==null || item.status==='applied';
   const leave=item.workflow_kind==='leave';
   const handover=item.workflow_kind==='handover';
@@ -128,8 +208,8 @@ function SubstituteCard({initial,options,onCompleted}:{initial:ServiceStartView;
     {leave && <p>原服務日：{item.leave_dates.map(d=>d.original_date).join('、')}</p>}
     {handover && <p>原區段剩餘服務日：{item.handover_dates.join('、')}</p>}
     {item.conflict_message && <p role="status">{item.conflict_message}</p>}
-    {item.status==='applied'?<><strong>正式排班已完成</strong><p>開始日：{item.result?.actual_start_date} · 第一期款期限：{item.result?.first_payment_due_date}</p>
-      {item.result?.assignments.map((assignment,index)=><p key={index}>{assignment.staff_name}：{assignment.service_dates.join('、')}</p>)}</>:<>
+    {item.status==='applied'?(observed?<><strong>正式排班已完成</strong><p>開始日：{item.result?.actual_start_date} · 第一期款期限：{item.result?.first_payment_due_date}</p>
+      {item.result?.assignments.map((assignment,index)=><p key={index}>{assignment.staff_name}：{assignment.service_dates.join('、')}</p>)}</>:<p>已收到排班完成結果，尚待正式回讀確認。{!pending && <button type="button" disabled={busy} onClick={()=>void refresh()}>重新讀取排班結果</button>}</p>):<>
       {leave && !recordDefer && <button type="button" disabled={frozen} onClick={()=>setRecordDefer(true)}>記錄原月嫂順延日期</button>}
       {leave && recordDefer && <fieldset disabled={frozen}><legend>記錄雙方重新談妥的順延日期</legend>{dateInputs()}
         <button type="button" disabled={!datesValid || changes.some(d=>d.new_date<=d.original_date)} onClick={()=>run('defer',{dates:changes})}>儲存順延日期並更新排班</button></fieldset>}
@@ -155,6 +235,6 @@ function SubstituteCard({initial,options,onCompleted}:{initial:ServiceStartView;
       </fieldset>}
     </>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {pending && <p>這筆操作結果尚未確認。<button type="button" disabled={busy} onClick={()=>void command(pending)}>確認原操作結果</button></p>}
+    {pending && <p>這筆操作結果尚未確認。<button type="button" disabled={busy} onClick={()=>void command(pending)}>{pending.observeOnly?'重新讀取排班結果':'確認原操作結果'}</button></p>}
   </article>;
 }

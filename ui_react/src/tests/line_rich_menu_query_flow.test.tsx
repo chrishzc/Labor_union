@@ -53,7 +53,7 @@ describe('LINE Rich Menu query 接線', () => {
     expect(resolveRichMenuUri('?target=unknown')).toBe('/line-identity?target=unknown');
   });
 
-  it('發布緊鄰儲存且保留確認，移除歷程入口；published 內容可建立下一版草稿', async () => {
+  it('發布緊鄰儲存且一次提交，移除歷程入口；published 內容可建立下一版草稿', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration, richMenuDraft } = dependencies();
@@ -67,10 +67,10 @@ describe('LINE Rich Menu query 接線', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '外觀與名稱' }));
     expect(screen.getByLabelText('選單名稱')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查並儲存草稿' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '儲存草稿' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '按鈕設定' }));
-    expect(screen.getByRole('button', { name: '檢查並儲存草稿' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    expect(screen.getByRole('button', { name: '儲存草稿' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '發布' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /準備發布至 LINE|確認發布至 LINE/ })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '此版本已發布' })).toBeInTheDocument();
     expect(screen.getByText(/這不是月嫂或工會人員的權限限制/)).toBeInTheDocument();
@@ -79,8 +79,8 @@ describe('LINE Rich Menu query 接線', () => {
     expect(configuration.listRichMenuPublications).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '發布紀錄' })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '圖文選單工作頁' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉發布確認' }));
-    expect(screen.getByRole('button', { name: '發布' }).parentElement).toBe(screen.getByRole('button', { name: '檢查並儲存草稿' }).parentElement);
+    expect(screen.getByRole('button', { name: '儲存草稿' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '發布至 LINE' })).not.toBeInTheDocument();
     expect(configuration.getRichMenuPublication).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '重新發布' })).not.toBeInTheDocument();
     expect(screen.queryByText(/發布工作 ID|設定版本|紀錄 ID|伺服器狀態/)).not.toBeInTheDocument();
@@ -114,12 +114,12 @@ describe('LINE Rich Menu query 接線', () => {
     expect(dependenciesValue.richMenuDraft.apply).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '查看發布狀態' }));
+    expect(screen.queryByRole('button', { name: '發布至 LINE' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '發布處理中' })).toBeInTheDocument();
     expect(screen.getAllByText('此版本正在發布處理中，為避免變更已送出的內容，目前只能查看。').length).toBeGreaterThan(0);
   });
 
-  it.each(['published', 'publish_retryable_failed'] as const)('排入後追蹤至 %s；可重試失敗留在確認視窗處理', async (terminalStatus) => {
+  it.each(['published', 'publish_retryable_failed'] as const)('排入後追蹤至 %s；可重試失敗留在發布狀態視窗處理', async (terminalStatus) => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected network')));
     sessionClient.setSession('root-session', {
       id: 7,
@@ -166,21 +166,20 @@ describe('LINE Rich Menu query 接線', () => {
       />
     );
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
-    fireEvent.click(await screen.findByRole('button', { name: '發布' }));
-    fireEvent.click(await screen.findByRole('button', { name: /檢查發布影響/ }));
-    await screen.findByText(/發布影響已確認/);
-    fireEvent.change(screen.getByRole('textbox', { name: '發布原因' }), {
+    await screen.findByRole('button', { name: '發布至 LINE' });
+    expect(publication.publish).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: '發布原因（選填）' }), {
       target: { value: '發布客戶選單新版' },
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: /同意排入發布序列/ }));
-    fireEvent.click(screen.getByRole('button', { name: /確認發布至 LINE/ }));
+    expect(screen.queryByRole('checkbox', { name: /同意排入發布序列/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '發布至 LINE' }));
 
     await waitFor(() => expect(dependenciesValue.configuration.getRichMenuPublication).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('heading', { name: terminalStatus === 'published' ? '此版本已發布' : '發布未完成' }, { timeout: 4000 })).toBeInTheDocument();
     if (terminalStatus === 'publish_retryable_failed') {
-      fireEvent.change(screen.getByRole('textbox', { name: '重試原因' }), { target: { value: '確認後重新排入' } });
-      fireEvent.click(screen.getByRole('checkbox', { name: /我已確認此紀錄為發布可重試失敗/ }));
-      fireEvent.click(screen.getByRole('button', { name: '確認重新排入發布' }));
+      fireEvent.change(screen.getByRole('textbox', { name: '重試原因（選填）' }), { target: { value: '確認後重新排入' } });
+      expect(screen.queryByRole('checkbox', { name: /我已確認此紀錄為發布可重試失敗/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '重新排入發布' }));
       await waitFor(() => expect(publication.retry).toHaveBeenCalledWith(19, expect.objectContaining({ reason: '確認後重新排入' }), expect.objectContaining({ signal: expect.any(AbortSignal) })));
       await screen.findByRole('heading', { name: '發布未完成' });
     }
@@ -216,16 +215,14 @@ describe('Rich Menu shared draft persistence', () => {
     expect(screen.getByLabelText('自訂選單底色')).toHaveValue('#123456');
     fireEvent.click(screen.getByRole('button', { name: '按鈕設定' }));
     fireEvent.change(screen.getByLabelText('按鈕顯示名稱'), { target: { value: '查詢服務進度' } });
-    expect(screen.getByRole('button', { name: '發布' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '發布至 LINE' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '檢查發布影響' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '外觀與名稱' }));
     expect(screen.getByLabelText('自訂選單底色')).toHaveValue('#123456');
-    fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' }));
-    await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '確認背景色及按鈕名稱' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
+    expect(screen.queryByRole('checkbox', { name: /我確認儲存此草稿/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存草稿' }));
     await screen.findByText('草稿已儲存並重新載入；尚未發布至 LINE。');
     expect(deps.richMenuDraft.apply).toHaveBeenCalledTimes(1);
     expect(deps.richMenuDraft.query).toHaveBeenCalledTimes(2);
@@ -248,18 +245,16 @@ describe('Rich Menu shared draft persistence', () => {
     vi.mocked(deps.richMenuDraft.apply).mockResolvedValue({ receipt: { outcome: 'created', committed_revision: 9, receipt_reference: 'readback-mismatch' }, readback: { ...initial, revision: 9 } });
     render(<LineManagementPage customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
     fireEvent.change(await screen.findByLabelText('自訂選單底色'), { target: { value: '#123456' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查並儲存草稿' })); await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '驗證讀回衝突' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /我確認儲存此草稿/ }));
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存草稿' }));
-    await screen.findAllByText(/重新載入的內容與確認結果不同/);
-    fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
-    fireEvent.click(screen.getByRole('button', { name: '取消修改' })); fireEvent.click(screen.getByRole('button', { name: '確認取消修改' }));
-    expect(screen.getByRole('button', { name: '發布' })).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: /我確認儲存此草稿/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存草稿' }));
+    await screen.findAllByText(/重新載入的內容不同/);
+    fireEvent.click(screen.getByRole('button', { name: '取消修改' }));
+    expect(screen.queryByRole('button', { name: '發布至 LINE' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '檢查發布影響' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
-    await screen.findByLabelText('自訂選單底色'); fireEvent.click(screen.getByRole('button', { name: '發布' }));
-    expect(screen.getByRole('button', { name: '檢查發布影響' })).toBeInTheDocument();
+    await screen.findByRole('button', { name: '發布至 LINE' });
+    expect(screen.getByRole('button', { name: '發布至 LINE' })).toBeInTheDocument();
   });
 
 });

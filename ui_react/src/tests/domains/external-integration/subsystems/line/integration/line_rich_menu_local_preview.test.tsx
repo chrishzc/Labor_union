@@ -81,10 +81,10 @@ describe('Rich Menu 本機互動預覽', () => {
     expect(screen.queryByText('合規可發布')).not.toBeInTheDocument();
     expect(screen.queryByText(/熱區路由合格/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    expect(screen.getByRole('button', { name: '發布至 LINE' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: /版本.*比對/ })).not.toBeInTheDocument();
     expect(screen.getByText('檢查正常')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '關閉發布確認' }));
+    expect(richMenuDraft.apply).not.toHaveBeenCalled();
     expect(screen.queryByText(/服務登記 \(2500x843 半版\)/)).not.toBeInTheDocument();
     expect(screen.queryByText(/升級 4 宮格熱區/)).not.toBeInTheDocument();
 
@@ -110,7 +110,6 @@ describe('Rich Menu 本機互動預覽', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '外觀與名稱' }));
     fireEvent.click(screen.getByRole('button', { name: '取消修改' }));
-    fireEvent.click(screen.getByRole('button', { name: '確認取消修改' }));
     expect(within(phoneMenu as HTMLElement).getByText('案件進度')).toBeInTheDocument();
     fireEvent.click(within(phoneMenu as HTMLElement).getByRole('button', { name: /案件進度/ }));
     expect(screen.queryByText('尚未保存的本機訊息')).not.toBeInTheDocument();

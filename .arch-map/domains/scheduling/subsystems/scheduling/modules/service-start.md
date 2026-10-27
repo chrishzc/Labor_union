@@ -27,6 +27,7 @@
 - `db/schema_parts/1054_scheduling_service_start.sql`
 
 - pending todo Query 與 Apply 同樣只接受洽談中、訂單成立、服務中；不列歷史、取消及完成案件，原需求歷史保留。
+- React 完成回應須核對同一 request／案件／人員，並透過 `ordersQueryClient.getAssignmentPlan` 回讀正式版本與逐人服務日期後才顯示完成或通知父頁。收到完成回應後的失敗保存只讀恢復標記；一般查詢或重新進頁讀到完成結果時，同樣先將原未明命令轉成只讀恢復。重試讀取原結果及正式排班，不重送異動，成功回讀才同步總數及通知父頁；離開畫面不送出晚到完成通知。
 
 ## Contracts
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — SSTART-01～08。

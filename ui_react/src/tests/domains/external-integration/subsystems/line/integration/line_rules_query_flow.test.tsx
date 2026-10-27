@@ -54,7 +54,8 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     await screen.findByRole('button', { name: '編輯訂金確認內容' });
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input) === '/api/v1/line/notification-rules/deposit_notice/message-template')).toHaveLength(1);
     expect(fetchSpy.mock.calls.every(([, options]) => options?.method === 'GET')).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
@@ -64,7 +65,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     expect(screen.getByLabelText('收件者')).toHaveValue('client');
     expect(screen.getByLabelText('排程方式')).toHaveValue('immediate');
     fireEvent.click(screen.getByRole('button', { name: '返回內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '關閉通知內容' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
     fireEvent.click(screen.getByRole('button', { name: '編輯訂金確認內容' }));
     expect(screen.getAllByText('訂金確認').length).toBeGreaterThan(0);
@@ -85,7 +86,8 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     expect(await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' })).toBeInTheDocument();
     // An empty rules definition retains the welcome entry, without inventing notification rules.
-    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(document.querySelectorAll('[data-notification-id]')).toHaveLength(1);
+    expect(document.querySelector('[data-notification-id="welcome"]')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '編輯訂金確認內容' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Current revision|revision：0/i)).not.toBeInTheDocument();
     expect(screen.queryByText('FLOW-13')).not.toBeInTheDocument();
