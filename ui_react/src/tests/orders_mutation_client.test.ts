@@ -411,14 +411,18 @@ describe('OrdersMutationClient Suite (Confirmed Service Dates & Controlled Reope
       expect(FingerprintSchema.safeParse('a'.repeat(64)).success).toBe(true);
     });
 
-    it('Reason 邊界與非空防護：空字串、純空白、>500 字元必須失敗；1 字元、500 字元與中文必須成功', () => {
-      expect(ReasonSchema.safeParse('').success).toBe(false);
-      expect(ReasonSchema.safeParse('   ').success).toBe(false);
+    it('Reason 為選填：接受空字串與純空白，保留 500 字元上限及中文輸入', () => {
+      expect(ReasonSchema.parse('')).toBe('');
+      expect(ReasonSchema.parse('   ')).toBe('   ');
       expect(ReasonSchema.safeParse('a'.repeat(501)).success).toBe(false);
       expect(ReasonSchema.safeParse('a').success).toBe(true);
       expect(ReasonSchema.safeParse('a'.repeat(500)).success).toBe(true);
       expect(ReasonSchema.safeParse('  a  ').success).toBe(true);
       expect(ReasonSchema.safeParse('客戶確認重啟合約需求').success).toBe(true);
+      const payload = { ...realisticOrderReopenApplyPayload, reason: '' };
+      expect(OrderReopenApplyPayloadSchema.parse(payload).reason).toBe('');
+      expect(OrderReopenApplyPayloadSchema.safeParse({ ...payload, expected_order_version: undefined }).success).toBe(false);
+      expect(OrderReopenApplyPayloadSchema.safeParse({ ...payload, preview_fingerprint: 'invalid' }).success).toBe(false);
     });
 
     it('Idempotency-Key 為空白或格式錯誤時應於前端請求前攔截拋錯', async () => {

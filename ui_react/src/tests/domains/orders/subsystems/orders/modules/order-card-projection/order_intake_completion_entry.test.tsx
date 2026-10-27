@@ -105,8 +105,8 @@ describe('Orders intake repair entry', () => {
     expect(screen.getByLabelText('每日服務時數')).toHaveValue(8);
     expect(screen.getByLabelText('備註（選填）')).toHaveValue('');
     expect(screen.getByLabelText('備註（選填）')).not.toHaveAttribute('aria-required');
-    fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
-    fireEvent.click(await screen.findByRole('button', { name: '確認儲存服務資料' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務資料' }));
+    expect(screen.queryByRole('button', { name: '確認儲存服務資料' })).not.toBeInTheDocument();
     await waitFor(() => expect(completionApply).toHaveBeenCalledWith(caseNo, repaired, '', expect.stringContaining(`orders-intake-complete-${caseNo}-`)));
     if (failReadback) {
       await screen.findByRole('button', { name: '只重新讀取補件結果' });
@@ -171,12 +171,11 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(screen.getByLabelText('每日服務時數'), { target: { value: '8' } });
     expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('服務天數')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '預覽服務資料變更' }));
-    await screen.findByRole('button', { name: '確認儲存服務資料' });
-    expect(previewTerms).toHaveBeenCalledWith(caseNo, '2026-11-15', 21, expect.objectContaining({ proposedServiceTime: savedTime }));
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '確認每日實際服務八小時' } });
     query.mockResolvedValue({ ...completion, lifecycle_version: 8 });
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存服務資料' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務資料' }));
+    await waitFor(() => expect(previewTerms).toHaveBeenCalledWith(caseNo, '2026-11-15', 21, expect.objectContaining({ proposedServiceTime: savedTime })));
+    expect(screen.queryByRole('button', { name: '確認儲存服務資料' })).not.toBeInTheDocument();
     await screen.findByRole('button', { name: '只重新讀取補件結果' });
     expect(apply).toHaveBeenCalledOnce();
     query.mockResolvedValue({ ...completion, lifecycle_version: 8, current_service_time: savedTime });
@@ -213,12 +212,11 @@ describe('Orders intake repair entry', () => {
     expect(screen.queryByLabelText('約定服務開始日')).not.toBeInTheDocument();
     fireEvent.change(phone, { target: { value: '0912345678' } });
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '核對並修正電話' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
-    await screen.findByLabelText('欄位修正前後');
     vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...profileDetail, client: {
       ...profileDetail.client, version: 3, values: { ...profileDetail.client.values, phone: '0912345678' },
     } });
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存缺件資料' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存缺件資料' }));
+    expect(screen.queryByRole('button', { name: '確認儲存缺件資料' })).not.toBeInTheDocument();
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     expect(screen.queryByLabelText('電話（手機／市話）')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('服務方式')).not.toBeInTheDocument();
@@ -261,16 +259,22 @@ describe('Orders intake repair entry', () => {
     const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
       case_no: 'CASE-153', lifecycle_version: 7, before_start_date: null, before_service_days: null,
       after_start_date: '2026-10-15', after_service_days: 30, changed_fields: [missing],
-      blockers: [], apply_allowed: true, preview_fingerprint: FP1,
+      blockers: ['synthetic_terms_owner_blocker'], apply_allowed: false, preview_fingerprint: FP1,
     });
-    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" />);
+    const applyTerms = vi.spyOn(orderIntakeCompletionClient, 'applyTerms').mockRejectedValue(new Error('unexpected apply'));
+    const onChanged = vi.fn();
+    render(<OrderIntakeRepairPanel caseNo="CASE-153" orderStatus="待補件" onChanged={onChanged} />);
     const missingLabel = missing === 'start_date' ? '約定服務開始日' : '服務天數';
     const savedLabel = missing === 'start_date' ? '服務天數' : '約定服務開始日';
     const input = await screen.findByLabelText(missingLabel);
     expect(screen.queryByLabelText(savedLabel)).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: missing === 'start_date' ? '2026-10-15' : '30' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存日期與天數' }));
     await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30, expect.any(Object)));
+    await screen.findByText('synthetic_terms_owner_blocker');
+    expect(applyTerms).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '儲存日期與天數' })).toBeEnabled();
   });
 
   it.each([false, true])('姓名備註留白且日期仍缺件時，使用客戶主檔正式回讀，名稱不一致則保留保護（不一致=%s）', async (mismatched) => {
@@ -298,8 +302,8 @@ describe('Orders intake repair entry', () => {
     render(<OrderIntakeRepairPanel caseNo="CASE-153" registry />);
     fireEvent.change(await screen.findByLabelText('客戶姓名'), { target: { value: '合成補件姓名' } });
     expect(screen.getByLabelText('備註（選填）')).toHaveValue('');
-    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件影響' }));
-    fireEvent.click(await screen.findByRole('button', { name: '確認儲存姓名' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存姓名' }));
+    expect(screen.queryByRole('button', { name: '確認儲存姓名' })).not.toBeInTheDocument();
     if (mismatched) {
       await screen.findByRole('button', { name: '只重新讀取補件結果' });
       expect(screen.getByLabelText('約定服務開始日')).toBeDisabled();
@@ -347,7 +351,7 @@ describe('Orders intake repair entry', () => {
     });
     render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, client_name: '測試客戶' }} onChanged={vi.fn()} />);
     fireEvent.change(await screen.findByLabelText('CASE-153 服務天數'), { target: { value: '30' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務資料補件' }));
     await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-153', '2026-10-15', 30));
   });
 
@@ -416,7 +420,7 @@ describe('Orders intake repair entry', () => {
     expect(screen.getByText('約定服務開始日', { selector: 'li' })).toBeInTheDocument();
     expect(screen.getByText('服務天數', { selector: 'li' })).toBeInTheDocument();
     expect(await screen.findByText('服務資料已鎖定，目前不能完成進件補齊。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存服務資料補件' })).toBeDisabled();
     expect(screen.queryByText('CASE-OK')).not.toBeInTheDocument();
   });
 
@@ -497,12 +501,14 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(screen.getByLabelText('CASE-153 備註（選填）'), {
       target: { value: '補齊原始進件缺漏' },
     });
-    await waitFor(() => expect(screen.getByRole('button', { name: '檢查服務資料補件' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '檢查服務資料補件' }));
-    await screen.findByText('補件欄位：約定服務開始日、服務天數');
-    expect(screen.getByText('補件前：未填寫／未填寫 天')).toBeInTheDocument();
-    expect(screen.getByText('補件後：2026-09-10／30 天')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '確認補齊服務資料' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存服務資料補件' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務資料補件' }));
+    await waitFor(() => expect(orderIntakeCompletionClient.previewTerms).toHaveBeenCalled());
+    await expect(vi.mocked(orderIntakeCompletionClient.previewTerms).mock.results[0].value).resolves.toMatchObject({
+      changed_fields: ['start_date', 'service_days'], before_start_date: null, before_service_days: null,
+      after_start_date: '2026-09-10', after_service_days: 30,
+    });
+    expect(screen.queryByRole('button', { name: '確認補齊服務資料' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(applyTerms).toHaveBeenCalledWith(
       'CASE-153',
@@ -519,7 +525,7 @@ describe('Orders intake repair entry', () => {
     await waitFor(() => expect(applyCompletion).toHaveBeenCalled());
   });
 
-  it.each([true, false])('shows name Preview before/after and honors owner apply_allowed=%s', async (allowed) => {
+  it.each([true, false])('one-click name repair preserves owner Preview facts and honors apply_allowed=%s', async (allowed) => {
     const onChanged = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(orderIntakeCompletionClient, 'previewCompletion').mockResolvedValue({
       case_no: 'CASE-153', lifecycle_version: 7, current_status: '待補件', target_status: '洽談中',
@@ -536,23 +542,22 @@ describe('Orders intake repair entry', () => {
     });
     render(<OrdersIntakeRepairCard item={{ ...incompleteSummary, start_date: '2026-09-10', service_days: 5 }} onChanged={onChanged} />);
     fireEvent.change(await screen.findByLabelText('CASE-153 客戶姓名'), { target: { value: '合成補件姓名' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查姓名補件' }));
-    const preview = await screen.findByLabelText('姓名補件前後');
-    expect(preview).toHaveTextContent('補件前姓名：未填寫');
-    expect(preview).toHaveTextContent('補件後姓名：合成補件姓名');
     expect(applyName).not.toHaveBeenCalled();
-    const applyButton = screen.getByRole('button', { name: '確認補齊客戶姓名' });
     expect(screen.getByLabelText('CASE-153 備註（選填）')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '儲存姓名補件' }));
+    await waitFor(() => expect(orderIntakeCompletionClient.previewClientName).toHaveBeenCalledOnce());
+    await expect(vi.mocked(orderIntakeCompletionClient.previewClientName).mock.results[0].value).resolves.toMatchObject({
+      before_client_name: null, after_client_name: '合成補件姓名', apply_allowed: allowed,
+    });
+    expect(screen.queryByRole('button', { name: '確認補齊客戶姓名' })).not.toBeInTheDocument();
     if (!allowed) {
       expect(screen.getByLabelText('姓名補件阻擋原因')).toHaveTextContent('synthetic_name_owner_blocker');
-      expect(applyButton).toBeDisabled();
-      fireEvent.click(applyButton);
+      fireEvent.click(screen.getByRole('button', { name: '儲存姓名補件' }));
+      await waitFor(() => expect(orderIntakeCompletionClient.previewClientName).toHaveBeenCalledTimes(2));
       expect(applyName).not.toHaveBeenCalled();
       expect(onChanged).not.toHaveBeenCalled();
       return;
     }
-    expect(applyButton).toBeEnabled();
-    fireEvent.click(applyButton);
     await waitFor(() => expect(applyName).toHaveBeenCalledWith(
       'CASE-153', expect.objectContaining({ apply_allowed: true, preview_fingerprint: FP1 }),
       '', expect.stringContaining('orders-intake-client-name-CASE-153-'),
@@ -576,7 +581,7 @@ describe('Orders intake repair entry', () => {
         missing_fields: [], blockers: ['order_intake_completion_status_not_eligible'],
         apply_allowed: false, preview_fingerprint: FP2,
       });
-    vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
+    const previewTerms = vi.spyOn(orderIntakeCompletionClient, 'previewTerms').mockResolvedValue({
       case_no: 'CASE-EARLY-CORRECTION', lifecycle_version: 7,
       before_start_date: '2026-09-10', before_service_days: 30,
       after_start_date: '2026-09-12', after_service_days: 28,
@@ -601,9 +606,9 @@ describe('Orders intake repair entry', () => {
     fireEvent.change(screen.getByLabelText('備註（選填）'), {
       target: { value: '修正剛匯入的服務條件' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '預覽日期與天數變更' }));
-    await screen.findByText('約定服務開始日 2026-09-12；服務天數 28 天。');
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存日期與天數' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存日期與天數' }));
+    await waitFor(() => expect(previewTerms).toHaveBeenCalledWith('CASE-EARLY-CORRECTION', '2026-09-12', 28, expect.anything()));
+    expect(screen.queryByRole('button', { name: '確認儲存日期與天數' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(applyTerms).toHaveBeenCalled());
     await waitFor(() => expect(previewCompletion).toHaveBeenCalledTimes(2));

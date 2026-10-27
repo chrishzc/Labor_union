@@ -20,6 +20,7 @@ import {
   applyLineIdentityReviewDecision,
 } from '../api/line_identity/line_identity_client';
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
+import { LineIdentityRevocationApplyRequestSchema } from '../api/line_identity/line_identity_schemas';
 import {
   BINDING_PAGE_FIXTURE,
   BOUND_IDENTITY_FIXTURE,
@@ -406,16 +407,33 @@ describe('LINE Identity Client（Phase 3A Lane D）', () => {
     expect(preview.provider_menu_id).toBeUndefined();
   });
 
-  it('空白 reason 在送出前 fail closed，網路呼叫為零', async () => {
-    globalThis.fetch = vi.fn();
+  it.each(['', '   ', ' 核對後解除 '])('選填 reason %j 送出前正規化並保留版本與 caller identity', async (reason) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(envelope(REVOCATION_REQUEST_FIXTURE)));
 
     await expect(
       applyLineIdentityRevocation(FIXTURE_LINE_USER_ID, {
         ...REVOCATION_APPLY_REQUEST_FIXTURE,
-        reason: '   ',
+        reason,
       })
-    ).rejects.toMatchObject({ code: 'REQUEST_INVALID', outcomeUnknown: false });
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    ).resolves.toEqual(REVOCATION_REQUEST_FIXTURE);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(url).toBe(`/api/v1/line/identity-bindings/${FIXTURE_LINE_USER_ID}/revocation/apply`);
+    expect(options?.method).toBe('POST');
+    expect(JSON.parse(String(options?.body))).toEqual({
+      ...REVOCATION_APPLY_REQUEST_FIXTURE,
+      reason: reason.trim(),
+    });
+  });
+
+  it('原因選填仍保留版本、冪等識別與關聯識別的必要驗證', () => {
+    const valid = { ...REVOCATION_APPLY_REQUEST_FIXTURE, reason: '' };
+    expect(LineIdentityRevocationApplyRequestSchema.safeParse(valid).success).toBe(true);
+    for (const field of ['expected_version', 'idempotency_key', 'correlation_id']) {
+      expect(LineIdentityRevocationApplyRequestSchema.safeParse({ ...valid, [field]: undefined }).success).toBe(false);
+    }
+    expect(LineIdentityRevocationApplyRequestSchema.safeParse({ ...valid, expected_version: -1 }).success).toBe(false);
+    expect(LineIdentityRevocationApplyRequestSchema.safeParse({ ...valid, reason: 'a'.repeat(1001) }).success).toBe(false);
   });
 
   it.each([
