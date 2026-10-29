@@ -1,49 +1,35 @@
 .line-ticket-reminder-workspace{min-width:0;color:var(--line-color-text)}
-.line-ticket-reminder-workspace h2{margin:0 0 20px;font-size:1.65rem;line-height:1.3}
-.line-ticket-reminder-card{overflow:hidden;border:1px solid var(--line-color-border);border-radius:16px;background:#fff;box-shadow:0 2px 12px rgba(74,69,67,.04)}
-.line-ticket-reminder-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line-color-border-subtle)}
-.line-ticket-status-tabs{display:flex;gap:6px;padding:6px;border:1px solid var(--line-color-border);border-radius:16px;box-shadow:var(--shadow-sm)}
-.line-ticket-status-tabs button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 14px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--line-color-text-muted);font-weight:750;white-space:nowrap}
-.line-ticket-status-tabs button:hover{background:var(--line-color-page)}
-.line-ticket-status-tabs button[aria-pressed=true]{background:var(--line-color-primary);border-color:var(--line-color-primary);color:#fff}
-.line-ticket-status-tabs button span{min-width:23px;padding:2px 6px;border-radius:6px;background:var(--md-sys-color-surface-container-high);font-size:.8125rem}
-.line-ticket-status-tabs button[aria-pressed=true] span{background:rgba(255,255,255,.18)}
-.line-ticket-reminder-workspace .line-secondary-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:8px 13px;border-radius:10px;font-size:.875rem;font-weight:700;cursor:pointer;white-space:nowrap}
-.line-ticket-reminder-workspace .line-secondary-btn svg{width:18px;height:18px}
-.line-ticket-reminder-filters{display:flex;flex-wrap:wrap;gap:12px;padding:20px 22px}
-.line-ticket-reminder-search{position:relative;flex:1;max-width:380px;min-width:220px}
-.line-ticket-reminder-search>svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--line-color-primary);pointer-events:none}
-.line-ticket-reminder-search .line-search-input{min-height:44px;padding:8px 12px 8px 37px}
-.line-ticket-reminder-filters .line-filter-select{min-width:180px}
-.line-ticket-reminder-table{width:100%;border-collapse:collapse;text-align:left}
-.line-ticket-reminder-table th{padding:14px 24px;font-size:.875rem;font-weight:700;color:var(--line-color-text-muted);background:var(--line-color-page);border-block:1px solid var(--line-color-border-subtle)}
-.line-ticket-reminder-table td{padding:20px 24px;border-bottom:1px solid var(--line-color-border-subtle);font-size:.875rem;vertical-align:middle}
+.line-ticket-list-heading{display:flex;align-items:baseline;gap:14px;margin-bottom:10px}
+.line-ticket-list-heading h2{margin:0;font-size:1.65rem;line-height:1.3}
+.line-ticket-list-heading>span{color:var(--line-color-text-muted);font-size:.875rem}
+.line-ticket-list-description{margin:0 0 20px;color:var(--line-color-text-muted);font-size:.875rem;line-height:1.8}
+.line-ticket-reminder-card{overflow:hidden;border:1px solid var(--line-color-border);border-radius:16px;background:#fff;box-shadow:0 2px 12px #4a45430a}
+.line-ticket-reminder-filters{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:20px 24px}
+.line-ticket-reminder-search{width:410px;max-width:100%;min-width:0}
+.line-ticket-reminder-search .line-search-input{width:100%;min-height:44px;padding:10px 14px}
+.line-ticket-reminder-workspace .line-secondary-btn{min-height:44px;border-radius:9px;padding:9px 14px;font-size:.875rem;white-space:nowrap}
+.line-ticket-reminder-table{width:100%;min-width:1000px;border-collapse:collapse;text-align:left}
+.line-ticket-reminder-table th{padding:16px 22px;border-block:1px solid var(--line-color-border-subtle);background:var(--line-color-page);font-size:.875rem;color:var(--line-color-text-muted)}
+.line-ticket-reminder-table td{padding:22px;border-bottom:1px solid var(--line-color-border-subtle);vertical-align:middle;font-size:.875rem;line-height:1.8;overflow-wrap:anywhere}
 .line-ticket-reminder-table tbody tr:last-child td{border-bottom:0}
 .line-ticket-reminder-table tbody tr:hover{background:#fffdfc}
-.line-ticket-reminder-table td:first-child{width:25%}
-.line-ticket-reminder-table td:nth-child(2){width:35%}
-.line-ticket-reminder-table td:nth-child(3){width:22%}
-.line-ticket-reminder-table td:last-child{white-space:nowrap}
+.line-ticket-reminder-table th:nth-child(1){width:15%}.line-ticket-reminder-table th:nth-child(2){width:16%}.line-ticket-reminder-table th:nth-child(3){width:15%}.line-ticket-reminder-table th:nth-child(4){width:29%}.line-ticket-reminder-table th:nth-child(5){width:15%}.line-ticket-reminder-table th:nth-child(6){width:10%}
+.line-ticket-reminder-table td:nth-child(5){white-space:nowrap;font-size:.8125rem}
 .line-ticket-reminder-table strong{font-size:1rem}
-.line-ticket-reminder-secondary{display:block;margin-top:6px;color:var(--line-color-text-muted);font-size:.875rem;line-height:1.7;overflow-wrap:anywhere}
-.line-ticket-reminder-source{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:700}
-.line-ticket-priority{padding:3px 8px;border:1px solid #fecaca;border-radius:6px;background:#fee2e2;color:#991b1b;font-size:.875rem;font-weight:700}
-.line-ticket-reminder-workspace .line-error,.line-ticket-reminder-workspace .line-loading{margin:0 22px 20px}
-.line-ticket-reminder-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--line-color-border-subtle);padding:16px 22px;font-size:.875rem;color:var(--line-color-text-muted)}
-.line-ticket-reminder-pagination>div{display:flex;gap:10px}
+.line-ticket-reminder-secondary{display:block;margin-top:6px;color:var(--line-color-text-muted);font-size:.8125rem;line-height:1.7}
+.line-ticket-name-copy{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.line-ticket-copy{min-height:36px;padding:5px 10px;border:1px solid var(--line-color-border);border-radius:7px;background:var(--line-color-page);color:var(--line-color-text-muted);font:inherit;font-size:.75rem;cursor:pointer;white-space:nowrap}
+.line-ticket-message{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.line-ticket-more-messages{margin-top:8px;color:var(--line-color-text-muted);font-size:.8125rem}.line-ticket-more-messages summary{cursor:pointer;width:fit-content}.line-ticket-more-messages p{white-space:pre-wrap;border-left:2px solid var(--line-color-border);padding-left:12px}
+.line-ticket-list-notice{margin:0 24px 18px;font-size:.875rem;color:var(--line-color-text-muted);line-height:1.8}
+.line-ticket-reminder-workspace .line-error,.line-ticket-reminder-workspace .line-loading{margin:0 24px 20px}
+.line-ticket-reminder-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid var(--line-color-border-subtle);padding:16px 22px;font-size:.875rem;color:var(--line-color-text-muted)}.line-ticket-reminder-pagination>div{display:flex;gap:10px}
 @media(max-width:700px){
- .line-ticket-reminder-top{flex-wrap:wrap;justify-content:flex-end;padding:14px;gap:12px}
- .line-ticket-status-tabs{flex:1 0 100%;gap:4px}
- .line-ticket-status-tabs button{flex:1;min-width:0;padding:8px 5px;font-size:.8125rem;gap:5px}
- .line-ticket-reminder-filters{padding:16px 14px}
- .line-ticket-reminder-search{max-width:none;min-width:100%}
- .line-ticket-reminder-filters .line-filter-select{width:100%}
- .line-ticket-reminder-table,.line-ticket-reminder-table tbody,.line-ticket-reminder-table tr,.line-ticket-reminder-table td{display:block;width:auto!important}
- .line-ticket-reminder-table thead{display:none}
- .line-ticket-reminder-table tr{position:relative;padding:20px 15px;border-top:1px solid var(--line-color-border-subtle)}
- .line-ticket-reminder-table td{padding:0;border:0}
- .line-ticket-reminder-table td:first-child{padding-right:105px;margin-bottom:16px}
- .line-ticket-reminder-table td:nth-child(3){position:absolute;right:15px;top:20px;text-align:right}
- .line-ticket-reminder-table td:last-child{margin-top:16px;font-size:.8125rem;color:var(--line-color-text-muted)}
- .line-ticket-reminder-pagination{padding:14px;flex-wrap:wrap}
+ .line-ticket-reminder-filters{padding:15px;gap:10px}.line-ticket-reminder-filters .line-secondary-btn{padding:8px 10px;font-size:.75rem}
+ .line-ticket-reminder-table,.line-ticket-reminder-table tbody,.line-ticket-reminder-table tr,.line-ticket-reminder-table td{display:block;width:auto!important;min-width:0}
+ .line-ticket-reminder-table thead{display:none}.line-ticket-reminder-table tr{padding:21px 18px;border-top:1px solid var(--line-color-border-subtle)}
+ .line-ticket-reminder-table td{padding:0;border:0;margin-bottom:15px}.line-ticket-reminder-table td:last-child{margin:0}.line-ticket-reminder-table td:last-child button{width:100%}
+ .line-ticket-reminder-table td:nth-child(2)::before{content:'LINE 顯示名稱'}.line-ticket-reminder-table td:nth-child(3)::before{content:'進件來源'}.line-ticket-reminder-table td:nth-child(4)::before{content:'內容'}.line-ticket-reminder-table td:nth-child(5)::before{content:'申請時間'}
+ .line-ticket-reminder-table td:not(:first-child):not(:last-child)::before{display:block;margin-bottom:5px;color:var(--line-color-text-muted);font-size:.75rem}
+ .line-ticket-name-copy{justify-content:space-between}.line-ticket-reminder-pagination{padding:14px;flex-wrap:wrap}
 }

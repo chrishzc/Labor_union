@@ -21,7 +21,6 @@ Windows 日常啟停／更新／搬機改用專案根目錄的 `Windows管理.ba
 | `reset_DB.bat` | 刪除並重建本機 `union_db`；需要明確確認，屬破壞性操作。 |
 | `get_durable_job_worker_task_status.ps1` | 唯讀查詢舊 Windows 排程任務。 |
 | `uninstall_durable_job_worker_task.ps1` | 明確移除舊排程任務。 |
-| `manage_gcp_cloud_run_db_bridge.ps1` | 管理既有受控 DB bridge；不建立 UI 或部署 Streamlit。 |
 
 ## Dry run
 

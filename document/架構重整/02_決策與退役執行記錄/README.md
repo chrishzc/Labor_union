@@ -16,6 +16,7 @@ package；T3 才要求 current spec＋package。相同 owner／scenario／scope 
 |---|---|---|---|
 | [匯入入口與 Legacy Writer 退役](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | 只剩 Client／Staff verified-LIFF replacement acceptance 與 dead historical SQL/helper audit；current profile mutation contract 依 `20` §6.1，entry retirement 依 `19`。 |
 | [Access Control production cutover／external alert](Access_Control_Production_Cutover_and_External_Security_Alert_Work_Package.md) | work-package | `proposed` | production target、external sink、operator 與 rollback scope 未指定；維持 deferred。 |
+| [LINE QA 客服知識契約收斂](LINE_QA客服知識契約收斂計畫.md) | implementation-gap-tracker | `blocked` | 正式語意由 `29` 擁有；追蹤逐題人工審核、versioned `published\|retired` catalog、conflict queue、closed-candidate runtime 與 API／React readback 完成證據。 |
 
 ## Retained current decisions／validation sources
 

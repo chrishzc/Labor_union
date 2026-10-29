@@ -10,6 +10,7 @@ from domains.line.configuration import LineConfigurationKind
 from shared_kernel.identities import ActorContext
 from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import render_message_template
+from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition, render_copy_payload
 
 
 @dataclass(frozen=True)
@@ -193,7 +194,9 @@ _BUILTINS = (
     ("service-order-update", "訂單資訊修改受理", "text", False, False, False),
     ("service-other", "其他問題－自助服務導覽", "flex", False, False, False),
     ("identity-pending", "身分申請受理通知", "text", False, False, False),
-    ("identity-bound", "身分綁定完成通知", "text", False, False, False),
+    ("identity-bound-customer", "客戶綁定成功", "text", False, False, False),
+    ("identity-bound-staff", "月嫂綁定成功", "text", False, False, False),
+    ("identity-bound-admin", "工會人員綁定成功", "text", False, False, False),
 )
 
 
@@ -211,7 +214,7 @@ class LineMessagePreviewApplication:
         else:
             templates = json.loads(snapshot.definition_json)
         rules = json.loads(self._configuration.get(LineConfigurationKind.NOTIFICATION_RULES, actor).definition_json)
-        return templates, rules
+        return effective_copy_definition(templates), rules
 
     def catalog(self, actor: ActorContext) -> tuple[PreviewDescriptor, ...]:
         templates, rules = self._definitions(actor)
@@ -224,7 +227,7 @@ class LineMessagePreviewApplication:
         references += [(r["id"], r["template_id"]) for r in rules.get("rules", [])
                        if r["template_id"] != "customer_onboarding_welcome" and r["template_id"] not in _RETIRED]
         referenced = {template_id for _, template_id in references}
-        references += [("template-" + key, key) for key in _IDENTITY_TEMPLATES if key not in referenced]
+        references += [("template-" + key, key) for key in _IDENTITY_TEMPLATES if key not in referenced and key not in {"bind_success_new_order", "staff_switch_success"}]
         descriptors = []
         for key, template_id in references:
             template = by_id.get(template_id)
@@ -251,6 +254,7 @@ class LineMessagePreviewApplication:
 
     def render(self, key: str, content: str | None, case_no: str | None,
                staff_id: int | None, actor: ActorContext, *, sample: bool = False) -> PreviewResult:
+        key = {"template-bind_success_new_order": "identity-bound-customer", "template-staff_switch_success": "identity-bound-staff"}.get(key, key)
         templates, rules = self._definitions(actor)
         descriptor = next((d for d in self._catalog(templates, rules) if d.id == key), None)
         if descriptor is None:
@@ -319,7 +323,11 @@ class LineMessagePreviewApplication:
                                      descriptor.format, facts=tuple(facts))
             candidate = dict(template)
             if content is not None:
-                candidate["content"] = content
+                if template["message_type"] == "flex":
+                    from subsystems.line.message_copy import copy_fields, apply_copy_payload
+                    candidate["content"] = apply_copy_payload(template["content"], content, copy_fields(template["content"]), {v: "{" + v + "}" for v in declared})
+                else:
+                    candidate["content"] = content
             rendered_payload = json.loads(render_message_template({"templates": [candidate]}, template["id"],
                                           {k: v for k, v in values.items() if k in declared}).payload_json)
         if key in _CURRENT_FLOW_IDS:
@@ -337,11 +345,16 @@ class LineMessagePreviewApplication:
                 return PreviewResult("unavailable", "所選案件與月嫂沒有此卡片所需的正式方案、候選紀錄或完整訂單／服務日期資料，請選擇其他對象。", "flex", facts=tuple(facts))
             payload = json.loads(card_source.payload_json)
         elif key in {"card-union-question", "card-union-answer"}:
+            if content and content.lstrip().startswith("{"):
+                # Stored reusable card copy is independent of per-case authored text.
+                authored_content = "工會於案件中輸入的詢問或回覆內容（公版範例）"
+            else:
+                authored_content = content
             if not content or not content.strip():
                 return PreviewResult("unavailable", "請輸入僅供預覽的工會詢問或回覆文案，不會儲存或發送。", "flex", facts=tuple(facts))
             from subsystems.scheduling.matching_line_cards import candidate_customer_question_card, candidate_caregiver_answer_card
-            payload = json.loads(candidate_customer_question_card(case.case_no, content, "https://preview.invalid/question")
-                if key == "card-union-question" else candidate_caregiver_answer_card(case.case_no, content, "preview-only", "https://preview.invalid/answer"))
+            payload = json.loads(candidate_customer_question_card(case.case_no, authored_content, "https://preview.invalid/question")
+                if key == "card-union-question" else candidate_caregiver_answer_card(case.case_no, authored_content, "preview-only", "https://preview.invalid/answer"))
         elif key in {"service-menu", "service-other", "order-update-menu"}:
             from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
             payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
@@ -351,10 +364,10 @@ class LineMessagePreviewApplication:
             payload = {"type": "text", "text": {"service-flow": _SERVICE_FLOW_REPLY, "service-payment": _PAYMENT_REPLY,
                 "service-profile-update": _TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
                 "service-order-update": _ORDER_UPDATE_ACKNOWLEDGEMENT}[key]}
-        elif key in {"service-contact", "service-resolved", "identity-pending", "identity-bound"}:
-            from subsystems.line.message_copy import CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING, IDENTITY_BOUND
+        elif key in {"service-contact", "service-resolved", "identity-pending"} or key.startswith("identity-bound-"):
+            from subsystems.line.message_copy import CONTACT_RECEIVED, CONTACT_RESOLVED, IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS
             payload = {"type": "text", "text": {"service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
-                "identity-pending": IDENTITY_PENDING, "identity-bound": IDENTITY_BOUND}[key]}
+                "identity-pending": IDENTITY_PENDING}.get(key, IDENTITY_SUCCESS_DEFAULTS.get(key.removeprefix("identity-bound-"), ""))}
         elif descriptor.template_id == _LEAVE:
             if not leave:
                 return PreviewResult("unavailable", "此案件沒有可用的月嫂請假紀錄，無法產生請假確認卡。", "flex", facts=tuple(facts))
@@ -376,9 +389,25 @@ class LineMessagePreviewApplication:
                                                             asdict(case), "preview-only"))
         else:
             payload = rendered_payload
+        if key in default_copy_templates():
+            if sample:
+                from subsystems.line.message_preview_samples import VALUES, CASE, STAFF
+                copy_values = {**VALUES, "staff_name": STAFF.name, "identity_url": VALUES["bind_url"], "registration_url": VALUES["url"],
+                    "recipient_count": 2, "amount_ntd": "6,000", "due_date": "2026-11-01", "service_dates": "2026-11-02、2026-11-04、2026-11-06", "service_period": "服務日期：2026-11-02、2026-11-04、2026-11-06",
+                    "assignments": STAFF.name + "：2026-11-02、2026-11-04、2026-11-06", "status": "訂單成立", "start_date": CASE.start_date, "end_date": CASE.end_date,
+                    "heading": "系統異常通知", "check_name": "LINE Worker（公版）", "message": "公版心跳逾期情境", "occurred_at": "2026-11-01 01:00:00",
+                    "payment_stage": {"payment-overdue-deposit": "訂金", "payment-overdue-first": "第一期款", "payment-overdue-second": "第二期款"}.get(key, ""),
+                    "remaining_amount": {"payment-overdue-deposit": "6,000", "payment-overdue-first": "12,000", "payment-overdue-second": "8,000"}.get(key, "")}
+            else:
+                copy_values = values
+            copy_content = content if not descriptor.allows_draft or (content and content.lstrip().startswith("{")) else None
+            if key == "runtime-system-health":
+                copy_values["status"] = "critical"
+            payload = render_copy_payload(templates, key, payload, copy_values, copy_content)
         if sample:
             from subsystems.line.message_preview_samples import sample_bindings
-            facts = flow_facts if flow_facts is not None else sample_bindings(descriptor, template, content, rendered_payload.get("text", "") if rendered_payload else "")
+            binding_content = authored_content if key in {"card-union-question", "card-union-answer"} else content
+            facts = flow_facts if flow_facts is not None else sample_bindings(descriptor, template, binding_content, rendered_payload.get("text", "") if rendered_payload else "")
         if payload.get("type") == "text":
             return PreviewResult("ready", "公版範例資料，非真實案件或月嫂；不會儲存或發送。" if sample else "使用資料庫資訊預覽；不會實際發送。", "text", str(payload["text"]), facts=tuple(facts))
         container = payload["contents"]

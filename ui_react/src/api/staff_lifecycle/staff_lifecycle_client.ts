@@ -128,7 +128,7 @@ function requestOptions(
   };
 }
 
-function decodeIssues(result: { error: { issues: readonly { path: (string | number)[]; message: string; code: string }[] } }, message: string, raw: unknown): ApiDecodeError {
+function decodeIssues(result: { error: { issues: readonly { path: PropertyKey[]; message: string; code: string }[] } }, message: string, raw: unknown): ApiDecodeError {
   return new ApiDecodeError(
     message,
     result.error.issues.map((issue) => ({

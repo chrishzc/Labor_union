@@ -74,13 +74,20 @@ export const LineNotificationTemplateEditor: React.FC<
   const hasChanges = content !== savedContent;
   const unsavedRef = useUnsavedDraft('通知訊息內容', { '通知內容': content }, { baseline: { '通知內容': savedContent }, busy: saving, enabled: !loading && !!template, save: () => save() });
   const preview = useMemo(
-    () => renderPreview(content, template?.variables ?? []),
-    [content, template?.variables],
+    () => renderPreview(template?.fields?.length ? Object.values(JSON.parse(content) as Record<string, string>).join('\n\n') : content, template?.variables ?? []),
+    [content, template?.variables, template?.fields],
   );
 
   const save = async (): Promise<void> => {
     if (!template || !hasChanges || saving) return;
     if (!saveValidation.validate([{ value: content, label: '通知內容', ref: saveFieldRef }])) return;
+    if (template.fields?.length) {
+      const values = JSON.parse(content) as Record<string, string>;
+      if (template.fields.some(field => !values[field.id]?.trim() || values[field.id].length > field.max_length)) {
+        setFeedback({ type: 'error', message: '請填寫完整文案，並確認各欄位的字數限制。' });
+        return;
+      }
+    }
     setSaving(true);
     setFeedback(null);
     try {
@@ -141,7 +148,7 @@ export const LineNotificationTemplateEditor: React.FC<
                 <RotateCcw aria-hidden="true" />放棄修改
               </button>
             </div>
-            <textarea ref={saveFieldRef} aria-required="true"
+            {template.fields?.length ? template.fields.map((field, index) => <label key={field.id} htmlFor={`line-notification-copy-${ruleId}-${index}`}>{field.label} {index + 1}<textarea id={`line-notification-copy-${ruleId}-${index}`} aria-required="true" rows={field.label === '按鈕名稱' ? 1 : 4} maxLength={field.max_length} value={(JSON.parse(content) as Record<string, string>)[field.id] ?? ''} disabled={saving} onChange={event => { setContent(JSON.stringify({ ...JSON.parse(content), [field.id]: event.target.value })); setFeedback(null); }} /></label>) : <textarea ref={saveFieldRef} aria-required="true"
               id={`line-notification-template-content-${ruleId}`}
               value={content}
               rows={14}
@@ -151,9 +158,9 @@ export const LineNotificationTemplateEditor: React.FC<
                 setContent(event.target.value);
                 if (feedback) setFeedback(null);
               }}
-            />{saveValidation.feedback}
+            />}{saveValidation.feedback}
             <div className="notification-template-meta">
-              <span>{content.length} / 5000 字</span>
+              {!template.fields?.length && <span>{content.length} / 5000 字</span>}
               {template.variables.length > 0 && (
                 <span className="notification-template-variables">
                   <Info aria-hidden="true" />動態變數：{template.variables.map((name) => `{${name}}`).join('、')}

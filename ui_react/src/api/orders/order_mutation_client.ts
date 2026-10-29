@@ -111,12 +111,12 @@ function resolveTransportOptions(
   return reqOptions;
 }
 
-function decodeOrderMutationEnvelope<T extends z.ZodTypeAny>(
-  dataSchema: T,
+function decodeOrderMutationEnvelope<T>(
+  dataSchema: z.ZodType<T>,
   raw: unknown
-): z.output<T> {
+): T {
   const envelope = decodePayload(
-    createOrderMutationEnvelopeSchema(dataSchema),
+    createOrderMutationEnvelopeSchema<T>(dataSchema),
     raw
   );
 

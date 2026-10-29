@@ -5,6 +5,7 @@
 .service-start-card fieldset { display:grid; gap:12px; border:1px solid #d1d5db; padding:14px; margin:12px 0; }
 .service-start-card label { display:grid; gap:6px; }
 .service-start-card input,.service-start-card select { padding:9px; min-height:42px; max-width:100%; }
-.service-start-workbench button { min-height:42px; padding:8px 12px; margin:5px 6px 5px 0; cursor:pointer; }
-.service-start-workbench button:disabled { opacity:.55; cursor:default; }
+.service-start-workbench button { min-height:42px; padding:8px 12px; margin:5px 6px 5px 0; border:1px solid var(--md-sys-color-primary,#c2410c); border-radius:8px; background:var(--md-sys-color-primary,#c2410c); color:var(--md-sys-color-on-primary,#fff); font:inherit; font-weight:600; cursor:pointer; }
+.service-start-workbench button:hover:not(:disabled) { background:var(--md-sys-color-primary-hover,#9a3412); border-color:var(--md-sys-color-primary-hover,#9a3412); }
+.service-start-workbench button:disabled { background:var(--md-sys-color-disabled-container,#eee8e5); color:var(--md-sys-color-disabled,#756b67); border-color:var(--md-sys-color-outline,#dec0b6); opacity:1; cursor:not-allowed; }
 .service-start-workbench [role=alert] { color:#a51c30; }

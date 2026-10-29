@@ -1,4 +1,7 @@
-"""One-time HTTPS root setup for the NAS image only."""
+"""
+File: nas_setup.py
+Description: 提供初次最高管理員 HTTPS 同源建立路由與中介層保護。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -115,12 +118,6 @@ async def create_first_root(request: Request):
             raise _error(409, "setup_conflict", "其他設定正在進行，請重新開啟頁面確認。") from None
         raise _error(503, "setup_unavailable", "設定服務暫時無法使用，請稍後再試。") from None
     return JSONResponse({"created": True, "next": "/admin/"}, status_code=201, headers=HEADERS)
-
-
-def create_app():
-    """Attach setup only to the NAS entry, never to the normal API application."""
-    from scripts.nas_test_runtime import management_preview_app
-    return attach_setup(management_preview_app())
 
 
 def attach_setup(app):

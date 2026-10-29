@@ -42,7 +42,6 @@
 - `GET /api/v1/operations-reports/case-statistics`、曆年計數與歷史狀態合併 — 同一正式規格 §15.2。
 
 ## Verification
-- test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
 - layout_status: `custom_current`
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
 - test_root: `tests/test_weekly_operations_report_contract.py`

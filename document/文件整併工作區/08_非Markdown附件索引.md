@@ -18,12 +18,12 @@
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_candidate.manifest.json` | `8f00ed5bad6d3ac0257616f3b67905adf7b29ba8` | `generated-live-evidence`；candidate manifest |
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json` | `193d16f34e1f988de1d277fa8524953d7e1780db` | `generated-live-evidence`；current disposition summary |
 | `document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.records.jsonl` | `7ea4e42d21d3bebde238fdfa1fe3648763c5c3bc` | `generated-live-evidence`；current per-identity disposition records |
-| `document/管理端UI/表格需求模板/所需表格.xlsx` | `4fe0b35602f6e389579623e4a864aff49407499e` | `mixed-output/legal-template-evidence`；保留作輸出／需求來源，不自行決定業務公式 |
-| `document/管理端UI/表格需求模板/服務人員契約.xlsx` | `f3b05146ed63a9d863f52f7d7290cbde699d0883` | `historical/legal-template-evidence`；保存責任由業務／法務裁決 |
-| `document/管理端UI/表格需求模板/核銷含印領清冊.xlsx` | `2eab40d7102e57ff1efbcc5cc2620ba688698832` | `output-template-evidence`；Government Subsidy／Finance Query 決定正式值 |
-| `document/管理端UI/表格需求模板/週報.xlsx` | `6863956b219926708baee9e3f82f291f088f8cae` | `historical-operational-report`；限制存取，保存責任由業務／法務裁決 |
-| `document/管理端UI/表格需求模板/應付帳款.xlsx` | `d07c9d953c1e635a37dd7ead83c857aeb28436ef` | `output-template-evidence`；Accounts Payable Export shape source |
-| `document/管理端UI/資料庫原始資料瀏覽_頁面欄位開放權限建議表.xlsx` | `726e63967cb58e7391e1f3b9bebcd7164b7ff608` | `historical/source-review`；目前仍可作 internal-admin surface permission/masking inventory 輸入，formal Access／owner contracts 優先 |
+| `document/資料庫、資料處理/表格需求模板/所需表格.xlsx` | `4fe0b35602f6e389579623e4a864aff49407499e` | `mixed-output/legal-template-evidence`；保留作輸出／需求來源，不自行決定業務公式 |
+| `document/資料庫、資料處理/表格需求模板/服務人員契約.xlsx` | `f3b05146ed63a9d863f52f7d7290cbde699d0883` | `historical/legal-template-evidence`；保存責任由業務／法務裁決 |
+| `document/資料庫、資料處理/表格需求模板/核銷含印領清冊.xlsx` | `2eab40d7102e57ff1efbcc5cc2620ba688698832` | `output-template-evidence`；Government Subsidy／Finance Query 決定正式值 |
+| `document/資料庫、資料處理/表格需求模板/週報.xlsx` | `6863956b219926708baee9e3f82f291f088f8cae` | `historical-operational-report`；限制存取，保存責任由業務／法務裁決 |
+| `document/資料庫、資料處理/表格需求模板/應付帳款.xlsx` | `d07c9d953c1e635a37dd7ead83c857aeb28436ef` | `output-template-evidence`；Accounts Payable Export shape source |
+| `document/資料庫、資料處理/表格需求模板/資料庫原始資料瀏覽_頁面欄位開放權限建議表.xlsx` | `726e63967cb58e7391e1f3b9bebcd7164b7ff608` | `historical/source-review`；目前仍可作 internal-admin surface permission/masking inventory 輸入，formal Access／owner contracts 優先 |
 | `document/資料庫、資料處理/1,HCM.xlsx` | `7b54c07b176b9fb7e4c8b438774f4a4bd13f2716` | `format-fixture`；HCM import |
 | `document/資料庫、資料處理/2.staff.xlsx` | `8881fee0fc099b264b10ef89f2c63ad6d55552ac` | `format-fixture`；Staff import |
 | `document/資料庫、資料處理/3.client_beclass.xlsx` | `5c8db9e9de539cbd0af13ea35e75af91199b2e64` | `format-fixture`；Client BeClass import |

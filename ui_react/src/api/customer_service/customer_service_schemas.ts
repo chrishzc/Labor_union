@@ -319,6 +319,10 @@ export const CustomerServiceReminderSchema = z.object({
   reason: z.enum(['explicit_human_request', 'explicit_wrong_answer', 'complaint', 'unresolved_feedback', 'order_change_requested', 'service_referral', 'binding_failure', 'unknown']),
   is_priority: z.boolean(),
   updated_at: CustomerServiceDateTimeSchema.nullable(),
+  version: z.number().int().nonnegative(),
+  line_display_name: z.string().nullable(),
+  messages: z.array(z.string()).max(10),
+  requested_at: CustomerServiceDateTimeSchema.nullable(),
 }).strict().refine(value => value.sources.includes(value.source), '客服來源不一致');
 export const CustomerServiceReminderPageSchema = z.object({
   items: z.array(CustomerServiceReminderSchema),

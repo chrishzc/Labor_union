@@ -78,11 +78,11 @@ function readRequestOptions(
   };
 }
 
-function decodeEnvelope<T extends z.ZodTypeAny>(
-  dataSchema: T,
+function decodeEnvelope<T>(
+  dataSchema: z.ZodType<T>,
   raw: object
-): z.output<T> {
-  return decodePayload(createLineConfigurationQueryEnvelopeSchema(dataSchema), raw)
+): T {
+  return decodePayload(createLineConfigurationQueryEnvelopeSchema<T>(dataSchema), raw)
     .data;
 }
 

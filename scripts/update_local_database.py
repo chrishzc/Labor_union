@@ -305,8 +305,9 @@ def build_additive_preview(
     """Build a bounded local-only plan without candidate creation or mysqldump."""
     if additive is None:
         raise LocalDatabaseUpdateError(
-            f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
-        )
+            "canonical migration catalog could not be loaded",
+            code="migration_catalog_unavailable",
+        ) from ADDITIVE_IMPORT_ERROR
     try:
         plan = additive.plan(
             config,

@@ -3,7 +3,7 @@
  * Description: 驗證 Finance entry 的 StrictMode GET 預算、四組查詢、正常匯入門檻與無假 mutation 入口。
  */
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../../../../../App';
 import { sessionClient } from '../../../../../../api/auth/session_client';
@@ -183,6 +183,7 @@ function installFetchStub(options: FetchStubOptions = {}): RequestRecord[] {
     }
     if (path === STAFF_DIRECTORY_ENDPOINT) return response(staffDirectoryResponse());
     if (path === STAFF_PAYABLE_ENDPOINT) return response(STAFF_PAYABLES_RESPONSE);
+    if (path === '/api/v1/staff-payables/historical-payouts/CASE-FIN-001/11') return response({ success: true, message: 'ok', error: null, data: { case_no: 'CASE-FIN-001', staff_id: 11, staff_payables_version: 1, adoption_receipt_id: null, adopted: false, normal_bank_candidate_identities: [], obligations: [] } });
     if (path === ACCOUNTS_PAYABLE_ENDPOINT) return response(ACCOUNTS_PAYABLE_RESPONSE);
     if (path === FINANCE_BATCHES_ENDPOINT) {
       if (!options.noPublicBatchIdentity) return response(FINANCE_BATCH_RESPONSE);
@@ -233,7 +234,7 @@ describe('Finance #finance entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 三個 workspace 維持 active-tab selector/detail exact GET budget，匯入流程在未選檔前保持 guarded', async () => {
+  it('actual StrictMode 收付款與銀行 workspace 維持 active-tab selector/detail exact GET budget，匯入流程在未選檔前保持 guarded', async () => {
     authenticate();
     const requests = installFetchStub();
     render(<StrictMode><App /></StrictMode>);
@@ -241,7 +242,7 @@ describe('Finance #finance entry static subgate', () => {
     await screen.findByRole('button', { name: '收款明細' });
     expect(window.location.hash).toBe('#finance');
     expect(screen.getByRole('heading', { name: '帳務工作台' })).toBeInTheDocument();
-    expect(Array.from(screen.getByRole('navigation', { name: '帳務工作區' }).querySelectorAll('button')).map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳']);
+    expect(Array.from(screen.getByRole('navigation', { name: '帳務工作區' }).querySelectorAll('button')).map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
     expect(countPath(requests, '/api/v1/client-payments')).toBe(1);
     expect(countPath(requests, ORDERS_SUMMARY_ENDPOINT)).toBe(1);
     expect(countPath(requests, CLIENT_RECEIPT_ENDPOINT)).toBe(0);
@@ -260,6 +261,7 @@ describe('Finance #finance entry static subgate', () => {
     expect(document.querySelector('[data-control-id="finance.staff-payable.mark-paid"]')).toBeNull();
     expect(document.querySelector('[data-control-id="finance.staff-payable.adjustment"]')).toBeNull();
     expect(screen.queryByText(/未開放/)).not.toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByRole('region', { name: '歷史月嫂付款人工確認' })).getByRole('button', { name: '重新查詢付款資料' })).toBeEnabled());
 
     fireEvent.click(screen.getByRole('button', { name: '付款' }));
     await screen.findByRole('region', { name: '付款清單' }, { timeout: 5000 });
@@ -322,7 +324,7 @@ describe('Finance #finance entry static subgate', () => {
     authenticate();
     const unavailableRequests = installFetchStub({ receiptStatus: 503 });
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('收款資料暫時無法取得，請確認權限後重新整理。'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('收款資料暫時無法取得，請重新整理。'));
     expect(screen.queryByText(/HTTP 503|correlation_id|finance-secret-detail/)).not.toBeInTheDocument();
     expect(screen.queryByText('OBL-C-1')).not.toBeInTheDocument();
     expect(screen.queryByText(/已成功|已結清|付款成功/)).not.toBeInTheDocument();

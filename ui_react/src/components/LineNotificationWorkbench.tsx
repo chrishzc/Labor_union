@@ -39,6 +39,15 @@ interface NotificationContent {
   content: string;
   revision: number;
   variables: string[];
+  fields?: { id: string; label: string; content: string; max_length: number }[];
+}
+
+const LIBRARY_PAGE_SIZE = 6;
+
+function copyFieldLabel(fields: NonNullable<NotificationContent['fields']>, index: number): string {
+  const field = fields[index];
+  const count = fields.filter(item => item.label === field.label).length;
+  return count > 1 ? `${field.label} ${fields.slice(0, index + 1).filter(item => item.label === field.label).length}` : field.label;
 }
 
 interface NotificationEntry {
@@ -96,11 +105,14 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   onReturnToFlow,
 }) => {
   const [entries, setEntries] = useState<NotificationEntry[]>([]);
+  const [builtinContents, setBuiltinContents] = useState<Record<string, { data: NotificationContent | null; error: string | null }>>({});
   const [descriptors, setDescriptors] = useState<PreviewDescriptor[]>([]);
   const [previewCatalogError, setPreviewCatalogError] = useState(false);
   const [previewCatalogLoading, setPreviewCatalogLoading] = useState(true);
   const [targetUnavailable, setTargetUnavailable] = useState(false);
   const [formatFilter, setFormatFilter] = useState<'all' | 'text' | 'flex'>('all');
+  const [libraryPage, setLibraryPage] = useState(1);
+  const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const [deliveryTab, setDeliveryTab] = useState(false);
   const [catalog, setCatalog] = useState<LineNotificationRulesCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -183,6 +195,28 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
 
   useEffect(() => () => { saveController.current?.abort(); }, []);
 
+  useEffect(() => { setBuiltinContents({}); }, [reload]);
+
+  useEffect(() => {
+    if (!selected || selected.kind !== 'card' || builtinContents[selected.id]) return;
+    const controller = new AbortController();
+    const id = selected.id;
+    void templates.get(id, { signal: controller.signal }).then(data => {
+      if (!controller.signal.aborted) setBuiltinContents(current => ({ ...current, [id]: { data, error: null } }));
+    }).catch(error => {
+      if (!controller.signal.aborted) setBuiltinContents(current => ({ ...current, [id]: { data: null, error: contentError(error) } }));
+    });
+    return () => controller.abort();
+  }, [selected?.id, templates, reload, builtinContents]);
+
+  useEffect(() => {
+    if (!selected || selected.kind !== 'card' || !builtinContents[selected.id]) return;
+    const loaded = builtinContents[selected.id];
+    if (selected.data === loaded.data && selected.error === loaded.error) return;
+    setSelected({ ...selected, ...loaded });
+    if (loaded.data) setContent(loaded.data.content);
+  }, [builtinContents, selected?.id]);
+
   useEffect(() => {
     if (loading || focusAfterReload.current === null) return;
     const id = focusAfterReload.current;
@@ -217,7 +251,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setSelected(entry);
     onSelectedEntryChange?.(entry.id);
     setTargetUnavailable(false);
-    setContent(entry.data?.content ?? (descriptors.find(item => item.id === entry.id)?.allows_draft ? '請協助確認本次服務時段，謝謝。' : ''));
+    setContent(entry.data?.content ?? '');
     setSaveError(null);
     setEditingSettings(false);
     setSettingsDirty(false);
@@ -229,6 +263,16 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const save = async () => {
     if (!selected?.data || !dirty || saving) return;
     if (!saveValidation.validate([{ value: content, label: '通知內容', ref: saveFieldRef }])) return;
+    if (selected.data.fields?.length) {
+      const values = JSON.parse(content) as Record<string, string>;
+      const invalid = selected.data.fields.find(field => !values[field.id]?.trim() || values[field.id].length > field.max_length);
+      if (invalid) {
+        setActiveFieldId(invalid.id);
+        window.requestAnimationFrame(() => saveFieldRef.current?.focus());
+        setSaveError('請填寫完整文案，並確認各欄位的字數限制。');
+        return;
+      }
+    }
     const target = selected;
     const controller = new AbortController();
     saveController.current = controller;
@@ -254,42 +298,55 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   };
 
   const allEntries: NotificationEntry[] = [...entries, ...descriptors.filter(item => item.builtin).map(item => ({
-    id: item.id, name: item.name, recipient: MANUAL_FLOW_DETAILS[item.id]?.recipient ?? (item.requires_case || item.requires_staff ? '公版案件與月嫂範例' : '依正式流程對象'), kind: 'card' as const, data: null, error: null,
+    id: item.id, name: item.name, recipient: item.id.startsWith('identity-bound-') ? ({ 'identity-bound-customer': '客戶私人聊天室', 'identity-bound-staff': '月嫂私人聊天室', 'identity-bound-admin': '工會人員私人聊天室' }[item.id] ?? '') : MANUAL_FLOW_DETAILS[item.id]?.recipient ?? (item.requires_case || item.requires_staff ? '公版案件與月嫂範例' : '依正式流程對象'), kind: 'card' as const, data: builtinContents[item.id]?.data ?? null, error: builtinContents[item.id]?.error ?? null,
   }))];
   // Parent navigation has already passed the shared unsaved-draft guard.
   // Wait for both queries: a builtin target may arrive after the rules list.
   useEffect(() => {
     if (!selectedEntryId || loading || previewCatalogLoading) return;
-    const entry = allEntries.find(item => item.id === selectedEntryId);
+    const resolvedId = ({ 'template-bind_success_new_order': 'identity-bound-customer', 'template-staff_switch_success': 'identity-bound-staff' } as Record<string, string>)[selectedEntryId] ?? selectedEntryId;
+    const entry = allEntries.find(item => item.id === resolvedId);
     setTargetUnavailable(!entry);
     if (!entry) { setSelected(null); return; }
-    if (selected?.id === entry.id) return;
+    if (resolvedId !== selectedEntryId) onSelectedEntryChange?.(resolvedId);
+    if (selected?.id === entry.id && selected.data === entry.data) return;
     setSelected(entry);
-    setContent(entry.data?.content ?? (descriptors.find(item => item.id === entry.id)?.allows_draft ? '請協助確認本次服務時段，謝謝。' : ''));
+    setContent(entry.data?.content ?? '');
     setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); setSaveError(null);
     setFormatFilter('all'); onSearchChange(''); onEnabledChange('all');
-  }, [selectedEntryId, entries, descriptors, loading, previewCatalogLoading]);
+  }, [selectedEntryId, entries, descriptors, builtinContents, loading, previewCatalogLoading]);
 
-  useEffect(() => {
-    if (!selected) return;
-    document.querySelector<HTMLButtonElement>(`[data-notification-id="${CSS.escape(selected.id)}"]`)?.scrollIntoView?.({ block: 'nearest' });
-  }, [selected?.id]);
+  useEffect(() => { setActiveFieldId(null); }, [selected?.id]);
   const query = search.trim().toLowerCase();
   const formatOf = (entry: NotificationEntry) => descriptors.find(item => item.id === entry.id)?.format ?? 'text';
   const statusOf = (entry: NotificationEntry) => messageFlowStatus({ id: entry.id, builtin: entry.kind === 'card' }, entry.rule);
   const visible = allEntries.filter(entry => (!query || `${entry.name} ${entry.data?.content ?? ''}`.toLowerCase().includes(query))
     && (formatFilter === 'all' || formatOf(entry) === formatFilter)
     && (enabled === 'all' || statusOf(entry) === enabled));
+  const pageCount = Math.max(1, Math.ceil(visible.length / LIBRARY_PAGE_SIZE));
+  const currentPage = Math.min(libraryPage, pageCount);
+  const pageEntries = visible.slice((currentPage - 1) * LIBRARY_PAGE_SIZE, currentPage * LIBRARY_PAGE_SIZE);
+  const selectedIndex = visible.findIndex(entry => entry.id === selected?.id);
+  useEffect(() => { setLibraryPage(1); }, [search, enabled, formatFilter]);
+  useEffect(() => {
+    if (selectedIndex >= 0) setLibraryPage(Math.floor(selectedIndex / LIBRARY_PAGE_SIZE) + 1);
+  }, [selected?.id, selectedIndex, search, enabled, formatFilter]);
+  const fields = selected?.data?.fields ?? [];
+  const requestedFieldIndex = fields.findIndex(field => field.id === activeFieldId);
+  const defaultFieldIndex = fields.reduce((best, field, index) => field.label === '卡片文字' && (fields[best]?.label !== '卡片文字' || field.content.length > fields[best].content.length) ? index : best, 0);
+  const fieldIndex = requestedFieldIndex >= 0 ? requestedFieldIndex : defaultFieldIndex;
+  const activeField = fields[fieldIndex];
   const managed = selected?.rule ? FLOW_MANAGED_EVENTS.has(selected.rule.eventCode) : false;
   const flowControlled = selected ? statusOf(selected) === 'flow' : false;
   const manualFlow = selected ? MANUAL_FLOW_DETAILS[selected.id] : undefined;
   const descriptor = descriptors.find(item => item.id === selected?.id);
+  const contentLoading = selected?.kind === 'card' && !builtinContents[selected.id];
 
   return (
     <section className="notification-workspace" aria-label="通知內容設定">
       {onReturnToFlow && selectedEntryId && <button type="button" className="notification-text-button" disabled={updating} onClick={() => requestLeave(onReturnToFlow)}><ArrowLeft aria-hidden="true" />返回 LINE 流程圖</button>}
       <div className="notification-page-heading">
-        <div><h2>通知與發送</h2><p>從通知文案到互動卡片，使用公版範例預覽，清楚查看每個帶入欄位與值。</p></div>
+        <div><h2>通知與發送</h2><p>選擇訊息與欄位，修改後預覽並儲存。</p></div>
         <div className="notification-heading-actions"><span className="notification-safe-badge"><ShieldCheck />預覽不會實際發送</span><button type="button" className="notification-button" disabled={loading || updating} onClick={() => requestLeave(() => { setSelected(null); setNotice(null); setReload(value => value + 1); })}><RefreshCw aria-hidden="true" />重新整理</button></div>
       </div>
       {notice && <p className="notification-feedback" role="status">{notice}</p>}
@@ -303,13 +360,14 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
           <div className="notification-format-filter" aria-label="訊息格式篩選">{([['all', '全部'], ['text', '純文字'], ['flex', '訊息卡片']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={formatFilter === key} onClick={() => setFormatFilter(key)}>{label}</button>)}</div>
           <select aria-label="啟用狀態" value={enabled} onChange={event => onEnabledChange(event.target.value as typeof enabled)}><option value="all">全部狀態</option><option value="enabled">已啟用</option><option value="disabled">已停用</option></select>
           <div className="notification-message-items">
-            {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); setFormatFilter('all'); }}>清除條件</button></div> : visible.map(entry => <button type="button" key={entry.id} className="notification-message-item" aria-pressed={selected?.id === entry.id} data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} disabled={updating} onClick={event => open(entry, event.currentTarget)}>
+            {loading ? <p className="notification-feedback" role="status">正在載入通知內容…</p> : visible.length === 0 ? <div className="notification-empty"><h3>沒有符合條件的通知</h3><button type="button" className="notification-button" onClick={() => { onSearchChange(''); onEnabledChange('all'); setFormatFilter('all'); }}>清除條件</button></div> : pageEntries.map(entry => <button type="button" key={entry.id} className="notification-message-item" aria-pressed={selected?.id === entry.id} data-notification-id={entry.id} aria-label={`${entry.data ? '編輯' : '查看'}${entry.name}內容`} disabled={updating} onClick={event => open(entry, event.currentTarget)}>
               <span className="notification-message-icon">{formatOf(entry) === 'flex' ? <LayoutPanelTop /> : <MessageSquare />}</span><span><strong>{entry.name}</strong><small>{entry.recipient}・{formatOf(entry) === 'flex' ? '訊息卡片' : '純文字'}{entry.rule?.enabled === false && !FLOW_MANAGED_EVENTS.has(entry.rule.eventCode) ? '・已停用' : ''}</small></span>
             </button>)}
           </div>
+          {!loading && pageCount > 1 && <nav className="notification-library-pagination" aria-label="訊息清單分頁"><button type="button" className="notification-button" aria-label="上一頁訊息" disabled={currentPage === 1 || updating} onClick={() => setLibraryPage(currentPage - 1)}>上一頁</button><span aria-live="polite">{currentPage} / {pageCount}</span><button type="button" className="notification-button" aria-label="下一頁訊息" disabled={currentPage === pageCount || updating} onClick={() => setLibraryPage(currentPage + 1)}>下一頁</button></nav>}
           <p className="notification-library-note">資料只用於查看訊息效果，不會建立投遞任務。</p>
         </section>
-        {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data || descriptor?.allows_draft ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
+        {selected ? <LineMessagePreviewWorkspace key={selected.id} descriptor={descriptor} entryId={selected.id} content={selected.data ? content : undefined} client={previews} showSources={!editingSettings && !deliveryTab}
           editor={<>
             <div className="notification-inline-title"><span>{formatOf(selected) === 'flex' ? '互動卡片' : '純文字'}</span><h3>{selected.name}</h3><p>{selected.recipient}</p></div>
             <nav className="notification-editor-tabs" aria-label="訊息內容與發送設定"><button type="button" aria-pressed={!deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(false); setEditingSettings(false); setSettingsDirty(false); })}>內容與測試</button><button type="button" aria-pressed={deliveryTab} disabled={updating} onClick={() => requestLeave(() => { setDeliveryTab(true); setEditingSettings(false); setSettingsDirty(false); })}>發送設定</button></nav>
@@ -321,10 +379,10 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
             </section> : <>
               {selected.error && !(selected.textEditingUnsupported && formatOf(selected) === 'flex') && <p className="notification-feedback error" role="alert">{selected.error}</p>}
               {selected.textEditingUnsupported && formatOf(selected) === 'flex' && <p className="notification-help">此卡片使用結構化內容，請查看右側預覽；可在「發送設定」調整啟用狀態。</p>}
-              {selected.data ? <><label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>{saveValidation.feedback}
+              {contentLoading && <p className="notification-feedback" role="status">正在載入訊息內容…</p>}{selected.data && !contentLoading ? <>{activeField ? <><div className="notification-field-switcher"><label htmlFor="notification-active-field">編輯欄位<select id="notification-active-field" value={activeField.id} disabled={saving} onChange={event => setActiveFieldId(event.target.value)}>{fields.map((field, index) => <option key={field.id} value={field.id}>{copyFieldLabel(fields, index)} · {field.content.replace(/\s+/g, ' ').slice(0, 22)}</option>)}</select></label><div className="notification-field-navigation"><button type="button" className="notification-button" aria-label="上一個欄位" disabled={saving || fieldIndex === 0} onClick={() => setActiveFieldId(fields[fieldIndex - 1].id)}>上一欄</button><span aria-live="polite">{fieldIndex + 1} / {fields.length}</span><button type="button" className="notification-button" aria-label="下一個欄位" disabled={saving || fieldIndex === fields.length - 1} onClick={() => setActiveFieldId(fields[fieldIndex + 1].id)}>下一欄</button></div></div><label className="notification-content-field notification-copy-field" htmlFor="notification-copy-content">{copyFieldLabel(fields, fieldIndex)}<textarea key={activeField.id} ref={saveFieldRef} id="notification-copy-content" aria-required="true" rows={16} maxLength={activeField.max_length} value={(JSON.parse(content) as Record<string, string>)[activeField.id] ?? ''} disabled={saving} onChange={event => { setContent(JSON.stringify({ ...JSON.parse(content), [activeField.id]: event.target.value })); setSaveError(null); }} /></label><p className="notification-help">切換欄位會保留修改；按「儲存內容」一次儲存這則訊息。</p></> : <label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>}{saveValidation.feedback}
                 {managed && <p className="notification-help">說明文字用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
                 {selected.data.variables.length > 0 ? <p className="notification-help">預覽變數使用下方公版範例值；實際發送由正式流程帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p> : <p className="notification-help">此段文案沒有需要手動填寫的變數。</p>}
-              </> : descriptor?.allows_draft ? <><label className="notification-content-field" htmlFor="notification-message-content">預覽文案<textarea id="notification-message-content" rows={16} value={content} maxLength={5000} onChange={event => setContent(event.target.value)} /></label><p className="notification-help">只試看工會自行輸入的詢問或回覆，不會儲存、建立待辦或發送。</p></> : selected.kind === 'card' && <p className="notification-help">使用正式訊息與卡片組裝方式，以下方公版範例資料展示內容。</p>}
+              </> : selected.kind === 'card' && !contentLoading && !selected.error && <p className="notification-help">使用正式訊息與卡片組裝方式，以下方公版範例資料展示內容。</p>}
               {saveError && <p className="notification-feedback error" role="alert">{saveError}</p>}
             </>}
           </>}

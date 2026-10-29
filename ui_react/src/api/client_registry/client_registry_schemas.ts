@@ -111,7 +111,7 @@ export const ClientRegistryDetailSchema = z.strictObject({
 });
 export const RegistryMutationPreviewSchema = z.strictObject({
   owner: z.enum(['client_profile', 'client_beclass']), aggregate_identity: z.string(),
-  current_version: z.number().int().nonnegative(), before: z.record(orderInformationValue), after: z.record(orderInformationValue),
+  current_version: z.number().int().nonnegative(), before: z.record(z.string(), orderInformationValue), after: z.record(z.string(), orderInformationValue),
   preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export const RegistryMutationReceiptSchema = z.strictObject({

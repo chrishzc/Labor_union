@@ -236,8 +236,8 @@ export const LineIdentityReviewApplyRequestSchema = z
   })
   .strict();
 
-export function createLineIdentityEnvelopeSchema<T extends z.ZodTypeAny>(
-  dataSchema: T
+export function createLineIdentityEnvelopeSchema<T>(
+  dataSchema: z.ZodType<T>
 ) {
   return z
     .object({

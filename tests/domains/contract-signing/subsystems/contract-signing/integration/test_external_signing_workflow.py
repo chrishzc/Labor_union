@@ -689,6 +689,8 @@ class FakeBindingConnection:
         self.parameters = parameters
 
     def fetchone(self):
+        if self.parameters == ("message_templates",):
+            return None  # No saved copy; retain the original reminder default.
         subject_type, subject_reference = self.parameters
         line_user_id = self.bindings.get((subject_type, subject_reference))
         if line_user_id is None:

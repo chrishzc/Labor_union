@@ -1,7 +1,17 @@
-"""Separate NAS management and public LINE route compositions."""
+"""
+File: nas_apps.py
+Description: 組合獨立管理端與公開 LINE 路由應用介面。
+"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+
+
+@asynccontextmanager
+async def _management_lifespan(_):
+    from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
+    ensure_builtin_knowledge_catalog()
+    yield
 
 
 def management_app():
@@ -9,7 +19,6 @@ def management_app():
     from api.routes.nas_setup import attach_setup
     from api.routes.private_line_media import router as private_line_media_router
     from api.routes.nas_line_operations import private_router as private_line_operations_router
-    from scripts.nas_test_runtime import _management_lifespan
     app.router.lifespan_context = _management_lifespan
     if not getattr(app.state, "private_line_media_attached", False):
         app.include_router(private_line_media_router)

@@ -120,6 +120,6 @@ export type StaffOverpaymentRecoveryPreview =
   | StaffOverpaymentRecoveryCollectionPreview
   | StaffOverpaymentRecoveryAdjustmentPreview;
 
-export function staffOverpaymentRecoveryEnvelope<T extends z.ZodTypeAny>(data: T) {
+export function staffOverpaymentRecoveryEnvelope<T>(data: z.ZodType<T>) {
   return z.strictObject({ success: z.literal(true), message: z.string(), data, error: z.null().optional() });
 }

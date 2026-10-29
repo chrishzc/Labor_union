@@ -12,6 +12,7 @@ import os
 import asyncio
 import sys
 from typing import Any, Dict, Optional
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
@@ -255,8 +256,32 @@ def _provisional_registration_intent(payload, line_user_id):
         survey_details=payload.survey_details,
     )
 
+_GATEWAY_PAGE = Path(__file__).resolve().parent / "static" / "gateway.html"
+
 @router.get("/")
-async def health_check():
+async def health_check(request: Request):
+    params = request.query_params
+    has_liff_params = any(
+        k in params
+        for k in (
+            "liff.state",
+            "code",
+            "liffClientId",
+            "liffRedirectUri",
+            "target",
+            "entry",
+            "state",
+        )
+    )
+    accept = request.headers.get("accept", "")
+
+    # 當為 LIFF / LINE Login 授權回呼或瀏覽器頁面導航時，回傳支援 LIFF SDK 的入口頁
+    if (has_liff_params or "text/html" in accept) and _GATEWAY_PAGE.exists():
+        return FileResponse(
+            _GATEWAY_PAGE,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
     db_ok = False
     db_msg = ""
     try:
@@ -267,14 +292,14 @@ async def health_check():
     except Exception as e:
         db_ok = False
         db_msg = str(e)
-        
+
     return {
         "status": "healthy",
         "api_version": "1.0.0",
         "database": {
             "connected": db_ok,
-            "message": db_msg
-        }
+            "message": db_msg,
+        },
     }
 
 @router.post("/")

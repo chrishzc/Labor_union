@@ -48,10 +48,10 @@ bounded() { timeout -s TERM -k 5 30 "$@"; }
 DB="$PROJECT-db-1"
 STATE=$(bounded "${D[@]}" inspect --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}' "$DB" 2>/dev/null)
 [[ "$STATE" == "$PROJECT|db|running" ]] || fail database_not_running_or_wrong_owner
-VOLUME=$(bounded "${D[@]}" volume inspect --format '{{index .Labels "com.docker.compose.project"}}' "${PROJECT}_mysql-data" 2>/dev/null)
-[[ "$VOLUME" == "$PROJECT" ]] || fail database_volume_owner_mismatch
 ACTUAL=$(bounded "${D[@]}" inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Name}}{{end}}{{end}}' "$DB" 2>/dev/null)
-[[ "$ACTUAL" == "${PROJECT}_mysql-data" ]] || fail database_volume_mismatch
+[[ -n "$ACTUAL" && "$ACTUAL" == "${PROJECT}_"* ]] || fail database_volume_mismatch
+VOLUME=$(bounded "${D[@]}" volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$ACTUAL" 2>/dev/null)
+[[ "$VOLUME" == "$PROJECT|mysql-data" ]] || fail database_volume_owner_mismatch
 IDS=$(bounded "${D[@]}" ps -aq --filter "label=com.docker.compose.project=$PROJECT")
 [[ -n "$IDS" ]] || fail missing_project_containers
 readarray -t CONTAINERS <<< "$IDS"

@@ -6,7 +6,7 @@ import { transport } from '../shared/transport';
 const DestinationSchema = z.strictObject({ configured: z.boolean(), account_display: z.string().min(1).max(255).nullable(), revision: z.number().int().nonnegative() });
 const PreviewSchema = z.strictObject({ current: DestinationSchema, candidate_account_display: z.string().min(1).max(255), expected_revision: z.number().int().nonnegative(), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) });
 const ReceiptSchema = z.strictObject({ account_display: z.string().min(1).max(255), resulting_revision: z.number().int().positive(), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/) });
-const response = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
+const response = <T>(schema: z.ZodType<T>) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
 
 export type PaymentDestination = z.infer<typeof DestinationSchema>;
 export type PaymentDestinationPreview = z.infer<typeof PreviewSchema>;
@@ -16,8 +16,8 @@ function options(headers: Record<string, string> = {}) {
   if (!token) throw new Error('請先登入。');
   return { token, headers };
 }
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
-  return decodePayload(response(schema), raw).data;
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T {
+  return decodePayload(response<T>(schema), raw).data;
 }
 
 export const paymentDestinationClient = {

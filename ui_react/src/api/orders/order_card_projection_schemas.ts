@@ -7,7 +7,7 @@ import { z } from 'zod';
 const DateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const AvailabilitySchema = z.enum(['available', 'unavailable', 'blocked']);
 
-export const OrdersCardProjectionFieldSchema = <T extends z.ZodTypeAny>(valueSchema: T) => z.strictObject({
+export const OrdersCardProjectionFieldSchema = <T>(valueSchema: z.ZodType<T>) => z.strictObject({
   value: valueSchema.nullable(),
   owner: z.string().min(1),
   source_identity: z.string().min(1),

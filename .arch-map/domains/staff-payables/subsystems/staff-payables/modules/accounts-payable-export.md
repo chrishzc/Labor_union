@@ -15,7 +15,7 @@
 - api-schema: `api/schemas/accounts_payable_export.py`
 - source: `infrastructure/mysql/accounts_payable_export_sources.py`
 - archive: `infrastructure/archive/accounts_payable.py`
-- archive configuration: `api/dependencies/accounts_payable_export.py` reads `ACCOUNTS_PAYABLE_ARCHIVE_ROOT`; NAS `deployment/nas/compose.yaml` sets `/data/accounts-payable-archive` on the persistent app-data bind mount. Local installations without this setting retain `downloads/accounts_payable_archive`.
+- archive configuration: `api/dependencies/accounts_payable_export.py` reads `ACCOUNTS_PAYABLE_ARCHIVE_ROOT`; installations without this setting default to `downloads/accounts_payable_archive`.
 - cash planning: `subsystems/staff_payables/cash_requirements_query.py` — 付款統一清單來源，唯讀保留 staff_id 供逐人明細精確定位；金額與日期規則不變。
 - cash planning source: `infrastructure/mysql/cash_requirements_repository.py`
   - 付款主清單保留已付／結清列，以獨立 `payment_status` 呈現 pending／partially_paid／paid／settled；包含 exact current 歷史確認及沖正後的目前餘額。匯出仍只選未付項目。

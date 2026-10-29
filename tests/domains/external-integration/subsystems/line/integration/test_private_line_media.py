@@ -1,7 +1,6 @@
-"""NAS public proxy -> real private HTTPS; synthetic identities/repositories, real files.
-
-Standalone unittest entry supports the admitted Linux runtime without new packages.
-It does not claim real MySQL, NAS ACL or LINE-provider verification.
+"""
+File: test_private_line_media.py
+Description: 驗證公開 LINE 照片與服務日誌代理至內部私人 HTTPS API 之雙向憑證與邊界隔離。
 """
 import asyncio
 from contextlib import contextmanager
@@ -109,6 +108,62 @@ class LogFixture:
         yield SimpleNamespace(commit=lambda: setattr(self, "commits", self.commits + 1))
 
 
+def _write_test_tls_bundle(ca_dir: Path, tls_dir: Path, sans: list | None = None) -> None:
+    from datetime import datetime, timedelta, timezone
+    import ipaddress
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    ca_dir.mkdir(parents=True, exist_ok=True)
+    server_dir = tls_dir / "management-api"
+    server_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test Private API CA")])
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.KeyUsage(True, False, False, False, False, True, True, False, False), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    san_entries = sans or [x509.DNSName("management-api"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+    srv_key = ec.generate_private_key(ec.SECP256R1())
+    srv_cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "management-api")]))
+        .issuer_name(ca_name)
+        .public_key(srv_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(srv_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    (ca_dir / "ca.pem").write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    (server_dir / "server-cert.pem").write_bytes(srv_cert.public_bytes(serialization.Encoding.PEM))
+    (server_dir / "server-key.pem").write_bytes(
+        srv_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+
+
 class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -148,15 +203,14 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
             ('infrastructure.mysql.line_unit_of_work.open_line_unit_of_work', bindings),
         ):
             p = patch(target, value); p.start(); self.patches.append(p)
-        # Generate the same strict private certificate chain used by NAS, in test temp only.
-        from scripts import nas_security_runtime as runtime
-        def write(path, content, mode=0o400):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        with patch.object(runtime, 'CA', self.root/'ca'), patch.object(runtime, 'API_TLS', self.root/'tls'), patch.object(runtime, '_write', write):
-            from cryptography import x509
-            import ipaddress
-            runtime._prepare_api_tls([x509.DNSName('management-api'), x509.IPAddress(ipaddress.ip_address('127.0.0.1'))])
+        # Generate a strict private certificate chain in test temp only.
+        from cryptography import x509
+        import ipaddress
+        _write_test_tls_bundle(
+            self.root / 'ca',
+            self.root / 'tls',
+            [x509.DNSName('management-api'), x509.IPAddress(ipaddress.ip_address('127.0.0.1'))],
+        )
         self.sock = socket.socket(); self.sock.bind(('127.0.0.1', 0))
         port = self.sock.getsockname()[1]
         config = uvicorn.Config(self.backend, log_level='critical', lifespan='off',
@@ -313,14 +367,8 @@ class PrivateLineMediaTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LineMediaError):
             LineMediaClient('http://management-api',str(self.root/'credentials/line-media-proxy/token'),str(self.root/'ca/ca.pem'))
         # An unrelated private CA is deterministic on Windows and Linux alike.
-        import ssl
-        from scripts import nas_security_runtime as runtime
-        def write(path, content, mode=0o400):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        other=self.root/'unrelated-ca'
-        with patch.object(runtime,'CA',other),patch.object(runtime,'API_TLS',self.root/'unrelated-tls'),patch.object(runtime,'_write',write):
-            runtime._prepare_api_tls()
+        other = self.root / 'unrelated-ca'
+        _write_test_tls_bundle(other, self.root / 'unrelated-tls')
         untrusted=LineMediaClient(self.base,str(self.root/'credentials/line-media-proxy/token'),str(other/'ca.pem'))
         with self.assertRaises(LineMediaError):
             await untrusted.preview({'line_id_token':'owner-token'})

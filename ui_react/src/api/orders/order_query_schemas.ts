@@ -168,7 +168,7 @@ export type AssignmentPlan = z.infer<typeof AssignmentPlanSchema>;
 
 /** Compatibility-only denied payloads for OrderTracker; no decoder or client method exists. */
 
-export function createOrderQueryEnvelopeSchema<T extends z.ZodTypeAny>(dataSchema: T) {
+export function createOrderQueryEnvelopeSchema<T>(dataSchema: z.ZodType<T>) {
   return z.strictObject({
     success: z.boolean(),
     message: z.string(),

@@ -16,6 +16,7 @@
 - `subsystems/client_profile/case_inspection_export.py` — 案件總覽及固定關聯明細 XLSX，保留明細 grain，不重算 owner facts。
 - `infrastructure/mysql/client_case_inspection_repository.py` — 以名冊篩選取得案件，固定欄位關聯 Query，無 writer。
 - `infrastructure/mysql/client_registry_query_repository.py`
+- 名冊帳務摘要重用 Client Finance 的可計價服務日唯讀 facts；尚未排班時使用既有約定日期，不建立 Scheduling facts 或付款義務。
 - `api/dependencies/client_registry.py`
 - `api/routes/client_registry.py`
 - `api/schemas/client_registry.py`

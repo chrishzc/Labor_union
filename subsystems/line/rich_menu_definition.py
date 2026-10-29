@@ -56,7 +56,14 @@ def _provider_action(action):
     if action_type == "message":
         return {"type": "message", "text": _text(action.get("text"), "message text")}
     if action_type == "postback":
-        return {"type": "postback", "data": _text(action.get("data"), "postback data")}
+        provider_postback: dict[str, str] = {
+            "type": "postback",
+            "data": _text(action.get("data"), "postback data"),
+        }
+        display_text = action.get("displayText") or action.get("text")
+        if isinstance(display_text, str) and display_text.strip():
+            provider_postback["displayText"] = display_text.strip()
+        return provider_postback
     if action_type != "uri":
         raise ValueError("Rich Menu action type is unsupported")
     if action.get("uri_source") == "liff":
@@ -65,10 +72,10 @@ def _provider_action(action):
             raise ValueError("LINE_LIFF_ID is required for LIFF Rich Menu actions")
         suffix = str(action.get("uri") or "").strip()
         uri = f"https://liff.line.me/{liff_id}"
-        if suffix.startswith("?"):
-            uri += f"/{suffix}"
-        elif suffix.startswith("#"):
+        if suffix.startswith("?") or suffix.startswith("#"):
             uri += suffix
+        elif suffix:
+            uri += f"/{suffix.lstrip('/')}"
         return {"type": "uri", "uri": uri}
     return {"type": "uri", "uri": _text(action.get("uri"), "action URI")}
 

@@ -360,3 +360,13 @@ PASS：合成 .env 的兩份完整 Compose，內網 5／Tunnel 7／全 profiles 
 FAILED（任務外）：全工作區 architecture closure 對 task base 25a590cc4e8bcb823b3f249caf85290614592b0c 有 47 項其他修改的 source／test 歸屬錯誤，本次 write set 無錯誤。結果保留於 scratch/nas-tunnel-20261021-architecture.json；不修補或收進本包、不將整個 workspace 宣稱全通過。
 
 NOT_RUN：實際 Cloudflare Access 寄信／政策、token 與 Tunnel 連線、實際域名 DNS／CA origin、DSM ACL／防火牆／排程／寄信、2 GB NAS 尖峰負載、Container Manager undefined。新唯讀 host 程式必須與對應 Compose／映像版本一起備份／回復；冷還原只明確啟動內網五個服務，不因 profiles 留空就誤啟動 Tunnel。正式資料或入口切換不在本次執行範圍。
+
+## 2026-10-26 NAS 路由修復與 LINE 私人操作接線
+
+Authority：修復 5 個 LIFF 頁面與配套 API、訂單初始化重複前綴；人工確認一併接線手機工會核心操作，維持公開 LINE 的低權限。基準 `a1db37a3d40131d91bdae32cac094cf69a3fd506`，其他工作中的 dirty paths 保留。
+
+Bounded implementation：Orders 初始化只由主 API 掛載；`api/routes/nas_line_operations.py` 明確選取既有接案、訂金、服務問答／回饋、手機工會與其子路由，公開端只經 `LineOperationsClient`／私人 HTTPS 轉送原 JSON 契約。管理端以 `line-operations-proxy` 驗證後仍呼叫原 handler 的 LINE 身分、有效綁定、能力、本人範圍、版本與冪等驗證。新 token／verifier 使用兩個獨立 volume，initialize 可為既有完整安裝補上這組憑證，不改舊六組 token／registry、`.env`、DB schema／GRANT 或既有資料。
+
+Acceptance：5 頁實際 GET、配套 API 掛載、私人／公開及角色拒絕、原 owner 呼叫／衝突與版本冪等、CA／hostname／token 實際 TLS 拒絕、既有安裝新增憑證與重入不覆寫、6 個 canonical Orders HTTP 入口且無重複前綴。以本 Module focused tests、Orders intake unit tests、Compose 模型及 scoped architecture closure 驗證；真實 NAS／Cloudflare、完整業務 DB 整合與映像建置／上傳不在本次執行範圍。
+
+2026-10-27 驗證：PASS，115 項相關離線回歸通過，保留原有業務斷言，含真實 loopback HTTPS 的 CA／hostname／錯誤 token 拒絕；3 項既有第三方提示。執行器禁止 DB、外部網路與本機 `.env` 載入。PASS，合成環境的全 profiles Compose config、UTF-8／Python AST、任務範圍 architecture closure 與 diff check。證據保存在 `scratch/nas-route-fix-20261026/`。NOT_RUN，實際 NAS／Cloudflare、完整業務 DB／Docker 整合及新版映像建置／上傳；未變更既有資料、`.env` 或已交付壓縮包。

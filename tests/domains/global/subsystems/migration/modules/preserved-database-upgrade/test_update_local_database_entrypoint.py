@@ -10,9 +10,33 @@ import pytest
 from scripts import update_local_database as update
 
 
+def test_readonly_nas_preview_has_loaded_both_canonical_runners():
+    assert update.migration is not None
+    assert update.additive is not None
+    assert update.MIGRATION_IMPORT_ERROR is None
+    assert update.ADDITIVE_IMPORT_ERROR is None
+
+
+def test_preview_reports_catalog_failure_before_database_access(monkeypatch, tmp_path):
+    cause = ValueError('credential detail must not be printed')
+    monkeypatch.setattr(update, 'additive', None)
+    monkeypatch.setattr(update, 'ADDITIVE_IMPORT_ERROR', cause)
+
+    class NoDatabaseAccess:
+        def connect(self, *args, **kwargs):
+            pytest.fail('catalog failure must precede database access')
+
+    with pytest.raises(update.LocalDatabaseUpdateError) as raised:
+        update.build_additive_preview(NoDatabaseAccess(), 'lu_test_catalog', tmp_path)
+    assert raised.value.code == 'migration_catalog_unavailable'
+    assert str(raised.value) == 'canonical migration catalog could not be loaded'
+    assert raised.value.__cause__ is cause
+
+
 def test_pending_business_backfill_selects_preserve_route_before_earlier_schema_qualification(monkeypatch):
     migration=update.migration
-    missing={'1054_scheduling_service_start.sql','1055_government_subsidy_periods.sql'}
+    artifacts = [entry['artifact']['name'] for entry in migration._local_ordered_upgrade_entries()]
+    missing = set(artifacts[artifacts.index('1054_scheduling_service_start.sql'):])
     monkeypatch.setattr(migration,'local_additive_target_state',
         lambda _config,_source,name,*_args,**_kwargs:{'state':'absent' if name in missing else 'exact'})
     def must_not_qualify(*args,**kwargs):

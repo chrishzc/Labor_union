@@ -38,7 +38,7 @@ export const ReasonSchema = z
     }
   );
 
-export function createOrderMutationEnvelopeSchema<T extends z.ZodTypeAny>(dataSchema: T) {
+export function createOrderMutationEnvelopeSchema<T>(dataSchema: z.ZodType<T>) {
   return z
     .object({
       success: z.boolean(),

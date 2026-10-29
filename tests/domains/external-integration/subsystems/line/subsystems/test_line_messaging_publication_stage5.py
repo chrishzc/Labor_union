@@ -173,6 +173,33 @@ def test_rich_menu_definition_and_image_are_deterministic(tmp_path) -> None:
     assert store.load(first)[1] == "image/jpeg"
 
 
+def test_rich_menu_liff_uri_formatting_no_spurious_slash(monkeypatch) -> None:
+    monkeypatch.setenv("LINE_LIFF_ID", "2010579869-testLiff")
+    menu = {
+        "id": "menu-liff",
+        "name": "LIFF 測試",
+        "size": {"width": 2500, "height": 843},
+        "selected": True,
+        "chat_bar_text": "開啟選單",
+        "appearance": {"image_mode": "generated", "background_color": "#FFFFFF"},
+        "buttons": [
+            {
+                "label": "查詢",
+                "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
+                "action": {"type": "uri", "uri_source": "liff", "uri": "?target=ai_assistant"},
+            },
+            {
+                "label": "路徑",
+                "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
+                "action": {"type": "uri", "uri_source": "liff", "uri": "/line-service-help"},
+            },
+        ],
+    }
+    provider = json.loads(rich_menu_provider_definition(menu))
+    assert provider["areas"][0]["action"]["uri"] == "https://liff.line.me/2010579869-testLiff?target=ai_assistant"
+    assert provider["areas"][1]["action"]["uri"] == "https://liff.line.me/2010579869-testLiff/line-service-help"
+
+
 def _failed_task():
     request = LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId("U-task")),

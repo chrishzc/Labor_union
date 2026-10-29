@@ -1,409 +1,50 @@
-# Synology Container Manager: keep .env beside this file; no build or CLI flags.
-name: ${COMPOSE_PROJECT_NAME:?請先把 .env.example 複製為 .env 並設定新的專案名稱}
-
-x-common: &common
-  security_opt: ["no-new-privileges:true"]
-  logging:
-    driver: json-file
-    options: {max-size: "5m", max-file: "2"}
-
-x-app: &app
-  <<: *common
-  image: ${NAS_IMAGE:?請填包含本次修改的新映像完整名稱與 tag}
-  pull_policy: never
-  restart: unless-stopped
-  read_only: true
-  tmpfs: ["/tmp:rw,noexec,nosuid,size=256m"]
-
-x-worker: &worker
-  <<: *app
-  user: "1000:1000"
-  mem_limit: 128m
-  environment: &worker-env
-    APP_ENV: production
-    INTERNAL_SERVICE_AUTH_MODE: nas_service_token
-    INTERNAL_SERVICE_TOKEN_FILE: /run/worker/token
-    INTERNAL_API_CA_FILE: /run/private-ca/ca.pem
-    INTERNAL_API_BASE_URL: https://management-api:8443
-  networks: [management-control]
-  depends_on:
-    management-api: {condition: service_healthy}
+# File: compose.yaml
+# Description: NAS 專用 MySQL 8.0 資料庫正式部署設定（應用系統、LINE Webhook 與 Tunnel 由工會電腦負責）。
+name: ${COMPOSE_PROJECT_NAME:?請先把 .env.example 複製為 .env 並設定 COMPOSE_PROJECT_NAME}
 
 services:
-  # DSM host task only: never part of the default application startup chain.
-  certificate-maintenance:
-    <<: *app
-    profiles: [certificates]
-    restart: "no"
-    entrypoint: ["python", "-m", "scripts.nas_certificate_maintenance"]
-    command: ["status"]
-    network_mode: none
-    mem_limit: 128m
-    environment:
-      NAS_CERT_LEAF_DAYS: ${NAS_CERT_LEAF_DAYS:-90}
-      NAS_CERT_RENEW_BEFORE_DAYS: ${NAS_CERT_RENEW_BEFORE_DAYS:-30}
-      NAS_CERT_CA_DAYS: ${NAS_CERT_CA_DAYS:-1825}
-      NAS_CERT_ROTATE_BEFORE_DAYS: ${NAS_CERT_ROTATE_BEFORE_DAYS:-180}
-      NAS_CERT_OVERLAP_DAYS: ${NAS_CERT_OVERLAP_DAYS:-30}
-    volumes:
-      # Allows the tested script to run with the existing image; no image build required.
-      - type: bind
-        source: ${NAS_CERT_MAINTENANCE_SCRIPT:-./nas_certificate_maintenance.py}
-        target: /app/scripts/nas_certificate_maintenance.py
-        read_only: true
-        bind: {create_host_path: false}
-      - type: bind
-        source: ${NAS_CERT_MAINTENANCE_ROOT:-./certificate-maintenance}
-        target: /maintenance
-        bind: {create_host_path: false}
-      - private-ca:/certificates/private-ca
-      - management-tls:/certificates/management-tls
-      - line-tls:/certificates/line-tls
-      - db-ca:/certificates/db-ca
-      - server-tls:/certificates/server-tls
-
-  initialize:
-    <<: *app
-    restart: "no"
-    command: ["python", "-m", "scripts.nas_security_runtime", "initialize"]
-    network_mode: none
-    mem_limit: 384m
-    environment:
-      NAS_BIND_IP: ${NAS_BIND_IP:?請填 NAS 的固定內網 IPv4 位址}
-      NAS_MANAGEMENT_HOSTNAME: ${NAS_MANAGEMENT_HOSTNAME:-}
-    volumes:
-      - settings:/settings
-      - line-settings:/line-settings
-      - type: bind
-        source: ${NAS_DATA_ROOT:?請填全新空白的 NAS 儲存根目錄}/app-data
-        target: /data
-        bind: {create_host_path: false}
-      - type: bind
-        source: ${NAS_DATA_ROOT}/controlled-files
-        target: /controlled-files
-        bind: {create_host_path: false}
-      - type: bind
-        source: ${NAS_DATA_ROOT}/line-media
-        target: /line-media
-        bind: {create_host_path: false}
-      - server-tls:/server-tls
-      - mysql-secrets:/mysql-secrets
-      - bootstrap:/bootstrap
-      - management-db:/profiles/management
-      - line-db:/profiles/line
-      - access-db:/profiles/access
-      - maintenance-db:/profiles/maintenance
-      - worker-verifiers:/workers/api
-      - durable-token:/workers/durable-job-worker
-      - knowledge-token:/workers/knowledge-retrieval-worker
-      - incident-token:/workers/incident-worker
-      - line-token:/workers/line-worker
-      - monitor-token:/workers/runtime-monitor
-      - line-media-token:/workers/line-media-proxy
-      - line-operations-token:/line-operations-credentials/line-operations-proxy
-      - line-operations-verifier:/line-operations-credentials/api
-      - management-tls:/api-tls/management-api
-      - line-tls:/api-tls/line-api
-      - private-ca:/private-ca
-      - db-ca:/db-ca
-      - line-config:/line-config
-      - type: bind
-        source: ${NAS_DATA_ROOT}/knowledge
-        target: /knowledge-data
-        bind: {create_host_path: false}
-
   db:
-    <<: *common
     image: ${MYSQL_IMAGE:-mysql:8.0.46}
     restart: unless-stopped
-    mem_limit: 512m
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    mem_limit: ${NAS_MYSQL_MEMORY:-1024m}
+    ports:
+      # 僅綁定 NAS 內網固定 IPv4，嚴禁對外網公開 3306；DSM 防火牆僅允許工會電腦內網 IP。
+      - "${NAS_DB_BIND_IP:?請在 .env 填入 NAS 固定內網 IPv4}:${NAS_DB_PORT:-3306}:3306"
     environment:
-      MYSQL_DATABASE: lu_test_nas_preview
-      MYSQL_ROOT_HOST: "%"
-      MYSQL_USER: nas_app
+      TZ: ${TZ:-Asia/Taipei}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-union_db}
+      MYSQL_USER: ${MYSQL_USER:-union_app}
       MYSQL_PASSWORD_FILE: /run/mysql-secrets/app-password
       MYSQL_ROOT_PASSWORD_FILE: /run/mysql-secrets/root-password
-    command: ["--innodb-buffer-pool-size=64M", "--innodb-log-buffer-size=8M", "--max-connections=20", "--table-open-cache=256", "--temptable-max-ram=16M", "--require-secure-transport=ON", "--ssl-ca=/tls/ca.pem", "--ssl-cert=/tls/server-cert.pem", "--ssl-key=/tls/server-key.pem", "--mysqlx=OFF"]
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL:-256M}"
+      - "--innodb-log-buffer-size=16M"
+      - "--max-connections=${MYSQL_MAX_CONNECTIONS:-60}"
+      - "--mysqlx=OFF"
     volumes:
       - mysql-data:/var/lib/mysql
-      - mysql-secrets:/run/mysql-secrets:ro
-      - server-tls:/tls:ro
-      - bootstrap:/docker-entrypoint-initdb.d:ro
-      - bootstrap:/etc/mysql/conf.d:ro
-    networks: [data]
-    depends_on:
-      initialize: {condition: service_completed_successfully}
+      - ./mysql-client.cnf:/etc/mysql/conf.d/mysql-client.cnf:ro
+      - type: bind
+        source: ${NAS_MYSQL_SECRETS_DIR:-./mysql-secrets}
+        target: /run/mysql-secrets
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
-      test: ["CMD-SHELL", "test -f /var/lib/mysql/.lu-preview-initialized && mysqladmin --host=127.0.0.1 ping --silent"]
+      test: ["CMD", "mysqladmin", "--host=127.0.0.1", "ping", "--silent"]
       interval: 30s
       timeout: 5s
       retries: 10
-      start_period: 180s
-
-  configure-security:
-    <<: *app
-    restart: "no"
-    command: ["python", "-m", "scripts.configure_nas_permissions", "--settings", "/settings/security.json", "--apply"]
-    mem_limit: 256m
-    volumes:
-      - settings:/settings:ro
-      - mysql-secrets:/mysql-secrets:ro
-      - db-ca:/run/db-ca:ro
-      - management-db:/profiles/management:ro
-      - line-db:/profiles/line:ro
-      - access-db:/profiles/access:ro
-      - maintenance-db:/profiles/maintenance:ro
-    networks: [data]
-    depends_on:
-      db: {condition: service_healthy}
-
-  redis:
-    <<: *common
-    image: ${REDIS_IMAGE:-redis:7-alpine}
-    restart: unless-stopped
-    command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "noeviction"]
-    mem_limit: 64m
-    volumes: [redis-data:/data]
-    networks: [data]
-
-  management-api:
-    <<: *app
-    command: ["python", "-m", "scripts.nas_security_runtime", "management-api"]
-    mem_limit: ${NAS_MANAGEMENT_MEMORY:-768m}
-    # DSM reaches this service through its fixed bridge address; no host port.
-    environment:
-      REACT_ADMIN_CURRENT_ARTIFACT_DIR: /opt/react-admin/current
-      NAS_TRUSTED_PROXY_IPS: ${NAS_TUNNEL_MANAGEMENT_PROXY_IP:-172.31.251.2}
-      REACT_ADMIN_PREVIOUS_ARTIFACT_DIR: /opt/react-admin/previous
-      REACT_ADMIN_ACTIVE_SELECTOR: current
-      LINE_OPERATIONS_CREDENTIALS_FILE: /run/line-operations-verifier/verifiers.json
-      FILE_SETTINGS_PATH: /data/file-settings.json
-      ACCOUNTS_PAYABLE_ARCHIVE_ROOT: /data/accounts-payable-archive
-      FILE_PHOTO_MAX_BYTES: ${FILE_PHOTO_MAX_BYTES:-10485760}
-      FILE_RESUME_MAX_BYTES: ${FILE_RESUME_MAX_BYTES:-20971520}
-      FILE_TRANSFER_TIMEOUT_SECONDS: ${FILE_TRANSFER_TIMEOUT_SECONDS:-60}
-      GOOGLE_MAPS_ROUTES_API_KEY: ${GOOGLE_MAPS_ROUTES_API_KEY:-}
-      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
-      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
-      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:-}
-      LINE_LIFF_ID: ${LINE_LIFF_ID:-}
-    volumes:
-      - settings:/settings:ro
-      - management-db:/run/db-management:ro
-      - type: bind
-        source: ${NAS_PROXY_RUNTIME_SCRIPT:-./nas_appliance.py}
-        target: /app/scripts/nas_appliance.py
-        read_only: true
-        bind: {create_host_path: false}
-      - access-db:/run/db-access:ro
-      - line-operations-verifier:/run/line-operations-verifier:ro
-      - maintenance-db:/run/db-maintenance:ro
-      - worker-verifiers:/run/worker-verifiers:ro
-      - management-tls:/run/api-tls:ro
-      - private-ca:/run/private-ca:ro
-      - db-ca:/run/db-ca:ro
-      - type: bind
-        source: ${NAS_DATA_ROOT}/app-data
-        target: /data
-        bind: {create_host_path: false}
-      - type: bind
-        source: ${NAS_DATA_ROOT}/controlled-files
-        target: /data/controlled-files
-        bind: {create_host_path: false}
-      - type: bind
-        source: ${NAS_DATA_ROOT}/line-media
-        target: /data/media
-        bind: {create_host_path: false}
-      - line-config:/run/line-config
-      - type: bind
-        source: ${NAS_DATA_ROOT}/knowledge
-        target: /data/knowledge
-        bind: {create_host_path: false}
-    networks:
-      data: {}
-      management-control: {}
-      line-media-control: {}
-      management-egress:
-        ipv4_address: ${NAS_PROXY_API_IP:?請填專用 Docker 網段內的管理容器位址}
-      management-tunnel:
-        ipv4_address: ${NAS_TUNNEL_MANAGEMENT_API_IP:-172.31.251.3}
-    depends_on:
-      configure-security: {condition: service_completed_successfully}
-    healthcheck:
-      test: ["CMD", "python", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://management-api:8443/health',context=ssl.create_default_context(cafile='/run/private-ca/ca.pem'),timeout=5).close()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 180s
-
-  line-api:
-    <<: *app
-    profiles: [line, tunnel, line-check]
-    command: ["python", "-m", "scripts.nas_security_runtime", "line-api"]
-    mem_limit: ${NAS_LINE_MEMORY:-384m}
-    environment:
-      NAS_TRUSTED_PROXY_IPS: ${NAS_TUNNEL_LINE_PROXY_IP:-172.31.252.2}
-      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
-      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
-      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:-}
-      LINE_LIFF_ID: ${LINE_LIFF_ID:-}
-      LINE_MEDIA_API_BASE_URL: https://management-api:8443
-      LINE_MEDIA_SERVICE_TOKEN_FILE: /run/line-media-proxy/token
-      LINE_MEDIA_API_CA_FILE: /run/private-ca/ca.pem
-      LINE_OPERATIONS_API_BASE_URL: https://management-api:8443
-      LINE_OPERATIONS_SERVICE_TOKEN_FILE: /run/line-operations-proxy/token
-      LINE_OPERATIONS_API_CA_FILE: /run/private-ca/ca.pem
-      FILE_TRANSFER_TIMEOUT_SECONDS: ${FILE_TRANSFER_TIMEOUT_SECONDS:-60}
-    volumes:
-      - line-settings:/line-settings:ro
-      - type: bind
-        source: ${NAS_PROXY_RUNTIME_SCRIPT:-./nas_appliance.py}
-        target: /app/scripts/nas_appliance.py
-        read_only: true
-        bind: {create_host_path: false}
-      - line-db:/run/db-line:ro
-      - worker-verifiers:/run/worker-verifiers:ro
-      - line-tls:/run/api-tls:ro
-      - private-ca:/run/private-ca:ro
-      - db-ca:/run/db-ca:ro
-      - line-media-token:/run/line-media-proxy:ro
-      - line-operations-token:/run/line-operations-proxy:ro
-      - type: bind
-        source: ${NAS_DATA_ROOT}/line-media
-        target: /data/media
-        bind: {create_host_path: false}
-      - line-config:/run/line-config:ro
-    networks:
-      data: {}
-      line-control: {}
-      line-media-control: {}
-      line-egress: {}
-      line-tunnel:
-        ipv4_address: ${NAS_TUNNEL_LINE_API_IP:-172.31.252.3}
-    depends_on:
-      management-api: {condition: service_healthy}
-    healthcheck:
-      test: ["CMD", "python", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://line-api:8443/health',context=ssl.create_default_context(cafile='/run/private-ca/ca.pem'),timeout=5).close()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 180s
-
-  durable-worker:
-    <<: *worker
-    profiles: [durable]
-    command: ["python", "-m", "scripts.run_durable_job_worker"]
-    volumes: ["durable-token:/run/worker:ro", "private-ca:/run/private-ca:ro"]
-  knowledge-worker:
-    <<: *worker
-    profiles: [knowledge]
-    command: ["python", "-m", "scripts.run_knowledge_worker"]
-    volumes: ["knowledge-token:/run/worker:ro", "private-ca:/run/private-ca:ro"]
-  incident-worker:
-    <<: *worker
-    profiles: [incident]
-    command: ["python", "-m", "scripts.run_incident_worker"]
-    volumes: ["incident-token:/run/worker:ro", "private-ca:/run/private-ca:ro"]
-  runtime-monitor:
-    <<: *worker
-    profiles: [monitor]
-    command: ["python", "-m", "scripts.run_service_monitor"]
-    environment:
-      <<: *worker-env
-      API_HEALTH_URL: https://management-api:8443/health
-      UI_HEALTH_URL: https://management-api:8443/admin/
-      LINE_PUBLIC_BASE_URL: ${LINE_PUBLIC_BASE_URL:-}
-      LINE_LIFF_HEALTH_URL: ${LINE_LIFF_HEALTH_URL:-}
-    volumes: ["monitor-token:/run/worker:ro", "private-ca:/run/private-ca:ro"]
-  line-worker:
-    <<: *worker
-    profiles: [line-check]
-    restart: "no"
-    command: ["python", "-m", "scripts.run_line_worker", "--check"]
-    environment:
-      <<: *worker-env
-      INTERNAL_API_BASE_URL: https://line-api:8443
-    volumes: ["line-token:/run/worker:ro", "private-ca:/run/private-ca:ro"]
-    networks: [line-control]
-    depends_on:
-      line-api: {condition: service_healthy}
-
-  cloudflared:
-    <<: *common
-    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.10.1}
-    profiles: [tunnel]
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/cloudflare/token"]
-    user: "65532:65532"
-    read_only: true
-    security_opt: ["no-new-privileges:true"]
-    mem_limit: 128m
-    volumes:
-      - type: bind
-        source: ${NAS_TUNNEL_TOKEN_FILE:-./tunnel/token}
-        target: /run/cloudflare/token
-        read_only: true
-        bind: {create_host_path: false}
-      - private-ca:/run/private-ca:ro
-    networks:
-      management-tunnel:
-        ipv4_address: ${NAS_TUNNEL_MANAGEMENT_PROXY_IP:-172.31.251.2}
-      line-tunnel:
-        ipv4_address: ${NAS_TUNNEL_LINE_PROXY_IP:-172.31.252.2}
-      tunnel-egress: {}
-    depends_on:
-      line-api: {condition: service_healthy}
-
-networks:
-  # Existing NAS installation: keep its internal 172.24.0.0/16 network.
-  # "external" preserves network ownership/lifecycle; it does not enable Internet access.
-  data:
-    external: true
-    name: "${COMPOSE_PROJECT_NAME:?請保留現有專案名稱}_data"
-  management-control: {internal: true}
-  management-tunnel:
-    internal: true
-    ipam:
-      config:
-        - subnet: ${NAS_TUNNEL_MANAGEMENT_SUBNET:-172.31.251.0/29}
-  line-tunnel:
-    internal: true
-    ipam:
-      config:
-        - subnet: ${NAS_TUNNEL_LINE_SUBNET:-172.31.252.0/29}
-  line-control: {internal: true}
-  line-media-control: {internal: true}
-  management-egress:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: ${NAS_PROXY_SUBNET:?請填不與 NAS、VPN 或其他 Docker 網路重疊的私有網段}
-  line-egress: {}
-  tunnel-egress: {}
+      start_period: 120s
 
 volumes:
-  settings: {}
-  line-settings: {}
-  server-tls: {}
-  mysql-secrets: {}
-  bootstrap: {}
-  management-db: {}
-  line-db: {}
-  access-db: {}
-  maintenance-db: {}
-  worker-verifiers: {}
-  durable-token: {}
-  knowledge-token: {}
-  incident-token: {}
-  line-token: {}
-  monitor-token: {}
-  line-media-token: {}
-  line-operations-token: {}
-  line-operations-verifier: {}
-  management-tls: {}
-  line-tls: {}
-  private-ca: {}
-  db-ca: {}
-  mysql-data: {}
-  redis-data: {}
-  line-config: {}
+  mysql-data:

@@ -18,6 +18,15 @@ from subsystems.line.runtime_monitoring import (
 
 
 class MySqlRuntimeMonitorRepository:
+    def alert_message(self, target):
+        from infrastructure.mysql.line_message_copy import configured_message_payload
+        from subsystems.line.runtime_alert_application import _message
+        occurred = target["occurred_at_utc"]
+        stamp = occurred.isoformat(sep=" ", timespec="seconds") if isinstance(occurred, datetime) else str(occurred)
+        return configured_message_payload(self._connection, "runtime-system-health", {"type": "text", "text": _message(target)}, {
+            "heading": "系統已恢復" if str(target["resulting_status"]) == "healthy" else "系統異常通知",
+            "check_name": target["check_name"], "status": target["resulting_status"], "message": target["message"], "occurred_at": stamp})["text"]
+
     def __init__(self, connection) -> None:
         self._connection = connection
 

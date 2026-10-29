@@ -540,7 +540,8 @@ def test_client_receipt_summary_includes_adjustment_allocations_and_net_reversal
     assert parameters == ("CASE-001",)
 
 
-def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
+@pytest.mark.parametrize("status", ["洽談中", "訂單完成", "訂單取消", "歷史訂單－服務完成"])
+def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
     start = date(2026, 10, 1)
     facts = ClientFinanceTermsFacts(
         case_no="CASE-001",
@@ -562,16 +563,27 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
     )
     connection = _SqlConnection(
         [
-            {"case_no": "CASE-001"},
+            {"case_no": "CASE-001", "status": status},
             {"received_total_ntd": 70000},
             (),
             ({"virtual_account": "99781699114999"},),
         ]
     )
     monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
+        lambda _cursor, _order, lock: (facts, None),
+    )
+    monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
         lambda _cursor, _order, lock: facts,
     )
+    if status != "洽談中":
+        def no_planned_facts(*args, **kwargs):
+            raise AssertionError("Terminal and historical queries must retain actual-service facts")
+        monkeypatch.setattr(
+            "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
+            no_planned_facts,
+        )
 
     status, code, values = _finance_values(connection, "CASE-001")
 
@@ -580,6 +592,36 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch):
     assert values["received_total_ntd"] == 70000
     assert values["customer_balance_ntd"] == 0
     assert values["virtual_account"] == "99781699114999"
+
+
+def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch):
+    facts = ClientFinanceTermsFacts(
+        case_no="A115001", account_version=0, service_hours_per_day=8,
+        floor_fee=MoneyNTD(0),
+        charge_days=tuple(ClientChargeDay(date(2026, 11, 16) + timedelta(days=i), False) for i in range(10)),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=5, client_hourly_rate=MoneyNTD(330),
+            deposit_due_date=date(2026, 11, 1), first_payment_due_date=date(2026, 11, 16),
+            second_payment_due_date=None,
+        ), existing_obligations=(), identity_status="非市民",
+    )
+    connection = _SqlConnection([
+        {"case_no": "A115001"}, {"received_total_ntd": 0}, (), (),
+    ])
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
+        lambda _cursor, _order, lock: (facts, None),
+    )
+
+    status, code, values = _finance_values(connection, "A115001")
+
+    assert (status, code) == ("ready", None)
+    assert values["service_hours"] == 80
+    assert values["customer_payable_total_ntd"] == values["customer_balance_ntd"] == 26400
+    assert values["deposit_amount_ntd"] == values["first_payment_amount_ntd"] == 13200
+    assert values["second_payment_amount_ntd"] == 0
+    assert values["received_total_ntd"] == 0
+    assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
 
 
 @pytest.mark.parametrize('note', ['', '   ', '補齊聯絡資料'])

@@ -1,7 +1,7 @@
 # Global Preserve-data Migration／Cutover Subsystem
 
+> 2026-10-29 新帳務參數依規格04 §0 PRICE-09走additive fresh／preserve release；新增政策、Orders nullable綁定、人工事件及分期資料，不回填或重算既有案件、不覆寫既有快照／流水。不包含production、reset或switch授權。\n
 
-> 2026-10-29 新帳務參數依規格04 §0 PRICE-09走additive fresh／preserve release；新增政策、Orders nullable綁定、人工事件及分期資料，不回填或重算既有案件、不覆寫既有快照／流水。不包含production、reset或switch授權。
 
 ## 1. 定位
 
@@ -562,3 +562,33 @@ legacy read-only preservation 與 drift negative → launcher regression。無�
 效果分類：新 disposable／NAS 空庫的 schema-only 與 canonical system-seed；business backfill／既有 DB destructive
 效果為零。失敗保留 journal，不修改既有 DB、不自動重跑 partial；權限、schema dependency 或 oracle 不符就停止。
 這是單一 current spec 覆蓋的 PACKAGE_REUSED；generation／engine receipt 放 ignored scratch，不建立重複規格或任務文件。
+
+### 9.4 DSM 冷備份副本的受控升級入口（2026-10-27）
+
+人工 Authority：重用現有本機升級工具，交付 DSM 專用腳本；原 NAS 資料不動，之後納入 image 及整合包。
+Owner 仍為 Global migration。Write set 為 DSM adapter、原 package inclusion、線上 SQL 備份卷身分檢查、
+對應操作文件與 focused tests；不新增／改寫 schema release、business backfill 或 runtime DB 權限政策。
+
+- `deployment/nas/upgrade-database.sh` 只供手動維護，不能設為每日自動切換。依同日後續人工簡化操作要求，
+  `--update` 在同一鎖內串接 prepare → 驗證成功才 switch → 原專案 up/wait；保留進階 prepare／switch。
+  任一步失敗即停止後續；啟動失敗只停止本專案新服務，保留兩個資料卷，不自動 rollback 或捨棄新寫入。
+  `scripts/update_nas_database.py` 是 container/backup transport；既有 `scripts.update_local_database`／
+  canonical runner 繼續擁有 schema 分類、copy 內 candidate、backfill、journal、replacement／rollback 及完整驗證。
+- Operational source 保持停止、正常退出，完整冷備份必須完成且 hash 相符；原 Compose／.env 及 DB 卷／
+  MySQL image identity 與備份不符時停止。Source 不接受任何 SQL 連線，不掛入升級 helper，不放寬 source-read principal guard。
+- Prepare 只將該冷備份的實際 MySQL 卷還原至新卷；副本使用同一 MySQL image，network none、無 published port，
+  runner 只共用副本網路 namespace。localhost／development 限制仍適用於此一新副本，不能指向正式 source。
+  原服務的 TLS 與受限 DB profiles 不變；副本 loopback 連線不作正式 TLS／DSM 網路資格證據。
+- Copy 內可由既有受控 replacement 重新建立同名資料庫，但原卷與整組備份永久保留。先驗 current schema、
+  source preservation／approved backfill、原帳號／MFA 儲存值及四個 DB profiles，再產生 verified receipt。
+- 人工明確執行 switch 才改原 Compose 邏輯 mysql-data 的 physical volume 指向及唯一 NAS_IMAGE；
+  DB 名稱、runtime generated settings、CA／密碼／MFA key、路徑與其餘 .env bytes 保持不變。
+  此為既有 §3.11 的 NAS physical-volume 適配：不改 DB_DATABASE，原 `.env` 只更新映像；
+  配對設定 before／after hash 在修改前落盤，跨檔案中斷時保持服務停止並核對 receipt，不自動猜測／重試。
+- Maintenance helper 才能掛 Docker socket；僅可信管理者執行、無對外入口，業務容器不增加該權限。
+  階段有界等待，失敗停止本次 helper、保留卷與紀錄，不清理原專案或其他專案。
+- 切換後維持同名 DB，因此既有 runtime 與憑證維護可沿用；日 SQL 備份依實際 volume 的 project／logical mysql-data
+  labels 驗身分，不把舊 physical volume 名稱當永久指向。新卷有正式新寫入後，回復前須先保存與對帳。
+
+驗收：靜態及負例 → 舊 image 合成帳號／MFA／檔案 → cold copy → 既有工具 upgrade／verify → source bytes
+及設定不變 → explicit volume switch → r2 啟動與原帳號／MFA／檔案回讀。原 NAS apply／GUI／負載仍由 operator 現場驗收。

@@ -229,14 +229,14 @@ deployment。
 
 本次核准範圍為既有「通知與發送」整合工作台與 authenticated、zero-write 訊息預覽，不改 Domain roots、schema、正式投遞、部署或 provider 權限。此節同時界定本次 bounded implementation／驗收，完成後不另建平行規格或追蹤文件。
 
-- LINE-PREVIEW-01：通知文案與訊息卡片共用清單，支援搜尋與文字／卡片篩選；內容編輯、既有發送設定與手機預覽置於同一工作台。文案框預設高度 504px，依 2026-10-22 後續人工裁決將實作的 252px 再加高一倍；手機預覽只保留一般手機，移除窄螢幕模式。
+- LINE-PREVIEW-01：通知文案與訊息卡片共用清單，支援搜尋與文字／卡片篩選；內容編輯、既有發送設定與手機預覽置於同一工作台。依 2026-10-29 最新人工裁決，所有訊息文字、卡片摘要、標題與按鈕名稱的編輯欄位均固定 504px。卡片一次編輯一個欄位，切換保留整則草稿；訊息清單每頁 6 則，搜尋與篩選重新定位，帶入範例預設收合。清單、編輯外框、完整訊息預覽不另設垂直捲軸，多張卡片逐張切換；手機預覽只保留一般手機，移除窄螢幕模式。
 - LINE-PREVIEW-02：依 2026-10-22 最新人工裁決，通知工作台改用明確標示的公版範例，移除案件／月嫂選擇與資格限制。範例不得標示為真實案件、正式金額、日期或已完成的業務結果；不查詢真實對象以補齊公版。固定文案不要求業務對象。
 - LINE-PREVIEW-03：`GET /api/v1/line/message-previews/catalog` 提供明列的正式訊息與純內容卡片入口。`POST .../preview` 增加 closed `data_source: sample | record`（既有呼叫預設 record）；工作台一律傳 sample，接受選用的 browser-memory 文案但不保存。既有 `GET .../subjects` 與 record 預覽維持原契約，不再由工作台呼叫。所有入口要求 `line.config.read`，回應 `Cache-Control: no-store`。
 - LINE-PREVIEW-04：公版透過獨立、無 DB／writer／provider 能力的 typed sample port 提供案例、月嫂、請假、付款、候選與完整確認包範例，重用原純卡片組裝。公版結果逐項列出真正帶入的欄位中文名稱、變數／欄位路徑與值；文字只列使用到的變數，卡片列出其動態內容。公版不代表正式資格或真實財務結果。既有 record port 仍使用 readonly transaction 與原 owner Query，不改根事實。
 - LINE-PREVIEW-05：重用正式文字範本與純卡片組裝函式，手機 renderer 只接受 closed display model。postback、interaction token、recipient identity、正式 URI 與 provider payload 不得穿透畫面；按鈕點擊只顯示動作說明。預覽不建立憑證、task、receipt、audit mutation、outbox／source event，不 commit、不 wakeup、不呼叫 provider。
 - LINE-PREVIEW-06：公版不因未選案件或缺少符合資格資料而 unavailable；無效文案仍回 typed 422，訊息不存在回 typed 404、設定查詢失敗回 closed 503。使用者清空工會草稿時提示輸入，不冒充成功。record 呼叫維持 needs_subject／unavailable／not_found。前端以 cancellation／request generation 防止晚到結果覆蓋新文案，失敗不顯示舊欄位或舊預覽。
 - LINE-PREVIEW-07：既有文案儲存與規則異動仍走原 owner、授權、revision 與回讀，不新增發送操作。驗收包含公版不呼叫真實對象 reader、欄位／值與渲染一致、所有目前正式訊息及卡片可直接預覽、去除可執行 action、原儲存回歸、晚到查詢防護、桌面／手機實際畫面及 build。測試與 source 歸屬沿用 notification-rules-presentation module。
-- LINE-PREVIEW-08：依 2026-10-22 人工裁決，清單補列 current 身分／登記模板、服務與問答及訂單異動導覽、客服受理／結案、身分受理／完成、候選聯絡資訊一／二／每週服務說明、工會詢問／回覆及客戶完整推薦確認包。來源採明列的正式入口，不以所有 bootstrap 模板自動升格為現行訊息；D+1～D+3、未具正式用途的測試／baseline 模板均不加入。公版完整確認包與候選卡使用明列的範例欄位，不受現行正式方案或候選資格限制；既有 record API 仍只查所選對象的 owner 唯讀 projection，不鎖資料、不發履歷下載憑證。`allows_draft` 只對工會詢問／回覆卡開放 browser-memory 文案，畫面不提供儲存或發送；其餘補列訊息為唯讀預覽。
+- LINE-PREVIEW-08：依 2026-10-22 人工裁決，清單補列 current 身分／登記模板、服務與問答及訂單異動導覽、客服受理／結案、身分受理／完成、候選聯絡資訊一／二／每週服務說明、工會詢問／回覆及客戶完整推薦確認包。來源採明列的正式入口，不以所有 bootstrap 模板自動升格為現行訊息；D+1～D+3、未具正式用途的測試／baseline 模板均不加入。公版完整確認包與候選卡使用明列的範例欄位，不受現行正式方案或候選資格限制；既有 record API 仍只查所選對象的 owner 唯讀 projection，不鎖資料、不發履歷下載憑證。`allows_draft` 只對工會詢問／回覆卡開放 browser-memory 文案，畫面不提供儲存或發送；其餘補列訊息的可編輯邊界依 LINE-COPY-01～05。
 
 #### LINE Configuration typed／redacted query（2026-08-20）
 
@@ -1276,6 +1276,14 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 
 本節原先列出的所有人工作業政策均已決定；任何後續 policy 變更仍須先更新決策記錄，
 不得以 mock、固定 actor 或 development bypass 補上。
+
+### 通知文案全面維護（2026-10-29 人工裁決）
+
+- LINE-COPY-01：本次工作包依人工要求開放「通知與發送」目前目錄全部通知文字，以及卡片摘要、固定標題、說明及按鈕名稱；不以原為固定文案或沒有通知規則而拒絕編輯。公版資料及動態 owner 欄位仍由原流程提供；按鈕的 URI、postback、識別、資格及動作不屬文案維護。
+- LINE-COPY-02：沿既有 MESSAGE_TEMPLATES 版本化 owner 及 notification-rules/{id}/message-template Query／PUT，額外解析目錄中的 standalone template 與內建訊息 ID。文字維持原欄位；卡片回傳具中文標籤及字數上限的 closed display fields，PUT 只接受同一已知欄位集合的文字。不得將完整 provider payload 或動作送入編輯器。沿原 read/manage 授權、revision CAS、typed 409、驗證與稽核；不新增資料表或通知規則。
+- LINE-COPY-03：客戶、月嫂及工會人員的成功通知分別使用 identity_bound_customer、identity_bound_staff、identity_bound_admin，預設分別提醒查看服務進度、確認月嫂資料／檔期及開啟工會待辦；每份可獨立儲存。即時完成及人工審核通過均按實際 subject_type 選用，不再發送共用成功文案。舊客戶或月嫂曾自行維護的文案只承接至對應身分，不複製到其他身分。既有 template-bind_success_new_order 與 template-staff_switch_success 深連結及文案 API ID 分別解析到客戶、月嫂的新設定，不再編輯無實際消費者的舊副本。
+- LINE-COPY-04：未保存的新設定以原純組裝函式及明列的身分預設提供 genesis，Query／公版 Preview 零寫入。每次新訊息在原交易內讀取設定並凍結 payload；重試沿原工作快照，不重組已排程或已寄訊息。即時客服回覆與背景受理沿同一份設定。工會逐案自行輸入的詢問／回覆仍由案件流程決定，共用卡片的標題及按鈕文案可維護。
+- LINE-COPY-05：本包 write set 限 LINE 文案目錄、既有設定 API／schema／React 編輯器、原訊息建立者的設定讀取、直接測試及對應架構 leaf。驗收為全部現行目錄能讀取並儲存、三身分成功及下一步互不覆寫、卡片動態欄位及 action 保留、多月嫂／變動區塊不錯置、stale 409、無效欄位／變數 422、預覽與新工作一致、既有工作不變、實際畫面及 build。副作用上限為本機檔案與 focused tests；不操作正式設定、LINE provider、production data 或選單發布。最終結果於對話交付，不另建逐步 receipt。
 
 ## 8. 分層驗收
 

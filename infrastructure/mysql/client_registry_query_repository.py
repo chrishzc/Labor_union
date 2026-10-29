@@ -20,6 +20,7 @@ from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_ide
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
 from infrastructure.mysql.order_terms_read_model import (
+    load_calculable_client_finance_facts,
     load_contract_client_finance_facts,
     select_order,
 )
@@ -643,9 +644,11 @@ def _finance_values(connection, case_no):
     try:
         with connection.cursor() as cursor:
             order_row = select_order(cursor, case_no, lock=False)
-            facts = load_contract_client_finance_facts(
-                cursor, order_row, lock=False
-            )
+            status = str(order_row.get("status") or "")
+            if status.startswith("歷史") or status in ("訂單取消", "訂單完成"):
+                facts = load_contract_client_finance_facts(cursor, order_row, lock=False)
+            else:
+                facts, _ = load_calculable_client_finance_facts(cursor, order_row, lock=False)
             received_total = _client_service_received_total(cursor, case_no)
             cursor.execute(
                 "SELECT amount_due_ntd,due_date,status FROM client_obligations "

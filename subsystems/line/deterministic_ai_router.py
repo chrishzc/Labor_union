@@ -100,6 +100,11 @@ _SUBSIDY_SCOPE_CLARIFICATION_OPTIONS = (
 _CONFIRMED_HUMAN_ALIASES = {"聯絡專人服務", "呼叫專員", "聯絡工會專員", "專人客服", "轉接真人客服", "轉真人客服"}
 
 
+def is_confirmed_human_request(text: str) -> bool:
+    normalized = text.strip() if isinstance(text, str) else ""
+    return normalized in _CONFIRMED_HUMAN_ALIASES or _human_reason(normalized) is not None
+
+
 class DeterministicLineRouter:
     """Pure M2 Phase 1 classifier with a closed, provider-free result set."""
 
@@ -237,4 +242,4 @@ def _safe_menu(reason_code: str) -> SafeMenu:
     return SafeMenu("service_help_safe_menu", _SAFE_MENU_OPTIONS, reason_code)
 
 
-__all__ = ["DeterministicLineRouter", "score_band"]
+__all__ = ["DeterministicLineRouter", "is_confirmed_human_request", "score_band"]

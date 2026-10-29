@@ -5,7 +5,7 @@ Description: 定義客服查詢、結案與回覆 Preview／Apply 的框架無�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -76,6 +76,11 @@ class CustomerServiceReminder:
     reason: str
     is_priority: bool
     updated_at: datetime | None
+    version: int = 0
+    line_display_name: str | None = None
+    messages: tuple[str, ...] = ()
+    requested_at: datetime | None = None
+    line_user_id: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,4 +1,7 @@
-"""Package current Windows program sources, never local settings or runtime data."""
+"""
+File: package_windows_runtime.py
+Description: 封裝工會電腦程式來源包並排除本機密鑰、環境變數與執行期資料。
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,10 +11,30 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import zipfile
 
-from scripts.package_nas_preview import include_source
-
 ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_ROOTS = {
+    'api', 'config', 'db', 'domains', 'infrastructure', 'line', 'scripts',
+    'shared_kernel', 'subsystems', 'validation', 'ui_react',
+}
+METADATA = {'requirements.txt', 'pyproject.toml', '.python-version'}
+SECRET_SUFFIXES = {'.pem', '.key', '.pfx', '.p12', '.sqlite', '.sqlite3', '.db', '.log'}
 EXTRAS = {'Windows管理.bat', 'docker-compose.yml', 'scripts/launchers/WINDOWS-REMOTE.md'}
+
+
+def include_source(name: str) -> bool:
+    path = PurePosixPath(name)
+    if name not in METADATA and path.parts[0] not in RUNTIME_ROOTS:
+        return name == 'document/line/AI客服QA題庫.jsonl'
+    if any(part in {'node_modules', '__pycache__', 'dist', 'scratch', 'certificate-maintenance'} for part in path.parts):
+        return False
+    lower = path.name.lower()
+    if lower.startswith('.env') or lower.endswith('.env') or lower in {
+        'credentials.json', 'token.json', 'token', 'verifiers.json', '.npmrc', '.pypirc', 'pip.conf',
+    }:
+        return False
+    if lower.startswith(('service_account', 'client_secret')) or path.suffix.lower() in SECRET_SUFFIXES:
+        return False
+    return True
 
 
 def included(name: str) -> bool:

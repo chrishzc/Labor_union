@@ -26,6 +26,120 @@ def _principal() -> AdminPrincipal:
     return AdminPrincipal(1, "admin", "管理員", "system_admin")
 
 
+def _copy_client(monkeypatch):
+    import json
+    from domains.line.canonical_payload import canonical_line_payload_json
+    from domains.line.configuration import LineConfigurationRevisionConflict
+    from subsystems.line.configuration_store import read_raw_config
+    class Application:
+        revision = 7
+        from pathlib import Path
+        definitions = {LineConfigurationKind.NOTIFICATION_RULES: json.loads(Path("config/notification_rules.json").read_text(encoding="utf-8")), LineConfigurationKind.MESSAGE_TEMPLATES: read_raw_config("message_templates")}
+        def get(self, kind, actor):
+            return LineConfigurationSnapshot(kind, LineConfigurationRevision(self.revision), canonical_line_payload_json(self.definitions[kind]))
+        def apply(self, **command):
+            if command["expected_revision"].value != self.revision:
+                raise LineConfigurationRevisionConflict("stale")
+            self.definitions[command["kind"]] = json.loads(canonical_line_payload_json(command["definition"]))
+            self.revision += 1
+            return ApplyLineConfigurationResult(LineConfigurationCommandOutcome.CREATED, self.get(command["kind"], command["actor"]))
+    application = Application()
+    monkeypatch.setattr(line_notification_rules, "get_line_configuration_application", lambda: application)
+    web = FastAPI()
+    web.include_router(line_notification_rules.router)
+    web.dependency_overrides[require_line_configuration_reader] = _principal
+    web.dependency_overrides[require_line_configuration_manager] = _principal
+    return TestClient(web), application
+
+
+def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monkeypatch):
+    from subsystems.line.message_preview import LineMessagePreviewApplication
+    client, application = _copy_client(monkeypatch)
+    catalog = LineMessagePreviewApplication._catalog(application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES], application.definitions[LineConfigurationKind.NOTIFICATION_RULES])
+    for entry in catalog:
+        if entry.id == "welcome":
+            continue
+        response = client.get(f"/api/v1/line/notification-rules/{entry.id}/message-template")
+        assert response.status_code == 200, (entry.id, response.text)
+        view = response.json()["data"]
+        assert view["content"]
+        if entry.format == "flex":
+            assert view["fields"], entry.id
+        saved = client.put(f"/api/v1/line/notification-rules/{entry.id}/message-template", json={"content": view["content"], "expected_revision": view["revision"]})
+        assert saved.status_code == 200, (entry.id, saved.text)
+        assert saved.json()["data"]["content"] == view["content"]
+
+
+def test_fixed_copy_and_card_labels_save_with_revision_and_reject_action_fields(monkeypatch):
+    import json
+    from subsystems.line.message_copy_catalog import render_copy_payload
+    from subsystems.line.order_group_application import group_invitation_payload
+    client, application = _copy_client(monkeypatch)
+    base = "/api/v1/line/notification-rules/"
+    text = client.get(base + "service-contact/message-template").json()["data"]
+    saved = client.put(base + "service-contact/message-template", json={"content": "已收到，請留下問題內容。", "expected_revision": text["revision"]})
+    assert saved.status_code == 200
+    assert client.get(base + "service-contact/message-template").json()["data"]["content"] == "已收到，請留下問題內容。"
+    stale = client.put(base + "service-contact/message-template", json={"content": "舊版修改", "expected_revision": text["revision"]})
+    assert stale.status_code == 409
+    assert "line_message_template_revision_conflict" in stale.text
+    view = client.get(base + "group-invitation-customer/message-template").json()["data"]
+    content = json.loads(view["content"])
+    button = next(field for field in view["fields"] if field["label"] == "按鈕名稱")
+    content[button["id"]] = "進入案件群組"
+    response = client.put(base + "group-invitation-customer/message-template", json={"content": json.dumps(content, ensure_ascii=False), "expected_revision": view["revision"]})
+    assert response.status_code == 200
+    payload = group_invitation_payload("CASE-1", "媽媽", "https://line.me/original")
+    result = render_copy_payload(application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES], "group-invitation-customer", payload, {"case_no": "CASE-1"})
+    action = result["contents"]["footer"]["contents"][0]["action"]
+    assert action == {"type": "uri", "label": "進入案件群組", "uri": "https://line.me/original"}
+    content["contents/footer/contents/0/action/uri"] = "https://invalid.local"
+    rejected = client.put(base + "group-invitation-customer/message-template", json={"content": json.dumps(content, ensure_ascii=False), "expected_revision": application.revision})
+    assert rejected.status_code == 422
+    assert application.revision == response.json()["data"]["revision"]
+
+
+def test_existing_flex_template_edits_text_without_replacing_dynamic_actions(monkeypatch):
+    import json
+    from copy import deepcopy
+    from subsystems.line.message_copy import copy_fields
+    client, application = _copy_client(monkeypatch)
+    definition = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]
+    template = next(t for t in definition["templates"] if t["id"] == "LINE-ORDER-SERVICE-START-DAY-CARD-V1")
+    before = deepcopy(template["content"])
+    rule = next(r for r in application.definitions[LineConfigurationKind.NOTIFICATION_RULES]["rules"] if r["template_id"] == template["id"])
+    path = f'/api/v1/line/notification-rules/{rule["id"]}/message-template'
+    view = client.get(path).json()["data"]
+    values = json.loads(view["content"])
+    button = next(f for f in view["fields"] if f["label"] == "按鈕名稱")
+    values[button["id"]] = "需要協助處理"
+    assert client.put(path, json={"content": json.dumps(values, ensure_ascii=False), "expected_revision": view["revision"]}).status_code == 200
+    after = next(t for t in application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]["templates"] if t["id"] == template["id"])["content"]
+    def actions(node):
+        if isinstance(node, dict):
+            if "action" in node:
+                yield {k: v for k, v in node["action"].items() if k != "label"}
+            for value in node.values():
+                yield from actions(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from actions(value)
+    assert list(actions(before)) == list(actions(after))
+    assert any(f["content"] == "需要協助處理" for f in copy_fields(after))
+
+
+def test_previous_audience_specific_success_ids_update_the_corresponding_current_role(monkeypatch):
+    client, _ = _copy_client(monkeypatch)
+    root = "/api/v1/line/notification-rules/"
+    for previous, current, text in (("template-bind_success_new_order", "identity-bound-customer", "客戶請查看服務進度。"), ("template-staff_switch_success", "identity-bound-staff", "月嫂請確認可服務時段。")):
+        view = client.get(root + previous + "/message-template").json()["data"]
+        saved = client.put(root + previous + "/message-template", json={"content": text, "expected_revision": view["revision"]})
+        assert saved.status_code == 200
+        assert client.get(root + current + "/message-template").json()["data"]["content"] == text
+    assert client.get(root + "identity-bound-customer/message-template").json()["data"]["content"] == "客戶請查看服務進度。"
+    assert "工會人員" in client.get(root + "identity-bound-admin/message-template").json()["data"]["content"]
+
+
 def _client(monkeypatch):
     app = FastAPI()
     app.include_router(line_configurations.router)
@@ -263,6 +377,7 @@ def test_notification_rule_message_template_can_be_queried_and_updated(monkeypat
         "revision": 7,
         "variables": ["case_no"],
         "sample_preview": "案件 〔case_no〕 已確認訂金。",
+        "fields": [],
     }
 
     updated = client.put(

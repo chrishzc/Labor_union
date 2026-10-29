@@ -95,6 +95,7 @@
             "type": "postback",
             "text": null,
             "uri": null,
+            "displayText": "聯絡專人服務",
             "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54
@@ -195,6 +196,7 @@
             "type": "postback",
             "text": null,
             "uri": null,
+            "displayText": "聯絡專人服務",
             "data": "customer-service:handoff:confirm"
           },
           "border_radius": 54

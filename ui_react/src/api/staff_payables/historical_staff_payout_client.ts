@@ -27,7 +27,7 @@ const ReadbackSchema = z.strictObject({
   projections: z.array(z.strictObject({ obligation_identity: z.string().min(1), amount_snapshot_ntd: z.number().int().positive(), obligation_payroll_version: z.number().int().nonnegative() })),
   owner_terminal: z.boolean(),
 });
-const response = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
+const response = <T>(schema: z.ZodType<T>) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
 export type HistoricalStaffPayoutQuery = z.infer<typeof QuerySchema>;
 export type HistoricalStaffPayoutPreview = z.infer<typeof PreviewSchema>;
 export type HistoricalStaffPayoutReadback = z.infer<typeof ReadbackSchema>;
@@ -43,7 +43,7 @@ function requestOptions(input: HistoricalStaffPayoutOptions = {}, headers: Recor
   const token = sessionClient.getToken(); if (!token) throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_UNAUTHENTICATED', '請先登入。', 401);
   return { ...transportInput, token, headers, timeoutMs: transportInput.timeoutMs ?? 30_000 };
 }
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> { try { return decodePayload(response(schema), raw).data; } catch { throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_SCHEMA_MISMATCH', '回應不符合 Staff Payables strict 契約。'); } }
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T { try { return decodePayload(response<T>(schema), raw).data; } catch { throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_SCHEMA_MISMATCH', '回應不符合 Staff Payables strict 契約。'); } }
 function mapped(error: unknown): never { if (error instanceof HistoricalStaffPayoutClientError) throw error; if (error instanceof ApiHttpError) throw new HistoricalStaffPayoutClientError(error.code, error.message, error.status, error.retryable); throw new HistoricalStaffPayoutClientError('HISTORICAL_STAFF_OUTCOME_UNKNOWN', error instanceof Error ? error.message : '結果目前無法確認。', undefined, true); }
 export const historicalStaffPayoutClient = {
   async query(caseNo: string, staffId: number, options: HistoricalStaffPayoutOptions = {}): Promise<HistoricalStaffPayoutQuery> { try { return decode(QuerySchema, await transport.get<unknown>(`/api/v1/staff-payables/historical-payouts/${encodeURIComponent(caseNo)}/${staffId}`, requestOptions(options))); } catch (error) { return mapped(error); } },

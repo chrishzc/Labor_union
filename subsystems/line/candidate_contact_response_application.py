@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infrastructure.mysql.line_message_copy import configured_message_payload
+
 import hashlib
 import json
 import os
@@ -437,6 +439,7 @@ def _enqueue_staff_customer_question(connection, context, text: str, question_id
     message = candidate_customer_question_card(
         str(context["case_no"]), text, _liff_url("candidate_contact_customer", reference),
     )
+    message = canonical_line_payload_json(configured_message_payload(connection, "card-union-question", json.loads(message), {"case_no": context["case_no"]}))
     MySqlLineDeliveryTaskRepository(connection).enqueue(LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId(str(context["customer_line_user_id"]).strip())),
         LineMessageKind.FLEX, message, now,
@@ -548,6 +551,7 @@ def _enqueue_caregiver_answer(connection, context, answer: str, event_id: int, n
     response_url = _liff_url("candidate_contact", reference)
     from subsystems.scheduling.matching_line_cards import candidate_caregiver_answer_card
     message = candidate_caregiver_answer_card(str(context["case_no"]), answer, reference, response_url)
+    message = canonical_line_payload_json(configured_message_payload(connection, "card-union-answer", json.loads(message), {"case_no": context["case_no"]}))
     MySqlLineDeliveryTaskRepository(connection).enqueue(
         LineDeliveryRequest(
             LineRecipient(LineRecipientType.USER, LineUserId(str(context["staff_line_user_id"]).strip())),

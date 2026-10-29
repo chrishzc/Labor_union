@@ -204,6 +204,13 @@ class DeleteLineNotificationRuleView(SaveLineNotificationRulesView):
     rule_id: Identifier
 
 
+class LineMessageCopyField(_ClosedModel):
+    id: StrictStr
+    label: StrictStr
+    content: StrictStr
+    max_length: StrictInt
+
+
 class LineNotificationMessageTemplateView(_ClosedModel):
     rule_id: Identifier
     template_id: Identifier
@@ -212,10 +219,11 @@ class LineNotificationMessageTemplateView(_ClosedModel):
     revision: StrictInt = Field(ge=0)
     variables: list[StrictStr]
     sample_preview: StrictStr
+    fields: list[LineMessageCopyField] = Field(default_factory=list)
 
 
 class UpdateLineNotificationMessageTemplateRequest(_ClosedModel):
-    content: StrictStr = Field(min_length=1, max_length=5_000)
+    content: StrictStr = Field(min_length=1, max_length=30_000)
     expected_revision: StrictInt = Field(ge=0)
     reason: StrictStr = Field(
         default="",

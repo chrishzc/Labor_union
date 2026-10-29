@@ -35,6 +35,7 @@ import {
 import {
   customerServiceClient,
   type CustomerServiceClient,
+  type CustomerServiceActionsClient,
   type CustomerServiceReminderClient,
 } from '../api/customer_service/customer_service_client';
 import { CustomerServiceClientError } from '../api/customer_service/customer_service_errors';
@@ -99,7 +100,6 @@ import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomer
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
 import { LineMessageFlow } from '../components/LineMessageFlow';
-import { PaymentOverdueReminderWorkbench } from '../components/PaymentOverdueReminderWorkbench';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
@@ -135,7 +135,7 @@ function hashPage(params: URLSearchParams, key: string): number {
   return Number.isSafeInteger(value) && value > 0 ? value : 1;
 }
 
-type CustomerServicePageClient = Partial<CustomerServiceClient & CustomerServiceReminderClient>;
+type CustomerServicePageClient = Partial<CustomerServiceClient & CustomerServiceReminderClient & CustomerServiceActionsClient>;
 type LineIdentityPageClient = Partial<LineIdentityClient>;
 
 interface LineManagementPageProps {
@@ -210,7 +210,6 @@ function displayQueryError(error: unknown, fallback: string): string {
 
 const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['tickets', '客服案件', 'line.tab.tickets'],
-  ['payment_overdue', '繳款逾期', 'line.tab.payment-overdue'],
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
@@ -307,6 +306,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
   const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'message_flow', 'order_groups', 'payment_overdue'], 'tickets'));
+  useEffect(() => { if (activeTab === 'payment_overdue') window.location.hash = '#finance?tab=receipts&view=overdue'; }, [activeTab]);
   const [notificationMessageId, setNotificationMessageId] = useState<string | null>(initialHashParams.get('message')?.slice(0, 191) || null);
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
@@ -757,7 +757,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       </nav>}
 
       {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
-      {activeTab === 'payment_overdue' && <PaymentOverdueReminderWorkbench />}
+      {activeTab === 'payment_overdue' && <a href="#finance?tab=receipts&view=overdue">前往帳務作業的逾期提醒</a>}
 
       {activeTab === 'richmenu' && (() => {
         const menus = localRichMenuConfiguration?.menus ?? [];

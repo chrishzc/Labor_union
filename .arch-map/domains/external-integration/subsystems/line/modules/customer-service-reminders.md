@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-React 客服案件的唯讀提醒呈現及 Customer Service owner-backed bounded query projection；不接管 ticket／escalation root、手機客服、回覆或結案 writer。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。服務開始日群組按鈕建立的 `start-day-response:` 客服事件歸服務需求來源，供工會待辦查閱。
+React 六欄未結案客服清單及 Customer Service owner-backed bounded query projection；完成按鈕沿既有 update Preview／Apply，由原 owner 在單一 UoW 完成 ticket／escalation 並解除 hold，不建立 Push。來源由 canonical message events 與同事件 escalation 解讀，未知保留未知，多來源不重複計數。服務開始日群組按鈕建立的 `start-day-response:` 客服事件歸服務需求來源，供工會待辦查閱。
 
 ## Implementation
 - primary: `ui_react/src/components/LineCustomerServiceReminderWorkbench.tsx`
@@ -18,6 +18,8 @@ React 客服案件的唯讀提醒呈現及 Customer Service owner-backed bounded
 - application: `subsystems/customer_service/application.py`
 - contract: `subsystems/customer_service/contracts.py`
 - adapter: `infrastructure/mysql/customer_service_repository.py::list_reminders`
+- 名稱唯讀 adapter: `infrastructure/line/messaging_api_adapter.py::display_names`；bounded Profile GET，缺值不冒充姓名。
+- 完成 coordination: `subsystems/customer_service/escalation_application.py::complete_ticket_holds`、`infrastructure/mysql/customer_service_escalation_repository.py::active_for_ticket`；保留原 writer／CAS／audit。
 
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6 React 客服案件提醒清單。
@@ -31,4 +33,4 @@ React 客服案件的唯讀提醒呈現及 Customer Service owner-backed bounded
 - parent_regression: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_management_no_fake_mutation.test.tsx`
 
 ## Boundaries
-Query 不 commit、不產生 receipt／outbox、不啟動 worker、不呼叫 provider；既有客服 Query／Preview／Apply 與手機 surface 保留。source filter 與 pagination 由 server 執行，不讀取或暴露 raw message／identity。
+Query 不 commit、不產生 receipt／outbox、不啟動 worker、不呼叫 provider；既有客服 Query／Preview／Apply 與手機 surface 保留。搜尋與 pagination 由 server 執行；只呈現最近10則原 owner 已保存的人員對話留言，不揭露已遮罩客訴、LINE user ID、電話或備註。完成操作只有原 application 的一次 outer commit，無 provider send。

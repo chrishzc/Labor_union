@@ -12,7 +12,7 @@
 .client-registry-page form { display: flex; gap: 8px; max-width: 100%; width: min(420px, 100%); }
 .client-registry-page form input { flex: 1 1 auto; width: 0; }
 .client-registry-page input { border: 1px solid #cfa99a; border-radius: 8px; padding: 9px 10px; min-width: 0; }
-.client-registry-page button { border: 1px solid #b45309; border-radius: 8px; padding: 9px 13px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); cursor: pointer; border-color: var(--md-sys-color-primary); }
+.client-registry-page button, .legacy-va-import button { border: 1px solid #b45309; border-radius: 8px; padding: 9px 13px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; cursor: pointer; border-color: var(--md-sys-color-primary); }
 .client-registry-page button:disabled { opacity: .5; cursor: not-allowed; }
 .client-registry-layout { display: grid; grid-template-columns: minmax(230px, 310px) minmax(0, 1fr); gap: 18px; }
 .client-registry-layout aside { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 210px); overflow: auto; }
@@ -108,8 +108,10 @@
 .registry-intake-preview dl > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 3fr); gap: 12px; }
 .registry-intake-preview dd { margin: 0; overflow-wrap: anywhere; }
 .client-registry-page button:not(:where(.client-registry-layout aside button, .registry-replacement-steps button)):hover:not(:disabled),
+.legacy-va-import button:hover:not(:disabled),
 .registry-return-row button:hover:not(:disabled) { background: var(--md-sys-color-primary-hover); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary-hover); }
 .client-registry-page button:not(:where(.client-registry-layout aside button, .registry-replacement-steps button)):disabled,
+.legacy-va-import button:disabled,
 .registry-return-row button:disabled { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; opacity: 1; }
 .registry-replacement-steps button { background: var(--md-sys-color-surface); color: var(--md-sys-color-primary); }
 .registry-replacement-steps button[aria-pressed="true"] { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); box-shadow: inset 0 -3px var(--md-sys-color-primary-hover); }

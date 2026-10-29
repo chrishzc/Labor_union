@@ -95,7 +95,7 @@ export const FinancePage: React.FC = () => {
   const sharedStaffDirectory = useStaffIdentityDirectory();
   const [entry] = useState(() => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
-    return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
+    return { tab: params.get('tab'), overdue: params.get('view') === 'overdue', caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
   const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'case-accounting' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'payment-destination' ? 'payment-destination' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'client-receipts' : 'receipts');
   const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments'>('receipts');
@@ -396,7 +396,7 @@ export const FinancePage: React.FC = () => {
         {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳'], ['case-accounting', '案件帳務'], ['accounting-warnings', '帳務警示']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
       </nav>
       {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
-      {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
+      {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialView={entry.overdue?'overdue':'all'} onOpenBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
       {activeTab === 'payments' && <FinancePaymentsWorkspace revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId => { if (staffId !== undefined) setSelectedStaff(staffId); setActiveTab('staff-payables'); }} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank} />}
       {subsidyCase && <CaseSubsidyDetailDrawer key={subsidyCase} caseNo={subsidyCase} onClose={() => setSubsidyCase('')} onOpenBank={openBank} onChanged={() => setReload(value => value + 1)} />}
       {activeTab === 'client-receipts' && (
@@ -620,7 +620,7 @@ export const FinancePage: React.FC = () => {
           <FinanceStatementArchive />
           <div className="finance-section-heading">
             <div>
-              <h2>銀行對帳</h2>
+              <h2>銀行對帳</h2>{selectedCase && <p>目前核對案件：{selectedCase}</p>}
               <p>選擇銀行交易明細工作簿後，按「匯入銀行交易明細」；系統自動檢查並提交可入帳款項，完成後顯示結果。</p>
             </div>
           </div>

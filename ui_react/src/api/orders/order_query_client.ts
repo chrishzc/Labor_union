@@ -164,8 +164,8 @@ function requestOptions(options?: OrderQueryOptions): RequestOptions {
   };
 }
 
-function decodeOrderEnvelope<T extends z.ZodTypeAny>(dataSchema: T, raw: unknown): z.output<T> {
-  const envelope = decodePayload(createOrderQueryEnvelopeSchema(dataSchema), raw);
+function decodeOrderEnvelope<T>(dataSchema: z.ZodType<T>, raw: unknown): T {
+  const envelope = decodePayload(createOrderQueryEnvelopeSchema<T>(dataSchema), raw);
   if (!envelope.success) {
     throw new ApiHttpError(
       400,
@@ -178,13 +178,13 @@ function decodeOrderEnvelope<T extends z.ZodTypeAny>(dataSchema: T, raw: unknown
   return envelope.data;
 }
 
-async function readResolved<T extends z.ZodTypeAny>(
+async function readResolved<T>(
   endpoint: string,
-  schema: T,
+  schema: z.ZodType<T>,
   resolvedOptions: RequestOptions,
   caseNo?: string,
   params?: RequestOptions['params']
-): Promise<z.output<T>> {
+): Promise<T> {
   try {
     const raw = await transport.get(endpoint, { ...resolvedOptions, params });
     return decodeOrderEnvelope(schema, raw);
@@ -196,13 +196,13 @@ async function readResolved<T extends z.ZodTypeAny>(
   }
 }
 
-function read<T extends z.ZodTypeAny>(
+function read<T>(
   endpoint: string,
-  schema: T,
+  schema: z.ZodType<T>,
   options?: OrderQueryOptions,
   caseNo?: string,
   params?: RequestOptions['params']
-): Promise<z.output<T>> {
+): Promise<T> {
   return readResolved(endpoint, schema, requestOptions(options), caseNo, params);
 }
 

@@ -25,12 +25,13 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     render(<ClientOverRefundRecoveryWorkbench caseNo="CASE-1" recoveryIdentity="recovery:1" client={owner} />);
     await waitFor(() => expect(screen.getByText(/目前餘額：500/)).toBeInTheDocument());
     expect(screen.getByText(/配對不會解除異常/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '確認套用' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存處理' })).toBeDisabled();
+    expect(owner.applyMatching).not.toHaveBeenCalled();
     expect(screen.queryByText(/bank:10|版本：3|狀態：open/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/入款流水紀錄編號/), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
     fireEvent.change(screen.getByLabelText(/佐證紀錄/), { target: { value: 'phone-log:1' } });
-    expect(screen.getByRole('button', { name: '預覽處理影響' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '儲存處理' })).toBeEnabled();
   });
 
   it('only shows解除 after fresh owner readback satisfies remaining=0 and terminal status', async () => {
@@ -44,9 +45,9 @@ describe('ClientOverRefundRecoveryWorkbench', () => {
     fireEvent.change(screen.getByLabelText(/調整金額/), { target: { value: '500' } });
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認後授權調整' } });
     fireEvent.change(screen.getByLabelText(/佐證紀錄/), { target: { value: 'phone-log:1' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽處理影響' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '確認套用' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '確認套用' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存處理' }));
+    expect(screen.queryByRole('button', { name: '確認套用' })).not.toBeInTheDocument();
+    await waitFor(() => expect(owner.applyAdjustment).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByText('客戶退款超額追償已解除')).toBeInTheDocument());
   });
 

@@ -25,6 +25,7 @@ from domains.customer_service.escalation import (
 from domains.customer_service.ticket import (
     CustomerServiceStatus,
     CustomerServiceVersionConflictError,
+    CustomerServiceTransitionError,
     transition_ticket,
 )
 from domains.line.canonical_payload import canonical_line_payload_json
@@ -225,6 +226,7 @@ class HumanEscalationApplication:
                         command,
                         int(_field(escalation, "id")),
                         self._now(),
+                        uow,
                     )
                 )
                 repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
@@ -538,16 +540,17 @@ def _optional_int(value) -> int | None:
     return None if value is None else int(value)
 
 
-def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime):
+def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime, unit=None):
+    from subsystems.line.message_copy_catalog import configured_payload
     line_user_id = LineUserId(str(_field(ticket, "line_user_id")))
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id),
         LineMessageKind.TEXT,
         canonical_line_payload_json(
-            {
+            configured_payload(unit, "service-resolved", {
                 "type": "text",
                 "text": CONTACT_RESOLVED,
-            }
+            })
         ),
         now,
         IdempotencyKey(
@@ -559,6 +562,42 @@ def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetim
         "customer_service_ticket",
         str(_field(ticket, "ticket_id")),
     )
+
+
+def complete_ticket_holds(uow, escalations, command, resulting_ticket_version: int) -> None:
+    """Finish the existing escalation path in the caller's transaction, without Push."""
+    repo = _repo(uow)
+    path = (EscalationWorkflowStatus.OPEN, EscalationWorkflowStatus.CLAIMED,
+            EscalationWorkflowStatus.HANDLING, EscalationWorkflowStatus.RESOLVED)
+    events = {EscalationWorkflowStatus.CLAIMED: EscalationEventType.CLAIMED,
+              EscalationWorkflowStatus.HANDLING: EscalationEventType.HANDLING_STARTED,
+              EscalationWorkflowStatus.RESOLVED: EscalationEventType.RESOLVED}
+    for row in escalations:
+        if not _release_predicate_satisfied(row, getattr(uow, "escalation_source", None)):
+            raise CustomerServiceTransitionError("客服來源仍有未完成事項，無法結案")
+        state = EscalationWorkflowStatus(str(_field(row, "workflow_status")))
+        if state not in path[:-1]:
+            raise CustomerServiceTransitionError("客服升級狀態不允許結案")
+        escalation_id = int(_field(row, "id"))
+        version = int(_field(row, "workflow_version"))
+        hold_version = int(_field(row, "hold_version", 0))
+        for target in path[path.index(state) + 1:]:
+            changes = {"workflow_status": target.value, "workflow_version": version + 1}
+            if target is EscalationWorkflowStatus.RESOLVED:
+                changes.update(hold_state="released", hold_version=hold_version + 1,
+                               resolution_code="handled_by_union_staff", resolution_evidence_digest=command.preview_fingerprint.value)
+            repo.transition(escalation_id, **changes)
+            event_types = (events[target], EscalationEventType.HOLD_RELEASED) if target is EscalationWorkflowStatus.RESOLVED else (events[target],)
+            for event in event_types:
+                key = _receipt_id(f"ticket-complete:{escalation_id}:{event.value}", command.idempotency_key.value)
+                repo.append_event(escalation_id, event,
+                    expected_escalation_version=version, resulting_escalation_version=version + 1,
+                    expected_ticket_version=command.expected_version.value, resulting_ticket_version=resulting_ticket_version,
+                    expected_hold_version=hold_version, resulting_hold_version=hold_version + (target is EscalationWorkflowStatus.RESOLVED),
+                    actor_ref=command.actor_id, reason_code="handled_by_union_staff",
+                    reason_evidence_digest=command.preview_fingerprint.value, receipt_id=_receipt_id(event.value, key),
+                    idempotency_key=key, correlation_id=command.correlation_id.value)
+            version += 1
 
 
 def _repo(uow):

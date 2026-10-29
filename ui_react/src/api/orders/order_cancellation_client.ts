@@ -223,7 +223,7 @@ export const OrderCancellationApplyPayloadSchema = z.strictObject({
   reason: z.string().trim().max(500),
 });
 
-const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
+const envelope = <T>(schema: z.ZodType<T>) => z.strictObject({
   success: z.boolean(),
   message: z.string(),
   data: schema,
@@ -247,8 +247,8 @@ function options(signal?: AbortSignal, headers?: Record<string, string>): Reques
   return { signal, token: sessionClient.getToken(), headers };
 }
 
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
-  const result = decodePayload(envelope(schema), raw);
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T {
+  const result = decodePayload(envelope<T>(schema), raw);
   if (!result.success) throw new ApiHttpError(400, 'ORDER_CANCELLATION_FAILED', result.error ?? result.message, false, raw);
   return result.data;
 }

@@ -115,7 +115,7 @@ def test_restored_catalogue_matches_only_the_exact_original_cached_source():
     from zipfile import ZipFile
     from xml.etree import ElementTree as ET
     from subsystems.contract_signing.template_catalog import PROJECT_ROOT, approved_template_mapping_path
-    with ZipFile(PROJECT_ROOT/'document/管理端UI/表格需求模板/所需表格.xlsx') as archive:
+    with ZipFile(PROJECT_ROOT/'document/資料庫、資料處理/表格需求模板/所需表格.xlsx') as archive:
         root = ET.fromstring(archive.read('xl/externalLinks/externalLink1.xml'))
     names = [item.attrib['val'] for item in root.findall('.//{*}sheetName')]
     catalog = next(item for item in root.findall('.//{*}sheetData') if names[int(item.attrib['sheetId'])] == '目錄')

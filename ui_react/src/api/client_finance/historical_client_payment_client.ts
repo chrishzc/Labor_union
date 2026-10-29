@@ -31,7 +31,7 @@ const ReadbackSchema = z.strictObject({
   case_no: z.string().min(1), account_version: z.number().int().nonnegative(), obligations: z.array(ObligationSchema),
   projections: z.array(ProjectionSchema), owner_terminal: z.boolean(),
 });
-const response = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
+const response = <T>(schema: z.ZodType<T>) => z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() });
 
 export type HistoricalClientPaymentQuery = z.infer<typeof QuerySchema>;
 export type HistoricalClientPaymentPreview = z.infer<typeof PreviewSchema>;
@@ -59,8 +59,8 @@ function requestOptions(input: HistoricalClientPaymentOptions = {}, headers: Rec
   if (!token) throw new HistoricalClientPaymentClientError('HISTORICAL_CLIENT_UNAUTHENTICATED', '請先登入。', 401);
   return { ...transportInput, token, headers, timeoutMs: transportInput.timeoutMs ?? 30_000 };
 }
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
-  try { return decodePayload(response(schema), raw).data; }
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T {
+  try { return decodePayload(response<T>(schema), raw).data; }
   catch { throw new HistoricalClientPaymentClientError('HISTORICAL_CLIENT_SCHEMA_MISMATCH', '回應不符合 Client Finance strict 契約。'); }
 }
 function mapped(error: unknown): never {

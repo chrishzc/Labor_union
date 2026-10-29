@@ -23,6 +23,7 @@
   - `api/routes/registration_applications.py`
   - `ui_react/src/api/registration_applications/client.ts`
   - `ui_react/src/components/RegistrationApplications.tsx`
+  - `ui_react/src/components/RegistrationApplications.css` — 待核准清單、申請明細及核准狀態，沿用專案色彩與響應式版面。
   - `ui_react/src/pages/ClientRegistryPage.tsx`（待核准需求分頁，保留名冊／虛擬帳號匯入）
   - `line/line_bot.py`（legacy rollback compatibility）
 

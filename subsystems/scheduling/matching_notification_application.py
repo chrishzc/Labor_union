@@ -5,6 +5,8 @@ Description: 協調媒合通知、人工回覆與 assignment conversion 後的�
 
 from __future__ import annotations
 
+from subsystems.line.message_copy_catalog import configured_payload
+
 import hashlib
 import secrets
 from dataclasses import replace
@@ -340,7 +342,7 @@ class MatchingNotificationApplication:
             occurred_at,
         )
         unit_of_work.delivery_tasks.enqueue(
-            _response_confirmation(result, line_user_id, correlation_id, occurred_at)
+            _response_confirmation(result, line_user_id, correlation_id, occurred_at, unit_of_work)
         )
         if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED:
             unit_of_work.customer_service.create_or_append(
@@ -506,6 +508,9 @@ class MatchingNotificationApplication:
     def _append_notification(self, unit_of_work, command, recipient, segment_id,
                              kind, snapshot, payload_json, token, action_scope):
         repository = unit_of_work.matching_notifications
+        import json
+        key = ("card-customer-confirmation" if snapshot.get("package_type") == "customer_confirmation" else "card-customer-profiles") if kind is MatchingNotificationKind.CUSTOMER_PROFILES else "card-caregiver-information" + ("-2" if kind is MatchingNotificationKind.CAREGIVER_INFO_2 else "")
+        payload_json = canonical_line_payload_json(configured_payload(unit_of_work, key, json.loads(payload_json), {"case_no": command.plan.case_no}))
         intent_id = repository.append_notification_intent(
             plan=command.plan,
             segment_id=segment_id,
@@ -842,13 +847,13 @@ def _matching_delivery(command, recipient, payload_json, intent_id, scheduled_at
     )
 
 
-def _response_confirmation(result, recipient, correlation_id, scheduled_at):
+def _response_confirmation(result, recipient, correlation_id, scheduled_at, unit=None):
     text = matching_response_text(result.caregiver_willingness, result.customer_decision)
     from domains.line.canonical_payload import canonical_line_payload_json
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.TEXT,
-        canonical_line_payload_json({"type": "text", "text": text}),
+        canonical_line_payload_json(configured_payload(unit, "matching-willing-received" if result.caregiver_willingness is not None else "matching-customer-assistance" if result.customer_decision is CustomerMatchingDecision.CONTACT_REQUESTED else "matching-customer-accepted" if result.customer_decision is CustomerMatchingDecision.ACCEPTED else "matching-customer-response", {"type": "text", "text": text})),
         scheduled_at,
         IdempotencyKey(f"matching-response-confirmation:{result.event_id}"),
         correlation_id,

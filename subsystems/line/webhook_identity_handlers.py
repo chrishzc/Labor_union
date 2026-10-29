@@ -27,6 +27,7 @@ from subsystems.line.feedback_contracts import FeedbackOutcome, RecordLineFeedba
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.line.navigation_catalog import CATALOG_REVISION
+from subsystems.line.message_copy_catalog import configured_payload
 
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
@@ -517,7 +518,11 @@ def _identity_link_message(purpose, url, unit_of_work=None):
         LineIdentityFlowPurpose.ADMIN_BINDING: "請開啟以下頁面登入並綁定工會後台帳號：",
     }
     intro = introductions.get(purpose, "請開啟以下頁面完成身分綁定：")
-    return f"{intro}\n\n{url}\n\n此連結將於 15 分鐘後失效。"
+    text = f"{intro}\n\n{url}\n\n此連結將於 15 分鐘後失效。"
+    if unit_of_work is not None and purpose in introductions:
+        key = "identity-staff-link" if purpose is LineIdentityFlowPurpose.STAFF_VERIFICATION else "identity-admin-link"
+        return configured_payload(unit_of_work, key, {"type": "text", "text": text}, {"identity_url": url})["text"]
+    return text
 
 
 def _identity_purpose_for_text(text):

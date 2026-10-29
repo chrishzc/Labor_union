@@ -1,0 +1,33 @@
+.registration-applications { color: var(--md-sys-color-on-surface, #432c23); }
+.registration-applications__header, .registration-applications__detail-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+.registration-applications__header { margin-bottom: 20px; }
+.registration-applications__header h2, .registration-applications__detail h3, .registration-applications__placeholder h3 { margin: 0; color: var(--md-sys-color-primary, #9a3412); }
+.registration-applications__header p, .registration-applications__placeholder p { margin: 8px 0 0; color: var(--md-sys-color-on-surface-variant, #74593f); line-height: 1.7; }
+.registration-applications button { border: 1px solid var(--md-sys-color-outline, #cfa99a); border-radius: 8px; padding: 10px 16px; background: var(--md-sys-color-surface-container, #fff); color: var(--md-sys-color-primary, #9a3412); font: inherit; font-weight: 600; cursor: pointer; }
+.registration-applications button:hover:not(:disabled) { background: var(--md-sys-color-primary-container, #ffedd5); }
+.registration-applications button:focus-visible { outline: 3px solid var(--md-sys-color-primary, #9a3412); outline-offset: 3px; }
+.registration-applications button:disabled { background: var(--md-sys-color-disabled-container, #f0e7e2); color: var(--md-sys-color-disabled, #80716b); cursor: not-allowed; }
+.registration-applications__layout { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.registration-applications__queue { min-width: 0; }
+.registration-applications__list { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0 0 16px; }
+.registration-applications .registration-applications__item { display: grid; gap: 12px; width: 100%; padding: 16px; text-align: left; color: var(--md-sys-color-on-surface, #432c23); line-height: 1.7; overflow-wrap: anywhere; border-color: #ead3c8; }
+.registration-applications__item small { color: var(--md-sys-color-primary, #9a3412); font-size: .8rem; }
+.registration-applications .registration-applications__item[aria-pressed="true"] { border-color: var(--md-sys-color-primary, #9a3412); background: var(--md-sys-color-primary-container, #ffedd5); }
+.registration-applications__detail, .registration-applications__placeholder, .registration-applications__empty { min-width: 0; border: 1px solid #ead3c8; border-radius: 12px; padding: 20px; background: var(--md-sys-color-surface-container, #fff); }
+.registration-applications__placeholder { padding: 32px 24px; }
+.registration-applications__empty { margin: 0; color: var(--md-sys-color-on-surface-variant, #74593f); line-height: 1.7; }
+.registration-applications__detail h3 { font-size: 1.05rem; overflow-wrap: anywhere; }
+.registration-applications__badge { border-radius: 999px; padding: 4px 10px; background: var(--md-sys-color-primary-container, #ffedd5); color: var(--md-sys-color-primary, #9a3412); font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.registration-applications__kind { color: var(--md-sys-color-on-surface-variant, #74593f); font-size: .875rem; overflow-wrap: anywhere; }
+.registration-applications__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin: 20px 0; }
+.registration-applications__fields > div { min-width: 0; border-radius: 8px; padding: 12px; background: #fffaf7; }
+.registration-applications__fields dt { font-size: .8rem; color: var(--md-sys-color-on-surface-variant, #74593f); }
+.registration-applications__fields dd { margin: 6px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.registration-applications__actions { display: flex; justify-content: flex-end; border-top: 1px solid #ead3c8; padding-top: 16px; }
+.registration-applications .registration-applications__approve { background: var(--md-sys-color-primary, #9a3412); border-color: var(--md-sys-color-primary, #9a3412); color: var(--md-sys-color-on-primary, #fff); }
+.registration-applications .registration-applications__approve:hover:not(:disabled) { background: var(--md-sys-color-primary-hover, #7c2d12); }
+.registration-applications .registration-applications__approve:disabled { background: var(--md-sys-color-disabled-container, #f0e7e2); border-color: var(--md-sys-color-outline, #cfa99a); color: var(--md-sys-color-disabled, #80716b); }
+.registration-applications__message { padding: 12px 16px; border-radius: 8px; background: var(--md-sys-color-primary-container, #ffedd5); line-height: 1.6; overflow-wrap: anywhere; }
+.registration-applications__message[role="alert"] { background: #fee2e2; color: #991b1b; }
+.registration-applications__loading { color: var(--md-sys-color-on-surface-variant, #74593f); }
+@media (max-width: 900px) { .registration-applications__layout { grid-template-columns: minmax(0, 1fr); } .registration-applications__detail { padding: 16px; } }

@@ -311,7 +311,7 @@ def test_historical_full_subsidy_staff_due_date_is_second_month_after_completion
     candidate = _candidate(
         replace(
             candidate.facts,
-            client_identity_status="補助市民",
+            client_identity_status="社福",
             contractual_floor_fee=MoneyNTD(0),
         ),
         request.intent,

@@ -115,7 +115,7 @@ describe('existing payable composition', () => {
     render(<FinancePage />);
     await screen.findByLabelText('付款摘要');
     expect(screen.queryByRole('tablist', { name: '應付帳款檢視' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button')).toHaveLength(3);
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
     expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
     fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'service_pending' } });
     expect(screen.queryByText('月嫂甲')).not.toBeInTheDocument();

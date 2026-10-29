@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
  * File: finance_query_page.test.tsx
  * Description: 驗證FinancePage active-tab query budget、server資料與正常單次操作匯入邊界。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchPreview, type FinanceImportBatchOutcome } from '../../../../../../../api/finance_import/finance_import_mutation_client';
@@ -348,7 +348,9 @@ describe('Finance import preview and replay boundary', () => {
     expect(applyRequests).toHaveLength(1);
     expect(applyRequests[0].body).toEqual({ batch_identity: plan.batch_identity,
       expected_batch_version: plan.batch_version, preview_fingerprint: plan.preview_fingerprint, reason: '' });
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    const workflow = document.querySelector<HTMLElement>('[data-surface-id="finance.finance-import.workflow"]');
+    expect(workflow).not.toBeNull();
+    expect(within(workflow!).queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   it.each(['blocked', 'no-ready-rows'] as const)('does not submit %s', async policy => {

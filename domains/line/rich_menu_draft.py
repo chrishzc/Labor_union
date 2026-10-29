@@ -151,7 +151,7 @@ def normalize_rich_menu_action(action: Mapping[str, object]) -> dict[str, object
     value = _mapping(action, "Rich Menu action")
     _only_keys(
         value,
-        {"type", "text", "uri", "uri_source", "data", "rich_menu_alias_id"},
+        {"type", "text", "displayText", "uri", "uri_source", "data", "rich_menu_alias_id"},
         "Rich Menu action",
     )
     kind = require_canonical_text(value.get("type"), "Rich Menu action type", 32)
@@ -169,9 +169,15 @@ def normalize_rich_menu_action(action: Mapping[str, object]) -> dict[str, object
         text = require_canonical_text(supplied.get("text"), "Rich Menu message text", 300)
         return {"type": kind, "text": text}
     if kind == "postback":
-        _reject_keys(supplied, {"text", "uri", "uri_source", "rich_menu_alias_id"}, kind)
+        _reject_keys(supplied, {"uri", "uri_source", "rich_menu_alias_id"}, kind)
         data = require_canonical_text(supplied.get("data"), "Rich Menu postback data", 300)
-        return {"type": kind, "data": data}
+        result: dict[str, Any] = {"type": kind, "data": data}
+        display_text = supplied.get("displayText") or supplied.get("text")
+        if display_text is not None:
+            result["displayText"] = require_canonical_text(
+                display_text, "Rich Menu postback displayText", 300
+            )
+        return result
     if kind == "richmenuswitch":
         _reject_keys(supplied, {"text", "uri", "uri_source"}, kind)
         alias = require_canonical_text(

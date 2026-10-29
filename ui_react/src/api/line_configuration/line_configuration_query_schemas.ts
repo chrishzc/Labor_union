@@ -393,8 +393,8 @@ export type LineRichMenuPublicationPage = z.infer<
   typeof LineRichMenuPublicationPageSchema
 >;
 
-export function createLineConfigurationQueryEnvelopeSchema<T extends z.ZodTypeAny>(
-  dataSchema: T
+export function createLineConfigurationQueryEnvelopeSchema<T>(
+  dataSchema: z.ZodType<T>
 ) {
   return z
     .object({

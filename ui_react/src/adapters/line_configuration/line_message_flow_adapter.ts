@@ -61,7 +61,7 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
     { title: '加入好友', nodes: [{ id: 'welcome', title: '加入 LINE 好友', ids: ['welcome'] }] },
     { title: '登記需求', nodes: [{ id: 'registration', title: '開啟服務登記', ids: ['service-registration'] }] },
     { title: '身分確認', nodes: [{ id: 'identity-pending', title: '受理身分申請', ids: ['identity-pending'], templates: ['staff_verification_requested', 'staff_verification_rejected'] }] },
-    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '身分綁定完成', ids: ['identity-bound'], templates: ['bind_success_new_order', 'bind_success_existing', 'client_rebind_approved', 'client_rebind_rejected'] }] },
+    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'], templates: ['bind_success_existing', 'client_rebind_approved', 'client_rebind_rejected'] }] },
   ] },
   { id: 'support', name: '客服與支援', summary: '一般留言不啟動聊天室 AI，也不自動開客服單。「問題／其他問題」回到自助導覽；明確呼叫專員後，留言才加入同一客服案件。舊 AI 回答錯誤按鈕只提示功能停用。', stages: [
     { title: '開啟服務', nodes: [

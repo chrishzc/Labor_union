@@ -14,6 +14,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold、masked alert intent 與簡短受理回覆；一般留言不啟動聊天室 AI 或自動轉人工。「問題／其他問題／5／6」只開自助導覽，active hold 內仍附加原案件。專員正式結案時解除 hold 並通知完成。舊回答錯誤／繼續／恢復 AI 入口只提示停用，不開單、不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
 
 ## Implementation
+  - `subsystems/line/webhook_immediate_reply.py` — 專人服務即時受理回覆；由 runtime 注入與背景受理相同的文案 reader，讀取結束後仍沿既有 Reply adapter。
 
 - `subsystems/line/runtime_human_escalation_source.py`
 - `subsystems/line/service_help_application.py`

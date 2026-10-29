@@ -16,6 +16,7 @@
 - workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 收款／付款清單，沿用既有 owner 摘要、government projection、cash planning；正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
+- overdue reminder composition: `FinanceReceiptsWorkspace.tsx` 承接既有 LINE-owned `PaymentOverdueReminderWorkbench.tsx`；只移動入口，不改逾期資格、金額或寄送 writer。
 - government receipt grouping: `ui_react/src/components/SubsidyPeriodWorkbench.tsx` — 月／季／年整期入款、同單位總額、季度涵蓋月份及防重，歸 Government Subsidy owner。
 - shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — exact-case 補助金額、整期涵蓋與目前應退／實付；不提供逐案銷帳。
 - immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。

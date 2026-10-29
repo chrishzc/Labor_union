@@ -37,6 +37,5 @@ document/line/*
 **/__pycache__/
 **/*.py[cod]
 **/*.log
-line/test_result.txt
 scripts/**/scratch/
 validation/generated_contract_documents/

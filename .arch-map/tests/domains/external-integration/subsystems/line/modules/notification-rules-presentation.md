@@ -13,7 +13,10 @@ test_root: ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx
 - 同檔流程圖 oracle 保護精簡步驟、延後展開、多則訊息精確定位、current 規則狀態與 shadow rule 不冒充停用、訊息 query 重新載入、未儲存草稿離頁保護、失效目標與 Query 失敗不假裝成功；所有設定變更與外送操作保持零呼叫。
 - `tests/domains/scheduling/subsystems/scheduling/integration/test_staff_leave_inquiry_transaction.py` — 請假說明設定進入新卡片，原案件／postback 不變，編輯後不改寫既有工作。
 - `tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_rule_api.py` — 保護規則引用訊息模板之typed query、版本化內容更新及既有規則 mutation route。
+- 同一 preview／API 與 React roots 保護全目錄文案讀取及儲存、三身分成功互不覆寫、直接完成與審核通過使用設定、既有工作重播、卡片動態區塊／原 action 不變、共用 writer 的卡片格式驗證、stale typed 409，以及內建文案晚到讀取不覆蓋可編輯草稿。
 
 - 同一 preview test root 保護公版無 real-reader 能力、付款／請假與所有內建卡片不受資格限制、文字僅列實際使用變數，及 sample API 不接受未知來源值。
 
 test_root: tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py
+
+- 同一 React oracle 保護訊息清單六則分頁與搜尋定位、單欄編輯的跨欄草稿保留、範例展開，以及多卡逐張切換不重建／發送訊息；實際畫面檢查固定 504px 與移除清單／編輯外框／預覽內層捲動。

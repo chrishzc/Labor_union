@@ -90,7 +90,7 @@ export const StaffPayoutJobSchema = z.strictObject({
   outcome: z.union([JobSuccessSchema, JobFailureSchema]).nullable(),
 });
 
-export const StaffPayoutResponseSchema = <T extends z.ZodTypeAny>(data: T) => z.strictObject({
+export const StaffPayoutResponseSchema = <T>(data: z.ZodType<T>) => z.strictObject({
   success: z.boolean(),
   message: z.string(),
   data,

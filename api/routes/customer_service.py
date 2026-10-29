@@ -6,6 +6,7 @@ Description: 暴露客服唯讀、結案與回覆 Preview／Apply，以及退役
 from __future__ import annotations
 
 from typing import Annotated
+import os
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -78,7 +79,10 @@ escalation_router = APIRouter(prefix="/api/v1/customer-service/escalations", tag
 
 
 def _application():
-    return CustomerServiceApplication(open_line_unit_of_work)
+    from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    profiles = LineMessagingApiAdapter(token, timeout_seconds=2).display_names if token else None
+    return CustomerServiceApplication(open_line_unit_of_work, display_names=profiles)
 
 
 def _escalation_application():

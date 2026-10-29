@@ -6,6 +6,8 @@ Description: 將客服文字路由為 durable LINE 回覆，並以同一 UoW 建
 from __future__ import annotations
 
 from subsystems.line.message_copy import CONTACT_RECEIVED
+from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.webhook_immediate_reply import is_immediate_reply_sent
 
 from datetime import datetime, timedelta
 import os
@@ -113,7 +115,7 @@ class LineServiceHelpApplication:
                     inbox,
                     unit_of_work,
                     line_user_id,
-                    _text_payload(_registration_reply(_registration_liff_url())),
+                    configured_payload(unit_of_work, "service-registration" if _registration_liff_url() else "service-registration-unavailable", _text_payload(_registration_reply(_registration_liff_url())), {"registration_url": _registration_liff_url()}),
                     "registration",
                     reason_code=outcome.reason_code,
                 )
@@ -303,15 +305,16 @@ class LineServiceHelpApplication:
             command = _escalation_command(inbox, line_user_id, referral)
             self._escalation_gateway.create_for_ticket(command, ticket, unit_of_work)
         unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        self._reply_or_enqueue(
-            inbox,
-            unit_of_work,
-            line_user_id,
-            _handoff_active_payload(
-                CONTACT_RECEIVED
-            ),
-            "ticket",
-        )
+        if not is_immediate_reply_sent(inbox):
+            self._reply_or_enqueue(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                _handoff_active_payload(
+                    CONTACT_RECEIVED
+                ),
+                "ticket",
+            )
         return int(ticket.ticket_id)
 
     def _retired_ai_action(self, inbox, unit_of_work, line_user_id) -> None:
@@ -374,7 +377,11 @@ class LineServiceHelpApplication:
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
         if context or self._identity_url is None:
-            return _progress_payload(context)
+            if not context:
+                return _progress_payload(context)
+            return configured_payload(unit_of_work, "service-progress", _progress_payload(context), {
+                "case_no": (context or {}).get("case_no") or "尚未核發", "status": (context or {}).get("status") or "資料確認中",
+                "start_date": (context or {}).get("start_date") or "未定", "end_date": (context or {}).get("end_date") or "未定"})
         event_id = inbox.event.event_id.value
         opened = unit_of_work.identity_flows.open(
             OpenLineIdentityFlowCommand(
@@ -386,10 +393,14 @@ class LineServiceHelpApplication:
             )
         )
         url = self._identity_url(opened.purpose.value, opened.flow_id.value)
-        return _text_payload(_unbound_progress_reply(url))
+        return configured_payload(unit_of_work, "service-progress-unbound", _text_payload(_unbound_progress_reply(url)), {"identity_url": url})
 
     def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         event_id = inbox.event.event_id.value
+        copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "ticket": "service-contact",
+                    "service_flow": "service-flow", "payment_subsidy": "service-payment", "profile_update": "service-profile-update", "order-update": "service-order-update", "other": "service-other"}.get(suffix)
+        if copy_key:
+            payload = configured_payload(unit_of_work, copy_key, payload)
         request = LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, line_user_id),
                 LineMessageKind.FLEX if payload.get("type") == "flex" else LineMessageKind.TEXT,

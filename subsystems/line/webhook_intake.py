@@ -40,10 +40,12 @@ class LineWebhookIntake:
         signature_verifier: object,
         unit_of_work_factory: Callable[[], LineUnitOfWorkPort],
         wakeup_publisher: LineWakeupPublisherPort,
+        immediate_reply_service: object | None = None,
     ) -> None:
         self._signature_verifier = signature_verifier
         self._unit_of_work_factory = unit_of_work_factory
         self._wakeup_publisher = wakeup_publisher
+        self._immediate_reply_service = immediate_reply_service
 
     def accept(
         self,
@@ -54,11 +56,27 @@ class LineWebhookIntake:
         if not self._signature_verifier.verify(raw_body, signature):
             raise InvalidLineWebhookSignatureError("invalid LINE webhook signature")
         envelope = _parse_envelope(raw_body)
+        if self._immediate_reply_service is not None:
+            self._handle_immediate_replies(envelope)
         events = _canonical_events(envelope)
         created_count = self._store(events, correlation_id)
         if created_count:
             self._publish_wakeup_best_effort()
         return LineWebhookIntakeResult(created_count, len(events) - created_count)
+
+    def _handle_immediate_replies(self, envelope: Mapping[str, object]) -> None:
+        raw_events = envelope.get("events")
+        if not isinstance(raw_events, list):
+            return
+        responder = getattr(self._immediate_reply_service, "try_immediate_reply", None)
+        if not callable(responder):
+            return
+        for raw_event in raw_events:
+            if isinstance(raw_event, dict):
+                try:
+                    responder(raw_event)
+                except Exception as error:
+                    print(f"[LINE Webhook] Immediate reply best-effort failed: {error}")
 
     def _store(self, events, correlation_id: CorrelationId) -> int:
         created_count = 0

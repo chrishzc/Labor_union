@@ -87,7 +87,7 @@ def connection(monkeypatch):
         raise AssertionError("registry dates must not call amount/schedule calculation")
 
     monkeypatch.setattr(repository_module, "_finance_values", no_amount_calculation)
-    monkeypatch.setattr(repository_module, "load_contract_client_finance_facts", no_amount_calculation)
+    monkeypatch.setattr(repository_module, "load_calculable_client_finance_facts", no_amount_calculation)
     monkeypatch.setattr(repository_module, "build_client_finance_terms_candidate", no_amount_calculation)
     # Virtual-account calculation is unchanged and outside this test boundary.
     monkeypatch.setattr(repository_module, "build_client_virtual_account", lambda _: None)

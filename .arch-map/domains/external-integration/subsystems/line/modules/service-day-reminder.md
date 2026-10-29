@@ -36,6 +36,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §5.5 — 日曆連續至少四個已結束且未填的正式服務日、工會逐次決定、原案件群組及群組版本複核；Scheduling 保留事實 owner。
 - Query 不 commit；人工命令只由 application 的 outer UoW 提交 durable task，HTTP 不直接呼叫 provider。公版預覽共用 `reminder_text`，不建立工作且沒有獨立啟用設定。
+- 提醒文案沿規格 17 LINE-COPY 維護；repository 的 `message` reader 借用原 connection，供待辦 Query 及依賴組裝注入的寄送 copy reader 共用。仍由原 `MySqlUnitOfWork` 唯一提交，不為文字設定建立新交易。
 - 通知事項 Query 以同一 `reminder_text` 及目前月嫂名稱提供實際提醒文案；仍以原送前 fresh read 決定收件群組及最終內容，不因預覽建立工作。
 
 ## Verification

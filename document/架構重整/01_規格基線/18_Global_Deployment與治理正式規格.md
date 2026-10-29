@@ -5,8 +5,9 @@
 - 狀態：`approved-architecture-baseline`
 - Current UI amendment：`approved-by-user-2026-09-02`
 - Operational retention amendment：`approved-by-user-2026-09-09`
+- Production topology decision：`approved-by-user-2026-10-29`（工會電腦執行應用系統／LINE Webhook／Cloudflare Tunnel／本機 Redis `docker-compose.yml`；NAS 僅執行 MySQL DB `deployment/nas/compose.yaml`、每日 SQL 備份與資料庫保留資料升級）
 - 管理端唯一 current UI：React
-- 舊 Streamlit、ngrok supervisor 與三映像 compat deployment：`removed`
+- 舊 Streamlit、ngrok supervisor、三映像 compat deployment、Cloud Run 橋接與舊 NAS 整機容器化應用（`deployment/nas-test/` 及 NAS 端 API／Workers／Tunnel）：`removed`
 
 本文件定義 deployment、release、runtime supervision 與 secret 邊界。它不授權任何特定 production project、host、credential、付款、schema mutation 或 provider write；外部執行仍需精確 target 與明確授權。
 
@@ -26,23 +27,20 @@
 12. 外部副作用只由已提交的 outbox、inbox 或 durable job 執行。
 13. 技術 log、技術紀錄與營運觀測資料以正向 allowlist 管理，最長保留 30 天；會員、訂單、排班、款項、合約、客服案件、正式業務事件、投遞證據、稽核證據、migration／release／backup 證據與受控業務檔案不得因本政策刪除。
 
-### 2.1 NAS Container Manager 測試模板（2026-10-19 人工授權）
+### 2.1 正式部署拓樸：工會電腦應用端 ＋ NAS 資料庫端（2026-10-29 人工定案）
 
-- 以 `deployment/nas/compose.yaml`、同目錄 `.env`（由 `.env.example` 填寫）及既有 README 提供無 SSH 的專案入口。預設基本組；`durable/knowledge/incident/monitor/line/tunnel/line-check` 分階段啟動，LINE Worker 僅在最後一組執行 --check，不隱含收送訊息 Authority。
-- 新安裝使用新專案名稱、新空白 bind roots、新 named volumes。初始化在變更檔案擁有者／產生新設定前拒絕非空受控檔案、LINE 媒體與知識根目錄；已標記安裝只驗證，不補造第六個 token 或覆寫現有秘密，不替代 preserve-data 升級。
-- 2026-10-20 人工授權將正式 Compose 對齊已啟動 NAS 並補齊維護流程：DS220+ 不設定不支援的 NanoCPUS，記憶體與安全邊界不變；data 引用既有 `${COMPOSE_PROJECT_NAME}_data` internal 網路，external 僅表示 Compose 不擁有其生命週期。既有安裝保留原專案名稱、.env、全部憑證／MFA keyring、資料卷與 bind roots；新測試才建立獨立網路及資料。一般換版與 DB preserve-data migration 分開；先在隔離環境驗重啟、重建、換版操作、失敗回復及冷備份還原，不操作真實 NAS、不建置或上傳映像。相同 digest 的 tag 切換不能作為不同程式版本相容性的證據；本機 Docker 亦不替代 DSM GUI／ACL／防火牆實機驗收。
-- 2026-10-20 人工採用 Synology DDNS／Let’s Encrypt／DSM 反向代理的新安裝方案：管理 API 不發布 host port，management-egress bridge 使用操作者確認不重疊的固定 subnet／API IP，僅供同機 DSM 作 HTTPS 目的地。瀏覽器入口使用管理子網域與專屬 HTTPS port（文件預設 19443），由 DSM 指派公信憑證並設定內網來源允許、其餘拒絕；內網 DNS 將管理子網域解析至 NAS 內網 IP，不增加路由器入站轉送或管理 Tunnel。初次內部憑證仍含 NAS IP／可選 hostname，Worker／DB 的驗證不變；DSM 上游私人 CA 鏈驗證未經實機證據不得宣稱完成，公信入口憑證不代表所有內部憑證已自動續期。
-- 五個 Worker 加照片代理使用六組獨立 token。公開 LINE 不掛受控業務檔案或 app-data／knowledge；透過專用內部網路與原始 LINE token 再驗證呼叫私人照片／日誌入口。MySQL／Redis／LINE API 不發布 host port，Tunnel 僅接 LINE origin。
-- GUI 操作、實際環境值、DSM ACL、來源限制、CA 信任與 NAS 2 GB 容量需實機驗證；不得由靜態 Compose 或暫存 initializer 測試宣稱已完成部署。模板交付不包含映像 build／push、既有資料異動或外部 provider effect。
-- 2026-10-20 人工採用低維護憑證方案二並要求先準備程式／DSM 教學：由 DSM 每日排程執行 certificates 一次性 profile，不新增常駐 CA、公開入口、通知服務或業務資料表。原初始化仍拒絕覆寫；首次維護將 legacy API／DB CA 分別導入可續期簽發狀態，保留全部帳號、MFA／Worker token、DB 密碼／GRANT、資料卷與業務檔案。CA 私鑰僅存在管理者保護的維護目錄，簽發工作不掛 Docker socket、業務資料或 DB 密碼；主機腳本核對 project／service／volume 歸屬，限定服務操作與等待時間。先發布新舊 CA 信任，再換服務憑證並做實際新連線驗證，重疊期後移除舊信任；失敗不降級 TLS，已過期備份不得宣稱回復成功，journal 支援續跑。失敗及成功回復均以非零結束通知 DSM；正常工作不寄每日信。維護腳本可透過唯讀掛載搭配已驗證舊映像，不代表已完成 DSM 排程、實際寄信、NAS ACL 或實機負載驗收；本次不建置／上傳或操作 NAS。
+- **工會電腦（Windows 應用端）**：以根目錄 `Windows管理.bat`（`scripts/launchers/manage_windows.ps1` → `supervise_local_runtime.ps1`）與根目錄 `docker-compose.yml`（本機 Redis）啟動並監督 FastAPI、React 靜態產物、背景 Workers、LINE Webhook 與 Cloudflare Tunnel（詳見 `§5.1`–`§5.5` 與 `scripts/launchers/WINDOWS-REMOTE.md`）。主機間程式交付使用 `scripts/package_windows_runtime.py` 產生排除秘密與 runtime 資料的來源雜湊部署包。
+- **NAS（Synology 資料庫端）**：僅透過 `deployment/nas/compose.yaml`、同目錄 `.env`（由 `.env.example` 填寫）與 `mysql-client.cnf` 部署區網隔離的 MySQL 8.0 資料庫（`db` 服務與 `mysql-data` 資料卷，密碼以 `/run/mysql-secrets/root-password` 與 `app-password` 唯讀檔案掛載，不對外網公開 3306）。操作由 `deployment/nas/README.md` 承接。
+- **舊 NAS 整機容器方案退役**：早期將 FastAPI（`management-api`／`line-api`）、Workers、DSM 19443 反向代理、NAS 端雙入口 Cloudflare Tunnel、NAS 私人 CA 每日輪替腳本及 DS220+ 預覽包（`deployment/nas-test/`、`deployment/nas/Dockerfile`、`scripts/package_nas_preview.py`、`scripts/nas_*`）跑在 NAS 上的過渡模板已於 2026-10-29 人工核准退役並移出工作樹；僅保留 `api/nas_apps.py`、`api/routes/nas_setup.py` 與 `api/routes/nas_line_operations.py` 既有 API 路由契約與機器憑證邊界。
 
 ## 3. Logical topology
 
-2026-10-26 人工授權的 NAS LIFF 路由修復：公開 LINE 的接案回覆、訂金付款、服務說明／回饋、手機工會管理與配套操作透過明確列出的既有路由轉送至管理 API 私人入口 `/internal/v1/line-operations`。只有 `line-operations-proxy` 的獨立機器憑證可使用此入口，且不得呼叫其他 Worker／照片私人操作。管理端沿用原 owner handler，逐次驗證 LINE ID token、目前有效綁定、工會能力或本人範圍、必要版本與冪等；機器憑證不代表使用者授權。未驗證或一般外部使用者不可藉此修改核心資料。公開容器不取得 management／access／maintenance DB 憑證，不放寬 LINE DB GRANT，並沿用既有私人 HTTPS／CA 與 line-media-control 網路。新 token 與僅含 hash 的 verifier 使用兩個獨立 named volumes；原 initialize 在驗證既有設定完整後只補這組憑證，不覆寫 `.env`、資料、原六組 Worker／照片憑證或其 registry，以保留舊映像回復能力。既有資料初始化規則、前後端業務契約、Cloudflare 雙 hostname 與 LINE Worker check-only 順序不變。
+現行正式部署將 Application Zone 置於工會 Windows 主機、Data / Archive Zone 的 MySQL 置於區網 NAS：
 
-2026-10-21 人工授權的 NAS 外網雙入口補充：採一個網頁管理的 Cloudflare Tunnel，以不同 hostname 分別導向 management-api 與 line-api；工會 hostname 必須以 Access 全 hostname 保護、指定信箱驗證及 connector Access token 驗證，進站後仍使用原網站帳號／MFA／業務權限，不能信任任意 Cf-Access 身分標頭作網站登入。LINE 不套人員 Access 登入，保留簽章、綁定／本人服務範圍與申請／工會核准流程。原內網 DNS／DSM HTTPS／反向代理與資料保留。token 僅為管理者保護的 host 檔案、唯讀掛給 UID 65532，不進 .env／命令列／映像／ZIP。兩個 origin 網路分別只有 connector 與對應 API，不加入 data 網路；只信任明確 connector IP，保留原 DSM 來源。程式以唯讀掛載相容既有映像，不建置或上傳映像。完整啟用 Compose 只改兩個服務的啟動 profiles，保留原 .env，LINE Worker 最後只 --check。憑證維護及 03:00 線上 SQL 備份保留；真實 Access／token／DNS／NAS ACL／防火牆／寄信與容量仍需實機驗收，不由隔離測試或 ZIP 存在冒充已上線。
-
-2026-10-20 人工授權的每日 SQL 備份：DSM 03:00 以獨立 root 維護腳本將本專案資料庫匯出到未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務、不重建映像或變更 Compose／.env／DB GRANT。僅支援非空 InnoDB 資料庫的 single-transaction／quick 線上快照，包含結構、資料、view、routines、triggers、events；不包含實體檔案、金鑰或 MySQL 系統帳號。管理者不得同時執行 schema 變更。來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記須檢查，失敗非零通知 DSM 並保留舊備份；不冒充完整災難備份或每日還原驗證。DSM ACL／實際收信／容量與 NAS 負載仍須實機驗收。操作由 deployment/nas/SQL-BACKUPS.md 承接。
+- **工會電腦外網與內網入口**：依 `§5.1`–`§5.5`，管理端透過受 Cloudflare Access 指定信箱保護的 Tunnel 路由與網站帳密／MFA 存取，本機另提供 loopback 入口；LINE Webhook 透過同一 Windows Tunnel 的獨立 hostname 精確路徑 `/webhook/line` 轉送至本機 FastAPI `127.0.0.1:8000`（不套人員 Access，保留 LINE 簽章、inbox 與去重契約）。
+- **API 隔離組成與機器憑證邊界**：`api/nas_apps.py`、`api/routes/nas_setup.py` 與 `api/routes/nas_line_operations.py` 保留管理與公開 LINE 分離組成及私人入口 `/internal/v1/line-operations`（限 `line-operations-proxy` 獨立機器憑證呼叫，並逐次驗證 LINE ID token、有效綁定、工會能力或本人範圍、版本與冪等）。
+- **NAS 每日線上 SQL 備份（2026-10-20 人工授權）**：DSM 每日 03:00 以獨立 root 維護腳本 `deployment/nas/backup-database.sh` 將 `db` 容器內的非空 InnoDB 資料庫匯出至未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務或變更 Compose／`.env`／DB GRANT。包含結構、資料、view、routines、triggers、events（single-transaction／quick 線上快照），不包含實體業務檔案、金鑰或 MySQL 系統帳號；管理者不得同時執行 schema 變更。來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記須檢查，失敗非零通知 DSM 並保留舊備份。操作由 `deployment/nas/SQL-BACKUPS.md` 承接。
+- **NAS 保留資料升級**：Schema 升級使用 `deployment/nas/upgrade-database.sh` 與 `scripts/update_nas_database.py` 針對冷備份副本驗證後切換，操作由 `deployment/nas/DATABASE-UPGRADE.md` 承接。
 
 ```text
 External Platform / React Admin

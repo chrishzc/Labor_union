@@ -285,8 +285,16 @@ def _append_decision_facts(unit_of_work, command, candidate, snapshot):
 
 
 def _enqueue_decision_message(unit_of_work, snapshot, command, scheduled_at):
+    from subsystems.line.message_copy import configured_text, IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES
     approved = snapshot.status is LineReviewStatus.APPROVED
     text = "您的 LINE 身分申請已審核通過。" if approved else "您的 LINE 身分申請未通過，請聯絡工會人員。"
+    if approved:
+        role = snapshot.subject_type.value
+        text = configured_text(unit_of_work, IDENTITY_SUCCESS_TEMPLATES[role], IDENTITY_SUCCESS_DEFAULTS[role])
+    elif snapshot.review_type is LineReviewType.STAFF_VERIFICATION:
+        text = configured_text(unit_of_work, "staff_verification_rejected", text)
+    elif snapshot.review_type is LineReviewType.CLIENT_REBIND:
+        text = configured_text(unit_of_work, "client_rebind_rejected", text)
     request = LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, snapshot.line_user_id),
         LineMessageKind.TEXT,

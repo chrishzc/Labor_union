@@ -22,7 +22,7 @@ export type HandoverContext=z.infer<typeof handoverContextSchema>;
 export interface HandoverInquiry {case_no:string;assignment_id:number;staff_id:number;expected_order_version:number;expected_scheduling_version:number;idempotency_key:string}
 export interface StartCommand {expected_version:number;idempotency_key:string;staff_id?:number;start_date?:string;end_date?:string;dates?:{original_date:string;new_date:string}[];date_changes?:{original_date:string;new_date:string}[]}
 
-async function call<T extends z.ZodTypeAny>(path:string,schema:T,body?:StartCommand|HandoverInquiry):Promise<z.output<T>> {
+async function call<T>(path:string,schema:z.ZodType<T>,body?:StartCommand|HandoverInquiry):Promise<T> {
   const token=sessionClient.getToken();
   if(!token) throw new ApiHttpError(401,'UNAUTHENTICATED','請先登入。');
   const raw=body ? await transport.post<unknown>(path,body,{token}) : await transport.get<unknown>(path,{token});

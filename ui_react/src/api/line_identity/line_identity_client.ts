@@ -195,11 +195,11 @@ function requiredText(value: string, label: string, maxLength: number): string {
   return normalized;
 }
 
-function decodeEnvelope<T extends z.ZodTypeAny>(
-  dataSchema: T,
+function decodeEnvelope<T>(
+  dataSchema: z.ZodType<T>,
   raw: unknown
-): z.output<T> {
-  const envelope = decodePayload(createLineIdentityEnvelopeSchema(dataSchema), raw);
+): T {
+  const envelope = decodePayload(createLineIdentityEnvelopeSchema<T>(dataSchema), raw);
   if (!envelope.success) {
     throw new LineIdentityClientError(
       'BACKEND_REJECTED',

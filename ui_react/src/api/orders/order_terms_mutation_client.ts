@@ -123,7 +123,7 @@ export interface OrderTermsApplyOptions extends OrderTermsRequestOptions {
   idempotencyKey?: string;
 }
 
-const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
+const envelope = <T>(schema: z.ZodType<T>) => z.strictObject({
   success: z.boolean(),
   message: z.string(),
   data: schema,
@@ -156,8 +156,8 @@ function options(
   };
 }
 
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
-  const result = decodePayload(envelope(schema), raw);
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T {
+  const result = decodePayload(envelope<T>(schema), raw);
   if (!result.success) {
     throw new ApiHttpError(
       400, 'ORDERS_TERMS_BUSINESS_ERROR', result.error ?? result.message, false, raw,

@@ -181,14 +181,14 @@ function requestOptions(
   };
 }
 
-function formatIssues(error: { issues: readonly { path: (string | number)[]; message: string; code?: string }[] }): string {
+function formatIssues(error: { issues: readonly { path: PropertyKey[]; message: string; code?: string }[] }): string {
   return error.issues
     .map((issue) => `[${issue.path.join('.') || '(root)'}] ${issue.message}`)
     .join(', ');
 }
 
 function validate<T>(
-  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly { path: (string | number)[]; message: string; code?: string }[] } } },
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string; code?: string }[] } } },
   value: unknown,
   label: string,
 ): T {
@@ -203,7 +203,7 @@ function decode<T>(
   schema: {
     safeParse(value: unknown):
       | { success: true; data: { success: boolean; message: string; data: T | null; error?: string | null } }
-      | { success: false; error: { issues: readonly { path: (string | number)[]; message: string; code?: string }[] } };
+      | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string; code?: string }[] } };
   },
   raw: unknown,
   operation: string,

@@ -50,6 +50,7 @@
 - entrypoints:
   - `scripts/launchers/update_local_database.bat`
   - `scripts/launchers/update_local_database.sh`
+  - `deployment/nas/upgrade-database.sh` and `scripts/update_nas_database.py` — DSM manual update adapter; `--update` runs prepare → verified switch → same-project activation under one lock. Advanced prepare/switch modes remain available. The stopped operational volume is never mounted; a checksum-verified cold backup is copied into a new volume, then the existing localhost/development updater runs only in its isolated helper namespace. Switching preserves the original volume, database name, credentials and all non-image deployment env bytes. See owner spec §9.4 and `deployment/nas/DATABASE-UPGRADE.md`.
 - config:
   - `db/schema_assembly/labor_union_fresh_table_retirements_v1.json` — current 逐表決策；既有表／資料不刪除。
   - `db/schema_parts/230_client_hcm_email.sql` — fresh nullable HCM email；BeClass email 獨立保存。
@@ -154,6 +155,8 @@
   replacement boundary — `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
 
 ## Verification
+- contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/test_nas_database_upgrade.py` — cold-backup identity/integrity, operational-source exclusion, helper network isolation and bounded configuration switching.
+
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_line_group_invitation_url_schema.py` — additive 私有網址欄位、release／fresh／descriptor 一致與 drift 拒絕。
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_nas_registration_approval_schema.py` — canonical registry、四欄 descriptor、absent／exact／partial／drift。
 - contract: `tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_candidate_weekly_information_schema.py` — exact predecessor／successor、順序／型別／nullability drift 與限定的 additive SQL effect。

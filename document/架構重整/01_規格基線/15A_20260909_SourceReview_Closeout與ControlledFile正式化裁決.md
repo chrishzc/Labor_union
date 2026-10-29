@@ -60,18 +60,17 @@
 
 ## 4. Source-review disposition artifact
 
-`document/功能開發計畫/SOURCE_REVIEW_DISPOSITION.md` 的任務已完成；它是 migration 過程記錄，不是產品 Authority，已退出 working tree。其最終裁決由本文件、`17`、`29`、`30` 與 `document/功能開發計畫/README.md` 承接。
+`document/功能開發計畫/SOURCE_REVIEW_DISPOSITION.md` 的任務已完成；它是 migration 過程記錄，不是產品 Authority，已退出 working tree。其最終裁決由本文件、`17`、`29`與 `30` 承接（原 `document/功能開發計畫/` 目錄已於 2026-10-29 完成整併並退出 working tree）。
 
 因此 `15` 內任何仍描述上述三份 source 文件為「已恢復」「current source-review」「仍有效待搬移」「不得退役」的較舊文字，均視為已被本 2026-09-09 amendment supersede。
 
 ## 5. 仍保留的功能開發文件
 
-本裁決不退役下列 current 文件：
+本裁決不退役下列 current 文件（2026-10-29 更新轉移後位置）：
 
-- `LINE_四大模組_詳細測試手冊與前置條件.md`：current 操作／手機 E2E 手冊，非 SSOT。
-- `LINE_QA客服知識契約收斂計畫.md`：current blocked implementation-gap tracker，正式語意仍由 `29` 擁有。
-- `Cloud_Run_單一Cloud_VPN_部署測試計畫.md`：proposed。
-- `Durable_Job_Worker_Supervision_延後開發計畫.md`：proposed／deferred。
+- `document/line/LINE_四大模組_詳細測試手冊與前置條件.md`：current 操作／手機 E2E 手冊，非 SSOT。
+- `document/架構重整/02_決策與退役執行記錄/LINE_QA客服知識契約收斂計畫.md`：current blocked implementation-gap tracker，正式語意仍由 `29` 擁有。
+- （2026-10-29 補充）`Durable_Job_Worker_Supervision_延後開發計畫.md` 已完成實作與結案退出 working tree；`Cloud_Run_單一Cloud_VPN_部署測試計畫.md` 已依人工定案「工會電腦＋NAS MySQL DB」正式架構取消並退出 working tree，均由 Git history 保存。
 
 Blocked／deferred 不等於 retired；只有完成、被 successor 承接或人工明確取消後才退出 working tree。
 

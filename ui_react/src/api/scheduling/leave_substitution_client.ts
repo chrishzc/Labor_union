@@ -68,14 +68,14 @@ function validateCaseNo(caseNo: string): string {
   return caseNo;
 }
 
-function formatSchemaIssues(error: { issues: readonly { path: (string | number)[]; message: string }[] }): string {
+function formatSchemaIssues(error: { issues: readonly { path: PropertyKey[]; message: string }[] }): string {
   return error.issues
     .map((issue) => `[${issue.path.join('.') || '(root)'}] ${issue.message}`)
     .join(', ');
 }
 
 function parseRequest<T>(
-  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly { path: (string | number)[]; message: string }[] } } },
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly { path: PropertyKey[]; message: string }[] } } },
   value: unknown,
 ): T {
   const result = schema.safeParse(value);
@@ -178,7 +178,7 @@ function decode<T>(
       | {
           success: false;
           error: {
-            issues: readonly { path: (string | number)[]; message: string }[];
+            issues: readonly { path: PropertyKey[]; message: string }[];
           };
         };
   },

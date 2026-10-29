@@ -190,7 +190,7 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 requester 的新訊息可依 current policy reopen 或建立新的幂等 ticket；不得靜默遺失。Claim、handling、reply 與 resolve 必須保留 actor、version、reason、event 與 receipt。
 
-使用者明確呼叫後，首次回覆固定為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」。後續留言加入同一客服案件，由專員處理；不顯示 AI 暫停、繼續使用 AI 或恢復 AI 的訊息與按鈕。客服人員正式結案時解除對話 hold，並通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊 AI 操作只回覆功能停用提示，不得結束既有案件或解除 hold。
+使用者明確呼叫後，首次回覆固定為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」。後續留言加入同一客服案件，由專員處理；不顯示 AI 暫停、繼續使用 AI 或恢復 AI 的訊息與按鈕。客服人員正式結案時解除對話 hold；依規格 20「React 客服案件清單」完成案件時不發通知，其他既有結案流程通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊 AI 操作只回覆功能停用提示，不得結束既有案件或解除 hold。
 
 客服回覆仍由 committed durable delivery task 外送。外送失敗不回滾已提交的 ticket 狀態，但不得把未送達顯示成已送達。含個人案件內容的訊息只可送給經 binding 與 authorization 確認的 recipient；群組或公開回答不得洩漏個案資料。
 
@@ -199,7 +199,7 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 1. 六類 Service Help 均有 deterministic routing、合法空狀態與 manual fallback。
 2. Gateway 兩個分支導向正確且零未授權業務寫入。
 3. enabled answer 只來自 versioned published catalog；draft、conflict 與 unowned item 不會自動回覆。
-4. 明確呼叫專員直接建立或沿用客服案件，不再要求確認；相同 escalation identity 不重複開單。一般留言不啟動聊天室 AI 或自動轉人工，呼叫後的訊息加入原 ticket。舊 AI 按鈕／指令不結案、不解除 hold；專員結案沿 owner version／lock 並回覆正式完成通知。
+4. 明確呼叫專員直接建立或沿用客服案件，不再要求確認；相同 escalation identity 不重複開單。一般留言不啟動聊天室 AI 或自動轉人工，呼叫後的訊息加入原 ticket。舊 AI 按鈕／指令不結案、不解除 hold；專員結案沿 owner version／lock；React 清單依規格 20 不發通知，其他既有流程回覆正式完成通知。
 5. customer／staff 雙角色必須明確選擇；不同 audience 不交叉顯示。
 6. local menu preview 不建立 provider task 或成功 receipt；publish 以 durable task 及 terminal readback 判定。
 7. LLM 或 Knowledge 不得直接寫業務 root、繞過 closed tool catalog 或宣稱 provider 成功。
@@ -213,10 +213,10 @@ Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 
 
 ## 11. 來源文件處置（2026-09-09）
 
-- `LINE_QA客服知識契約收斂計畫.md` 保留為 current blocked `implementation-gap-tracker`。它不是 SSOT；只追蹤逐題內容完整性、versioned `draft|published|retired` lifecycle、conflict queue、closed-candidate runtime 與 API／React readback 尚未被證明完成的缺口。
+- `document/架構重整/02_決策與退役執行記錄/LINE_QA客服知識契約收斂計畫.md` 保留為 current blocked `implementation-gap-tracker`。它不是 SSOT；只追蹤逐題內容完整性、versioned `draft|published|retired` lifecycle、conflict queue、closed-candidate runtime 與 API／React readback 尚未被證明完成的缺口。
 - `LINE_Rich_Menu_多角色圖文選單與互動中心正式規範.md` 已完成 disposition 並退回 Git history。其仍有效的 audience、current-role、draft／publish 與 typed action 邊界已由 `17`、`23` 與本文件承接；舊「三套 menu」「訪客／客戶共用 default」「禁止使用者明確選 role」「禁止 `richmenuswitch`」及硬編 endpoint／page/component 等內容被 current formal contract 否定，不得復活。
 - `LINE_Rich_Menu_本機視覺比對與互動模擬工作室正式規範.md` 已完成 disposition 並退回 Git history。本機 preview 的 canvas／area／action validation、before／after、role preview context、零 provider 外送、零 publication task、Preview≠publish 與 provider readback 已由 `17` 與本文件承接；舊 UI 排版、示例 wording、特定 screenshot／component 細節不建立 Authority。
-- `LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/功能開發計畫/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
+- `LINE_四大模組_詳細測試手冊與前置條件.md` 保留在 `document/line/`，作為 current 可執行操作／手機 E2E 驗收手冊。它可保存 Agent 前置、測試資料準備、裝置操作、readback、驗收層級與 cleanup，但不得覆蓋本文件及 `17`、`20`、`23`、`26` 的 owner／語意／transaction 契約；route、schema、owner 或正式驗收條件改變時必須同步更新。
 - `document/line/服務說明規則書.md` 保留為歷史輸入／wording evidence，不與 current formal spec 競爭；需要舊語意時由其內容或 Git history 查核，不建立第二套 owner。
 
 Rich Menu source-review 已完成；後續若需要新增 layout、endpoint 或 provider capability，直接更新唯一 owning formal spec／current implementation／操作手冊，不恢復已退役的 source-review 規格。

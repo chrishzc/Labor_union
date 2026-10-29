@@ -53,6 +53,21 @@ def line_webhook_runtime_mode() -> LineRuntimeMode:
     return validate_line_api_runtime(os.environ).webhook_mode
 
 
+def _immediate_reply_service():
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    if not token:
+        return None
+    from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
+    from subsystems.line.webhook_immediate_reply import LineWebhookImmediateReplyService
+
+    def contact_copy():
+        from subsystems.line.message_copy_catalog import configured_payload
+        from subsystems.line.message_copy import CONTACT_RECEIVED
+        with open_line_unit_of_work() as unit:
+            return configured_payload(unit, "service-contact", {"type": "text", "text": CONTACT_RECEIVED})["text"]
+    return LineWebhookImmediateReplyService(LineMessagingApiAdapter(token), contact_copy)
+
+
 @lru_cache(maxsize=1)
 def get_line_webhook_intake() -> LineWebhookIntake:
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "").strip()
@@ -61,6 +76,7 @@ def get_line_webhook_intake() -> LineWebhookIntake:
         LineWebhookSignatureVerifier(channel_secret),
         open_line_unit_of_work,
         publisher,
+        immediate_reply_service=_immediate_reply_service(),
     )
 
 

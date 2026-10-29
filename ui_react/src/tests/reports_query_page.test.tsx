@@ -49,7 +49,7 @@ describe('ReportsPage query-only presentation', () => {
       '補助款金額', '單價', '結案/核銷', '年度季度',
     ]);
     expect(within(weeklySubsidyTable).getAllByText('CASE-RPT-001')).toHaveLength(2);
-    expect(within(weeklySubsidyTable).getByText('(114)一般市民')).toBeInTheDocument();
+    expect(within(weeklySubsidyTable).getByText('(114)補助市民')).toBeInTheDocument();
     expect(within(weeklySubsidyTable).getByText('2026年第三季')).toBeInTheDocument();
     expect(within(weeklySubsidyTable).queryByText('王**')).not.toBeInTheDocument();
     expect(within(weeklySubsidyTable).queryByText('A*********')).not.toBeInTheDocument();

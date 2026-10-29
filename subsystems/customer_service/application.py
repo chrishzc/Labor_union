@@ -6,7 +6,7 @@ Description: 協調客服查詢、結案與回覆 Preview／Apply，並在單一
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from domains.customer_service.ticket import (
@@ -35,12 +35,14 @@ from subsystems.customer_service.contracts import (
     PreviewCustomerServiceTicketUpdate,
 )
 from subsystems.line.ports import LineAuditIntent
+from subsystems.customer_service.escalation_application import complete_ticket_holds
 
 
 class CustomerServiceApplication:
-    def __init__(self, unit_of_work_factory: Callable, now: Callable[[], datetime] | None = None) -> None:
+    def __init__(self, unit_of_work_factory: Callable, now: Callable[[], datetime] | None = None, display_names: Callable[[tuple[str, ...]], dict[str, str | None]] | None = None) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._display_names = display_names
 
     def summary(self):
         return self._read(lambda repository: repository.summary())
@@ -49,7 +51,11 @@ class CustomerServiceApplication:
         return self._read(lambda repository: repository.list(query))
 
     def reminders(self, query: CustomerServiceReminderQuery) -> CustomerServiceReminderPage:
-        return self._read(lambda repository: repository.list_reminders(query))
+        page = self._read(lambda repository: repository.list_reminders(query))
+        if self._display_names and page.items:
+            names = self._display_names(tuple(dict.fromkeys(item.line_user_id for item in page.items if item.line_user_id)))
+            page = replace(page, items=tuple(replace(item, line_display_name=names.get(item.line_user_id)) for item in page.items))
+        return page
 
     def detail(self, ticket_id: int):
         return self._read(lambda repository: repository.detail(ticket_id))
@@ -81,6 +87,7 @@ class CustomerServiceApplication:
             replay = unit_of_work.receipts.get(command.idempotency_key)
             if replay is not None:
                 return _replay_update(unit_of_work, command, replay)
+            escalations = unit_of_work.escalations.active_for_ticket(command.ticket_id) if command.status is CustomerServiceStatus.RESOLVED else ()
             current = unit_of_work.customer_service.get(command.ticket_id, lock=True)
             candidate = _update_candidate(
                 current,
@@ -115,6 +122,8 @@ class CustomerServiceApplication:
                 candidate.normalized_internal_note,
                 _admin_id(command.actor_id),
             )
+            if escalations:
+                complete_ticket_holds(unit_of_work, escalations, command, result.version)
             unit_of_work.receipts.append(
                 IdempotencyReceipt(
                     command.idempotency_key,

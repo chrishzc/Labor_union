@@ -9,7 +9,9 @@
 
 「通知與發送」採清單、inline 編輯與手機預覽整合工作台。依 2026-10-22 最新人工裁決，工作台改用明確標示的公版範例，以無業務 DB 能力的 typed sample port 重用原純組裝函式；欄位表列出中文名稱、變數／路徑與帶入值。移除真實案件／月嫂選取與資格限制，不建立投遞任務、操作憑證、異動稽核或 provider effect。既有 record API 保留原 readonly 契約，工作台不再呼叫。
 
-文案欄位依 2026-10-22 後續人工裁決預設 504px；手機效果只保留一般手機，無窄螢幕切換模式。
+依 2026-10-29 最新人工裁決，所有訊息與卡片欄位均固定 504px。一次顯示一個欄位，切換保留整則草稿；訊息清單每頁 6 則，範例資料預設收合，完整預覽與編輯外框沿單一頁面捲動，多張卡片使用前後切換。手機效果只保留一般手機，無窄螢幕切換模式。
+
+依 2026-10-29 人工裁決，目前目錄全部訊息開放文案維護；卡片摘要、固定標題、說明與按鈕名稱採分欄編輯及同一 revision 儲存，多欄卡片使用單一大欄位切換。動態 owner 欄位及 action 不屬文案。客戶、月嫂及工會人員各有獨立綁定成功設定，直接完成與審核通過按實際身分選用；舊客戶／月嫂成功訊息 ID 分別解析到對應身分設定。只在建立新訊息時讀取設定，不改已提交的 payload；重複綁定沿原 key 查既有工作，避免重新以新文案入列。
 
 ## Implementation
 - primary: `ui_react/src/components/LineNotificationWorkbench.tsx`
@@ -19,7 +21,9 @@
   - `ui_react/src/api/line_notification_rules/line_message_preview_client.ts` — authenticated closed preview catalog／subjects／preview transport。
   - `subsystems/line/message_preview.py` — LINE-owned typed preview contracts、純渲染協調與移除可執行 action 的 projection。
   - `subsystems/line/message_preview_samples.py` — 明列的公版值、無 DB sample port、卡片範例與帶入欄位對照。
-  - `subsystems/line/message_copy.py` — 正式客服與身分固定文案，供實際通知與唯讀預覽共用。
+  - `subsystems/line/message_copy.py` — 文案預設、三身分成功設定、原交易內設定讀取，以及僅 display text 的欄位投影／替換；不處理 provider action。
+  - `subsystems/line/message_copy_catalog.py` — 明列目前內建訊息的虛擬 genesis、卡片欄位與共用純替換，保留動態區塊及舊工作快照。
+  - `infrastructure/mysql/line_message_copy.py` — 借用原 connection 的設定 reader；不另開 writer／commit。
   - shared dependency: `subsystems/line/service_start_day.py::start_day_response_text` — 服務當天群組受理回覆由原 owner 提供純文案；代班／群組日期公版明列指定日期及月嫂欄位。
   - `infrastructure/mysql/line_message_preview_repository.py` — readonly transaction、參數化分頁、owner facts 與既有付款 source 轉接。
   - `api/routes/line_message_preview.py`
@@ -39,16 +43,16 @@
 
 流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」公版沿實際自助導覽卡，收費與補助共用現行 40／120 小時文案。
 
-補列 current 身分／登記模板、客服導覽及受理／結案、候選資訊一／二／每週說明、工會詢問／回覆及完整推薦確認包。卡片重用 `subsystems/scheduling/matching_line_cards.py` 純組裝；公版使用明列範例，訂單資訊欄位沿用 Orders owner `subsystems/orders/order_information.py` 的純格式化；既有 record API 透過 Orders／Matching owner 唯讀 projection。工會詢問與回覆接受僅預覽草稿，不提供儲存。D+1～D+3 與未具正式用途的測試模板不列入。零候選固定協調通知已由現行人工協調取代，預覽、有效規則／模板與 bootstrap 均移除，writer 拒絕重新加入。補列訂金、服務群組成功／錯誤、配對回覆、請假回覆、進度與身分入口、完整去敏告警；公版共用原純組裝函式，欄位值明列，record API 對新增純公版項目明示不可用。告警收件者改稱已設定管理員個人對象，不寫死幹部群；群組告警已取消。
+補列 current 身分／登記模板、客服導覽及受理／結案、候選資訊一／二／每週說明、工會詢問／回覆及完整推薦確認包。卡片重用 `subsystems/scheduling/matching_line_cards.py` 純組裝；公版使用明列範例，訂單資訊欄位沿用 Orders owner `subsystems/orders/order_information.py` 的純格式化；既有 record API 透過 Orders／Matching owner 唯讀 projection。工會逐案詢問與回覆草稿僅預覽，共用卡片的標題、說明與按鈕名稱沿文案設定儲存。D+1～D+3 與未具正式用途的測試模板不列入。零候選固定協調通知已由現行人工協調取代，預覽、有效規則／模板與 bootstrap 均移除，writer 拒絕重新加入。補列訂金、服務群組成功／錯誤、配對回覆、請假回覆、進度與身分入口、完整去敏告警；公版共用原純組裝函式，欄位值明列，record API 對新增純公版項目明示不可用。告警收件者改稱已設定管理員個人對象，不寫死幹部群；群組告警已取消。
 
 ## Contracts
-- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — LINE-PREVIEW-01～08、三個 authenticated zero-write entry points 與資料／副作用邊界。
+- `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — LINE-PREVIEW-01～08、LINE-COPY-01～05、authenticated zero-write preview 與原版本化文案維護。
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` — LINE notification configuration與delivery邊界。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
-- test_root: `tests/domains/external-integration/subsystems/line/modules/notification-rules-presentation/`
 - layout_status: `custom_current`
+- test_root: `tests/domains/external-integration/subsystems/line/modules/notification-rules-presentation/`
 - test_root: `ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx`
 - contract_test: `tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_rule_api.py`
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_message_preview.py`

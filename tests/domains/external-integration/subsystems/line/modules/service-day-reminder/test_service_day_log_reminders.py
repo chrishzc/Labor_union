@@ -46,6 +46,7 @@ def test_pending_query_previews_the_same_message_as_the_existing_sender():
     cursor.fetchall.return_value=[{'id':8,'name':'測試月嫂'}]
     connection=Mock();connection.cursor.return_value=cursor
     repository=MySqlServiceDayLogReminderRepository(connection)
+    repository.message = reminder_text
     repository.scheduling=SimpleNamespace(missing_runs=lambda *args,**kwargs:((gap,),1))
     repository._group=lambda case:None
     result,total=repository.list(NOW,1,25)
@@ -64,6 +65,15 @@ def test_click_queues_one_short_case_group_message_and_commits():
     assert request.source_aggregate_type==SOURCE_TYPE
     assert request.correlation_id.value.endswith(':3')
     unit.commit.assert_called_once()
+
+
+def test_sender_uses_the_composed_copy_reader_with_fresh_staff_name():
+    _, repository, unit = application()
+    reader = Mock(side_effect=lambda name: f"請 {name} 確認服務日誌紀錄。")
+    app = ServiceDayLogReminderApplication(repository, lambda: nullcontext(unit), lambda: NOW, reader)
+    app.send(COMMAND)
+    reader.assert_called_once_with('測試月嫂')
+    assert '請 測試月嫂 確認服務日誌紀錄。' in repository.enqueue.call_args.args[0].payload_json
 
 
 def test_replay_returns_original_task_without_rechecking_or_enqueue():

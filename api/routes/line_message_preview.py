@@ -31,7 +31,7 @@ def _query(call):
         return call()
     except MessagePreviewNotFound as error:
         raise typed_http_error(404, "not_found", "line_message_preview_not_found", "找不到所選訊息、案件或月嫂，請重新查詢。", "line-message-preview") from error
-    except LineMessageConfigurationError as error:
+    except (LineMessageConfigurationError, ValueError) as error:
         raise typed_http_error(422, "validation", "line_message_preview_invalid", "文案或必要變數不完整，請確認內容後再試。", "line-message-preview") from error
     except Exception as error:
         raise typed_http_error(503, "unavailable", "line_message_preview_unavailable", "訊息預覽暫時無法載入，請稍後再試。", "line-message-preview", retryable=True) from error

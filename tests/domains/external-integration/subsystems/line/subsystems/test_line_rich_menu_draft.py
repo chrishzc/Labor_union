@@ -646,4 +646,8 @@ def test_bootstrap_menu_has_merged_ai_faq_and_direct_human_contact_at_bottom(men
     lower = sorted((button for button in menu["buttons"] if button["bounds"]["y"] > 0), key=lambda b:b["bounds"]["x"])
     assert [button["label"] for button in lower] == ["AI 智慧問答", "聯絡專人服務"]
     assert lower[0]["action"] == {"type":"uri", "uri":"?target=ai_assistant", "uri_source":"liff"}
-    assert lower[1]["action"] == {"type":"postback", "data":"customer-service:handoff:confirm"}
+    assert lower[1]["action"] == {
+        "type": "postback",
+        "data": "customer-service:handoff:confirm",
+        "displayText": "聯絡專人服務",
+    }

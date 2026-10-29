@@ -20,7 +20,8 @@
 - `ui_react/src/api/line_order_groups/payment_overdue_reminder_client.ts`
 - `ui_react/src/components/PaymentOverdueReminderWorkbench.tsx`
 - `ui_react/src/components/PaymentOverdueReminderWorkbench.css`
-- `ui_react/src/pages/LineManagementPage.tsx` — 日常作業「繳款逾期」入口。
+- `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/pages/FinancePage.tsx` — 帳務收款「逾期提醒」主要入口，核對銀行入款保留案號。
+- `ui_react/src/pages/LineManagementPage.tsx` — 原深連結導向 `#finance?tab=receipts&view=overdue`。
 
 ## Dependencies
 - Finance: `client-finance/receipt-reconciliation` 的 typed `OverdueClientPayment`；LINE 不重算或改寫帳務。

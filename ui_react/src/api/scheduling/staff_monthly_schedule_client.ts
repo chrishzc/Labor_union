@@ -42,7 +42,7 @@ const ResponseSchema = z.strictObject({
     year: z.number().int().min(1900).max(2100),
     month: z.number().int().min(1).max(12),
     days: z.array(DaySchema).min(28),
-    schedule_map: z.record(SummarySchema),
+    schedule_map: z.record(z.string(), SummarySchema),
   }),
   error: z.string().nullable().optional(),
 });

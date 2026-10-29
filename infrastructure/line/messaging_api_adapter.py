@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -38,6 +41,29 @@ class LineMessagingApiAdapter:
         self._access_token = normalized
         self._session = session or requests.Session()
         self._timeout_seconds = timeout_seconds
+
+    def display_names(self, user_ids: tuple[str, ...]) -> dict[str, str | None]:
+        """Bounded read-only profiles; never send messages or persist credentials."""
+        deadline = time.monotonic() + self._timeout_seconds
+        def read(user_id: str) -> tuple[str, str | None]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return user_id, None
+            try:
+                response = self._session.get(
+                    f"https://api.line.me/v2/bot/profile/{quote(user_id, safe='')}",
+                    headers={"Authorization": f"Bearer {self._access_token}"},
+                    timeout=remaining,
+                )
+                if response.status_code != 200:
+                    return user_id, None
+                profile = response.json()
+                name = profile.get("displayName") if isinstance(profile, dict) and profile.get("userId") == user_id else None
+                return user_id, name.strip() if isinstance(name, str) and name.strip() else None
+            except (requests.RequestException, ValueError):
+                return user_id, None
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            return dict(executor.map(read, dict.fromkeys(user_ids)))
 
     def send(self, request: LineDeliveryRequest) -> LineProviderOutcome:
         try:

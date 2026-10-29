@@ -31,7 +31,7 @@ class PreviewOptionPageView(BaseModel):
 class RenderPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=191)
-    content: str | None = Field(default=None, max_length=5000)
+    content: str | None = Field(default=None, max_length=30000)
     data_source: Literal["record", "sample"] = "record"
     case_no: str | None = Field(default=None, min_length=1, max_length=191)
     staff_id: int | None = Field(default=None, gt=0)

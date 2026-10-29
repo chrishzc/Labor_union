@@ -31,6 +31,10 @@ class CustomerServiceReminderView(BaseModel):
     ]
     is_priority: bool
     updated_at: datetime | None
+    version: int = Field(ge=0)
+    line_display_name: str | None
+    messages: list[str] = Field(max_length=10)
+    requested_at: datetime | None
 
 
 class CustomerServiceReminderSummaryView(BaseModel):

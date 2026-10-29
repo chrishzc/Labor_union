@@ -2,6 +2,7 @@ import { fireEvent,render,screen,within,waitFor } from '@testing-library/react';
 import { describe,it,expect,vi } from 'vitest';
 import { PaymentOverdueReminderWorkbench } from '../../../../../../../components/PaymentOverdueReminderWorkbench';
 import type { PaymentOverdueReminderClient,PaymentOverdueTodo } from '../../../../../../../api/line_order_groups/payment_overdue_reminder_client';
+import { FinanceReceiptsWorkspace } from '../../../../../../../components/FinanceReceiptsWorkspace';
 import { LineManagementPage } from '../../../../../../../pages/LineManagementPage';
 import { paymentOverdueReminderClient } from '../../../../../../../api/line_order_groups/payment_overdue_reminder_client';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
@@ -27,7 +28,7 @@ describe('各期繳款逾期待辦',()=>{
     expect(api.send).toHaveBeenCalledExactlyOnceWith(item('first',42000),expect.any(String));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(await screen.findByRole('button',{name:'已建立寄送工作'})).toBeDisabled();
-    expect(screen.getByRole('link',{name:'核對銀行入款'})).toHaveAttribute('href','#finance?tab=finance-import');
+    expect(screen.getByRole('link',{name:'核對銀行入款'})).toHaveAttribute('href','#finance?tab=finance-import&case_no=CASE-1');
   });
   it('缺少對象保留待辦並禁用提醒，不替換收件位置',async()=>{
     const api=client([{...item('deposit',18000),can_send:false,unavailable_reason:'尚未綁定客戶 LINE'},
@@ -52,21 +53,25 @@ describe('各期繳款逾期待辦',()=>{
     render(<PaymentOverdueReminderWorkbench client={api}/>);
     const button=await screen.findByRole('button',{name:'發送提醒'});
     vi.mocked(api.list).mockResolvedValue({items:[],total:0,page:1,page_size:25});fireEvent.click(button);
-    await screen.findByText('目前沒有繳款逾期待辦。');expect(api.send).toHaveBeenCalledTimes(1);
+    await screen.findByText('目前沒有符合提醒資格的逾期款。');expect(api.send).toHaveBeenCalledTimes(1);
     expect(document.body).not.toHaveTextContent('private SQL');
   });
   it('查詢失敗不當成零筆成功，也不發送',async()=>{
     const api=client();vi.mocked(api.list).mockRejectedValueOnce(new Error('raw database'));
     render(<PaymentOverdueReminderWorkbench client={api}/>);await screen.findByRole('alert');
-    expect(screen.queryByText('目前沒有繳款逾期待辦。')).not.toBeInTheDocument();expect(api.send).not.toHaveBeenCalled();
+    expect(screen.queryByText('目前沒有符合提醒資格的逾期款。')).not.toBeInTheDocument();expect(api.send).not.toHaveBeenCalled();
   });
-  it('實際 LINE 頁籤及深連結可開啟待辦',async()=>{
+  it('帳務收款直接承接逾期提醒，舊 LINE 連結導向新位置',async()=>{
     const api=client([item('deposit',18000)]);
     const spy=vi.spyOn(paymentOverdueReminderClient,'list').mockImplementation(api.list);
+    window.history.replaceState(null,'','#finance?tab=receipts&view=overdue');
+    const view=render(<FinanceReceiptsWorkspace revision={0} initialView="overdue" onOpenCase={()=>{}} onOpenSubsidy={()=>{}}/>);
+    expect(await screen.findByRole('heading',{name:'逾期提醒'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'逾期提醒'})).toHaveAttribute('aria-pressed','true');
+    await screen.findByText('客戶私人聊天室');view.unmount();
     window.history.replaceState(null,'','#line-management?tab=payment_overdue');
-    const view=render(<LineManagementPage/>);
-    expect(await screen.findByRole('heading',{name:'繳款逾期待辦'})).toBeInTheDocument();
-    expect(screen.getByRole('button',{name:'繳款逾期'})).toHaveAttribute('aria-current','page');
-    await screen.findByText('客戶私人聊天室');view.unmount();spy.mockRestore();window.history.replaceState(null,'','/');
+    render(<LineManagementPage/>);
+    await waitFor(()=>expect(window.location.hash).toBe('#finance?tab=receipts&view=overdue'));
+    expect(screen.queryByRole('button',{name:'繳款逾期'})).not.toBeInTheDocument();spy.mockRestore();window.history.replaceState(null,'','/');
   });
 });

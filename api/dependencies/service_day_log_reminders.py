@@ -10,7 +10,7 @@ from subsystems.line.service_day_log_reminders import ServiceDayLogReminderAppli
 def get_service_day_log_reminders():
     connection = get_connection()
     try:
-        yield ServiceDayLogReminderApplication(MySqlServiceDayLogReminderRepository(connection),
-                                               lambda: MySqlUnitOfWork(connection), lambda: datetime.now(UTC))
+        repository = MySqlServiceDayLogReminderRepository(connection)
+        yield ServiceDayLogReminderApplication(repository, lambda: MySqlUnitOfWork(connection), lambda: datetime.now(UTC), repository.message)
     finally:
         connection.close()

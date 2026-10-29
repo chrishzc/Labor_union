@@ -8,6 +8,7 @@ import json
 import hashlib
 from datetime import datetime
 from typing import Any, Mapping
+from domains.customer_service.ticket import CustomerServiceVersionConflictError
 
 from domains.customer_service.escalation import (
     AutomationHoldState,
@@ -26,7 +27,7 @@ class CustomerServiceEscalationNotFoundError(LookupError):
     """找不到 escalation root。"""
 
 
-class CustomerServiceEscalationVersionConflictError(RuntimeError):
+class CustomerServiceEscalationVersionConflictError(CustomerServiceVersionConflictError):
     """escalation CAS 未更新任何資料。"""
 
 
@@ -92,6 +93,11 @@ class MySqlCustomerServiceEscalationRepository:
             + (" FOR UPDATE" if lock else ""),
             (hold_scope,),
         )
+
+    def active_for_ticket(self, ticket_id: int) -> tuple[Mapping[str, Any], ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_SELECT + " WHERE ticket_id=%s AND automation_hold_state='active' ORDER BY id FOR UPDATE", (ticket_id,))
+            return tuple(cursor.fetchall() or ())
 
     def active_hold(self, hold_scope: str) -> AutomationHoldDecision | None:
         if self.get_active_by_scope(hold_scope) is None:

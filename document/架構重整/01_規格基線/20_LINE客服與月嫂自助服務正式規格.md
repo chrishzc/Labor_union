@@ -51,7 +51,7 @@ waiting → handling → resolved
 
 官方帳號以自助服務為主。聊天室一般留言不啟動 AI 問答，也不因未知輸入、回答錯誤或未取得答案自動轉人工。使用者點選「聯絡專人服務」、輸入「聯絡專人服務」或既有「呼叫專員」，或明確要求真人協助時，直接建立或沿用同一使用者＋同一 category 的未完成 ticket，無需再次確認。既有「轉真人客服」「轉接真人客服」「專人客服」入口導向相同流程。成功只回覆「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」；收到需求不代表專員已即時上線。
 
-呼叫後的後續留言加入同一客服案件，由工會專員回覆。既有 active hold 只用於維持人工處理的對話歸屬，不向使用者呈現 AI 暫停／恢復狀態；客服人員正式結案時依 owner version／lock 解除 hold，並通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊「繼續使用 AI」「恢復 AI」按鈕與文字指令只提示入口停用，不得結案、解除 hold 或宣稱聊天室 AI 已啟用。
+呼叫後的後續留言加入同一客服案件，由工會專員回覆。既有 active hold 只用於維持人工處理的對話歸屬，不向使用者呈現 AI 暫停／恢復狀態；客服人員正式結案時依 owner version／lock 解除 hold；本節 React 清單「處理完成」不發完成通知，其他既有結案流程通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊「繼續使用 AI」「恢復 AI」按鈕與文字指令只提示入口停用，不得結案、解除 hold 或宣稱聊天室 AI 已啟用。
 
 ### 3.3 交易、冪等與 retry
 
@@ -169,7 +169,7 @@ service-day 驗證、staging 與直接 Apply；不能因 NAS watcher 發現檔�
   不直接改正式排班、訂單與付款狀態。
 - LINE 流程圖的「日誌連續缺漏－工會決定提醒」連到「通知與發送」的人工日誌提醒公版。
   預覽與人工寄送共用同一文案組裝，列出範例月嫂姓名及帶入值；狀態顯示「由流程控制」，
-  由工會逐次決定是否提醒，沒有獨立啟用開關或可儲存的文案設定，不連回退役自動私訊規則。
+  由工會逐次決定是否提醒，沒有獨立啟用開關；提醒文案沿規格 17 LINE-COPY 的版本化設定維護，不連回退役自動私訊規則。
 
 ### 5.6 服務完工與滿意度問卷邀請
 
@@ -239,15 +239,17 @@ LIFF 每次查詢／操作仍驗證 LINE token、有效工會身分及原 capabi
 
 手機管理端客服、身分及資料異動審核一次點擊提交，必要 Preview／Apply 由程式依序呼叫，不要求第二次人工確認；備註選填，原 writer 需要稽核原因時以系統操作說明保存。未知 Apply 結果保留原冪等鍵，不因重按而另建操作。成功後重查共用來源、數量及卡片；仍待客戶回答、欠款或缺日誌時保留。條件審核後保留原面板供選擇月嫂重新詢問。查詢、預覽、Apply 的成功及失敗回應均核對目前事項／畫面序號，離開後不得覆寫新畫面；再次進入讀回正式結果。
 
-### React 客服案件提醒清單（2026-10-15 人工裁決）
+### React 客服案件清單（2026-10-29 人工核准）
 
-React「客服與營運」的客服案件頁只提醒與追蹤未結案客服，不在此提供明細操作、接手、內部備註、LINE 回覆或結案。保留「需要處理／待接手／處理中」、工單／案件編號搜尋、來源篩選及重新整理；不呈現已結案入口、總覽橫幅、說明入口、預覽情境或個人／優先篩選。列表顯示對象與案件 reference、來源及閉合原因說明、狀態／處理人、單一更新時間；server metadata 超過單頁才呈現必要分頁。其他 LINE 工作面、手機客服與既有 command／API 不因本頁移除操作而退役。
+React「客服與營運」客服頁只列未結案案件，採六欄：客服對象、可複製的 LINE 顯示名稱、進件來源、客戶留言、申請時間、案件完成。不顯示 waiting／handling 狀態分頁、處理人、優先標籤、抽屜、站內回覆或聊天室跳轉；不建立聊天室網址對應。搜尋姓名、工單／案件編號及 server 分頁保留。LINE 顯示名稱不是搜尋好友用的 LINE ID，不以會員姓名或 U 開頭識別碼代替；透過官方唯讀 Profile 查詢取得，單頁至多100個對象、並行上限4，單頁外部查詢共用2秒預算，預算耗盡後略過尚未開始的對象，缺設定／封鎖／取得失敗顯示「尚未取得」，不影響其他案件查閱。這些是目前查詢實作上限，依實際效能／官方限制調整，不改業務資格。
 
-新增 reader-protected `GET /api/v1/customer-service/tickets/reminders`，只接受 `status=open|waiting|handling`、closed `source`、bounded `search`、positive `page` 與 `page_size=1..100`。`open` 固定是 `waiting|handling`，由 repository COUNT 與 LIMIT/OFFSET 合併分頁；不得下載各狀態固定上限後在瀏覽器假分頁。回傳全域 waiting／handling 摘要、篩選後 total 及 bounded items；一張 ticket 只算一件，即使有多個來源也不重複計數。依有效 HIGH escalation 優先，再以更新時間及 ticket ID 倒序排列。讀取固定零 commit／receipt／enqueue／worker wakeup／provider call。
+`GET /api/v1/customer-service/tickets/reminders` 保留既有 reader、closed source、bounded search／pagination 與 waiting／handling 摘要契約。清單固定查未結案，公開 projection 增加 version、line_display_name、requested_at 與最近10則已保存的客戶留言；申請時間取 ticket 建立時間，不能拿更新時間代替。留言僅取已驗證人工對話 active-hold customer-message，不以系統受理文案、管理備註或回覆充當客戶留言，不重新揭露已遮罩客訴；沒有可呈現內容顯示尚未留言，已遮罩客訴明示去敏。多則留言同格展開，不開抽屜；文字保持純文字呈現。查詢不 commit／receipt／enqueue／worker wakeup，Profile 僅 GET，無 Push。
 
-`source` 固定 `handoff|complaint|feedback|order|service|binding|unknown`。來源只取既有 customer-message event 的 canonical namespace 與同 ticket、同 event identity 的 typed escalation：`line-complaint:` 是明確客訴，`line-feedback-ticket:` 是未解決回饋，`line-order-change:`／`line-service-help:order-update:` 是訂單異動，`binding-failure:` 是綁定協助；同事件的明確人工／回答錯誤 escalation 是轉真人，既有 `line-service-help:profile_update|contact_union|other:` 是服務轉介。保留全部已辨識來源以供篩選，顯示最新已辨識來源；後續補訊、agent reply 或管理 event 不改寫來源。缺證據顯示 `unknown`，不得從 category、訊息文字、情緒、前端輸入或已結案歷史推定來源／優先。
+來源固定 `handoff|complaint|feedback|order|service|binding|unknown`，沿用既有 canonical event／同事件 escalation 的分類，不由留言或姓名猜測。`unknown` 是缺證據的既有案件；同一 ticket 多來源仍只列一筆，顯示最新已辨識來源。
 
-提醒 DTO 只回傳 ticket ID、client name、case reference、waiting／handling、處理人顯示名稱、closed source／reason、有效升級優先旗標及 UTC 更新時間；不回傳 LINE identity、電話、原始訊息、內部備註、event key、fingerprint 或 provider 細節。無姓名以未具名呈現，無來源仍保留待辦；載入與失敗不可冒充零筆。來源篩選及搜尋變更回第 1 頁，晚到／已取消查詢不得覆蓋新結果。
+「處理完成」一次點擊接回既有 detail／update Preview／Apply；程式重讀並核對清單 ticket version，保留內部備註，不要求人員再預覽或確認。新留言／其他人更新造成版本差異時保留案件、重查後由人員決定。Apply 在同一 outer transaction 鎖定 active escalation 及 ticket，沿現有 open→claimed→handling→resolved 升級路徑，保存版本、完成事件及解除 hold，僅一次 commit。待 owner 來源允許才完成；不單改前端或以清單消失假完成。此桌面「處理完成」不新增客戶完成通知或任何 Push；手機及既有專用 escalation 結案通知維持原契約。結果未明保留同一操作識別／payload，僅查核原操作，成功後重查正式清單及件數；成功前不移除案件。
+
+DTO 不回傳 LINE user ID、電話、內部備註、event key 或 provider payload。授權限原客服 reader／handler。完成僅關閉當前工單並保留歷史；後續新訊息沿既有 owner 規則處理。驗收涵蓋六欄、名稱複製／缺值、真實留言／去敏、申請時間、server 分頁、晚到回應、版本衝突、完成與 hold 原子一致、同鍵重播及零 Push。
 
 - merge 的 Rich Menu 圖面、按鈕標籤與 LIFF 卡片樣式可移植。
 - 「客服與選單」的 Rich Menu 編輯器必須提供背景圖與按鈕顯示名稱的 draft 編輯入口；畫面預覽、
@@ -487,7 +489,7 @@ LIFF 圖例與正式入口依目前流程呈現：客戶無實際服務日期修
 ### 6.10 各期繳款逾期待辦與人工提醒
 
 - 訂金、第一期、第二期均須符合 §6.7 的雙方簽約完成資格，才按各自正式到期日及同一期未核銷餘額，於台灣日期到期日隔天起且餘額為正列入工會內部待辦；不等待服務完工。未完成雙方簽約、不需第二期、金額零、未到期、已結清、已取消義務及歷史案件不列入清單或總數。工會應退給客戶的退款不屬於本提醒。保留原計算金額與期限，不從簽約日重新起算到期日。
-- LINE「客服與營運 → 日常作業 → 繳款逾期」呈現各筆案件、期別、到期日、逾期天數、餘額、提醒對象與上次提醒／寄送結果。同案多期逾期分列，不跨期合計；載入或重新整理只查詢；通知事項頁重用同一待辦與發送入口，沒有全域彈窗或另一套通知狀態。
+- 「帳務作業 → 收款 → 逾期提醒」為主要入口，沿用原 LINE reminder Query／Send；原 LINE 繳款逾期深連結導向此工作區，不另加帳務頂層分頁。呈現各筆案件、期別、到期日、逾期天數、餘額、提醒對象與上次提醒／寄送結果。同案多期逾期分列，不跨期合計；零筆明示沒有符合提醒資格的逾期款，不代表全部欠款歸零。核對銀行入款保留同案脈絡；載入或重新整理只查詢；通知事項頁重用同一待辦與發送入口，沒有全域彈窗或另一套通知狀態。
 - 工會人員自行決定是否點「發送提醒」；一次點擊直接建立既有 durable delivery task，不設再次確認視窗，不自動定期重發。同次操作重播沿用原工作；寄送未完成時不建立第二筆。收到結果不明時保留原操作供確認，不顯示成功或另建工作。
 - 訂金提醒只寄本案客戶已綁定的私人聊天室；第一、二期只寄本案有效案件群組。缺少客戶綁定或群組時保留待辦、禁用發送並顯示原因；不得改送其他對象。既有到期當天第一、二期群組通知及訂金 LIFF 提醒保持原流程，不由逾期提醒重播。
 - 文案為純文字、無按鈕：「本案{期別}尚有 NT$ {該期未核銷餘額} 未確認入帳，請協助確認繳款，謝謝。」期別僅為「訂金」「第一期款」「第二期款」，不用全案金額或未來期款；銀行資料未匯入不能宣稱客戶未繳款。

@@ -207,7 +207,7 @@ export const ActualStartReceiptSchema = z.discriminatedUnion('operation', [
   ActualStartRescheduleReceiptSchema,
 ]);
 
-const envelope = <T extends z.ZodTypeAny>(schema: T) => z.strictObject({
+const envelope = <T>(schema: z.ZodType<T>) => z.strictObject({
   success: z.boolean(),
   message: z.string(),
   data: schema.nullable(),
@@ -260,8 +260,8 @@ function requestOptions(
   };
 }
 
-function decode<T extends z.ZodTypeAny>(schema: T, raw: unknown): z.output<T> {
-  const response = decodePayload(envelope(schema), raw);
+function decode<T>(schema: z.ZodType<T>, raw: unknown): T {
+  const response = decodePayload(envelope<T>(schema), raw);
   if (!response.success) {
     throw new ApiHttpError(
       400,

@@ -228,9 +228,9 @@ class MySqlCustomerServiceRepository:
                 clauses.append(f"EXISTS (SELECT 1 FROM customer_service_ticket_events e WHERE e.ticket_id=t.id AND ({_REMINDER_SOURCE_CASE})=%s)")
                 params.append(query.source.value)
         if query.search and query.search.strip():
-            clauses.append("(t.case_no LIKE %s OR CAST(t.id AS CHAR) LIKE %s)")
+            clauses.append("(t.case_no LIKE %s OR CAST(t.id AS CHAR) LIKE %s OR c.name LIKE %s)")
             pattern = f"%{query.search.strip().removeprefix('#')}%"
-            params.extend((pattern, pattern))
+            params.extend((pattern, pattern, pattern))
         where = " AND ".join(clauses)
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -238,10 +238,10 @@ class MySqlCustomerServiceRepository:
                 "FROM customer_service_tickets WHERE status IN ('waiting','handling')"
             )
             summary = cursor.fetchone() or {}
-            cursor.execute(f"SELECT COUNT(*) AS total FROM customer_service_tickets t WHERE {where}", tuple(params))
+            cursor.execute(f"SELECT COUNT(*) AS total FROM customer_service_tickets t LEFT JOIN clients c ON c.id=t.client_id WHERE {where}", tuple(params))
             total = int((cursor.fetchone() or {}).get("total") or 0)
             cursor.execute(
-                "SELECT t.id,c.name AS client_name,t.case_no,t.status,"
+                "SELECT t.id,c.name AS client_name,t.case_no,t.status,t.version,t.line_user_id,t.created_at_utc AS requested_at,"
                 "a.display_name AS assigned_admin_name,t.updated_at_utc AS updated_at,"
                 "EXISTS (SELECT 1 FROM customer_service_escalations x WHERE x.ticket_id=t.id "
                 "AND x.workflow_status<>'resolved' AND x.urgency='high') AS is_priority "
@@ -255,7 +255,7 @@ class MySqlCustomerServiceRepository:
             if rows:
                 placeholders = ",".join("%s" for _ in rows)
                 cursor.execute(
-                    f"SELECT e.ticket_id,e.id,({_REMINDER_SOURCE_CASE}) AS source,"
+                    f"SELECT e.ticket_id,e.id,e.event_key,e.event_type,e.message_text,({_REMINDER_SOURCE_CASE}) AS source,"
                     "(SELECT x.trigger_code FROM customer_service_escalations x "
                     "WHERE x.ticket_id=e.ticket_id AND x.source_event_identity=e.event_key "
                     "ORDER BY x.id DESC LIMIT 1) AS trigger_code "
@@ -263,8 +263,14 @@ class MySqlCustomerServiceRepository:
                     tuple(int(row["id"]) for row in rows),
                 )
                 source_rows = list(cursor.fetchall() or ())
+        messages_by_ticket: dict[int, list[str]] = {}
         sources_by_ticket: dict[int, list[tuple[CustomerServiceReminderSource, str | None]]] = {}
         for row in source_rows:
+            if row.get("event_type") == "customer_message" and str(row.get("event_key", "")).startswith("line-service-help:active-hold:"):
+                text = row.get("message_text")
+                messages = messages_by_ticket.setdefault(int(row["ticket_id"]), [])
+                if isinstance(text, str) and text.strip() and len(messages) < 10:
+                    messages.append(text.strip())
             if row["source"] is not None:
                 source = CustomerServiceReminderSource(row["source"])
                 items = sources_by_ticket.setdefault(int(row["ticket_id"]), [])
@@ -280,11 +286,17 @@ class MySqlCustomerServiceRepository:
             updated_at = row.get("updated_at")
             if isinstance(updated_at, datetime) and updated_at.tzinfo is None:
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
+            requested_at = row.get("requested_at")
+            if isinstance(requested_at, datetime) and requested_at.tzinfo is None:
+                requested_at = requested_at.replace(tzinfo=timezone.utc)
             items.append(CustomerServiceReminder(
                 ticket_id=int(row["id"]), client_name=row.get("client_name"), case_no=row.get("case_no"),
                 status=row["status"], assigned_admin_name=row.get("assigned_admin_name"),
                 source=source, sources=tuple(item[0] for item in sources), reason=reason,
                 is_priority=bool(row["is_priority"]), updated_at=updated_at,
+                version=int(row["version"]), line_user_id=row.get("line_user_id"),
+                messages=tuple(messages_by_ticket.get(int(row["id"]), ())),
+                requested_at=requested_at,
             ))
         return CustomerServiceReminderPage(
             items=tuple(items), total=total, page=query.page, page_size=query.page_size,
@@ -408,7 +420,7 @@ def _list_filters(
         clauses.append("t.category=%s")
         parameters.append(query.category.value)
     if query.search:
-        clauses.append("(t.case_no LIKE %s OR CAST(t.id AS CHAR) LIKE %s)")
+        clauses.append("(t.case_no LIKE %s OR CAST(t.id AS CHAR) LIKE %s OR c.name LIKE %s)")
         pattern = f"%{query.search.strip()}%"
         parameters.extend((pattern, pattern))
     return clauses, tuple(parameters)

@@ -1,4 +1,7 @@
-"""NAS route parity and the machine/LINE identity boundary; no external services."""
+"""
+File: test_nas_line_operations.py
+Description: 驗證獨立 LINE 操作代理與內部私人 HTTPS 憑證授權邊界。
+"""
 import asyncio
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -251,17 +254,6 @@ def test_new_credential_can_resume_token_creation_without_rotating_it(tmp_path):
     assert (tmp_path / "api/verifiers.json").read_bytes() == before
 
 
-def test_compose_keeps_the_token_and_verifier_separate_from_database_credentials():
-    model = yaml.safe_load((ROOT / "deployment/nas/compose.yaml").read_text("utf-8"))
-    public = model["services"]["line-api"]
-    manager = model["services"]["management-api"]
-    assert "line-operations-token:/run/line-operations-proxy:ro" in public["volumes"]
-    assert "line-operations-verifier:/run/line-operations-verifier:ro" in manager["volumes"]
-    assert not any("line-operations-token:" in str(mount) for mount in manager["volumes"])
-    assert not any(any(name + ":" in str(mount) for name in ("management-db", "access-db", "maintenance-db", "line-operations-verifier"))
-                   for mount in public["volumes"])
-
-
 def test_restored_customer_payment_query_keeps_the_original_ownership_check(bridge, monkeypatch):
     from api.routes import line_deposit_payment as deposit
     from domains.line.identities import LineUserId
@@ -334,6 +326,62 @@ def test_path_normalization_cannot_escape_the_private_operation_prefix(bridge):
     assert bridge.options == []
 
 
+def _write_test_tls_bundle(folder: Path, sans: list) -> tuple[Path, Path, Path]:
+    from datetime import datetime, timedelta, timezone
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    folder.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test Private API CA")])
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.KeyUsage(True, False, False, False, False, True, True, False, False), critical=True)
+        .sign(ca_key, hashes.SHA256())
+    )
+    srv_key = ec.generate_private_key(ec.SECP256R1())
+    srv_cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "management-api")]))
+        .issuer_name(ca_name)
+        .public_key(srv_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(srv_key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+        .add_extension(x509.SubjectAlternativeName(sans), critical=False)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    ca_file = folder / "ca.pem"
+    cert_file = folder / "server-cert.pem"
+    key_file = folder / "server-key.pem"
+    ca_file.write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    cert_file.write_bytes(srv_cert.public_bytes(serialization.Encoding.PEM))
+    key_file.write_bytes(
+        srv_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return ca_file, cert_file, key_file
+
+
 def test_real_private_tls_requires_the_correct_ca_hostname_and_machine_token(tmp_path, monkeypatch):
     import ipaddress
     import socket
@@ -344,16 +392,13 @@ def test_real_private_tls_requires_the_correct_ca_hostname_and_machine_token(tmp
     import uvicorn
     from api.routes.nas_line_operations import require_private_line_operations
     from infrastructure.http.line_operations_client import LineOperationsClient, LineOperationsUnavailable, PREFIX
-    from scripts import nas_security_runtime as runtime
 
-    def write(path, content, mode=0o400):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
-    monkeypatch.setattr(runtime, "_write", write)
-    monkeypatch.setattr(runtime, "CA", tmp_path / "ca")
-    monkeypatch.setattr(runtime, "API_TLS", tmp_path / "tls")
-    runtime._prepare_api_tls([x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))])
-    ca_file = runtime.CA / "ca.pem"
+    ca_file, cert_file, key_file = _write_test_tls_bundle(
+        tmp_path / "tls", [x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]
+    )
+    other_ca_file, _, _ = _write_test_tls_bundle(
+        tmp_path / "other-tls", [x509.DNSName("management-api")]
+    )
     credential_root = tmp_path / "credentials"
     ensure_line_operations_credentials(credential_root)
     token_file = credential_root / LINE_OPERATIONS_SERVICE / "token"
@@ -369,8 +414,8 @@ def test_real_private_tls_requires_the_correct_ca_hostname_and_machine_token(tmp
     port = listener.getsockname()[1]
     listener.listen()
     server = uvicorn.Server(uvicorn.Config(app, log_level="critical", access_log=False,
-        ssl_certfile=str(runtime.API_TLS / "management-api/server-cert.pem"),
-        ssl_keyfile=str(runtime.API_TLS / "management-api/server-key.pem")))
+        ssl_certfile=str(cert_file),
+        ssl_keyfile=str(key_file)))
     thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
     thread.start()
     try:
@@ -391,10 +436,7 @@ def test_real_private_tls_requires_the_correct_ca_hostname_and_machine_token(tmp
             wrong_token.write_text("z" * 43)
             rejected = LineOperationsClient(f"https://127.0.0.1:{port}", str(wrong_token), str(ca_file))
             assert (await rejected.request("POST", "/api/v1/line/test-query", **arguments)).status_code == 401
-            monkeypatch.setattr(runtime, "CA", tmp_path / "other-ca")
-            monkeypatch.setattr(runtime, "API_TLS", tmp_path / "other-tls")
-            runtime._prepare_api_tls()
-            wrong_ca = LineOperationsClient(f"https://127.0.0.1:{port}", str(token_file), str(runtime.CA / "ca.pem"))
+            wrong_ca = LineOperationsClient(f"https://127.0.0.1:{port}", str(token_file), str(other_ca_file))
             with pytest.raises(LineOperationsUnavailable):
                 await wrong_ca.request("POST", "/api/v1/line/test-query", **arguments)
         asyncio.run(check())

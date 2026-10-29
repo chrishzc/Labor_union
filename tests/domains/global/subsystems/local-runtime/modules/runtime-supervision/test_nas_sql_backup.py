@@ -35,11 +35,11 @@ import os, sys, time
 a = sys.argv[3:]
 with open(os.environ['DOCKER_TRACE'], 'a') as out: out.write(a[0]+'\\n')
 if a[0] == 'ps': print('fixture-id')
-elif a[0] == 'volume': print('wrong' if os.getenv('FAULT') == 'owner' else 'lu-nas-life-backup')
+elif a[0] == 'volume': print('wrong' if os.getenv('FAULT') == 'owner' else 'lu-nas-life-backup|mysql-data')
 elif a[0] == 'inspect':
     fmt = a[2]
     if 'State.Status' in fmt: print('lu-nas-life-backup|db|running')
-    elif '.Name' in fmt: print('lu-nas-life-backup_mysql-data')
+    elif '.Name' in fmt: print(os.getenv('FIXTURE_MYSQL_VOLUME', 'lu-nas-life-backup_mysql-data'))
     else: print(os.environ['MOUNT_SOURCE'])
 elif a[0] == 'exec':
     sys.stdin.read()
@@ -106,6 +106,12 @@ def test_host_rejects_backup_folder_with_public_permissions(host):
     destination.chmod(0o755)
     assert run().returncode == 2
     assert not list(destination.glob("*/COMPLETE"))
+
+
+def test_host_accepts_owned_replacement_volume_for_the_same_logical_mysql_data(host, monkeypatch):
+    monkeypatch.setenv('FIXTURE_MYSQL_VOLUME', 'lu-nas-life-backup_mysql-upgrade-20261027t030000z')
+    _, _, run = host
+    assert run('--check').returncode == 0
 
 
 @pytest.mark.skipif(os.getenv("NAS_SQL_BACKUP_DOCKER_TEST") != "1", reason="local isolated Docker opt-in")

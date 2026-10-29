@@ -40,7 +40,7 @@ function options(key?: string) {
   const headers: Record<string, string> = key ? { 'Idempotency-Key': key } : {};
   return { token, headers };
 }
-function decode<T extends z.ZodTypeAny>(schema: T, value: unknown): z.output<T> {
+function decode<T>(schema: z.ZodType<T>, value: unknown): T {
   return decodePayload(z.strictObject({ success: z.literal(true), message: z.string(), data: schema, error: z.string().nullable().optional() }), value).data;
 }
 const root = '/api/v1/accounting-pricing';

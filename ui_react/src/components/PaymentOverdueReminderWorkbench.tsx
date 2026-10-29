@@ -9,7 +9,7 @@ const statuses:Record<string,string>={pending:'待寄送',processing:'寄送中'
 const inQueue=new Set(['pending','processing','retryable_failed']);
 const identity=(item:PaymentOverdueTodo)=>JSON.stringify(item.payment);
 
-export function PaymentOverdueReminderWorkbench({client=paymentOverdueReminderClient}:{client?:PaymentOverdueReminderClient}) {
+export function PaymentOverdueReminderWorkbench({client=paymentOverdueReminderClient,onOpenBank}:{client?:PaymentOverdueReminderClient;onOpenBank?:(caseNo:string)=>void}) {
   const [data,setData]=useState<PaymentOverduePage|null>(null);
   const [page,setPage]=useState(1);
   const [reload,setReload]=useState(0);
@@ -46,13 +46,13 @@ export function PaymentOverdueReminderWorkbench({client=paymentOverdueReminderCl
     } finally {busy.current=false;setPending(null);}
   }
   return <section className="line-table-container payment-overdue-workbench" aria-labelledby="payment-overdue-title">
-    <div className="line-section-heading"><div><h2 id="payment-overdue-title">繳款逾期待辦</h2>
-      <p>各期到期日隔天起，未核銷餘額分別列入。訂金提醒客戶私訊；第一、二期提醒案件群組。</p></div>
+    <div className="line-section-heading"><div><h2 id="payment-overdue-title">逾期提醒</h2>
+      <p>僅列雙方簽約完成且各期到期日已過、仍有未核銷餘額的款項。訂金提醒客戶私訊；第一、二期提醒案件群組。</p></div>
       <button className="line-secondary-btn" type="button" disabled={loading||!!pending} onClick={()=>setReload(value=>value+1)}>重新整理逾期待辦</button></div>
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
     {loading?<p role="status">正在查詢各期繳款逾期待辦…</p>:data&&<>
       <p>共 {data.total} 筆；是否發送由工會逐次決定。</p>
-      {!data.items.length?<p>目前沒有繳款逾期待辦。</p>:<div className="line-table-scroll"><table className="line-data-table">
+      {!data.items.length?<p>目前沒有符合提醒資格的逾期款。</p>:<div className="line-table-scroll"><table className="line-data-table">
         <thead><tr><th scope="col">案件／期別</th><th scope="col">到期日</th><th scope="col">未核銷餘額</th><th scope="col">提醒對象</th><th scope="col">上次提醒</th><th scope="col">操作</th></tr></thead>
         <tbody>{data.items.map(item=><tr key={item.payment.obligation_identity}>
           <td>{item.payment.case_no}<br/>{names[item.payment.payment_stage]}</td><td>{item.payment.due_date}<br/>逾期 {item.overdue_days} 天</td>
@@ -61,7 +61,7 @@ export function PaymentOverdueReminderWorkbench({client=paymentOverdueReminderCl
           <td><button type="button" className="line-primary-btn" disabled={!item.can_send||!!pending||!!item.last_reminder&&inQueue.has(item.last_reminder.status)} onClick={()=>void send(item)}>
             {pending===identity(item)?'建立中…':item.last_reminder&&inQueue.has(item.last_reminder.status)?'已建立寄送工作':keys.current.has(identity(item))?'確認原操作結果':'發送提醒'}</button>
             {item.unavailable_reason&&<p>{item.unavailable_reason}</p>}
-            <p><a href="#finance?tab=finance-import">核對銀行入款</a></p></td>
+            <p><a href={`#finance?tab=finance-import&case_no=${encodeURIComponent(item.payment.case_no)}`} onClick={event=>{if(onOpenBank){event.preventDefault();onOpenBank(item.payment.case_no);}}}>核對銀行入款</a></p></td>
         </tr>)}</tbody></table></div>}
       {data.total>data.page_size&&<nav aria-label="繳款逾期待辦分頁"><button type="button" disabled={page===1||!!pending} onClick={()=>setPage(value=>value-1)}>上一頁</button>
         <span>第 {page} 頁</span><button type="button" disabled={page*data.page_size>=data.total||!!pending} onClick={()=>setPage(value=>value+1)}>下一頁</button></nav>}
