@@ -187,3 +187,47 @@ def test_registration_initialization_error_disables_every_form_control() -> None
         "#registerForm button"
     ) in failure_source
     assert "control => control.disabled = true" in failure_source
+
+
+def test_service_days_rejects_fractional_input_without_truncating_or_changing_the_previous_integer():
+    source = (ROOT / "line/static/register.html").read_text(encoding="utf-8")
+    guard = "function setupServiceDaysIntegerInput()" + source.split(
+        "function setupServiceDaysIntegerInput()", 1
+    )[1].split("function setupIdNumberAutoUppercase()", 1)[0]
+    script = r'''
+const assert = require('node:assert/strict');
+const handlers = new Map();
+const input = {value: '30', validity: {badInput: false}, addEventListener: (kind, fn) => handlers.set(kind, fn)};
+const document = {getElementById: () => input};
+let error = '';
+function setFieldError(control, message) {assert.equal(control, input); error = message;}
+''' + guard + r'''
+setupServiceDaysIntegerInput();
+for (const text of ['.', '1.5', ',', '1e2', '-1']) {
+  let prevented = false;
+  handlers.get('beforeinput')({data: text, preventDefault(){prevented = true;}});
+  assert.equal(prevented, true);
+  assert.equal(input.value, '30');
+}
+for (const text of ['1.5', '1,5', '1e2', '-1']) {
+  let prevented = false;
+  handlers.get('paste')({clipboardData: {getData: () => text}, preventDefault(){prevented = true;}});
+  assert.equal(prevented, true);
+  assert.equal(input.value, '30');
+}
+input.value = '1.5'; handlers.get('input')();
+assert.equal(input.value, '30'); assert.match(error, /整數/);
+input.value = '31'; handlers.get('input')();
+assert.equal(input.value, '31'); assert.equal(error, '');
+input.value = ''; input.validity.badInput = true; handlers.get('input')();
+assert.equal(input.value, '31'); assert.match(error, /整數/);
+input.validity.badInput = false; input.value = ''; handlers.get('input')();
+assert.equal(input.value, ''); assert.equal(error, '');
+let prevented = false;
+handlers.get('paste')({clipboardData: {getData: () => '45'}, preventDefault(){prevented = true;}});
+assert.equal(prevented, false);
+console.log('integer service day input contract passed');
+'''
+    result = subprocess.run(["node"], input=script, capture_output=True, text=True,
+                            encoding="utf-8", timeout=10, check=True)
+    assert "integer service day input contract passed" in result.stdout

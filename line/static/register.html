@@ -316,7 +316,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             </div>
             <div class="form-group">
                 <label class="form-label required">預計服務天數</label>
-                <input type="number" class="form-input" id="service_days" required min="1" max="60" placeholder="例如: 30">
+                <input type="number" step="1" inputmode="numeric" class="form-input" id="service_days" required min="1" max="60" placeholder="例如: 30">
             </div>
         </div>
         <section id="nonCitizenServiceFields" hidden aria-label="非市民服務條件">
@@ -683,7 +683,35 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         autofillFromQueryParams();
         setupIdNumberAutoUppercase();
         setupEmailTypoHint();
+        setupServiceDaysIntegerInput();
     });
+
+    function setupServiceDaysIntegerInput() {
+        const input = document.getElementById('service_days');
+        let previousValue = input.value;
+        const reject = () => setFieldError(input, '預計服務天數只能輸入整數。');
+        input.addEventListener('beforeinput', event => {
+            if (event.data && /[^0-9]/.test(event.data)) {
+                event.preventDefault();
+                reject();
+            }
+        });
+        input.addEventListener('paste', event => {
+            if (!/^[0-9]+$/.test(event.clipboardData.getData('text'))) {
+                event.preventDefault();
+                reject();
+            }
+        });
+        input.addEventListener('input', () => {
+            if (input.validity.badInput || !/^[0-9]*$/.test(input.value)) {
+                input.value = previousValue;
+                reject();
+                return;
+            }
+            previousValue = input.value;
+            setFieldError(input, '');
+        });
+    }
 
     function setupIdNumberAutoUppercase() {
         const idInput = document.getElementById('id_number');
@@ -1093,7 +1121,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             }
         }
 
-        const days = isNonCitizen ? Number(serviceDays.value) : Number.parseInt(serviceDays.value, 10);
+        const days = Number(serviceDays.value);
         if (!Number.isInteger(days)) addError(errors, serviceDays, '請填寫預計服務天數。');
         else if (days < 1 || (!isNonCitizen && days > 60)) addError(errors, serviceDays, isNonCitizen ? '預計服務天數需為正整數。' : '預計服務天數需介於 1 至 60 天。');
 
@@ -1253,7 +1281,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
                 phone: document.getElementById("phone").value,
                 tel: document.getElementById("tel").value || "",
                 expected_date: document.getElementById("expected_date").value,
-                service_days: parseInt(document.getElementById("service_days").value, 10),
+                service_days: Number(document.getElementById("service_days").value),
                 address: document.getElementById("address").value,
                 gender: document.getElementById("gender").value,
                 email: document.getElementById("email").value || "",
