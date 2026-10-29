@@ -10,7 +10,8 @@ UI 開啟詳情時借用既有 auth `/me` 回讀 root，明確顯示「刪除此
 既有 append-only triggers 預設保留；例外必須符合本次 pending claim、unsigned case、row ownership 與未完成 receipt。connection context 在成功／失敗清除；明確 guard 拒絕為完整 rollback 的 typed 409。
 
 ## Implementation
-- `subsystems/registry_deletion.py`
+- `subsystems/registry_deletion/coordinator.py`
+- `subsystems/registry_deletion/__init__.py`
 - `infrastructure/mysql/registry_deletion_repository.py`
 - `infrastructure/mysql/registry_case_deletion.py`
 - `api/dependencies/registry_deletion.py`
