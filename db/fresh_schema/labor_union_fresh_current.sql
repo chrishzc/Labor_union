@@ -1757,7 +1757,7 @@ CREATE TABLE `client_refund_return_review_receipts` (
 CREATE TABLE `client_refund_reversal_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `correction_type` enum('refund','refund_return','reversal') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `correction_type` enum('refund','refund_return','reversal','refund_overage') COLLATE utf8mb4_unicode_ci NOT NULL,
   `command_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `preview_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2601,6 +2601,18 @@ CREATE TABLE `customer_service_tickets` (
   CONSTRAINT `fk_customer_service_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `finance_accounting_dismissals` (
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_identity` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `warning_kind` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `difference_ntd` bigint NOT NULL,
+  `source_version` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_no`,`item_identity`,`warning_kind`,`difference_ntd`),
+  CONSTRAINT `fk_accounting_dismissal_case` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `finance_anomaly_occurrences` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `occurrence_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2982,6 +2994,42 @@ CREATE TABLE `finance_import_source_reviews` (
   CONSTRAINT `chk_finance_source_review_digest` CHECK (regexp_like(`source_content_digest`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_finance_source_review_issues` CHECK (((json_type(`issue_codes`) = _utf8mb4'ARRAY') and (json_length(`issue_codes`) > 0))),
   CONSTRAINT `chk_finance_source_review_row` CHECK ((`source_row` >= 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `finance_manual_statements` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `fields` json NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_manual_statement_object` CHECK ((json_type(`fields`) = _utf8mb4'OBJECT'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `finance_statement_archive_state` (
+  `id` tinyint NOT NULL,
+  `version` bigint unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_statement_singleton` CHECK ((`id` = 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `finance_statement_commands` (
+  `idempotency_key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `result_identity` varchar(191) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `saved_count` int unsigned NOT NULL,
+  `excluded_count` int unsigned NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`idempotency_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `finance_statement_exclusions` (
+  `finance_import_row_id` bigint NOT NULL,
+  `kept_identity` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`finance_import_row_id`),
+  CONSTRAINT `fk_statement_excluded_row` FOREIGN KEY (`finance_import_row_id`) REFERENCES `finance_import_rows` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `financial_adjustment_apply_receipts` (
@@ -5599,6 +5647,12 @@ CREATE TABLE `media_assets` (
   CONSTRAINT `fk_media_created_by` FOREIGN KEY (`created_by_admin_user_id`) REFERENCES `admin_users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `non_citizen_case_sequences` (
+  `roc_year` smallint unsigned NOT NULL,
+  `next_sequence` int unsigned NOT NULL DEFAULT '1',
+  PRIMARY KEY (`roc_year`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `order_actual_start_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -8082,6 +8136,8 @@ CREATE TABLE `weekly_report_metrics` (
 INSERT INTO `accounting_pricing_state` (`singleton_id`,`revision`) VALUES (1,0);
 
 INSERT INTO `client_subsidy_policy_migrations` (`policy_key`) VALUES ('subsidy-period-policy-2026-10-24-v1');
+
+INSERT INTO `finance_statement_archive_state` (`id`,`version`) VALUES (1,0);
 
 INSERT INTO `government_payers` (`payer_identity`,`payer_name`,`incoming_memo_match`,`is_active`) VALUES ('hccg','新竹市政府','新竹市政府',1);
 

@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-refund-overage-receipt-2026-10-29-v1",
+  "release_metadata": {
+    "release_name": "Complete the supported Client Finance over-refund receipt kind",
+    "application_version": "client-refund-overage-receipt-v1",
+    "published_at": "2026-10-29",
+    "description": "Append existing domain refund_overage to persistence enum without altering old receipt values or ordinals"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-finance-statement-workspace-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1058_client_refund_overage_receipt.sql",
+      "relative_path": "db/schema_parts/1058_client_refund_overage_receipt.sql",
+      "sha256": "a7893c7c4450312747e8f36a5cc51e05527cf54e28578236b4851347d43aacec",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-owned-candidate-before-switch; retain-additive-events-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "client-refund-overage-receipt-exact",
+      "phase": "post-schema",
+      "policy": "Exact appended receipt enum; existing receipt values and ordinals unchanged",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "client-refund-overage-receipt-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "client-refund-overage-receipt-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_29_client_refund_overage_receipt_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_29_client_refund_overage_receipt_v1.descriptors.json",
+    "sha256": "62f956328c8554f6fb3cd38a6f1d1d291fdbf024340de1508efcedf8c993b367",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

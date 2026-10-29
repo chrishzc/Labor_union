@@ -67,7 +67,14 @@ class ClientFinancePageQuery:
     cases: tuple[ClientFinanceCaseSummary, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FinanceCaseCategory:
+    case_no: str
+    category: Literal["subsidy", "non_citizen"]
+
+
 class ClientFinanceQueryRepository(Protocol):
+    def query_categories(self) -> tuple[FinanceCaseCategory, ...]: ...
     def query_all(self) -> ClientFinancePageQuery: ...
 
     def query_case(self, case_no: str) -> ClientFinanceCaseQuery: ...
@@ -81,6 +88,9 @@ class ClientFinanceQueryApplication:
 
     def query_all(self) -> ClientFinancePageQuery:
         return self._repository.query_all()
+
+    def query_categories(self) -> tuple[FinanceCaseCategory, ...]:
+        return self._repository.query_categories()
 
     def query_case(self, case_no: str) -> ClientFinanceCaseQuery:
         return self._repository.query_case(case_no)

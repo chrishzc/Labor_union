@@ -10,6 +10,9 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- `db/schema_parts/235_finance_statement_workspace.sql` and `db/schema_parts/1057_finance_statement_workspace.sql`, with the finance_statement_workspace_v1 release / descriptors — immutable schema predecessor for the approved non-citizen release chain; no separate finance-workspace application is included here.
+- `db/schema_parts/236_client_refund_overage_receipt.sql` and `db/schema_parts/1058_client_refund_overage_receipt.sql`, with the client_refund_overage_receipt_v1 release / descriptors — exact enum append predecessor, no row changes.
+- `db/schema_parts/237_non_citizen_case_sequences.sql` and `db/schema_parts/1059_non_citizen_case_sequences.sql`, with the non_citizen_cases_v1 release / descriptors — annual approval counter; schema-only; Case Import owns fresh/preserve evidence.
 - Accounting pricing additive release: `db/schema_parts/234_accounting_pricing.sql`, `db/schema_parts/1056_accounting_pricing.sql`, `db/migration_releases/labor_union_2026_10_29_accounting_pricing_v1.json` and `db/migration_releases/labor_union_2026_10_29_accounting_pricing_v1.descriptors.json`; no legacy finance backfill.
 - Accounting pricing evidence: `validation/receipts/ACCOUNTING-PRICING-implementation-20261029.json` — synthetic fresh/preserve and implementation verification; shared-workspace failures are explicit.
 - subsidy period policy: `scripts/migrate_subsidy_period_policy.py` — hash-bound one-time identity relabeling and replayable automatic-refund synchronization, selected by the default preserve-data route. Plan binds selected backfill inventory; invalid owner facts remain pending with case/reason evidence, including after verify or replay. Business backfills select the preserve route before schema-only qualification.

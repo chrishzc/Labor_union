@@ -12,6 +12,8 @@ from datetime import date, datetime
 from typing import Iterator
 
 from pymysql.err import OperationalError
+from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
+from subsystems.client_finance.client_payments_query import FinanceCaseCategory
 
 from subsystems.client_finance.client_payments_query import (
     ClientFinanceAllocationFact,
@@ -38,6 +40,12 @@ class MySqlClientFinanceQueryRepository:
         return ClientFinancePageQuery(
             tuple(_summary(row) for row in rows)
         )
+
+    def query_categories(self) -> tuple[FinanceCaseCategory, ...]:
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute("SELECT o.case_no," + CASE_CATEGORY_SQL + " AS category "
+                           "FROM orders o JOIN clients c ON c.id=o.client_id ORDER BY o.case_no")
+            return tuple(FinanceCaseCategory(str(row["case_no"]), row["category"]) for row in cursor.fetchall())
 
     def query_case(self, case_no: str) -> ClientFinanceCaseQuery:
         normalized = _case_no(case_no)

@@ -6,6 +6,7 @@ Description: 提供自選期間營運報表 strict JSON Query 與同 candidate �
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -41,14 +42,15 @@ def query_case_statistics(
     year: int = Query(..., ge=1, le=9998),
     quarter: int | None = Query(None, ge=1, le=4),
     month: int | None = Query(None, ge=1, le=12),
+    case_category: Literal["subsidy", "non_citizen"] = Query("subsidy"),
     principal: AdminPrincipal = Depends(require_admin),
     query: WeeklyOperationsReportQuery = Depends(get_weekly_operations_report_query),
 ):
     del principal
     try:
-        if set(request.query_params) - {"year", "quarter", "month"}:
+        if set(request.query_params) - {"year", "quarter", "month", "case_category"}:
             raise ValueError("case_statistics_period_invalid")
-        report = query.query_case_statistics(year, quarter, month)
+        report = query.query_case_statistics(year, quarter, month, case_category=case_category)
         view = CaseStatisticsView.model_validate({**_slots_dict(report), "summary": _slots_dict(report.summary)})
     except ValueError as exc:
         if str(exc) == "case_statistics_period_invalid":

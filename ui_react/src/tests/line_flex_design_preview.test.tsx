@@ -49,7 +49,7 @@ describe('LINE studio public preview', () => {
     fireEvent.click(screen.getByRole('button', {name:'訊息卡片 (4)'}));
     fireEvent.click(await screen.findByRole('button', {name:'重新載入公版'}));
     await waitFor(() => expect(previewClient.catalog).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', {name:'全部 (21)'}));
+    fireEvent.click(screen.getByRole('button', {name:'全部 (22)'}));
     fireEvent.click(screen.getByRole('button', {name:/申請訂單異動 提出/}));
     expect(screen.queryByText('服務日期／天數')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', {name:/寶寶日誌與餐食照片 依服務日/}));
@@ -112,7 +112,7 @@ describe('LINE studio public preview', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-    expect(screen.getByText('21 個項目')).toBeInTheDocument();
+    expect(screen.getByText('22 個項目')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單與卡片' }), { target: { value: 'register.html' } });
     expect(screen.getByText('1 個項目')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /需求調查 填寫基本資料/ })).toHaveAttribute('aria-pressed', 'true');

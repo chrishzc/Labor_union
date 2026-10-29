@@ -138,6 +138,15 @@ def registration_page():
     return FileResponse(_REGISTRATION_PAGE, headers=_NO_CACHE_HEADERS)
 
 
+@page_router.get("/line-non-citizen-registration")
+def non_citizen_registration_page():
+    from fastapi.responses import HTMLResponse
+    html = _REGISTRATION_PAGE.read_text(encoding="utf-8").replace(
+        "<body>", '<body data-registration-kind="non_citizen">', 1
+    )
+    return HTMLResponse(html, headers=_NO_CACHE_HEADERS)
+
+
 @page_router.get("/line-profile-guard")
 def profile_guard_page():
     return FileResponse(_PROFILE_GUARD_PAGE, headers=_NO_CACHE_HEADERS)
@@ -431,6 +440,7 @@ def _apply_combined_registration(application, payload, line_user_id):
 def _registration_response(receipt, identity_status):
     return ProvisionalRegistrationResponse(
         registration_id=receipt.registration_id,
+        case_no=receipt.case_no,
         client_id=receipt.client_id,
         beclass_record_id=receipt.beclass_record_id,
         client_name=receipt.client_name,
@@ -657,6 +667,15 @@ def _registration_intent(payload, line_user_id):
         id_number=payload.id_number,
         liff_config_revision=payload.liff_config_revision,
         survey_details=payload.survey_details,
+        registration_kind=payload.registration_kind,
+        service_start_date=payload.service_start_date,
+        service_time=payload.service_time,
+        residence_type=payload.residence_type,
+        delivery_type=payload.delivery_type,
+        service_type=payload.service_type,
+        baby_info=payload.baby_info,
+        notes=payload.notes,
+        line_id=payload.line_id,
     )
 
 
@@ -733,6 +752,8 @@ def _development_identity_fallback_enabled() -> bool:
 def _translate_identity_errors(call, *arguments):
     try:
         return call(*arguments)
+    except ProvisionalRegistrationDomainError as error:
+        raise _registration_http_error(422, error.issue.value, str(error)) from error
     except LineIdentityNotFoundError as error:
         raise typed_http_error(
             404,

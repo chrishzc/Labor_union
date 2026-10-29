@@ -20,6 +20,8 @@ def test_runtime_copy_describes_review_instead_of_promising_matching():
     runtime["page"].update(subtitle="測試副標題", submit_button="設定送出文字", success_title="設定成功標題")
     script = r"""
 const nodes = new Map();
+const isNonCitizen = false;
+const nonCitizenFields = [];
 function element(id) {if (!nodes.has(id)) nodes.set(id, {}); return nodes.get(id);}
 const document = {documentElement: {style: {setProperty(){}}}, body: {style: {}}, getElementById: element, querySelector: element};
 function applySystemField() {}

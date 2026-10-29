@@ -50,10 +50,12 @@ from subsystems.contract_signing.staff_contract_application import _rest_weekday
         ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), None, date(2026, 10, 20)),
         ("一般市民", 20, 0, 0, True, (12000, 45000, 3000, 60000), "", date(2026, 10, 20)),
         ("一般市民", 30, 0, 0, True, (12000, 45000, 33000, 90000), "無休", None),
+        ("非市民", 30, 0, 0, True, (16000, 48000, 32000, 96000), "連續服務", None),
     ],
 )
+@pytest.mark.parametrize("case_no", ["CASE-1", "A115001"])
 def test_candidate_payment_preview_without_plan_or_payroll(
-    monkeypatch, identity, service_days, floor_fee, persisted_days, has_start, expected_amounts, service_mode, stored_second_due,
+    monkeypatch, identity, service_days, floor_fee, persisted_days, has_start, expected_amounts, service_mode, stored_second_due, case_no,
 ):
     from infrastructure.mysql import contract_full_preview_repository as adapter
     from infrastructure.mysql import order_information_repository as information
@@ -63,7 +65,7 @@ def test_candidate_payment_preview_without_plan_or_payroll(
     from shared_kernel.money import MoneyNTD
 
     case = {
-        "case_no": "CASE-1", "start_date": date(2026, 10, 1) if has_start else None,
+        "case_no": case_no, "start_date": date(2026, 10, 1) if has_start else None,
         "service_days": service_days, "service_hours_per_day": 10,
         "service_type": service_mode, "custom_rest_dates": [],
         "floor_fee": floor_fee, "client_identity_status": identity,
@@ -99,10 +101,10 @@ def test_candidate_payment_preview_without_plan_or_payroll(
     monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: case)
     monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs:
         ClientFinanceTermsFacts(
-            "CASE-1", 1, 10, MoneyNTD(floor_fee),
+            case_no, 1, 10, MoneyNTD(floor_fee),
             tuple(ClientChargeDay(date(2026, 10, day), False)
                   for day in range(1, persisted_days + 1)),
-            ClientPaymentTerms(4, MoneyNTD(300), date(2026, 9, 20),
+            ClientPaymentTerms(5 if identity == "非市民" else 4, MoneyNTD(320 if identity == "非市民" else 300), date(2026, 9, 20),
                                date(2026, 10, 1), stored_second_due), (),
             client_service_charge_waived=identity == "低收入戶",
         ))
@@ -124,7 +126,7 @@ def test_candidate_payment_preview_without_plan_or_payroll(
         assert formal.facts["second_payment_amount"] == 9000
         assert formal.facts["total_employer_self_pay_payable"] == 66000
     preview = information.MySqlOrderInformationRepository(connection).preview_candidate_information(
-        "CASE-1", 91, 1,
+        case_no, 91, 1,
     )
     service = dict(next(section.rows for section in preview.line_sections
                         if section.title == "服務約定"))

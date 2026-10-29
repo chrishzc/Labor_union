@@ -1,5 +1,8 @@
 # Orders Domain
 
+> 2026-10-29 帳務參數裁決：規格04 §0 PRICE-02／03規範案件初建即綁定政策及個案人工覆寫。後續補件、日期更正與重排保留適用版本；不把服務日期當自動選價日期。原始條款／排班ownership不移交參數頁。\n
+
+
 ## 1. Domain 責任
 
 Orders 擁有：
@@ -145,6 +148,30 @@ lifecycle scope，自動讀完 continuation；Chrome 回讀兩頁皆為 94 筆�
 React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 production build 已通過。
 - 代辦看板與訂單管理可採不同 presentation，但必須消費同一 server lifecycle predicate；兩頁不得各自
   以中文 status、日期、card lane 或 local cache 判斷是否完成。
+
+### 3.1.4 非市民案件沿用訂單推進（2026-10-29 人工確認）
+
+狀態：`implemented / repository-local-verified`。使用者已於 2026-10-29 核准七階段實作與逐階段驗收；執行範圍及實際證據見 [非市民案件實作工作包](../非市民案件實作工作包.md)。此狀態不代表已部署、使用正式資料或完成外部 provider 驗收。
+
+使用者已逐項確認下列流程。沿用是沿用各步驟既有 owner、正式條件、事件、操作及回讀，不代表畫面切換即可推進，也不新增非市民專用 lifecycle。
+
+| 順序 | 步驟 | 非市民處理 |
+|---|---|---|
+| 1 | 進件與資料完整性驗證 | LIFF 合併表單依 `17` 驗證，工會核准才正式建案 |
+| 2 | 建立候選月嫂池 | 沿用候選篩選及工會選人方式 |
+| 3 | 詢問月嫂接案意願 | 沿用 |
+| 4 | 等待與處理月嫂意願回覆 | 沿用 |
+| 5 | 推薦月嫂給客戶確認 | 沿用 |
+| 6 | 建立契約並送交外部簽署平台 | 操作沿用；適用非市民政策及自費條文 |
+| 7 | 雙方簽署完成與文件回收 | 沿用現行分開簽回及完成條件 |
+| 8 | 客戶定金繳款與核銷 | 按 5 天服務費收取；收款及核銷沿用 |
+| 9 | 服務日期確認與排班 | 沿用 |
+| 10 | 服務開始與履約 | 實際開工、服務紀錄及服務中異動沿用 |
+| 11 | 完工／服務完成確認 | 沿用 |
+| 12 | 客戶端結算 | 結清、補收及退款沿用 |
+| 13 | 月嫂端結算 | 報酬結算及付款沿用 |
+
+費率、定金及剩餘服務費公式由 `04` §0.1 擁有；媒合、排班及月嫂給付依各既有 owner 契約。看板／工作台須承接非市民正式案件；僅案件統計依 `15` §15.3 分流，不得把統計排除條件套在案件工作清單。後續 UI、共用案件識別及驗收影響見 `17` §5.1.2；本次未修改實作。
 
 ### 3.2 Terms Preview／Apply
 
@@ -387,7 +414,7 @@ Identity 的 typed handoff，不是 LINE、UI、worker 或付款／通知 adapte
 或 LINE root。event producer 必須保留 current lifecycle version，讓 consumer 可辨識 stale
 event；相同 key／payload replay 回原 receipt，payload mismatch 固定 conflict。
 
-一般客戶沒有月嫂綁定時，LINE 保存正常略過 receipt，不建立選單恢復工作；已處理的事件依 LINE receipt 排除，不更動 Orders outbox。
+一般客戶沒有月嫂綁定時，LINE 保存正常略過 receipt，不建立選單恢復工作；已處理的事件依 LINE receipt 排除，不更動 Orders outbox。 Orders 原本允許未綁定 LINE 的案件以 NULL source subject 保存 immutable handoff；consumer 依規格 23 §9.5 核對同樣未綁定的 owner、版本、terminal 狀態與 capability 後，使用原正常略過 receipt，不補造身分或改寫 Orders 來源。
 
 LINE Identity 依該 committed outbox 呼叫既有 role-scoped Query／Apply：只有該 LINE User ID
 的 staff binding 仍為 `active`，且其全部 active client-role cases 都由 owner readback 證明

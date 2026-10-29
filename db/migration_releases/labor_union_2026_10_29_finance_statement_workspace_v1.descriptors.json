@@ -1,0 +1,229 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-finance-statement-workspace-2026-10-29-v1",
+  "descriptors": {
+    "1057_finance_statement_workspace.sql": {
+      "tables": {
+        "finance_statement_archive_state": {
+          "id": {
+            "column_type": "tinyint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "version": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        },
+        "finance_manual_statements": {
+          "id": {
+            "column_type": "bigint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "fields": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "finance_statement_commands": {
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "result_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "saved_count": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "excluded_count": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "finance_statement_exclusions": {
+          "finance_import_row_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "kept_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "finance_accounting_dismissals": {
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "item_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "warning_kind": {
+            "column_type": "varchar(30)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "difference_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "source_version": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "finance_statement_archive_state.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "finance_manual_statements.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "finance_statement_commands.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "finance_statement_exclusions.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "finance_import_row_id"
+          ]
+        },
+        "finance_accounting_dismissals.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "case_no",
+            "item_identity",
+            "warning_kind",
+            "difference_ntd"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "finance_statement_exclusions.fk_statement_excluded_row": {
+          "columns": [
+            "finance_import_row_id"
+          ],
+          "referenced_table": "finance_import_rows",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "finance_accounting_dismissals.fk_accounting_dismissal_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "finance_statement_archive_state.chk_statement_singleton": "atom(id=1)",
+        "finance_manual_statements.chk_manual_statement_object": "atom(json_type(fields)='OBJECT')"
+      },
+      "triggers": [],
+      "parent_columns": {}
+    }
+  }
+}

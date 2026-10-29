@@ -16,6 +16,7 @@ from subsystems.case_import.provisional_registration_types import (
 )
 from subsystems.line.identity_application import LineIdentityApplication, LineIdentityConflictError
 from shared_kernel.identities import CorrelationId
+from subsystems.case_import.case_import_workflow import CaseImportWorkflowError
 
 
 router = APIRouter(prefix="/api/v1/admin/registration-applications", tags=["需求申請審核"])
@@ -33,6 +34,9 @@ class ApplicationView(BaseModel):
     phone: str
     approved: bool
     fields: list[ApplicationField]
+    registration_kind: str = "subsidy"
+    case_no: str | None = None
+    approved_at_utc: str | None = None
 
 
 class ApprovalRequest(BaseModel):
@@ -53,7 +57,9 @@ def _view(snapshot) -> ApplicationView:
               for key, value in values.items()]
     return ApplicationView(registration_id=snapshot.registration_id, version=snapshot.version,
                            name=str(candidate.client_payload["name"]), phone=str(candidate.client_payload["phone"]),
-                           approved=snapshot.client_id is not None, fields=fields)
+                           approved=snapshot.client_id is not None, fields=fields,
+                           registration_kind=candidate.registration_kind, case_no=snapshot.case_no,
+                           approved_at_utc=snapshot.approved_at_utc.isoformat() if snapshot.approved_at_utc else None)
 
 
 def _translate(operation):
@@ -65,6 +71,14 @@ def _translate(operation):
     except ProvisionalRegistrationStorageError:
         raise typed_http_error(503, "unavailable", "registration_application_unavailable",
             "申請資料暫時無法使用，請稍後重試。", uuid4().hex, retryable=True) from None
+    except CaseImportWorkflowError as error:
+        category = error.error.category.value
+        status = {"validation": 422, "domain_blocked": 422, "conflict": 409,
+                  "idempotency_mismatch": 409, "forbidden": 403, "not_found": 404,
+                  "unavailable": 503, "internal": 500}[category]
+        raise typed_http_error(status, category, error.error.code,
+            "正式案件建立未完成，請依提示檢查資料後重新查詢。", error.error.correlation_id.value,
+            retryable=error.error.retryable) from None
 
 
 @router.get("", response_model=BaseResponse[list[ApplicationView]])

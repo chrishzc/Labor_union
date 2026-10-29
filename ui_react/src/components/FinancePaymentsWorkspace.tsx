@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cashRequirementsQueryClient, type CashRequirementRow } from '../api/accounts_payable/cash_requirements_query_client';
 import { accountsPayableExportClient } from '../api/accounts_payable/accounts_payable_export_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
+import { caseCategoriesClient, type FinanceCaseCategory, type FinanceCaseFilter } from '../api/client_finance/case_categories_client';
 
 const types = { staff_payable: '月嫂薪資', client_refund: '客戶退款', client_subsidy_return: '補助退款' };
 const awaitsSubsidyData = (row: CashRequirementRow) => row.certainty === 'estimated' && row.payment_type === 'client_subsidy_return';
@@ -14,6 +15,8 @@ export function FinancePaymentsWorkspace({ revision, targetMonth, onMonthChange,
   const [rows, setRows] = useState<CashRequirementRow[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [type, setType] = useState('all');
+  const [caseCategory,setCaseCategory]=useState<FinanceCaseFilter>('subsidy');
+  const [categories,setCategories]=useState(new Map<string,FinanceCaseCategory>());
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [month, setMonth] = useState('');
@@ -25,14 +28,16 @@ export function FinancePaymentsWorkspace({ revision, targetMonth, onMonthChange,
     const controller = new AbortController(); setState('loading');
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
-      void cashRequirementsQueryClient.queryAll(controller.signal).then(data => { if (!controller.signal.aborted) { setRows(data); setState('ready'); } })
+      void Promise.all([cashRequirementsQueryClient.queryAll(controller.signal),caseCategoriesClient.query(controller.signal)]).then(([data,caseCategories]) => {
+        if(data.some(row=>!caseCategories.has(row.case_no))) throw new Error('case_category_missing');
+        if (!controller.signal.aborted) { setRows(data);setCategories(caseCategories); setState('ready'); } })
         .catch(() => { if (!controller.signal.aborted) setState('error'); });
     });
     return () => controller.abort();
   }, [revision, refresh]);
   useEffect(() => () => downloadController.current?.abort(), []);
   useEffect(() => { downloadController.current?.abort(); setDownloading(false); setDownload(''); }, [targetMonth]);
-  const filtered = rows.filter(row => (type === 'all' || row.payment_type === type)
+  const filtered = rows.filter(row => (caseCategory==='all'||categories.get(row.case_no)===caseCategory) && (type === 'all' || row.payment_type === type)
     && (status === 'all' || (status === 'data_pending' ? awaitsSubsidyData(row) : status === 'confirmed' ? row.certainty === 'confirmed' && row.payment_status === 'pending' : row.payment_status === status))
     && (!month || !row.payment_date || row.payment_date.startsWith(month))
     && `${row.case_no} ${row.payment_type === 'staff_payable' ? staffIdentity.label(row.staff_id, row.recipient_name) : row.recipient_name ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
@@ -52,6 +57,7 @@ export function FinancePaymentsWorkspace({ revision, targetMonth, onMonthChange,
   return <section className="finance-workspace finance-collection" aria-label="付款清單">
     <div className="finance-section-heading"><div><h2>付款</h2><p>月嫂薪資、客戶退款與補助退款，一份清單安排付款。</p></div><div className="finance-row-actions"><button type="button" onClick={() => onOpenStaff()}>人員與歷史付款</button><button type="button" onClick={() => setRefresh(value => value + 1)}>重新整理</button></div></div>
     <div className="finance-filter-bar">
+      <label>案件類別<select aria-label="案件類別" className="finance-select" value={caseCategory} onChange={event=>setCaseCategory(event.target.value as FinanceCaseFilter)}><option value="subsidy">補助案件</option><option value="non_citizen">非市民案件</option><option value="all">全部案件</option></select></label>
       <label>款項類型<select className="finance-select" value={type} onChange={event => setType(event.target.value)}><option value="all">全部類型</option>{Object.entries(types).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       <label>付款狀態<select className="finance-select" value={status} onChange={event => setStatus(event.target.value)}><option value="all">全部</option><option value="confirmed">確認待付</option><option value="data_pending">計算資料待確認</option><option value="partially_paid">部分付款</option><option value="paid">已付款</option><option value="settled">已結清</option></select></label>
       <label>付款月份<input className="finance-input" type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>

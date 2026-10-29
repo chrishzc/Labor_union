@@ -41,6 +41,15 @@
           "path": "https://hsinchu-nanny.hccg.gov.tw/home",
           "enabled": true,
           "order": 20
+        },
+        {
+          "id": "non_citizen_registration",
+          "label": "非市民服務申請",
+          "description": "填寫非市民服務需求，送工會核准建案。",
+          "icon": "",
+          "path": "/line-non-citizen-registration",
+          "enabled": true,
+          "order": 21
         }
       ],
       "fields": []
@@ -166,6 +175,261 @@
           "enabled": true,
           "order": 50,
           "placeholder": "請填寫完整地址（含巷弄樓層）",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        }
+      ]
+    },
+    "non_citizen_registration": {
+      "page_type": "registration",
+      "enabled": true,
+      "title": "非市民服務申請",
+      "subtitle": "填寫服務需求及退款帳戶，送出後由工會審核。",
+      "submit_button": "送出完整服務登記表單",
+      "success_title": "申請已送出",
+      "success_description": "待工會核准後才建立正式案件並配發案件編號。",
+      "loading_text": "資料傳送中，請稍候...",
+      "content": {
+        "logo": "新竹市月子工會",
+        "close_button": "關閉視窗",
+        "custom_section_title": "其他服務需求"
+      },
+      "actions": [],
+      "fields": [
+        {
+          "id": "name",
+          "label": "產婦姓名",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 10,
+          "placeholder": "請填寫真實姓名",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "phone",
+          "label": "行動電話",
+          "type": "phone",
+          "required": true,
+          "enabled": true,
+          "order": 20,
+          "placeholder": "例如：0912345678",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "expected_date",
+          "label": "預產期（或已生產日期）",
+          "type": "date",
+          "required": true,
+          "enabled": true,
+          "order": 30,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "service_days",
+          "label": "預計服務天數",
+          "type": "number",
+          "required": true,
+          "enabled": true,
+          "order": 40,
+          "placeholder": "例如：30",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "address",
+          "label": "服務地址",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 50,
+          "placeholder": "請填寫完整地址（含巷弄樓層）",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "gender",
+          "label": "性別",
+          "type": "single_choice",
+          "required": true,
+          "enabled": true,
+          "order": 100,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": [
+            {
+              "value": "女",
+              "label": "女"
+            },
+            {
+              "value": "男",
+              "label": "男"
+            }
+          ]
+        },
+        {
+          "id": "email",
+          "label": "Email",
+          "type": "email",
+          "required": true,
+          "enabled": true,
+          "order": 101,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "city",
+          "label": "縣市",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 102,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "birth_date",
+          "label": "出生日期",
+          "type": "date",
+          "required": true,
+          "enabled": true,
+          "order": 103,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "service_start_date",
+          "label": "預計服務開始日",
+          "type": "date",
+          "required": true,
+          "enabled": true,
+          "order": 104,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "service_time",
+          "label": "服務時間",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 105,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "residence_type",
+          "label": "居住型態",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 106,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "delivery_type",
+          "label": "生產方式",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 107,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "service_type",
+          "label": "服務方式",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 108,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "baby_info",
+          "label": "寶寶資訊",
+          "type": "textarea",
+          "required": true,
+          "enabled": true,
+          "order": 109,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "refund_bank_code",
+          "label": "退款銀行與分行代號",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 110,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "refund_bank_account",
+          "label": "退款帳戶",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 111,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "notes",
+          "label": "其他事項（無則填「無」）",
+          "type": "textarea",
+          "required": true,
+          "enabled": true,
+          "order": 110,
+          "placeholder": "",
+          "help_text": "",
+          "system_field": true,
+          "options": []
+        },
+        {
+          "id": "line_id",
+          "label": "LINE ID（未設定填「無」）",
+          "type": "text",
+          "required": true,
+          "enabled": true,
+          "order": 111,
+          "placeholder": "",
           "help_text": "",
           "system_field": true,
           "options": []

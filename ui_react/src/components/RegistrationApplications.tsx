@@ -27,7 +27,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     void run(async () => {
       const result = await client.approve(submitted); setSelected(result);
       setItems(previous => previous.filter(item => item.registration_id !== result.registration_id));
-      setMessage('需求申請已核准，正式客戶資料已建立。');
+      setMessage(result.registration_kind === 'non_citizen' ? `非市民需求已核准，案件 ${result.case_no} 已建立。` : '需求申請已核准，正式客戶資料已建立。');
       await onCommitted?.();
     });
   };
@@ -36,7 +36,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     <button type="button" disabled={busy} onClick={() => void refresh()}>重新查詢</button>
     <ul>{items.map(item => <li key={item.registration_id}>
       <button type="button" disabled={busy} onClick={() => void run(async () => setSelected(await client.detail(item.registration_id)))}>
-        申請 {item.registration_id}：{item.name}／{item.phone}
+        申請 {item.registration_id}：{item.name}／{item.phone}{item.registration_kind === 'non_citizen' && '（非市民）'}
       </button>
     </li>)}</ul>
     {!busy && !items.length && <p>目前沒有待核准的需求申請。</p>}
@@ -46,8 +46,9 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     })}>載入更多</button>}
     {selected && <section aria-label={`需求申請 ${selected.registration_id}`}>
       <h3>申請 {selected.registration_id}：{selected.name}</h3>
+      {selected.registration_kind === 'non_citizen' && <p>非市民服務申請{selected.case_no && ` · 案件編號：${selected.case_no}`}</p>}
       <dl>{selected.fields.map((field, index) => <div key={`${field.label}-${index}`}><dt>{field.label}</dt><dd style={{ whiteSpace: 'pre-wrap' }}>{field.value}</dd></div>)}</dl>
-      {selected.approved ? <p>此申請已核准。</p> : <button type="button" disabled={busy} onClick={approve}>核准並建立客戶</button>}
+      {selected.approved ? <p>此申請已核准。</p> : <button type="button" disabled={busy} onClick={approve}>{selected.registration_kind === 'non_citizen' ? '核准並建立案件' : '核准並建立客戶'}</button>}
     </section>}
     {message && <p role={error ? 'alert' : 'status'}>{message}</p>}
   </section>;

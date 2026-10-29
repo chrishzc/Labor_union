@@ -554,6 +554,51 @@ def get_liff_state():
     return {"revision": str(snapshot.revision.value), "config": config}
 
 
+class NonCitizenLiffPageView(BaseModel):
+    revision: str
+    page: LiffPage | None
+
+
+@router.get("/liff/non-citizen", response_model=NonCitizenLiffPageView)
+def get_non_citizen_liff_page():
+    snapshot, config = _liff_snapshot()
+    return NonCitizenLiffPageView(revision=str(snapshot.revision.value), page=config.pages.get("non_citizen_registration"))
+
+
+@router.post("/liff/non-citizen", response_model=NonCitizenLiffPageView, dependencies=[Depends(require_line_manager)])
+def initialize_non_citizen_liff_page(request: Request, if_match: str | None = Header(default=None, alias="If-Match")):
+    from subsystems.line.liff_models import non_citizen_registration_page
+    from subsystems.line.liff_models import LiffNavigationAction
+    with LIFF_CONFIG_LOCK:
+        snapshot, config = _require_liff_revision(if_match)
+        if "non_citizen_registration" in config.pages:
+            return NonCitizenLiffPageView(revision=str(snapshot.revision.value), page=config.pages["non_citizen_registration"])
+        config.pages["non_citizen_registration"] = non_citizen_registration_page(config.pages["registration"])
+        config.pages["gateway"].actions.append(LiffNavigationAction(
+            id="non_citizen_registration", label="非市民服務申請", description="直接填寫非市民服務需求，由工會核准建案。",
+            path="/line-non-citizen-registration", order=max((a.order for a in config.pages["gateway"].actions), default=0)+1,
+        ))
+        config = LiffSettingsConfig.model_validate(config)
+        result = _save_liff(config, request, reason="啟用非市民服務申請頁面及入口", expected_revision=snapshot.revision)
+    return NonCitizenLiffPageView(revision=str(result.revision.value), page=config.pages["non_citizen_registration"])
+
+
+@router.put("/liff/non-citizen", response_model=NonCitizenLiffPageView, dependencies=[Depends(require_line_manager)])
+def save_non_citizen_liff_page(payload: LiffPage, request: Request,
+                               if_match: str | None = Header(default=None, alias="If-Match")):
+    with LIFF_CONFIG_LOCK:
+        snapshot, config = _require_liff_revision(if_match)
+        if "non_citizen_registration" not in config.pages:
+            raise HTTPException(status_code=404, detail="請先建立非市民申請頁面")
+        config.pages["non_citizen_registration"] = payload
+        try:
+            config = LiffSettingsConfig.model_validate(config)
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="非市民表單的必填欄位必須保持啟用及必填。") from None
+        result = _save_liff(config, request, reason="更新非市民服務申請頁面", expected_revision=snapshot.revision)
+    return NonCitizenLiffPageView(revision=str(result.revision.value), page=payload)
+
+
 @router.post("/liff/validate")
 def validate_liff_config(payload: LiffSettingsConfig):
     return {"status": "valid", "config": payload}

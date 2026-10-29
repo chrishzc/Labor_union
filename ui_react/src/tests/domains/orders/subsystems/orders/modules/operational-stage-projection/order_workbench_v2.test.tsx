@@ -25,7 +25,7 @@ function statisticsResult(year: number, quarter: number | null, month: number | 
     year, quarter, month,
     start_date: `${year}-${String(startMonth).padStart(2, '0')}-01`,
     end_date: `${year}-${String(endMonth).padStart(2, '0')}-${new Date(year, endMonth, 0).getDate()}`,
-    timezone: 'Asia/Taipei', available_years: [2026, 2025, 2024], annual_application_count: 12,
+    case_category: 'subsidy', timezone: 'Asia/Taipei', available_years: [2026, 2025, 2024], annual_application_count: 12,
     generated_at: '2026-10-13T12:00:00+08:00',
     summary: {
       application_count: count, general_eligible_count: count, general_ineligible_count: 0,
@@ -452,7 +452,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('12'));
     const beforeRefresh = vi.mocked(caseStatisticsQueryClient.query).mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
-    await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenCalledTimes(beforeRefresh + 1));
+    await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenCalledTimes(beforeRefresh + 2));
   });
 
   it('快速切換統計月份時取消舊請求，晚到回應不覆蓋新數據', async () => {

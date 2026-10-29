@@ -8,6 +8,8 @@
 在既有 Finance owner page 以 Client Finance strict client 呈現 pre-system historical Query／Preview／Confirm／Apply／fresh readback。只允許 exact direction 與 obligation selection；正常銀行候選、stale、identity mismatch 或 outcome unknown 時 fail closed，不透過 Anomalies 或 generic settlement writer。
 
 ## Implementation
+- classification query: `subsystems/client_finance/client_payments_query.py`、`infrastructure/mysql/case_category_query.py`、`api/routes/client_payments.py` — authenticated `/api/v1/client-payments/case-categories` 只回 case_no／category，依綁定費率規則及舊身分分類，不依 A 前綴，不寫入帳務。
+- category client: `ui_react/src/api/client_finance/case_categories_client.ts` — strict 分類投影供收款／付款的補助（預設）、非市民、全部篩選；同一集合產生明細、件數及金額合計；來源不完整明示查詢失敗。
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
 - composition: `ui_react/src/pages/FinancePage.tsx` — 唯一三個主工作區：收款、付款、銀行對帳；舊深連結解析至對應工作區／同案明細，帳務設定獨立。

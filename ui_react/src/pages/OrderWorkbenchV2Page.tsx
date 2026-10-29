@@ -251,6 +251,7 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
       <details className="order-v2-overview-details">
         <summary>案件受理統計</summary>
         <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} />
+        <WorkbenchCaseStatistics refreshKey={projectionRefreshKey} caseCategory="non_citizen" />
       </details>
 
       <div className="order-v2-overview-details order-v2-stage-overview">

@@ -462,3 +462,9 @@
 .liff-studio-public-preview .notification-edit-and-preview { width: 100%; min-width: 0; }
 .liff-studio-public-preview .notification-inline-editor { min-width: 0; }
 @media (max-width: 1100px) { .liff-studio-public-preview .notification-edit-and-preview { grid-template-columns: minmax(0, 1fr); } }
+.non-citizen-liff-settings { max-width: 100%; padding: 16px; }
+.non-citizen-liff-settings[hidden] { display: none; }
+.non-citizen-liff-settings fieldset { display: grid; gap: 12px; min-width: 0; border: 0; padding: 12px 0; }
+.non-citizen-liff-settings label { display: grid; gap: 6px; margin-bottom: 10px; }
+.non-citizen-liff-settings input:not([type="checkbox"]), .non-citizen-liff-settings textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--border-color, #dbe2ea); border-radius: 6px; }
+.non-citizen-liff-settings details > div { padding: 8px 0; border-bottom: 1px solid var(--border-color, #dbe2ea); }

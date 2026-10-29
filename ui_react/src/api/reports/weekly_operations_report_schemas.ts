@@ -161,6 +161,7 @@ const CaseStatisticsSummarySchema = z.strictObject({
 export const CaseStatisticsResponseSchema = z.strictObject({
   success: z.literal(true), message: z.string(), error: z.string().nullable(),
   data: z.strictObject({
+    case_category: z.enum(['subsidy', 'non_citizen']),
     year: z.number().int().min(1).max(9998),
     quarter: z.number().int().min(1).max(4).nullable(),
     month: z.number().int().min(1).max(12).nullable(),

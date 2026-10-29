@@ -102,6 +102,21 @@ class ClientTransactionCreate(BaseModel):
         return self
 
 
+class FinanceCaseCategoryView(BaseModel):
+    case_no: str
+    category: Literal["subsidy", "non_citizen"]
+
+
+@router.get("/case-categories", response_model=BaseResponse[list[FinanceCaseCategoryView]])
+def query_case_categories(
+    principal: AdminPrincipal = Depends(require_admin),
+    application: ClientFinanceQueryApplication = Depends(get_client_finance_query_application),
+):
+    del principal
+    return BaseResponse(data=[FinanceCaseCategoryView(case_no=row.case_no, category=row.category)
+                              for row in application.query_categories()])
+
+
 @router.get("", response_model=BaseResponse[ClientFinancePageView])
 def get_all_client_payments(
     principal: AdminPrincipal = Depends(require_admin),

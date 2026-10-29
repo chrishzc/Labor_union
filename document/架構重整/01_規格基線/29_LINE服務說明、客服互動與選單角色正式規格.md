@@ -65,6 +65,7 @@ Client canonical `city`、`address`、`residence_type` 仍由 Client owner 保�
 
 - 選擇「未申請市府平台」：開啟新竹市政府月子照顧服務平台，提示先完成市府申請。
 - 選擇「已申請市府平台」：先進入 `/line-bind` 核對姓名與電話；已有完整登記且未綁定者由 canonical Apply 綁定、同帳號已綁定者直接返回、需改綁者明確申請；尚無資料或缺需求問卷者才進入 `/line-registration`。此核對不以市府申請狀態冒充工會核准。
+- 2026-10-29 非市民規格核准（尚未實作）：新增「非市民服務申請」選項，直接導入獨立非市民 LIFF 填寫頁，不要求先申請市府平台；上述兩個既有補助導流選項保留。合併欄位、必填、退款帳戶及核准後 A 開頭配號依 [`17` §5.1.1](17_External_Integration_LINE_Access正式規格.md#noncitizen-intake-20261029)，新增頁面與管理端設定依 `20` §6.0A。入口選擇僅決定申請路徑，正式身分及建案仍由 owner 驗證保存。
 - Gateway／registration 頁不得因 query string、browser local state 或單次點擊即宣稱 binding、案件或申請成功。
 - 2026-10-19 人工裁決：Registration Preview 零寫入；外部 Apply 只保存完整需求申請及必要事件，回傳待工會核准，不建立 Client／BeClass 或宣稱已綁定正式客戶。工會核准才由 Case Import owning flow 建立正式客戶、來源資料及對應 LINE binding；核准具重複操作與競爭保護。既有已完成 registration／客戶／綁定保存。此段取代先前外部 Apply 可立即建立 intake Client 的規則，並依 `17` 的 NAS-LINE-01 驗收。
 - 後續 verify、provisional registration、binding 與人工 review 依 `17`、`23` 與 `26` 的 owner contract 執行；任何資料庫 mutation 都必須走 typed application boundary。
@@ -76,6 +77,8 @@ Gateway、綁定頁及管理預覽的有效設定須使用一致文案；綁定�
 登記表單說明為「請填寫服務需求，送出後由工會審核。」；新申請成功顯示「申請已送出，待工會核准。」及申請編號，不宣稱媒合完成。綁定成功只說明「綁定成功，專屬選單將稍後更新。」；只有 owner 提供真實案件編號時才顯示，不填入固定範例號碼。
 
 月嫂入口顯示「月嫂身分綁定」，文字「我是月嫂」與「我要綁定月嫂」均導向同一驗證頁。
+
+非市民頁面送出後同樣只顯示待工會核准及申請編號，不宣稱已有正式案件或完成綁定；工會核准後才以 owner 回讀顯示正式案件編號。新增導流／填寫頁不另建選單 audience 或客服分類，也不授權發布 LINE 選單。此次只更新規格，LIFF gateway、表單及設定尚未修改。
 
 ### 4.1 加好友引導：只保留即時歡迎（2026-09-16 使用者裁決）
 

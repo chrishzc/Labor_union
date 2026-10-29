@@ -13,6 +13,7 @@ import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDe
 import '../../components/LineNotificationWorkbench.css';
 import '../LineManagementPage.css';
 import './LiffCardStudio.css';
+import { NonCitizenLiffSettingsPanel } from './NonCitizenLiffSettingsPanel';
 
 export type LiffAssetType = 'liff' | 'flex_card';
 export type LiffAudienceRole = 'visitor' | 'customer' | 'staff' | 'union_staff';
@@ -85,6 +86,13 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     description: '正式入口先顯示登記選擇；選擇已登記後才進入候選資料檢查與明確確認，不以姓名、電話或網址列 userId 授權。',
     apiMapping: '候選綁定、資料檢查與確認送出流程示意',
     audienceRoles: ['visitor'],
+  },
+  {
+    id: 'non_citizen_registration', displayTitle: '非市民服務申請', purpose: '填寫非市民服務需求，送工會核准建案。',
+    group: '身分與服務入口', type: 'liff', title: '非市民服務申請', subtitle: '自費服務申請', badge: '待工會核准',
+    endpointUrl: '/line-non-citizen-registration', launchPath: '/line-non-citizen-registration',
+    authLevel: '後端驗證 LINE 登入憑證', description: '合併服務需求及報名問卷，工會核准後才建立正式案件。',
+    apiMapping: '既有 registration Preview／Apply 及工會核准', audienceRoles: ['visitor', 'customer'],
   },
   {
     id: 'profile_guard',
@@ -419,7 +427,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
     );
   }
 
-  if (item.id === 'register') {
+  if (item.id === 'register' || item.id === 'non_citizen_registration') {
     return (
       <div className="mock-form-inputs">
         <div className="mock-step-indicator">需求調查表單</div>
@@ -428,9 +436,22 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label>身分證字號（選填）</label><input type="text" placeholder="例如：A123456789" readOnly />
         <label>行動電話 *</label><input type="text" placeholder="例如：0912345678" readOnly />
         <label>服務地址 *</label><input type="text" placeholder="請填寫完整地址（含巷弄樓層）" readOnly />
+        {item.id === 'non_citizen_registration' && <>
+          <label>出生日期 *</label><input type="date" readOnly />
+          <label>性別 *</label><input placeholder="請選擇性別" readOnly />
+          <label>Email *</label><input type="email" readOnly />
+          <label>縣市 *</label><input readOnly />
+        </>}
         <strong>2. 照護與環境</strong>
         <label>預產期（或已生產日期） *</label><input type="date" readOnly />
         <label>預計服務天數 *</label><input type="number" readOnly />
+        {item.id === 'non_citizen_registration' && <>
+          <strong>服務條件（必填）</strong>
+          <label>預計服務開始日 *</label><input type="date" readOnly />
+          <label>服務時間 *</label><input placeholder="8小時 08:00-17:00" readOnly />
+          <label>居住型態／生產方式／服務方式／寶寶資訊 *</label><textarea readOnly />
+          <label>其他事項及 LINE ID（無則填「無」）*</label><input readOnly />
+        </>}
         <strong>3. 飲食偏好</strong>
         <label><input type="radio" disabled /> 葷食</label>
         <label><input type="radio" disabled /> 素食</label>
@@ -438,6 +459,7 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
         <label><input type="checkbox" disabled /> 大同電鍋</label>
         <label><input type="checkbox" disabled /> 奶瓶消毒鍋</label>
         <strong>5. 費用與同意條款</strong>
+        {item.id === 'non_citizen_registration' && <><label>退款銀行／分行及帳戶 *</label><input readOnly /><small>送出後待工會核准才建立正式案件及配發 A 編號。</small></>}
         <label><input type="checkbox" disabled /> 已詳閱退費原則</label>
         <button type="button" className="mock-primary-btn" disabled>送出完整服務登記表單</button>
       </div>
@@ -927,6 +949,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           ) : (
             <div className="liff-studio-detail-empty" role="status"><Search aria-hidden="true" /><strong>找不到符合條件的內容</strong><p>調整搜尋或使用對象後，再查看預覽。</p></div>
           )}
+          <NonCitizenLiffSettingsPanel active={selectedItem?.id === 'non_citizen_registration'} />
         </section>
       </div>
     </div>

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-accounting-pricing-2026-10-29-v1
+-- Release: labor-union-validation-schema-non-citizen-cases-2026-10-29-v1
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -22010,3 +22010,67 @@ LEFT JOIN JSON_TABLE(p.policy_json,'$.identities[*]' COLUMNS (
 LEFT JOIN case_pricing_events e ON e.id=o.pricing_override_event_id AND e.case_no=o.case_no
 WHERE o.pricing_policy_id IS NOT NULL OR o.pricing_override_event_id IS NOT NULL;
 -- END SOURCE: db/schema_parts/234_accounting_pricing.sql
+
+-- BEGIN SOURCE: db/schema_parts/235_finance_statement_workspace.sql
+-- Finance Import-owned manual statements, identity-only exclusions and warning acknowledgement.
+-- Automatic successful statements remain a read-only projection of committed owner evidence.
+CREATE TABLE IF NOT EXISTS finance_statement_archive_state (
+    id TINYINT PRIMARY KEY,
+    version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    CONSTRAINT chk_statement_singleton CHECK (id=1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+INSERT IGNORE INTO finance_statement_archive_state(id,version) VALUES (1,0);
+
+CREATE TABLE IF NOT EXISTS finance_manual_statements (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    fields JSON NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_manual_statement_object CHECK (JSON_TYPE(fields)='OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS finance_statement_commands (
+    idempotency_key VARCHAR(191) COLLATE utf8mb4_bin PRIMARY KEY,
+    command_digest CHAR(64) NOT NULL,
+    result_identity VARCHAR(191) NULL,
+    saved_count INT UNSIGNED NOT NULL,
+    excluded_count INT UNSIGNED NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS finance_statement_exclusions (
+    finance_import_row_id BIGINT PRIMARY KEY,
+    kept_identity VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_statement_excluded_row FOREIGN KEY (finance_import_row_id) REFERENCES finance_import_rows(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS finance_accounting_dismissals (
+    case_no VARCHAR(50) NOT NULL,
+    item_identity VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+    warning_kind VARCHAR(30) NOT NULL,
+    difference_ntd BIGINT NOT NULL,
+    source_version VARCHAR(191) NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(case_no,item_identity,warning_kind,difference_ntd),
+    CONSTRAINT fk_accounting_dismissal_case FOREIGN KEY (case_no) REFERENCES orders(case_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/235_finance_statement_workspace.sql
+
+-- BEGIN SOURCE: db/schema_parts/236_client_refund_overage_receipt.sql
+-- Complete the already-supported Client Finance REFUND_OVERAGE writer contract.
+-- Append only: preserve the ordinal and value of all existing receipt kinds.
+ALTER TABLE client_refund_reversal_apply_receipts
+    MODIFY COLUMN correction_type ENUM('refund', 'refund_return', 'reversal', 'refund_overage') NOT NULL;
+-- END SOURCE: db/schema_parts/236_client_refund_overage_receipt.sql
+
+-- BEGIN SOURCE: db/schema_parts/237_non_citizen_case_sequences.sql
+-- A sequence is allocated only inside the approval transaction.
+CREATE TABLE IF NOT EXISTS non_citizen_case_sequences (
+    roc_year SMALLINT UNSIGNED NOT NULL PRIMARY KEY,
+    next_sequence INT UNSIGNED NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/237_non_citizen_case_sequences.sql

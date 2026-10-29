@@ -56,6 +56,7 @@ class WeeklyCaseFact:
     planned_start_date: date | None
     planned_end_date: date | None
     seq_num: int | None = None
+    case_category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,8 @@ class SubsidyFacts:
 
 
 class WeeklyOperationsReportFacts(Protocol):
+    def list_non_citizen_case_years(self) -> list[int]: ...
+    def list_non_citizen_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
     def list_case_years(self) -> list[int]: ...
     def list_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
     def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]: ...
@@ -149,6 +152,7 @@ class CaseStatistics:
     annual_application_count: int
     summary: CaseStatisticsSummary
     generated_at: datetime
+    case_category: str = "subsidy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,12 +322,18 @@ def _order_status_counts(rows: tuple[WeeklyCaseRow, ...]) -> dict[str, int]:
     return counts
 
 
+def _is_non_citizen(fact: WeeklyCaseFact) -> bool:
+    return fact.case_category == "non_citizen" if fact.case_category is not None else fact.identity_status == "非市民"
+
+
 class WeeklyOperationsReportQuery:
     def __init__(self, facts: WeeklyOperationsReportFacts, now) -> None:
         self._facts = facts
         self._now = now
 
-    def query_case_statistics(self, year: int, quarter: int | None = None, month: int | None = None) -> CaseStatistics:
+    def query_case_statistics(self, year: int, quarter: int | None = None, month: int | None = None, case_category: str = "subsidy") -> CaseStatistics:
+        if case_category not in {"subsidy", "non_citizen"}:
+            raise ValueError("case_statistics_period_invalid")
         if not 1 <= year <= 9998 or (quarter is not None and not 1 <= quarter <= 4) or (month is not None and not 1 <= month <= 12):
             raise ValueError("case_statistics_period_invalid")
         if quarter is not None and month is not None and (month - 1) // 3 + 1 != quarter:
@@ -333,10 +343,14 @@ class WeeklyOperationsReportQuery:
         start_date = date(year, first_month, 1)
         end_date = date(year + (last_month == 12), last_month % 12 + 1, 1) - timedelta(days=1)
         annual_start, annual_end = date(year, 1, 1), date(year, 12, 31)
+        non_citizen = case_category == "non_citizen"
+        loader = self._facts.list_non_citizen_case_statistics_facts if non_citizen else self._facts.list_case_statistics_facts
+        years = self._facts.list_non_citizen_case_years if non_citizen else self._facts.list_case_years
         annual_rows = tuple(
             self._case_row(fact)
-            for fact in self._facts.list_case_statistics_facts(annual_start, annual_end)
+            for fact in loader(annual_start, annual_end)
             if fact.created_at is not None and annual_start <= fact.created_at.date() <= annual_end
+            and _is_non_citizen(fact) == non_citizen
         )
         rows = tuple(row for row in annual_rows if start_date <= row.application_date <= end_date)
         status_counts = _order_status_counts(rows)
@@ -348,17 +362,18 @@ class WeeklyOperationsReportQuery:
         return CaseStatistics(
             year=year, quarter=quarter, month=month, start_date=start_date, end_date=end_date,
             timezone=TIMEZONE,
-            available_years=tuple(sorted({generated_at.year, year, *self._facts.list_case_years()}, reverse=True)),
+            available_years=tuple(sorted({generated_at.year, year, *years()}, reverse=True)),
             annual_application_count=len(annual_rows),
             summary=CaseStatisticsSummary(
                 application_count=len(rows),
                 general_eligible_count=qualifications[0], general_ineligible_count=qualification_summary.general_ineligible_count,
                 subsidized_eligible_count=qualifications[2], subsidized_ineligible_count=qualification_summary.subsidized_ineligible_count,
                 order_status_counts={status: status_counts[status] for status in ORDER_STATUS_LABELS},
-                unclassified_qualification_count=len(rows) - sum(qualifications),
+                unclassified_qualification_count=0 if non_citizen else len(rows) - sum(qualifications),
                 other_status_count=len(rows) - sum(status_counts[status] for status in ORDER_STATUS_LABELS),
             ),
             generated_at=generated_at,
+            case_category=case_category,
         )
 
     def query(
@@ -368,7 +383,7 @@ class WeeklyOperationsReportQuery:
     ) -> WeeklyOperationsReport:
         if start_date > end_date:
             raise ValueError("operations_report_date_range_invalid")
-        facts_cases = self._facts.list_case_facts(start_date, end_date)
+        facts_cases = [fact for fact in self._facts.list_case_facts(start_date, end_date) if not _is_non_citizen(fact)]
         facts_cases_sorted = sorted(
             facts_cases,
             key=lambda f: (f.created_at or datetime.min, f.client_id)
@@ -419,6 +434,7 @@ class WeeklyOperationsReportQuery:
                 for fact in self._facts.list_case_facts(annual_start, annual_end)
                 if fact.created_at is not None
                 and annual_start <= fact.created_at.date() <= annual_end
+                and not _is_non_citizen(fact)
             )
             annual_metrics = tuple(self._facts.list_weekly_metrics(annual_start, annual_end))
             annual_totals.append(self._case_totals(

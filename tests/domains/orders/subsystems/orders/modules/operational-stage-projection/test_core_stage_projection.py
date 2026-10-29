@@ -1,6 +1,8 @@
 """Focused contract tests for the dry-run thirteen core-stage projection."""
 
 from datetime import datetime, timezone
+from dataclasses import replace
+import pytest
 
 from fastapi import Response
 
@@ -225,8 +227,9 @@ def test_historical_and_cancelled_orders_are_explicit_branches_without_mainline_
     assert cancelled.current_core_stage_ordinal is None
 
 
-def test_new_endpoint_is_independent_and_old_operational_timeline_contract_still_validates():
-    source_page = _page(_timeline())
+@pytest.mark.parametrize("case_no", ["CASE-CORE-001", "A115001"])
+def test_new_endpoint_is_independent_and_old_operational_timeline_contract_still_validates(case_no):
+    source_page = _page(replace(_timeline(), case_no=case_no))
     application = _Application(source_page)
 
     new_response = Response()
@@ -240,6 +243,7 @@ def test_new_endpoint_is_independent_and_old_operational_timeline_contract_still
         application=application,
     )
     assert len(new_result.data.items[0].core_stages) == 13
+    assert new_result.data.items[0].case_no == case_no
     assert new_response.headers["etag"] == f'"{_ETAG}"'
 
     old_response = Response()

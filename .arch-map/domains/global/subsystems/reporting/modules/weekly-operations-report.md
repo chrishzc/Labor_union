@@ -34,6 +34,8 @@
 - storage: current `weekly_report_metrics` uses Monday `week_start_date` as its key and nullable promotion／inquiry counts; fresh `218` and preserve `1035` provide the table. Released `1031` batch objects are historical compatibility only and have no current runtime reader／writer.
 
 ## Contracts
+- 非市民依正式身分／綁定費率規則分類，排除於原受理統計及同 candidate XLSX；獨立 `case_category=non_citizen` 統計只讀可追溯的工會核准建案日（臺灣時間），提供月／季／年、完整年度累計與六種狀態。無核准日期的舊案不推定或回填。
+- Reporting adapter 借用 `infrastructure/mysql/case_category_query.py` 的唯讀分類 SQL；身分根值與費率規則仍屬原 owner。Reports／看板共用 `ui_react/src/components/WorkbenchCaseStatistics.tsx` 與其 CSS（Orders presentation owner）。
 - 服務工時及補助列保留原姓名，另借用同一 Staff join 的 nullable `staff_union_no`，供管理端顯示「公會編號 姓名」；報表金額、工作日、週序及既有 XLSX 欄位不變。
 - React 週報日期欄位完成輸入並 blur／Enter 後才套用查詢，編輯中的局部年份不發出跨千年查詢；沿用既有欄位與重新載入入口，套用新期間立即清除舊報表／匯出可用狀態。
 - `operations-report.v3`、canonical `start_date`／`end_date`與Monday-keyed weekly metrics — `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` §15.1。
@@ -42,6 +44,7 @@
 ## Verification
 - test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
 - layout_status: `custom_current`
+- test_root: `tests/domains/global/subsystems/reporting/modules/weekly-operations-report/`
 - test_root: `tests/test_weekly_operations_report_contract.py`
 - integration_root: `ui_react/src/tests/reports_query_page.test.tsx`
 - integration_root: `ui_react/src/tests/reports_weekly_service_display.test.tsx`

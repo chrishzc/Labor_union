@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-finance-statement-workspace-2026-10-29-v1",
+  "release_metadata": {
+    "release_name": "Bank statement archive and accounting warning acknowledgements",
+    "application_version": "finance-statement-workspace-v1",
+    "published_at": "2026-10-29",
+    "description": "Additive manual bank facts and identity-only exclusion and dismissal records; existing finance unchanged"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-accounting-pricing-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1057_finance_statement_workspace.sql",
+      "relative_path": "db/schema_parts/1057_finance_statement_workspace.sql",
+      "sha256": "02b207525ca97c0bbd012b3e566a5a08edc9168d381cba975ba9888f79c373c9",
+      "dependencies": [],
+      "data_effect": "system_seed",
+      "rollback_policy": "discard-owned-candidate-before-switch; retain-additive-events-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "finance-statement-workspace-additive-exact",
+      "phase": "post-schema",
+      "policy": "Exact workspace schema; singleton present; bank and accounting facts unchanged",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "finance-statement-workspace-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "finance-statement-workspace-additive-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_29_finance_statement_workspace_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_29_finance_statement_workspace_v1.descriptors.json",
+    "sha256": "dd3933e4c3b61b22ee6e58b0540bb88238d89e9c202cacff1132f0c73020a3be",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -4,6 +4,7 @@ from subsystems.client_finance.virtual_account_resolution import (
     build_client_virtual_account,
     resolve_case_virtual_account,
     resolve_client_virtual_account,
+    resolve_client_virtual_account_suffix,
 )
 
 
@@ -19,8 +20,51 @@ class _Cursor:
         return self.result_sets.pop(0) if self.result_sets else []
 
 
+def test_memo_suffix_uses_imported_virtual_account_mapping_before_formula():
+    cursor = _Cursor([{"case_no": "114000018"}])
+    result = resolve_client_virtual_account_suffix(cursor, "115001")
+    assert result == {"result": "resolved", "case_no": "114000018", "reason": None}
+    assert len(cursor.executions) == 1
+    assert cursor.executions[0][1] == ("99781699115001",)
+
+
+def test_memo_suffix_uses_existing_case_when_no_imported_mapping_exists():
+    cursor = _Cursor([], [{"case_no": "015000001"}])
+    assert resolve_client_virtual_account_suffix(cursor, "015001")["case_no"] == "015000001"
+    assert cursor.executions[-1][1] == ("015000001",)
+
+
+@pytest.mark.parametrize("suffix", [None, 115001, "11500", "1150010", "１１５００１"])
+def test_invalid_memo_suffix_does_not_query_cases(suffix):
+    cursor = _Cursor()
+    assert resolve_client_virtual_account_suffix(cursor, suffix)["result"] == "pending"
+    assert cursor.executions == []
+
+
 def test_builds_contract_virtual_account_from_canonical_case_number():
     assert build_client_virtual_account("115000157") == "99781699115157"
+
+
+@pytest.mark.parametrize(("case_no", "account"), [
+    ("A115001", "99781699115501"), ("A115002", "99781699115502"),
+    ("A116001", "99781699116501"), ("A115499", "99781699115999"),
+])
+def test_non_citizen_virtual_account_uses_year_and_sequence_plus_500(case_no, account):
+    assert build_client_virtual_account(case_no) == account
+    assert resolve_client_virtual_account(_Cursor([], [{"case_no": case_no}]), account) == {
+        "result": "resolved", "case_no": case_no, "reason": None,
+    }
+
+
+def test_non_citizen_suffix_does_not_treat_case_digits_as_virtual_account_suffix():
+    assert resolve_client_virtual_account_suffix(_Cursor([], [{"case_no": "A115001"}]), "115001")["result"] == "pending"
+    assert resolve_client_virtual_account_suffix(_Cursor([], [{"case_no": "A115001"}]), "115501")["case_no"] == "A115001"
+
+
+def test_non_citizen_formula_never_overrides_imported_mapping_or_ambiguous_cases():
+    assert resolve_client_virtual_account(_Cursor([{"case_no": "114000018"}]), "99781699115501")["case_no"] == "114000018"
+    assert resolve_client_virtual_account(_Cursor([], [{"case_no": "115000501"}, {"case_no": "A115001"}]),
+                                        "99781699115501")["reason"] == "case_not_unique"
 
 
 @pytest.mark.parametrize("case_no", [None, "CASE-1", "115001234", "１１５０００１５７"])

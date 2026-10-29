@@ -362,6 +362,9 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_23_scheduling_service_start_v1.json",
     "labor_union_2026_10_27_government_subsidy_periods_hash_v2.json",
     "labor_union_2026_10_29_accounting_pricing_v1.json",
+    "labor_union_2026_10_29_finance_statement_workspace_v1.json",
+    "labor_union_2026_10_29_client_refund_overage_receipt_v1.json",
+    "labor_union_2026_10_29_non_citizen_cases_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2286,6 +2289,9 @@ def _modified_parent_predecessor_absent_state(
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
     predecessor_columns = {
+        "1058_client_refund_overage_receipt.sql": {
+            "client_refund_reversal_apply_receipts": {"correction_type": _column_contract("enum('refund','refund_return','reversal')", "NO")},
+        },
         "1051_candidate_weekly_information.sql": {
             "caregiver_candidate_contact_events": {"event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn')", "NO")},
         },
@@ -5451,6 +5457,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                     "columns": (name.casefold(),),
                 }
         descriptor["tables"][table] = columns
+    if part_name == "1058_client_refund_overage_receipt.sql":
+        descriptor["parent_columns"]["client_refund_reversal_apply_receipts"] = {
+            "correction_type": _column_contract("enum('refund','refund_return','reversal','refund_overage')", "NO"),
+        }
     trigger_pattern = re.compile(
         r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+"
         r"(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+"

@@ -330,6 +330,16 @@ numbered pagination regression 覆蓋；不得為取得 Chrome 正向頁面而�
 既有 `/api/config/liff`、`runtime`、`state`、主題／頁面／欄位儲存、history 與 rollback 保留入口，改經同一 configuration Query／Apply。ETag／If-Match 使用資料庫 revision；讀取後遭並行更新回 409，不能盲目覆蓋。共用 typed LIFF validation 同時約束管理 API 與通用 configuration writer。
 歷史讀不可變資料庫版本；還原是在目前 revision 上新增一版，不修改舊版本或回寫檔案。舊檔案歷史不自動匯入或作現行還原來源。設定操作只產生設定版本與稽核，不建立訊息、排程投遞或選單發布工作。
 
+### 6.0A 非市民 LIFF 填寫頁與設定（2026-10-29 人工確認）
+
+狀態：`implemented / repository-local-verified`。使用者已於 2026-10-29 核准七階段實作與逐階段驗收；執行範圍及實際證據見 [非市民案件實作工作包](../非市民案件實作工作包.md)。此狀態不代表已部署、使用正式資料或完成外部 provider 驗收。
+
+管理端 LIFF 工作室的頁面選擇、導流目標、欄位及文案設定需能維護新頁面；頁面 runtime、typed 設定驗證、歷史及還原均沿 §6.0 同一 versioned configuration owner。保留原補助問卷及既有頁面設定，新表單必填要求不套到其他申請類別。新增頁面不表示新增 LINE audience、選單發布或 provider 效果授權。
+
+verified LIFF 送出只保存待審申請，顯示申請編號及「待工會核准」；工會核准後的正式案件及綁定由既有 owner 處理。後續登記、繳費資訊、服務及帳務頁面需接受 A 開頭案件識別，取用本案正式帳號與非市民政策，不由前端推算。
+
+後續需驗收 gateway 非市民選項、新填寫頁、必填與退款用語、設定保存／runtime／還原、送出結果與核准回讀，以及原補助導流不變。本次僅更新規格，尚未建立頁面或改動設定。
+
 ### 6.1 LIFF 資料異動申請與管理核准（2026-08-25 人工裁決）
 
 `profile_update` 不再是唯讀設計槽位；正式目標是 verified LIFF 使用者提出資料異動申請，經工會

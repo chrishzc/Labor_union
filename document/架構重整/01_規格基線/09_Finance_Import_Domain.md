@@ -1,5 +1,7 @@
 # Finance Import／Canonical Bank Facts Domain
 
+> 2026-10-29 已確認的新需求與 U12 完整實作見 [`22` §15](22_銀行流水匯入與帳務異常處理正式規格.md#finance-20261029)。成功明細採正式入帳證據與原列的唯讀投影，人工明細／判重識別／警示解除為獨立 additive 記錄；案件頁只消費 typed owner 結果。U10 的備註六碼及銷帳來源規則保留，沒有 fingerprint 變更；本機驗收不表示 production 部署或既有資料重分類。
+
 ## 1. Domain 責任
 
 Finance Import 是銀行來源檔、canonical bank facts、occurrence、分類結果及歷史重分類稽核的唯一 owner。
@@ -164,6 +166,8 @@ Modules：
 - 客戶／對方姓名、備註、對方帳號、金額與交易時間的正規化交叉證據；
 - 已確認的銀行格式規則。
 
+2026-10-29 補充：本次永豐客戶退款／月嫂付款的案件候選，只讀原檔「備註」（`memo`）中的完整連續六碼，對應 Client Finance 虛擬帳號後六碼；不讀／回退「存摺備註」，客戶收款完整虛擬帳號只讀原檔「銷帳編號」。人工範例 `HC115001服務人員`、`A115001服務人員`、`HC115001退款` 均擷取 `115001`；不得從較長連續數字截六碼，多組不同六碼維持人工確認。六碼只是案件線索，不是收款帳號或直接核銷證據。Client Finance 既有匯入對照優先；退款／月嫂款候選必須限於已辨識案件，不能只按人員跨案加總。U10 已授權此局部實作，新批次分類版本為 `finance-transaction-classifier-v4`；原 fingerprint 版本／原始欄位及既存分類事件不改寫，其他功能不因此實作。完整規則及驗收見 `22` §15.6.1。
+
 候選評分與行為：
 
 1. 虛擬帳號、完整銀行 reference 或唯一帳戶 ownership 為強證據，直接建立候選。
@@ -178,6 +182,8 @@ Modules：
 4. 零候選、多候選、跨 owner、證據衝突，或不同銀行列已命中同一義務時，改為
    `review_required`。第二筆疑似重匯不得靜默略過或自動打平，必須保留 canonical row
    並形成可處理的 anomaly。
+
+2026-10-29 非市民規格補充（尚未實作）：Client Finance `04` §8 已增加 A 開頭案件的正式帳號公式，Finance Import 必須消費同一 typed 解析結果並支援回傳 A 開頭 `case_no`。例如 `A115001` 的公式虛擬帳號為 `99781699115501`，尾六碼為 `115501`；不能以去掉 A 後的案件數字另推帳號。既有完整銷帳編號來源、匯入對照優先、備註六碼及唯一案件／款項條件保持，新增格式接線與回歸見 `22` §15.6.2。此規格同步不修改 classifier、fingerprint、歷史分類或帳務。
 
 ### 4.3.1 銀行格式與分類品質驗證註記
 
@@ -308,6 +314,8 @@ Modules：
 - `FinanceImportTypedResultMapper`
 
 Query 永遠唯讀，不觸發 scan、reclassification、dispatch、alert refresh 或狀態轉移。API／CLI 只顯示 bounded summary；逐列結果必須使用明確 report export，且遮蔽敏感資料。
+
+2026-10-29 補充：`22` §15.4 核准的成功明細整庫匯出，可向獲授權的帳務下載者提供原始銀行欄位；這不授權 bounded summary／一般錯誤或 log 輸出完整帳號。新增的人工明細允許無案件及其他可選欄位，屬明確人工來源，不得偽造 canonical bank fact 或假裝正式核銷。查無案件不納入成功明細庫，不等於刪除既有 staging／attempt／review。銀行層應收／應付標籤不取消正式 client receipt／refund／staff payout 的 owner 身分，詳 `22` §15.3、§15.6。
 
 ## 5. 正常匯入命令邊界
 

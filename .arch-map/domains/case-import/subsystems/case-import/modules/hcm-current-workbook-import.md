@@ -41,6 +41,7 @@
 - inbound: `case-import/case-import` — authenticated HCM workbook intake。
 
 ## Contracts
+- 非市民新案由 LIFF 核准建案；HCM 新進件識別為非市民／保留的 A 編號時只列待確認，不呼叫新建案件 writer。既有案件 replay／email 空白補入保留原邊界。
 - Partial intake 逐欄保存合法開始日、天數與 typed 服務時數／完整時段；其他重要欄位錯誤不清空合法 Orders 條款。`regression/test_hcm_partial_order_terms.py` 以實際 INSERT 保存值驗證 Orders 條款 reader 與補件 Query。
 - Current review adapter 將 MySQL 日期／日期時間／TIME 值序列化後計算 root fingerprint，保留原始 typed values 供解除警示判定；補正日期或時段後，警示 Query 不得因非 JSON scalar 回傳 500。
 - HCM 只有姓名、身分資格、報名時間、預計服務日期、希望服務天數、服務時間錯誤，或服務方式空值才觸發 partial intake／待補件；非空服務方式原文作排班參考，不產生格式警示，歷史格式警示依 current root 非空規則解除。其他錯誤僅警示並照常建立完整案件。Preview／Apply 最低建案資格均為可用案件編號。電話使用 Client-owned 手機／市話格式與正規化。

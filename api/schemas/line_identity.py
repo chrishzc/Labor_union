@@ -147,6 +147,15 @@ class ProvisionalRegistrationPreviewRequest(BaseModel):
     id_number: str | None = Field(default=None, max_length=50)
     liff_config_revision: str | None = Field(default=None, max_length=191)
     survey_details: dict[str, Any] = Field(default_factory=dict)
+    registration_kind: Literal["subsidy", "non_citizen"] = "subsidy"
+    service_start_date: str | None = Field(default=None, max_length=10)
+    service_time: str | None = Field(default=None, max_length=100)
+    residence_type: str | None = Field(default=None, max_length=50)
+    delivery_type: str | None = Field(default=None, max_length=50)
+    service_type: str | None = Field(default=None, max_length=100)
+    baby_info: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=1000)
+    line_id: str | None = Field(default=None, max_length=50)
 
     @field_validator("id_number")
     @classmethod
@@ -226,6 +235,7 @@ class ProvisionalRegistrationResponse(BaseModel):
     client_name: str
     replayed: bool
     identity_status: str | None = None
+    case_no: str | None = None
 
 
 class LineIdentityRuntimeConfigResponse(BaseModel):

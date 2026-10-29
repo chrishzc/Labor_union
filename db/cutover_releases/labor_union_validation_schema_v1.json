@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-accounting-pricing-2026-10-29-v1",
+  "release_id": "labor-union-validation-schema-non-citizen-cases-2026-10-29-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 179,
-    "ordered_digest_sha256": "89a87eb515ac098dcef81bd94cb4f4fb90c46738ca0d2b60679939b6bb4919f7",
-    "terminal_artifact": "234_accounting_pricing.sql"
+    "expected_count": 182,
+    "ordered_digest_sha256": "9eba330e395b06dfb600a6552e5764e6cbee9d60e8fda51833ce65dc2890d12d",
+    "terminal_artifact": "237_non_citizen_case_sequences.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "bdfcf18351090bf777e5c0ea07780a50b03aa6d25ccda7a597a44db37304ddff"
+    "sha256": "c97bc6f481691163fb5d6e50b12b654ceae6c174016a06a63f45f755e5f3be53"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

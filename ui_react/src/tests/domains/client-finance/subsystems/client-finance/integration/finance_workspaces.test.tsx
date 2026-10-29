@@ -1,3 +1,4 @@
+import { caseCategoriesClient } from '../../../../../../api/client_finance/case_categories_client';
 /** Agreed workspace composition, separate totals, exact case detail and recovery. */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +19,8 @@ const advance = { advance_id: 10, case_no: caseNo, client_name: '測試客戶', 
 const caseCoverage={case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:12000,coverage:[{receipt_id:9,label:'2026 年 第 1 季',amount_ntd:36000,recorded_case_amount_ntd:12000,recorded_service_end_date:'2026-01-20',recovered_advance_ntd:12000}]};
 const periodView=(period:SubsidyPeriod)=>({period,version:1,label:`${period.year} 年 第 ${period.index} 季`,lines:[{case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:12000,unavailable_reason:null}],total_ntd:12000,coverage:[],recorded_lines:[],changed_cases:[],blocked_cases:[],can_reconcile:true});
 beforeEach(() => {
-  vi.restoreAllMocks(); window.location.hash = '#finance';
+  vi.restoreAllMocks();
+  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const]))); window.location.hash = '#finance';
   vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
   vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
   vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: caseNo, client_name: '測試客戶', order_status: '訂單完成', staff_name: null, identity_status: '一般市民', start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: 5, total_employer_self_pay_payable: 20000 }], next_cursor: null, etag: 'a'.repeat(64) });
@@ -37,7 +39,8 @@ beforeEach(() => {
   vi.spyOn(recovery, 'preview').mockResolvedValue({ row: advance, account_version: 3, batch_version: 5, preview_fingerprint: 'a'.repeat(64) });
   vi.spyOn(recovery, 'apply').mockResolvedValue({ advance_id: 10, case_no: caseNo, recovered_amount_ntd: 12000, account_version: 4 });
 });
-afterEach(() => { cleanup(); window.location.hash = ''; vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); window.location.hash = ''; vi.restoreAllMocks();
+  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const]))); });
 
 async function openDetail() {
   fireEvent.click(await screen.findByRole('button', { name: '案件補助明細' }));
@@ -46,6 +49,31 @@ async function openDetail() {
   return drawer;
 }
 describe('three finance workspaces', () => {
+  it('uses the same case category for receipt/payment rows, counts and totals, including numeric legacy non-citizens', async () => {
+    vi.mocked(caseCategoriesClient.query).mockResolvedValue(new Map([[caseNo,'subsidy'],['115000099','non_citizen']]));
+    const citizen = {case_no:caseNo,account_version:'1',open_receivable_amount_ntd:100,open_payable_amount_ntd:0,obligation_count:1,ledger_entry_count:0,receipt_entry_count:0,receipt_status:'unpaid' as const};
+    vi.mocked(clientFinanceHistoryClient.queryAll).mockResolvedValue([citizen,{...citizen,case_no:'115000099',open_receivable_amount_ntd:500}]);
+    vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
+      row_id:'nc-refund',case_no:'115000099',recipient_name:'非市民合成客戶',payment_type:'client_refund',
+      certainty:'confirmed',source:'client_refund',payment_status:'pending',source_amount_ntd:700,
+      unpaid_amount_ntd:700,payment_date:'2026-11-15',date_is_estimate:false,pending_reasons:[],
+    }]);
+    render(<FinancePage />);
+    await screen.findByText(caseNo);
+    expect(screen.queryByText('115000099')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('案件類別')).toHaveValue('subsidy');
+    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'non_citizen'}});
+    expect(screen.getByText('115000099')).toBeInTheDocument();
+    expect(screen.queryByText(caseNo)).not.toBeInTheDocument();
+    expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('1 件目前待收合計 NT$ 500');
+    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'all'}});
+    expect(document.querySelector('.finance-inline-summary')).toHaveTextContent('2 件目前待收合計 NT$ 600');
+    fireEvent.click(screen.getByRole('button',{name:'付款'}));
+    await screen.findByText('沒有符合條件的付款項目。');
+    fireEvent.change(screen.getByLabelText('案件類別'),{target:{value:'non_citizen'}});
+    expect(screen.getByText('非市民合成客戶')).toBeInTheDocument();
+    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('1 筆確認待付 NT$ 700');
+  });
   it('distinguishes a missing canonical payable from an unpaid or zero balance', async () => {
     vi.mocked(cashRequirementsQueryClient.queryAll).mockResolvedValue([{
       row_id: 'missing', case_no: 'HISTORICAL-MISSING', recipient_name: '帳務未建月嫂', staff_id: 9,

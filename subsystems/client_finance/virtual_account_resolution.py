@@ -6,18 +6,26 @@ from typing import Any
 import re
 
 
-_VIRTUAL_ACCOUNT_PATTERN = re.compile(r"^99781699([0-9]{3})([0-9]{3})$")
+_VIRTUAL_ACCOUNT_PREFIX = "99781699"
+_VIRTUAL_ACCOUNT_PATTERN = re.compile(rf"^{_VIRTUAL_ACCOUNT_PREFIX}([0-9]{{3}})([0-9]{{3}})$")
 
 
 def build_client_virtual_account(case_no: object) -> str | None:
     """Build the per-case Client Finance collection account."""
     normalized = str(case_no) if case_no is not None else ""
+    non_citizen = re.fullmatch(r"A([0-9]{3})([0-9]{3})", normalized)
+    if non_citizen:
+        year, case_sequence = non_citizen.groups()
+        account_sequence = int(case_sequence) + 500
+        if int(case_sequence) < 1 or account_sequence > 999:
+            return None
+        return f"{_VIRTUAL_ACCOUNT_PREFIX}{year}{account_sequence:03d}"
     if len(normalized) != 9 or not normalized.isascii() or not normalized.isdigit():
         return None
     sequence = int(normalized[3:])
     if sequence > 999:
         return None
-    return f"99781699{normalized[:3]}{sequence:03d}"
+    return f"{_VIRTUAL_ACCOUNT_PREFIX}{normalized[:3]}{sequence:03d}"
 
 
 def resolve_case_virtual_account(cursor: Any, case_no: object) -> dict[str, str | None]:
@@ -44,6 +52,13 @@ def resolve_case_virtual_account(cursor: Any, case_no: object) -> dict[str, str 
 
 def _pending(reason: str) -> dict[str, str | None]:
     return {"result": "pending", "case_no": None, "reason": reason}
+
+
+def resolve_client_virtual_account_suffix(cursor: Any, suffix: object) -> dict[str, str | None]:
+    """Use the canonical account resolver for a six-digit bank memo reference."""
+    if not isinstance(suffix, str) or re.fullmatch(r"[0-9]{6}", suffix) is None:
+        return _pending("invalid_virtual_account_format")
+    return resolve_client_virtual_account(cursor, _VIRTUAL_ACCOUNT_PREFIX + suffix)
 
 
 def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[str, str | None]:
@@ -74,12 +89,19 @@ def resolve_client_virtual_account(cursor: Any, cancellation_code: Any) -> dict[
             "case_no": next(iter(imported_candidates)),
             "reason": None,
         }
-    cursor.execute("SELECT case_no FROM orders WHERE case_no = %s", (generated_case_no,))
+    formula_candidates = {generated_case_no}
+    if int(sequence) > 500:
+        non_citizen_case_no = f"A{roc_year}{int(sequence) - 500:03d}"
+        formula_candidates.add(non_citizen_case_no)
+        cursor.execute("SELECT case_no FROM orders WHERE case_no IN (%s,%s)",
+                       (generated_case_no, non_citizen_case_no))
+    else:
+        cursor.execute("SELECT case_no FROM orders WHERE case_no = %s", (generated_case_no,))
     generated_matches = cursor.fetchall()
     candidates = {
         str(row.get("case_no") if isinstance(row, dict) else row[0])
         for row in generated_matches
-        if str(row.get("case_no") if isinstance(row, dict) else row[0]) == generated_case_no
+        if str(row.get("case_no") if isinstance(row, dict) else row[0]) in formula_candidates
     }
     if not candidates:
         return _pending("case_not_found")
@@ -92,4 +114,5 @@ __all__ = [
     "build_client_virtual_account",
     "resolve_case_virtual_account",
     "resolve_client_virtual_account",
+    "resolve_client_virtual_account_suffix",
 ]

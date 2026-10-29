@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "89a87eb515ac098dcef81bd94cb4f4fb90c46738ca0d2b60679939b6bb4919f7",
+  "active_artifacts_sha256": "9eba330e395b06dfb600a6552e5764e6cbee9d60e8fda51833ce65dc2890d12d",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -185,7 +185,10 @@
     "db/schema_parts/1053_line_order_group_invitation_url.sql",
     "db/schema_parts/1054_scheduling_service_start.sql",
     "db/schema_parts/233_government_subsidy_periods.sql",
-    "db/schema_parts/234_accounting_pricing.sql"
+    "db/schema_parts/234_accounting_pricing.sql",
+    "db/schema_parts/235_finance_statement_workspace.sql",
+    "db/schema_parts/236_client_refund_overage_receipt.sql",
+    "db/schema_parts/237_non_citizen_case_sequences.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -217,7 +220,13 @@
     "db/schema_parts/1051_candidate_weekly_information.sql": "migration-only",
     "db/schema_parts/233_government_subsidy_periods.sql": "active-bootstrap",
     "db/schema_parts/1055_government_subsidy_periods.sql": "migration-only",
-    "db/schema_parts/1056_accounting_pricing.sql": "migration-only"
+    "db/schema_parts/1056_accounting_pricing.sql": "migration-only",
+    "db/schema_parts/235_finance_statement_workspace.sql": "active-bootstrap",
+    "db/schema_parts/236_client_refund_overage_receipt.sql": "active-bootstrap",
+    "db/schema_parts/237_non_citizen_case_sequences.sql": "active-bootstrap",
+    "db/schema_parts/1057_finance_statement_workspace.sql": "migration-only",
+    "db/schema_parts/1058_client_refund_overage_receipt.sql": "migration-only",
+    "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -480,6 +489,33 @@
       "replay": "exact metadata and singleton preserve existing policy versions and events",
       "rollback": "discard only newly created validation candidate; retain additive evidence after apply",
       "unresolved_policy": "partial or drift metadata blocks apply"
+    },
+    "db/schema_parts/1057_finance_statement_workspace.sql": {
+      "source_object": "existing bank and accounting facts without manual statements or acknowledgements",
+      "successor": "db/schema_parts/235_finance_statement_workspace.sql",
+      "terminal_schema_evidence": "fresh 235 and additive preserve 1057 are byte-identical",
+      "data_effect": "schema and missing singleton only; no bank or accounting backfill",
+      "replay": "exact metadata and singleton preserve all records",
+      "rollback": "retain additive evidence; discard only new disposable candidate",
+      "unresolved_policy": "partial or drift metadata blocks apply"
+    },
+    "db/schema_parts/1058_client_refund_overage_receipt.sql": {
+      "source_object": "supported refund overage writer with three-value receipt enum",
+      "successor": "db/schema_parts/236_client_refund_overage_receipt.sql",
+      "terminal_schema_evidence": "fresh 236 and preserve 1058 are byte-identical",
+      "data_effect": "append refund_overage enum value; preserve prior values and ordinals",
+      "replay": "exact four-value enum is no-op",
+      "rollback": "retain appended value and compatible forward application",
+      "unresolved_policy": "unknown enum, nullability or default blocks apply"
+    },
+    "db/schema_parts/1059_non_citizen_case_sequences.sql": {
+      "source_object": "annual non-citizen approval sequence",
+      "successor": "db/schema_parts/237_non_citizen_case_sequences.sql",
+      "terminal_schema_evidence": "fresh 237 and preserve 1059 are byte-identical",
+      "data_effect": "schema-only new counter table; existing business rows unchanged",
+      "replay": "exact counter table is a no-op",
+      "rollback": "discard isolated candidate before switch; retain forward-compatible counter after apply",
+      "unresolved_policy": "partial or drift blocks apply"
     }
   }
 }

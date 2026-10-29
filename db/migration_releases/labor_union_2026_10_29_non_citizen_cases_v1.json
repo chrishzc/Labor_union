@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-non-citizen-cases-2026-10-29-v1",
+  "release_metadata": {
+    "release_name": "Non-citizen annual case issuance",
+    "application_version": "non-citizen-cases-v1",
+    "published_at": "2026-10-29",
+    "description": "Add an annual approval sequence without changing existing applications, cases or finance"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-client-refund-overage-receipt-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1059_non_citizen_case_sequences.sql",
+      "relative_path": "db/schema_parts/1059_non_citizen_case_sequences.sql",
+      "sha256": "4134f4043d2c1315da1585dae5d1bbe82ba3967f723750d8fe76c0dad6d3f4e2",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-owned-candidate-before-switch; retain-additive-events-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "non-citizen-case-sequence-exact",
+      "phase": "post-schema",
+      "policy": "Exact annual counter; existing application, case and finance rows preserved",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "non-citizen-cases-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "non-citizen-case-sequence-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_29_non_citizen_cases_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_29_non_citizen_cases_v1.descriptors.json",
+    "sha256": "ed5ff92eb8fceff92a84a04a0b627e7bb2c050f8d6f92321ec3582545f6338a2",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

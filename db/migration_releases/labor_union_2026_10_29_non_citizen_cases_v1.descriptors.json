@@ -1,0 +1,36 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-non-citizen-cases-2026-10-29-v1",
+  "descriptors": {
+    "1059_non_citizen_case_sequences.sql": {
+      "tables": {
+        "non_citizen_case_sequences": {
+          "roc_year": {
+            "column_type": "smallint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "next_sequence": {
+            "column_type": "int unsigned",
+            "is_nullable": "NO",
+            "column_default": "1",
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "non_citizen_case_sequences.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "roc_year"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {}
+    }
+  }
+}

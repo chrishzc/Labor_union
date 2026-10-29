@@ -38,7 +38,7 @@ describe('weekly operations report clients', () => {
   it('案件統計以 authenticated 單一 GET 傳入期間，保留真零值並拒絕錯誤總數／期間／歷史分欄', async () => {
     const data = {
       year: 2026, quarter: 2, month: 4, start_date: '2026-04-01', end_date: '2026-04-30',
-      timezone: 'Asia/Taipei', available_years: [2026, 2025], annual_application_count: 12,
+      case_category: 'subsidy', timezone: 'Asia/Taipei', available_years: [2026, 2025], annual_application_count: 12,
       generated_at: '2026-10-13T12:00:00+08:00',
       summary: {
         application_count: 4, general_eligible_count: 1, general_ineligible_count: 0,
@@ -51,7 +51,7 @@ describe('weekly operations report clients', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response(data));
     const result = await caseStatisticsQueryClient.query(2026, 2, 4);
     expect(result.summary.general_ineligible_count).toBe(0);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/operations-reports/case-statistics?year=2026&quarter=2&month=4');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/operations-reports/case-statistics?year=2026&quarter=2&month=4&case_category=subsidy');
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer weekly-report-token');
     fetchMock.mockResolvedValueOnce(response({ ...data, summary: { ...data.summary, application_count: 5 } }));
     await expect(caseStatisticsQueryClient.query(2026, 2, 4)).rejects.toThrow('案件統計合計不一致');

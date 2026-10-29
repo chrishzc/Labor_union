@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 import re
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -44,6 +44,15 @@ class ProvisionalRegistrationIntent:
     id_number: str | None
     liff_config_revision: str | None
     survey_details: Mapping[str, Any]
+    registration_kind: Literal["subsidy", "non_citizen"] = "subsidy"
+    service_start_date: str | None = None
+    service_time: str | None = None
+    residence_type: str | None = None
+    delivery_type: str | None = None
+    service_type: str | None = None
+    baby_info: str | None = None
+    notes: str | None = None
+    line_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +61,11 @@ class ProvisionalRegistrationCandidate:
     client_payload: Mapping[str, str | int | None]
     beclass_payload: Mapping[str, str | Mapping[str, Any] | None]
     payload_fingerprint: PreviewFingerprint
+
+    @property
+    def registration_kind(self) -> str:
+        metadata = self.beclass_payload["survey_details"].get("_liff_meta", {})
+        return metadata.get("registration_kind", "subsidy")
 
 
 def build_provisional_registration_candidate(
@@ -94,6 +108,21 @@ def build_provisional_registration_candidate(
             optional["liff_config_revision"],
         ),
     }
+    if intent.registration_kind not in {"subsidy", "non_citizen"}:
+        raise ProvisionalRegistrationDomainError(
+            ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "registration kind is invalid"
+        )
+    if intent.registration_kind == "non_citizen":
+        from domains.case_import.non_citizen_registration import non_citizen_client_fields
+        try:
+            client.update(non_citizen_client_fields(intent))
+        except (ValueError, TypeError) as error:
+            raise ProvisionalRegistrationDomainError(
+                ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, str(error)
+            ) from error
+        beclass["survey_details"]["_liff_meta"].update(
+            page="non_citizen_registration", registration_kind="non_citizen"
+        )
     return ProvisionalRegistrationCandidate(
         line_user_id,
         client,

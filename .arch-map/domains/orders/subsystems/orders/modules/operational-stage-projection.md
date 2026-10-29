@@ -27,6 +27,7 @@
   - `ui_react/src/adapters/orders/order_core_stage_projection_adapter.ts`
   - `ui_react/src/pages/OrderWorkbenchV2Page.tsx`
   - `ui_react/src/components/WorkbenchCaseStatistics.tsx`
+  - `ui_react/src/components/WorkbenchCaseStatistics.css` — 原受理與獨立非市民統計共用；手機直接呈現狀態，Reports 借用同元件。
   - `ui_react/src/components/OrderWorkbenchV2Drawer.tsx`
   - `ui_react/src/components/OrderWorkbenchV2OwnerContext.tsx`
   - `ui_react/src/components/OrderWorkbenchV2Drawer.css`

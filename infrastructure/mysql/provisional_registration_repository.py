@@ -85,26 +85,52 @@ class MySqlProvisionalRegistrationRepository:
         snapshot = self.load_application(registration_id, for_update=True)
         candidate = snapshot.candidate
         if snapshot.client_id is not None and snapshot.beclass_record_id is not None:
+            if candidate.registration_kind == "non_citizen" and snapshot.case_no is None:
+                raise ProvisionalRegistrationConflictError("registration_case_issue_incomplete")
             return ProvisionalRegistrationReceipt(registration_id, snapshot.client_id, snapshot.beclass_record_id,
-                                                   str(candidate.client_payload["name"]), True, False)
+                                                   str(candidate.client_payload["name"]), True, False, snapshot.case_no)
         if snapshot.version != expected_version or snapshot.client_id is not None or snapshot.beclass_record_id is not None:
             raise ProvisionalRegistrationConflictError("registration_application_stale")
+        approved_at = self._now()
         with _cursor(self._connection) as cursor:
             client_id = _insert_client(cursor, candidate)
             beclass_id = _insert_beclass_record(cursor, candidate)
             cursor.execute("UPDATE provisional_client_registrations SET client_id=%s,beclass_record_id=%s,"
-                           "application_version=application_version+1,approved_by_actor=%s,approved_at_utc=UTC_TIMESTAMP(6) "
+                           "application_version=application_version+1,approved_by_actor=%s,approved_at_utc=%s "
                            "WHERE id=%s AND application_version=%s AND client_id IS NULL AND beclass_record_id IS NULL",
-                           (client_id, beclass_id, actor, registration_id, expected_version))
+                           (client_id, beclass_id, actor, approved_at.astimezone(timezone.utc).replace(tzinfo=None),
+                            registration_id, expected_version))
             if cursor.rowcount != 1:
                 raise ProvisionalRegistrationConflictError("registration_application_stale")
-        self._enqueue_confirmation(candidate, registration_id, approved=True)
+        case_no = self._issue_non_citizen_case(registration_id, candidate, actor, approved_at) if candidate.registration_kind == "non_citizen" else None
+        self._enqueue_confirmation(candidate, registration_id, approved=True, case_no=case_no)
         return ProvisionalRegistrationReceipt(registration_id, client_id, beclass_id,
-                                               str(candidate.client_payload["name"]), False, True)
+                                               str(candidate.client_payload["name"]), False, True, case_no)
 
-    def _enqueue_confirmation(self, candidate, registration_id, *, approved) -> None:
+    def _issue_non_citizen_case(self, registration_id, candidate, actor, approved_at) -> str:
+        from infrastructure.mysql.case_import_repository import MySqlCaseImportRepository
+        from infrastructure.mysql.non_citizen_case_number_repository import allocate_non_citizen_case_number
+        from shared_kernel.identities import ActorContext, ExpectedVersion
+        from subsystems.case_import.case_import_workflow import ApplyCaseImport, CaseImportWorkflow
+        from subsystems.case_import.non_citizen_registration_application import non_citizen_case_intent
+        case_no = allocate_non_citizen_case_number(self._connection, approved_at)
+        with _cursor(self._connection) as cursor:
+            cursor.execute("SELECT holiday_date FROM holidays")
+            holidays = {row["holiday_date"] for row in cursor.fetchall()}
+        intent = non_citizen_case_intent(candidate, case_no, approved_at, registration_id, holidays)
+        workflow = CaseImportWorkflow(MySqlCaseImportRepository(self._connection), lambda: None)
+        correlation = CorrelationId(f"non-citizen-approval:{registration_id}")
+        preview = workflow.preview(intent, correlation)
+        receipt = workflow.apply_in_current_uow(ApplyCaseImport(
+            intent, ExpectedVersion(preview.import_version), preview.fingerprint,
+            IdempotencyKey(f"non-citizen-approval:{registration_id}"), ActorContext(actor),
+            "工會核准非市民服務申請", correlation,
+        ))
+        return receipt.case_no
+
+    def _enqueue_confirmation(self, candidate, registration_id, *, approved, case_no=None) -> None:
         self._delivery_tasks.enqueue(
-            _confirmation_request(candidate, registration_id, self._now(), approved=approved)
+            _confirmation_request(candidate, registration_id, self._now(), approved=approved, case_no=case_no)
         )
 
 
@@ -162,6 +188,7 @@ def _receipt(record, candidate, *, replayed):
     return ProvisionalRegistrationReceipt(
         int(record["id"]), int(record["client_id"]), int(record["beclass_record_id"]),
         str(candidate.client_payload["name"]), replayed, False,
+        record.get("case_no"),
     )
 
 
@@ -188,13 +215,13 @@ def _insert_beclass_record(cursor, candidate) -> int:
     return _last_insert_id(cursor, "provisional_registration_beclass_insert_failed")
 
 
-def _confirmation_request(candidate, registration_id, scheduled_at, *, approved):
+def _confirmation_request(candidate, registration_id, scheduled_at, *, approved, case_no=None):
     stage = "approved" if approved else "submitted"
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, LineUserId(candidate.line_user_id)),
         LineMessageKind.TEXT,
         canonical_line_payload_json(
-            {"type": "text", "text": _confirmation_message(candidate, approved=approved)}
+            {"type": "text", "text": _confirmation_message(candidate, approved=approved, case_no=case_no)}
         ),
         scheduled_at,
         IdempotencyKey(f"line-registration:{registration_id}:{stage}"),
@@ -204,10 +231,12 @@ def _confirmation_request(candidate, registration_id, scheduled_at, *, approved)
     )
 
 
-def _confirmation_message(candidate, *, approved) -> str:
+def _confirmation_message(candidate, *, approved, case_no=None) -> str:
     name = str(candidate.client_payload["name"])
     if not approved:
         return f"【系統通知】\n{name}您好，需求申請已送出，待工會人員核准後才建立正式客戶資料。送出申請不代表已完成媒合。"
+    if case_no:
+        return f"【系統通知】\n{name}您好，非市民服務申請已核准。\n案件編號：{case_no}\n工會將與您確認後續服務安排。"
     return (
         f"【系統通知】\n服務登記與綁定成功！您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
         "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
@@ -246,7 +275,10 @@ _CONFLICT_INSERT_SQL = (
 )
 
 _APPLICATION_SELECT = ("SELECT id,application_version,application_payload,payload_fingerprint,line_user_id,"
-                       "client_id,beclass_record_id,approved_by_actor FROM provisional_client_registrations")
+                       "client_id,beclass_record_id,approved_by_actor,approved_at_utc,"
+                       "(SELECT e.case_no FROM provisional_registration_case_issue_events e "
+                       "WHERE e.registration_id=provisional_client_registrations.id) AS case_no "
+                       "FROM provisional_client_registrations")
 
 
 def _application_snapshot(row) -> RegistrationApplicationSnapshot:
@@ -258,8 +290,12 @@ def _application_snapshot(row) -> RegistrationApplicationSnapshot:
         raise ProvisionalRegistrationStorageError("registration_application_identity_mismatch")
     candidate = ProvisionalRegistrationCandidate(str(row["line_user_id"]), payload["client"], payload["beclass"],
                                                  PreviewFingerprint(row["payload_fingerprint"]))
+    approved_at = row.get("approved_at_utc")
+    if approved_at is not None and approved_at.tzinfo is None:
+        approved_at = approved_at.replace(tzinfo=timezone.utc)
     return RegistrationApplicationSnapshot(int(row["id"]), int(row["application_version"]), candidate,
-                                           row["client_id"], row["beclass_record_id"], row["approved_by_actor"])
+                                           row["client_id"], row["beclass_record_id"], row["approved_by_actor"],
+                                           row.get("case_no"), approved_at)
 
 
 def _candidate_snapshot(candidate):

@@ -9,8 +9,10 @@
 
 ## Implementation
 - primary: `line/static/register.html`
+- 非市民頁面共用表單 presentation，以 server-owned body marker 切換 HCM＋BeClass 合併必填及 typed payload；不由 query string 決定正式身分。
 - entrypoints:
   - `/line-registration`
+  - `/line-non-citizen-registration`
   - `/api/v1/line/identity/registration/preview`
   - `/api/v1/line/identity/registration/apply`
 

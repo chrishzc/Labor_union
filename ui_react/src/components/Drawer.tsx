@@ -54,6 +54,7 @@ export const Drawer: React.FC<DrawerProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (leavePendingRef.current) return;
       if (e.key === 'Escape' && isOpen && !closeDisabled) {
+        e.preventDefault();
         closeRef.current();
       }
       if (e.key === 'Tab') {

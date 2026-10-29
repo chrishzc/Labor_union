@@ -6,6 +6,7 @@ Description: 定義 provisional LINE 登記的 Preview、衝突與套用結果�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ExpectedVersion
@@ -42,6 +43,7 @@ class ProvisionalRegistrationReceipt:
     client_name: str
     replayed: bool
     worker_wakeup_required: bool
+    case_no: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,8 @@ class RegistrationApplicationSnapshot:
     client_id: int | None
     beclass_record_id: int | None
     approved_by_actor: str | None
+    case_no: str | None = None
+    approved_at_utc: datetime | None = None
 
 
 __all__ = [

@@ -112,7 +112,7 @@ def render_from_synthetic_source(connection, database):
                 continue
             cursor.execute(f"SHOW CREATE TRIGGER `{trigger['name']}`")
             ddl = _without_definer(cursor.fetchone()["SQL Original Statement"])
-            chunks.append(ddl + ";")
+            chunks.append("DELIMITER $$\n" + ddl + "$$\nDELIMITER ;")
         cursor.execute("SELECT table_name AS name,view_definition AS definition FROM information_schema.views WHERE table_schema=%s ORDER BY table_name", (database,))
         for view in cursor.fetchall():
             chunks.append(f"CREATE OR REPLACE VIEW `{view['name']}` AS {view['definition']};")

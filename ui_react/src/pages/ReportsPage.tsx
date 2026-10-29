@@ -5,6 +5,7 @@ import { staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
  */
 import React, { useEffect, useRef, useState } from 'react';
 import './ReportsPage.css';
+import { WorkbenchCaseStatistics } from '../components/WorkbenchCaseStatistics';
 import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_client';
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
 import {
@@ -374,6 +375,7 @@ export const ReportsPage: React.FC = () => {
         <p className="page-subtitle">集中查詢營運報表與政府補助核銷資料，並可下載完整工作表。</p>
       </div>
     </header>
+    <details className="reports-workspace"><summary>非市民案件統計</summary><WorkbenchCaseStatistics caseCategory="non_citizen" /></details>
     <section className="reports-workspace" aria-label="營運與補助報表查詢工作區">
       <div className="reports-toolbar">
         <div>

@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-client-refund-overage-receipt-2026-10-29-v1",
+  "descriptors": {
+    "1058_client_refund_overage_receipt.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {
+        "client_refund_reversal_apply_receipts": {
+          "correction_type": {
+            "column_type": "enum('refund','refund_return','reversal','refund_overage')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      }
+    }
+  }
+}

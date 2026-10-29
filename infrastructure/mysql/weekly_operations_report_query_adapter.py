@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
 from subsystems.government_subsidy import reconciliation_register_query
 from subsystems.reporting.weekly_operations_report_query import (
     SubsidyFact,
@@ -28,8 +29,34 @@ class MySqlWeeklyOperationsReportQueryAdapter:
 
     def list_case_years(self) -> list[int]:
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT DISTINCT YEAR(created_at) AS application_year FROM clients WHERE created_at IS NOT NULL ORDER BY application_year DESC")
+            cursor.execute("SELECT DISTINCT YEAR(c.created_at) AS application_year FROM clients c "
+                           "LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no "
+                           "WHERE c.created_at IS NOT NULL AND " + CASE_CATEGORY_SQL + "='subsidy' ORDER BY application_year DESC")
             return [int(row["application_year"]) for row in cursor.fetchall() if 1 <= int(row["application_year"]) <= 9998]
+
+    def list_non_citizen_case_years(self) -> list[int]:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT DISTINCT YEAR(DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR)) AS application_year "
+                           + _NON_CITIZEN_APPROVAL_FROM_SQL + " ORDER BY application_year DESC")
+            return [int(row["application_year"]) for row in cursor.fetchall()]
+
+    def list_non_citizen_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
+        # Approval is stored as UTC; select/filter Taipei dates without inferring
+        # dates for legacy cases that have no traceable approval record.
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT c.id AS client_id,c.identity_status,o.status AS order_status,"
+                           "DATE_ADD(r.approved_at_utc,INTERVAL 8 HOUR) AS approved_local "
+                           + _NON_CITIZEN_APPROVAL_FROM_SQL
+                           + " AND r.approved_at_utc >= %s AND r.approved_at_utc < %s ORDER BY r.approved_at_utc,c.id",
+                           (datetime.combine(start_date, datetime.min.time()) - timedelta(hours=8),
+                            datetime.combine(end_date + timedelta(days=1), datetime.min.time()) - timedelta(hours=8)))
+            rows = cursor.fetchall()
+        return [WeeklyCaseFact(
+            client_id=int(row["client_id"]), case_no=None, created_at=_datetime(row["approved_local"]),
+            applicant_name=None, identity_status=_optional_text(row.get("identity_status")), reject_reason=None,
+            district=None, order_status=_optional_text(row.get("order_status")), service_days=None,
+            service_hours_per_day=None, planned_start_date=None, planned_end_date=None, case_category="non_citizen",
+        ) for row in rows]
 
     def list_case_statistics_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
         # 計數只需要資格、狀態與日期；不讀取姓名、地址或原始拒絕原因。
@@ -43,6 +70,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             reject_reason="rejected" if row["is_rejected"] else None,
             district=None, order_status=_optional_text(row.get("order_status")),
             service_days=None, service_hours_per_day=None, planned_start_date=None, planned_end_date=None,
+            case_category=row.get("case_category"),
         ) for row in rows]
 
     def list_case_facts(self, start_date: date, end_date: date) -> list[WeeklyCaseFact]:
@@ -64,6 +92,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 planned_start_date=_optional_date(row.get("planned_start_date")),
                 planned_end_date=_optional_date(row.get("planned_end_date")),
                 seq_num=_optional_int(row.get("seq_num")),
+                case_category=row.get("case_category"),
             )
             for row in rows
         ]
@@ -213,26 +242,32 @@ def _json_rest_days(value: object) -> list[int] | None:
     return None
 
 
-_CASE_FACTS_SQL = """
+_NON_CITIZEN_APPROVAL_FROM_SQL = """FROM orders o JOIN clients c ON c.id=o.client_id
+JOIN provisional_registration_case_issue_events e ON e.case_no=o.case_no AND e.client_id=c.id
+JOIN provisional_client_registrations r ON r.id=e.registration_id
+WHERE r.approved_at_utc IS NOT NULL AND """ + CASE_CATEGORY_SQL + "='non_citizen'"
+
+_CASE_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,
        c.name AS applicant_name,c.identity_status,c.reject_reason,c.city,c.address,
-       o.status AS order_status,o.service_days,o.service_hours_per_day,
+       {CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,o.service_days,o.service_hours_per_day,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE c.created_at >= %s AND c.created_at < %s
+WHERE {CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 
-_CASE_STATISTICS_FACTS_SQL = """
+_CASE_STATISTICS_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.created_at AS application_created_at,c.identity_status,
        (c.reject_reason IS NOT NULL AND c.reject_reason <> '') AS is_rejected,
-       o.status AS order_status
+       {CASE_CATEGORY_SQL} AS case_category,o.status AS order_status
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE c.created_at >= %s AND c.created_at < %s
+WHERE {CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
+
 
 _SERVICE_FACTS_SQL = """
 SELECT a.id AS assignment_id,a.case_no,c.name AS client_name,s.name AS staff_name,s.union_no AS staff_union_no,

@@ -58,6 +58,7 @@ class CaseStatisticsSummaryView(_StrictModel):
 
 
 class CaseStatisticsView(_StrictModel):
+    case_category: Literal["subsidy", "non_citizen"]
     year: int = Field(ge=1, le=9998)
     quarter: int | None = Field(ge=1, le=4)
     month: int | None = Field(ge=1, le=12)

@@ -124,6 +124,12 @@ class LiffSettingsConfig(BaseModel):
                 "address": "text",
             },
         }
+        if "non_citizen_registration" in self.pages:
+            if self.pages["non_citizen_registration"].page_type != "registration":
+                raise ValueError("non_citizen_registration must use page_type=registration")
+            required_fields["non_citizen_registration"] = {
+                **required_fields["registration"], **NON_CITIZEN_FIELDS,
+            }
         for page_id, contract in required_fields.items():
             fields = {field.id: field for field in self.pages[page_id].fields}
             for field_id, field_type in contract.items():
@@ -135,3 +141,33 @@ class LiffSettingsConfig(BaseModel):
                 if not field.enabled or not field.required:
                     raise ValueError(f"{page_id}.{field_id} must remain enabled and required")
         return self
+
+
+NON_CITIZEN_FIELDS = {
+    "gender": "single_choice", "email": "email", "city": "text", "birth_date": "date",
+    "service_start_date": "date", "service_time": "text", "residence_type": "text",
+    "delivery_type": "text", "service_type": "text", "baby_info": "textarea",
+    "notes": "textarea", "line_id": "text",
+    "refund_bank_code": "text", "refund_bank_account": "text",
+}
+
+
+def non_citizen_registration_page(registration: LiffPage) -> LiffPage:
+    """Build a new page only for an explicit configuration Apply/bootstrap."""
+    page = registration.model_copy(deep=True)
+    page.title = "非市民服務申請"
+    page.subtitle = "填寫服務需求及退款帳戶，送出後由工會審核。"
+    page.success_title = "申請已送出"
+    page.success_description = "待工會核准後才建立正式案件並配發案件編號。"
+    fields = {field.id: field for field in page.fields}
+    labels = {"gender":"性別", "email":"Email", "city":"縣市", "birth_date":"出生日期",
+              "service_start_date":"預計服務開始日", "service_time":"服務時間",
+              "residence_type":"居住型態", "delivery_type":"生產方式", "service_type":"服務方式",
+              "baby_info":"寶寶資訊", "notes":"其他事項（無則填「無」）", "line_id":"LINE ID（未設定填「無」）", "refund_bank_code":"退款銀行與分行代號", "refund_bank_account":"退款帳戶"}
+    for index, (name, kind) in enumerate(NON_CITIZEN_FIELDS.items(), start=100):
+        previous = fields.get(name)
+        fields[name] = LiffField(id=name, label=labels[name], type=kind, required=True, enabled=True,
+                                system_field=True, order=previous.order if previous else index,
+                                options=[LiffOption(value="女",label="女"), LiffOption(value="男",label="男")] if kind=="single_choice" else [])
+    page.fields = sorted(fields.values(), key=lambda field: field.order)
+    return page
