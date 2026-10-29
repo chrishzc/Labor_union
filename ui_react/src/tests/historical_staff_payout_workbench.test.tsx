@@ -5,6 +5,9 @@ import { historicalStaffPayoutClient } from '../api/staff_payables/historical_st
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { sessionClient } from '../api/auth/session_client';
 import { transport } from '../api/shared/transport';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
+
+function LeaveAction({ onLeave }: { onLeave: () => void }) { const { requestLeave } = useUnsavedNavigation(); return <button onClick={() => requestLeave(onLeave)}>離開付款頁</button>; }
 
 const obligation = {
   obligation_identity: 'staff-obligation:1', case_no: 'CASE-1', staff_id: 7, amount_due_ntd: 8000,
@@ -56,14 +59,22 @@ describe('HistoricalStaffPayoutWorkbench', () => {
       projections: [{ obligation_identity: 'staff-obligation:1', amount_snapshot_ntd: 8000, obligation_payroll_version: 3 }], owner_terminal: true,
     });
 
-    render(<HistoricalStaffPayoutWorkbench caseNo="CASE-1" staffId={7} />);
+    const left = vi.fn();
+    render(<UnsavedChangesProvider><LeaveAction onLeave={left} /><HistoricalStaffPayoutWorkbench caseNo="CASE-1" staffId={7} /></UnsavedChangesProvider>);
     fireEvent.click(await screen.findByLabelText(/staff-obligation:1/));
-    fireEvent.click(screen.getByRole('button', { name: '預覽歷史付款影響' }));
-    expect(await screen.findByText(/金額快照：NT\$ 8,000/)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/我已核對案件、月嫂/));
-    fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
+    fireEvent.change(screen.getByLabelText('付款日期（不確定可留空）'), { target: { value: '2026-09-01' } });
+    fireEvent.change(screen.getByLabelText('證據參考（選填）'), { target: { value: 'phone-log:staff-7:payment' } });
+    fireEvent.click(screen.getByRole('button', { name: '離開付款頁' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存變更並離開' }));
+    await waitFor(() => expect(historicalStaffPayoutClient.preview).toHaveBeenCalledOnce());
+    await expect(vi.mocked(historicalStaffPayoutClient.preview).mock.results[0].value).resolves.toMatchObject({
+      case_no: 'CASE-1', staff_id: 7, amount_snapshot_ntd: 8000, preview_fingerprint: 'b'.repeat(64),
+    });
+    expect(screen.queryByLabelText(/我已核對案件、月嫂/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認並提交' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/已重新讀取付款結果：本月嫂款項已結清/)).toBeInTheDocument();
+    await waitFor(() => expect(left).toHaveBeenCalledTimes(1));
   });
 });

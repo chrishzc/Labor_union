@@ -101,6 +101,8 @@ from subsystems.finance_import.refund_return_review_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/finance-import", tags=["Finance Import"])
+from api.routes.finance_statement_workspace import router as statement_workspace_router
+router.include_router(statement_workspace_router)
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _CorrelationHeader = Annotated[

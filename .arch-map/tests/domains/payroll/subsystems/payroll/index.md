@@ -5,6 +5,8 @@ test_root: tests/domains/payroll/subsystems/payroll/
 integration_root: tests/domains/payroll/subsystems/payroll/integration/
 fixtures_root: tests/fixtures/
 modules:
+  tiered-payroll:
+    test_root: tests/domains/payroll/subsystems/payroll/modules/tiered-payroll/
   payroll-adjustment:
     test_root: tests/domains/payroll/subsystems/payroll/modules/payroll-adjustment/
   late-obligation-disposition:

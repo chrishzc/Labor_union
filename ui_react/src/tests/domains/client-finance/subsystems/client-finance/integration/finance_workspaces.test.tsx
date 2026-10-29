@@ -20,7 +20,8 @@ const caseCoverage={case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:1200
 const periodView=(period:SubsidyPeriod)=>({period,version:1,label:`${period.year} 年 第 ${period.index} 季`,lines:[{case_no:caseNo,service_end_date:'2026-01-20',amount_ntd:12000,unavailable_reason:null}],total_ntd:12000,coverage:[],recorded_lines:[],changed_cases:[],blocked_cases:[],can_reconcile:true});
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const]))); window.location.hash = '#finance';
+  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const])));
+  window.location.hash = '#finance';
   vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) { this.setAttribute('open', ''); });
   vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) { this.removeAttribute('open'); });
   vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: caseNo, client_name: '測試客戶', order_status: '訂單完成', staff_name: null, identity_status: '一般市民', start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: 5, total_employer_self_pay_payable: 20000 }], next_cursor: null, etag: 'a'.repeat(64) });
@@ -39,8 +40,7 @@ beforeEach(() => {
   vi.spyOn(recovery, 'preview').mockResolvedValue({ row: advance, account_version: 3, batch_version: 5, preview_fingerprint: 'a'.repeat(64) });
   vi.spyOn(recovery, 'apply').mockResolvedValue({ advance_id: 10, case_no: caseNo, recovered_amount_ntd: 12000, account_version: 4 });
 });
-afterEach(() => { cleanup(); window.location.hash = ''; vi.restoreAllMocks();
-  vi.spyOn(caseCategoriesClient,'query').mockResolvedValue(new Map(['TEST-001','TEST-002','HISTORICAL-MISSING','HISTORICAL','HANDOVER','HISTORICAL-PAID','HISTORICAL-UNPAID','FORMAL','OTHER','PAID','PARTIAL','SERVICE','TEST-001-OTHER','REFUND','ADJUSTMENT','REVERSAL','SUBSIDY_RETURN','SUBSIDY_ADVANCE'].map(caseNo=>[caseNo,'subsidy' as const]))); });
+afterEach(() => { cleanup(); window.location.hash = ''; vi.restoreAllMocks(); });
 
 async function openDetail() {
   fireEvent.click(await screen.findByRole('button', { name: '案件補助明細' }));
@@ -176,9 +176,9 @@ describe('three finance workspaces', () => {
     fireEvent.change(screen.getByLabelText('彙總單位'),{target:{value:'year'}});
     await waitFor(()=>expect(subsidyPeriodClient.query).toHaveBeenLastCalledWith(expect.objectContaining({unit:'year',index:1}),expect.any(AbortSignal)));
   });
-  it('has exactly three entries and separates confirmed money, estimates and unknown dates', async () => {
+  it('includes case accounting and shared warnings while separating confirmed money, estimates and unknown dates', async () => {
     render(<FinancePage />);
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳']);
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
     await screen.findByRole('button', { name: '收款明細' });
     expect(cashRequirementsQueryClient.queryAll).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '付款' }));

@@ -46,7 +46,17 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
       : orderSummaries.length === 0
         ? '目前沒有可選案件'
         : '請選擇案件';
-  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy: busy || outcomeUnknown, resetKey: facts });
+  const unsaved = useUnsavedDraft('歷史服務天數', { '服務天數': days, '原因': reason }, { busy: busy || outcomeUnknown, resetKey: facts, save: () => run(save), discard: () => { setDays(Object.fromEntries((facts?.assignments ?? []).map(item => [item.assignment_identity, '']))); setReason(''); setPreview(null); } });
+  async function save() {
+    if (!facts || outcomeUnknown) return;
+    const checkedInputs = inputs();
+    if (checkedInputs.some(item => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)) throw new Error('請填寫每位月嫂的正整數服務天數。');
+    const checked = await historicalServiceAccountingClient.preview(facts.case_no, checkedInputs);
+    let receipt;
+    try { receipt = await historicalServiceAccountingClient.apply(checked, checkedInputs, reason.trim()); }
+    catch (error) { const rejected = error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429; setOutcomeUnknown(!rejected); throw error; }
+    setPreview(checked); unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。');
+  }
 
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
@@ -63,7 +73,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>
       {facts.assignments.map((item) => <label key={item.assignment_identity} style={{ display: 'block', marginBottom: 8 }}>{staffIdentity.label(item.staff_id, item.staff_name)}實際服務天數 <input type="number" min="1" step="1" value={days[item.assignment_identity] ?? ''} disabled={busy || outcomeUnknown} onChange={(event) => { setDays((current) => ({ ...current, [item.assignment_identity]: event.target.value })); setPreview(null); }} /></label>)}
       <label>更新原因（選填）<input value={reason} maxLength={500} disabled={busy || outcomeUnknown} onChange={event => setReason(event.target.value)} /></label>
-      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(async () => { const checkedInputs = inputs(); const checked = await historicalServiceAccountingClient.preview(facts.case_no, checkedInputs); setPreview(checked); let receipt; try { receipt = await historicalServiceAccountingClient.apply(checked, checkedInputs, reason.trim()); } catch (error) { const rejected = error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429; setOutcomeUnknown(!rejected); throw error; } unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。'); })}>儲存服務天數與帳務</button>
+      <button type="button" disabled={busy || outcomeUnknown || inputs().some((item) => !Number.isInteger(item.actual_service_days) || item.actual_service_days <= 0)} onClick={() => void run(save)}>儲存服務天數與帳務</button>
     </div>}
     {preview && <div className="import-result-state" role="status">
       <p>總實際服務 {preview.total_actual_service_days} 天；樓層費 {preview.historical_floor_fee_ntd.toLocaleString()} 元；雙薪 0 小時。</p>

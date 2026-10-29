@@ -137,6 +137,7 @@ class PricingConfigurationApplication:
                 return replay
             if catalog.revision != expected_revision:
                 raise PricingConflict("pricing_policy_stale")
+            policy.validate_subsidy_rates()
             revision = catalog.revision + 1
             self.repository.save_policy(policy, revision, actor, reason)
             self.repository.save_receipt(key, actor, command, revision)
@@ -155,6 +156,7 @@ class PricingConfigurationApplication:
             raise PricingConflict("case_pricing_stale")
         if terms.rule is not facts.terms.rule or terms.identity_name != facts.terms.identity_name:
             raise ValueError("case_pricing_identity_rule_immutable")
+        terms.validate_subsidy_rates()
 
     def _preview(self, facts, terms, expected_revision):
         self._validate_case_terms(facts, terms, expected_revision)

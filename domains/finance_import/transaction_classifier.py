@@ -180,12 +180,25 @@ def _classify_taishin_outgoing(
 def _classify_sinopac_outgoing(
     row: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
+    client_refund_accounts: Mapping[str, Any],
 ) -> dict[str, Any]:
     reference_key = (
         "transaction_reference" if row["format_id"] == "legacy" else "交易參考編號"
     )
     account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
     staff_ids = _ids_for_account(staff_accounts, account)
+    if row["format_id"] == "sinopac":
+        client_ids = _ids_for_account(client_refund_accounts, account)
+        if client_ids and staff_ids:
+            return _review("counterparty_identity_type_conflict")
+        if len(client_ids) > 1:
+            return _review("counterparty_account_multiple_matches")
+        if client_ids:
+            return _result(
+                "client_refund", client_ids,
+                "sinopac_unique_client_refund_account_in_transaction_reference",
+                account,
+            )
     if not staff_ids:
         return _review("sinopac_staff_account_no_match")
     if len(staff_ids) != 1:
@@ -236,7 +249,7 @@ def classify_finance_transaction(
             if heuristic_result is not None:
                 return heuristic_result
             return _review("sinopac_invalid_or_missing_virtual_account")
-        return _classify_sinopac_outgoing(row, staff_accounts)
+        return _classify_sinopac_outgoing(row, staff_accounts, client_refund_accounts)
 
     if format_id == "taishin":
         if direction == "incoming":

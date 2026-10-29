@@ -10,6 +10,7 @@
 - 2026-08-10 金流證據與超收裁決：`approved`
 - 2026-08-11 差額付款與追償可執行契約：`approved`
 - 2026-09-11 客戶代墊、月嫂整筆應付與服務後補助退還：`reconfirmed-by-user`
+- 2026-10-29 案件帳務 UI、差額只顯示與共用警示：U12 已授權並完成本機程式及後端驗收；完整行為及證據見 [`22` §15](22_銀行流水匯入與帳務異常處理正式規格.md#finance-20261029)，仍沒有手續費核銷或自動結清授權。既有 `REFUND_OVERAGE` writer 的收據 enum 由 236／1058 append-only 補齊，不重定義退款／追償規則。
 - 本文件覆蓋舊稿中「人工月結 aggregate」與「一般客戶退款 deferred／missing」的矛盾。
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 Commands、schema、pytest 與
   legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
@@ -150,6 +151,8 @@ blocker／anomaly。只有金額差異且 ownership 唯一時，才可使用專�
 
 公會實際出款小於選定 obligation remaining 時，先核銷實際付款，剩餘款繼續列待付。
 後續補款沿同一 obligation 核銷剩餘款，不修改原應付全額或重複計算薪資。
+
+2026-10-29 差額顯示補充：案件頁以應付減有效實付顯示手續費參考，不認列費用、不扣減 obligation，也不因差額在 100 元以內或人員解除警示而結清。少付超過 100 元及任何超付依 `22` §15.7–15.8 進共用帳務警示；恰好少付 100 元不觸發此新增門檻。這是顯示／警示契約，以下不足額核銷、remaining、補款、超額追償及原正式 owner 規則不變。
 
 `ApplyStaffPayoutDifference(mode=underpayment)` 必須在單一 Staff Payables UoW 內：
 

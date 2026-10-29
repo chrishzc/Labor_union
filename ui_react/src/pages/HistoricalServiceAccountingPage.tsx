@@ -11,7 +11,7 @@ export const HistoricalServiceAccountingPage: React.FC = () => (
     <header className="page-header-banner import-result-header">
       <div>
         <h1 className="page-title">🧮 歷史訂單實際服務天數設定</h1>
-        <p className="page-subtitle">核對歷史訂單最終實際服務天數，並沿用既有帳務預覽與建立流程。</p>
+        <p className="page-subtitle">填寫歷史訂單最終實際服務天數，儲存後同步更新帳務。</p>
       </div>
     </header>
     <HistoricalServiceAccountingWorkbench />

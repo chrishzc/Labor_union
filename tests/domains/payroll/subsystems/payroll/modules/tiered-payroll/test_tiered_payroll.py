@@ -24,6 +24,17 @@ def test_due_dates_use_service_end_month_and_roll_year_independently():
     assert funding_due_date(date(2026, 12, 31), directly_subsidized=True) == date(2027, 2, 15)
 
 
+def test_zero_subsidy_uses_self_pay_rate_without_zeroing_salary():
+    import pytest
+    tier = TieredPayrollRate(0, 310, Decimal(0), False)
+    assignment = OfficialAssignmentServiceFacts('non-citizen', 1, (date(2026, 10, 1),))
+    rate = AssignmentRateSnapshot('non-citizen', 'pricing-1', PayrollPolicyKind.NON_CITIZEN, MoneyNTD(310), tier)
+    result = build_case_payroll_candidate((assignment,), (rate,), PayrollTerms(1, 8, MoneyNTD(0)))
+    assert result.total_payable.amount == 2480
+    with pytest.raises(ValueError, match='payroll_tiered_rate_invalid'):
+        TieredPayrollRate(0, 310, Decimal(1), False)
+
+
 def test_installment_cash_closes_only_due_portion_and_preserves_whole_entitlement():
     from domains.payroll.installments import installment_balances
     from domains.staff_payables.reconciliation import (OutgoingBankFact, StaffPrimaryBankAccount,

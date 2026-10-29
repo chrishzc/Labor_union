@@ -5,6 +5,10 @@ test_root: tests/domains/client-finance/subsystems/client-finance/
 integration_root: tests/domains/client-finance/subsystems/client-finance/integration/
 fixtures_root: tests/fixtures/
 modules:
+  pricing-configuration:
+    test_root: tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/
+    presentation_test_root: ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/pricing-configuration/
+    architecture: ../../../../../domains/client-finance/subsystems/client-finance/modules/pricing-configuration.md
   subsidy-advance-recovery-workbench:
     layout_status: custom_current
     test_root: tests/domains/client-finance/subsystems/client-finance/modules/subsidy-advance-recovery-workbench/

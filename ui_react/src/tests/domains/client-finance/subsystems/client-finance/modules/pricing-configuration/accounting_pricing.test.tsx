@@ -21,7 +21,7 @@ const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: '
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('Standalone accounting parameter policy', () => {
-  it('keeps four independent rates, inherits new identities and confirms saved version by readback', async () => {
+  it('keeps independent excess rates, inherits new identities and confirms saved version by readback', async () => {
     let catalog: PricingCatalog = { revision: 0, versions: [] };
     vi.mocked(accountingPricingClient.catalog).mockImplementation(async () => structuredClone(catalog));
     vi.mocked(accountingPricingClient.savePolicy).mockImplementation(async (policy, revision, reason) => {
@@ -47,6 +47,63 @@ describe('Standalone accounting parameter policy', () => {
     expect(screen.queryByRole('tab', { name: '收款帳戶' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '版本紀錄' }));
     await screen.findByText('synthetic-admin');
+  });
+});
+
+describe('Subsidy pricing protections', () => {
+  it.each(['citizen', 'social'] as const)('keeps historical unequal %s rates readable and blocks save until equal', async rule => {
+    const legacy: CasePricing = { ...current, terms: { ...current.terms, rule, client: { covered: 301, excess: 330 }, payroll: { covered: 300, excess: 310 } } };
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(legacy);
+    vi.mocked(accountingPricingClient.applyCase).mockImplementation(async (_case, terms) => {
+      vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({ ...legacy, revision: 1, terms });
+      return { revision: 1 };
+    });
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={vi.fn(async () => {})} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+    await screen.findByText('補助範圍內的客戶時薪與月嫂時薪必須相等，才能向政府報帳。');
+    const save = screen.getByRole('button', { name: '儲存本案調整' });
+    fireEvent.change(screen.getByLabelText('客戶用盡後時薪'), { target: { value: '340' } });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(accountingPricingClient.applyCase).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('月嫂補助內時薪'), { target: { value: '301' } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await screen.findByText('本案人工計價已儲存並確認；帳務已同步。');
+    const terms = vi.mocked(accountingPricingClient.applyCase).mock.calls[0][1];
+    expect(terms.client).toEqual({ covered: 301, excess: 340 });
+    expect(terms.payroll).toEqual({ covered: 301, excess: 310 });
+    expect(accountingPricingClient.previewCase).not.toHaveBeenCalled();
+  });
+
+  it('shows disabled zero non-citizen subsidy fields and keeps self-pay editable', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue({ ...current, terms: { ...current.terms, identity_name: '非市民', rule: 'non_citizen', subsidy_hours: 0, client: { covered: 0, excess: 330 }, payroll: { covered: 0, excess: 310 } } });
+    render(<UnsavedChangesProvider><CasePricingAdjustmentPanel caseNo="synthetic-case" revision={0} onCommitted={vi.fn(async () => {})} onStateChange={vi.fn()} /></UnsavedChangesProvider>);
+    for (const label of ['補助時數上限（小時）', '客戶補助內時薪', '月嫂補助內時薪']) {
+      const field = await screen.findByLabelText(label);
+      expect(field).toHaveValue(0); expect(field).toBeDisabled();
+    }
+    expect(screen.getByLabelText('客戶用盡後時薪')).toHaveValue(330);
+    expect(screen.getByLabelText('月嫂用盡後時薪')).toHaveValue(310);
+    fireEvent.change(screen.getByLabelText('客戶用盡後時薪'), { target: { value: '340' } });
+    expect(screen.getByRole('button', { name: '儲存本案調整' })).toBeEnabled();
+  });
+
+  it('protects identity and twins policy settings, with zero non-citizen covered rates', async () => {
+    vi.mocked(accountingPricingClient.catalog).mockResolvedValue({ revision: 0, versions: [] });
+    render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
+    expect(await screen.findByLabelText('非市民 客戶補助內時薪')).toHaveValue(0);
+    expect(screen.getByLabelText('非市民 月嫂補助內時薪')).toHaveValue(0);
+    expect(screen.getByLabelText('非市民 客戶用盡後時薪')).toHaveValue(320);
+    fireEvent.change(screen.getByLabelText('社福 客戶補助內時薪'), { target: { value: '351' } });
+    const save = screen.getByRole('button', { name: '儲存新版本' });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('社福 月嫂補助內時薪'), { target: { value: '351' } });
+    expect(save).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('雙胞胎客戶補助內時薪'), { target: { value: '451' } });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('雙胞胎月嫂補助內時薪'), { target: { value: '451' } });
+    expect(save).toBeEnabled();
+    expect(accountingPricingClient.savePolicy).not.toHaveBeenCalled();
   });
 });
 

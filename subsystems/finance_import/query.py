@@ -10,6 +10,7 @@ from datetime import date, datetime
 from decimal import Decimal
 import json
 from typing import Any
+from domains.finance_import.statement_archive import bank_import_type
 
 
 _MAXIMUM_PAGE_SIZE = 100
@@ -128,6 +129,7 @@ class FinanceImportReviewRowSummary:
     occurrence_count: int
     available_actions: tuple[str, ...]
     created_at: datetime
+    bank_type: str = "legacy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,7 +386,7 @@ class FinanceImportQueryService:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 f"""
-                SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.direction,
+                SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.direction, finance_row.format_id,
                        finance_row.debit, finance_row.credit, finance_row.reconciliation_status,
                        finance_row.created_at, event.classification_type,
                        event.disposition, event.available_actions,
@@ -507,6 +509,7 @@ def _review_row(row: dict[str, Any]) -> FinanceImportReviewRowSummary:
         str(row["disposition"]), str(row["reconciliation_status"]),
         str(row["source_sheet"]), int(row["source_row"]), int(row["occurrence_count"]),
         _text_tuple(row.get("available_actions")), row["created_at"],
+        bank_import_type(str(row.get("format_id", "legacy")), str(row["direction"])),
     )
 
 

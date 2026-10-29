@@ -1,0 +1,17 @@
+.case-accounting { display: grid; gap: 18px; }
+.case-accounting-card { background: #fff; border: 1px solid #f0d9cf; border-radius: 16px; padding: 22px; margin: 14px 0; min-width: 0; }
+.case-accounting-search { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.case-accounting-field { display: grid; gap: 8px; flex: 1 1 240px; min-width: 0; }
+.case-accounting-search input, .case-accounting-search select { width: 100%; min-width: 0; box-sizing: border-box; padding: 12px; border: 1px solid #dec8bd; border-radius: 8px; background: #fff; }
+.case-accounting-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.case-accounting-summary article { display: grid; gap: 12px; padding: 22px; background: #fff; border: 1px solid #f0d9cf; border-radius: 14px; }
+.case-accounting-summary strong { font-size: 1.7rem; overflow-wrap: anywhere; }
+.case-accounting-summary small { color: #856b5d; }
+.case-accounting-warning { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid #f3e7e1; }
+.case-accounting-warning p { margin: 8px 0; }
+.case-accounting-card table { white-space: nowrap; }
+.statement-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.statement-fields label { display: grid; gap: 6px; }
+.statement-fields input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #dec8bd; border-radius: 6px; padding: 9px; }
+@media (max-width: 900px) { .case-accounting-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .statement-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .case-accounting-card { padding: 14px; } .case-accounting-summary, .statement-fields { grid-template-columns: 1fr; } .case-accounting-warning { align-items: flex-start; flex-direction: column; } }

@@ -22,6 +22,7 @@ from domains.client_finance.client_refund_reversal import (
     ClientRefundReturnBankFact,
     ClientReversalTarget,
 )
+from domains.finance_import.cancellation_code import extract_sinopac_account_reference
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
@@ -362,7 +363,7 @@ def _load_refund_bank_rows(cursor, identities, lock):
     row_ids = tuple(_positive_row_id(item) for item in identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
+        "SELECT fir.id,fir.format_id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
         "fir.currency,COALESCE(classification.classification_type,"
         "fir.classification_type) AS effective_classification_type,"
         "fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
@@ -489,10 +490,17 @@ def _refund_row_is_eligible(row, case_no, expected_classification, recipient_acc
         and row.get("effective_classification_type") == expected_classification
         and row.get("reconciliation_status") == "pending"
         and row.get("transaction_date") is not None
-        and row.get("resolved_counterparty_account") == recipient_account
+        and _refund_source_account(row) == recipient_account
         and row.get("ledger_entry_id") is None
         and _is_twd(row.get("currency"))
     )
+
+
+def _refund_source_account(row):
+    if row.get("format_id") == "sinopac":
+        references = _json_object(row.get("bank_references"))
+        return extract_sinopac_account_reference(references.get("交易參考編號"))
+    return row.get("resolved_counterparty_account")
 
 
 def _refund_return_row_is_eligible(row):
@@ -782,7 +790,7 @@ def _public_payable_obligations(rows):
 
 def _query_candidate_outgoing_bank_rows(cursor):
     cursor.execute(
-        "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
+        "SELECT fir.id,fir.format_id,fir.bank_references,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
         "fir.currency,fir.reconciliation_status,fir.counterparty_account AS resolved_counterparty_account,"
         "COALESCE(classification.classification_type,fir.classification_type) "
         "AS effective_classification_type,ledger.id AS ledger_entry_id "
@@ -814,7 +822,7 @@ def _query_outgoing_bank_facts(rows, obligations, purpose):
             )
     facts = []
     for row in rows:
-        account = row.get("resolved_counterparty_account")
+        account = _refund_source_account(row)
         targets = accounts_to_obligations.get(str(account).strip(), ())
         if (
             row.get("effective_classification_type") != expected_classification

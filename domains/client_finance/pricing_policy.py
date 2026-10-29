@@ -20,9 +20,8 @@ class HourlyRates:
     excess: int
 
     def __post_init__(self):
-        for value in (self.covered, self.excess):
-            if type(value) is not int or value <= 0:
-                raise ValueError("pricing_hourly_rate_must_be_positive_integer")
+        if type(self.covered) is not int or self.covered < 0 or type(self.excess) is not int or self.excess <= 0:
+            raise ValueError("pricing_hourly_rate_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +44,18 @@ class CasePricingTerms:
             raise ValueError("pricing_subsidy_hours_invalid")
         if self.rule is IdentityRule.NON_CITIZEN and hours != 0:
             raise ValueError("pricing_non_citizen_subsidy_hours_must_be_zero")
+        if hours > 0 and (self.client.covered == 0 or self.payroll.covered == 0):
+            raise ValueError("pricing_covered_rate_must_be_positive")
+        if self.rule is IdentityRule.NON_CITIZEN:
+            # Unused historical covered rates carry no entitlement or money.
+            object.__setattr__(self, "client", HourlyRates(0, self.client.excess))
+            object.__setattr__(self, "payroll", HourlyRates(0, self.payroll.excess))
         object.__setattr__(self, "subsidy_hours", hours)
+
+    def validate_subsidy_rates(self) -> None:
+        """Guard new settings; historical unequal settings remain readable."""
+        if self.client.covered != self.payroll.covered:
+            raise ValueError("pricing_covered_rates_must_match")
 
     def split_hours(self, total: Decimal) -> tuple[Decimal, Decimal]:
         total = Decimal(str(total))
@@ -96,6 +106,14 @@ class PricingPolicy:
         if not twins:
             return result
         return CasePricingTerms(result.identity_name, result.rule, result.subsidy_hours, self.twins_client, self.twins_payroll)
+
+    def validate_subsidy_rates(self) -> None:
+        for item in self.identities:
+            item.validate_subsidy_rates()
+        if self.twins_client.covered != self.twins_payroll.covered:
+            raise ValueError("pricing_covered_rates_must_match")
+        if self.twins_client.covered == 0:
+            raise ValueError("pricing_covered_rate_must_be_positive")
 
 
 def whole_ntd(value: Decimal) -> int:

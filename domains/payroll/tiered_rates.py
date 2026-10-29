@@ -13,10 +13,17 @@ class TieredPayrollRate:
     directly_subsidized: bool
 
     def __post_init__(self):
-        if any(type(v) is not int or v <= 0 for v in (self.covered_rate, self.excess_rate)):
+        if (type(self.covered_rate) is not int or self.covered_rate < 0
+                or type(self.excess_rate) is not int or self.excess_rate <= 0):
             raise ValueError("payroll_tiered_rate_invalid")
         if not self.subsidy_hours.is_finite() or self.subsidy_hours < 0:
             raise ValueError("payroll_subsidy_hours_invalid")
+        if self.subsidy_hours > 0 and self.covered_rate == 0:
+            raise ValueError("payroll_tiered_rate_invalid")
+
+    @property
+    def base_rate(self) -> int:
+        return self.covered_rate if self.subsidy_hours > 0 else self.excess_rate
 
 
 def funding_due_date(completed_on: date, *, directly_subsidized: bool) -> date:

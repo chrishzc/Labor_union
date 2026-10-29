@@ -32,6 +32,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
   const [message, setMessage] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const [identity] = useState(() => ({ idempotencyKey: `finance-correction-${crypto.randomUUID()}`, correlationId: `finance-correction-${crypto.randomUUID()}` }));
   const [retryCommand, setRetryCommand] = useState<CorrectionCommand | null>(null);
   const invalidate = () => { setPayoutTarget(null); setPreview(null); setSelection(null); setMessage(''); };
@@ -73,7 +74,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
     setBusy(true); setSubmitted(true);
     try {
       const job = await financeImportCorrectionClient.apply(command.preview, command.selection, command.identity);
-      setRetryCommand(null); setJobId(job.job_id); setMessage('更正已受理，請查詢處理結果；尚未完成核銷。');
+      setRetryCommand(null); setJobId(job.job_id); setMessage('更正已受理，正在確認核銷結果。');
+      await readOutcome(job.job_id, command.preview);
     }
     catch (error) {
       setRetryCommand(command);
@@ -82,17 +84,21 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
     }
     finally { setBusy(false); }
   };
-  const readOutcome = async () => {
-    if (!jobId || !preview) return;
+  const readOutcome = async (selectedJob = jobId, checkedPreview = preview) => {
+    if (!selectedJob || !checkedPreview) return;
     setBusy(true);
     try {
-      const outcome = await financeImportCorrectionClient.queryOutcome(jobId);
+      let outcome = await financeImportCorrectionClient.queryOutcome(selectedJob);
+      for (let attempt = 0; attempt < 9 && !['succeeded', 'failed', 'cancelled'].includes(outcome.status); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        outcome = await financeImportCorrectionClient.queryOutcome(selectedJob);
+      }
       if (outcome.status === 'succeeded') {
         if (
           !outcome.receipt
           || outcome.receipt.row_identity !== rowIdentity
-          || outcome.receipt.batch_identity !== preview.candidate.batch_identity
-          || outcome.receipt.preview_fingerprint !== preview.preview_fingerprint
+          || outcome.receipt.batch_identity !== checkedPreview.candidate.batch_identity
+          || outcome.receipt.preview_fingerprint !== checkedPreview.preview_fingerprint
         ) throw new Error('更正收據尚未確認，不能判定完成。');
         if (kind === 'client_refund') {
           const fresh = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
@@ -100,12 +106,12 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
           setSelected([]);
           setMessage(fresh.refund_obligations.length ? '退款核銷完成；已更新剩餘待退款，後續清冊只列餘額。' : '退款核銷完成；本案一般退款已退清。');
         } else setMessage('帳務更正完成，已確認核銷收據。');
-        onPosted?.();
-      } else setMessage(outcome.status === 'failed' || outcome.status === 'cancelled' ? '更正未完成，請重新查詢帳務資料。' : '更正仍在處理中。');
+        setCompleted(true); onPosted?.();
+      } else { if (outcome.status === 'failed' || outcome.status === 'cancelled') setCompleted(true); setMessage(outcome.status === 'failed' || outcome.status === 'cancelled' ? '更正未完成，請重新查詢帳務資料。' : '更正仍在處理中。'); }
     } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
     finally { setBusy(false); }
   };
-  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '部分退款': partialRefund, '原因': reason }, { busy, resetKey: submitted });
+  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '部分退款': partialRefund, '原因': reason }, { enabled: kind !== 'staff_payout' || !payoutTarget, busy: busy || payoutBusy || (!!retryCommand && !submitted) || (!!jobId && !completed), resetKey: completed, save: review, discard: () => { setSelected([]); setTarget(''); setReason(''); setPartialRefund(false); invalidate(); } });
 
   return <section aria-label="銀行款項更正" className="order-case-review-note finance-correction-form">
     <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款或月嫂付款。金額由後端核對，不可手動標記已付。</p>

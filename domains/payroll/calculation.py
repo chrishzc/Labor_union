@@ -72,7 +72,7 @@ class AssignmentRateSnapshot:
         _validate_identity(self.assignment_identity, "assignment identity")
         _validate_identity(self.policy_version, "payroll policy version")
         _require_nonnegative_money(self.hourly_rate, "hourly rate")
-        if self.tiered is not None and self.hourly_rate.amount != self.tiered.covered_rate:
+        if self.tiered is not None and self.hourly_rate.amount != self.tiered.base_rate:
             raise ValueError("payroll_tiered_snapshot_mismatch")
         if self.tiered is None and self.hourly_rate != _HOURLY_RATE_BY_POLICY[self.policy_kind]:
             raise ValueError("payroll_rate_snapshot_mismatch")

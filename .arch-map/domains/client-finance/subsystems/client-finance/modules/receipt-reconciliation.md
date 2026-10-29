@@ -9,6 +9,8 @@
 等待訂金檔期釋放可借用原外層 UoW 的唯讀 `query_unreceived_deposit`：完整查核 account 版本、同案 obligations／義務事件／ledger，以 Domain-owned `UnreceivedDepositConfirmation` 提供未建立帳务且未收款證明；不因缺 settlement projection 推定零、不建立 account 或帳務根事實。
 
 ## Implementation
+- `db/schema_parts/236_client_refund_overage_receipt.sql`, `db/schema_parts/1058_client_refund_overage_receipt.sql` — append the already-supported refund_overage kind to persistence receipts; preserve old enum ordinals and receipt rows.
+- case accounting projection: `subsystems/client_finance/case_accounting_query.py`, `infrastructure/mysql/client_payments_query_repository.py` — current obligation events, signed allocations, explicit surplus disposition and valid historical evidence; query only, typed consumer in Finance Import workspace.
 - primary:
   - `domains/client_finance/reconciliation.py`
   - `subsystems/client_finance/reconciliation_workflow.py`

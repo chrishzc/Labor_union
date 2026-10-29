@@ -14,6 +14,74 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+class ManualStatementBody(_StrictModel):
+    fields: dict[str, str | StrictInt | None]
+    duplicate_of: str | None = Field(default=None, min_length=1, max_length=191)
+
+
+class StatementDuplicateBody(_StrictModel):
+    candidate_identity: str = Field(min_length=1, max_length=191)
+    kept_identity: str = Field(min_length=1, max_length=191)
+
+
+class StatementCommandReceiptView(_StrictModel):
+    identity: str | None
+    saved_count: int
+    excluded_count: int
+
+
+class AccountingWarningBody(_StrictModel):
+    item_identity: str = Field(min_length=1, max_length=191)
+    kind: Literal["over_received", "over_paid", "under_paid"]
+    expected_ntd: StrictInt
+    actual_ntd: StrictInt
+    difference_ntd: StrictInt
+    source_version: str = Field(min_length=1, max_length=191)
+
+
+class AccountingWarningView(AccountingWarningBody):
+    dismissed: bool
+    dismissed_by: str | None
+    dismissed_at: str | None
+
+
+class AccountingItemView(_StrictModel):
+    identity: str
+    direction: Literal["receivable", "payable"]
+    label: str
+    party: str
+    expected_ntd: int
+    actual_ntd: int
+    has_payment: bool
+    version: str
+    due_date: str | None
+    summary_included: bool = True
+    unallocated_surplus_ntd: int = 0
+
+
+class AccountingTransactionView(_StrictModel):
+    identity: str
+    item_identity: str
+    occurred_on: str
+    kind: str
+    amount_ntd: int
+    bank: str | None
+
+
+class CaseAccountingView(_StrictModel):
+    case_no: str
+    client_name: str
+    receivable_ntd: int | None
+    received_ntd: int | None
+    payable_ntd: int | None
+    paid_ntd: int | None
+    pending_warning_count: int
+    client_items: list[AccountingItemView]
+    staff_items: list[AccountingItemView]
+    transactions: list[AccountingTransactionView]
+    warnings: list[AccountingWarningView]
+
+
 class FinanceImportBatchPreviewBody(_StrictModel):
     batch_identity: str = Field(min_length=1, max_length=191)
 
@@ -59,6 +127,7 @@ class FinanceImportReviewRowSummaryView(_StrictModel):
     direction: str
     amount_ntd: int = Field(gt=0)
     classification_type: str
+    bank_type: Literal["receivable", "payable", "government_subsidy", "subsidy_return", "review", "legacy"] = "legacy"
     disposition: str
     reconciliation_status: str
     source_sheet: str

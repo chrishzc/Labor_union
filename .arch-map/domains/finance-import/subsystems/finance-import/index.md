@@ -16,6 +16,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — receipt/outbox/idempotency
 
 ## Modules
+- `statement-workspace` — successful bank archive, manual statements, case accounting and persistent warning acknowledgement; path: `modules/statement-workspace.md`
 - `import006-owner-current-facts` — retired IMPORT-006 owner-validation／migration evidence only；path: `modules/import006-owner-current-facts.md`
 - `finance-import-correction` — Finance Import correction Query／Preview／Apply and durable outcome client contract；path: `modules/finance-import-correction.md`
 

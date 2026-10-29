@@ -10,33 +10,33 @@ from subsystems.client_finance.pricing_configuration import (
 
 
 def terms(rule=IdentityRule.SOCIAL):
-    return CasePricingTerms("社福", rule, Decimal(120), HourlyRates(350, 300), HourlyRates(360, 310))
+    return CasePricingTerms("社福", rule, Decimal(120), HourlyRates(350, 300), HourlyRates(350, 310))
 
 
-def test_customer_and_payroll_tiers_are_independent_and_claim_uses_covered_rate():
+def test_covered_rates_match_and_excess_tiers_remain_independent():
     facts = CasePricingFacts("case-1", 0, (1, 2, 3), terms(), "policy",
         tuple(PricingServiceDay(date(2026, 10, day), Decimal(8)) for day in range(1, 21)), 1000)
     impact = pricing_impact(terms(), facts)
     assert (impact.covered_hours, impact.excess_hours) == (120, 40)
     assert impact.client_amount == 40 * 300 + 1000
-    assert impact.staff_total_amount == 120 * 360 + 40 * 310 + 1000
-    assert impact.subsidy_amount == 120 * 360
+    assert impact.staff_total_amount == 120 * 350 + 40 * 310 + 1000
+    assert impact.subsidy_amount == 120 * 350
     assert impact.subsidy_return_amount == 0
 
 
 def test_cutoff_inside_a_service_day_and_customer_advance_refund():
-    pricing = CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(10), HourlyRates(300, 320), HourlyRates(350, 330))
+    pricing = CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(10), HourlyRates(300, 320), HourlyRates(300, 330))
     assert pricing.client_charge(Decimal(8), Decimal(8)) == 2 * 300 + 6 * 320
     assert pricing.subsidy_return(Decimal(16)) == 10 * 300
     from domains.government_subsidy.pricing import subsidy_claim_amount
-    assert subsidy_claim_amount(Decimal(16), pricing.subsidy_hours, pricing.payroll.covered) == 10 * 350
+    assert subsidy_claim_amount(Decimal(16), pricing.subsidy_hours, pricing.payroll.covered) == 10 * 300
 
 
 def test_policy_birth_override_preserves_identity_subsidy_cap():
     policy = PricingPolicy(date(2026, 11, 1), (
         CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
         terms(), CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 320), HourlyRates(320, 320))),
-        HourlyRates(450, 400), HourlyRates(460, 410))
+        HourlyRates(450, 400), HourlyRates(450, 410))
     case = policy.for_case("低收入戶", twins=True)
     assert case.subsidy_hours == 120
     assert case.client.excess == 400
@@ -46,6 +46,45 @@ def test_policy_birth_override_preserves_identity_subsidy_cap():
 def test_non_citizen_cannot_acquire_subsidy_through_numeric_override():
     with pytest.raises(ValueError, match="non_citizen"):
         CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(40), HourlyRates(320, 320), HourlyRates(320, 320))
+
+
+@pytest.mark.parametrize('rule', [IdentityRule.CITIZEN, IdentityRule.SOCIAL])
+def test_new_case_settings_reject_unequal_covered_rates_but_legacy_is_readable(rule):
+    from dataclasses import replace
+    invalid = replace(terms(), rule=rule, client=HourlyRates(301, 330), payroll=HourlyRates(300, 310))
+    class Repository:
+        def case(self, case_no, *, lock=False):
+            return CasePricingFacts(case_no, 0, (1, 2, 3), invalid, 'manual', (), 0)
+    application = PricingConfigurationApplication(Repository(), lambda: pytest.fail('preview wrote'))
+    assert application.query_case('legacy-unequal')[0].terms == invalid
+    with pytest.raises(ValueError, match='pricing_covered_rates_must_match'):
+        application.preview_case('legacy-unequal', invalid, 0)
+    fixed = replace(invalid, payroll=HourlyRates(301, 310))
+    assert application.preview_case('legacy-unequal', fixed, 0).candidate == fixed
+
+
+def test_non_citizen_unused_covered_rates_are_zero_and_self_pay_is_preserved():
+    legacy = CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 330), HourlyRates(320, 310))
+    assert legacy.client == HourlyRates(0, 330) and legacy.payroll == HourlyRates(0, 310)
+    legacy.validate_subsidy_rates()
+    facts = CasePricingFacts('non-citizen', 0, (1,), legacy, 'policy', (PricingServiceDay(date(2026, 10, 1), Decimal(8)),), 0)
+    impact = pricing_impact(legacy, facts)
+    assert (impact.covered_hours, impact.subsidy_amount, impact.subsidy_return_amount, impact.staff_covered_amount) == (0, 0, 0, 0)
+    assert (impact.client_amount, impact.staff_total_amount) == (2640, 2480)
+
+
+def test_policy_guards_identity_and_twins_covered_rates():
+    from dataclasses import replace
+    valid = PricingPolicy(date(2026, 11, 1), (
+        CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 330), HourlyRates(300, 310)),
+        terms(), CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 320), HourlyRates(0, 310))),
+        HourlyRates(450, 460), HourlyRates(450, 420))
+    valid.validate_subsidy_rates()
+    for invalid in (replace(valid, twins_payroll=HourlyRates(451, 420)), replace(valid, identities=valid.identities + (replace(terms(), identity_name='新增社福', payroll=HourlyRates(351, 310)),))):
+        with pytest.raises(ValueError, match='pricing_covered_rates_must_match'):
+            invalid.validate_subsidy_rates()
+    non_citizen_twins = valid.for_case('非市民', twins=True)
+    assert non_citizen_twins.client == HourlyRates(0, 460) and non_citizen_twins.payroll == HourlyRates(0, 420)
 
 
 def test_case_preview_changes_when_owner_facts_change_and_is_read_only():

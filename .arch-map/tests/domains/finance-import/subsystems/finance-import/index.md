@@ -10,6 +10,10 @@ integration_root: tests/test_finance_source_review_mysql_e2e.py
 fixtures_root: tests/fixtures/
 
 modules:
+  statement-workspace:
+    layout_status: custom_current
+    test_root: tests/domains/finance-import/subsystems/finance-import/integration/test_statement_workspace.py
+    test_root: ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/
   finance-import-correction:
     layout_status: custom_current
     test_root: ui_react/src/tests/finance_import_correction_client.test.ts

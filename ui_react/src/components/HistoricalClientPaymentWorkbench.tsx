@@ -198,7 +198,7 @@ export const HistoricalClientPaymentWorkbench: React.FC<{ caseNo: string }> = ({
       if (isActive(request)) setMessage(text);
     } finally { busyRef.current = false; if (activeCase.current === caseNo) setBusy(false); }
   };
-  useUnsavedDraft('歷史客戶款項確認', { '款項方向': direction, '款項項目': selected, '確認狀態': confirmation, '付款日期': paymentDate, '日期不明原因': unknownReason, '來源狀態': sourceAvailability, '佐證': evidenceReference, '原因': reason }, { busy, resetKey: readback });
+  useUnsavedDraft('歷史客戶款項確認', { '款項方向': direction, '款項項目': selected, '確認狀態': confirmation, '付款日期': paymentDate, '日期不明原因': unknownReason, '來源狀態': sourceAvailability, '佐證': evidenceReference, '原因': reason }, { busy: busy || protectedFlow, resetKey: readback, save: runPreview, discard: () => { setSelected([]); setReason(''); setPaymentDate(''); setUnknownReason(''); setEvidenceReference(''); setPreview(null); } });
 
 
   return <section className="finance-detail-block" aria-label="歷史客戶付款人工確認">

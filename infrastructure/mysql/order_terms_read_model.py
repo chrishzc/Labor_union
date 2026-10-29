@@ -663,7 +663,8 @@ def _load_client_finance(cursor, order_row, schedule_rows, lock):
     from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
     pricing = load_case_pricing(cursor, order_row, lock=lock)
     if pricing is not None:
-        source = replace(source, payment_terms=replace(source.payment_terms, client_hourly_rate=MoneyNTD(pricing.client.covered)), pricing=pricing)
+        rate = pricing.client.covered if pricing.subsidy_hours > 0 else pricing.client.excess
+        source = replace(source, payment_terms=replace(source.payment_terms, client_hourly_rate=MoneyNTD(rate)), pricing=pricing)
     return replace(source,effective_start_date=order_row.get('actual_start_date'))
 
 
@@ -774,8 +775,8 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
     if pricing is not None:
         tiers = payroll_tiers(pricing)
         source = replace(source,
-            source_terms=tuple(replace(item, hourly_rate=MoneyNTD(tiers.covered_rate), tiered=tiers) for item in source.source_terms),
-            case_policy=replace(source.case_policy, hourly_rate=MoneyNTD(tiers.covered_rate), tiered=tiers) if source.case_policy else None)
+            source_terms=tuple(replace(item, hourly_rate=MoneyNTD(tiers.base_rate), tiered=tiers) for item in source.source_terms),
+            case_policy=replace(source.case_policy, hourly_rate=MoneyNTD(tiers.base_rate), tiered=tiers) if source.case_policy else None)
     cursor.execute(
         "SELECT recovery.staff_id,SUM(recovery.remaining_amount_ntd) AS remaining_ntd "
         "FROM staff_overpayment_recoveries recovery "

@@ -58,7 +58,7 @@ describe('PaymentDestinationConfigurationPanel', () => {
     expect(paymentDestinationClient.apply).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '儲存帳戶' }));
     await waitFor(() => expect(paymentDestinationClient.apply).toHaveBeenCalledOnce());
-    expect(paymentDestinationClient.apply).toHaveBeenCalledWith(expect.objectContaining({ preview_fingerprint: 'a'.repeat(64) }), note.trim());
+    expect(paymentDestinationClient.apply).toHaveBeenCalledWith(expect.objectContaining({ preview_fingerprint: 'a'.repeat(64) }), note.trim(), expect.any(String));
     expect(await screen.findByText(/已更新/)).toBeInTheDocument();
     expect(window.alert).not.toHaveBeenCalled();
   });

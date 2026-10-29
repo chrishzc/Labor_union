@@ -27,13 +27,13 @@ export const paymentDestinationClient = {
   async preview(accountDisplay: string, expectedRevision: number): Promise<PaymentDestinationPreview> {
     return decode(PreviewSchema, await transport.post('/api/v1/client-finance/payment-destination/preview', { account_display: accountDisplay, expected_revision: expectedRevision }, options()));
   },
-  async apply(preview: PaymentDestinationPreview, reason: string) {
+  async apply(preview: PaymentDestinationPreview, reason: string, key = `payment-destination-${crypto.randomUUID()}`) {
     return decode(ReceiptSchema, await transport.post('/api/v1/client-finance/payment-destination/apply', {
       account_display: preview.candidate_account_display,
       expected_revision: preview.expected_revision,
       preview_fingerprint: preview.preview_fingerprint,
       reason,
-    }, options({ 'Idempotency-Key': `payment-destination-${crypto.randomUUID()}`, 'X-Correlation-ID': `payment-destination-${crypto.randomUUID()}` })));
+    }, options({ 'Idempotency-Key': key, 'X-Correlation-ID': `payment-destination-${crypto.randomUUID()}` })));
   },
 };
 

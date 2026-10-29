@@ -66,7 +66,7 @@ def policy():
             "client": {"covered": rate, "excess": excess or rate}, "payroll": {"covered": rate, "excess": excess or rate}}
     return {"effective_on": (date.today() - timedelta(days=1)).isoformat(),
         "identities": [identity("補助市民", "citizen", 40, 300), identity("社福", "social", 120, 350, 300), identity("非市民", "non_citizen", 0, 320), identity("新增社福身分", "social", 100, 340, 290)],
-        "twins_client": {"covered": 450, "excess": 400}, "twins_payroll": {"covered": 460, "excess": 410}}
+        "twins_client": {"covered": 450, "excess": 400}, "twins_payroll": {"covered": 450, "excess": 410}}
 
 
 def seed_case(case_no, identity="社福"):
@@ -111,7 +111,7 @@ def test_policy_replay_conflict_case_binding_and_manual_http_flow(client):
     assert current["source"] == "policy"
     assert current["impact"]["client_amount"] == 12000
     assert current["impact"]["staff_total_amount"] == 54000
-    terms = {**current["terms"], "client": {"covered": 350, "excess": 280}, "payroll": {"covered": 360, "excess": 310}}
+    terms = {**current["terms"], "client": {"covered": 360, "excess": 280}, "payroll": {"covered": 360, "excess": 310}}
     request = {"terms": terms, "expected_revision": 0}
     preview = post(client, "/api/v1/accounting-pricing/cases/pricing-new/preview", request, "pricing-preview")
     assert preview["after"]["client_amount"] == 11200
@@ -165,7 +165,7 @@ def seed_assignment(case_no):
         with connection.cursor() as cursor:
             cursor.execute("INSERT INTO staff(name) VALUES('Synthetic Pricing Staff')")
             staff_id = cursor.lastrowid
-            cursor.execute("INSERT INTO staff_bank_accounts(staff_id,bank_code,account_no,is_primary) VALUES(%s,'012',%s,1)", (staff_id, '0' * 12))
+            cursor.execute("INSERT INTO staff_bank_accounts(staff_id,bank_code,account_no,is_primary) VALUES(%s,'012',%s,1)", (staff_id, f'{staff_id:012d}'))
             cursor.execute("INSERT INTO scheduling_generations(case_no,generation_number,resulting_aggregate_version,status,effective_marker,created_by,change_reason) VALUES(%s,1,1,'effective',1,'pricing-test','synthetic fixture')", (case_no,))
             generation_id = cursor.lastrowid
             cursor.execute("UPDATE scheduling_aggregates SET aggregate_version=1,generation_counter=1,effective_generation_id=%s WHERE case_no=%s", (generation_id, case_no))
@@ -207,7 +207,7 @@ def test_real_salary_writer_installments_export_and_repricing(client):
         connection.rollback()
 
         current = client.get('/api/v1/accounting-pricing/cases/pricing-scheduled').json()['data']
-        terms = {**current['terms'], 'payroll': {'covered':360,'excess':310}}
+        terms = {**current['terms'], 'client': {**current['terms']['client'], 'covered':360}, 'payroll': {'covered':360,'excess':310}}
         request = {'terms':terms,'expected_revision':current['revision']}
         preview = post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/preview',request,'scheduled-preview')
         apply = {**request,'preview_fingerprint':preview['preview_fingerprint'],'reason':'synthetic scheduled repricing'}
@@ -235,7 +235,7 @@ def test_real_salary_writer_installments_export_and_repricing(client):
             assert _query_obligation_rows(cursor,staff_id)[0]['due_date'] == '2026-12-15'
         connection.rollback()
         current = client.get('/api/v1/accounting-pricing/cases/pricing-scheduled').json()['data']
-        request = {'terms':{**current['terms'],'payroll':{'covered':340,'excess':300}},'expected_revision':current['revision']}
+        request = {'terms':{**current['terms'],'client':{**current['terms']['client'],'covered':340},'payroll':{'covered':340,'excess':300}},'expected_revision':current['revision']}
         preview = post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/preview',request,'paid-preview')
         apply = {**request,'preview_fingerprint':preview['preview_fingerprint'],'reason':'synthetic paid correction'}
         post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/apply',apply,'paid-apply')
@@ -265,7 +265,7 @@ def test_owner_failure_rolls_back_every_repricing_write_and_original_key_can_ret
     import infrastructure.mysql.payroll_terms_writer as payroll_writer
     case_no = 'pricing-scheduled'
     current = client.get(f'/api/v1/accounting-pricing/cases/{case_no}').json()['data']
-    request = {'terms':{**current['terms'],'client':{'covered':350,'excess':290}},'expected_revision':current['revision']}
+    request = {'terms':{**current['terms'],'client':{**current['terms']['client'],'excess':290}},'expected_revision':current['revision']}
     preview = post(client,f'/api/v1/accounting-pricing/cases/{case_no}/preview',request,'rollback-preview')
     apply = {**request,'preview_fingerprint':preview['preview_fingerprint'],'reason':'synthetic atomic rollback'}
     def fail_after_finance(*args):
@@ -291,7 +291,7 @@ def test_settled_subsidy_is_a_typed_zero_write_blocker(client):
     finally:
         connection.close()
     current = client.get('/api/v1/accounting-pricing/cases/pricing-scheduled').json()['data']
-    request = {'terms':{**current['terms'],'payroll':{'covered':341,'excess':300}},'expected_revision':current['revision']}
+    request = {'terms':{**current['terms'],'client':{**current['terms']['client'],'covered':341},'payroll':{'covered':341,'excess':300}},'expected_revision':current['revision']}
     preview = post(client,'/api/v1/accounting-pricing/cases/pricing-scheduled/preview',request,'settled-preview')
     apply = {**request,'preview_fingerprint':preview['preview_fingerprint'],'reason':'must block settled subsidy'}
     response = client.post('/api/v1/accounting-pricing/cases/pricing-scheduled/apply',json=apply,headers={'Idempotency-Key':'settled-apply'})
@@ -344,5 +344,71 @@ def test_contract_estimate_and_government_projection_use_current_case_tiers(clie
         assert '34,000 元：2026-12-15' in facts['staff_payable_due_date']
         projected = MySqlOrderGovernmentSubsidyProjectionRepository(connection).query_order_projection_facts(('pricing-scheduled',))
         assert projected[0].estimated_subsidy_amount_ntd == 40800
+    finally:
+        connection.close()
+
+
+def test_unequal_subsidy_case_and_policy_commands_are_zero_write_422(client):
+    from copy import deepcopy
+    case_no = 'pricing-subsidy-guard'
+    seed_case(case_no)
+    bootstrap_case(client, case_no)
+    path = f'/api/v1/accounting-pricing/cases/{case_no}'
+    current = client.get(path).json()['data']
+    invalid = deepcopy(current['terms'])
+    invalid['client']['covered'] += 1
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT (SELECT COUNT(*) FROM case_pricing_events) AS events,(SELECT COUNT(*) FROM accounting_pricing_receipts) AS receipts')
+            before = cursor.fetchone()
+        for suffix in ('preview', 'apply'):
+            response = client.post(path + '/' + suffix, json={'terms': invalid, 'expected_revision': current['revision']}, headers={'Idempotency-Key': 'invalid-' + suffix})
+            assert response.status_code == 422 and 'pricing_covered_rates_must_match' in response.text, response.text
+        assert client.get(path).json()['data'] == current
+        catalog = client.get('/api/v1/accounting-pricing').json()['data']
+        for twin in (False, True):
+            invalid_policy = policy()
+            if twin:
+                invalid_policy['twins_payroll']['covered'] += 1
+            else:
+                invalid_policy['identities'][0]['payroll']['covered'] += 1
+            response = client.post('/api/v1/accounting-pricing/policies', json={'policy': invalid_policy, 'expected_revision': catalog['revision']}, headers={'Idempotency-Key': 'invalid-policy-' + str(twin)})
+            assert response.status_code == 422 and 'pricing_covered_rates_must_match' in response.text, response.text
+        assert client.get('/api/v1/accounting-pricing').json()['data'] == catalog
+        connection.rollback()
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT (SELECT COUNT(*) FROM case_pricing_events) AS events,(SELECT COUNT(*) FROM accounting_pricing_receipts) AS receipts')
+            assert cursor.fetchone() == before
+    finally:
+        connection.close()
+
+
+def test_non_citizen_zero_subsidy_and_independent_self_pay_through_real_writers(client):
+    from infrastructure.mysql.payroll_rebuild_repository import MySqlPayrollRebuildRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.payroll.rebuild_workflow import PayrollRebuildWorkflow
+    from shared_kernel.identities import ActorContext, IdempotencyKey, CorrelationId
+    case_no = 'pricing-non-citizen-zero'
+    seed_case(case_no, identity='非市民')
+    bootstrap_case(client, case_no)
+    staff_id = seed_assignment(case_no)
+    connection = mysql_adapter.get_connection()
+    try:
+        repository = MySqlPayrollRebuildRepository(connection)
+        with MySqlUnitOfWork(connection) as unit:
+            PayrollRebuildWorkflow(repository, None).synchronize_in_unit_of_work(case_no, actor=ActorContext('pricing-test'), key=IdempotencyKey('nc-initial'), correlation_id=CorrelationId('nc-initial'))
+            unit.commit()
+        path = f'/api/v1/accounting-pricing/cases/{case_no}'
+        current = client.get(path).json()['data']
+        assert current['terms']['subsidy_hours'] == current['terms']['client']['covered'] == current['terms']['payroll']['covered'] == 0
+        candidate = {**current['terms'], 'client': {'covered': 0, 'excess': 330}, 'payroll': {'covered': 0, 'excess': 310}}
+        post(client, path + '/apply', {'terms': candidate, 'expected_revision': current['revision']}, 'nc-direct-save')
+        after = client.get(path).json()['data']
+        assert after['terms'] == candidate
+        assert all(after['impact'][key] == 0 for key in ('covered_hours', 'staff_covered_amount', 'subsidy_amount', 'subsidy_return_amount'))
+        assert (after['impact']['client_amount'], after['impact']['staff_total_amount']) == (52800, 49600)
+        assert repository.query_staff_month(staff_id, 2026, 11).payable_total.amount == 49600
+        assert repository.query_staff_month(staff_id, 2026, 12).payable_total.amount == 0
     finally:
         connection.close()

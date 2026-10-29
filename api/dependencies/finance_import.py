@@ -199,6 +199,31 @@ def get_finance_import_query_service():
         connection.close()
 
 
+def get_statement_archive_application():
+    from infrastructure.mysql.finance_statement_archive_repository import MySqlStatementArchiveRepository
+    from subsystems.finance_import.statement_archive import StatementArchiveApplication
+    connection = get_connection()
+    try:
+        yield StatementArchiveApplication(MySqlStatementArchiveRepository(connection))
+    finally:
+        connection.close()
+
+
+def get_accounting_workspace():
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
+    from infrastructure.mysql.client_payments_query_repository import query_case_accounting
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    connection = get_connection()
+    try:
+        yield AccountingWorkspace(
+            MySqlAccountingWorkspaceState(connection), partial(query_case_accounting, connection),
+            partial(query_case_staff_accounting, connection),
+        )
+    finally:
+        connection.close()
+
+
 __all__ = [
     "FinanceImportApplication",
     "FinanceImportOwningDomainCompositePort",

@@ -1,9 +1,12 @@
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { historicalClientPaymentClient } from '../api/client_finance/historical_client_payment_client';
 import { sessionClient } from '../api/auth/session_client';
 import { transport } from '../api/shared/transport';
+
+function LeaveAction({ onLeave }: { onLeave: () => void }) { const { requestLeave } = useUnsavedNavigation(); return <button onClick={() => requestLeave(onLeave)}>離開付款頁</button>; }
 
 const obligation = {
   obligation_identity: 'client-obligation:1', case_no: 'CASE-1', obligation_type: 'deposit',
@@ -58,12 +61,15 @@ describe('HistoricalClientPaymentWorkbench', () => {
       projections: [{ obligation_identity: 'client-obligation:1', amount_snapshot_ntd: 12000, obligation_projection_version: 4 }], owner_terminal: true,
     });
 
-    render(<HistoricalClientPaymentWorkbench caseNo="CASE-1" />);
+    const left = vi.fn();
+    render(<UnsavedChangesProvider><LeaveAction onLeave={left} /><HistoricalClientPaymentWorkbench caseNo="CASE-1" /></UnsavedChangesProvider>);
     fireEvent.click(await screen.findByLabelText(/client-obligation:1/));
     fireEvent.change(screen.getByLabelText('原因（選填）'), { target: { value: '核對歷史付款' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存歷史付款' }));
+    fireEvent.click(screen.getByRole('button', { name: '離開付款頁' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存變更並離開' }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/已重新讀取付款結果：客戶款項已結清/)).toBeInTheDocument();
+    await waitFor(() => expect(left).toHaveBeenCalledTimes(1));
   });
 });

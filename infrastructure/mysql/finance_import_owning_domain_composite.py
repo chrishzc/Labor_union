@@ -47,10 +47,12 @@ from shared_kernel.identities import (
 )
 from shared_kernel.errors import ErrorCategory
 from domains.finance_import.cancellation_code import (
+    extract_sinopac_memo_case_suffix,
     resolve_finance_cancellation_code,
 )
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
+    resolve_client_virtual_account_suffix,
 )
 from subsystems.client_finance.reconciliation_workflow import (
     ClientReconciliationApplyRequest,
@@ -386,9 +388,16 @@ def _resolve_client_refund(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
     if client_id is None:
         return candidate
-    rows = _load_client_refund_targets(connection, client_id)
+    memo_scoped, case_no = _sinopac_outgoing_case_no(connection, candidate.row_identity)
+    if memo_scoped and case_no is None:
+        return candidate
+    rows = _load_client_refund_targets(connection, client_id, case_no)
     targets = _unique_case_refund_targets(rows, candidate.amount.amount)
     if targets is None:
+        return candidate
+    if sum(int(row["amount_due_ntd"]) for row in rows if str(row["obligation_identity"]) in targets) != candidate.amount.amount:
+        # Partial refunds require the owner's explicit human-confirmed action;
+        # do not advertise them as an exact automatic dispatch.
         return candidate
     return _ready_candidate(candidate, targets, "unique-client-refund-obligation-balance")
 
@@ -398,7 +407,31 @@ def _json_object(value):
     return decoded if isinstance(decoded, dict) else {}
 
 
-def _load_client_refund_targets(connection, client_id):
+def _sinopac_outgoing_case_no(connection, row_identity):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT format_id,direction,memo FROM finance_import_rows WHERE id=%s",
+            (_row_id(row_identity),),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return True, None
+        if row["format_id"] != "sinopac":
+            return False, None
+        if row["direction"] != "outgoing":
+            return True, None
+        suffix = extract_sinopac_memo_case_suffix(row["memo"])
+        if suffix is None:
+            return True, None
+        resolution = resolve_client_virtual_account_suffix(cursor, suffix)
+    if resolution["result"] != "resolved":
+        return True, None
+    return True, str(resolution["case_no"])
+
+
+def _load_client_refund_targets(connection, client_id, case_no=None):
+    case_predicate = "AND obligation.case_no=%s " if case_no is not None else ""
+    parameters = (client_id, case_no) if case_no is not None else (client_id,)
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT obligation.case_no,obligation.obligation_identity,"
@@ -407,8 +440,9 @@ def _load_client_refund_targets(connection, client_id):
             "WHERE order_row.client_id=%s AND obligation.direction='payable_to_client' "
             "AND obligation.status='open' AND obligation.amount_due_ntd>0 "
             "AND obligation.obligation_type IN ('refund','adjustment') "
+            + case_predicate +
             "ORDER BY obligation.case_no,obligation.due_date,obligation.obligation_identity",
-            (client_id,),
+            parameters,
         )
         return tuple(cursor.fetchall())
 
@@ -457,6 +491,11 @@ def _resolve_staff_payout(connection, candidate):
     staff_id = _single_prefixed_identity(candidate, "staff:")
     if staff_id is None:
         return candidate
+    memo_scoped, case_no = _sinopac_outgoing_case_no(connection, candidate.row_identity)
+    if memo_scoped and case_no is None:
+        return candidate
+    case_predicate = "AND obligation.case_no=%s " if case_no is not None else ""
+    parameters = (staff_id, case_no) if case_no is not None else (staff_id,)
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT obligation.obligation_identity,"
@@ -470,8 +509,9 @@ def _resolve_staff_payout(connection, candidate):
             "AND obligation.status<>'cancelled' "
             "AND obligation.amount_due_ntd>0 "
             "AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid')) "
+            + case_predicate +
             "ORDER BY obligation.obligation_identity",
-            (staff_id,),
+            parameters,
         )
         rows = tuple(cursor.fetchall())
     total = sum(int(row["balance_ntd"]) for row in rows)

@@ -303,7 +303,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     setAccepted(null); setJob(null); setPreview(null); setRowIdsText(''); setDifferenceMode(''); setReason(''); setNotice(null); setError(null); command.current = null;
   };
   useEffect(() => { onBusyChange?.(busy !== null || unknownOutcome); return () => onBusyChange?.(false); }, [busy, unknownOutcome, onBusyChange]);
-  useUnsavedDraft('月嫂付款核銷', { '銀行交易資料列': rowIdsText, '核銷方式': differenceMode, '原因': reason }, { busy: busy !== null || unknownOutcome, resetKey: accepted });
+  useUnsavedDraft('月嫂付款核銷', { '銀行交易資料列': rowIdsText, '核銷方式': differenceMode, '原因': reason }, { busy: busy !== null || unknownOutcome || (accepted !== null && !['succeeded', 'failed', 'cancelled'].includes(job?.status ?? '')), resetKey: busy === null && !unknownOutcome && job?.status === 'succeeded' ? job : null, save: runPreview, discard: () => { setRowIdsText(''); setDifferenceMode(''); setReason(''); invalidatePreview(); } });
 
 
   if (!query) return <section aria-label="月嫂付款核銷"><h3>月嫂付款核銷</h3>{busy === 'query' && <p role="status">正在讀取最新應付款資料…</p>}{error && <div role="alert">{error}</div>}<button type="button" disabled={busy !== null} onClick={() => void retryOwnerQuery()}>重新讀取</button></section>;

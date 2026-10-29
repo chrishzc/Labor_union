@@ -14,7 +14,7 @@ class PricingModel(BaseModel):
 
 
 class HourlyRatesBody(PricingModel):
-    covered: int = Field(strict=True, gt=0)
+    covered: int = Field(strict=True, ge=0)
     excess: int = Field(strict=True, gt=0)
 
 

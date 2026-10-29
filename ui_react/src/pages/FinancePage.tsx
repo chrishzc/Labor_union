@@ -28,8 +28,10 @@ import { FinanceReceiptsWorkspace } from '../components/FinanceReceiptsWorkspace
 import { FinancePaymentsWorkspace } from '../components/FinancePaymentsWorkspace';
 import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
 import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
+import { FinanceCaseAccounting, FinanceAccountingWarnings } from '../components/FinanceCaseAccounting';
+import { FinanceStatementArchive } from '../components/FinanceStatementArchive';
 
-type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination';
+type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination' | 'case-accounting' | 'accounting-warnings';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 type FinanceImportReviewSnapshot = {
   batchIdentity: string;
@@ -74,7 +76,7 @@ function financeErrorMessage(error: unknown, fallback: string): string {
   if (status === 401 || code.includes('unauthenticated')) return '請先登入後再執行此操作。';
   if (status === 403 || code.includes('forbidden')) return '目前帳號無法執行此操作，請洽系統管理員。';
   if (status === 409 || code.includes('stale') || code.includes('conflict') || code.includes('mismatch')) {
-    return '資料已變更，請重新整理並再次預覽。';
+    return '資料已變更，請重新整理後再儲存。';
   }
   if (status >= 500 || code.includes('unavailable') || code.includes('network') || code.includes('timeout')) {
     return '服務暫時無法使用，請稍後再試。';
@@ -95,7 +97,7 @@ export const FinancePage: React.FC = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
-  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'payment-destination' ? 'payment-destination' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'client-receipts' : 'receipts');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'case-accounting' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'payment-destination' ? 'payment-destination' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'client-receipts' : 'receipts');
   const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments'>('receipts');
   const [subsidyCase, setSubsidyCase] = useState(entry.tab === 'subsidy-advance' || entry.tab === 'cross-order' ? entry.caseNo : '');
   const activeWorkspace = activeTab === 'staff-payables' ? 'payments' : activeTab === 'client-receipts' ? detailReturn : activeTab;
@@ -380,7 +382,7 @@ export const FinancePage: React.FC = () => {
       if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
     }
   };
-  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0)), busy: importBusy || applyJob.kind === 'loading', discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); } });
+  useUnsavedDraft('銀行交易匯入', { '待匯入檔案': financeWorkbook?.name ?? '', '原因': applyReason }, { baseline: { '待匯入檔案': '', '原因': '' }, enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0)), busy: importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'), save: ingestWorkbook, discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); } });
 
 
   return (
@@ -391,7 +393,7 @@ export const FinancePage: React.FC = () => {
         <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => { if (('payment-destination') !== activeTab) requestLeave(() => setActiveTab('payment-destination')); }}>帳務設定</button>
       </header>
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
-        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
+        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳'], ['case-accounting', '案件帳務'], ['accounting-warnings', '帳務警示']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
       </nav>
       {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
       {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
@@ -596,7 +598,7 @@ export const FinancePage: React.FC = () => {
               <div className="finance-filter-bar">
                 <label>
                   歷史付款案件
-                  <select value={historicalStaffCase} onChange={(event) => setHistoricalStaffCase(event.target.value)}>
+                  <select value={historicalStaffCase} onChange={(event) => { const value=event.target.value;requestLeave(()=>setHistoricalStaffCase(value)); }}>
                     {[...new Set(payables.data.obligations.map((item) => item.caseNo))].map((caseNo) => (
                       <option key={caseNo} value={caseNo}>{caseNo}</option>
                     ))}
@@ -611,8 +613,11 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'case-accounting' && <FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} />}
+      {activeTab === 'accounting-warnings' && <FinanceAccountingWarnings onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} />}
       {activeTab === 'finance-import' && (
         <section className="finance-workspace">
+          <FinanceStatementArchive />
           <div className="finance-section-heading">
             <div>
               <h2>銀行對帳</h2>
@@ -755,8 +760,8 @@ export const FinancePage: React.FC = () => {
                                 <td>{row.transaction_date ?? '—'}</td>
                                 <td>{row.direction}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
-                                <td>{row.classification_type}</td>
-                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(row)}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
+                                <td>{{ receivable: '應收', payable: '應付', government_subsidy: '政府補助', subsidy_return: '補助退款', review: '待核對', legacy: '歷史格式' }[row.bank_type ?? 'legacy']}</td>
+                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -766,7 +771,7 @@ export const FinancePage: React.FC = () => {
                     {correctionRow && <section className="finance-detail-block" aria-label="指定銀行入款的正確訂單" style={{ marginTop: '12px' }}>
                       <div className="finance-meta">
                         <strong>{correctionRow.source_sheet}#{correctionRow.source_row}｜{correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</strong>
-                        <button type="button" className="finance-btn-secondary" onClick={() => setCorrectionRow(null)}>關閉</button>
+                        <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(null))}>關閉</button>
                       </div>
                       <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onPosted={() => { setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
                     </section>}

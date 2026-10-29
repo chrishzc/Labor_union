@@ -1,4 +1,5 @@
-import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { SubsidyPeriodWorkbench } from '../../../../../../../components/SubsidyPeriodWorkbench';
 import { subsidyPeriodClient,type SubsidyPeriod,type SubsidyPeriodView } from '../../../../../../../api/government_subsidy/period_reconciliation_client';
@@ -17,6 +18,18 @@ afterEach(()=>{cleanup();vi.resetAllMocks();});
 async function loaded(){await screen.findByText('本期補助總額',{exact:false});}
 
 describe('whole-period subsidy workbench',()=>{
+  it('saves the original selected period before applying a newly typed year',async()=>{
+    render(<UnsavedChangesProvider><SubsidyPeriodWorkbench onOpenCase={()=>{}}/></UnsavedChangesProvider>);await loaded();
+    const originalYear=new Date().getFullYear();
+    fireEvent.change(screen.getByLabelText('政府銀行款項'),{target:{value:'2'}});
+    fireEvent.change(screen.getByLabelText('年度'),{target:{value:'203'}});
+    fireEvent.change(screen.getByLabelText('年度'),{target:{value:'2031'}});
+    const dialog=await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button',{name:'儲存變更並離開'}));
+    await waitFor(()=>expect(vi.mocked(subsidyPeriodClient.query).mock.lastCall?.[0].year).toBe(2031));
+    expect(vi.mocked(subsidyPeriodClient.reconcile).mock.calls[0][0].period.year).toBe(originalYear);
+    expect(subsidyPeriodClient.reconcile).toHaveBeenCalledTimes(1);
+  });
   it('shows invalid scheduling as unknown and blocks receipt without claiming a bank amount mismatch',async()=>{
     vi.mocked(subsidyPeriodClient.query).mockImplementation(async period=>({...view(period),total_ntd:null,can_reconcile:false,
       lines:[{case_no:'CASE-1',service_end_date:'2026-01-20',amount_ntd:null,unavailable_reason:'scheduling_effective_generation_invalid'}]}));

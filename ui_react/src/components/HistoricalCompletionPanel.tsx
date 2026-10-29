@@ -3,6 +3,7 @@
  * Description: 顯示 Step 11 fresh owner roots、active alerts 與 owner referral，不推斷完成狀態。
  */
 import { useEffect, useState } from 'react';
+import { useUnsavedDraft } from './UnsavedChanges';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import {
   HistoricalCompletionContractError,
@@ -58,6 +59,7 @@ export function HistoricalCompletionPanel({
   const [state, setState] = useState<QueryState>({ kind: 'loading' });
   const [reason, setReason] = useState('');
   const [action, setAction] = useState<CompletionActionState>({ kind: 'idle' });
+  useUnsavedDraft('歷史案件帳務完成', { '完成原因': reason }, { baseline: { '完成原因': '' }, busy: ['previewing', 'applying', 'outcome_unknown'].includes(action.kind), save: () => loadPreview(), discard: () => setReason('') });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -103,6 +105,7 @@ export function HistoricalCompletionPanel({
     setAction({ kind: 'applying', preview });
     try {
       const receipt = await client.apply(preview, reason.trim());
+      setReason('');
       setAction({ kind: 'success', receipt });
     } catch (error: unknown) {
       const rejected = (error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) || (error instanceof HistoricalCompletionContractError && error.code === 'historical_completion_unauthenticated');

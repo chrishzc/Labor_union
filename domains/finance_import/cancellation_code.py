@@ -8,6 +8,15 @@ from typing import Any
 
 _VALID_CANCELLATION_CODE = re.compile(r"99781699[0-9]{6}")
 _SINOPAC_ACCOUNT_REFERENCE = re.compile(r"([0-9]+)(?:\s*[^\W\d_][^\d]*)?")
+_MEMO_CASE_SUFFIX = re.compile(r"(?<!\d)[0-9]{6}(?!\d)")
+
+
+def extract_sinopac_memo_case_suffix(value: object) -> str | None:
+    """Read one distinct six-digit case reference from the memo only."""
+    if not isinstance(value, str):
+        return None
+    candidates = set(_MEMO_CASE_SUFFIX.findall(value))
+    return next(iter(candidates)) if len(candidates) == 1 else None
 
 
 def extract_sinopac_account_reference(value: object) -> str | None:

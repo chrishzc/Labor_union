@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { accountingPricingClient, PricingTermsSchema, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
+import { accountingPricingClient, PricingTermsSchema, pricingTermsError, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges } from './UnsavedChanges';
 import '../pages/AccountingParametersPage.css';
@@ -20,6 +20,7 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
   const busy = status === 'saving' || status === 'unknown';
   const busyRef = useRef(busy); busyRef.current = busy;
   const dirty = !!(current && draft && (!sameTerms(current.terms, draft) || reason !== ''));
+  const subsidyError = draft ? pricingTermsError(draft) : '';
   const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
   const unsavedRef = useUnsavedChanges('個案計價調整', dirty && current && draft ? [
     { label: '補助上限', before: String(current.terms.subsidy_hours), after: String(draft.subsidy_hours) },
@@ -54,7 +55,7 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
   }
   async function apply() {
     if (!current || !draft || inFlight.current || disabled || (!dirty && !pending.current)) return;
-    if (!pending.current && !PricingTermsSchema.safeParse(draft).success) { setStatus('error'); setMessage('請確認補助上限與四種正整數時薪。'); return; }
+    if (!pending.current && (!PricingTermsSchema.safeParse(draft).success || subsidyError)) { setStatus('error'); setMessage(subsidyError || '請確認補助上限與時薪；用盡後時薪須為正整數。'); return; }
     const command = pending.current ?? { terms: structuredClone(draft), revision: current.revision, reason: reason.trim(), key: `case-pricing:${crypto.randomUUID()}` };
     pending.current = command; inFlight.current = true; ++request.current; setStatus('saving'); setMessage('');
     let applied = false;
@@ -81,12 +82,13 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
     {status === 'loading' && <p role="status">正在讀取本案參數…</p>}
     {current && draft && <><p className="pricing-note">計價身分：{current.terms.identity_name}；來源：{current.source === 'manual' ? '本案人工設定' : current.source === 'policy' ? '案件綁定政策' : '原案件規則'}（版本 {current.revision}）</p>
       <fieldset disabled={busy || disabled} style={{ border: 0, padding: 0, margin: 0 }}><label className="pricing-field">補助時數上限（小時）<input type="number" min="0" step="0.5" value={draft.subsidy_hours} disabled={draft.rule === 'non_citizen'} onChange={event => update({ subsidy_hours: Number(event.target.value) })} /></label>
-        <table className="pricing-table"><thead><tr><th>計價範圍</th><th>客戶時薪（元）</th><th>月嫂時薪（元）</th></tr></thead><tbody>{(['covered', 'excess'] as const).map(tier => <tr key={tier}><th scope="row">{tier === 'covered' ? '補助範圍內' : '補助用盡後'}</th>{(['client', 'payroll'] as const).map(owner => <td key={owner}><input aria-label={`${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min="1" step="1" value={draft[owner][tier]} disabled={draft.subsidy_hours === 0 && tier === 'covered'} onChange={event => update({ [owner]: { ...draft[owner], [tier]: Number(event.target.value) } })} /></td>)}</tr>)}</tbody></table>
-        <p className="pricing-note">補助時數按整案累計。社福補助內由補助涵蓋，超額由客戶自付。</p>
+        <table className="pricing-table"><thead><tr><th>計價範圍</th><th>客戶時薪（元）</th><th>月嫂時薪（元）</th></tr></thead><tbody>{(['covered', 'excess'] as const).map(tier => <tr key={tier}><th scope="row">{tier === 'covered' ? '補助範圍內' : '補助用盡後'}</th>{(['client', 'payroll'] as const).map(owner => <td key={owner}><input aria-label={`${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min={tier === 'covered' && draft.subsidy_hours === 0 ? 0 : 1} step="1" value={draft[owner][tier]} disabled={draft.rule === 'non_citizen' && tier === 'covered'} onChange={event => update({ [owner]: { ...draft[owner], [tier]: Number(event.target.value) } })} /></td>)}</tr>)}</tbody></table>
+        <p className="pricing-note">補助範圍內客戶與月嫂時薪須相等；補助用盡後可分別調整。非市民補助時數與補助內時薪均為 0。補助時數按整案累計。</p>
+        {subsidyError && <p role="alert" className="pricing-status">{subsidyError}</p>}
         <label className="pricing-field">調整原因（選填）<textarea maxLength={500} value={reason} onChange={event => setReason(event.target.value)} /></label>
       </fieldset>
       <p className="pricing-note">月嫂給付：客戶負擔部分為服務結束月次月 15 日；直接補助部分為次次月 15 日。兩者均不以實際入帳月起算。既有收付款與已簽文件保留原紀錄。</p>
-      <div className="pricing-actions"><button type="button" disabled={busy || disabled} onClick={reset}>取消修改</button><button type="button" className="pricing-primary" disabled={disabled || status === 'saving' || (!dirty && !pending.current)} onClick={() => void apply()}>{status === 'saving' ? '儲存並確認中…' : pending.current ? '重試原操作與回讀' : '儲存本案調整'}</button></div>
+      <div className="pricing-actions"><button type="button" disabled={busy || disabled} onClick={reset}>取消修改</button><button type="button" className="pricing-primary" disabled={disabled || status === 'saving' || (!pending.current && (!!subsidyError || !dirty))} onClick={() => void apply()}>{status === 'saving' ? '儲存並確認中…' : pending.current ? '重試原操作與回讀' : '儲存本案調整'}</button></div>
     </>}
     {!busy && <button className="pricing-reload" disabled={disabled} onClick={() => void load()}>重新讀取本案參數</button>}
   </section>;

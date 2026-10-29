@@ -4,7 +4,7 @@ import { decodePayload } from '../shared/runtime_decoder';
 import { transport } from '../shared/transport';
 
 const money = z.number().int().positive();
-const rates = z.strictObject({ covered: money, excess: money });
+const rates = z.strictObject({ covered: z.number().int().nonnegative(), excess: money });
 export const PricingTermsSchema = z.strictObject({ identity_name: z.string().min(1).max(100),
   rule: z.enum(['citizen', 'social', 'non_citizen']), subsidy_hours: z.number().nonnegative().multipleOf(0.5), client: rates, payroll: rates });
 export const PricingPolicySchema = z.strictObject({ effective_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -26,6 +26,13 @@ export type PricingCatalog = z.infer<typeof catalog>;
 export type CasePricing = z.infer<typeof caseView>;
 export type PricingPreview = z.infer<typeof preview>;
 export type PricingImpact = z.infer<typeof impact>;
+
+export function pricingTermsError(terms: PricingTerms): string {
+  if (terms.rule === 'non_citizen' && (terms.subsidy_hours !== 0 || terms.client.covered !== 0 || terms.payroll.covered !== 0)) return '非市民的補助時數與補助內時薪必須為 0。';
+  if (terms.client.covered !== terms.payroll.covered) return '補助範圍內的客戶時薪與月嫂時薪必須相等，才能向政府報帳。';
+  if (terms.subsidy_hours > 0 && terms.client.covered <= 0) return '有補助時數時，補助內時薪必須為正整數。';
+  return '';
+}
 
 function options(key?: string) {
   const token = sessionClient.getToken();

@@ -276,3 +276,97 @@ __all__ = [
     "ClientFinanceCaseNotFound",
     "MySqlClientFinanceQueryRepository",
 ]
+
+
+def query_case_accounting(connection, case_no, *, for_update=False):
+    """Project original obligation amounts and effective cash allocations only."""
+    from subsystems.client_finance.case_accounting_query import (
+        ClientAccountingItem, ClientAccountingTransaction,
+    )
+    lock = " FOR UPDATE" if for_update else ""
+    with connection.cursor() as cursor:
+        if for_update:
+            cursor.execute("SELECT case_no FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))
+            cursor.fetchall()
+            cursor.execute("SELECT obligation_identity FROM client_obligations WHERE case_no=%s FOR UPDATE", (case_no,))
+            cursor.fetchall()
+        cursor.execute(
+            "SELECT o.obligation_identity,o.obligation_type,o.direction,o.due_date,o.status,"
+            "o.amount_due_ntd,o.projection_version,e.after_amount_ntd,"
+            "COALESCE(a.aggregate_version,0) AS account_version,c.name AS client_name,"
+            "h.confirmation_kind,h.amount_snapshot_ntd,"
+            "h.current_event_id AS historical_event "
+            "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
+            "JOIN orders r ON r.case_no=o.case_no JOIN clients c ON c.id=r.client_id "
+            "LEFT JOIN client_finance_accounts a ON a.case_no=o.case_no "
+            "LEFT JOIN historical_client_payment_projections h ON h.obligation_identity=o.obligation_identity "
+            "AND h.amount_snapshot_ntd=o.amount_due_ntd AND h.obligation_projection_version=o.projection_version "
+            "WHERE o.case_no=%s AND o.status<>'cancelled' "
+            "AND o.obligation_type<>'subsidy_return' ORDER BY o.obligation_identity" + lock, (case_no,),
+        )
+        obligations = cursor.fetchall()
+        cursor.execute(
+            "SELECT l.id,l.entry_type,l.occurred_on,l.reversal_of_entry_id,"
+            "base.entry_type AS reversed_type,x.obligation_identity,x.amount_ntd,b.format_id "
+            "FROM client_ledger_entries l JOIN client_ledger_obligation_allocations x ON x.ledger_entry_id=l.id "
+            "LEFT JOIN client_ledger_entries base ON base.id=l.reversal_of_entry_id "
+            "LEFT JOIN finance_import_rows b ON b.id=l.finance_import_row_id "
+            "WHERE l.case_no=%s ORDER BY l.id,x.allocation_ordinal" + lock, (case_no,),
+        )
+        allocations = cursor.fetchall()
+        cursor.execute(
+            "SELECT d.receivable_obligation_identity,d.overage_amount_ntd "
+            "FROM client_receipt_overage_dispositions d WHERE d.case_no=%s "
+            "AND NOT EXISTS(SELECT 1 FROM client_ledger_entries r WHERE r.reversal_of_entry_id=d.receipt_ledger_entry_id)" + lock,
+            (case_no,),
+        )
+        overages = cursor.fetchall()
+        cursor.execute(
+            "SELECT recovery.refund_obligation_identity AS receivable_obligation_identity,"
+            "event.after_amount_ntd AS overage_amount_ntd "
+            "FROM client_over_refund_recoveries recovery "
+            "JOIN client_over_refund_recovery_events event ON event.recovery_identity=recovery.recovery_identity "
+            "AND event.event_type='established' WHERE recovery.case_no=%s "
+            "AND NOT EXISTS (SELECT 1 FROM client_ledger_entries reversal "
+            "WHERE reversal.reversal_of_entry_id=recovery.refund_ledger_entry_id)" + lock,
+            (case_no,),
+        )
+        refund_overages = cursor.fetchall()
+    sums, transactions = {}, []
+    for row in allocations:
+        kind = row["entry_type"]
+        if kind not in {"receipt", "refund", "reversal"}:
+            continue
+        if kind == "reversal" and row["reversed_type"] not in {"receipt", "refund"}:
+            continue
+        identity = row["obligation_identity"]
+        amount = int(row["amount_ntd"]) * (-1 if kind == "reversal" else 1)
+        sums[identity] = sums.get(identity, 0) + amount
+        transactions.append(ClientAccountingTransaction(
+            f"client-entry:{row['id']}:{identity}", identity, str(row["occurred_on"]), kind,
+            amount, row["format_id"],
+        ))
+    allocated = dict(sums)
+    for row in (*overages, *refund_overages):
+        identity = row["receivable_obligation_identity"]
+        sums[identity] = sums.get(identity, 0) + int(row["overage_amount_ntd"])
+    labels = {"deposit": "訂金", "first": "第一期", "second": "第二期", "refund": "客戶退款", "adjustment": "帳務調整"}
+    items = []
+    for row in obligations:
+        identity = row["obligation_identity"]
+        # Client obligations are remaining-balance projections, including after
+        # date-only owner events. Nominal amount is remaining plus effective
+        # allocated cash; explicit surplus is displayed only in actual cash.
+        expected = int(row["amount_due_ntd"]) + allocated.get(identity, 0)
+        paid = sums.get(identity, 0)
+        if row["confirmation_kind"] == "paid":
+            paid += int(row["amount_snapshot_ntd"])
+        items.append(ClientAccountingItem(
+            identity, "receivable" if row["direction"] == "receivable_from_client" else "payable",
+            labels.get(row["obligation_type"], "帳務款項"), str(row["client_name"]), expected,
+            paid, identity in sums or row["confirmation_kind"] == "paid",
+            f"{row['account_version']}:{row['projection_version']}:{row['historical_event'] or 0}",
+            None if row["due_date"] is None else str(row["due_date"]),
+        ))
+    valid = {item.identity for item in items}
+    return tuple(items), tuple(row for row in transactions if row.item_identity in valid)

@@ -3,6 +3,24 @@ from decimal import Decimal
 import pytest
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
+from domains.finance_import.cancellation_code import extract_sinopac_memo_case_suffix
+
+
+@pytest.mark.parametrize(("memo", "expected"), [
+    ("HC115001服務人員", "115001"),
+    ("A115001服務人員", "115001"),
+    ("HC115001退款", "115001"),
+    ("B015001付款", "015001"),
+    ("HC115001／A115001", "115001"),
+    ("HC115001／HC115002", None),
+    ("HC11500", None),
+    ("HC1150010", None),
+    ("20261029", None),
+    ("沒有案件尾碼", None),
+    (None, None),
+])
+def test_sinopac_memo_has_one_complete_six_digit_case_suffix(memo, expected):
+    assert extract_sinopac_memo_case_suffix(memo) == expected
 
 
 def _row(**overrides):

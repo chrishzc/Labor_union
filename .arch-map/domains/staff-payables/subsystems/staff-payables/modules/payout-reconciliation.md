@@ -8,6 +8,8 @@
 沿既有 Staff Payables 契約編排銀行出款核銷、退匯與沖正的 Query／Preview／Apply；由同一 outer Unit of Work 保存付款事件、精確義務連結、projection、receipt 與 outbox，不發動銀行匯款。
 
 ## Implementation
+- `subsystems/staff_payables/case_accounting_query.py`
+- `infrastructure/mysql/case_staff_accounting_repository.py` — case-scoped effective obligation, payout and historical evidence; no month filter, no cash writer.
 - `domains/staff_payables/reconciliation.py`
 - `subsystems/staff_payables/payout_reconciliation.py`
 - `infrastructure/mysql/staff_payout_repository.py`

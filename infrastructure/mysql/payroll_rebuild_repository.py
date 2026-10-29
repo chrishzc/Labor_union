@@ -400,7 +400,7 @@ def _rate_snapshots(rows, pricing=None):
             _assignment_identity(row["assignment_id"]),
             str(row["policy_version"]),
             PayrollPolicyKind(str(row["policy_kind"])),
-            MoneyNTD(tiers.covered_rate if tiers else _integer_ntd(row["hourly_rate_ntd"])),
+            MoneyNTD(tiers.base_rate if tiers else _integer_ntd(row["hourly_rate_ntd"])),
             tiers,
         )
         for row in rows
