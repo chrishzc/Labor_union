@@ -187,7 +187,7 @@ correlation 與 idempotency identity。事件不得由 LINE、UI、worker 或付
 直接建立；若退款／歸檔由其他 owner 完成，Orders 只攜帶該 owner 的 typed receipt reference，
 不得跨域直寫其 root。
 
-LINE Identity consumer 收到事件後先核對 source subject、Orders 版本與 capability，再讀取同一 LINE User ID 的 role-scoped bindings。一般客戶沒有 staff binding 是合法情況，保存 `noop_not_staff` receipt 並正常完成，不查詢月嫂選單、不建立 menu intent、不要求人員操作。這裡判斷的是客戶本人角色，不是案件有沒有服務月嫂。多筆 staff binding、身分不符及版本衝突仍為真正錯誤。
+LINE Identity consumer 收到事件後先核對 source subject、Orders 版本與 capability，再讀取同一 LINE User ID 的 role-scoped bindings。一般客戶沒有 staff binding 是合法情況，保存 `noop_not_staff` receipt 並正常完成，不查詢月嫂選單、不建立 menu intent、不要求人員操作。 此規則也涵蓋 Orders 已有 nullable handoff 的未綁定客戶：source subject 為 NULL，且 fresh-read 的案件 owner 仍未綁定 LINE（NULL／空字串）時，先通過相同 Orders 版本、terminal 狀態及 capability 驗證，再保存同一 `noop_not_staff` receipt；不猜測 LINE User ID、不查詢角色／選單、不建立通知。若 owner 已有非空 LINE User ID，NULL source 仍屬 subject mismatch，零寫入。相同來源 replay 仍回原收據，payload mismatch 仍為 conflict。這裡判斷的是客戶本人角色，不是案件有沒有服務月嫂。多筆 staff binding、身分不符及版本衝突仍為真正錯誤。
 
 只有存在有效 staff binding 時才讀 client-role active-case Query 與月嫂選單 publication。只有同時滿足以下條件，才可在既有 LINE Identity
 outer Unit of Work 內建立一次 `staff_default_restore` menu intent／receipt：

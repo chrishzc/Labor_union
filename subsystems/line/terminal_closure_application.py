@@ -26,11 +26,11 @@ def consume_terminal_closure(
 ) -> TerminalClosureReadback:
     """Fresh-read LINE roots, then append one menu intent and receipt at most once."""
 
-    if event.source_subject is None or event.source_subject == "":
+    if event.source_subject == "":
         raise TerminalClosureConsumerError("line_terminal_closure_subject_missing")
-    if event.source_subject != event.source_subject.strip():
+    if event.source_subject is not None and event.source_subject != event.source_subject.strip():
         raise TerminalClosureConsumerError("line_terminal_closure_subject_invalid")
-    line_user_id = _line_user(event)
+    line_user_id = _line_user(event) if event.source_subject is not None else None
     with unit_of_work_factory() as unit_of_work:
         existing = unit_of_work.receipts.get(event.idempotency_key)
         if existing is not None:
@@ -51,6 +51,10 @@ def consume_terminal_closure(
         _validate_case(event, case)
         if event.capability != "staff_default_restore":
             raise TerminalClosureConsumerError("line_terminal_closure_capability_mismatch")
+        if line_user_id is None:
+            return _record_decision(
+                unit_of_work, event, None, TerminalClosureDecision.NOOP_NOT_STAFF,
+            )
         bindings = tuple(unit_of_work.identities.list_by_user(line_user_id))
         staff = _staff_binding(bindings)
         if staff is None:
@@ -130,7 +134,7 @@ def _validate_case(event, case: Mapping[str, object] | None) -> None:
         raise TerminalClosureConsumerError("line_terminal_closure_orders_stale")
     if str(case.get("status")) not in _TERMINAL_STATUSES:
         raise TerminalClosureConsumerError("line_terminal_closure_case_not_terminal")
-    owner = case.get("line_user_id")
+    owner = case.get("line_user_id") or None
     if owner is not None and owner != event.source_subject:
         raise TerminalClosureConsumerError("line_terminal_closure_subject_mismatch")
 

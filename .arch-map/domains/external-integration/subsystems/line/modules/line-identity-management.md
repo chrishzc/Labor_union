@@ -69,7 +69,7 @@
 ## Provenance
 - `line_identity_role_bindings` and `line_identity_role_binding_events` are the single shared role-scoped successor; legacy roots/events are migration/compatibility input only — `architecture_declared` — `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` §9.
 - Role selection, bounded streak and same-type replacement tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`.
-- Terminal closure ordinary-customer no-staff no-op／receipt-filtered pending scan and restore/replay/stale/revocation tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py`.
+- Terminal closure ordinary-customer no-staff no-op（含 source subject NULL 且 owner 未綁定時，先驗版本／terminal／capability 再記原 noop receipt）／receipt-filtered pending scan and restore/replay/stale/revocation tests are owned by this Module test root — `source_observed` — `tests/domains/external-integration/subsystems/line/modules/line-identity-management/contract/test_terminal_closure_restore.py`.
 
 ## Change triggers
 - Reconcile this module when role-scoped binding ownership, selected-role state, bounded streak, replacement constraints, Staff retirement adaptation, persistence implementation root, Customer Service typed dependency, or canonical module test root changes.

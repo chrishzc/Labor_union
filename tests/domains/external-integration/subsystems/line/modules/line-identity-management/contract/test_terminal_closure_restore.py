@@ -259,3 +259,46 @@ def test_ordinary_customer_still_checks_source_subject_version_and_capability():
         with pytest.raises(TerminalClosureConsumerError, match=error):
             consume_terminal_closure(_factory(uow), event)
         assert not uow.receipts.items and not uow.outbox.items
+
+
+@pytest.mark.parametrize('owner_subject', [None, ''])
+def test_unbound_customer_closure_records_existing_noop_without_guessing_a_line_user(owner_subject):
+    uow = _Uow([], {**_case(), 'line_user_id': owner_subject})
+
+    def unavailable(*_):
+        raise AssertionError('unbound customer must not look up LINE bindings or menus')
+
+    uow.identities.list_by_user = unavailable
+    uow.identity_management.staff_menu_publication = unavailable
+    uow.identity_management.active_client_cases = unavailable
+    event = _event(source_subject=None)
+    first = consume_terminal_closure(_factory(uow), event)
+    replay = consume_terminal_closure(_factory(uow), event)
+
+    assert first.decision is TerminalClosureDecision.NOOP_NOT_STAFF
+    assert first.menu_intent_identity is None and first.binding_version is None
+    assert replay.decision is TerminalClosureDecision.NOOP_REPLAY
+    assert replay.replay_of is TerminalClosureDecision.NOOP_NOT_STAFF
+    assert len(uow.receipts.items) == 1 and uow.commits == 1
+    assert not uow.outbox.items
+
+
+@pytest.mark.parametrize('case,capability,error', [
+    ({**_case(), 'line_user_id': 'U-other'}, 'staff_default_restore', 'subject_mismatch'),
+    ({**_case(), 'line_user_id': None, 'lifecycle_version': 5}, 'staff_default_restore', 'orders_stale'),
+    ({**_case(), 'line_user_id': None, 'status': '服務中'}, 'staff_default_restore', 'case_not_terminal'),
+    ({**_case(), 'line_user_id': None}, 'wrong', 'capability_mismatch'),
+])
+def test_unbound_closure_still_fails_closed_for_owner_version_state_and_capability(case, capability, error):
+    uow = _Uow([], case)
+    with pytest.raises(TerminalClosureConsumerError, match=error):
+        consume_terminal_closure(_factory(uow), _event(source_subject=None, capability=capability))
+    assert not uow.receipts.items and not uow.outbox.items and uow.commits == 0
+
+
+def test_unbound_noop_does_not_accept_changed_payload_for_the_same_source_identity():
+    uow = _Uow([], {**_case(), 'line_user_id': None})
+    consume_terminal_closure(_factory(uow), _event(source_subject=None))
+    with pytest.raises(TerminalClosureConsumerError, match='idempotency_conflict'):
+        consume_terminal_closure(_factory(uow), _event(source_subject='U-other'))
+    assert len(uow.receipts.items) == 1 and uow.commits == 1 and not uow.outbox.items
