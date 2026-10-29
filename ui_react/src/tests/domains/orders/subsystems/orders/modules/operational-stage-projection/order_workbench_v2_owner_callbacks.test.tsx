@@ -44,10 +44,9 @@ function TermsHarness({ onObserved }: { onObserved: () => void }) {
 }
 async function applyTerms() {
   fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '3' } });
-  fireEvent.click(screen.getByRole('button', { name: '預覽服務條件變更' }));
   const reason = await screen.findByLabelText('條款變更原因');
   fireEvent.change(reason, { target: { value: '客戶確認延長一天。' } });
-  fireEvent.click(screen.getByRole('button', { name: '確認儲存服務條件' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存服務條件' }));
 }
 
 describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
@@ -122,11 +121,11 @@ describe('實際 owner 元件只在正式回讀成立後通知外層', () => {
     const onObserved = vi.fn(); const view = render(<OrderFormalRecommendationPanel caseNo={CASE} onObserved={onObserved} />);
     const send = await screen.findByRole('button', { name: '寄送確認資訊給客戶' });
     await waitFor(() => expect(send).toBeEnabled());
-    fireEvent.click(send);
+    expect(mocks.sendConfirmation).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('調整寄送訊息'));
     fireEvent.change(await screen.findByLabelText('方案 51 確認資訊備註'), { target: { value: '人工核對履歷。' } });
-    await waitFor(() => expect(screen.getByRole('button', { name: '確認寄送' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: '確認寄送' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '寄送確認資訊給客戶' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '寄送確認資訊給客戶' }));
     await waitFor(() => expect(mocks.sendConfirmation).toHaveBeenCalledTimes(1));
     view.unmount();
     await act(async () => { resolve({ intent_id: 81, delivery_status: 'pending' }); });

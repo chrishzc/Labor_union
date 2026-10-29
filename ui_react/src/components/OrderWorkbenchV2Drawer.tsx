@@ -425,7 +425,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
             {timeline.status === 'ready' && currentBranch === 'cancelled'
-              ? <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />
+              ? <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} startDisabled={navigationLocked || factsRefreshing || operation !== null} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />
               : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
           </div>
         </div>

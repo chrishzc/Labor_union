@@ -401,16 +401,38 @@ describe('OrderMutationAdapter State Machine & Flow Suite', () => {
       expect(draft?.status).toBe('observed');
     });
 
-    it('applyReopenFlow: 原因為純空白時拒絕提交並拋出 OrderMutationValidationError', async () => {
+    it('applyReopenFlow: 選填原因為純空白時仍保留版本、指紋、冪等鍵與回讀流程', async () => {
       orderMutationFlowStore.setReopenPreviewReady(
         'ORD-2026-0801',
         realisticOrderReopenPreviewView
       );
       updateReopenReason('ORD-2026-0801', '   ');
-
-      await expect(applyReopenFlow('ORD-2026-0801')).rejects.toThrow(
-        OrderMutationValidationError
+      const draft = orderMutationFlowStore.getReopenDraft('ORD-2026-0801')!;
+      const apply = vi.spyOn(ordersMutationClient, 'applyReopen').mockResolvedValue(
+        realisticOrderReopenReceiptView
       );
+      const requery = vi.fn().mockResolvedValue(undefined);
+
+      await expect(applyReopenFlow('ORD-2026-0801', requery)).resolves.toEqual(
+        realisticOrderReopenReceiptView
+      );
+      expect(apply).toHaveBeenCalledExactlyOnceWith(
+        'ORD-2026-0801',
+        {
+          expected_order_version: realisticOrderReopenPreviewView.order_version,
+          expected_client_finance_version: realisticOrderReopenPreviewView.client_finance_version,
+          expected_payroll_version: realisticOrderReopenPreviewView.payroll_version,
+          preview_fingerprint: realisticOrderReopenPreviewView.preview_fingerprint,
+          reason: '   ',
+        },
+        { idempotencyKey: draft.idempotencyKey }
+      );
+      expect(requery).toHaveBeenCalledTimes(1);
+      expect(orderMutationFlowStore.getReopenDraft('ORD-2026-0801')?.status).toBe('observed');
+      orderMutationFlowStore.setReopenPreviewReady('ORD-2026-0801', realisticOrderReopenPreviewView);
+      updateReopenReason('ORD-2026-0801', 'a'.repeat(501));
+      await expect(applyReopenFlow('ORD-2026-0801')).rejects.toThrow(OrderMutationValidationError);
+      expect(apply).toHaveBeenCalledTimes(1);
     });
 
     it('applyReopenFlow: 503 錯誤時轉入 outcome_unknown 並可使用相同 Idempotency-Key 重試', async () => {

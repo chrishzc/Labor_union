@@ -147,10 +147,11 @@ describe('OrderWorkbenchV2Drawer service completion wiring', () => {
 
   it('shows automatic completion status without a manual completion action and refreshes on owner state changes', async () => {
     render(<OrderWorkbenchV2Drawer caseNo="CASE-142" branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '客戶與月嫂確認排班' });
+    await screen.findByRole('heading', { name: '排班結果與代班' });
     expect(screen.queryByRole('button', { name: '辦理完工確認' })).not.toBeInTheDocument();
     expect(screen.getByText('預計服務完成時間・CASE-142')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '服務前更換月嫂 →' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '服務前更換月嫂 →' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '臨時代班 →' })).toHaveAttribute('href', '#scheduling?tab=leave_sub&case_no=CASE-142');
 
     const completion = await screen.findByRole('button', { name: 'test-owner-background-readback' });
     expect(mocks.getOrderDetail).toHaveBeenCalledTimes(1);

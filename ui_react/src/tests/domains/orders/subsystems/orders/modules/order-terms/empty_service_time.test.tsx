@@ -69,7 +69,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-const previewButton = () => screen.getByRole('button', { name: '預覽服務條件變更' });
+const previewButton = () => screen.getByRole('button', { name: '儲存服務條件' });
 
 async function submittedTerms() {
   await waitFor(() => expect(orderTermsMutationClient.preview).toHaveBeenCalledTimes(1));
@@ -169,7 +169,7 @@ describe('Issue #337 empty service time', () => {
 
     fireEvent.change(screen.getByLabelText('約定服務開始日'), { target: { value: '2026-10-02' } });
     fireEvent.click(previewButton());
-    fireEvent.click(await screen.findByRole('button', { name: '確認儲存服務條件' }));
+    expect(screen.queryByRole('button', { name: '確認儲存服務條件' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(onObserved).toHaveBeenCalledTimes(1));
     expect(vi.mocked(orderTermsMutationClient.apply).mock.calls[0][1].proposed_terms.service_time).toEqual(emptyTime);

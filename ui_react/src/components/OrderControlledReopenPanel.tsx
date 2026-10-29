@@ -9,11 +9,12 @@ import {
 
 interface Props {
   caseNo: string;
+  startDisabled?: boolean;
   onObserved?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
+export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, startDisabled = false, onObserved, onBusyChange }) => {
   const [, setRevision] = useState(0);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -30,11 +31,11 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
   const status = draft?.status ?? 'closed';
   const inFlight = status === 'apply_pending' || status === 'receipt_received' || status === 'requery_loading';
   const unresolved = inFlight || status === 'outcome_unknown' || status === 'observation_failed';
-  useEffect(() => { onBusyChange?.(unresolved); }, [unresolved, onBusyChange]);
+  useEffect(() => { onBusyChange?.(unresolved || status === 'preview_loading'); }, [unresolved, status, onBusyChange]);
   useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
 
   const preview = async () => {
-    if (unresolved || actionInFlight.current || status === 'preview_loading') return;
+    if (startDisabled || unresolved || actionInFlight.current || status === 'preview_loading') return;
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
@@ -96,8 +97,8 @@ export const OrderControlledReopenPanel: FC<Props> = ({ caseNo, onObserved, onBu
     <section aria-label={`案件 ${caseNo} 受控重開`}>
       <h4>受控重開取消案件</h4>
       <p>只重開正式案件狀態；不恢復舊指派、舊排班或舊檔期鎖，必須重新完成 Scheduling 預覽。</p>
-      <label>重開原因（選填）<textarea aria-label="Beta 受控重開原因" maxLength={500} value={reason} disabled={unresolved || status === 'preview_loading'} onChange={event => setReason(event.target.value)} /></label>
-      <button type="button" disabled={unresolved || status === 'preview_loading'} onClick={() => void preview()}>重開訂單</button>
+      <label>重開原因（選填）<textarea aria-label="Beta 受控重開原因" maxLength={500} value={reason} disabled={startDisabled || unresolved || status === 'preview_loading'} onChange={event => setReason(event.target.value)} /></label>
+      <button type="button" disabled={startDisabled || unresolved || status === 'preview_loading'} onClick={() => void preview()}>重開訂單</button>
       {status === 'preview_loading' && <p role="status">檢查受控重開中…</p>}
       {draft?.previewView && (
         <>

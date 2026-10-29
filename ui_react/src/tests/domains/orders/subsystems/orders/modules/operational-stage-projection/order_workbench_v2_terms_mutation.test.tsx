@@ -157,10 +157,10 @@ async function openTermsPanel(): Promise<HTMLElement> {
 
 async function previewAndApply(panel: HTMLElement) {
   fireEvent.change(within(panel).getByLabelText('服務天數'), { target: { value: '21' } });
-  fireEvent.click(within(panel).getByRole('button', { name: '預覽服務條件變更' }));
-  await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalled());
   fireEvent.change(within(panel).getByLabelText('條款變更原因'), { target: { value: '客戶確認延長一天' } });
-  fireEvent.click(within(panel).getByRole('button', { name: '確認儲存服務條件' }));
+  fireEvent.click(within(panel).getByRole('button', { name: '儲存服務條件' }));
+  await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalled());
+  expect(within(panel).queryByRole('button', { name: '確認儲存服務條件' })).not.toBeInTheDocument();
 }
 
 describe('名冊沿用訂單條款操作', () => {
@@ -236,7 +236,7 @@ describe('名冊沿用訂單條款操作', () => {
     });
   });
 
-  it('沿用既有 Preview -> 原因確認 -> Apply，並在成功後回讀正式條款投影', async () => {
+  it('一次儲存依序執行既有 Preview、Apply 與正式回讀，保留選填原因及所有版本', async () => {
     const panel = await openTermsPanel();
     const advanced = corePage();
     advanced.items[0]!.current_core_stage_code = 'formal_recommendation';
@@ -244,7 +244,10 @@ describe('名冊沿用訂單條款操作', () => {
     mocks.getCoreStageTimelines.mockResolvedValue(advanced);
 
     fireEvent.change(within(panel).getByLabelText('服務天數'), { target: { value: '21' } });
-    fireEvent.click(within(panel).getByRole('button', { name: '預覽服務條件變更' }));
+    window.alert = vi.fn();
+    expect(mocks.applyTerms).not.toHaveBeenCalled();
+    fireEvent.change(within(panel).getByLabelText('條款變更原因'), { target: { value: '客戶確認延長一天' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '儲存服務條件' }));
 
     await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalledWith('CASE-TERMS', {
       proposed_terms: {
@@ -256,18 +259,11 @@ describe('名冊沿用訂單條款操作', () => {
         service_time: { start_time: '08:00:00', end_time: '17:00:00', end_day_offset: 0 },
       },
     }, expect.objectContaining({ signal: expect.anything() })));
-    expect(within(panel).getByText(/版本：Order 12 · Scheduling 13 · Client Finance 5 · Payroll 6/)).toBeInTheDocument();
-
-    window.alert = vi.fn();
-    const save = within(panel).getByRole('button', { name: '確認儲存服務條件' });
-    expect(save).toBeEnabled();
-    fireEvent.click(save);
-    expect(window.alert).toHaveBeenCalled();
-    expect(within(panel).getByLabelText('條款變更原因')).toHaveFocus();
-    expect(mocks.applyTerms).not.toHaveBeenCalled();
-
-    fireEvent.change(within(panel).getByLabelText('條款變更原因'), { target: { value: '客戶確認延長一天' } });
-    fireEvent.click(within(panel).getByRole('button', { name: '確認儲存服務條件' }));
+    await expect(mocks.previewTerms.mock.results[0].value).resolves.toMatchObject({
+      order_version: 12, scheduling_version: 13, client_finance_version: 5, payroll_version: 6,
+    });
+    expect(within(panel).queryByRole('button', { name: '確認儲存服務條件' })).not.toBeInTheDocument();
+    expect(window.alert).not.toHaveBeenCalled();
 
     await waitFor(() => expect(mocks.applyTerms).toHaveBeenCalledWith(
       'CASE-TERMS',
@@ -322,9 +318,12 @@ describe('名冊沿用訂單條款操作', () => {
     const panel = await openTermsPanel();
 
     fireEvent.change(within(panel).getByLabelText('約定服務開始日'), { target: { value: '2026-10-02' } });
-    fireEvent.click(within(panel).getByRole('button', { name: '預覽服務條件變更' }));
-    expect(await within(panel).findByText(/Client Finance 未讀取 · Payroll 未讀取/)).toBeInTheDocument();
-    fireEvent.click(within(panel).getByRole('button', { name: '確認儲存服務條件' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '儲存服務條件' }));
+    await waitFor(() => expect(mocks.previewTerms).toHaveBeenCalledOnce());
+    await expect(mocks.previewTerms.mock.results[0].value).resolves.toMatchObject({
+      client_finance_version: null, payroll_version: null,
+    });
+    expect(within(panel).queryByRole('button', { name: '確認儲存服務條件' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(mocks.applyTerms).toHaveBeenCalledWith(
       'CASE-TERMS',
@@ -346,7 +345,7 @@ describe('名冊沿用訂單條款操作', () => {
       code: 'confirmed_service_dates_reconfirmation_required',
     }));
     const panel = await openTermsPanel();
-    fireEvent.click(within(panel).getByRole('button', { name: '預覽服務條件變更' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '儲存服務條件' }));
     expect(await within(panel).findByRole('alert')).toHaveTextContent('本案已有服務日期');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本面板精算完整替代日期');
     expect(within(panel).getByRole('alert')).toHaveTextContent('本次未儲存任何變更');
@@ -403,13 +402,13 @@ describe('名冊沿用訂單條款操作', () => {
     // Change end time earlier than start time on same day -> invalid
     fireEvent.change(within(panel).getByLabelText('每日結束時間'), { target: { value: '08:00' } });
     expect(within(panel).getByText('每日結束時間須晚於開始時間；若為跨日服務，請將「結束時間是否跨日」設為隔日。')).toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: '預覽服務條件變更' })).toBeDisabled();
+    expect(within(panel).getByRole('button', { name: '儲存服務條件' })).toBeDisabled();
 
     // Switch offset to 隔日 -> 09:00 to 08:00 (+1 day) = 23 hours
     fireEvent.change(within(panel).getByLabelText('結束時間是否跨日'), { target: { value: '1' } });
     expect(hoursInput).toHaveValue(23);
     expect(within(panel).queryByText('每日結束時間須晚於開始時間；若為跨日服務，請將「結束時間是否跨日」設為隔日。')).not.toBeInTheDocument();
-    expect(within(panel).getByRole('button', { name: '預覽服務條件變更' })).not.toBeDisabled();
+    expect(within(panel).getByRole('button', { name: '儲存服務條件' })).not.toBeDisabled();
   });
 
   it('下廚需求尚未確認時仍可單獨修改服務時段並保留 unknown', async () => {
@@ -424,7 +423,7 @@ describe('名冊沿用訂單條款操作', () => {
       target: { value: '09:00' },
     });
     const previewButton = within(panel).getByRole('button', {
-      name: '預覽服務條件變更',
+      name: '儲存服務條件',
     });
     expect(previewButton).not.toBeDisabled();
     fireEvent.click(previewButton);
@@ -559,20 +558,19 @@ describe('Issue326 replacement dates and allocation from the Terms UI', () => {
     if (failure === 'unknown') mocks.applyTerms.mockRejectedValueOnce(new Error('connection interrupted'));
     render(<OrderTermsMutationPanel caseNo="CASE-TERMS" query={query} />);
     fireEvent.change(screen.getByLabelText('服務天數'), { target: { value: '30' } });
-    expect(screen.getByRole('button', { name: '預覽服務條件變更' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存服務條件' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('替代日期排休方式'), { target: { value: '連續服務' } });
-    fireEvent.click(screen.getByRole('button', { name: '精算替代日期' }));
+    fireEvent.click(screen.getByRole('button', { name: '試算替代日期（選用）' }));
     await screen.findByText(/替代服務日期（30 天）/);
     expect(calculate).toHaveBeenCalledWith({ case_no: 'CASE-TERMS', actual_start_date: '2026-10-01', target_service_days: 30, service_mode: '連續服務' });
     if (assigned) {
-      expect(screen.getByRole('button', { name: '預覽服務條件變更' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '儲存服務條件' })).toBeDisabled();
       fireEvent.change(screen.getByLabelText('指派 9 新服務天數'), { target: { value: '12' } });
       fireEvent.change(screen.getByLabelText('指派 10 新服務天數'), { target: { value: '18' } });
     }
-    fireEvent.click(screen.getByRole('button', { name: '預覽服務條件變更' }));
-    await screen.findByLabelText('條款變更原因');
     fireEvent.change(screen.getByLabelText('條款變更原因'), { target: { value: '合成縮減服務驗收' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認儲存服務條件' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務條件' }));
+    expect(screen.queryByRole('button', { name: '確認儲存服務條件' })).not.toBeInTheDocument();
     if (failure === 'readback') {
       await screen.findByText(/條款已套用，但正式回讀失敗/);
       expect(screen.queryByText(/服務條件已儲存並重新讀取確認/)).not.toBeInTheDocument();

@@ -3,7 +3,7 @@
  * Description: 驗證歷史訂單 review 更正的 strict binding、Preview invalidation 與 Confirm／Apply 流程。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   HISTORICAL_REVIEW_REMEDIATION_QUERY_PATH,
   queryHistoricalReviewRemediation,
@@ -49,7 +49,7 @@ const preview: HistoricalReviewPreview = {
 
 function fakeClient(overrides: Partial<HistoricalReviewRemediationClient> = {}): HistoricalReviewRemediationClient {
   return {
-    query: vi.fn().mockResolvedValue(context),
+    query: vi.fn().mockResolvedValueOnce(context).mockResolvedValue({ ...context, remediation_version: 1, prior_alert_active: false }),
     preview: vi.fn().mockResolvedValue(preview),
     apply: vi.fn().mockResolvedValue({
       prior_review_identity: context.review_identity,
@@ -77,22 +77,20 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(HISTORICAL_REVIEW_REMEDIATION_QUERY_PATH(context.review_identity));
   });
 
-  it('requires file, reason, evidence, Preview and explicit Confirm before Apply', async () => {
+  it('requires file and evidence, checks Preview and applies once from Save', async () => {
     const owner = fakeClient();
     render(<HistoricalOrderReviewRemediationWorkbench reviewIdentity={context.review_identity} client={owner} />);
     await waitFor(() => expect(screen.getByText(/CASE-\*\*\*1/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '儲存更正' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認資料後更正' } });
     fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'phone-log:1' } });
     const file = new File(['xlsx'], 'correction.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     fireEvent.change(screen.getByLabelText(/單列更正/), { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Preview 結果' })).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '確認套用更正' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(screen.getByRole('button', { name: '確認套用更正' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: '確認套用更正' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正' }));
+    await waitFor(() => expect(owner.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用更正' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('原警示已解除')).toBeInTheDocument());
     expect(owner.apply).toHaveBeenCalledOnce();
   });
@@ -110,15 +108,15 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
     fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'record:visible-layer' } });
     fireEvent.change(screen.getByLabelText(/單列更正/), { target: { files: [new File(['xlsx'], 'correction.xlsx')] } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正' }));
 
-    await waitFor(() => expect(screen.getByText('預計處理：更正資料可採用')).toBeInTheDocument());
+    await waitFor(() => expect(owner.preview).toHaveBeenCalledOnce());
     expect(screen.queryByText(new RegExp(preview.preview_fingerprint))).not.toBeInTheDocument();
     expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用更正' }));
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用更正' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('處理結果：更正資料可採用')).toBeInTheDocument());
     expect(screen.queryByText(/receipt:1/)).not.toBeInTheDocument();
     expect(screen.queryByText('corrected_source_adopted')).not.toBeInTheDocument();
@@ -132,19 +130,24 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     expect(screen.queryByText(/raw database host detail/)).not.toBeInTheDocument();
   });
 
-  it('invalidates Preview when reason changes', async () => {
-    const owner = fakeClient();
+  it('uses the latest reason and freezes edits while the single-save check is pending', async () => {
+    const pending = (() => { let resolve!: (value: HistoricalReviewPreview) => void; const promise = new Promise<HistoricalReviewPreview>(done => { resolve = done; }); return { promise, resolve }; })();
+    const owner = fakeClient({ preview: vi.fn().mockReturnValue(pending.promise) });
     render(<HistoricalOrderReviewRemediationWorkbench reviewIdentity={context.review_identity} client={owner} />);
     await waitFor(() => expect(screen.getByText(/CASE-\*\*\*1/)).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
     fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'record:1' } });
     fireEvent.change(screen.getByLabelText(/單列更正/), { target: { files: [new File(['xlsx'], 'correction.xlsx')] } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
-    await waitFor(() => expect(screen.getByRole('checkbox')).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '另一筆電話確認' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正' }));
+    await waitFor(() => expect(owner.preview).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText(/處理原因/)).toBeDisabled();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(owner.apply).not.toHaveBeenCalled();
+    expect(owner.preview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reason: '電話確認', evidence: 'record:1' }));
+    await act(async () => { pending.resolve(preview); });
+    await waitFor(() => expect(owner.apply).toHaveBeenCalledOnce());
+    expect(owner.apply).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ reason: '電話確認', evidence: 'record:1', preview_fingerprint: preview.preview_fingerprint }), expect.anything());
   });
 
   it('keeps explicit remaining issues visible while owner alert is still active', async () => {
@@ -167,11 +170,11 @@ describe('HistoricalOrderReviewRemediationWorkbench', () => {
     fireEvent.change(screen.getByLabelText(/處理原因/), { target: { value: '電話確認' } });
     fireEvent.change(screen.getByLabelText(/佐證/), { target: { value: 'record:active' } });
     fireEvent.change(screen.getByLabelText(/單列更正/), { target: { files: [new File(['xlsx'], 'correction.xlsx')] } });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Preview 更正結果' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 更正結果' }));
-    await waitFor(() => expect(screen.getByRole('checkbox')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用更正' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正' }));
+    await waitFor(() => expect(owner.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認套用更正' })).not.toBeInTheDocument();
 
     expect(await screen.findByText('原 review 尚未解除的欄位衝突')).toBeInTheDocument();
     expect(screen.getByText('更正已提交，等待異常重新檢核')).toBeInTheDocument();

@@ -16,7 +16,7 @@ function Operation({ label, onObserved, onBusyChange }: OperationProps) {
   </section>;
 }
 vi.mock('../../../../../../../components/OrderCancellationPanel', () => ({ OrderCancellationPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="cancellation" /> }));
-vi.mock('../../../../../../../components/OrderControlledReopenPanel', () => ({ OrderControlledReopenPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="reopen" /> }));
+vi.mock('../../../../../../../components/OrderControlledReopenPanel', () => ({ OrderControlledReopenPanel: (props: Omit<OperationProps, 'label'> & { startDisabled?: boolean }) => <section aria-label="操作面板 reopen"><button type="button" disabled={props.startDisabled}>重開訂單</button></section> }));
 vi.mock('../../../../../../../components/OrderActualStartPanel', () => ({ OrderActualStartPanel: (props: Omit<OperationProps, 'label'>) => <Operation {...props} label="actual-start" /> }));
 vi.mock('../../../../../../../components/OrderWorkbenchV2OwnerContext', () => ({ OrderWorkbenchV2OwnerContext: ({ revision }: { revision: number }) => <p>Owner context revision {revision}</p> }));
 vi.mock('../../../../../../../components/OrderServiceCompletionActions', () => ({ OrderServiceCompletionActions: () => <p>正常完工操作入口</p> }));
@@ -50,7 +50,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   it('同頁點擊待辦看板時沿用返回流程', async () => {
     const onClose = vi.fn();
     const view = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" homeNavigationRequest={0} onClose={onClose} />);
-    await screen.findByRole('heading', { name: '客戶與月嫂確認排班' });
+    await screen.findByRole('heading', { name: '排班結果與代班' });
     view.rerender(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" homeNavigationRequest={1} onClose={onClose} />);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -71,8 +71,8 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   });
 
   it.each([
-    ['formal_service', '客戶與月嫂確認排班'],
-    ['service_completion', '客戶與月嫂確認排班'],
+    ['formal_service', '排班結果與代班'],
+    ['service_completion', '排班結果與代班'],
     ['confirmed_service_dates', '現行服務日期'],
   ])('依 %s 直接呈現 %s，沿用兩步服務安排', async (stage, label) => {
     const data = page();
@@ -82,9 +82,9 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     await screen.findByRole('heading', { name: label });
     expect(screen.getByRole('navigation', { name: '服務安排步驟' }).querySelectorAll('button')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
-    const other = label === '現行服務日期' ? '確認排班' : '設定服務日期';
+    const other = label === '現行服務日期' ? '排班結果與代班' : '設定服務日期';
     fireEvent.click(screen.getByRole('button', { name: new RegExp(other) }));
-    expect(screen.getByRole('heading', { name: other === '確認排班' ? '客戶與月嫂確認排班' : '現行服務日期' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: other === '排班結果與代班' ? '排班結果與代班' : '現行服務日期' })).toBeInTheDocument();
   });
 
   it.each([
@@ -119,7 +119,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
 
   it('未完工案件只提供開始日異動，不提供完工日期更正', async () => {
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '客戶與月嫂確認排班' });
+    await screen.findByRole('heading', { name: '排班結果與代班' });
     fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     expect(screen.getByRole('button', { name: '更正開始日並重排' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
@@ -128,7 +128,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
   it('尚無排班時仍可確認日期，開始日儲存使用上方日期工作區', async () => {
     mocks.assignment.mockResolvedValue({ case_no: CASE, assignments: [] });
     render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
-    await screen.findByRole('heading', { name: '客戶與月嫂確認排班' });
+    await screen.findByRole('heading', { name: '排班結果與代班' });
     fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     expect(screen.getByText('日期操作入口')).toBeVisible();
     expect(screen.queryByRole('button', { name: '確認／更正實際開始日' })).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     const normal = render(<OrderWorkbenchV2Drawer caseNo={CASE} branchType="normal" onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /確認服務日期與排班/ }));
     await waitFor(() => expect(mocks.core).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('button', { name: '重開訂單' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '操作面板 reopen' })).not.toBeInTheDocument();
     normal.unmount();
 
     mocks.core.mockResolvedValue(page(true));
@@ -159,7 +159,7 @@ describe('Beta Drawer 受控操作整合與跨支線回讀', () => {
     const button = await screen.findByRole('button', { name: '重開訂單' });
     expect(screen.queryByRole('button', { name: '更正完工服務日期' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更正開始日並重排' })).not.toBeInTheDocument();
-    fireEvent.click(button);
+    expect(button).toBeEnabled();
     expect(screen.getByRole('region', { name: '操作面板 reopen' })).toBeInTheDocument();
   });
 

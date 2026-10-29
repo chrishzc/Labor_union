@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { OrderCandidateQueryPanel } from '../components/OrderCandidateQueryPanel';
+import { CandidateInquiryDialog } from '../components/CandidateInquiryDialog';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
+import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
 import { ApiNetworkError, ApiTimeoutError } from '../api/shared/typed_errors';
 
@@ -133,8 +137,25 @@ const allFilters = {
   daily_service_hours: false,
 };
 
+function CandidateDialog({ presentation, onLeave, onReadback }: {
+  presentation: 'legacy' | 'workbench'; onLeave: () => void; onReadback: () => void;
+}) {
+  const { requestLeave } = useUnsavedNavigation();
+  const [open, setOpen] = useState(true);
+  const [editState, setEditState] = useState({ dirty: false, busy: false });
+  return <>
+    <button onClick={() => requestLeave(onLeave)}>離開案件</button>
+    {open && <CandidateInquiryDialog title="新增候選月嫂" busy={editState.busy}
+      onClose={() => requestLeave(() => { setOpen(false); onLeave(); })}>
+      <OrderCandidateQueryPanel caseNo="115000204" includeMultiCaregiver={false} presentation={presentation}
+        onEditStateChange={setEditState} onPoolReadback={onReadback} />
+    </CandidateInquiryDialog>}
+  </>;
+}
+
 describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回讀', () => {
   beforeEach(() => {
+    orderMutationFlowStore.clearAll();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.createAddCandidatesCommand.mockImplementation((caseNo, candidates) => ({
       caseNo,
@@ -349,5 +370,69 @@ describe('待辦看板 Beta 第 2 階正式候選查詢、候選池寫入與回�
     expect(await screen.findByText('候選池回讀與本次寫入選擇不一致。')).toBeInTheDocument();
     expect(onPoolReadback).not.toHaveBeenCalled();
     expect(mocks.sendInformation).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'workbench'] as const)('%s：寫入與回讀中保護離開，成功回讀後正常關閉', async presentation => {
+    const receipt = { pool_id: 9, candidate_ids: [17], status: 'recorded' };
+    let finishAdd!: (value: typeof receipt) => void;
+    let finishReadback!: (value: ReturnType<typeof candidatePool>) => void;
+    mocks.searchInquiryCandidates.mockResolvedValue(availability());
+    mocks.addCandidates.mockImplementationOnce(() => new Promise(resolve => { finishAdd = resolve; }));
+    if (presentation === 'workbench') mocks.queryPool.mockResolvedValueOnce({ ...candidatePool(), candidates: [] });
+    mocks.queryPool.mockImplementationOnce(() => new Promise(resolve => { finishReadback = resolve; }));
+    const onLeave = vi.fn();
+    const onReadback = vi.fn();
+    render(<UnsavedChangesProvider><CandidateDialog presentation={presentation} onLeave={onLeave} onReadback={onReadback} /></UnsavedChangesProvider>);
+    if (presentation === 'legacy') {
+      fireEvent.click(await screen.findByRole('checkbox', { name: '選擇正式候選 正式合格月嫂' }));
+      fireEvent.click(screen.getByRole('button', { name: '加入候選池（1）' }));
+    } else {
+      fireEvent.click(await screen.findByRole('button', { name: '加入候選池（正式合格月嫂）' }));
+    }
+    expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '離開案件' }));
+    expect(screen.getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    expect(onLeave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+    await act(async () => { finishAdd(receipt); });
+    expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '離開案件' }));
+    expect(screen.getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    expect(onReadback).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+    await act(async () => { finishReadback(candidatePool()); });
+    await waitFor(() => expect(onReadback).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(onLeave).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each(['寫入結果未明', '回讀失敗'] as const)('%s：仍禁止捨棄離開，原操作確認成功後才解鎖', async failure => {
+    const receipt = { pool_id: 9, candidate_ids: [17], status: 'recorded' };
+    mocks.searchInquiryCandidates.mockResolvedValue(availability());
+    mocks.queryPool.mockResolvedValueOnce({ ...candidatePool(), candidates: [] });
+    if (failure === '寫入結果未明') mocks.addCandidates.mockRejectedValueOnce(new ApiTimeoutError(30000));
+    else mocks.queryPool.mockRejectedValueOnce(new Error('回讀失敗'));
+    mocks.addCandidates.mockResolvedValue(receipt);
+    mocks.queryPool.mockResolvedValue(candidatePool());
+    const onLeave = vi.fn();
+    const onReadback = vi.fn();
+    render(<UnsavedChangesProvider><CandidateDialog presentation="workbench" onLeave={onLeave} onReadback={onReadback} /></UnsavedChangesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '加入候選池（正式合格月嫂）' }));
+    const retryLabel = failure === '寫入結果未明' ? '以原操作重新確認加入候選池' : '只重新讀取候選池結果';
+    await screen.findByRole('button', { name: retryLabel });
+    expect(screen.getByRole('button', { name: '關閉' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '離開案件' }));
+    expect(screen.getByRole('button', { name: '捨棄變更並離開' })).toBeDisabled();
+    expect(onLeave).not.toHaveBeenCalled();
+    expect(onReadback).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '繼續編輯' }));
+    fireEvent.click(screen.getByRole('button', { name: retryLabel }));
+    await waitFor(() => expect(onReadback).toHaveBeenCalledOnce());
+    expect(mocks.addCandidates).toHaveBeenCalledTimes(failure === '寫入結果未明' ? 2 : 1);
+    if (failure === '寫入結果未明') expect(mocks.addCandidates.mock.calls[1][0]).toBe(mocks.addCandidates.mock.calls[0][0]);
+    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    expect(onLeave).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

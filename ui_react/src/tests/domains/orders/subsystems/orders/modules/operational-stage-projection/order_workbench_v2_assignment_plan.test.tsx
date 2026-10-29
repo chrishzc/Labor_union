@@ -108,7 +108,8 @@ describe('正式指派自動回讀與排班明細', () => {
     expect(await screen.findByText('2 段')).toBeInTheDocument();
     expect(screen.getByText(/尚無有效媒合方案/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('mock 日期表確認與排班')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('matching plan 0');
+    expect(screen.getByLabelText('mock 日期表確認與排班')).toHaveTextContent('2026-09-10、2026-09-11、2026-09-12、2026-09-13');
   });
 
   it('只使用既有 assignment-plan owner facts 顯示正式指派段與官方服務日', async () => {

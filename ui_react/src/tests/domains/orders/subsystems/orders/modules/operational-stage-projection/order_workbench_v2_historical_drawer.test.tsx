@@ -37,6 +37,10 @@ const mocks = vi.hoisted(() => ({
   getStart: vi.fn(), getCalendar: vi.fn(), previewStart: vi.fn(), applyStart: vi.fn(),
   getDates: vi.fn(), calculate: vi.fn(), previewDates: vi.fn(), applyDates: vi.fn(),
 }));
+vi.mock('../../../../../../../api/staff_directory/staff_directory_client', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../../../../../api/staff_directory/staff_directory_client')>(),
+  loadActiveStaffIds: vi.fn(async () => new Set([42, 43])),
+}));
 const dateWorkspace = vi.hoisted(() => ({ live: false }));
 
 vi.mock('../../../../../../../api/orders/order_core_stage_projection_client', () => ({
@@ -255,13 +259,10 @@ describe('historical Drawer immutable evidence boundary', () => {
     const readsBefore = mocks.core.mock.calls.length;
     act(() => window.history.replaceState(null, '', entry.getAttribute('href')!));
     view.rerender(<FinancePage />);
-    fireEvent.click(await screen.findByRole('button', { name: '預覽並確認帳務完成' }));
-    const confirm = await screen.findByRole('button', { name: '確認推進至帳務完成' });
-    expect(confirm).toBeDisabled();
     expect(apply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox', { name: '我已確認客戶款項及所有月嫂款項均已結清' }));
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
+    fireEvent.change(await screen.findByLabelText('完成原因（選填）'), { target: { value: '確認歷史訂單客戶款項及月嫂款項皆已結清' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存帳務完成' }));
+    expect(screen.queryByRole('checkbox', { name: '我已確認客戶款項及所有月嫂款項均已結清' })).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.summaries).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole('button', { name: '確認推進至帳務完成' })).not.toBeInTheDocument());
     expect(query).toHaveBeenCalledWith('CASE-FUTURE', expect.objectContaining({ signal: expect.any(AbortSignal) }));
@@ -462,7 +463,7 @@ describe('historical Drawer immutable evidence boundary', () => {
     expect(mocks.applyStart).not.toHaveBeenCalled();
     expect(mocks.applyDates).not.toHaveBeenCalled();
     fireEvent.change(startInput, { target: { value: '' } });
-    fireEvent.click(screen.getByRole('button', { name: /確認排班/ }));
+    fireEvent.click(screen.getByRole('button', { name: /排班結果與代班/ }));
     expect(screen.queryByRole('button', { name: '預覽正式安排' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /設定服務日期/ }));
     expect(startInput).toHaveValue('');
@@ -607,6 +608,6 @@ describe('historical Drawer immutable evidence boundary', () => {
     fireEvent.click(entry);
     expect(await screen.findByRole('radio', { name: /候選月嫂乙/ })).toHaveAttribute('value', '43');
     const replacementRegion = screen.getByRole('region', { name: '更換月嫂' });
-    expect(within(replacementRegion).getByRole('button', { name: '檢查換人影響' })).toBeDisabled();
+    expect(within(replacementRegion).getByRole('button', { name: '儲存更換' })).toBeDisabled();
   });
 });

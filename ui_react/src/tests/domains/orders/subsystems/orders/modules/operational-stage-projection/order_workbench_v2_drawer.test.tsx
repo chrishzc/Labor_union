@@ -269,9 +269,9 @@ describe('待辦看板 唯讀工作 Drawer', () => {
     expect(entry).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('region', { name: '正式分段工作區' })).toBeVisible();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByText('分段下廚篩選：true')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox', { name: '下廚料理' }));
     expect(screen.getByText('分段下廚篩選：false')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '下廚料理' }));
+    expect(screen.getByText('分段下廚篩選：true')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '候選月嫂' }));
     expect(screen.getByRole('button', { name: '候選月嫂' })).toHaveAttribute('aria-pressed', 'true');
   });

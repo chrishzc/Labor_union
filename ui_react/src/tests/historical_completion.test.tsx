@@ -98,12 +98,10 @@ describe('HistoricalCompletionPanel', () => {
     const onCompleted = vi.fn();
     render(<HistoricalCompletionPanel caseNo="CASE-1" client={completionClient} onCompleted={onCompleted} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '預覽並確認帳務完成' }));
-    const applyButton = await screen.findByRole('button', { name: '確認推進至帳務完成' });
-    expect(applyButton).toBeDisabled();
     expect(onCompleted).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('checkbox', { name: /客戶款項及所有月嫂款項/ }));
-    fireEvent.click(applyButton);
+    fireEvent.click(await screen.findByRole('button', { name: '儲存帳務完成' }));
+    expect(screen.queryByRole('button', { name: '確認推進至帳務完成' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /客戶款項及所有月嫂款項/ })).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText(/已推進至歷史訂單－帳務完成/)).toBeInTheDocument());
     expect(completionClient.apply).toHaveBeenCalledTimes(1);

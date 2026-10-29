@@ -17,9 +17,9 @@ it('offers an explicit period update for an existing candidate and verifies the 
   const pool = { case_no: 'TEST', pool_id: 1, candidates: [candidate] };
   mocks.pool.mockResolvedValueOnce(pool).mockResolvedValue({ ...pool, candidates: [updated] });
   mocks.add.mockResolvedValue({ pool_id: 1, candidate_ids: [2], status: 'recorded' });
-  mocks.search.mockResolvedValue({ case_no: 'TEST', planned_start_date: '2026-11-15', planned_end_date: '2026-12-11', conflicts: [], candidate_options: [{ staff_id: 2, staff_name: candidate.staff_name, segment_index: 0, case_period_start: '2026-11-15', case_period_end: '2026-12-11', selected_segment_start: '2026-11-15', selected_segment_end: '2026-12-11', full_case_coverage: true, supported_day_count: 27, required_day_count: 27 }] });
+  mocks.search.mockResolvedValue({ case_no: 'TEST', planned_start_date: '2026-11-15', planned_end_date: '2026-12-11', conflicts: [], candidate_options: [{ staff_id: 2, staff_name: candidate.staff_name, matching_conditions: { region: { status: 'pending', required_value: null, staff_values: [] }, preferred_service_days: { status: 'pending', required_value: null, staff_values: [] } }, segment_index: 0, case_period_start: '2026-11-15', case_period_end: '2026-12-11', selected_segment_start: '2026-11-15', selected_segment_end: '2026-12-11', full_case_coverage: true, supported_day_count: 27, required_day_count: 27 }] });
   render(<OrderCandidateQueryPanel caseNo="TEST" presentation="workbench" includeMultiCaregiver={false} />);
-  fireEvent.click(screen.getByRole('button', { name: '查詢合適人選' }));
+  await waitFor(() => expect(mocks.search).toHaveBeenCalled());
   const update = await screen.findByRole('button', { name: '更新詢問期間（測試月嫂）' });
   expect(screen.getByText(/更新後須重新記錄接案意願/)).toBeInTheDocument();
   fireEvent.click(update);
@@ -34,10 +34,10 @@ it('explains retained dates separately from buffer reminders without excluding a
     conflicts: [
       { staff_id: 1, work_date: '2026-11-15', reason_code: 'active_lock' },
       { staff_id: 1, work_date: '2026-12-01', reason_code: 'buffer' },
-    ], candidate_options: [{ segment_index: 0, staff_id: 1, staff_name: '衝突測試月嫂', full_case_coverage: false,
+    ], candidate_options: [{ segment_index: 0, staff_id: 1, staff_name: '衝突測試月嫂', matching_conditions: { region: { status: 'pending', required_value: null, staff_values: [] }, preferred_service_days: { status: 'pending', required_value: null, staff_values: [] } }, full_case_coverage: false,
       supported_day_count: 5, required_day_count: 21 }] });
   render(<OrderCandidateQueryPanel caseNo="CONFLICT" presentation="workbench" includeMultiCaregiver={false} />);
-  fireEvent.click(screen.getByRole('button', { name: '查詢合適人選' }));
+  await waitFor(() => expect(mocks.search).toHaveBeenCalled());
   await screen.findByText('未設定 衝突測試月嫂');
   fireEvent.click(screen.getByText('查看衝突日期與原因'));
   expect(screen.getByText('其他案件已保留檔期：2026-11-15')).toBeVisible();

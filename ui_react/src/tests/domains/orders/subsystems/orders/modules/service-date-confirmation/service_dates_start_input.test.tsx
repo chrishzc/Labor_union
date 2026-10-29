@@ -88,6 +88,7 @@ it('排班前建議跳過假日，人工選假日上班後可保存並保留到�
 
 async function input(date: string) {
   await waitFor(() => expect(screen.getByLabelText('實際開始日')).toHaveValue('2026-10-01'));
+  await waitFor(() => expect(screen.getByLabelText('實際開始日')).toBeEnabled());
   fireEvent.change(screen.getByLabelText('實際開始日'), { target: { value: date } });
   await waitFor(() => expect(mocks.calculate).toHaveBeenLastCalledWith(expect.objectContaining({ actual_start_date: date })));
   await waitFor(() => expect(screen.getByLabelText('建議服務日期摘要')).toHaveTextContent(date));

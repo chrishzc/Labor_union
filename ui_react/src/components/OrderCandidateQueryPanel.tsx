@@ -316,7 +316,7 @@ const CandidateQueryForCase: FC<OrderCandidateQueryPanelProps> = ({ caseNo, onPo
     : null;
   useEffect(() => { onEditStateChange?.({ dirty: selectedStaffIds.size > 0, busy: busy || recoveryPending }); }, [selectedStaffIds, busy, recoveryPending, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
-  useUnsavedDraft('新增詢問人選', { '已選月嫂': [...selectedStaffIds] }, { baseline: { '已選月嫂': [] }, busy: multiBusy || addState.status === 'saving' || !!flow });
+  useUnsavedDraft('新增詢問人選', { '已選月嫂': [...selectedStaffIds] }, { baseline: { '已選月嫂': [] }, busy: multiBusy || addState.status === 'saving' || recoveryPending });
 
 
   return (

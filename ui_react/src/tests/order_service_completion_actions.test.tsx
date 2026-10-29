@@ -56,19 +56,16 @@ describe('OrderServiceCompletionActions', () => {
     expect(orderServiceCompletionClient.preview).not.toHaveBeenCalled();
   });
 
-  it('preserves Preview confirmation gating and completion readback', async () => {
+  it('checks the current version before a single save and verifies completion readback', async () => {
     const onCompleted = vi.fn();
     render(<OrderServiceCompletionActions caseNo="115000001" orderStatus="服務中" onCompleted={onCompleted} />);
     expect(screen.getByText(/重新核對排班、完整服務日、服務結束時刻與可完成條件/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/lifecycle controls|fingerprint|idempotency|receipt/i);
 
-    fireEvent.click(screen.getByRole('button', { name: '檢查服務完成影響' }));
-    await screen.findByText('服務完成內容已檢查');
-    const apply = screen.getByRole('button', { name: '確認套用服務完成' });
-    expect(apply).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('完工確認原因'), { target: { value: '已核對最後服務日' } });
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(apply);
+    expect(orderServiceCompletionClient.apply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('完工原因（選填）'), { target: { value: '已核對最後服務日' } });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務完成' }));
 
     await screen.findByText('服務完成已登記並完成回讀。');
     expect(screen.queryByRole('button', { name: '確認套用服務完成' })).not.toBeInTheDocument();
@@ -78,11 +75,10 @@ describe('OrderServiceCompletionActions', () => {
 
   it('does not claim successful readback or retain Apply when parent refresh fails', async () => {
     render(<OrderServiceCompletionActions caseNo="CASE-001" orderStatus="服務中" onCompleted={async () => { throw new Error('refresh failed'); }} />);
-    fireEvent.click(screen.getByRole('button', { name: '檢查服務完成影響' }));
-    await screen.findByText('服務完成內容已檢查');
-    fireEvent.change(screen.getByLabelText('完工確認原因'), { target: { value: '已核對服務日' } });
-    fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: '確認套用服務完成' }));
+    expect(orderServiceCompletionClient.apply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('完工原因（選填）'), { target: { value: '已核對服務日' } });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務完成' }));
     expect(await screen.findByText(/案件狀態尚未回讀確認/)).toBeInTheDocument();
     expect(screen.queryByText('服務完成已登記並完成回讀。')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認套用服務完成' })).not.toBeInTheDocument();
@@ -93,7 +89,7 @@ describe('OrderServiceCompletionActions', () => {
       new ApiHttpError(500, 'orders_backend_failed', 'raw SQL connection failed', true),
     );
     render(<OrderServiceCompletionActions caseNo="CASE-001" orderStatus="服務中" onCompleted={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '檢查服務完成影響' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存服務完成' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('服務完成處理暫時無法使用');
     expect(screen.getByRole('alert')).not.toHaveTextContent(/orders_backend_failed|raw SQL/i);
   });

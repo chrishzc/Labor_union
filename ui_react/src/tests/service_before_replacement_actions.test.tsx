@@ -195,10 +195,10 @@ describe('ServiceBeforeReplacementActions', () => {
     await screen.findByText('可以辦理更換');
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledWith('CASE-RPRE-001', 'R-02', expect.any(AbortSignal));
     expect(screen.getByText('重新挑選候選月嫂')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: ' 客戶要求更換月嫂 ' } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: ' 客戶要求更換月嫂 ' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
 
-    await screen.findByText('預覽完成，尚未寫入');
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
     expect(screen.queryByText('技術詳情與資料來源')).not.toBeInTheDocument();
     expect(screen.queryByText(fingerprint)).not.toBeInTheDocument();
     expect(screen.queryByText(/generation:7/)).not.toBeInTheDocument();
@@ -211,10 +211,9 @@ describe('ServiceBeforeReplacementActions', () => {
       },
       expect.any(AbortSignal),
     );
-    const applyButton = screen.getByRole('button', { name: '確認更換' });
-    expect(applyButton).toBeDisabled();
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(applyButton);
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    await waitFor(() => expect(serviceBeforeReplacementClient.apply).toHaveBeenCalledOnce());
 
     await screen.findByText(/已完成更換/);
     expect(serviceBeforeReplacementClient.apply).toHaveBeenCalledWith(
@@ -256,7 +255,7 @@ describe('ServiceBeforeReplacementActions', () => {
 
     expandReplacementPanel();
     await screen.findByText('已有實際服務，必須改走請假代班');
-    expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('換人原因（選填）')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '前往請假代班' }));
     expect(onSubstitutionReferral).toHaveBeenCalledWith(referral);
     expect(screen.getByText('已服務日期：2026-08-01')).toBeInTheDocument();
@@ -279,8 +278,8 @@ describe('ServiceBeforeReplacementActions', () => {
 
     await screen.findByText('已辦理更換，請勿重複提交');
     expect(screen.getByText('依已確認的推薦結果繼續安排')).toBeInTheDocument();
-    expect(screen.queryByLabelText('換人原因')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '預覽換人影響' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('換人原因（選填）')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存更換' })).not.toBeInTheDocument();
   });
 
   it('沒有 typed anomaly binding 時不預設猜 R-01，必須由操作者選擇', async () => {
@@ -300,11 +299,11 @@ describe('ServiceBeforeReplacementActions', () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: preview.reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
 
     await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
     const firstCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[0];
@@ -322,11 +321,11 @@ describe('ServiceBeforeReplacementActions', () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: preview.reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
 
     await screen.findByText(/沿用原操作安全地確認結果，不會重複建立換人/);
     const firstCall = vi.mocked(serviceBeforeReplacementClient.apply).mock.calls[0];
@@ -363,11 +362,11 @@ describe('ServiceBeforeReplacementActions', () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" onCommitted={onCommitted} />);
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: preview.reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
     await screen.findByText(/已完成更換/);
     expect(screen.queryByText('parent refresh failed')).not.toBeInTheDocument();
   });
@@ -376,11 +375,11 @@ describe('ServiceBeforeReplacementActions', () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-02" />);
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: preview.reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
     await screen.findByText(/案件已更新/);
     expect(serviceBeforeReplacementClient.query).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/若本案另有待處理異常/)).toBeInTheDocument();
@@ -403,11 +402,11 @@ describe('ServiceBeforeReplacementActions', () => {
     render(<ServiceBeforeReplacementActions caseNo="CASE-RPRE-001" initialScenario="R-07" />);
     expandReplacementPanel();
     await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: preview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
+    fireEvent.change(screen.getByLabelText('換人原因（選填）'), { target: { value: preview.reason } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存更換' }));
+    await waitFor(() => expect(serviceBeforeReplacementClient.preview).toHaveBeenCalledOnce());
+    expect(screen.queryByLabelText('我已確認換人原因及影響')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '確認更換' })).not.toBeInTheDocument();
 
     await screen.findByText(/目前沒有可用候選月嫂/);
     expect(screen.queryByText(/blocked_no_candidate/)).not.toBeInTheDocument();

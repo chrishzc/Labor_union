@@ -2,6 +2,7 @@ import {render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {afterEach,it,expect,vi} from 'vitest';
 import {ServiceHandoverPage} from '../pages/ServiceHandoverPage';
 import {serviceStartClient,type ServiceStartView,type HandoverContext} from '../api/scheduling/service_start_client';
+import {ordersQueryClient} from '../api/orders/order_query_client';
 import {ApiHttpError} from '../api/shared/typed_errors';
 import {parseServiceHandoverLink,serviceHandoverHref} from '../adapters/scheduling/service_handover_navigation';
 const request:ServiceStartView={request_id:8,case_no:'CASE',staff_id:1,staff_name:'原月嫂',segment_id:null,order_version:2,version:4,status:'substitute_required',requested_start_date:null,
@@ -49,8 +50,11 @@ it('願意後只開放單人邀請，真正加入後才顯示交接日',async()=
 });
 it('工會填交接日，顯示全部剩餘日，一次儲存且不新增確認步驟',async()=>{
  setup({...facts,request:{...request,willingness:'willing',joined:true}});
- const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...request,status:'applied',result:{actual_start_date:'2026-12-20',actual_end_date:'2027-01-07',order_version:3,
- first_payment_due_date:'2026-12-20',group_record_queued:true,assignments:[{staff_id:2,staff_name:'接任月嫂',service_dates:['2027-01-06','2027-01-07']}]}});
+ const command=vi.spyOn(serviceStartClient,'command').mockResolvedValue({...request,willingness:'willing',joined:true,status:'applied',result:{actual_start_date:'2026-12-20',actual_end_date:'2027-01-07',order_version:3,
+ first_payment_due_date:'2026-12-20',group_record_queued:true,assignments:[{staff_id:1,staff_name:'原月嫂',service_dates:['2027-01-05']},{staff_id:2,staff_name:'接任月嫂',service_dates:['2027-01-06','2027-01-07']}]}});
+ vi.spyOn(ordersQueryClient,'getAssignmentPlan').mockResolvedValue({case_no:'CASE',order_version:3,scheduling_version:4,scheduling_generation:2,client_finance_version:1,payroll_version:1,contracted_service_days:3,service_hours_per_day:8,service_started:true,
+  assignments:[{assignment_id:31,candidate_key:null,staff_id:1,sequence:1,assigned_start_date:'2027-01-05',assigned_end_date:'2027-01-05',official_service_dates:['2027-01-05'],actual_hours:null,lineage_source_assignment_ids:[]},
+   {assignment_id:32,candidate_key:null,staff_id:2,sequence:2,assigned_start_date:'2027-01-06',assigned_end_date:'2027-01-07',official_service_dates:['2027-01-06','2027-01-07'],actual_hours:null,lineage_source_assignment_ids:[31]}]});
  render(<ServiceHandoverPage/>);fireEvent.change(await screen.findByLabelText('交接日'),{target:{value:'2027-01-06'}});
  expect(screen.getByText('交接日起接任 2 個服務日：2027-01-06、2027-01-07')).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'儲存交接日並更新排班與帳務'}));

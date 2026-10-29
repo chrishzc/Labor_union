@@ -76,12 +76,27 @@ describe('Beta 沿用正式受控重開狀態機', () => {
 
   it('receipt 後回讀失敗，恢復只重試觀察、不重開第二次', async () => {
     mocks.detail.mockRejectedValueOnce(new Error('readback unavailable')).mockResolvedValue({ case_no: CASE, order_status: '訂單成立' });
-    const onObserved = vi.fn(); render(<OrderControlledReopenPanel caseNo={CASE} onObserved={onObserved} />);
+    const onObserved = vi.fn(); const view = render(<OrderControlledReopenPanel caseNo={CASE} onObserved={onObserved} />);
     await check(); fireEvent.click(screen.getByRole('button', { name: '重開訂單' }));
     const retry = await screen.findByRole('button', { name: '只重新讀取重開結果' });
+    view.rerender(<OrderControlledReopenPanel caseNo={CASE} startDisabled onObserved={onObserved} />);
+    expect(screen.getByRole('button', { name: '重開訂單' })).toBeDisabled();
+    expect(retry).toBeEnabled();
     expect(onObserved).not.toHaveBeenCalled(); fireEvent.click(retry);
     await screen.findByText(/受控重開已完成正式回讀/);
     expect(mocks.apply).toHaveBeenCalledTimes(1); expect(onObserved).toHaveBeenCalledTimes(1);
+  });
+
+  it('外層仍在處理其他操作時不能開始重開，解鎖後沿用原正式流程', async () => {
+    const view = render(<OrderControlledReopenPanel caseNo={CASE} startDisabled />);
+    expect(screen.getByLabelText('Beta 受控重開原因')).toBeDisabled();
+    const start = screen.getByRole('button', { name: '重開訂單' });
+    expect(start).toBeDisabled(); fireEvent.click(start);
+    expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.apply).not.toHaveBeenCalled();
+    view.rerender(<OrderControlledReopenPanel caseNo={CASE} startDisabled={false} />);
+    fireEvent.click(start);
+    await screen.findByText(/受控重開已完成正式回讀/);
+    expect(mocks.preview).toHaveBeenCalledOnce(); expect(mocks.apply).toHaveBeenCalledOnce();
   });
 
   it('正式回讀狀態不同不冒充完成，保留 receipt', async () => {
