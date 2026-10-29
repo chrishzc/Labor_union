@@ -129,6 +129,7 @@ def deposit_reminder(body: DepositReminder, principal=Depends(require_capability
         return BaseResponse(data={'task_id':identity, 'delivery_status':status}, message='已建立寄送工作，尚未證明送達。')
     except DepositNotificationConflict as error:
         messages = {
+            'deposit_contract_not_completed':'客戶與所有月嫂尚未完成簽約，請完成雙方簽約後再提醒繳款。',
             'deposit_customer_not_bound':'客戶尚未綁定 LINE，請先完成身分綁定。',
             'deposit_payment_details_incomplete':'繳費資訊尚未完整，請核對到期日、銀行代碼與虛擬帳號。',
             'deposit_liff_not_configured':'尚未設定繳費頁面，請先完成 LIFF 設定。',

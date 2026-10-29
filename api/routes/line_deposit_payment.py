@@ -154,6 +154,8 @@ def _raise_error(error):
         raise typed_http_error(401, 'forbidden', 'liff_token_invalid', '請重新從 LINE 開啟頁面。', correlation) from error
     if isinstance(error, (DepositPaymentForbidden, LineCapabilityDeniedError)):
         raise typed_http_error(403, 'forbidden', 'deposit_payment_forbidden', '無法查看或操作此案件的繳費資料。', correlation) from error
+    if str(error) == 'deposit_contract_not_completed':
+        raise typed_http_error(409, 'conflict', str(error), '客戶與所有月嫂尚未完成簽約，請完成雙方簽約後再提醒繳款。', correlation) from error
     raise typed_http_error(409, 'conflict', str(error), '繳費資料或狀態已變更，請重新讀取待辦。', correlation) from error
 
 

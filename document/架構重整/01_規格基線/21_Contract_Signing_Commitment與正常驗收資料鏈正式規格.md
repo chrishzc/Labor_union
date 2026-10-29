@@ -23,6 +23,7 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 - `commitment` 是所有月嫂簽約完成後保存的人員、方案版本及精確服務日資料，供後續客戶契約與正式排班驗證；它不是另一個供使用者操作的簽約階段。業務流程不得以「簽約前服務承諾」或「形成有效簽約承諾」代替「所有月嫂簽約完成」。
 - 應收不分「正式應收」與「非正式應收」。資料不足稱「待確認」；資料齊全即由系統同步並顯示訂金與各期客戶應付，不另設「建立付款義務」關卡。`obligation`、`commitment_ready`、`client_signed_received`、`contract_completed` 及既有資料表、API、事件識別名稱維持原名，不為簡化流程新增帳務狀態；計算與核銷不再依賴簽約時點。
 - 「簽回」可用於描述簽署文件回收與證據驗證；描述業務流程階段時使用上述簽約完成名稱。預覽不建立應收；已核銷交易與已簽文件不得因用詞修正而改寫。
+- 2026-10-29 訂金提醒與各期逾期待辦裁決：客戶及所有月嫂均已簽約完成才取得提醒資格；沿用同案 Orders `contract_completed` 事件及相符的目前 `contract_identity` 作為正式完成事實。單方簽署、僅產生／寄送文件或付款均不能代替。此資格只限制訂金繳費提醒及訂金／第一期／第二期逾期待辦與發送，未簽約仍依規格 04 預先計算各期金額，且不改變合法核銷與既有到期日。
 
 ## 2. Business scenario 與 Global invariants
 
@@ -382,14 +383,14 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 → 外部平台完成月嫂與客戶簽署
 → 管理員上傳最終簽署 PDF，Preview 並確認其包含客戶與所有月嫂簽署
 → Apply 在單一 outer UoW 建立缺少的 commitment、Orders contract identity／completion、
-  最終受控 PDF／receipt 與 Client Finance 訂金 obligation
+  最終受控 PDF／receipt，並沿用 Client Finance 已預先同步的訂金及各期應付
 → 進入訂金核銷
 ```
 
 1. 外部平台交接為明確、可重播的本機 mutation；只代表操作者已送交，不宣稱 provider delivery 或簽署狀態。
 2. 最終簽署 PDF 的受控 readback 是雙方完成簽署的 aggregate evidence。個別 staff／client completion report 保留為選用、可稽核、replay-safe 的 compatibility evidence，不是 final Apply prerequisite。
 3. Preview 零寫入，綁定 current session、status version、staging version／digest、Orders 與 Client Finance versions。Apply fresh-lock 後由 PDF digest 推導穩定 contract identity，並在同一交易完成 commitment、Orders、Client Finance、controlled file、session 與 receipt；任一步失敗不得留下 partial writes。
-4. 訂金 obligation 由 final Apply 建立；第 8 階段在 final PDF 前不得提前顯示為進行中或完成，final PDF 後依 settlement owner 根事實顯示 blocked／completed。
+4. 依 2026-10-29 提醒資格裁決，訂金及各期金額依完整資料預先計算，不等待 final Apply；雙方簽約完成後才列入訂金繳費提醒與各期逾期待辦。第 8 階段在 final PDF 前不得提前顯示為進行中或完成，final PDF 後依 settlement owner 根事實顯示 blocked／completed。
 5. 既有個別回報、歷史 recovery 與 receipt 仍可查閱，不得回頭成為新主流程門禁。
 
 ### 2026-09-29 未綁定 LINE 的外部平台交接裁決

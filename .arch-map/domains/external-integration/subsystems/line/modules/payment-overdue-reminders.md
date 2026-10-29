@@ -6,6 +6,7 @@
 
 ## Responsibility
 工會各期繳款逾期待辦與逐次人工提醒。訂金只寄客戶私訊，第一、二期只寄原案件群組；Query 零寫入，Send 與 provider 前重讀同一筆期別帳務及收件對象。沒有自動逾期催繳、跨期合計、私訊替代群組或新財務狀態。
+訂金、第一期、第二期清單／總數與寄送均須雙方簽約完成；Finance 唯讀查詢核對 Orders 目前契約識別及同案相符 `contract_completed` 事件，不符資格的舊待寄提醒取消，原金額與期限保持。
 
 ## Implementation
 - `subsystems/line/payment_overdue_reminders.py`

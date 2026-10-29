@@ -56,6 +56,7 @@ class DepositNotificationTodoPage:
 
 
 class DepositNotificationPort(Protocol):
+    def contract_completed(self, case_no: str, *, lock: bool = False) -> bool: ...
     def customer_line_user_id(self, case_no: str, *, lock: bool = False) -> str | None: ...
     def next_settlement(self) -> DepositSettlementIntent | None: ...
     def existing_delivery(self, key: IdempotencyKey) -> LineDeliveryTaskSnapshot | None: ...
@@ -124,6 +125,8 @@ class DepositNotificationApplication:
                 return existing.task_id.value, existing.status.value
             if payment.settled or payment.obligation_version != expected_version:
                 raise DepositNotificationConflict('deposit_payment_changed')
+            if not uow.deposit_notifications.contract_completed(case_no, lock=True):
+                raise DepositNotificationConflict('deposit_contract_not_completed')
             if not self.ready(payment):
                 raise DepositNotificationConflict('deposit_payment_details_incomplete')
             recipient = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
@@ -182,7 +185,9 @@ def deposit_delivery_is_current(uow, task, now) -> bool:
     recipient = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
     valid = (payment is not None and payment_source(payment) == request.source_aggregate_identity
              and recipient == request.recipient.identity.value
-             and payment.settled == (request.source_aggregate_type == SETTLED))
+             and payment.settled == (request.source_aggregate_type == SETTLED)
+             and (request.source_aggregate_type != REMINDER
+                  or uow.deposit_notifications.contract_completed(case_no, lock=True)))
     if not valid:
         uow.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
             task.task_id, ActorContext('line-deposit-worker'),

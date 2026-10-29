@@ -45,6 +45,8 @@ owner 計算結果；既有保存的第二期日期不取代本公式。預覽�
 
 完整進件與服務條件保存後，在原 outer Unit of Work 依目前付款條款、服務天數、每日時數、單價與樓層費，自動同步訂金、第一期與第二期客戶應付。未簽約或未建立執行指派，不阻擋金額計算與核銷；不要求人員另行建立付款義務。
 
+2026-10-29 訂金提醒與逾期待辦人工裁決：預先計算、保存各期金額及合法核銷維持上述規則；訂金繳費提醒與訂金／第一期／第二期逾期待辦，另須客戶及所有月嫂均已簽約完成。資格沿用同案 `order_contract_flow_events.event_type=contract_completed`，且事件的 `contract_identity` 必須等於 Orders 目前契約識別；沒有正式完成事件、只有單方簽署或契約識別不符，均不得列入。這是通知資格，不是新增帳務狀態或計算／核銷門檻。原到期日不因簽約重設；雙方簽約完成後若原期限已過，依各期既有逾期規則列入。
+
 付款相關條件變動沿用既有 Terms Preview／Apply、Finance aggregate version 與正式 writer。日期優先使用本次正式替代／目前確認日期；尚未確認時只供計價使用約定服務量，不建立 Scheduling 服務事實。既有未結清期款沿原 identity 更新；已核銷交易、allocation 與簽署文件不得覆寫，差額沿既有 adjustment／refund 規則承接。非計價修改、歷史實際服務補正及 nonstage 完整性保護維持各 owner 契約。
 
 所有 Query／Preview 零寫入；自動同步只發生在有授權的資料保存交易。初始化回條仍記錄政策 roots 的初始版本，後續帳務同步使用 Client Finance 自己的版本與事件，與父命令同交易提交及回滾。重播不重複計算或建立款項；缺少必要資料不填零、也不偽造服務或付款。
@@ -135,7 +137,7 @@ Modules：
 
 ### Reconciliation Preview／Apply
 
-客戶各期逾期查詢供 LINE 規格 20 §6.10 工會待辦使用：每筆訂金／第一期／第二期獨立讀取正式 due date、current event、projection version 及未核銷餘額，台灣到期日隔天起、同筆餘額為正才逾期，不以訂金到期日觸發後續期款或合計全案應付。不需／零金額第二期不列；提醒不建立新義務、收款或異常。核銷與條款日期變更沿既有 writer 更新，待辦重新查詢即反映，已排入寄送的舊快照由 LINE 在 provider 前取消。
+客戶各期逾期查詢供 LINE 規格 20 §6.10 工會待辦使用：先依上述雙方簽約完成資格篩選，再按每筆訂金／第一期／第二期獨立讀取正式 due date、current event、projection version 及未核銷餘額，台灣到期日隔天起、同筆餘額為正才逾期，不以訂金到期日觸發後續期款或合計全案應付。不需／零金額第二期不列；提醒不建立新義務、收款或異常。清單、總數、送出提醒前與 provider 前均重讀同一資格；未完成雙方簽約的舊待寄提醒須取消。核銷與條款日期變更沿既有 writer 更新，待辦重新查詢即反映，已排入寄送的舊快照由 LINE 在 provider 前取消。
 
 鎖定銀行 facts、account version 與 obligations；驗證方向、案件、external reference、ownership 與完整 allocation。Preview 零寫入；Apply 建立正式 ledger、allocation、projection、audit 與 outbox。
 

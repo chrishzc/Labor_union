@@ -6,6 +6,9 @@ _FROM = (
     'JOIN orders orders_root ON orders_root.case_no=o.case_no '
     "WHERE o.direction='receivable_from_client' AND o.obligation_type IN ('deposit','first','second') "
     "AND orders_root.status IN ('洽談中','訂單成立','服務中','訂單完成') "
+    "AND EXISTS (SELECT 1 FROM order_contract_flow_events flow "
+    "WHERE flow.case_no=orders_root.case_no AND flow.event_type='contract_completed' "
+    "AND flow.contract_identity=orders_root.contract_identity) "
     "AND o.status='open' AND o.amount_due_ntd>0 AND e.after_amount_ntd>0 AND o.due_date IS NOT NULL"
 )
 _SELECT = ('SELECT o.case_no,o.obligation_type,o.obligation_identity,o.projection_version,'

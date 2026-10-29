@@ -1,6 +1,6 @@
 """Deposit notifications preserve finance truth, customer ownership and durable delivery."""
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 import json
 import sqlite3
 from types import SimpleNamespace
@@ -15,6 +15,8 @@ from domains.client_finance.reconciliation import PaymentStage
 from infrastructure.mysql.client_receipt_reconciliation_repository import MySqlClientReceiptReconciliationRepository
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
+from infrastructure.mysql.overdue_payment_query_repository import MySqlOverduePaymentQueryRepository
+from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
 from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineAuditRepository
@@ -26,6 +28,7 @@ from subsystems.line.deposit_notifications import (
     ASSISTANCE_ACK, DepositNotificationApplication, DepositNotificationConflict,
     DepositPaymentForbidden, handle_deposit_assistance, payment_source,
 )
+from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderApplication, PaymentOverdueReminderConflict
 
 NOW = datetime(2026, 10, 22, 5, tzinfo=timezone.utc)
 CASE = '115000157'
@@ -53,10 +56,16 @@ class Cursor:
         row = self.cursor.fetchone()
         if row is None:
             return None
-        return {key: datetime.fromisoformat(value) if value and key.endswith('_at_utc') else value for key, value in dict(row).items()}
+        return self._row(row)
 
     def fetchall(self):
-        return [dict(row) for row in self.cursor.fetchall()]
+        return [self._row(row) for row in self.cursor.fetchall()]
+
+    @staticmethod
+    def _row(row):
+        return {key: (datetime.fromisoformat(value) if key.endswith('_at_utc') else
+                      date.fromisoformat(value) if key == 'due_date' else value) if value else value
+                for key, value in dict(row).items()}
 
 
 class Connection:
@@ -73,6 +82,7 @@ class Uow:
         connection = Connection(raw)
         self.deposit_payments = MySqlDepositPaymentQueryRepository(connection)
         self.deposit_notifications = MySqlDepositNotificationRepository(connection)
+        self.payment_overdue_reminders = MySqlPaymentOverdueReminderRepository(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.audit = MySqlLineAuditRepository(connection)
         self.customer_service = SimpleNamespace(create_or_append=lambda command: SimpleNamespace(ticket_id=55))
@@ -97,7 +107,10 @@ def db():
     raw.create_function('JSON_UNQUOTE', 1, lambda value: value)
     raw.create_function('CONCAT', -1, lambda *values: ''.join(str(value) for value in values))
     raw.executescript('''
-    CREATE TABLE orders(case_no TEXT PRIMARY KEY,client_id INTEGER,status TEXT);
+    CREATE TABLE orders(case_no TEXT PRIMARY KEY,client_id INTEGER,status TEXT,contract_identity TEXT);
+    CREATE TABLE order_contract_flow_events(case_no TEXT,contract_identity TEXT,event_type TEXT);
+    CREATE TABLE client_finance_accounts(case_no TEXT PRIMARY KEY,aggregate_version INTEGER);
+    CREATE TABLE line_order_group_bindings(case_no TEXT,group_id TEXT,binding_status TEXT,aggregate_version INTEGER);
     CREATE TABLE clients(id INTEGER PRIMARY KEY,line_user_id TEXT);
     CREATE TABLE line_identity_role_bindings(line_user_id TEXT,subject_type TEXT,subject_reference TEXT,binding_status TEXT);
     CREATE TABLE client_obligations(obligation_identity TEXT PRIMARY KEY,case_no TEXT,obligation_type TEXT,direction TEXT,
@@ -122,7 +135,10 @@ def db():
     CREATE TABLE customer_service_ticket_events(ticket_id INTEGER,event_key TEXT);
     CREATE TABLE line_domain_audit_events(action TEXT,actor_id TEXT,aggregate_type TEXT,aggregate_identity TEXT);
     ''')
-    raw.execute("INSERT INTO orders VALUES (?,1,'洽談中')", (CASE,))
+    raw.execute("INSERT INTO orders(case_no,client_id,status) VALUES (?,1,'洽談中')", (CASE,))
+    complete_contract(raw)
+    raw.execute('INSERT INTO client_finance_accounts VALUES (?,2)', (CASE,))
+    raw.execute("INSERT INTO line_order_group_bindings VALUES (?,'C-synthetic','active',1)", (CASE,))
     raw.execute('INSERT INTO clients VALUES (1,?)', (USER,))
     raw.execute("INSERT INTO line_identity_role_bindings VALUES (?,'customer','1','bound')", (USER,))
     raw.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-one',?,'deposit','receivable_from_client','open',2,12000,'2026-11-01')", (CASE,))
@@ -133,6 +149,64 @@ def db():
 
 def application(db, **kwargs):
     return DepositNotificationApplication(lambda: Uow(db), lambda: NOW, liff_id='synthetic-liff', bank_code=kwargs.get('bank_code', '807'))
+
+
+def complete_contract(db, case_no=CASE):
+    identity = case_no + ':signed'
+    db.execute('UPDATE orders SET contract_identity=? WHERE case_no=?', (identity, case_no))
+    db.execute("INSERT INTO order_contract_flow_events VALUES (?,?,'contract_completed')", (case_no, identity))
+
+
+@pytest.mark.parametrize('change', ['missing_event', 'missing_identity', 'different_contract', 'different_case'])
+def test_unsigned_contract_keeps_calculated_amount_but_blocks_reminder_list_and_send(db, change):
+    if change == 'missing_event':
+        db.execute('DELETE FROM order_contract_flow_events')
+    elif change == 'missing_identity':
+        db.execute('UPDATE orders SET contract_identity=NULL')
+    elif change == 'different_contract':
+        db.execute("UPDATE orders SET contract_identity='other-contract'")
+    else:
+        db.execute("UPDATE order_contract_flow_events SET case_no='other-case'")
+    db.commit()
+    before = rows(db, 'client_obligations')
+    page = Uow(db).deposit_notifications.followups()
+    assert page.items == () and page.total == page.unpaid_total == page.page_total == 0
+    assert application(db).query_customer(CASE, USER).amount_ntd == 12000
+    with pytest.raises(DepositNotificationConflict, match='deposit_contract_not_completed'):
+        application(db).send_reminder(CASE, 2, IdempotencyKey('unsigned'), ACTOR)
+    assert not rows(db, 'line_delivery_tasks') and rows(db, 'client_obligations') == before
+
+
+@pytest.mark.parametrize('stage', ['deposit', 'first', 'second'])
+def test_all_overdue_stages_require_both_parties_signed_at_query_send_and_provider(db, stage):
+    db.execute('UPDATE client_obligations SET obligation_type=?,due_date=?', (stage, '2026-10-21'))
+    db.commit()
+    repository = MySqlOverduePaymentQueryRepository(Connection(db))
+    payments, total = repository.list(date(2026, 10, 22), 1, 25)
+    assert total == 1 and len(payments) == 1 and payments[0].payment_stage == stage
+    expected = payments[0]
+    app = PaymentOverdueReminderApplication(lambda: Uow(db), lambda: NOW)
+    identity, _ = app.send(expected, 'signed-' + stage, ACTOR)
+    db.execute('DELETE FROM order_contract_flow_events')
+    db.commit()
+    before = rows(db, 'client_obligations')
+    assert repository.list(date(2026, 10, 22), 1, 25) == ((), 0)
+    assert repository.get(expected.obligation_identity, lock=True) is None
+    with pytest.raises(PaymentOverdueReminderConflict, match='payment_overdue_changed'):
+        app.send(expected, 'unsigned-' + stage, ACTOR)
+    db.execute("UPDATE line_delivery_tasks SET processing_status='processing',lease_owner='test',lease_acquired_at_utc=?,lease_expires_at_utc=?",
+               (NOW.isoformat(' '), (NOW + timedelta(seconds=60)).isoformat(' ')))
+    db.commit()
+    task = Uow(db).delivery_tasks.get(LineDeliveryTaskId(identity))
+    worker = LineDeliveryWorker(lambda: Uow(db), SimpleNamespace(send=lambda _: pytest.fail('unsigned case reached provider')),
+                                'test', lambda: NOW, batch_size=1)
+    worker._claim = lambda: (task,)
+    assert worker.run_once() == 1
+    assert rows(db, 'line_delivery_tasks')[0]['processing_status'] == 'cancelled'
+    assert rows(db, 'client_obligations') == before
+    complete_contract(db)
+    db.commit()
+    assert repository.list(date(2026, 10, 22), 1, 25)[1] == 1
 
 
 @pytest.mark.parametrize('liff_id',['','your_liff_id_here'])
@@ -198,6 +272,10 @@ def test_reminder_blocks_changed_missing_or_unauthorized_facts_without_job(db, c
 
 
 def test_success_is_automatic_only_for_committed_formal_deposit_and_replay_is_unique(db):
+    # A legitimate receipt before signing still gets its receipt notification.
+    db.execute('DELETE FROM order_contract_flow_events')
+    db.execute('UPDATE orders SET contract_identity=NULL')
+    db.commit()
     assert application(db).run_once() == 0
     settle(db)
     assert {row['intent_type'] for row in rows(db,'client_finance_outbox')} == {'orders_deposit_reconciled'}
@@ -252,6 +330,7 @@ def test_queue_failure_rolls_back_notification_and_can_retry_same_settlement(db,
 
 def test_noncanonical_case_without_unique_imported_account_stays_pending(db):
     db.execute("UPDATE orders SET case_no='CASE-NONCANONICAL'")
+    db.execute("UPDATE order_contract_flow_events SET case_no='CASE-NONCANONICAL'")
     db.execute("UPDATE client_obligations SET case_no='CASE-NONCANONICAL'");db.commit()
     payment=application(db).query_customer('CASE-NONCANONICAL',USER)
     assert payment.virtual_account is None
@@ -275,7 +354,7 @@ def test_unbound_success_is_staff_todo_not_fake_sent_then_binding_can_resume(db)
     assert len(rows(db,'line_delivery_tasks')) == 1
 
 
-@pytest.mark.parametrize('change', ['settled','rebind','version','cancelled','reversed'])
+@pytest.mark.parametrize('change', ['settled','rebind','version','cancelled','reversed','unsigned'])
 def test_provider_guard_cancels_outdated_tasks_and_never_calls_provider(db, change):
     if change == 'reversed':
         settle(db);application(db).run_once()
@@ -286,6 +365,7 @@ def test_provider_guard_cancels_outdated_tasks_and_never_calls_provider(db, chan
         if change == 'rebind': db.execute("UPDATE clients SET line_user_id='U-new'");db.execute("UPDATE line_identity_role_bindings SET line_user_id='U-new'")
         if change == 'version': db.execute('UPDATE client_obligations SET projection_version=3')
         if change == 'cancelled': db.execute("UPDATE orders SET status='訂單取消'")
+        if change == 'unsigned': db.execute('DELETE FROM order_contract_flow_events')
     db.execute("UPDATE line_delivery_tasks SET processing_status='processing',lease_owner='test',lease_acquired_at_utc=?,lease_expires_at_utc=?", (NOW.isoformat(' '), (NOW+timedelta(seconds=60)).isoformat(' ')))
     db.commit()
     task = Uow(db).delivery_tasks.get(LineDeliveryTaskId(1))
@@ -351,6 +431,14 @@ def test_verified_customer_route_and_staff_capability_guards(db, monkeypatch):
     assert result.json()['data']['total'] == 1
     assert client.post(staff+'/remind',json={'line_id_token':'owner','case_no':CASE,'expected_version':2,'idempotency_key':'one'}).status_code==200
     assert capabilities==[LineCapability.TASK_READ,LineCapability.TASK_SEND]
+    db.execute('DELETE FROM order_contract_flow_events')
+    db.commit()
+    unsigned=client.post(staff,json={'line_id_token':'owner','page':1}).json()['data']
+    assert unsigned['items']==[] and unsigned['total']==0
+    response=client.post(staff+'/remind',json={'line_id_token':'owner','case_no':CASE,'expected_version':2,'idempotency_key':'unsigned'})
+    assert response.status_code==409
+    assert 'deposit_contract_not_completed' in response.text and '雙方簽約' in response.text
+    assert len(rows(db,'line_delivery_tasks'))==1
 
 
 @pytest.mark.parametrize('pending_count', [26, 101])
@@ -360,7 +448,11 @@ def test_staff_todo_total_counts_eligible_payments_before_pagination(db, monkeyp
     # A historical settlement and ambiguous obligations are not current todos.
     settle(db)
     db.execute("UPDATE client_finance_outbox SET payload_snapshot='{}'")
-    db.execute("INSERT INTO orders VALUES ('000-AMBIGUOUS',1,'洽談中')")
+    db.execute("INSERT INTO orders(case_no,client_id,status) VALUES ('000-UNSIGNED',1,'洽談中')")
+    db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) "
+               "VALUES ('unsigned-deposit','000-UNSIGNED','deposit','receivable_from_client','open',1,1000,'2026-11-01')")
+    db.execute("INSERT INTO orders(case_no,client_id,status) VALUES ('000-AMBIGUOUS',1,'洽談中')")
+    complete_contract(db, '000-AMBIGUOUS')
     for index in range(2):
         db.execute(
             "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES (?, '000-AMBIGUOUS', 'deposit', "
@@ -368,7 +460,8 @@ def test_staff_todo_total_counts_eligible_payments_before_pagination(db, monkeyp
         )
     cases = [f'TODO-{index:04d}' for index in range(pending_count)]
     for case_no in cases:
-        db.execute("INSERT INTO orders VALUES (?,1,'洽談中')", (case_no,))
+        db.execute("INSERT INTO orders(case_no,client_id,status) VALUES (?,1,'洽談中')", (case_no,))
+        complete_contract(db, case_no)
         db.execute(
             "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES (?,?,'deposit','receivable_from_client',"
             "'open',1,1000,'2026-11-01')", ('deposit-' + case_no, case_no),
@@ -412,7 +505,8 @@ def test_staff_todo_total_counts_eligible_payments_before_pagination(db, monkeyp
 
 
 def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_leaves(db):
-    db.execute("INSERT INTO orders VALUES ('PUBLIC-UNPAID',1,'洽談中')")
+    db.execute("INSERT INTO orders(case_no,client_id,status) VALUES ('PUBLIC-UNPAID',1,'洽談中')")
+    complete_contract(db, 'PUBLIC-UNPAID')
     db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-unpaid','PUBLIC-UNPAID','deposit',"
                "'receivable_from_client','open',1,1000,'2026-11-01')")
     db.commit()
@@ -433,7 +527,8 @@ def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_lea
 
 
 def test_same_case_focus_filters_before_paging_and_exits_after_notice_sent(db):
-    db.execute("INSERT INTO orders VALUES ('PUBLIC-OTHER',1,'洽談中')")
+    db.execute("INSERT INTO orders(case_no,client_id,status) VALUES ('PUBLIC-OTHER',1,'洽談中')")
+    complete_contract(db, 'PUBLIC-OTHER')
     db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-other','PUBLIC-OTHER','deposit',"
                "'receivable_from_client','open',1,1000,'2026-11-01')")
     db.commit();settle(db);application(db).run_once()

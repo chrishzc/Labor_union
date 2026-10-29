@@ -24,6 +24,7 @@
   - `api/routes/client_receipt_reconciliation.py`
 
 ## Dependencies
+- outbound: `orders` — 各期逾期 Query 只讀同案正式契約完成事件與目前契約識別；雙方簽約完成才列入提醒清單與總數，預先計價與核銷不受影響。
 - inbound: `finance-import` — 透過 owning-domain composite 委派收款核銷並保留外層交易。
 - outbound: `orders` — 以已提交的 deposit intent 通知訂金核銷結果。
 - outbound: `external-integration/line/order-pre-start-notification-source` — 第二期正式核銷在既有 projection_refresh payload 帶通知標記與正式金額／分配 identity；零新 enum／schema；正常核銷不產生財務 anomaly，真實超收仍保留。

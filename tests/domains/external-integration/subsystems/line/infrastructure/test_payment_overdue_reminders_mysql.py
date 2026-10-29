@@ -40,6 +40,11 @@ def prepare(http,*,days=30,bound=True,group=True):
     url=f'/api/v1/orders/{case}/intake-completion'
     plan=checked(http.post(url+'/preview',json={}))
     checked(http.post(url+'/apply',json={'expected_lifecycle_version':plan['lifecycle_version'],'preview_fingerprint':plan['preview_fingerprint'],'reason':''},headers={'Idempotency-Key':case+':init'}))
+    # The reminder fixture represents both parties signed; intake still prices before signing.
+    contract=case+':signed'
+    write('UPDATE orders SET contract_identity=%s WHERE case_no=%s',(contract,case))
+    write("INSERT INTO order_contract_flow_events(case_no,contract_identity,event_type,actor,reason,idempotency_key) "
+          "VALUES (%s,%s,'contract_completed','synthetic','both parties signed fixture',%s)",(case,contract,contract))
     user='U'+uuid4().hex
     if bound:
         write('UPDATE clients SET line_user_id=%s WHERE id=%s',(user,client))

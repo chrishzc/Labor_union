@@ -9,6 +9,7 @@
 依 settlement identity 去重建立成功通知。客戶 LIFF 只讀本人案件繳費資料；協助按鈕沿既有客服
 案件與聊天室留言流程。缺帳號／銀行代碼或客戶綁定時保留人員待辦。provider 前重驗來源與綁定。
 不擁有財務、入帳或案件狀態，不通知群組、不補發歷史核銷。
+未核銷訂金提醒的清單／總數、送出與 provider 前均須同案雙方簽約完成；以 Orders 目前契約識別及相符 `contract_completed` 事件唯讀判定，舊待寄提醒不符則取消。預先計價、合法核銷、已核銷成功通知與客戶繳費查詢不加此門檻。
 
 ## Implementation
 - `subsystems/line/deposit_notifications.py`
@@ -27,6 +28,7 @@
 - staff presentation: `line/static/mobile_admin.html`
 
 ## Dependencies
+- outbound: `orders` — 只讀目前契約識別與同案正式契約完成事件，不重建簽署狀態機。
 - outbound: `client-finance/receipt-reconciliation` — typed DepositPayment Query 及帶 `line_deposit_notification` 標記的 committed Orders deposit event；不改 outbox status、不新增 enum。
 - outbound: `customer-service` — 既有 create_or_append 及客服留言受理，不觸發群組告警。
 - outbound: LINE Delivery — committed queue／lease／cancel／provider pipeline；不從 API 直接寄送。

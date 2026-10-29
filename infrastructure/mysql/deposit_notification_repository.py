@@ -11,6 +11,17 @@ class MySqlDepositNotificationRepository:
     def __init__(self, connection):
         self._connection = connection
 
+    def contract_completed(self, case_no, *, lock=False):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no FROM orders o WHERE o.case_no=%s "
+                "AND EXISTS (SELECT 1 FROM order_contract_flow_events flow "
+                "WHERE flow.case_no=o.case_no AND flow.event_type='contract_completed' "
+                "AND flow.contract_identity=o.contract_identity)" + (' FOR UPDATE' if lock else ''),
+                (case_no,),
+            )
+            return cursor.fetchone() is not None
+
     def customer_line_user_id(self, case_no, *, lock=False):
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -78,6 +89,9 @@ class MySqlDepositNotificationRepository:
                     "JOIN client_obligation_events e ON e.id=d.current_event_id "
                     "WHERE d.obligation_type='deposit' AND d.direction='receivable_from_client' "
                     "AND d.status<>'cancelled' AND (d.amount_due_ntd>0 OR (d.status='settled' AND e.after_amount_ntd>0)) AND o.status IN ('洽談中','訂單成立','服務中') "
+                    "AND (d.status='settled' OR EXISTS (SELECT 1 FROM order_contract_flow_events flow "
+                    "WHERE flow.case_no=o.case_no AND flow.event_type='contract_completed' "
+                    "AND flow.contract_identity=o.contract_identity)) "
                     "AND d.case_no>%s" + (" AND d.case_no=%s" if case_no is not None else "")
                     + " ORDER BY d.case_no LIMIT %s",
                     (after_case_no, case_no, 100) if case_no is not None else (after_case_no, 100),
