@@ -15,7 +15,7 @@ import { LineNotificationWorkbench } from '../components/LineNotificationWorkben
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import type { LineConfigurationQueryClient } from '../api/line_configuration/line_configuration_query_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
-import type { LineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
+import type { LineMessagePreviewClient, PreviewNode } from '../api/line_notification_rules/line_message_preview_client';
 import { lineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
 import { LineMessageFlow } from '../components/LineMessageFlow';
 import { LineManagementPage } from '../pages/LineManagementPage';
@@ -253,8 +253,9 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     fireEvent.click(screen.getByRole('button', { name: '日誌連續缺漏－工會決定提醒 由流程控制 調整訊息' }));
     expect(window.location.hash).toContain('message=service-day-log-reminder');
     await screen.findByText('請 範例月嫂 補上尚未填寫的服務日誌，謝謝。');
+    fireEvent.click(screen.getByText('公版預覽資料', { selector: 'summary' }));
     expect(screen.getByRole('region', { name: '帶入欄位與值' })).toHaveTextContent('月嫂姓名（staff_name）範例月嫂');
-    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '儲存內容' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
     expect(screen.getByText('案件群組', { selector: 'dd' })).toBeInTheDocument();
     expect(screen.getByText('由流程控制', { selector: 'dd' })).toBeInTheDocument();
@@ -305,7 +306,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
     await act(async () => resolveCatalog(rows));
     await screen.findByRole('heading', { name: '目前訂金提醒卡' });
-    await waitFor(() => expect(previews.render).toHaveBeenCalledWith({ id: 'deposit-reminder', data_source: 'sample' }, expect.any(Object)));
+    await waitFor(() => expect(previews.render).toHaveBeenCalledWith({ id: 'deposit-reminder', content: '目前正式文案 {case_no}', data_source: 'sample' }, expect.any(Object)));
     unmount();
     vi.mocked(lineMessagePreviewClient.catalog).mockResolvedValue(rows);
     window.history.replaceState(null, '', '#line-management?tab=push_queue&message=removed-message');
@@ -507,6 +508,60 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
 }
 
 describe('通知內容統一工作區', () => {
+  it('訊息清單每頁六則，搜尋後顯示符合項目並維持目前訊息定位', async () => {
+    const { Harness, previews } = contentWorkbench();
+    vi.mocked(previews.catalog).mockResolvedValue(Array.from({ length: 14 }, (_, index) => ({ id: `fixed-${index + 1}`, template_id: null, name: `固定公告${index + 1}`, format: 'text' as const, requires_case: false, requires_staff: false, builtin: true, allows_draft: false })));
+    const { container } = render(<Harness />);
+    await screen.findByRole('navigation', { name: '訊息清單分頁' });
+    expect(container.querySelectorAll('.notification-message-items > button')).toHaveLength(6);
+    fireEvent.click(screen.getByRole('button', { name: '下一頁訊息' }));
+    expect(container.querySelectorAll('.notification-message-items > button')).toHaveLength(6);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '固定公告14' } });
+    fireEvent.click(await screen.findByRole('button', { name: '查看固定公告14內容' }));
+    await screen.findByRole('textbox', { name: '通知內容' });
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '' } });
+    expect(await screen.findByRole('button', { name: '編輯固定公告14內容' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('多張卡片逐張預覽，切換卡片不重建訊息或發送', async () => {
+    const { Harness, previews, templates } = contentWorkbench();
+    const node = (text: string): PreviewNode => ({ kind: 'text', text, bold: false, size: 'sm', layout: 'vertical', primary: false, action_description: '', children: [] });
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'card-customer-profiles', template_id: null, name: '月嫂資料與確認卡', format: 'flex', requires_case: true, requires_staff: true, builtin: true, allows_draft: false }]);
+    vi.mocked(previews.render).mockResolvedValue({ status: 'ready', note: '公版範例', format: 'flex', text: '', bubbles: [node('第一張月嫂資料'), node('第二張確認資料')], facts: [] });
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看月嫂資料與確認卡內容' }));
+    await screen.findByText('第一張月嫂資料');
+    expect(screen.queryByText('第二張確認資料')).not.toBeInTheDocument();
+    const requests = vi.mocked(previews.render).mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: '下一張卡片' }));
+    expect(screen.getByText('第二張確認資料')).toBeInTheDocument();
+    expect(screen.queryByText('第一張月嫂資料')).not.toBeInTheDocument();
+    expect(previews.render).toHaveBeenCalledTimes(requests);
+    expect(templates.update).not.toHaveBeenCalled();
+  });
+  it('既有客戶綁定成功連結解析至客戶獨立文案', async () => {
+    const { previews, templates, configuration, onboarding } = contentWorkbench();
+    const onSelectedEntryChange = vi.fn();
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'identity-bound-customer', template_id: null, name: '客戶綁定成功', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false }]);
+    render(<UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} previews={previews} search="" enabled="all" onSearchChange={vi.fn()} onEnabledChange={vi.fn()} selectedEntryId="template-bind_success_new_order" onSelectedEntryChange={onSelectedEntryChange} /></UnsavedChangesProvider>);
+    await screen.findByRole('textbox', { name: '通知內容' });
+    expect(screen.getByRole('heading', { name: '客戶綁定成功' })).toBeInTheDocument();
+    expect(onSelectedEntryChange).toHaveBeenCalledWith('identity-bound-customer');
+    expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
+  });
+  it('內建文案讀取完成前不提供會被晚到設定覆寫的編輯欄位', async () => {
+    const { Harness, previews, templates } = contentWorkbench();
+    let complete!: (value: Awaited<ReturnType<LineNotificationTemplateClient['get']>>) => void;
+    const originalGet = vi.mocked(templates.get).getMockImplementation()!;
+    vi.mocked(templates.get).mockImplementation((id, options) => id === 'service-contact' ? new Promise(resolve => { complete = resolve; }) : originalGet(id, options));
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'service-contact', template_id: null, name: '呼叫專員－需求受理', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false }]);
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看呼叫專員－需求受理內容' }));
+    expect(screen.getByText('正在載入訊息內容…')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '通知內容' })).not.toBeInTheDocument();
+    await act(async () => complete({ rule_id: 'service-contact', template_id: 'LINE-COPY-service-contact', name: '受理', content: '已儲存的受理文案', revision: 7, variables: [], sample_preview: '已儲存的受理文案' }));
+    expect(await screen.findByRole('textbox', { name: '通知內容' })).toHaveValue('已儲存的受理文案');
+  });
   it('固定流程回覆和歡迎訊息不混入啟停篩選，與流程圖共用狀態且沒有獨立開關', async () => {
     const { Harness, previews, templates, onboarding } = contentWorkbench();
     const current = await previews.catalog();
@@ -529,7 +584,7 @@ describe('通知內容統一工作區', () => {
     fireEvent.click(screen.getByRole('button', { name: '發送設定' }));
     expect(screen.getByText('由流程控制', { selector: 'dd' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '修改發送設定' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '儲存內容' })).toBeDisabled();
     expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
   });
   it('服務當天結構化卡片不把不支援文字編輯誤報為版本衝突，保留正式預覽與啟用設定', async () => {
@@ -555,20 +610,39 @@ describe('通知內容統一工作區', () => {
     expect(onboarding.update).not.toHaveBeenCalled();
   });
 
-  it('補列正式訊息與卡片，詢問文案只能預覽，不提供儲存或正式動作', async () => {
+  it('固定訊息可儲存，卡片標題與按鈕名稱可分欄編輯並預覽', async () => {
     const { Harness, previews, templates, onboarding } = contentWorkbench();
+    const originalGet = vi.mocked(templates.get).getMockImplementation()!;
+    const fields = [
+      { id: 'altText', label: '訊息摘要', content: '原始摘要', max_length: 400 },
+      { id: 'contents/body/contents/0/text', label: '卡片標題', content: '工會詢問', max_length: 5000 },
+      { id: 'contents/footer/contents/0/action/label', label: '按鈕名稱', content: '回答問題', max_length: 20 },
+    ];
+    vi.mocked(templates.get).mockImplementation(async (id, options) => id === 'card-union-question'
+      ? { rule_id: id, template_id: 'LINE-COPY-card-union-question', name: '工會詢問客戶卡', revision: 7, variables: [], sample_preview: '', fields, content: JSON.stringify(Object.fromEntries(fields.map(field => [field.id, field.content]))) }
+      : originalGet(id, options));
     vi.mocked(previews.catalog).mockResolvedValue([
       { id: 'service-contact', template_id: null, name: '呼叫專員－需求受理', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false },
       { id: 'card-union-question', template_id: null, name: '工會詢問客戶卡', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
     ]);
     render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: '查看呼叫專員－需求受理內容' }));
-    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    const fixedText = await screen.findByRole('textbox', { name: '通知內容' });
+    fireEvent.change(fixedText, { target: { value: '請留下需要協助的內容。' } });
+    expect(screen.getByRole('button', { name: '儲存內容' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '還原內容' }));
     fireEvent.click(screen.getByRole('button', { name: '查看工會詢問客戶卡內容' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '預覽文案' }), { target: { value: '請協助確認服務條件。' } });
-    await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-union-question', content: '請協助確認服務條件。', data_source: 'sample' }, expect.any(Object)));
-    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
-    expect(templates.update).not.toHaveBeenCalled(); expect(onboarding.update).not.toHaveBeenCalled();
+    fireEvent.change(await screen.findByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[1].id } });
+    fireEvent.change(screen.getByRole('textbox', { name: '卡片標題' }), { target: { value: '請確認服務條件' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[2].id } });
+    fireEvent.change(screen.getByRole('textbox', { name: '按鈕名稱' }), { target: { value: '填寫回覆' } });
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    fireEvent.change(screen.getByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[1].id } });
+    expect(screen.getByRole('textbox', { name: '卡片標題' })).toHaveValue('請確認服務條件');
+    await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-union-question', content: expect.stringContaining('填寫回覆'), data_source: 'sample' }, expect.any(Object)));
+    fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
+    await waitFor(() => expect(templates.update).toHaveBeenCalledWith('card-union-question', { content: expect.stringContaining('請確認服務條件'), expected_revision: 7 }, expect.any(Object)));
+    expect(onboarding.update).not.toHaveBeenCalled();
   });
 
   it('歡迎訊息與通知共用清單，搜尋內容且直接開啟編輯，不提供獨立發送紀錄', async () => {
@@ -661,6 +735,7 @@ describe('通知內容統一工作區', () => {
     fireEvent.click(await screen.findByRole('button', { name: '編輯訂金確認通知內容' }));
     await waitFor(() => expect(document.querySelector('.notification-bubble')).toHaveTextContent('案件 DEMO-CASE-001 已確認訂金。'));
     expect(screen.queryByRole('combobox', { name: '選擇案件' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('公版預覽資料', { selector: 'summary' }));
     expect(screen.getByRole('region', { name: '公版預覽資料' })).toHaveTextContent('案件編號（case_no）');
     expect(screen.getByRole('table', { name: '本次帶入欄位與值' })).toHaveTextContent('DEMO-CASE-001');
     expect(previews.subjects).not.toHaveBeenCalled();

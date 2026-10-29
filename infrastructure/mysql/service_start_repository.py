@@ -1,5 +1,7 @@
 """Scheduling-owned service-start facts; delivery is only committed work, never a provider call."""
 
+from infrastructure.mysql.line_message_copy import configured_message_payload
+
 from dataclasses import asdict
 from datetime import date, datetime, timezone
 import hashlib
@@ -284,9 +286,10 @@ class MySqlServiceStartRepository:
                 (request_id, staff_id, start_date, end_date, hashlib.sha256(token.encode()).hexdigest()))
             candidate_id = int(c.lastrowid)
             c.execute('UPDATE scheduling_service_start_requests SET selected_candidate_id=%s,aggregate_version=aggregate_version+1 WHERE id=%s', (candidate_id, request_id))
-        self._enqueue(LineRecipientType.USER,selected['line_user_id'],
-            substitute_inquiry(request['case_no'],start_date,end_date,token,
-                service_dates=list(dates) if handover else [item['original_date'] for item in context['dates']] if context else None),
+        service_dates = list(dates) if handover else [item['original_date'] for item in context['dates']] if context else None
+        inquiry = substitute_inquiry(request['case_no'], start_date, end_date, token, service_dates=service_dates)
+        inquiry = configured_message_payload(self.connection, 'service-start-inquiry', inquiry, {'case_no': request['case_no'], 'service_period': '服務日期：'+'、'.join(str(day) for day in service_dates) if service_dates else f'服務期間：{start_date}～{end_date}'})
+        self._enqueue(LineRecipientType.USER,selected['line_user_id'], inquiry,
             'service_start_inquiry',str(candidate_id),'inquire:'+key)
 
     def record_willingness(self, token, line_user_id, willingness, event_key):
@@ -332,7 +335,7 @@ class MySqlServiceStartRepository:
             c.execute('UPDATE scheduling_service_start_candidates SET invitation_identity=%s WHERE id=%s',(identity,candidate['id']))
             c.execute('UPDATE scheduling_service_start_requests SET aggregate_version=aggregate_version+1 WHERE id=%s',(request_id,))
         self._enqueue(LineRecipientType.USER,candidate['line_user_id'],
-            group_invitation_payload(request['case_no'],'月嫂',group['invitation_url']), 'service_start_invitation',identity,'invite:'+key)
+            configured_message_payload(self.connection, 'group-invitation-staff', group_invitation_payload(request['case_no'],'月嫂',group['invitation_url']), {'case_no': request['case_no']}), 'service_start_invitation',identity,'invite:'+key)
 
     @staticmethod
     def invitation_identity(candidate,group):
@@ -378,7 +381,7 @@ class MySqlServiceStartRepository:
             else:
                 c.execute("UPDATE scheduling_service_start_requests SET status='applied',result_snapshot=%s,aggregate_version=aggregate_version+1 WHERE id=%s",(_json(result),request_id))
         if group and group['group_id']:
-            self._enqueue(LineRecipientType.GROUP,group['group_id'],service_date_record(request['case_no'],result['assignments']),
+            self._enqueue(LineRecipientType.GROUP,group['group_id'],configured_message_payload(self.connection, 'service-start-result', service_date_record(request['case_no'],result['assignments']), {'case_no': request['case_no'], 'assignments': '\n'.join(item['staff_name']+'：'+'、'.join(item['service_dates']) for item in result['assignments'])}),
                 'service_start_schedule',str(request_id),'schedule:'+key)
 
     def delivery_is_current(self, task):

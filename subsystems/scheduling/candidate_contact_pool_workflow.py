@@ -3,6 +3,9 @@ Description: 管理候選聯繫池 workflow 與其 typed state，不建立正式
 """
 from __future__ import annotations
 
+from infrastructure.mysql.line_message_copy import configured_message_payload
+from domains.line.canonical_payload import canonical_line_payload_json
+
 import hashlib
 import json
 import os
@@ -1022,6 +1025,7 @@ def _send_information_in_transaction(
                 hashlib.sha256(event_key.encode("utf-8")).hexdigest()
             ),
         )
+        message = canonical_line_payload_json(configured_message_payload(connection, "card-candidate-information-" + str(info_type), json.loads(message), {"case_no": case_no}))
         delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(
             LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, LineUserId(recipient.strip())),

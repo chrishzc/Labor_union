@@ -11,6 +11,10 @@ from subsystems.line.delivery_contracts import EnqueueLineDeliveryResult, LineDe
 
 
 class MySqlServiceDayLogReminderRepository:
+    def message(self, staff_name):
+        from infrastructure.mysql.line_message_copy import configured_message_payload
+        return configured_message_payload(self.connection, 'service-day-log-reminder', {"type": "text", "text": reminder_text(staff_name)}, {'staff_name': staff_name})["text"]
+
     def __init__(self, connection):
         self.connection = connection
         self.scheduling = MySqlServiceDayLogRepository(connection)
@@ -32,7 +36,7 @@ class MySqlServiceDayLogReminderRepository:
                 cursor.execute("SELECT id,name FROM staff WHERE id IN (" + ",".join(["%s"]*len(identities)) + ")", identities)
                 names = {int(row['id']):str(row['name']) for row in cursor.fetchall()}
         return tuple(ServiceDayLogReminder(gap, f"案件 {gap.case_no} 群組", bool(self._group(gap.case_no)),
-                                         reminder_text(names[gap.staff_id]) if gap.staff_id in names else None)
+                                         self.message(names[gap.staff_id]) if gap.staff_id in names else None)
                      for gap in gaps), total
 
     def recipient(self, command, now):

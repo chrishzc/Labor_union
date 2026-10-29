@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from subsystems.line.message_copy import CANDIDATE_WILLING_RECEIVED
+from subsystems.line.message_copy_catalog import configured_payload
 
 import hashlib
 import json
@@ -45,10 +46,10 @@ class LineCandidateContactPostbackApplication:
             unit_of_work.delivery_tasks.enqueue(LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, line_user_id),
                 LineMessageKind.TEXT,
-                canonical_line_payload_json({
+                canonical_line_payload_json(configured_payload(unit_of_work, "candidate-willing-received", {
                     "type": "text",
                     "text": CANDIDATE_WILLING_RECEIVED,
-                }),
+                })),
                 event.occurred_at,
                 IdempotencyKey("candidate-willing-ack:" + hashlib.sha256(
                     event.event_id.value.encode("utf-8")

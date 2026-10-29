@@ -10,6 +10,13 @@ from api.schemas.candidate_contact_pool import CandidateInformationPreviewView
 from subsystems.scheduling import candidate_contact_pool_workflow as workflow
 
 
+@pytest.fixture(autouse=True)
+def default_message_configuration(monkeypatch):
+    from domains.line.configuration import LineConfigurationSnapshot
+    from domains.line.identities import LineConfigurationRevision
+    monkeypatch.setattr("infrastructure.mysql.line_message_copy.MySqlLineConfigurationRepository", lambda connection: SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(1), '{"templates":[]}')))
+
+
 class Cursor:
     lastrowid = 8
     def __init__(self):

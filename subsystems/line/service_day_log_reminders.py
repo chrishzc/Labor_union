@@ -1,7 +1,7 @@
 """Union-only log reminder actions; queries never enqueue or call LINE."""
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
@@ -52,10 +52,11 @@ class ServiceDayLogReminderPort(Protocol):
 
 
 class ServiceDayLogReminderApplication:
-    def __init__(self, repository: ServiceDayLogReminderPort, unit_of_work_factory, now):
+    def __init__(self, repository: ServiceDayLogReminderPort, unit_of_work_factory, now, copy_reader: Callable[[str], str] | None = None):
         self.repository = repository
         self._unit = unit_of_work_factory
         self._now = now
+        self._copy_reader = copy_reader or reminder_text
 
     def list(self, page=1, page_size=25):
         return self.repository.list(self._now(), page, page_size)
@@ -72,7 +73,7 @@ class ServiceDayLogReminderApplication:
             group_id, staff_name, group_version = recipient
             result = self.repository.enqueue(LineDeliveryRequest(
                 LineRecipient(LineRecipientType.GROUP, LineGroupId(group_id)), LineMessageKind.TEXT,
-                canonical_line_payload_json({"type": "text", "text": reminder_text(staff_name)}),
+                canonical_line_payload_json({"type": "text", "text": self._copy_reader(staff_name)}),
                 self._now(), IdempotencyKey(f"service-day-log-manual:{command.idempotency_key}"),
                 CorrelationId(command.correlation.value + f":{group_version}"), SOURCE_TYPE, command.case_no))
             unit.commit()

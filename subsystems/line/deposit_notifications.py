@@ -1,6 +1,8 @@
 """Staff-initiated payment reminders and committed settlement notifications."""
 from __future__ import annotations
 
+from subsystems.line.message_copy_catalog import configured_payload
+
 import json
 import re
 from dataclasses import dataclass
@@ -132,7 +134,7 @@ class DepositNotificationApplication:
             recipient = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
             if recipient is None:
                 raise DepositNotificationConflict('deposit_customer_not_bound')
-            result = uow.delivery_tasks.enqueue(self._request(payment, recipient, REMINDER, key))
+            result = uow.delivery_tasks.enqueue(self._request(payment, recipient, REMINDER, key, uow))
             uow.audit.append(LineAuditIntent('deposit_reminder_queued', actor.actor_id, REMINDER, str(result.task_id.value)))
             uow.commit()
             return result.task_id.value, result.status.value
@@ -155,7 +157,7 @@ class DepositNotificationApplication:
                     break
                 key = settlement_key(payment)
                 if uow.deposit_notifications.existing_delivery(key) is None:
-                    uow.delivery_tasks.enqueue(self._request(payment, recipient, SETTLED, key))
+                    uow.delivery_tasks.enqueue(self._request(payment, recipient, SETTLED, key, uow))
                 uow.commit()
                 processed += 1
         return processed
@@ -165,11 +167,14 @@ class DepositNotificationApplication:
         if not current or current != line_user_id:
             raise DepositPaymentForbidden('deposit_payment_forbidden')
 
-    def _request(self, payment, recipient, kind, key):
+    def _request(self, payment, recipient, kind, key, unit=None):
         if not self._liff_id or self._liff_id == 'your_liff_id_here':
             raise DepositNotificationConflict('deposit_liff_not_configured')
         url = f'https://liff.line.me/{self._liff_id}/?' + urlencode({'target': 'deposit_payment', 'case_no': payment.case_no})
         payload = deposit_notification_payload(payment.case_no, payment.amount_ntd, payment.due_date, kind, url)
+        if unit is not None:
+            payload = configured_payload(unit, 'deposit-settled' if kind == SETTLED else 'deposit-reminder', payload,
+                {'case_no': payment.case_no, 'amount_ntd': f'{payment.amount_ntd:,}', 'due_date': str(payment.due_date)})
         return LineDeliveryRequest(LineRecipient(LineRecipientType.USER, LineUserId(recipient)), LineMessageKind.FLEX,
                                    canonical_line_payload_json(payload), self._now(), key,
                                    CorrelationId(key.value), kind, payment_source(payment))
@@ -213,7 +218,7 @@ def handle_deposit_assistance(data, event, uow) -> bool:
     ))
     uow.delivery_tasks.enqueue(LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id), LineMessageKind.TEXT,
-        canonical_line_payload_json({'type': 'text', 'text': ASSISTANCE_ACK}),
+        canonical_line_payload_json(configured_payload(uow, 'deposit-assistance', {'type': 'text', 'text': ASSISTANCE_ACK})),
         event.occurred_at, key, CorrelationId(f'line-event:{event.event_id.value}'),
         'customer_service_assistance_ack', str(ticket.ticket_id),
     ))

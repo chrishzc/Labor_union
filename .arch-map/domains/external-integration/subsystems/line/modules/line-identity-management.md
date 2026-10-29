@@ -17,6 +17,7 @@
   - `line/static/bind.html` — 客戶綁定／已綁定／改綁申請分流、取消與明確呼叫專員。
   - `domains/line/identity_binding.py`
   - `subsystems/line/identity_application.py`
+  - `subsystems/line/identity_review_application.py` — 正式身分審核 Preview／Apply；通過後按實際 subject_type 讀取該身分成功文案，沿原 UoW 入列通知。
   - `subsystems/line/identity_contracts.py`
   - `api/dependencies/line_identity.py` — NAS 管理員 credential binding 使用內部 access profile；外部客戶／月嫂仍用 LINE profile。
   - `subsystems/line/webhook_identity_handlers.py` — webhook identity dispatch 與未注入 canonical Service Help application 時的 bounded guidance fallback。

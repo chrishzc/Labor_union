@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
+import json
+from domains.line.canonical_payload import canonical_line_payload_json
+from infrastructure.mysql.line_message_copy import configured_message_payload
 import hashlib
 from typing import Any
 
@@ -121,6 +125,7 @@ class MySqlExternalSigningHandoffNotificationPort:
                     idempotency_key=key,
                     correlation_id=command.correlation_id,
                 )
+            request = replace(request, payload_json=canonical_line_payload_json(configured_message_payload(self._connection, "contract-signing-client" if subject_type == "customer" else "contract-signing-staff", json.loads(request.payload_json), {"case_no": facts.case_no})))
             self._delivery_tasks.enqueue(request)
         return tuple(manual_targets)
 

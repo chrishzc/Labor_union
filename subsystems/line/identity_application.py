@@ -5,7 +5,8 @@ Description: 編排 verified LINE platform root、身分流程、原子登記、
 
 from __future__ import annotations
 
-from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_BOUND
+from subsystems.line.message_copy import IDENTITY_PENDING, IDENTITY_SUCCESS_DEFAULTS, IDENTITY_SUCCESS_TEMPLATES, configured_text
+from subsystems.line.message_copy_catalog import configured_payload
 
 from datetime import datetime, timedelta
 from typing import Callable
@@ -933,11 +934,6 @@ def _create_review(
 # Kept cohesive so the stable delivery key covers every semantic result field.
 def _enqueue_result_message(unit_of_work, result, correlation_id, scheduled_at):
     pending = result.status is LineIdentityApplyStatus.PENDING_REVIEW
-    text = (
-        IDENTITY_PENDING
-        if pending
-        else IDENTITY_BOUND
-    )
     key_fingerprint = fingerprint_payload(
         {
             "line_user_id": result.line_user_id.value,
@@ -949,12 +945,18 @@ def _enqueue_result_message(unit_of_work, result, correlation_id, scheduled_at):
             ),
         }
     )
+    delivery_key = IdempotencyKey(f"identity-result:{key_fingerprint.value}")
+    exists = getattr(unit_of_work.delivery_tasks, "exists_for_key", None)
+    if callable(exists) and exists(delivery_key):
+        return  # Preserve the committed payload even when copy has since changed.
+    text = configured_payload(unit_of_work, "identity-pending", {"type": "text", "text": IDENTITY_PENDING})["text"] if pending else configured_text(
+        unit_of_work, IDENTITY_SUCCESS_TEMPLATES[result.subject_type.value], IDENTITY_SUCCESS_DEFAULTS[result.subject_type.value])
     request = LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, result.line_user_id),
         LineMessageKind.TEXT,
         canonical_line_payload_json({"type": "text", "text": text}),
         scheduled_at,
-        IdempotencyKey(f"identity-result:{key_fingerprint.value}"),
+        delivery_key,
         correlation_id,
         "line_identity",
         f"{result.subject_type.value}:{result.subject_reference}",

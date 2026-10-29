@@ -225,6 +225,7 @@ class HumanEscalationApplication:
                         command,
                         int(_field(escalation, "id")),
                         self._now(),
+                        uow,
                     )
                 )
                 repo.save_receipt(command.idempotency_key.value, fingerprint, receipt)
@@ -538,16 +539,17 @@ def _optional_int(value) -> int | None:
     return None if value is None else int(value)
 
 
-def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime):
+def _admin_resolution_delivery(ticket, command, escalation_id: int, now: datetime, unit=None):
+    from subsystems.line.message_copy_catalog import configured_payload
     line_user_id = LineUserId(str(_field(ticket, "line_user_id")))
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, line_user_id),
         LineMessageKind.TEXT,
         canonical_line_payload_json(
-            {
+            configured_payload(unit, "service-resolved", {
                 "type": "text",
                 "text": CONTACT_RESOLVED,
-            }
+            })
         ),
         now,
         IdempotencyKey(

@@ -42,6 +42,7 @@ from subsystems.line.order_group_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
+from subsystems.line.message_copy_catalog import configured_payload, default_copy_templates
 
 _BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
 _INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
@@ -96,7 +97,11 @@ class LineOrderGroupApplication:
                 raise
             if isinstance(error, RuntimeError) and str(error) not in _SAFE_RUNTIME_ERRORS:
                 raise
-            self._reply_to_group(inbox, unit_of_work, _safe_error_message(error), "error")
+            message = _safe_error_message(error)
+            key = next((key for key, template in default_copy_templates().items() if key.startswith(("group-error-", "group-format-")) and template["content"] == message), None)
+            if key:
+                message = configured_payload(unit_of_work, key, {"type": "text", "text": message})["text"]
+            self._reply_to_group(inbox, unit_of_work, message, "error")
         return True
 
     def handle_membership(self, inbox, unit_of_work) -> bool:
@@ -156,7 +161,7 @@ class LineOrderGroupApplication:
         self._reply_to_group(
             inbox,
             unit_of_work,
-            group_binding_acknowledgement(case_no),
+            configured_payload(unit_of_work, "group-bound", {"type": "text", "text": group_binding_acknowledgement(case_no)}, {"case_no": case_no})["text"],
             "bound",
         )
 
@@ -202,6 +207,7 @@ class LineOrderGroupApplication:
                     inbox.event.occurred_at,
                     "媽媽" if recipient == audience.customer_line_user_id else "月嫂",
                     binding.version.value,
+                    unit_of_work,
                 )
             )
         unit_of_work.audit.append(
@@ -215,7 +221,7 @@ class LineOrderGroupApplication:
         self._reply_to_group(
             inbox,
             unit_of_work,
-            group_invitation_acknowledgement(binding.case_no, len(recipients)),
+            configured_payload(unit_of_work, "group-invitations-queued", {"type": "text", "text": group_invitation_acknowledgement(binding.case_no, len(recipients))}, {"case_no": binding.case_no, "recipient_count": len(recipients)})["text"],
             "invite-queued",
         )
 
@@ -345,8 +351,10 @@ def _message_text(inbox) -> str | None:
     return text.strip() if isinstance(text, str) and text.strip() else None
 
 
-def _invitation_delivery(relay, recipient, event_identity, scheduled_at, label, binding_version):
+def _invitation_delivery(relay, recipient, event_identity, scheduled_at, label, binding_version, unit=None):
     payload = group_invitation_payload(relay.case_no, label, relay.invitation_url)
+    if unit is not None:
+        payload = configured_payload(unit, "group-invitation-customer" if label == "媽媽" else "group-invitation-staff", payload, {"case_no": relay.case_no})
     return LineDeliveryRequest(
         LineRecipient(LineRecipientType.USER, recipient),
         LineMessageKind.FLEX,

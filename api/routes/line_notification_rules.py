@@ -8,6 +8,8 @@ from dataclasses import asdict
 from pathlib import Path
 import re
 from uuid import uuid4
+from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
+from subsystems.line.message_copy import validate_copy_content, copy_fields, apply_copy_payload
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Path as ApiPath
 from pymysql.err import InterfaceError, OperationalError
@@ -153,8 +155,17 @@ def update_notification_rule_message_template(
         item for item in definition["templates"]
         if item.get("id") == view.template_id
     )
-    template["content"] = payload.content
     try:
+        if template.get("message_type") == "flex":
+            template["content"] = apply_copy_payload(template["content"], payload.content, copy_fields(template["content"]),
+                {variable["name"]: "{" + variable["name"] + "}" for variable in template.get("variables", [])})
+        elif template.get("copy_fields"):
+            validate_copy_content(payload.content, template["copy_fields"])
+            template["content"] = payload.content
+        elif len(payload.content) > 5000:
+            raise LineMessageConfigurationError("通知文案不可超過 5000 字。")
+        else:
+            template["content"] = payload.content
         validate_message_templates(definition)
         result = application.apply(
             kind=LineConfigurationKind.MESSAGE_TEMPLATES,
@@ -170,11 +181,8 @@ def update_notification_rule_message_template(
             ),
         )
     except LineConfigurationRevisionConflict as error:
-        raise HTTPException(
-            status_code=409,
-            detail="通知訊息內容已遭修改，請重新載入後再試。",
-        ) from error
-    except LineMessageConfigurationError as error:
+        raise typed_http_error(409, "conflict", "line_message_template_revision_conflict", "通知訊息內容已遭修改，請重新載入後再試。", "line-message-template") from error
+    except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
     request.state.audit_action = "line.notification_rule.message_template.update"
@@ -417,7 +425,7 @@ def _message_template_definition(snapshot) -> dict[str, object]:
         value = json.loads(snapshot.definition_json)
     if not isinstance(value, dict) or not isinstance(value.get("templates"), list):
         raise HTTPException(status_code=409, detail="通知訊息設定目前無法讀取。")
-    return value
+    return effective_copy_definition(value)
 
 
 def _message_template_view(
@@ -427,38 +435,53 @@ def _message_template_view(
     revision: int,
 ) -> LineNotificationMessageTemplateView:
     rule = next((item for item in rules.rules if item.id == rule_id), None)
-    if rule is None:
-        raise HTTPException(status_code=404, detail="找不到這筆通知規則。")
+    if rule is not None:
+        template_id = rule.template_id
+    elif rule_id in default_copy_templates():
+        template_id = default_copy_templates()[rule_id]["id"]
+    elif rule_id.startswith("template-"):
+        from subsystems.line.message_preview import _IDENTITY_TEMPLATES
+        template_id = rule_id.removeprefix("template-")
+        if template_id not in _IDENTITY_TEMPLATES:
+            raise HTTPException(status_code=404, detail="找不到這筆訊息設定。")
+        from subsystems.line.message_copy import IDENTITY_SUCCESS_TEMPLATES
+        template_id = {"bind_success_new_order": IDENTITY_SUCCESS_TEMPLATES["customer"], "staff_switch_success": IDENTITY_SUCCESS_TEMPLATES["staff"]}.get(template_id, template_id)
+    else:
+        raise HTTPException(status_code=404, detail="找不到這筆訊息設定。")
     templates = templates_definition.get("templates", [])
     template = next(
         (
             item for item in templates
-            if isinstance(item, dict) and item.get("id") == rule.template_id
+            if isinstance(item, dict) and item.get("id") == template_id
         ),
         None,
     )
     if template is None:
         raise HTTPException(status_code=404, detail="找不到此規則使用的訊息模板。")
-    if template.get("message_type") != "text" or not isinstance(template.get("content"), str):
+    if template.get("message_type") not in {"text", "flex"} or not isinstance(template.get("content"), (str, dict)):
         raise HTTPException(status_code=409, detail="此規則使用的訊息格式目前不支援文字編輯。")
     variables = [
         str(item.get("name"))
         for item in template.get("variables", [])
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     ]
-    content = str(template["content"])
+    fields = copy_fields(template["content"]) if template.get("message_type") == "flex" else template.get("copy_fields", [])
+    content = json.dumps({field["id"]: field["content"] for field in fields}, ensure_ascii=False) if template.get("message_type") == "flex" else str(template["content"])
+    if fields:
+        content = json.dumps(json.loads(content), ensure_ascii=False, separators=(",", ":"))
     sample_preview = _TEMPLATE_VARIABLE.sub(
         lambda match: f"〔{match.group(1)}〕",
         content,
     )
     return LineNotificationMessageTemplateView(
-        rule_id=rule.id,
-        template_id=rule.template_id,
-        name=str(template.get("name") or rule.template_id),
+        rule_id=rule_id,
+        template_id=template_id,
+        name=str(template.get("name") or template_id),
         content=content,
         revision=revision,
         variables=variables,
         sample_preview=sample_preview,
+        fields=[{k: (json.loads(content)[field["id"]] if k == "content" else field[k]) for k in ("id", "label", "content", "max_length")} for field in fields],
     )
 
 

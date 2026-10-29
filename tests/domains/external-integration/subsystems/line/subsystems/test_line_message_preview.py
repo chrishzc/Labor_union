@@ -215,7 +215,7 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
     ids = {entry.id for entry in catalog}
     assert {"card-customer-confirmation", "card-union-question", "card-union-answer",
             "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3",
-            "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound",
+            "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
             "template-register_success", "template-staff_verification_requested"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
 
@@ -256,7 +256,7 @@ def test_second_payment_public_preview_is_short_group_copy_without_actions(key,p
     assert application.render(key,None,None,None,actor()).status=='unavailable'
 
 
-@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound", "service-flow", "service-payment", "service-profile-update", "service-order-update", "service-other"])
+@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-flow", "service-payment", "service-profile-update", "service-order-update", "service-other"])
 def test_fixed_runtime_messages_need_no_database_and_expose_no_actions(key):
     def forbidden():
         pytest.fail("fixed runtime message must not read subjects or create an interaction")
@@ -461,3 +461,109 @@ def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_perio
         result=application.render('payment-overdue-'+stage,None,None,None,actor(),sample=True)
         assert label in result.text and amount in result.text
         assert any(fact.label==recipient for fact in result.facts)
+
+
+def test_all_current_builtin_messages_have_editable_copy_and_genesis_is_not_mutated():
+    from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
+    defaults = default_copy_templates()
+    original = {"templates": []}
+    effective = effective_copy_definition(original)
+    for entry in app().catalog(actor()):
+        if entry.builtin and entry.template_id is None:
+            assert entry.id in defaults, entry.id
+    effective["templates"][0]["content"] = "只修改候選設定"
+    assert original == {"templates": []}
+    assert next(iter(defaults.values()))["content"] != "只修改候選設定"
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_each_identity_success_uses_its_own_saved_copy_and_keeps_existing_tasks(reviewed):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from domains.line.identities import LineUserId, LineReviewRequestId
+    from domains.line.identity_binding import LineBindingSubjectType
+    from domains.line.review import LineReviewStatus
+    from shared_kernel.identities import CorrelationId
+    from subsystems.line.identity_application import _enqueue_result_message
+    from subsystems.line.identity_review_application import _enqueue_decision_message
+    from subsystems.line.identity_contracts import LineIdentityApplyResult, LineIdentityApplyStatus
+    from subsystems.line.message_copy import IDENTITY_SUCCESS_TEMPLATES
+    from subsystems.line.message_copy_catalog import effective_copy_definition
+    definition = effective_copy_definition({"templates": []})
+    texts = {"customer": "客戶：請查看案件進度", "staff": "月嫂：請補齊可服務時段", "admin": "工會：請查看待辦"}
+    for template in definition["templates"]:
+        role = next((role for role, identifier in IDENTITY_SUCCESS_TEMPLATES.items() if identifier == template["id"]), None)
+        if role:
+            template["content"] = texts[role]
+    tasks = []
+    unit = SimpleNamespace(configurations=SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(8), canonical_line_payload_json(definition))),
+                           delivery_tasks=SimpleNamespace(enqueue=tasks.append, exists_for_key=lambda key: any(task.idempotency_key == key for task in tasks)))
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    for role in LineBindingSubjectType:
+        if reviewed:
+            snapshot = SimpleNamespace(status=LineReviewStatus.APPROVED, subject_type=role, line_user_id=LineUserId("U" + role.value))
+            command = SimpleNamespace(request_id=LineReviewRequestId(1), idempotency_key=SimpleNamespace(value="review-" + role.value), correlation_id=CorrelationId("review-copy"))
+            _enqueue_decision_message(unit, snapshot, command, now)
+        else:
+            result = LineIdentityApplyResult(LineIdentityApplyStatus.BOUND, LineUserId("U" + role.value), role, "1")
+            _enqueue_result_message(unit, result, CorrelationId("identity-copy"), now)
+    assert [json.loads(task.payload_json)["text"] for task in tasks] == list(texts.values())
+    frozen = tasks[0].payload_json
+    next(t for t in definition["templates"] if t["id"] == IDENTITY_SUCCESS_TEMPLATES["customer"])["content"] = "新的客戶文案"
+    assert tasks[0].payload_json == frozen
+    if not reviewed:
+        result = LineIdentityApplyResult(LineIdentityApplyStatus.BOUND, LineUserId("Ucustomer"), LineBindingSubjectType.CUSTOMER, "1")
+        _enqueue_result_message(unit, result, CorrelationId("identity-copy-replay"), now)
+        assert len(tasks) == 3
+
+
+def test_card_copy_handles_multiple_profiles_without_overwriting_data_or_actions():
+    from copy import deepcopy
+    from subsystems.scheduling.matching_line_cards import customer_profiles_card
+    from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition, render_copy_payload
+    definition = effective_copy_definition({"templates": []})
+    key = "card-customer-profiles"
+    default = default_copy_templates()[key]
+    template = next(t for t in definition["templates"] if t["id"] == default["id"])
+    values = json.loads(template["content"])
+    for field in default["copy_fields"]:
+        if field["content"] == "請確認配對方案":
+            values[field["id"]] = "請核對推薦結果"
+        if field["content"] == "接受此配對":
+            values[field["id"]] = "確認選擇"
+    template["content"] = json.dumps(values, ensure_ascii=False)
+    profiles = [{"id": i, "name": name, "city": "新竹市", "care_babies": i, "service_regions": ["新竹市"], "special_skills": []} for i, name in ((1, "王月嫂"), (2, "林月嫂"))]
+    payload = json.loads(customer_profiles_card("CASE-7", profiles, "original-action-token", "逐案說明不可被共用文案取代"))
+    before = deepcopy(payload)
+    result = render_copy_payload(definition, key, payload, {"case_no": "CASE-7"})
+    assert payload == before
+    assert result["contents"]["contents"][:2] == before["contents"]["contents"][:2]
+    decision = result["contents"]["contents"][-1]
+    assert decision["body"]["contents"][0]["text"] == "請核對推薦結果"
+    assert decision["body"]["contents"][2]["text"] == "逐案說明不可被共用文案取代"
+    action = decision["footer"]["contents"][0]["action"]
+    assert action["label"] == "確認選擇"
+    assert action["data"] == before["contents"]["contents"][-1]["footer"]["contents"][0]["action"]["data"]
+
+
+def test_configuration_owner_rejects_malformed_card_copy_from_any_writer():
+    from subsystems.line.message_configuration import validate_message_templates, LineMessageConfigurationError
+    from subsystems.line.message_copy_catalog import effective_copy_definition, default_copy_templates
+    definition = effective_copy_definition({"templates": []})
+    identifier = default_copy_templates()["service-menu"]["id"]
+    template = next(t for t in definition["templates"] if t["id"] == identifier)
+    template["content"] = "這不是卡片文案欄位集合"
+    with pytest.raises(LineMessageConfigurationError):
+        validate_message_templates(definition)
+
+
+def test_progress_without_owner_context_does_not_invent_case_facts_from_copy_defaults():
+    from types import SimpleNamespace
+    from subsystems.line.service_help_application import LineServiceHelpApplication, _progress_payload
+    from subsystems.line.message_copy_catalog import effective_copy_definition
+    definition = effective_copy_definition({"templates": []})
+    unit = SimpleNamespace(customer_service=SimpleNamespace(latest_client_case=lambda user: None),
+        configurations=SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(1), canonical_line_payload_json(definition))))
+    result = LineServiceHelpApplication(lambda: None)._progress_payload(None, unit, SimpleNamespace(value="U-copy-test"))
+    assert result == _progress_payload(None)
+    assert "最新案件" not in result["text"]

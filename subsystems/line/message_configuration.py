@@ -70,6 +70,10 @@ def notification_description(snapshot: LineConfigurationSnapshot, template_id: s
 
 def validate_message_templates(definition: Mapping[str, object]) -> None:
     templates = _object_list(definition, "templates")
+    copy_specs = {}
+    if any(isinstance(t.get("id"), str) and t["id"].startswith("LINE-COPY-") for t in templates):
+        from subsystems.line.message_copy_catalog import default_copy_templates
+        copy_specs = {t["id"]: t for t in default_copy_templates().values() if t.get("copy_fields")}
     identifiers: set[str] = set()
     for template in templates:
         identifier = _identifier(template.get("id"), "template id")
@@ -86,6 +90,12 @@ def validate_message_templates(definition: Mapping[str, object]) -> None:
             raise LineMessageConfigurationError("flex template content must be an object")
         if message_type not in {"text", "flex"}:
             raise LineMessageConfigurationError("unsupported message template type")
+        if identifier in copy_specs:
+            from subsystems.line.message_copy import validate_copy_content
+            try:
+                validate_copy_content(content, copy_specs[identifier]["copy_fields"])
+            except (TypeError, ValueError) as error:
+                raise LineMessageConfigurationError("卡片文案欄位不完整或格式不正確。") from error
         declared = _declared_variables(template)
         used = _variables_in_value(content)
         if not used.issubset(declared):

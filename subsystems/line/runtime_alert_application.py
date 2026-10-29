@@ -194,7 +194,7 @@ class RuntimeLineAlertProjector:
             result = delivery_tasks.enqueue(LineDeliveryRequest(
                 LineRecipient(LineRecipientType(resolved_type), identity),
                 LineMessageKind.TEXT,
-                canonical_line_payload_json({"type": "text", "text": _message(target)}),
+                canonical_line_payload_json({"type": "text", "text": repository.alert_message(target) if callable(getattr(repository, "alert_message", None)) else _message(target)}),
                 self._now(),
                 IdempotencyKey(f"runtime-alert:{event_id}:{target['id']}"),
                 CorrelationId(f"runtime-health-event:{event_id}"),

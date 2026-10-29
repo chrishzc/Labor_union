@@ -15,6 +15,7 @@ from domains.line.identities import LineSourceType
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import CorrelationId, IdempotencyKey, IdempotencyReceipt
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+from subsystems.line.message_copy_catalog import configured_payload
 
 EVENT_CODE = 'order.service_start_day'
 SOURCE_TYPE = 'order_service_start_day'
@@ -96,7 +97,7 @@ class ServiceStartDayPostbackApplication:
         message = start_day_response_text(decision)
         unit.delivery_tasks.enqueue(LineDeliveryRequest(
             LineRecipient(LineRecipientType.GROUP, source.group_id), LineMessageKind.TEXT,
-            canonical_line_payload_json({'type': 'text', 'text': message}), event.occurred_at,
+            canonical_line_payload_json(configured_payload(unit, 'service-start-normal-received' if decision == 'normal' else 'service-start-help-received', {'type': 'text', 'text': message})), event.occurred_at,
             IdempotencyKey('ack:' + key.value), CorrelationId('start-day:' + event.event_id.value),
             'order_service_start_day_response', token,
         ))

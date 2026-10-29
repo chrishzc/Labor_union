@@ -9,6 +9,7 @@ from shared_kernel.clock import TAIPEI_TIME_ZONE
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
+from subsystems.line.message_copy_catalog import configured_payload
 
 SOURCE_TYPE = 'manual_payment_overdue_reminder'
 STAGE_LABELS = {'deposit':'訂金','first':'第一期款','second':'第二期款'}
@@ -88,7 +89,7 @@ class PaymentOverdueReminderApplication:
             if recipient is None:
                 raise PaymentOverdueReminderConflict('payment_overdue_recipient_unavailable')
             result = unit.delivery_tasks.enqueue(LineDeliveryRequest(recipient.recipient,LineMessageKind.TEXT,
-                canonical_line_payload_json({'type':'text','text':reminder_text(current)}),now,key,
+                canonical_line_payload_json(configured_payload(unit, 'payment-overdue-' + current.payment_stage, {'type':'text','text':reminder_text(current)}, {'payment_stage': STAGE_LABELS[current.payment_stage], 'remaining_amount': f'{current.remaining_amount_ntd:,}'})),now,key,
                 CorrelationId(payment_reference(current)+f':{recipient.binding_version}'),SOURCE_TYPE,current.obligation_identity))
             unit.audit.append(LineAuditIntent('payment_overdue_reminder_queued',actor.actor_id,SOURCE_TYPE,str(result.task_id.value)))
             unit.commit()

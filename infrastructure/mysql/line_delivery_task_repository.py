@@ -78,6 +78,11 @@ class MySqlLineDeliveryTaskRepository:
             LineDeliveryStatus.PENDING,
         )
 
+    def exists_for_key(self, key: IdempotencyKey) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM line_delivery_tasks WHERE idempotency_key=%s", (key.value,))
+            return cursor.fetchone() is not None
+
     def get(self, task_id: LineDeliveryTaskId) -> LineDeliveryTaskSnapshot | None:
         with self._connection.cursor() as cursor:
             cursor.execute(_SELECT_SQL, (task_id.value,))
