@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from decimal import Decimal
 import json
 from typing import Any
@@ -150,9 +151,14 @@ class MySqlCaseArchitectureBootstrapRepository:
 def _load_facts(cursor, intent, *, lock):
     order_row = _select_order(cursor, intent.case_no, lock)
     order = _order_facts(order_row)
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    pricing = load_case_pricing(cursor, order_row, lock=lock)
+    if pricing is not None:
+        order = replace(order, pricing_identity_rule=pricing.rule.value)
     policy_kind = payroll_policy_kind_for_case(
         order.source_identity_status,
         order.multi_birth_count,
+        order.pricing_identity_rule,
     )
     policy_row = _select_rate_policy(
         cursor,
@@ -609,7 +615,7 @@ def _lock_suffix(lock: bool) -> str:
 _ORDER_SELECT_SQL = (
     "SELECT o.case_no,o.lifecycle_version,o.start_date,o.service_days,"
     "o.service_hours_per_day,o.floor_fee,o.service_start_time,o.service_end_time,"
-    "o.service_end_day_offset,c.identity_status,record.survey_details,state.effective_values_json "
+    "o.service_end_day_offset,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,c.identity_status,record.survey_details,state.effective_values_json "
     "FROM orders o "
     "JOIN clients c ON c.id=o.client_id AND c.case_no=o.case_no "
     "LEFT JOIN beclass_records record ON record.id=("

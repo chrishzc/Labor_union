@@ -157,7 +157,9 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
 
     application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
 
-    assert "實際金額以工會確認結果為準" in unit_of_work.delivery_tasks.requests[1].payload_json
+    fee_copy = unit_of_work.delivery_tasks.requests[1].payload_json
+    assert "實際補助金額依本案服務資料計算" in fee_copy
+    assert "最高40小時" in fee_copy and "最高120小時" in fee_copy
 
 
 def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):

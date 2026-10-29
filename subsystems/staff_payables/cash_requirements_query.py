@@ -94,7 +94,7 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             reasons.append("月嫂付款狀態或受款資料待確認")
         source = {"formal_obligation": "staff_obligation", "historical_projection": "historical_payroll", "order_facts": "missing_payroll"}[item.source]
         rows.append(CashRequirementRow(
-            item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}", case.case_no, item.recipient_name,
+            (item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}") + (f":due:{item.effective_due_date.isoformat()}" if sum(other.obligation_identity == item.obligation_identity for other in case.staff_items) > 1 and item.effective_due_date else ""), case.case_no, item.recipient_name,
             "staff_payable", "confirmed" if item.source == "formal_obligation" else "estimated", source,
             None if item.amount_due is None else item.amount_due.amount,
             None if item.balance is None else max(0, item.balance.amount), item.effective_due_date, False, tuple(reasons), item.staff_id,

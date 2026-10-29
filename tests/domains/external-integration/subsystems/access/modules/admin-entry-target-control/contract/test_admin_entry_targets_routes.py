@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import Request
 from fastapi.testclient import TestClient
+import pytest
 
 import api.main as main_module
 from api.dependencies.admin_auth import require_admin
@@ -14,6 +15,15 @@ from api.main import app
 from api.routes.admin_entry_targets import get_admin_entry_target_control
 from subsystems.access.admin_entry_target_control import AdminEntryTargetControl, ArtifactHealth, make_initial_state
 from subsystems.access.authentication_session import AdminPrincipal
+
+
+@pytest.fixture(autouse=True)
+def isolate_unrelated_startup_seeds(monkeypatch):
+    from api.dependencies import knowledge_retrieval
+
+    monkeypatch.setattr(main_module, "ensure_development_root_admin", lambda: None)
+    monkeypatch.setattr(main_module, "ensure_development_line_configuration", lambda: None)
+    monkeypatch.setattr(knowledge_retrieval, "ensure_builtin_knowledge_catalog", lambda: None)
 
 
 class MemoryStore:

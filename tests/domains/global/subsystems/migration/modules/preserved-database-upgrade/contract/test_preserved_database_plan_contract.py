@@ -105,7 +105,7 @@ def test_plan_remains_ready_after_restore_candidate_exists(monkeypatch) -> None:
     monkeypatch.setattr(runner, "schema_artifacts", lambda: [])
     monkeypatch.setattr(runner, "_table_evidence", lambda *_: {"orders": {"count": 1}})
     monkeypatch.setattr(runner, "RELEASE_MANIFEST", type("Manifest", (), {
-        "release_id": "test-release", "fingerprint": "manifest"
+        "release_id": "test-release", "fingerprint": "manifest", "backfills": ()
     })())
     monkeypatch.setattr(runner, "SCHEMA_PARTS", ())
 
@@ -318,8 +318,11 @@ def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch)
 def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
     assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
         "twins-payroll-rate-snapshots-v1",
+        "subsidy-period-policy-v1",
     )
-    assert tuple(item.release_id for item in runner.RELEASE_MANIFEST.manifests[-14:]) == (
+    releases = tuple(item.release_id for item in runner.RELEASE_MANIFEST.manifests)
+    release_index = releases.index("labor-union-twins-payroll-policy-2026-09-12-v2")
+    assert releases[release_index:release_index + 18] == (
         "labor-union-twins-payroll-policy-2026-09-12-v2",
         "labor-union-matching-plan-create-receipts-2026-09-12-v1",
         "labor-union-order-service-hours-half-precision-2026-09-14-v1",
@@ -334,6 +337,10 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
         "labor-union-client-hcm-email-2026-10-13-v1",
         "labor-union-staff-union-number-2026-10-13-v1",
         "labor-union-candidate-weekly-information-2026-10-14-v1",
+        "labor-union-nas-registration-approval-2026-10-19-v1",
+        "labor-union-line-order-group-invitation-url-2026-10-22-v1",
+        "labor-union-scheduling-service-start-2026-10-23-v1",
+        "labor-union-subsidy-periods-2026-10-27-v2",
     )
     assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
         "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"

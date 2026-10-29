@@ -1,9 +1,11 @@
-"""Application flow regression for disabling and replacing the active LINE alert group."""
+"""Admin target disable/readback and rejection of retired group registration."""
 
 from datetime import datetime, timezone
+import pytest
 
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.runtime_alert_target_application import RuntimeAlertTargetApplication
+from subsystems.line.runtime_alert_target_contracts import RuntimeAlertTargetError
 from subsystems.line.runtime_alert_target_contracts import SetLineAlertTargetEnabledCommand
 
 
@@ -15,9 +17,9 @@ class _Repository:
         self.rows = {
             7: {
                 "id": 7,
-                "group_id": "group-a",
-                "target_type": "group",
-                "display_name": "測試 LINE 群組",
+                "group_id": None,
+                "target_type": "admin_user",
+                "display_name": "測試管理員個人通知",
                 "enabled": True,
                 "minimum_status": "critical",
                 "updated_at_utc": NOW,
@@ -104,7 +106,7 @@ class _UnitOfWork:
         self.hooks.append(hook)
 
 
-def test_disable_preview_apply_readback_then_new_group_registration_preserves_singleton():
+def test_disable_preview_apply_readback_then_retired_group_registration_has_no_effect():
     repository = _Repository()
     units = []
     app = RuntimeAlertTargetApplication(lambda: units.append(_UnitOfWork(repository)) or units[-1], lambda: NOW)
@@ -136,9 +138,11 @@ def test_disable_preview_apply_readback_then_new_group_registration_preserves_si
     assert app.list_targets()[0].state == "disabled"
 
     registration_unit = _UnitOfWork(repository)
-    assert app.register_group(registration_unit, "group-b", "admin:7", "event-group-b") is True
-    registration_unit.commit()
+    with pytest.raises(RuntimeAlertTargetError) as rejected:
+        app.register_group(registration_unit, "group-b", "admin:7", "event-group-b")
+    assert rejected.value.code == "line_alert_group_retired"
+    assert registration_unit.commits == 0
 
     targets = app.list_targets()
-    assert [target.state for target in targets if target.target_kind == "group"] == ["disabled", "active"]
-    assert sum(target.target_kind == "group" and target.state == "active" for target in targets) == 1
+    assert [(target.target_kind, target.state) for target in targets] == [("admin_user", "disabled")]
+    assert list(repository.rows) == [7]

@@ -163,7 +163,7 @@ def _materialize_contract_client_finance_facts(
     service_hours_per_day = float(order_row["service_hours_per_day"])
     floor_fee = MoneyNTD(_integer_ntd(order_row["floor_fee"]))
     client_service_charge_waived = False
-    if source.identity_status is not None:
+    if source.identity_status is not None and source.pricing is None:
         coverage = derive_subsidy_coverage(
             source.identity_status,
             Decimal(len(charge_days)) * Decimal(str(service_hours_per_day)),
@@ -181,6 +181,8 @@ def _materialize_contract_client_finance_facts(
         open_nonstage_obligation_count=source.open_nonstage_obligation_count,
         client_service_charge_waived=client_service_charge_waived,
         identity_status=source.identity_status,
+        pricing=source.pricing,
+        existing_subsidy_return_count=source.existing_subsidy_return_count,
     )
 
 
@@ -658,6 +660,10 @@ def _load_client_finance(cursor, order_row, schedule_rows, lock):
     source = _client_finance_source(
         terms_row, obligation_rows, double_pay_dates, rate_override
     )
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    pricing = load_case_pricing(cursor, order_row, lock=lock)
+    if pricing is not None:
+        source = replace(source, payment_terms=replace(source.payment_terms, client_hourly_rate=MoneyNTD(pricing.client.covered)), pricing=pricing)
     return replace(source,effective_start_date=order_row.get('actual_start_date'))
 
 
@@ -763,6 +769,13 @@ def _load_payroll(cursor, order_row, assignment_rows, lock):
         rate_override,
         ancestry,
     )
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, payroll_tiers
+    pricing = load_case_pricing(cursor, order_row, lock=lock)
+    if pricing is not None:
+        tiers = payroll_tiers(pricing)
+        source = replace(source,
+            source_terms=tuple(replace(item, hourly_rate=MoneyNTD(tiers.covered_rate), tiered=tiers) for item in source.source_terms),
+            case_policy=replace(source.case_policy, hourly_rate=MoneyNTD(tiers.covered_rate), tiered=tiers) if source.case_policy else None)
     cursor.execute(
         "SELECT recovery.staff_id,SUM(recovery.remaining_amount_ntd) AS remaining_ntd "
         "FROM staff_overpayment_recoveries recovery "
@@ -1171,7 +1184,7 @@ _ORDER_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.end_date,o.actual_end_date,o.service_days,"
     "o.service_hours_per_day,o.requires_cooking,o.floor_fee,o.service_start_time,"
     "o.service_end_time,o.service_end_day_offset,o.actual_start_date,"
-    "o.staff_payment_due_date,clients.identity_status AS client_identity_status,"
+    "o.staff_payment_due_date,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,clients.identity_status AS client_identity_status,"
     "EXISTS(SELECT 1 FROM order_service_data_locks l "
     "WHERE l.case_no=o.case_no) AS service_data_locked "
     "FROM orders o JOIN clients ON clients.case_no=o.case_no WHERE o.case_no=%s"

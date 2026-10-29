@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — transaction/replay contract
 
 ## Modules
+- `tiered-payroll` — case-wide subsidy consumption and funding installments; path: `modules/tiered-payroll.md`
 - `payroll-adjustment` — 既有調整 Query／Preview／Apply 與 typed 查詢回應；path: `modules/payroll-adjustment.md`
 - `late-obligation-disposition` — retired PAYOUT-002 owner validation／historical settlement evidence；path: `modules/late-obligation-disposition.md`
 - `historical-service-accounting` — 歷史逐 assignment 單薪應付與差額義務；path: `modules/historical-service-accounting.md`

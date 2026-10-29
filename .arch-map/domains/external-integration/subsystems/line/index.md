@@ -91,7 +91,7 @@ layout_status: `custom_current`
 - integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/`
 - higher_boundary: LINE Identity first-release living baseline由Global schema/release routing分類；Anomalies consumer保留在其canonical integration root。
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_delivery_friend_regressions.py`
-- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_m4_continuation_regressions.py`
+- integration_test: `tests/domains/external-integration/subsystems/line/integration/test_line_m4_continuation_regressions.py` — 客服 SQL、LINE 投遞及群組告警退役後的跨 owner 邊界。
 - integration_root: `ui_react/src/tests/line_successor_clients.test.ts`
 
 上述修正的source基準為PR #299 `4eb58e07e94660308ba8afd05d39931f0301fdf1`；記錄中的

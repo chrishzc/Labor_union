@@ -88,13 +88,14 @@ def test_schedule_navigation_is_typed_by_api_adapter():
 
 def test_staff_summary_supports_exact_typed_lookup():
     connection = _Connection(
-        [{"id": 7, "name": "王小美", "phone": "0900", "education": None}]
+        [{"id": 7, "name": "王小美", "phone": "0900", "education": None, "union_no": None}]
     )
 
     response = staff.get_staff_summaries(
         page_size=1,
         after_id=None,
         staff_id=7,
+        lifecycle_state=None,
         principal=AdminPrincipal(7, "staff-reader", "Staff Reader", "admin"),
         application=StaffSummaryQueryApplication(
             StaffSummaryQueryService(MySqlStaffSummaryQueryRepository(connection))

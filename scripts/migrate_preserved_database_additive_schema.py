@@ -360,7 +360,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_19_nas_registration_approval_v1.json",
     "labor_union_2026_10_22_line_order_group_invitation_url_v1.json",
     "labor_union_2026_10_23_scheduling_service_start_v1.json",
-    "labor_union_2026_10_24_government_subsidy_periods_v1.json",
+    "labor_union_2026_10_27_government_subsidy_periods_hash_v2.json",
+    "labor_union_2026_10_29_accounting_pricing_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -659,7 +660,7 @@ def _configure_default_release_manifests() -> None:
         include_backfills=True,
         backfill_release_ids=frozenset(
             {"labor-union-twins-payroll-policy-2026-09-12-v2",
-             "labor-union-subsidy-periods-2026-10-24-v1"}
+             "labor-union-subsidy-periods-2026-10-27-v2"}
         ),
     )
 
@@ -1805,6 +1806,8 @@ def _government_outbox_intent_type_repair_state(
 def _owned_classification(
     snapshot: Mapping[str, Any], *, defer_missing_triggers: bool = False
 ) -> dict[str, str]:
+    from scripts.fresh_schema_policy import retired_fresh_tables
+    retired = retired_fresh_tables()
     present_columns: dict[str, set[str]] = {}
     for row in snapshot["columns"]:
         present_columns.setdefault(row["table_name"], set()).add(
@@ -1814,6 +1817,28 @@ def _owned_classification(
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        described = set(expected.get("tables", {})) | set(expected.get("parent_columns", {}))
+        if described & retired and part != "186_line_identity_management.sql":
+            # Preserve-data and readiness share the same approved retirement
+            # projection. Historical presence/absence never schedules removal;
+            # retained objects still pass the strict canonical comparator.
+            canonical = _canonical_artifact_descriptor(part)
+            if part in {"155_line_identity_review_configuration.sql", "156_line_publication_media_order_group.sql"}:
+                # These legacy artifacts use their original append-only name
+                # contract; later selected releases own their evolved types.
+                projected = deepcopy(expected)
+                projected["tables"] = {name: columns for name, columns in expected["tables"].items() if name not in retired}
+                projected["triggers"] = {name for name in expected["triggers"]
+                    if canonical["triggers"][name]["event_object_table"] not in retired}
+                result[part] = _descriptor_presence_state(
+                    projected, present_columns, present_triggers, snapshot.get("views", ()),
+                    defer_missing_triggers=defer_missing_triggers,
+                )
+            else:
+                result[part] = _metadata_state_for_artifact(
+                    snapshot, canonical, part, defer_missing_triggers=defer_missing_triggers,
+                )
+            continue
         if part == "999_v_order_details_view.sql":
             state = _descriptor_presence_state(
                 expected,
@@ -5924,6 +5949,19 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         # This receipt key has exact, case-sensitive replay semantics in the new DDL.
         descriptor['tables']['government_subsidy_period_entries']['idempotency_key'].update(
             character_set_name='utf8mb4',collation_name='utf8mb4_bin')
+    if part_name == '1056_accounting_pricing.sql':
+        descriptor['parent_columns']['orders'] = {
+            'pricing_policy_id': _column_contract('bigint', 'YES'),
+            'pricing_override_event_id': _column_contract('bigint', 'YES'),
+            'pricing_revision': _column_contract('bigint', 'NO', '0'),
+        }
+        for index, column in (('ix_orders_pricing_policy', 'pricing_policy_id'), ('ix_orders_pricing_override', 'pricing_override_event_id')):
+            descriptor['indexes'][('orders', index)] = {'non_unique': 1, 'columns': (column,)}
+        for name, column, table in (('fk_order_pricing_policy', 'pricing_policy_id', 'accounting_pricing_policies'), ('fk_order_pricing_override', 'pricing_override_event_id', 'case_pricing_events')):
+            descriptor['foreign_keys'][('orders', name)] = {'columns': (column,), 'referenced_table': table,
+                'referenced_columns': ('id',), 'update_rule': 'RESTRICT', 'delete_rule': 'RESTRICT'}
+        descriptor['tables']['accounting_pricing_receipts']['idempotency_key'].update(
+            character_set_name='utf8mb4', collation_name='utf8mb4_bin')
     if part_name == "1052_nas_registration_approval.sql":
         descriptor["parent_columns"]["provisional_client_registrations"] = {
             "application_payload": _column_contract("json", "YES"),

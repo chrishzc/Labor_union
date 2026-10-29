@@ -7,9 +7,11 @@
 ## Responsibility
 保存 assignment 建立／替換時的 immutable Payroll rate snapshot，並套用正式 Payroll terms impact。Actual Start 日期 replacement 只可把唯一 source assignment frozen snapshot 原值搬移到 successor，不改 Payroll root、obligation 或金額，且缺少 source snapshot 時不得 fallback；歷史重啟首次建立安排沒有 source snapshot 時，才可使用案件既有 case policy。任何分支都不得自行產生費率。
 BeClass rate correction 保留 Scheduling identity，未付款的 replacement obligation identity 綁定唯一 correction event，支援同一 assignment 反覆補正；既有 frozen rate snapshot 與已付款歷史不覆寫。
+未綁定新分段計價的既有案件，沿 Payroll 正式付款日規則：客戶代墊次月十五日，社福且零客戶應付才為次次月十五日；已形成日期不覆寫。
 
 ## Implementation
 - primary:
+  - `domains/payroll/payment_due_date.py` — 既有 assignment／歷史帳務共同使用的純付款日與社福資格規則；新分段資金來源期程由 tiered-payroll 擁有。
   - `subsystems/payroll/terms_impact.py`
   - `infrastructure/mysql/payroll_terms_writer.py`
 
@@ -23,6 +25,7 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 ## Verification
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/assignment-terms-impact/`
 - test_root: `tests/domains/payroll/subsystems/payroll/integration/test_service_handover_accounting.py`
+- test_root: `tests/domains/payroll/subsystems/payroll/integration/test_staff_payment_due_date.py`
 - handover contract: `document/架構重整/01_規格基線/03_Payroll_Domain.md` §9；沿同月嫂家族追溯 obligation／adjustment，append entitlement delta，Staff Payables 獨立處理超付，不以原全額重建。
 
 ## Provenance

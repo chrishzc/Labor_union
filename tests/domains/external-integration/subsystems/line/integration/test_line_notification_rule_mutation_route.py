@@ -230,7 +230,7 @@ def test_save_rejects_raw_definition_extra_field_before_application(monkeypatch)
     assert response.status_code == 422
 
 
-def test_whitespace_only_mutation_text_returns_redacted_typed_validation_error() -> None:
+def test_whitespace_only_mutation_identity_returns_redacted_typed_validation_error() -> None:
     app = FastAPI()
     install_typed_error_handlers(app)
     app.include_router(line_notification_rules.router)
@@ -240,7 +240,7 @@ def test_whitespace_only_mutation_text_returns_redacted_typed_validation_error()
         "preview_fingerprint": "f" * 64,
         "definition": _definition(),
         "reason": " \t\n",
-        "idempotency_key": "notification-validation-1",
+        "idempotency_key": " \t\n",
         "correlation_id": "notification-validation-1",
     })
     assert response.status_code == 422

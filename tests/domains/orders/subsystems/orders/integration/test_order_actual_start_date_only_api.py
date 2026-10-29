@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.order_actual_start import get_actual_start_application
 from api.routes.order_actual_start import ActualStartApplyBody, router
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -70,7 +70,7 @@ class _Application:
 def _client():
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(
+    app.dependency_overrides[require_line_matching_override] = lambda: AdminPrincipal(
         id=1,
         username="admin",
         display_name="Administrator",

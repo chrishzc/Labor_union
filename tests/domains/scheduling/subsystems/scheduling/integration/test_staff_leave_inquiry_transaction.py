@@ -1,15 +1,12 @@
-"""Admin review -> actual Staff Leave SQL -> transactional inquiry boundary.
+"""Retained historical review owner -> SQL transaction without customer delivery.
 
-SQLite translates only placeholders/FOR UPDATE. LINE enqueue is a strict local
-transport double using the real request fingerprint, not a provider invocation.
-These tests call the actual route with its declared application dependency;
-they do not establish MySQL isolation, HTTP authentication or mobile delivery.
+SQLite translates MySQL placeholders, locking and text casts. These tests call
+the retained application directly; the retired HTTP route remains unavailable.
+They do not establish MySQL isolation, HTTP authentication or mobile delivery.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-import inspect
 import json
 import sqlite3
 import re
@@ -19,7 +16,6 @@ from domains.line.configuration import LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
 
 import pytest
-from fastapi import HTTPException
 
 from api.dependencies import staff_leave_intake as composition
 from api.routes import staff_leave_management as route
@@ -28,6 +24,10 @@ from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.line.staff_leave_customer_coordination import (
     StaffLeaveCustomerCoordinationApplication,
     parse_staff_leave_customer_postback,
+)
+from subsystems.scheduling.staff_leave_intake_workflow import (
+    ReviewStaffLeaveRequest,
+    StaffLeaveIntakeWorkflowError,
 )
 
 
@@ -180,8 +180,6 @@ def inquiry(tmp_path, monkeypatch):
     monkeypatch.setattr(composition, "get_connection", lambda: Connection(state))
     monkeypatch.setattr(route, "get_connection", lambda: Connection(state))
     monkeypatch.setattr(line_composition, "open_line_unit_of_work", lambda: LineUow(state))
-    # Covers the old route's direct import as well as the injected successor.
-    monkeypatch.setattr(route, "open_line_unit_of_work", lambda: LineUow(state), raising=False)
     original_init = StaffLeaveCustomerCoordinationApplication.__init__
 
     def init_with_clock(self, connection_factory, line_unit_of_work_factory, now):
@@ -193,24 +191,10 @@ def inquiry(tmp_path, monkeypatch):
 
 
 def review(*, action="accept", version=1, key="review-17", reason="reviewed", request_id=17):
-    dependency = inspect.signature(route.review_staff_leave_request).parameters["application"].default.dependency
-    value = dependency()
-
-    @contextmanager
-    def resolved_application():
-        if inspect.isgenerator(value):
-            try:
-                yield next(value)
-            finally:
-                value.close()
-        else:
-            yield value
-
-    with resolved_application() as application:
-        return route.review_staff_leave_request(
-            request_id, route.ReviewBody(expected_version=version, action=action, reason=reason),
-            key, SimpleNamespace(username="synthetic-admin"), application,
-        )
+    application = composition.get_staff_leave_customer_coordination_application()
+    return application.review(ReviewStaffLeaveRequest(
+        request_id, version, action, reason, False, "synthetic-admin", key,
+    ))
 
 
 def rows(state, table):
@@ -227,7 +211,8 @@ def assert_pending_without_inquiries(state):
 
 def test_historical_review_receipt_commits_without_customer_inquiry(inquiry):
     result = review()
-    assert result.data == {"request_id":17,"status":"accepted_for_processing","version":2,"actor":"synthetic-admin"}
+    assert (result.request_id, result.status.value, result.version) == (17, "accepted_for_processing", 2)
+    assert rows(inquiry, "scheduling_staff_leave_request_events")[0][3] == "synthetic-admin"
     assert inquiry.commits == 1
     assert len(rows(inquiry,"scheduling_staff_leave_request_events")) == 1
     assert len(rows(inquiry,"scheduling_staff_leave_request_receipts")) == 1
@@ -238,7 +223,7 @@ def test_historical_review_receipt_commits_without_customer_inquiry(inquiry):
 def test_retired_delivery_failure_cannot_block_historical_review(inquiry, failure):
     # Retired customer delivery cannot block a historical review.
     inquiry.fail_enqueue = failure
-    assert review().data['status'] == 'accepted_for_processing'
+    assert review().status.value == 'accepted_for_processing'
     assert rows(inquiry,'test_delivery') == []
     assert inquiry.enqueue_calls == 0
 
@@ -260,7 +245,8 @@ def test_review_replay_does_not_reenqueue_or_reset_delivery_result(inquiry, stat
     before = rows(inquiry, "test_delivery")
     calls = inquiry.enqueue_calls
     inquiry.now += timedelta(days=1)
-    assert review().data == first.data
+    replay = review()
+    assert (replay.request_id, replay.status, replay.version) == (first.request_id, first.status, first.version)
     assert rows(inquiry, "test_delivery") == before
     assert inquiry.enqueue_calls == calls
     assert len(rows(inquiry, "scheduling_staff_leave_request_events")) == 1
@@ -278,22 +264,21 @@ def test_replay_does_not_send_a_second_inquiry_after_rebinding(inquiry):
 
 @pytest.mark.parametrize("action,status", [("reject", "rejected"), ("cancel", "cancelled")])
 def test_nonaccept_review_never_enqueues_customer_inquiries(inquiry, action, status):
-    assert review(action=action).data["status"] == status
+    assert review(action=action).status.value == status
     assert rows(inquiry, "test_delivery") == []
     assert inquiry.commits == 1
 
 
-@pytest.mark.parametrize("options", [{"version": 2}, {"request_id": 999}])
-def test_invalid_review_has_no_persisted_effect(inquiry, options):
-    with pytest.raises(HTTPException) as error:
+@pytest.mark.parametrize("options,code", [({"version": 2}, "leave_request_stale"), ({"request_id": 999}, "leave_request_not_found")])
+def test_invalid_review_has_no_persisted_effect(inquiry, options, code):
+    with pytest.raises(StaffLeaveIntakeWorkflowError, match=code):
         review(**options)
-    assert error.value.status_code == 409
     assert_pending_without_inquiries(inquiry)
 
 
 def test_missing_recipient_stays_visible_without_inventing_delivery(inquiry):
     inquiry.db.execute("DELETE FROM line_identity_role_bindings")
-    assert review().data["status"] == "accepted_for_processing"
+    assert review().status.value == "accepted_for_processing"
     assert rows(inquiry, "test_delivery") == []
     assert inquiry.connections == 1
     assert inquiry.commits == 1
@@ -308,6 +293,6 @@ def test_old_copy_cannot_reactivate_customer_inquiry(inquiry):
 
 def test_no_official_work_days_does_not_create_inquiries(inquiry):
     inquiry.db.execute("UPDATE staff_schedule SET is_work_day=0")
-    assert review().data["status"] == "accepted_for_processing"
+    assert review().status.value == "accepted_for_processing"
     assert rows(inquiry, "test_delivery") == []
     assert inquiry.commits == 1

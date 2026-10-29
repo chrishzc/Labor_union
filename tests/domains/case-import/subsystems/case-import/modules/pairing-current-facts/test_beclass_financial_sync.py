@@ -78,11 +78,14 @@ def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypa
         "load_locked_facts",
         lambda *_: SimpleNamespace(scheduling=SimpleNamespace(segments=())),
     )
-    monkeypatch.setattr(module, "select_order", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(module, "select_order", lambda *_args, **_kwargs: {
+        "start_date": date(2026, 10, 1), "service_days": 5,
+        "service_hours_per_day": 8, "floor_fee": 0,
+    })
     monkeypatch.setattr(
         module,
-        "load_contract_client_finance_facts",
-        lambda *_args, **_kwargs: finance_facts,
+        "load_calculable_client_finance_facts",
+        lambda *_args, **_kwargs: (finance_facts, None),
     )
     monkeypatch.setattr(
         module,
@@ -116,7 +119,7 @@ def test_financial_sync_persists_450_terms_and_client_obligation_impact(monkeypa
     assert persisted[0].source_event_id == 9
 
 
-def test_unassigned_40_day_case_corrects_rate_without_creating_obligations(monkeypatch):
+def test_incomplete_unassigned_case_corrects_existing_terms_without_inventing_days(monkeypatch):
     connection = _Connection()
     finance_facts = ClientFinanceTermsFacts(
         case_no="CASE-40-DAYS",

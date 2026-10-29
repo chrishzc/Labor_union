@@ -278,6 +278,7 @@ class FakeBootstrapRepository:
         self.claim = CommandClaimState.CREATED
         self.stored = None
         self.saved = None
+        self.synchronized_charges = []
 
     def load_for_preview(self, intent):
         return self.facts
@@ -293,6 +294,10 @@ class FakeBootstrapRepository:
 
     def create_bootstrap(self, command, candidate):
         return 41
+
+    def synchronize_client_charges(self, command, candidate, event_id):
+        assert candidate is self.candidate
+        self.synchronized_charges.append((command, event_id))
 
     def existing_bootstrap_event_id(self, case_no):
         return 42
@@ -327,7 +332,9 @@ def test_bootstrap_ensure_persists_then_replays(monkeypatch):
     second = workflow.ensure(command)
 
     assert first == second
+    assert repository.synchronized_charges == [(command, 41)]
     assert unit_of_work.committed is True
+
 
 
 def test_bootstrap_ensure_rejects_stale_order_version(monkeypatch):

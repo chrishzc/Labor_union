@@ -62,7 +62,9 @@ def database():
             refund_obligation_identity TEXT, case_no TEXT, bank_account TEXT
         );
         CREATE TABLE staff_bank_accounts (id INTEGER, staff_id INTEGER, account_no TEXT);
-        CREATE TABLE finance_import_rows (id INTEGER, bank_references TEXT);
+        CREATE TABLE finance_import_rows (
+            id INTEGER, bank_references TEXT, format_id TEXT, direction TEXT, memo TEXT
+        );
     """)
     yield connection
     connection.close()
@@ -97,8 +99,8 @@ def _bank_row(monkeypatch, database, account=SNAPSHOT_ACCOUNT):
     monkeypatch.setattr(taishin.pd, "read_excel", lambda *_args, **_kwargs: frame)
     [row] = taishin.normalize_taishin_rows("synthetic-only.xlsx", "synthetic", 1)
     database.execute(
-        "INSERT INTO finance_import_rows VALUES (?, ?)",
-        (1, json.dumps(row["bank_references"])),
+        "INSERT INTO finance_import_rows VALUES (?, ?, ?, ?, ?)",
+        (1, json.dumps(row["bank_references"]), "taishin", "outgoing", row.get("memo")),
     )
     return row
 

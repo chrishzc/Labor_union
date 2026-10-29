@@ -18,6 +18,7 @@ from infrastructure.mysql.client_finance_terms_writer import (
 from infrastructure.mysql.order_terms_read_model import (
     _select_assignments,
     _select_generation,
+    load_calculable_client_finance_facts,
     load_contract_client_finance_facts,
     load_locked_facts,
     preflight_staff_ids,
@@ -59,9 +60,16 @@ class MySqlBeClassFinancialSync:
                 # The committed effective birth count is the input for later
                 # bootstrap/rate resolution. No financial root exists to adjust.
                 return
-            finance_facts = load_contract_client_finance_facts(
-                cursor, order_row, lock=True
-            )
+            if not has_assignments and all(order_row.get(name) is not None for name in (
+                "start_date", "service_days", "service_hours_per_day", "floor_fee",
+            )):
+                finance_facts, _ = load_calculable_client_finance_facts(
+                    cursor, order_row, lock=True
+                )
+            else:
+                finance_facts = load_contract_client_finance_facts(
+                    cursor, order_row, lock=True
+                )
             change_identity = f"beclass-rate-correction:{correction_event_id}"
             _persist_effective_client_rate(
                 cursor,

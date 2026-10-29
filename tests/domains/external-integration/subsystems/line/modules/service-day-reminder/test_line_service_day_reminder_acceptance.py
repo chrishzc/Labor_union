@@ -105,6 +105,10 @@ class _ProjectionRepository(MySqlLineNotificationRepository):
     def _source_has_newer_version(self, _source):
         return False
 
+    def line006_recheck_targets_for_source(self, source_event_id):
+        assert source_event_id == 51
+        return ()  # This Scheduling fixture has no Anomalies recheck lineage.
+
     def _resolve_recipient(self, selector, facts, *, source_domain="unknown", event_code=""):
         assert selector == "assigned_caregiver"
         assert facts["staff_id"] == 4

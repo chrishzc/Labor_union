@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import shutil
 import pytest
 
 
@@ -79,6 +80,14 @@ def test_no_auth_launcher_provisions_or_attests_local_entry_target_state_before_
 def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_overriding(
     tmp_path: Path,
 ) -> None:
+    bash = "bash"
+    if os.name == "nt":
+        # Windows' bash.exe is a WSL launcher; this is a native subprocess test.
+        git = shutil.which("git")
+        if git:
+            git_bash = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+            if git_bash.is_file():
+                bash = str(git_bash)
     project_root = tmp_path / "project"
     project_python = project_root / ".venv" / "bin" / "python"
     project_python.parent.mkdir(parents=True)
@@ -115,7 +124,7 @@ def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_ov
     env["APP_ENV"] = "development"
     before = (ROOT / ".env").read_bytes() if (ROOT / ".env").exists() else None
     generated = subprocess.run(
-        ["bash", "-c", source, "launcher", "--dry-run"],
+        [bash, "-c", source, "launcher", "--dry-run"],
         cwd=ROOT,
         env=env,
         check=False,
@@ -133,7 +142,7 @@ def test_no_auth_launcher_injects_ephemeral_anomaly_key_without_persisting_or_ov
     env["ANOMALY_ISSUE_IDENTITY_KEY_V1"] = explicit
     env["EXPECTED_ANOMALY_ISSUE_IDENTITY_KEY_V1"] = explicit
     preserved = subprocess.run(
-        ["bash", "-c", source, "launcher", "--dry-run"],
+        [bash, "-c", source, "launcher", "--dry-run"],
         cwd=ROOT,
         env=env,
         check=False,

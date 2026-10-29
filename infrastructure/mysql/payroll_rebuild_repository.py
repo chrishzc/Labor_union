@@ -71,6 +71,11 @@ class MySqlPayrollRebuildRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
 
+    def synchronize_installments(self, case_no, payroll):
+        from infrastructure.mysql.payroll_installments import persist_payroll_installments
+        with self._connection.cursor() as cursor:
+            persist_payroll_installments(cursor, case_no, payroll)
+
     def load(self, case_no: str, *, for_update: bool) -> PayrollRebuildFacts:
         with _cursor(self._connection) as cursor:
             root = _load_root(cursor, case_no, for_update)
@@ -86,7 +91,9 @@ class MySqlPayrollRebuildRepository:
             special_dates = _load_special_dates(cursor, assignments, for_update)
             adjustments = _load_adjustments(cursor, assignments, for_update)
             obligations = _load_obligations(cursor, case_no, for_update)
-        return _rebuild_facts(
+            from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, payroll_tiers
+            pricing = load_case_pricing(cursor, root, lock=for_update)
+        facts = _rebuild_facts(
             root,
             assignments,
             schedules,
@@ -94,7 +101,9 @@ class MySqlPayrollRebuildRepository:
             special_dates,
             adjustments,
             obligations,
+            pricing,
         )
+        return facts
 
     def find_receipt(self, key):
         with _cursor(self._connection) as cursor:
@@ -134,6 +143,8 @@ class MySqlPayrollRebuildRepository:
             _advance_version(cursor, persistence)
             _append_outbox(cursor, persistence)
             _insert_receipt(cursor, persistence)
+            from infrastructure.mysql.payroll_installments import persist_payroll_installments
+            persist_payroll_installments(cursor, persistence.request.case_no, persistence.preview.payroll)
 
     def query_staff_month(self, staff_id: int, year: int, month: int):
         month_start, month_end = _month_range(year, month)
@@ -295,6 +306,7 @@ def _rebuild_facts(
     special_dates,
     adjustments,
     obligations,
+    pricing=None,
 ):
     schedules_by_assignment = _schedule_index(assignments, schedules)
     specials_by_assignment = _date_index(special_dates)
@@ -308,7 +320,7 @@ def _rebuild_facts(
         case_no=str(root["case_no"]),
         payroll_version=int(root["aggregate_version"]),
         service_facts=service_facts,
-        rate_snapshots=_rate_snapshots(rates),
+        rate_snapshots=_rate_snapshots(rates, pricing),
         terms=_payroll_terms(root),
         adjustments=_payroll_adjustments(adjustments_by_assignment),
         existing_obligations=_existing_obligations(obligations),
@@ -317,6 +329,10 @@ def _rebuild_facts(
 
 
 def _payment_due_date(root):
+    if root.get("pricing_policy_id") is not None or root.get("pricing_override_event_id") is not None:
+        from domains.payroll.tiered_rates import funding_due_date
+        completed_on = root.get("actual_end_date")
+        return funding_due_date(completed_on, directly_subsidized=False) if completed_on else None
     existing = root["staff_payment_due_date"]
     if existing is not None:
         return existing
@@ -373,13 +389,19 @@ def _service_facts(assignments, schedules, special_dates):
     )
 
 
-def _rate_snapshots(rows):
+def _rate_snapshots(rows, pricing=None):
+    if pricing is not None:
+        from infrastructure.mysql.pricing_configuration_repository import payroll_tiers
+        tiers = payroll_tiers(pricing)
+    else:
+        tiers = None
     return tuple(
         AssignmentRateSnapshot(
             _assignment_identity(row["assignment_id"]),
             str(row["policy_version"]),
             PayrollPolicyKind(str(row["policy_kind"])),
-            MoneyNTD(_integer_ntd(row["hourly_rate_ntd"])),
+            MoneyNTD(tiers.covered_rate if tiers else _integer_ntd(row["hourly_rate_ntd"])),
+            tiers,
         )
         for row in rows
     )
@@ -863,7 +885,7 @@ def _lock_clause(lock):
 
 _ROOT_SELECT_SQL = (
     "SELECT o.case_no,o.service_days,o.service_hours_per_day,o.floor_fee,"
-    "o.status AS order_status,o.actual_end_date,c.identity_status,"
+    "o.status AS order_status,o.actual_end_date,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,c.identity_status,"
     "(SELECT SUM(event.after_amount_ntd) FROM client_obligations obligation "
     "JOIN client_obligation_events event ON event.id=obligation.current_event_id "
     "WHERE obligation.case_no=o.case_no AND obligation.status IN ('open','settled') "
@@ -959,10 +981,17 @@ _RECEIPT_INSERT_SQL = (
     "resulting_payroll_version,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s)"
 )
 _MONTHLY_OBLIGATIONS_SQL = (
-    "SELECT obligation_identity,assignment_id,case_no,staff_id,direction,"
-    "amount_due_ntd,due_date FROM staff_obligations "
-    "WHERE staff_id=%s AND due_date>=%s AND due_date<%s AND status='open' "
-    "ORDER BY obligation_identity"
+    "SELECT obligations.obligation_identity,obligations.assignment_id,obligations.case_no,"
+    "obligations.staff_id,obligations.direction,"
+    "COALESCE(installments.amount_ntd,obligations.amount_due_ntd) AS amount_due_ntd,"
+    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END AS due_date "
+    "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments "
+    "ON installments.obligation_identity=obligations.obligation_identity "
+    "WHERE obligations.staff_id=%s AND "
+    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END >=%s AND "
+    "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END <%s "
+    "AND obligations.status='open' AND COALESCE(installments.amount_ntd,obligations.amount_due_ntd)>0 "
+    "ORDER BY obligations.obligation_identity"
 )
 
 

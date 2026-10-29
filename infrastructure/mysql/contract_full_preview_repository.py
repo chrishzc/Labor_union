@@ -304,7 +304,7 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
         total_hours = Decimal(len(dates)) * Decimal(
             str(finance.service_hours_per_day)
         )
-        coverage = _derive_contract_subsidy_coverage(facts, total_hours)
+        coverage = _derive_contract_subsidy_coverage(facts, total_hours) if finance.pricing is None else None
         finance = replace(
             finance,
             charge_days=tuple(ClientChargeDay(day, False) for day in dates),
@@ -327,7 +327,7 @@ def _extend_precontract_facts(connection, case_no, facts, owners, plan):
             "client_virtual_account": facts.get("client_virtual_account"),
         }
     )
-    _project_subsidy_coverage(facts, owners)
+    _project_subsidy_coverage(facts, owners, finance.pricing)
 
 
 def _extend_precontract_staff_payroll(
@@ -341,11 +341,16 @@ def _extend_precontract_staff_payroll(
     """Project, but never persist, the accepted-plan whole staff payable."""
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT policy_version,policy_kind,hourly_rate_ntd "
-            "FROM case_payroll_rate_policy_snapshots WHERE case_no=%s",
+            "SELECT policy.policy_version,policy.policy_kind,policy.hourly_rate_ntd,"
+            "o.case_no,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,"
+            "c.identity_status AS client_identity_status "
+            "FROM case_payroll_rate_policy_snapshots policy JOIN orders o ON o.case_no=policy.case_no "
+            "JOIN clients c ON c.id=o.client_id WHERE policy.case_no=%s",
             (case_no,),
         )
         policy = cursor.fetchone()
+        from infrastructure.mysql.pricing_configuration_repository import load_case_pricing, payroll_tiers
+        pricing = load_case_pricing(cursor, policy) if policy else None
     if policy is None:
         return
     service_dates = {
@@ -375,7 +380,8 @@ def _extend_precontract_staff_payroll(
                 item.assignment_identity,
                 str(policy["policy_version"]),
                 policy_kind,
-                MoneyNTD(int(policy["hourly_rate_ntd"])),
+                MoneyNTD(pricing.payroll.covered if pricing else int(policy["hourly_rate_ntd"])),
+                payroll_tiers(pricing) if pricing else None,
             )
             for item in service_facts
         )
@@ -393,19 +399,25 @@ def _extend_precontract_staff_payroll(
             for item in payroll.assignments
             if item.assignment_identity == f"matching-segment:{matching_segment_id}"
         )
-        coverage = derive_subsidy_coverage(
+        coverage = None if pricing else derive_subsidy_coverage(
             str(facts["identity_status"]),
             Decimal(str(facts["total_hours"])),
             Decimal(str(facts.get("floor_fee") or 0)),
         )
-        due_date = calculate_staff_payment_due_date(
+        due_date = None if pricing else calculate_staff_payment_due_date(
             max(day for dates in service_dates.values() for day in dates),
             int(facts["total_employer_self_pay_payable"]),
             coverage.is_full_subsidy_order,
         )
     except (KeyError, StopIteration, TypeError, ValueError, ArithmeticError):
         return
-    facts["service_unit_price"] = selected.hourly_rate.amount
+    if pricing:
+        from domains.payroll.installments import payroll_installments
+        from infrastructure.mysql.payroll_installments import payment_date_projection, hourly_rate_projection
+        due_date = payment_date_projection(tuple((p.funding_kind,p.amount,p.due_date) for p in payroll_installments(selected, max(day for dates in service_dates.values() for day in dates))))
+        facts['service_unit_price'] = hourly_rate_projection(pricing)
+    else:
+        facts["service_unit_price"] = selected.hourly_rate.amount
     facts["staff_payable_total"] = selected.total_payable.amount
     facts["staff_payable_due_date"] = due_date
     facts["payroll_payment_date"] = due_date
@@ -608,7 +620,7 @@ def _extend_owner_facts(
             total_hours = Decimal(len(expected_service_dates)) * Decimal(
                 str(finance.service_hours_per_day)
             )
-            coverage = _derive_contract_subsidy_coverage(facts, total_hours)
+            coverage = _derive_contract_subsidy_coverage(facts, total_hours) if finance.pricing is None else None
             finance = replace(
                 finance,
                 charge_days=tuple(ClientChargeDay(day, False) for day in expected_service_dates),
@@ -767,7 +779,17 @@ def _extend_owner_facts(
             owners["client"] = projection_fingerprint(
                 {"client": owners.get("client"), "email": client_email}
             )
-        _project_subsidy_coverage(facts, owners)
+        if finance.pricing is not None:
+            from infrastructure.mysql.payroll_installments import payment_date_projection, hourly_rate_projection
+            facts['service_unit_price'] = hourly_rate_projection(finance.pricing)
+            if len(exact_obligations) == 1:
+                with connection.cursor() as cursor:
+                    cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments WHERE obligation_identity=%s ORDER BY due_date,funding_kind', (exact_obligations[0].obligation_identity,))
+                    portions = tuple((row['funding_kind'],int(row['amount_ntd']),row['due_date']) for row in cursor.fetchall())
+                facts['staff_payable_due_date'] = payment_date_projection(portions)
+                facts['payroll_payment_date'] = facts['staff_payable_due_date']
+            owners['payroll'] = projection_fingerprint({'payroll':owners.get('payroll'),'rate':facts['service_unit_price'],'due':facts.get('staff_payable_due_date')})
+        _project_subsidy_coverage(facts, owners, finance.pricing)
         if subsidy_claim is not None:
             # B40 is the Government Subsidy service claim, not a staff wage.
             # Only an exact approved claim item may populate it.
@@ -935,12 +957,22 @@ def _special_holiday_dates(value: object) -> tuple[date, ...] | None:
 
 
 def _project_subsidy_coverage(
-    facts: dict[str, object], owners: dict[str, str]
+    facts: dict[str, object], owners: dict[str, str], pricing=None
 ) -> None:
     """Expose the existing Client Finance typed coverage result by name."""
     identity = facts.get("identity_status")
     total_hours = facts.get("total_hours")
     if not isinstance(identity, str) or total_hours is None:
+        return
+    if pricing is not None:
+        from domains.government_subsidy.pricing import subsidy_claim_amount
+        covered, excess = pricing.split_hours(Decimal(str(total_hours)))
+        facts['subsidy_hours'] = covered
+        facts['projected_subsidy_amount'] = subsidy_claim_amount(Decimal(str(total_hours)), pricing.subsidy_hours, pricing.payroll.covered)
+        hours = Decimal(str(facts.get('service_hours_per_day') or 0))
+        if hours > 0:
+            facts['client_finance_self_pay_days'] = excess / hours
+        owners['client_finance'] = projection_fingerprint({'client_finance':owners.get('client_finance'),'subsidy_hours':covered,'rate':pricing.payroll.covered})
         return
     coverage = _derive_contract_subsidy_coverage(
         facts, Decimal(str(total_hours))

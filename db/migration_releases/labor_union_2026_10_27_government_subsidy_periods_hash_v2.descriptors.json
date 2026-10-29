@@ -1,0 +1,291 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-subsidy-periods-2026-10-27-v2",
+  "descriptors": {
+    "1055_government_subsidy_periods.sql": {
+      "tables": {
+        "client_subsidy_policy_migrations": {
+          "policy_key": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "completed_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "CURRENT_TIMESTAMP(6)",
+            "extra": "DEFAULT_GENERATED"
+          }
+        },
+        "client_subsidy_identity_label_changes": {
+          "client_id": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_identity": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_identity": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "changed_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "CURRENT_TIMESTAMP(6)",
+            "extra": "DEFAULT_GENERATED"
+          }
+        },
+        "government_subsidy_period_years": {
+          "period_year": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "aggregate_version": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        },
+        "government_subsidy_period_entries": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "period_unit": {
+            "column_type": "varchar(10)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "period_year": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "period_index": {
+            "column_type": "int",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "period_start": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "period_end": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "finance_import_row_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reversal_of_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "paid_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "idempotency_key": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_bin"
+          },
+          "actor": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": "CURRENT_TIMESTAMP(6)",
+            "extra": "DEFAULT_GENERATED"
+          }
+        },
+        "government_subsidy_period_members": {
+          "receipt_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "service_end_date": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "client_subsidy_policy_migrations.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "policy_key"
+          ]
+        },
+        "client_subsidy_identity_label_changes.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "client_id"
+          ]
+        },
+        "government_subsidy_period_years.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "period_year"
+          ]
+        },
+        "government_subsidy_period_entries.ix_subsidy_period_range": {
+          "non_unique": 1,
+          "columns": [
+            "period_start",
+            "period_end"
+          ]
+        },
+        "government_subsidy_period_entries.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "government_subsidy_period_entries.uq_subsidy_period_bank": {
+          "non_unique": 0,
+          "columns": [
+            "finance_import_row_id"
+          ]
+        },
+        "government_subsidy_period_entries.uq_subsidy_period_key": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "government_subsidy_period_entries.uq_subsidy_period_reversal": {
+          "non_unique": 0,
+          "columns": [
+            "reversal_of_id"
+          ]
+        },
+        "government_subsidy_period_members.ix_subsidy_period_case": {
+          "non_unique": 1,
+          "columns": [
+            "case_no"
+          ]
+        },
+        "government_subsidy_period_members.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "receipt_id",
+            "case_no"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "client_subsidy_identity_label_changes.fk_subsidy_identity_client": {
+          "columns": [
+            "client_id"
+          ],
+          "referenced_table": "clients",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_entries.fk_subsidy_period_bank": {
+          "columns": [
+            "finance_import_row_id"
+          ],
+          "referenced_table": "finance_import_rows",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_entries.fk_subsidy_period_reversal": {
+          "columns": [
+            "reversal_of_id"
+          ],
+          "referenced_table": "government_subsidy_period_entries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_members.fk_subsidy_period_member": {
+          "columns": [
+            "receipt_id"
+          ],
+          "referenced_table": "government_subsidy_period_entries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "government_subsidy_period_entries.ck_subsidy_period_unit": "atom(period_unitin('month','quarter','year'))",
+        "government_subsidy_period_entries.ck_subsidy_period_amount": "atom(amount_ntd>0)",
+        "government_subsidy_period_entries.ck_subsidy_period_range": "atom(period_end>period_start)",
+        "government_subsidy_period_members.ck_subsidy_period_member_amount": "atom(amount_ntd>=0)"
+      },
+      "triggers": [],
+      "parent_columns": {},
+      "views": {}
+    }
+  }
+}

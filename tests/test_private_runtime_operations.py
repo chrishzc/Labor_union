@@ -271,6 +271,8 @@ def test_durable_composition_delegates_heartbeat_to_typed_application_after_work
     # service-arrangement and due-order discovery adapters.
     monkeypatch.setattr(private_operation_dependencies, "build_service_arrangement_automation",
         lambda _: SimpleNamespace(dispatch_pending=lambda: None))
+    monkeypatch.setattr("subsystems.orders.service_start_lifecycle.ServiceStartLifecycleWorkflow",
+        lambda *_: SimpleNamespace(advance_due=lambda _: None))
     monkeypatch.setattr(private_operation_dependencies, "MySqlDueOrderAutoCompletionRepository", lambda _: object())
     monkeypatch.setattr(private_operation_dependencies, "DurableJobCommandApplication", lambda *_: object())
     monkeypatch.setattr(private_operation_dependencies, "AutoCompletionJobDispatcher",

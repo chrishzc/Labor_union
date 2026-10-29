@@ -401,10 +401,15 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
         changed = {**query["terms"], "planned_start_date": "2026-10-02"}
         preview = _preview(client, changed)
         # Orders spec §3.2: moving an existing payment deadline is formal even
-        # before assignments or obligations exist; an empty service time survives.
+        # before assignments exist; complete intake has already formed the
+        # deposit obligation and an empty service time must survive.
         assert preview["requires_formal_apply"] is True
         assert preview["client_finance_impact"]["payment_terms"]["first_payment_due_date"] == "2026-10-02"
-        assert preview["client_finance_impact"]["actions"] == []
+        actions = preview["client_finance_impact"]["actions"]
+        assert [(item["payment_stage"], item["action"]) for item in actions] == [
+            ("deposit", "unchanged"), ("first", "unchanged"), ("second", "unchanged"),
+        ]
+        assert all(item["before_amount"] == item["after_amount"] for item in actions)
         assert preview["payroll_impact"] is None
         assert _snapshot(connection) == before
         receipt = _data(_apply(client, query, preview, changed, "issue337-empty-apply"))
@@ -434,9 +439,11 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
                 )
             },
         }
-        assert permanent_counts["client_obligations"] == 0
+        assert permanent_counts["client_obligations"] == before[1]["client_obligations"] == 2
         assert permanent_counts["staff_obligations"] == 0
         with connection.cursor() as cursor:
+            cursor.execute("SELECT obligation_type FROM client_obligations WHERE case_no=%s", (_CASE_NO,))
+            assert {row["obligation_type"] for row in cursor.fetchall()} == {"deposit", "subsidy_return"}
             cursor.execute(
                 "SELECT terms.policy_version,terms.client_hourly_rate_ntd,"
                 "terms.deposit_service_days,terms.deposit_due_date,"
@@ -467,18 +474,16 @@ def test_empty_service_time_round_trips_through_http_application_and_mysql():
                 "end_day_offset": 1,
             },
         }
-        complete_preview = _preview(client, complete)
-        assert complete_preview["requires_formal_apply"] is False
-        _data(_apply(client, readback, complete_preview, complete, "issue337-complete-apply"))
-        complete_readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
-        assert complete_readback["terms"]["service_time"] == complete["service_time"]
-        assert complete_readback["client_finance_version"] == readback["client_finance_version"]
-        assert complete_readback["payroll_version"] == readback["payroll_version"]
+        # Existing obligations retain the non-pricing integrity gate. The
+        # legal no-root clock-completion lane is exercised below separately.
+        blocked = client.post(f"/api/v1/orders/{_CASE_NO}/terms/preview", json={"proposed_terms": complete})
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"]["error"]["code"] == "preassignment_client_finance_obligation_conflict"
         assert _snapshot(connection)[1] == permanent_counts
 
         failed_before = _snapshot(connection)
         partial = {
-            **complete_readback["terms"],
+            **readback["terms"],
             "service_time": {
                 "start_time": "09:00:00",
                 "end_time": None,
@@ -598,6 +603,16 @@ def test_general_terms_date_change_round_trips_without_downstream_roots():
         assert readback["terms"]["planned_start_date"] == "2026-10-02"
         assert readback["client_finance_version"] is None
         assert readback["payroll_version"] is None
+        complete = {**readback["terms"], "service_time": {
+            "start_time": "21:00:00", "end_time": "05:00:00", "end_day_offset": 1,
+        }}
+        complete_preview = _preview(client, complete)
+        assert complete_preview["requires_formal_apply"] is False
+        _data(_apply(client, readback, complete_preview, complete, "issue337-complete-no-roots"))
+        complete_readback = _data(client.get(f"/api/v1/orders/{_CASE_NO}/terms"))
+        assert complete_readback["terms"]["service_time"] == complete["service_time"]
+        assert complete_readback["client_finance_version"] is None
+        assert complete_readback["payroll_version"] is None
         with connection.cursor() as cursor:
             for table in ("client_finance_accounts", "payroll_case_accounts"):
                 cursor.execute(

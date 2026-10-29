@@ -291,6 +291,22 @@ class MySqlStaffPayoutRepository:
             lock,
         )
         obligations = _obligation_facts(obligation_rows, events)
+        if selection.event_type is StaffPayoutEventType.PAYOUT and selection.difference_mode is None and bank_rows:
+            from dataclasses import replace
+            occurred_on = min(_bank_event_metadata(row).occurred_on for row in bank_rows)
+            limits = {}
+            for row in obligation_rows:
+                if not row.get("has_installments"):
+                    continue
+                cursor.execute("SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments "
+                    "WHERE obligation_identity=%s" + (" FOR UPDATE" if lock else ""), (row["obligation_identity"],))
+                installments = tuple(cursor.fetchall())
+                due_amount = sum(int(item["amount_ntd"]) for item in installments if item["due_date"] is not None and item["due_date"] <= occurred_on)
+                limits[str(row["obligation_identity"])] = due_amount
+            if limits:
+                from domains.staff_payables.reconciliation import project_staff_payable
+                obligations = tuple(replace(item, installment_limit=MoneyNTD(max(0, limits[item.obligation_identity] - project_staff_payable(item).net_paid.amount)))
+                    if item.obligation_identity in limits else item for item in obligations)
         blockers = _load_blocking_anomalies(cursor, bank_rows)
         bank_facts = (
             self._outgoing_bank_facts(bank_rows, staff_id, blockers)
@@ -435,7 +451,7 @@ def _load_obligation_rows(cursor, identities, *, lock):
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.staff_id,"
-        + effective_staff_obligation_amount() + " AS amount_due_ntd "
+        + effective_staff_obligation_amount() + " AS amount_due_ntd,EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) AS has_installments "
         "FROM staff_obligations obligations "
         f"WHERE obligations.obligation_identity IN ({placeholders}) "
         "AND obligations.direction='payable_to_staff' AND obligations.status='open' "
@@ -1128,7 +1144,14 @@ def _stored_receipt(row) -> StoredStaffPayoutReceipt:
 def _query_obligation_rows(cursor, staff_id):
     cursor.execute(
         "SELECT obligations.obligation_identity,obligations.case_no,"
-        + effective_staff_obligation_amount() + " AS amount_due_ntd,obligations.due_date,"
+        + effective_staff_obligation_amount() + " AS amount_due_ntd,"
+        "CASE WHEN EXISTS(SELECT 1 FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity) "
+        "THEN (SELECT MIN(i.due_date) FROM staff_obligation_installments i WHERE i.obligation_identity=obligations.obligation_identity "
+        "AND i.amount_ntd>0 AND CASE WHEN i.funding_kind='client' THEN "
+        "COALESCE(projection.balance_ntd,obligations.amount_due_ntd)-COALESCE((SELECT s.amount_ntd FROM staff_obligation_installments s "
+        "WHERE s.obligation_identity=i.obligation_identity AND s.funding_kind='subsidy'),0) "
+        "ELSE COALESCE(projection.balance_ntd,obligations.amount_due_ntd) END>0) "
+        "ELSE obligations.due_date END AS due_date,"
         "COALESCE(projection.net_paid_ntd,0) AS net_paid_ntd,"
         "COALESCE(projection.balance_ntd,obligations.amount_due_ntd) "
         "AS balance_ntd,"

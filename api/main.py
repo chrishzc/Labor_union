@@ -50,6 +50,7 @@ from api.routes import (
     contract_external_signing,
     client_payments,
     client_payment_destination,
+    accounting_pricing,
     contracts,
     controlled_files,
     file_settings,
@@ -359,6 +360,7 @@ app.include_router(line_system_config.router)
 app.include_router(line_system_config.public_router)
 app.include_router(client_payments.router)
 app.include_router(client_payment_destination.router)
+app.include_router(accounting_pricing.router)
 app.include_router(client_deposit_reversal.router)
 app.include_router(client_deposit_skip.router)
 app.include_router(client_receipt_reconciliation.router)

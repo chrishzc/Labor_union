@@ -15,6 +15,7 @@
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — outer UoW
 
 ## Modules
+- `pricing-configuration` — versioned four-rate policies and explicit case repricing; path: `modules/pricing-configuration.md`
 - `subsidy-advance-recovery-workbench` — 政府入款後的工會墊款 Query／Preview／Apply 與正式回收 readback；path: `modules/subsidy-advance-recovery-workbench.md`
 - `client-subsidy-return-query` — 以案件為入口的補助退款唯讀查詢，正式金額與明示預估分開；path: `modules/client-subsidy-return-query.md`
 - `deposit-skip` — 一般市民由管理員允許訂金未付仍推進，不變更應收與核銷狀態；path: `modules/deposit-skip.md`

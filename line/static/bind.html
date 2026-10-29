@@ -639,7 +639,7 @@
         successContent.style.display = 'block';
         document.getElementById('successTitle').textContent = runtimePage?.success_title || title;
         successDesc.style.whiteSpace = 'pre-line';
-        successDesc.textContent = [...new Set([runtimePage?.success_description || '', title, description,
+        successDesc.textContent = [...new Set([runtimePage?.success_description || '', description,
             caseNo ? `案件編號：${caseNo}` : ''])].filter(Boolean).join('\n');
     }
 

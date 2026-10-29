@@ -36,8 +36,8 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_caregiver_availability_lock_release_service.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\scheduling\\subsystems\\scheduling\\modules\\waiting-deposit-lock\\test_caregiver_availability_lock_release_service.py"
     ],
-    "test_paths": ["tests/test_caregiver_availability_lock_release_service.py"]
+    "test_paths": ["tests/domains/scheduling/subsystems/scheduling/modules/waiting-deposit-lock/test_caregiver_availability_lock_release_service.py"]
   }
 }

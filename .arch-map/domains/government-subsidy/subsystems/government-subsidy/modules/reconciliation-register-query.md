@@ -10,6 +10,7 @@
 ## Implementation
 - finance estimate: `subsystems/government_subsidy/reconciliation_register_query.py::project_receivable_estimate` — 共用既有公式供 Orders 政府補助 projection／Finance 清單；缺值或已存在的目前排班關聯失效時保持未知，不寫 claim。報表不略過失效關聯湊成可核銷總額。
 - schedule-rule: `domains/government_subsidy/claim_schedule.py`
+- pricing-rule: `domains/government_subsidy/pricing.py` — bound/manual case subsidy cap and covered caregiver rate; no excess-rate or blended-rate claim calculation.
 - primary:
   - `subsystems/government_subsidy/reconciliation_register_query.py`
   - `api/schemas/government_subsidy_report.py`

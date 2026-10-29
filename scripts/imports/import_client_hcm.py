@@ -443,6 +443,16 @@ class HcmLegacyRowIntake:
                     outcomes["ready"] += 1
                     outcomes["email_fill"] += int(preview is not None)
                     continue
+            if '身分資格' in validation_errors and record.get('identity_status'):
+                with self._connection.cursor() as cursor:
+                    from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
+                    if initial_identity_rule(cursor, str(record['identity_status']), record.get('case_no')) is not None:
+                        validation_errors.pop('身分資格', None)
+            with self._connection.cursor() as cursor:
+                non_citizen = _requires_non_citizen_liff(record, cursor)
+            if non_citizen:
+                outcomes["review_required"] += 1
+                continue
             outcome = "ready_with_warning" if validation_errors else "ready"
             outcomes[outcome] += 1
         return outcomes
@@ -485,6 +495,11 @@ def _import_row(
         if "email" in record and MySqlClientProfileRepository(connection).load_email_fill_target(str(case_no)) is not None:
             return _fill_existing_hcm_email(record, connection, source_digest, source_sheet,
                                             ordinal, correlation, detailed)
+        if '身分資格' in validation_errors and record.get('identity_status'):
+            with connection.cursor() as pricing_cursor:
+                from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
+                if initial_identity_rule(pricing_cursor, str(record['identity_status']), case_no) is not None:
+                    validation_errors.pop('身分資格', None)
         identity_resolution = application.resolve_hcm_identity(
             str(case_no), str(record.get("ip_address") or "").strip(),
             str(record.get("name") or "").strip(),
@@ -504,6 +519,11 @@ def _import_row(
                 current_uow=current_uow,
             )
             return _row_outcome(outcome, ordinal, str(case_no), {}, None, detailed)
+        if _requires_non_citizen_liff(record, cursor):
+            errors = {"身分資格": "non_citizen_requires_liff_registration"}
+            problem = _persist_hcm_review(connection, source_digest, source_sheet, ordinal,
+                                          raw_row, case_no, errors)
+            return _row_outcome("review_required", ordinal, str(case_no), errors, problem, detailed)
         intent = _hcm_import_intent(cursor, record, validation_errors)
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
@@ -548,6 +568,17 @@ def _import_row(
         )
     except Exception:
         raise
+
+
+def _requires_non_citizen_liff(record, cursor=None):
+    # Only the new-case lane calls this gate; historical replay remains available.
+    identity = record.get("identity_status")
+    if identity == "非市民" or re.fullmatch(r"A[0-9]{6}", str(record.get("case_no") or "")):
+        return True
+    if cursor is not None and identity and identity not in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶"}:
+        from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
+        return initial_identity_rule(cursor, str(identity), record.get("case_no")) == "non_citizen"
+    return False
 
 
 def _fill_existing_hcm_email(record, connection, source_digest, source_sheet, ordinal, correlation, detailed):
@@ -694,7 +725,8 @@ def _find_matching_provisional_registration(cursor, record) -> int | None:
 def _hcm_import_intent(cursor, record, validation_errors):
     accepted_record = _partial_hcm_record(record, validation_errors)
     provisional_registration_id = _find_matching_provisional_registration(cursor, accepted_record)
-    if HCM_INTAKE_BLOCKING_FIELDS.intersection(validation_errors):
+    required_values = ("name", "identity_status", "created_at", "service_start_date", "service_days", "service_time")
+    if HCM_INTAKE_BLOCKING_FIELDS.intersection(validation_errors) or any(not accepted_record.get(key) for key in required_values):
         return build_hcm_partial_case_import_intent(
             accepted_record,
             provisional_registration_id=provisional_registration_id,
@@ -859,17 +891,13 @@ def _normalized_record(row):
 
 
 def _case_import_intent(cursor, record, *, provisional_registration_id=None):
+    from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
     start_date = record.get("service_start_date")
     service_days = record.get("service_days")
     if type(start_date) is not date or not isinstance(service_days, int):
         raise ValueError("case_import_service_terms_required")
     holidays = _load_holiday_dates(cursor)
-    end_date = _calculate_service_end_date(
-        start_date,
-        service_days,
-        record.get("service_type"),
-        holidays,
-    )
+    end_date = _calculate_service_end_date(start_date, service_days, record.get("service_type"), holidays)
     if end_date is None:
         raise ValueError("case_import_planned_end_date_required")
     if provisional_registration_id is None:
@@ -879,6 +907,7 @@ def _case_import_intent(cursor, record, *, provisional_registration_id=None):
         end_date,
         requires_cooking=None,
         provisional_registration_id=provisional_registration_id,
+        pricing_identity_rule=initial_identity_rule(cursor, str(record.get('identity_status') or ''), record.get('case_no')),
     )
 
 

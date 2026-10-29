@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Callable
 
@@ -67,11 +67,14 @@ class StaffPayableFacts:
     staff_id: int
     amount_due: MoneyNTD
     events: tuple[StaffPayoutEvent, ...] = ()
+    installment_limit: MoneyNTD | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.obligation_identity, "obligation identity")
         require_positive_integer(self.staff_id, "staff id")
         _require_positive_money(self.amount_due, "staff obligation amount")
+        if self.installment_limit is not None and (not isinstance(self.installment_limit, MoneyNTD) or self.installment_limit.amount < 0):
+            raise ValueError("staff_installment_limit_invalid")
         if not isinstance(self.events, tuple):
             raise TypeError("payout events must be a tuple")
         identities = tuple(event.identity for event in self.events)
@@ -338,19 +341,22 @@ def build_staff_payout_reopen_candidate(
 def _build_exact_payout(staff_id, ordered_banks, ordered_payables):
     bank_total = MoneyNTD(sum(item.amount.amount for item in ordered_banks))
     obligation_total = MoneyNTD(
-        sum(project_staff_payable(item).balance.amount for item in ordered_payables)
+        sum(_allocatable_amount(item, True) for item in ordered_payables)
     )
     if bank_total != obligation_total:
         raise ValueError("staff_payout_amount_mismatch")
     allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
     _validate_exact_allocation(ordered_banks, ordered_payables, allocations)
-    return _payout_candidate(
+    candidate = _payout_candidate(
         staff_id,
         bank_total,
         obligation_total,
         allocations,
         ordered_banks,
     )
+    if bank_total.amount < sum(project_staff_payable(item).balance.amount for item in ordered_payables):
+        return replace(candidate, resulting_status=StaffPayableStatus.PARTIALLY_PAID)
+    return candidate
 
 
 def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
@@ -513,7 +519,8 @@ def _allocate(bank_facts, payable_facts, *, use_remaining_balance=False) -> tupl
 
 def _allocatable_amount(payable, use_remaining_balance) -> int:
     if use_remaining_balance:
-        return project_staff_payable(payable).balance.amount
+        remaining = project_staff_payable(payable).balance.amount
+        return min(remaining, payable.installment_limit.amount) if payable.installment_limit is not None else remaining
     return payable.amount_due.amount
 
 
@@ -547,7 +554,7 @@ def _validate_exact_allocation(bank_facts, payable_facts, allocations) -> None:
     if any(bank_totals[item.identity] != item.amount for item in bank_facts):
         raise ValueError("staff_obligation_not_exactly_settled")
     if any(
-        payable_totals[item.obligation_identity] != project_staff_payable(item).balance
+        payable_totals[item.obligation_identity] != MoneyNTD(_allocatable_amount(item, True))
         for item in payable_facts
     ):
         raise ValueError("staff_obligation_not_exactly_settled")

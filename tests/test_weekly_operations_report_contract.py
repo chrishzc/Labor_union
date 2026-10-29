@@ -110,7 +110,9 @@ def test_case_statistics_calendar_periods_merge_history_and_preserve_unknowns():
     assert all(count == 0 for count in empty.summary.order_status_counts.values())
 
 
-def test_case_statistics_api_is_authenticated_strict_and_rejects_conflicting_filters():
+def test_case_statistics_api_is_authenticated_strict_and_rejects_conflicting_filters(monkeypatch):
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
     facts = _CaseStatisticsFacts()
     app = _app()
     app.dependency_overrides[get_weekly_operations_report_query] = lambda: WeeklyOperationsReportQuery(

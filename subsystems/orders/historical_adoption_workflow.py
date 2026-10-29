@@ -193,8 +193,8 @@ class HistoricalOrderAdoptionWorkflow:
                 and self._default_accounting is None):
             raise ValueError("historical_default_accounting_unavailable")
         assignment_ids = self._append_assignment_candidates(preview)
-        self._ensure_matching_pending_deposit(request, preview)
         receipt = self._repository.persist(request, preview, assignment_ids)
+        self._ensure_matching_pending_deposit(request, preview)
         self._establish_default_accounting(request, preview)
         return receipt
 

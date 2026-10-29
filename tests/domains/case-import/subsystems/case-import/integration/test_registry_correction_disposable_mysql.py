@@ -2,6 +2,7 @@
 
 from argparse import Namespace
 from datetime import date
+import json
 import os
 
 from fastapi import FastAPI
@@ -214,6 +215,23 @@ def test_assigned_birth_corrections_keep_next_operations_readable(registry_datab
     connection = mysql_adapter.get_connection()
     try:
         staff_id = fixture["_seed_waiting_lock_case"](connection)
+        # Current assignment authority is an explicit service-start result;
+        # the retained legacy date-card confirmations are only history.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO scheduling_service_start_requests "
+                "(case_no,staff_id,plan_id,segment_id,decision,requested_start_date,"
+                "source_order_version,status,execution_dates,confirmed_version_id,"
+                "submit_key,submit_fingerprint) "
+                "SELECT p.case_no,s.staff_id,p.id,s.id,'accepted','2026-08-01',0,"
+                "'awaiting_peers',%s,v.id,'registry-assigned-start',%s "
+                "FROM caregiver_matching_plans p "
+                "JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "
+                "JOIN confirmed_service_date_versions v ON v.case_no=p.case_no AND v.is_current=1 "
+                "WHERE p.case_no='AP-DURABLE-1' AND p.is_active=1",
+                (json.dumps([{"staff_id": staff_id, "dates": ["2026-08-01", "2026-08-02"]}]), "f" * 64),
+            )
+        connection.commit()
         clock = FixedBusinessClock(datetime(2026, 7, 31, 9, tzinfo=TAIPEI_TIME_ZONE))
         workflow = AssignmentPlanWorkflow(MySqlAssignmentPlanRepository(connection),
             MySqlClientFinanceAssignmentImpactPort(connection), MySqlPayrollAssignmentImpactPort(connection),

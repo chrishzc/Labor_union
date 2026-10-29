@@ -30,7 +30,7 @@ def is_full_subsidy_eligible(client_identity_status: str) -> bool:
     normalized = client_identity_status.strip()
     if not normalized:
         raise ValueError("client_identity_status is required")
-    return normalized == "補助市民"
+    return normalized == "社福"
 
 
 def _nonnegative_decimal(value: Decimal | int) -> Decimal:

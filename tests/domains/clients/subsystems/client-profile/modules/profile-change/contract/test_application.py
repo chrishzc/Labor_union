@@ -457,7 +457,7 @@ def test_admin_profile_change_uses_case_identity_and_exact_idempotent_replay(not
         )
 
 
-def test_admin_optional_note_http_contract_does_not_relax_profile_review_decisions():
+def test_admin_and_review_notes_are_optional_without_relaxing_profile_field_limits():
     from pydantic import ValidationError
     from api.schemas.client_registry import ClientProfileAdminApplyRequest
     from api.schemas.client_profile import ClientProfileApprovalApplyRequest
@@ -466,4 +466,5 @@ def test_admin_optional_note_http_contract_does_not_relax_profile_review_decisio
     assert ClientProfileAdminApplyRequest(**body, reason='').reason == ''
     with pytest.raises(ValidationError):
         ClientProfileAdminApplyRequest(**body, reason='字' * 501)
-    assert ClientProfileApprovalApplyRequest.model_fields['reason'].is_required()
+    assert not ClientProfileApprovalApplyRequest.model_fields['reason'].is_required()
+    assert ClientProfileApprovalApplyRequest.model_fields['reason'].default == ''

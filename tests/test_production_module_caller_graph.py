@@ -62,8 +62,20 @@ def test_nested_router_mount_requires_a_reachable_parent(tmp_path: Path) -> None
         "router.include_router(unmounted_router)\n"
     )
     (routes / "unmounted.py").write_text("")
+    (tmp_path / "api/nas_apps.py").write_text(
+        "from api.routes.nas_setup import attach_setup\n"
+        "from api.routes.nas_public import public_router as line_router\n"
+        "def factory():\n"
+        "    for item in (line_router,):\n"
+        "        app.include_router(item)\n"
+        "    return attach_setup(app)\n"
+    )
+    (routes / "nas_public.py").write_text("")
+    (routes / "nas_setup.py").write_text(
+        "def attach_setup(app):\n    app.include_router(router)\n    return app\n"
+    )
 
-    assert _mounted_router_modules(tmp_path) == {"parent", "child"}
+    assert _mounted_router_modules(tmp_path) == {"parent", "child", "nas_public", "nas_setup"}
 
 
 def _production_module_paths() -> dict[Path, str]:
@@ -138,23 +150,43 @@ def _requires_static_caller(path: Path, module: str) -> bool:
 
 
 def _mounted_router_modules(root: Path = ROOT) -> set[str]:
-    pending = [root / "api/main.py"]
+    pending = [path for path in (root / "api/main.py", root / "api/nas_apps.py") if path.exists()]
+    visited: set[Path] = set()
     mounted: set[str] = set()
     while pending:
-        tree = ast.parse(pending.pop().read_text(encoding="utf-8"))
+        path = pending.pop()
+        if path in visited:
+            continue
+        visited.add(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         imports: dict[str, str] = {}
+        attachments: dict[str, str] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
             for alias in node.names:
                 if node.module == "api.routes":
                     imports[alias.asname or alias.name] = alias.name
-                elif (node.module or "").startswith("api.routes.") and alias.name == "router":
-                    imports[alias.asname or alias.name] = node.module.removeprefix("api.routes.")
+                elif (node.module or "").startswith("api.routes."):
+                    module = node.module.removeprefix("api.routes.")
+                    if alias.name == "router" or alias.name.endswith("_router"):
+                        imports[alias.asname or alias.name] = module
+                    elif alias.name.startswith("attach_"):
+                        attachments[alias.asname or alias.name] = module
+        arguments: list[ast.AST] = []
         for call in ast.walk(tree):
-            if not _is_router_mount(call):
-                continue
-            argument = call.args[0]
+            if _is_router_mount(call):
+                arguments.append(call.args[0])
+            elif isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                module = attachments.get(call.func.id)
+                if module is not None:
+                    mounted.add(module)
+                    pending.append(root / "api/routes" / f"{module}.py")
+            elif isinstance(call, ast.For) and isinstance(call.target, ast.Name) and isinstance(call.iter, (ast.Tuple, ast.List)):
+                if any(_is_router_mount(item) and isinstance(item.args[0], ast.Name)
+                       and item.args[0].id == call.target.id for item in ast.walk(call)):
+                    arguments.extend(call.iter.elts)
+        for argument in arguments:
             imported_name = argument.value if isinstance(argument, ast.Attribute) else argument
             module = imports.get(ast.unparse(imported_name))
             if module is not None and module not in mounted:

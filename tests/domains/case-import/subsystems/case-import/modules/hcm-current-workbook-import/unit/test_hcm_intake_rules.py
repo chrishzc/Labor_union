@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pandas as pd
@@ -28,6 +29,9 @@ def valid_hcm_row():
 
 
 def _exercise_hcm_row(monkeypatch, row):
+    import infrastructure.mysql.pricing_configuration_repository as pricing
+    monkeypatch.setattr(pricing, 'initial_identity_rule', lambda *_args: None)
+    connection = SimpleNamespace(cursor=lambda: nullcontext(None))
     monkeypatch.setattr(import_client_hcm.MySqlClientProfileRepository, "load_email_fill_target",
                         lambda _self, _case_no, **_kwargs: None)
     applied = []
@@ -50,9 +54,9 @@ def _exercise_hcm_row(monkeypatch, row):
                         lambda *_args: reconciled.append(True))
     monkeypatch.setattr(import_client_hcm, "record_hcm_import_review",
                         lambda *_args, **kwargs: reviews.append(kwargs) or "hcm-review:synthetic")
-    preview = import_client_hcm.HcmLegacyRowIntake(None).preview_rows(pd.DataFrame([row]), "synthetic.xlsx")
+    preview = import_client_hcm.HcmLegacyRowIntake(connection).preview_rows(pd.DataFrame([row]), "synthetic.xlsx")
     outcome = import_client_hcm._import_row(
-        row, 1, None, Application(), "synthetic.xlsx", connection=object(), source_digest="a" * 64,
+        row, 1, None, Application(), "synthetic.xlsx", connection=connection, source_digest="a" * 64,
     )
     return preview, outcome, applied, reviews, reconciled
 

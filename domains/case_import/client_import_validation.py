@@ -14,7 +14,7 @@ import pandas as pd
 from domains.clients.profile import CLIENT_PHONE_PATTERN, normalize_client_phone
 
 GENDER_VALUES = {"男", "女"}
-IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "低收入戶", "中低收入戶", "非市民"}
+IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶", "非市民"}
 RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
 DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
 SERVICE_TYPE_VALUES = {

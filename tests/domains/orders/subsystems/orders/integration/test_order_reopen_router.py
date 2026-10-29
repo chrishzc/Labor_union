@@ -91,6 +91,7 @@ class InMemoryOrderReopenRepository:
     def append_reopen_event(
         self, request: OrderReopenApplyRequest, preview: OrderReopenPreview
     ) -> int:
+        self.last_reopen_request = request
         return 101
 
     def clear_cancellation_control(
@@ -322,29 +323,32 @@ def test_apply_order_reopen_reason_validation():
         "preview_fingerprint": fingerprint,
     }
 
-    # Empty reason -> 422
+    # Optional reasons normalize to an empty stored note.
     res_empty = client.post(
         "/api/v1/orders/CASE-RO-001/reopen/apply",
         headers=headers,
         json={**base_body, "reason": ""},
     )
-    assert res_empty.status_code == 422
+    assert res_empty.status_code == 200
+    assert repo.last_reopen_request.reason == ""
 
-    # Whitespace only reason -> 422
+    # Whitespace only reason
     res_space = client.post(
         "/api/v1/orders/CASE-RO-001/reopen/apply",
         headers=headers,
         json={**base_body, "reason": "    \t \n "},
     )
-    assert res_space.status_code == 422
+    assert res_space.status_code == 200
+    assert repo.last_reopen_request.reason == ""
 
-    # Missing reason field -> 422
+    # Missing reason field
     res_missing = client.post(
         "/api/v1/orders/CASE-RO-001/reopen/apply",
         headers=headers,
         json=base_body,
     )
-    assert res_missing.status_code == 422
+    assert res_missing.status_code == 200
+    assert repo.last_reopen_request.reason == ""
 
     # 1-char reason (valid) -> 200
     res_1 = client.post(
@@ -510,7 +514,9 @@ def test_order_reopen_mysql_retryable_error():
     assert error["retryable"] is True
 
 
-def test_order_reopen_requires_admin_auth():
+def test_order_reopen_requires_admin_auth(monkeypatch):
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
     repo = InMemoryOrderReopenRepository()
     app = _create_app(repo, authenticate=False)
     client = TestClient(app)

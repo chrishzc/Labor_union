@@ -1,0 +1,303 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-accounting-pricing-2026-10-29-v1",
+  "descriptors": {
+    "1056_accounting_pricing.sql": {
+      "tables": {
+        "accounting_pricing_state": {
+          "singleton_id": {
+            "column_type": "tinyint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "revision": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        },
+        "accounting_pricing_policies": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "effective_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "policy_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "case_pricing_events": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "resulting_revision": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "pricing_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "accounting_pricing_receipts": {
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "",
+            "character_set_name": "utf8mb4",
+            "collation_name": "utf8mb4_bin"
+          },
+          "command_hash": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "result_json": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at_utc": {
+            "column_type": "datetime(6)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        },
+        "staff_obligation_installments": {
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "funding_kind": {
+            "column_type": "enum('client','subsidy')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "due_date": {
+            "column_type": "date",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {
+        "accounting_pricing_state.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "singleton_id"
+          ]
+        },
+        "accounting_pricing_policies.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "accounting_pricing_policies.ix_accounting_pricing_effective": {
+          "non_unique": 1,
+          "columns": [
+            "effective_on",
+            "id"
+          ]
+        },
+        "case_pricing_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "case_pricing_events.uq_case_pricing_revision": {
+          "non_unique": 0,
+          "columns": [
+            "case_no",
+            "resulting_revision"
+          ]
+        },
+        "accounting_pricing_receipts.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "idempotency_key"
+          ]
+        },
+        "staff_obligation_installments.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "obligation_identity",
+            "funding_kind"
+          ]
+        },
+        "orders.ix_orders_pricing_policy": {
+          "non_unique": 1,
+          "columns": [
+            "pricing_policy_id"
+          ]
+        },
+        "orders.ix_orders_pricing_override": {
+          "non_unique": 1,
+          "columns": [
+            "pricing_override_event_id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "case_pricing_events.fk_case_pricing_order": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_obligation_installments.fk_payroll_installment_obligation": {
+          "columns": [
+            "obligation_identity"
+          ],
+          "referenced_table": "staff_obligations",
+          "referenced_columns": [
+            "obligation_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "orders.fk_order_pricing_policy": {
+          "columns": [
+            "pricing_policy_id"
+          ],
+          "referenced_table": "accounting_pricing_policies",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "orders.fk_order_pricing_override": {
+          "columns": [
+            "pricing_override_event_id"
+          ],
+          "referenced_table": "case_pricing_events",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "accounting_pricing_state.chk_accounting_pricing_singleton": "atom(singleton_id=1)",
+        "staff_obligation_installments.chk_payroll_installment_amount": "atom(amount_ntd>=0)"
+      },
+      "triggers": [],
+      "parent_columns": {
+        "orders": {
+          "pricing_policy_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "pricing_override_event_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "pricing_revision": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          }
+        }
+      },
+      "views": {
+        "case_pricing_facts": {
+          "definition_sha256": "6e7d341eaceda2eb537e0abc462161c26f13a9c0f63f719ab712ac9c92302970"
+        }
+      }
+    }
+  }
+}

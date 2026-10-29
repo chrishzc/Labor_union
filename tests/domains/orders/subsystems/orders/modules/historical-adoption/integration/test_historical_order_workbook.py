@@ -20,6 +20,8 @@ from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAss
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from .historical_accounting_fixture import default_accounting, seed_accounting_basis
+from infrastructure.mysql.historical_pending_deposit_matching_repository import MySqlHistoricalPendingDepositMatchingRepository
 from subsystems.orders.historical_order_adoption_outbox_consumer import (
     consume_historical_order_adoption_review_events,
 )
@@ -62,7 +64,7 @@ def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
         replay = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
 
         assert receipt.adopted_count == 2
-        assert receipt.assignments_created == 0
+        assert receipt.assignments_created == 1
         assert replay.replayed_workbook is True
         _assert_assignment_and_evidence(connection, first_case, second_case)
     finally:
@@ -108,10 +110,12 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
         assert receipt.status_counts.as_dict() == expected_counts
         assert replay.status_counts.as_dict() == expected_counts
         assert replay.replayed_workbook is True
-        assert _order_status(connection, cancelled_case) == "訂單取消"
-        assert _order_status(connection, completed_case) == "訂單成立"
+        assert _order_status(connection, cancelled_case) == "洽談中"
+        assert _order_status(connection, completed_case) == "歷史訂單－未服務"
         assert _order_status(connection, discussion_case) == "洽談中"
-        for case_no in (cancelled_case, completed_case, discussion_case):
+        assert _count(connection, "order_lifecycle_state_events", cancelled_case) == 0
+        assert _count(connection, "historical_order_adoption_receipts", cancelled_case) == 0
+        for case_no in (completed_case, discussion_case):
             assert _count(connection, "order_lifecycle_state_events", case_no) == 1
             assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
     finally:
@@ -140,7 +144,7 @@ def test_workbook_refreshes_a_later_row_for_the_same_case_after_its_own_write(tm
 
         assert receipt.source_row_count == 2
         assert receipt.adopted_count == 2
-        assert _order_status(connection, case_no) == "訂單成立"
+        assert _order_status(connection, case_no) == "歷史訂單－未服務"
         assert _count(connection, "order_lifecycle_state_events", case_no) == 1
         assert _count(connection, "historical_order_adoption_receipts", case_no) == 2
     finally:
@@ -184,11 +188,10 @@ def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(t
             token,
         )
 
-        assert receipt.adopted_count == 3
+        assert receipt.adopted_count == 2
         assert replay.replayed_workbook is True
         expected_after = {
-            cancelled_case: "訂單取消",
-            completed_case: "訂單成立",
+            completed_case: "歷史訂單－未服務",
             discussion_case: "洽談中",
         }
         with connection.cursor() as cursor:
@@ -199,15 +202,17 @@ def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(t
                 case_numbers,
             )
             events = {row["case_no"]: row for row in cursor.fetchall()}
-        assert set(events) == set(case_numbers)
+        assert set(events) == set(expected_after)
         assert all(row["before_status"] == "待補件" for row in events.values())
         assert {
             case_no: row["after_status"] for case_no, row in events.items()
         } == expected_after
         assert {
-            case_no: _order_status(connection, case_no) for case_no in case_numbers
+            case_no: _order_status(connection, case_no) for case_no in expected_after
         } == expected_after
-        for case_no in case_numbers:
+        assert _order_status(connection, cancelled_case) == "待補件"
+        assert _count(connection, "historical_order_adoption_receipts", cancelled_case) == 0
+        for case_no in expected_after:
             assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
     finally:
         connection.close()
@@ -228,7 +233,7 @@ def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
         with pytest.raises(HistoricalOrderWorkbookConflict):
             service.apply(str(changed_path), f"historical-workbook:conflict:{token}", changed_preview.preview_fingerprint, "historical-workbook-test", token)
 
-        assert _order_status(connection, case_no) == "訂單成立"
+        assert _order_status(connection, case_no) == "歷史訂單－服務完成"
     finally:
         connection.close()
 
@@ -267,7 +272,7 @@ def test_valid_historical_values_replace_current_values_without_false_conflict(t
                 (case_no,),
             )
             assert cursor.fetchone() == {
-                "status": "訂單成立",
+                "status": "歷史訂單－服務完成",
                 "lifecycle_version": 4,
                 "actual_start_date": date(2025, 1, 2),
                 "actual_end_date": date(2025, 1, 31),
@@ -284,7 +289,8 @@ def test_row_apply_rolls_back_when_persist_fails(tmp_path, monkeypatch):
         row = load_historical_order_workbook(str(_write_single_workbook(tmp_path / "rollback.xlsx", case_no, staff_name, status=1))).rows[0]
         repository = MySqlHistoricalOrderAdoptionRepository(connection)
         workflow = HistoricalOrderAdoptionWorkflow(
-            repository, lambda: MySqlUnitOfWork(connection), MySqlHistoricalAssignmentWriter(connection)
+            repository, lambda: MySqlUnitOfWork(connection), MySqlHistoricalAssignmentWriter(connection),
+            default_accounting=default_accounting(connection),
         )
         preview = workflow.preview(row)
         monkeypatch.setattr(repository, "_append_outbox", _raise_after_domain_writes)
@@ -312,6 +318,8 @@ def test_workbook_apply_rolls_back_every_prior_row_when_a_later_row_fails(
             repository,
             lambda: MySqlUnitOfWork(connection),
             MySqlHistoricalAssignmentWriter(connection),
+            default_accounting=default_accounting(connection),
+            matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(connection),
         )
         service = HistoricalOrderWorkbookImportService(
             HistoricalOrderWorkbookImportRepository(connection),
@@ -473,7 +481,7 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
         assert preview.source_row_count == 1
         assert receipt.adopted_count == 1
         assert replay.replayed_workbook is True
-        assert _order_status(connection, source_row.case_no) == "訂單成立"
+        assert _order_status(connection, source_row.case_no) == "歷史訂單－服務完成"
     finally:
         connection.close()
 
@@ -482,14 +490,14 @@ def _service(connection):
     workflow = HistoricalOrderAdoptionWorkflow(
         MySqlHistoricalOrderAdoptionRepository(connection), lambda: MySqlUnitOfWork(connection),
         MySqlHistoricalAssignmentWriter(connection),
+        default_accounting=default_accounting(connection),
+        matching_pending_deposit=MySqlHistoricalPendingDepositMatchingRepository(connection),
     )
     return HistoricalOrderWorkbookImportService(
         HistoricalOrderWorkbookImportRepository(connection),
         workflow,
         lambda: MySqlUnitOfWork(connection),
     )
-
-
 def _seed_controlled_source_roots(connection, source_row):
     with connection.cursor() as cursor:
         cursor.execute("SELECT id FROM clients WHERE case_no=%s", (source_row.case_no,))
@@ -499,6 +507,7 @@ def _seed_controlled_source_roots(connection, source_row):
                 "INSERT INTO orders (case_no,client_id,status,lifecycle_version) VALUES (%s,%s,'洽談中',0)",
                 (source_row.case_no, cursor.lastrowid),
             )
+            seed_accounting_basis(cursor, source_row.case_no)
         for caregiver in source_row.caregivers:
             cursor.execute("SELECT id FROM staff WHERE name=%s", (caregiver.name,))
             if cursor.fetchone() is None:
@@ -519,7 +528,8 @@ def _seed_case(connection, token, suffix):
             "INSERT INTO orders (case_no,client_id,status,lifecycle_version) VALUES (%s,%s,'洽談中',0)",
             (case_no, cursor.lastrowid),
         )
-        cursor.execute("INSERT INTO staff (name,identity_card) VALUES (%s,%s)", (staff_name, f"W{token[:9]}{suffix[:1]}"))
+        seed_accounting_basis(cursor, case_no)
+        cursor.execute("INSERT INTO staff (name,identity_card) VALUES (%s,%s)", (staff_name, f"W{uuid4().hex[:10]}"))
     connection.commit()
     return (case_no, staff_name)
 
@@ -556,13 +566,16 @@ def _write_status_workbook(destination, case_statuses):
     sheet.title = "六欄狀態驗收"
     sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"])
     for case_no, status in case_statuses:
-        sheet.append([_client_name(case_no), case_no, None, None, status, None])
+        suffix, token = case_no.removeprefix("HISTORICAL-WORKBOOK-").rsplit("-", 1)
+        staff_name = f"historical-workbook-staff-{suffix}-{token[:6]}"
+        sheet.append([_client_name(case_no), case_no, None, None, status, staff_name])
     workbook.save(destination)
     return destination
 
 
 def _client_name(case_no):
-    return f"historical-workbook-client-{case_no.split('-')[2]}-{case_no.split('-')[3][:6]}"
+    suffix, token = case_no.removeprefix("HISTORICAL-WORKBOOK-").rsplit("-", 1)
+    return f"historical-workbook-client-{suffix}-{token[:6]}"
 
 
 def _seed_staff(connection, token, suffix):
@@ -574,7 +587,7 @@ def _seed_staff(connection, token, suffix):
 
 
 def _assert_assignment_and_evidence(connection, first_case, second_case):
-    assert _count(connection, "case_staff_assignments", first_case) == 0
+    assert _count(connection, "case_staff_assignments", first_case) == 1
     assert _count(connection, "case_staff_assignments", second_case) == 0
     assert _count(connection, "historical_order_pairing_evidence", first_case, via_receipt=True) == 1
     assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 1

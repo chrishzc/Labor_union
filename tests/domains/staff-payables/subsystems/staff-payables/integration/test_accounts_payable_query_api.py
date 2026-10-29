@@ -26,6 +26,7 @@ from infrastructure.mysql.accounts_payable_export_sources import (
     _STAFF_PAYABLE_CASE_AUDIT_SQL,
     _STAFF_PAYABLES_SQL,
 )
+from infrastructure.mysql.payroll_installments import installment_export_sql
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.staff_payables.accounts_payable_export import (
     AccountsPayableExportWorkflow,
@@ -60,12 +61,12 @@ class _Connection:
         return False
 
     def execute(self, statement, parameters=None):
-        if statement == _STAFF_PAYABLES_SQL:
+        if statement == installment_export_sql(_STAFF_PAYABLES_SQL):
             eligible = (self.row["due_date"] == parameters[0]
                         and self.row["payout_status"] in {"payable", "partially_paid"}
                         and self.row["export_amount_ntd"] > 0)
             self.rows = (dict(self.row),) if eligible else ()
-        elif statement == _STAFF_PAYABLE_CASE_AUDIT_SQL:
+        elif statement == installment_export_sql(_STAFF_PAYABLE_CASE_AUDIT_SQL):
             self.rows = (dict(self.row),) if parameters[0] == self.row["case_no"] else ()
         elif statement == _STAFF_PAYABLE_CASE_ORDER_FACTS_SQL:
             self.rows = ({"case_no": self.row["case_no"], "staff_payment_due_date": self.row["order_due_date"]},)

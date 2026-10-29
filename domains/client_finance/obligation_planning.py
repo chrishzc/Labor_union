@@ -14,6 +14,7 @@ from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.terms import OrderTerms
 from domains.orders.floor_fee import prorate_floor_fee
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+from domains.client_finance.pricing_policy import CasePricingTerms
 from domains.client_finance.subsidy_coverage import (
     derive_subsidy_coverage,
     normalize_subsidy_policy_identity,
@@ -112,6 +113,8 @@ class ClientFinanceTermsFacts:
     open_nonstage_obligation_count: int = 0
     client_service_charge_waived: bool = False
     identity_status: str | None = None
+    pricing: CasePricingTerms | None = None
+    existing_subsidy_return_count: int = 0
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -143,6 +146,7 @@ class ClientFinanceTermsSourceFacts:
     identity_status: str | None = None
     existing_subsidy_return_count: int = 0
     effective_start_date: date | None = None
+    pricing: CasePricingTerms | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -430,6 +434,12 @@ def automatic_subsidy_return_plan(facts: ClientFinanceTermsFacts, *, identity_st
                                   completed_on: date | None, existing_return_count: int) -> ClientSubsidyReturnPlan | None:
     if completed_on is None:
         return None
+    if facts.pricing is not None:
+        total = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
+        amount = facts.pricing.subsidy_return(total)
+        if amount == 0 and existing_return_count == 0 and facts.existing_subsidy_return_count == 0:
+            return None
+        return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal", MoneyNTD(amount), subsidy_advance_due_date(completed_on))
     identity = normalize_subsidy_policy_identity(str(identity_status or ""))
     if identity == '社福' and existing_return_count:
         return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",MoneyNTD(0),subsidy_advance_due_date(completed_on))
@@ -550,6 +560,16 @@ def _cancellation_subsidy_return_plan(
             return ClientSubsidyReturnPlan(f"client-subsidy-return:{source_facts.case_no}:terminal",MoneyNTD(0),
                 subsidy_advance_due_date(order_terms.planned_start_date))
         return None
+    if source_facts.pricing is not None:
+        amount = source_facts.pricing.subsidy_return(
+            Decimal(len(service_dates)) * Decimal(str(order_terms.service_hours_per_day))
+        )
+        if amount == 0 and not source_facts.existing_subsidy_return_count:
+            return None
+        return ClientSubsidyReturnPlan(
+            f"client-subsidy-return:{source_facts.case_no}:terminal",
+            MoneyNTD(amount), subsidy_advance_due_date(max(service_dates)),
+        )
     identity_status = normalize_subsidy_policy_identity(
         str(source_facts.identity_status or "")
     )
@@ -613,7 +633,7 @@ def _materialize_terms_facts(source_facts, order_terms, scheduling):
 def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
     charge_days = _charge_days(service_dates, source_facts.double_pay_dates)
     client_service_charge_waived = False
-    if source_facts.identity_status is not None:
+    if source_facts.identity_status is not None and source_facts.pricing is None:
         coverage = derive_subsidy_coverage(
             source_facts.identity_status,
             Decimal(str(order_terms.service_days))
@@ -632,6 +652,8 @@ def _terms_facts_from_service_dates(source_facts, order_terms, service_dates):
         source_facts.open_nonstage_obligation_count,
         client_service_charge_waived,
         source_facts.identity_status,
+        source_facts.pricing,
+        source_facts.existing_subsidy_return_count,
     )
 
 
@@ -709,6 +731,9 @@ def _stage_plan(facts, payment_stage, charge_days, floor_fee):
 
 
 def _daily_charge(facts, charge_day):
+    if facts.pricing is not None:
+        consumed = Decimal(facts.charge_days.index(charge_day)) * Decimal(str(facts.service_hours_per_day))
+        return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed, double_pay=charge_day.is_double_pay))
     if normalize_subsidy_policy_identity(facts.identity_status or '') == '社福':
         index = facts.charge_days.index(charge_day)
         remaining = max(0,120-index*facts.service_hours_per_day)

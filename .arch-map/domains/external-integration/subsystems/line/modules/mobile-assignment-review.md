@@ -62,4 +62,4 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_assignment_review_entrypoint.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_admin_review_pagination.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_admin_work_surfaces.py`
-- integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_static_mutation_ui.py`
+- higher_boundary: `tests/domains/external-integration/subsystems/line/integration/test_line_static_mutation_ui.py` — 上位 LINE Subsystem 的身分、客服與手機操作跨 owner 靜態契約。

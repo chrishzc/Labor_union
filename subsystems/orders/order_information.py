@@ -279,7 +279,7 @@ def _candidate_line_sections(
     }
     info_one_payments = {
         "f_112_cc", "f_113_cd", "f_116_cg", "f_117_ch", "f_118_ci",
-        "f_119_cj", "f_120_ck", "f_122_cm",
+        "f_119_cj", "f_120_ck", "f_121_cl", "f_122_cm",
     }
     info_one_other = {"f_114_ce", "f_115_cf"}
     grouped: dict[str, list[tuple[str, str]]] = {}

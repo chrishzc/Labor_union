@@ -29,6 +29,7 @@ import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
 import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
+import { AccountingParametersPage } from './pages/AccountingParametersPage';
 import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { StorageManagementPage } from './pages/StorageManagementPage';
@@ -179,6 +180,7 @@ const AppContent: React.FC = () => {
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}
+        {currentPage === 'accounting-parameters' && <AccountingParametersPage />}
         {currentPage === 'historical-service-accounting' && <HistoricalServiceAccountingPage />}
 
         {/* Audit & System Section */}

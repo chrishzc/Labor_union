@@ -13,6 +13,7 @@ from domains.orders.floor_fee import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
+from domains.payroll.tiered_rates import TieredPayrollRate, price_hours
 from shared_kernel.validation import (
     require_canonical_text,
     require_nonnegative_integer,
@@ -65,12 +66,15 @@ class AssignmentRateSnapshot:
     policy_version: str
     policy_kind: PayrollPolicyKind
     hourly_rate: MoneyNTD
+    tiered: TieredPayrollRate | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.assignment_identity, "assignment identity")
         _validate_identity(self.policy_version, "payroll policy version")
         _require_nonnegative_money(self.hourly_rate, "hourly rate")
-        if self.hourly_rate != _HOURLY_RATE_BY_POLICY[self.policy_kind]:
+        if self.tiered is not None and self.hourly_rate.amount != self.tiered.covered_rate:
+            raise ValueError("payroll_tiered_snapshot_mismatch")
+        if self.tiered is None and self.hourly_rate != _HOURLY_RATE_BY_POLICY[self.policy_kind]:
             raise ValueError("payroll_rate_snapshot_mismatch")
 
 
@@ -117,6 +121,10 @@ class AssignmentPayrollCandidate:
     floor_fee_allocated: MoneyNTD
     effective_adjustments: MoneyNTD
     total_payable: MoneyNTD
+    covered_salary: int = 0
+    excess_salary: int = 0
+    directly_subsidized: bool = False
+    tiered_pricing: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,13 +229,21 @@ def _allocate_floor_fee(earned_floor_fee, facts):
     return allocate_largest_remainder(earned_floor_fee, service_days)
 
 
-def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments):
+def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments, consumed_by_date=None):
     service_day_count = len(facts.service_dates)
     actual_hours = service_day_count * terms.service_hours_per_day
     double_pay_hours = len(facts.double_pay_dates) * terms.service_hours_per_day
     service_salary = MoneyNTD(_whole_ntd(
         (actual_hours + double_pay_hours) * rate.hourly_rate.amount
     ))
+    covered_salary = excess_salary = 0
+    if rate.tiered is not None:
+        for day in facts.service_dates:
+            covered, excess = price_hours(((Decimal(str(terms.service_hours_per_day)), day in facts.double_pay_dates),),
+                rate.tiered, (consumed_by_date or {}).get(day, Decimal(0)))
+            covered_salary += covered
+            excess_salary += excess
+        service_salary = MoneyNTD(covered_salary + excess_salary)
     total_payable = service_salary + floor_fee + adjustments
     return AssignmentPayrollCandidate(
         assignment_identity=facts.assignment_identity,
@@ -240,6 +256,10 @@ def _build_assignment_candidate(facts, rate, terms, floor_fee, adjustments):
         floor_fee_allocated=floor_fee,
         effective_adjustments=adjustments,
         total_payable=total_payable,
+        covered_salary=covered_salary,
+        excess_salary=excess_salary,
+        directly_subsidized=bool(rate.tiered and rate.tiered.directly_subsidized),
+        tiered_pricing=rate.tiered is not None,
     )
 
 
@@ -250,6 +270,8 @@ def _whole_ntd(value: Decimal | int) -> int:
 
 
 def _build_assignment_candidates(facts, rates, terms, floor_fees, adjustments):
+    ordered_days = sorted(day for item in facts for day in item.service_dates)
+    consumed = {day: Decimal(index) * Decimal(str(terms.service_hours_per_day)) for index, day in enumerate(ordered_days)}
     return tuple(
         _build_assignment_candidate(
             item,
@@ -257,6 +279,7 @@ def _build_assignment_candidates(facts, rates, terms, floor_fees, adjustments):
             terms,
             floor_fees[item.assignment_identity],
             adjustments[item.assignment_identity],
+            consumed,
         )
         for item in facts
     )
@@ -275,7 +298,7 @@ def _candidate_payload(assignments, facts, rates, terms) -> dict[str, object]:
 
 
 def _assignment_payload(item) -> dict[str, object]:
-    return {
+    payload = {
         "assignment_identity": item.assignment_identity,
         "staff_id": item.staff_id,
         "official_service_day_count": item.official_service_day_count,
@@ -287,6 +310,10 @@ def _assignment_payload(item) -> dict[str, object]:
         "effective_adjustments_ntd": item.effective_adjustments.amount,
         "total_payable_ntd": item.total_payable.amount,
     }
+    if item.tiered_pricing:
+        payload.update(covered_salary=item.covered_salary, excess_salary=item.excess_salary,
+            directly_subsidized=item.directly_subsidized)
+    return payload
 
 
 def _facts_payload(item, rates) -> dict[str, object]:

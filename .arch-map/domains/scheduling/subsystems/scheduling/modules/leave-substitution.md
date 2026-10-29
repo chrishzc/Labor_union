@@ -63,3 +63,5 @@
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/service-start/service_start_workbench.test.tsx`
 
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover_mysql.py`
+
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution/`

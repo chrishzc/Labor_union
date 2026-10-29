@@ -26,7 +26,15 @@ def test_release_is_additive_hash_bound_and_connected_to_fresh_and_preserve():
     for item in (release['artifacts'][0], release['descriptor_artifact']):
         assert hashlib.sha256((ROOT / item['relative_path']).read_bytes()).hexdigest() == item['sha256']
     assert validate_schema_assembly() == []
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1] == MANIFEST.name
+    release_index = migration.DEFAULT_RELEASE_MANIFESTS.index(MANIFEST.name)
+    assert migration.DEFAULT_RELEASE_MANIFESTS[release_index:release_index + 6] == (
+        MANIFEST.name,
+        'labor_union_2026_10_14_candidate_weekly_information_v1.json',
+        'labor_union_2026_10_19_nas_registration_approval_v1.json',
+        'labor_union_2026_10_22_line_order_group_invitation_url_v1.json',
+        'labor_union_2026_10_23_scheduling_service_start_v1.json',
+        'labor_union_2026_10_27_government_subsidy_periods_hash_v2.json',
+    )
     fresh = (ROOT / 'db/schema_parts/231_staff_union_number.sql').read_text(encoding='utf-8')
     bridge = (ROOT / 'db/schema_parts' / ARTIFACT).read_text(encoding='utf-8')
     assert fresh == bridge

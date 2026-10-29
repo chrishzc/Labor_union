@@ -258,66 +258,18 @@ def test_claim_none_locks_receipt_key_without_commit() -> None:
     assert connection.commit_count == 0
 
 
-def test_zero_candidate_agree_projects_client_decision_and_orders_intents() -> None:
+def test_retired_zero_candidate_preview_cannot_create_client_or_orders_intents() -> None:
+    from subsystems.scheduling.matching_coordination_workflow import MatchingCoordinationWorkflowError
     facts = _facts(no_candidate=True)
-    alternative = MatchingCoordinationWorkflow().preview(
-        PreviewZeroCandidateAlternative(
-            case_no="CASE-001",
-            actor=ActorContext("admin_user_id:1"),
-            reason="no candidate preview",
-            correlation_id=CorrelationId("corr-zero-preview-agree"),
-            idempotency_key=IdempotencyKey("preview:matching:zero:agree"),
-            expected_source_versions=facts.source_versions,
-            criteria_snapshot_id="snapshot-1",
-            policy_id="policy-v1",
-            policy_version=1,
-            relaxed_criteria=("service_days",),
-        ),
-        facts,
+    request = PreviewZeroCandidateAlternative(
+        case_no="CASE-001", actor=ActorContext("admin_user_id:1"), reason="historical zero pool",
+        correlation_id=CorrelationId("retired-zero-preview"), idempotency_key=IdempotencyKey("retired-zero-preview"),
+        expected_source_versions=facts.source_versions, criteria_snapshot_id="snapshot-1",
+        policy_id="policy-v1", policy_version=1, relaxed_criteria=("service_days",),
     )
-    command = ApplyZeroCandidateAlternative(
-        case_no="CASE-001",
-        actor=ActorContext("admin_user_id:1"),
-        reason="accept explicit compromise",
-        correlation_id=CorrelationId("corr-zero-agree"),
-        idempotency_key=IdempotencyKey("matching:zero:agree"),
-        expected_source_versions=facts.source_versions,
-        criteria_snapshot_id="snapshot-1",
-        alternative_id=alternative.alternative_id,
-        policy_id="policy-v1",
-        policy_version=1,
-        relaxed_criteria=("service_days",),
-        preview_fingerprint=alternative.preview_fingerprint,
-        decision="agree",
-    )
-    receipt = MatchingCoordinationWorkflow().apply(
-        command,
-        facts,
-        preview_fingerprint=alternative.preview_fingerprint,
-    )
-
-    replay = _repository_module._receipt_from_payload(
-        _repository_module._receipt_payload(receipt)
-    )
-    payloads = _repository_module._intent_payloads(command, replay)
-
-    assert replay.outbox_intent_ids == (
-        "matching:zero:agree:zero-candidate:client-decision",
-        "matching:zero:agree:zero-candidate:orders",
-    )
-    assert len(payloads) == 2
-    assert payloads[0][0:3] == (
-        "matching:zero:agree:zero-candidate:client-decision",
-        "line_client_decision",
-        "line_integration",
-    )
-    assert payloads[0][3]["source_identity"] == M3_ZERO_POOL_SOURCE_ID
-    assert payloads[0][3]["recipient_selector"] == "matching.request.participants"
-    assert payloads[1][0:3] == (
-        "matching:zero:agree:zero-candidate:orders",
-        "orders_terms_update_requested",
-        "orders_workflow",
-    )
+    with pytest.raises(MatchingCoordinationWorkflowError) as rejected:
+        MatchingCoordinationWorkflow().preview(request, facts)
+    assert rejected.value.error.code == "matching_zero_pool_notification_retired"
 
 
 def test_current_snapshot_round_trips_typed_bytes_and_optional_lock() -> None:
@@ -725,73 +677,20 @@ def test_accepted_lineage_receipt_then_three_immutable_intents_without_commit() 
     assert not any("LINE" in sql and "HTTP" in sql for sql in sqls)
 
 
-def test_zero_candidate_disagree_writes_customer_service_intent() -> None:
+def test_retired_zero_candidate_apply_cannot_create_customer_service_intent() -> None:
+    from subsystems.scheduling.matching_coordination_workflow import MatchingCoordinationWorkflowError
     facts = _facts(no_candidate=True)
-    alternative = MatchingCoordinationWorkflow().preview(
-        PreviewZeroCandidateAlternative(
-            case_no="CASE-001",
-            actor=ActorContext("admin_user_id:1"),
-            reason="no candidate preview",
-            correlation_id=CorrelationId("corr-zero-preview-1"),
-            idempotency_key=IdempotencyKey("preview:matching:zero:1"),
-            expected_source_versions=facts.source_versions,
-            criteria_snapshot_id="snapshot-1",
-            policy_id="policy-v1",
-            policy_version=1,
-            relaxed_criteria=("service_days",),
-        ),
-        facts,
-    )
+    fingerprint = fingerprint_payload({"historical-zero-pool": "disagree"})
     command = ApplyZeroCandidateAlternative(
-        case_no="CASE-001",
-        actor=ActorContext("admin_user_id:1"),
-        reason="no candidate review",
-        correlation_id=CorrelationId("corr-zero-1"),
-        idempotency_key=IdempotencyKey("matching:zero:1"),
-        expected_source_versions=facts.source_versions,
-        criteria_snapshot_id="snapshot-1",
-        alternative_id=alternative.alternative_id,
-        policy_id="policy-v1",
-        policy_version=1,
-        relaxed_criteria=("service_days",),
-        preview_fingerprint=alternative.preview_fingerprint,
-        decision="disagree",
+        case_no="CASE-001", actor=ActorContext("admin_user_id:1"), reason="historical zero pool",
+        correlation_id=CorrelationId("retired-zero-apply"), idempotency_key=IdempotencyKey("retired-zero-apply"),
+        expected_source_versions=facts.source_versions, criteria_snapshot_id="snapshot-1", alternative_id="old-alternative",
+        policy_id="policy-v1", policy_version=1, relaxed_criteria=("service_days",),
+        preview_fingerprint=fingerprint, decision="disagree",
     )
-    receipt = MatchingCoordinationWorkflow().apply(
-        command, facts, preview_fingerprint=alternative.preview_fingerprint
-    )
-    connection = _Connection(
-        _lineage_rows()
-        + [
-            {"id": 701, "criteria_snapshot_id": 601, "package_lineage_id": 801},
-            {"id": 701},
-            {"id": 901},
-        ]
-    )
-    repository = _repo(connection)
-
-    repository.append_lineage(command, facts, receipt)
-    repository.save_receipt(command, receipt.command_fingerprint, receipt)
-    repository.append_typed_intents(command, receipt)
-
-    outbox_inserts = [
-        params
-        for statement, params in connection.statements
-        if statement.lstrip().upper().startswith(
-            "INSERT INTO MATCHING_COORDINATION_OUTBOX"
-        )
-    ]
-    assert len(outbox_inserts) == 2
-    assert outbox_inserts[0][4:6] == (
-        "line_client_decision",
-        "line_integration",
-    )
-    assert outbox_inserts[1][4:6] == (
-        "customer_service_ticket",
-        "customer_service",
-    )
-    assert json.loads(outbox_inserts[1][6])["customer_service"]["category"] == "service_flow"
-    assert connection.commit_count == 0
+    with pytest.raises(MatchingCoordinationWorkflowError) as rejected:
+        MatchingCoordinationWorkflow().apply(command, facts, preview_fingerprint=fingerprint)
+    assert rejected.value.error.code == "matching_zero_pool_notification_retired"
 
 
 def test_zero_candidate_confirmation_persists_package_event_receipt_and_owner_intent() -> None:

@@ -199,9 +199,13 @@ class PayrollRebuildWorkflow:
             actions = _build_actions(payroll, facts.existing_obligations, facts.staff_payment_due_date)
             if any(action.action is not StaffObligationActionKind.UNCHANGED for action in actions):
                 raise ValueError("payroll_handover_settlement_required")
+            if any(item.tiered_pricing for item in payroll.assignments):
+                self._repository.synchronize_installments(case_no, payroll)
             return facts.staff_payment_due_date
         preview = _build_preview(facts)
         if all(action.action is StaffObligationActionKind.UNCHANGED for action in preview.actions):
+            if any(item.tiered_pricing for item in preview.payroll.assignments):
+                self._repository.synchronize_installments(case_no, preview.payroll)
             return facts.staff_payment_due_date
         request = PayrollRebuildRequest(case_no, ExpectedVersion(facts.payroll_version), preview.fingerprint,
             key, actor, "系統依已確認服務資料同步月嫂應付", correlation_id)

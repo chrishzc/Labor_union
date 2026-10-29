@@ -21,6 +21,7 @@ from domains.payroll.calculation import (
     build_case_payroll_candidate,
     rate_snapshot,
 )
+from domains.payroll.tiered_rates import TieredPayrollRate
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -61,6 +62,7 @@ class SourceAssignmentPayrollTerms:
     adjustment_total: MoneyNTD = MoneyNTD(0)
     ancestor_assignment_ids: tuple[int, ...] = ()
     hourly_rate: MoneyNTD | None = None
+    tiered: TieredPayrollRate | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.source_assignment_id, "source assignment id")
@@ -76,6 +78,7 @@ class CasePayrollPolicyTerms:
     policy_version: str
     policy_kind: PayrollPolicyKind
     hourly_rate: MoneyNTD | None = None
+    tiered: TieredPayrollRate | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.policy_version, "payroll policy version", _IDENTITY_MAXIMUM_LENGTH)
@@ -447,7 +450,7 @@ def _carried_rate_snapshots(facts, source_terms):
 
 
 def _exact_rate(identity, policy):
-    return (AssignmentRateSnapshot(identity, policy.policy_version, policy.policy_kind, policy.hourly_rate)
+    return (AssignmentRateSnapshot(identity, policy.policy_version, policy.policy_kind, policy.hourly_rate, policy.tiered)
             if policy.hourly_rate is not None else rate_snapshot(identity, policy.policy_version, policy.policy_kind))
 
 

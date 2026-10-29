@@ -247,14 +247,18 @@ def _facts(
 
 def _apply_explicit_rate_correction(cursor, case, case_no):
     rate = load_explicit_case_service_rate(cursor, case_no)
-    if rate is None:
-        return case
-    return {
+    result = dict(case) if rate is None else {
         **dict(case),
         "client_hourly_rate_ntd": rate.hourly_rate_ntd,
         "payroll_hourly_rate_ntd": rate.hourly_rate_ntd,
         "_effective_multi_birth_count": rate.multi_birth_count,
     }
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    pricing = load_case_pricing(cursor, case)
+    if pricing is not None:
+        result.update(_pricing=pricing, client_hourly_rate_ntd=pricing.client.covered,
+            payroll_hourly_rate_ntd=pricing.payroll.covered)
+    return result
 
 
 def _matching_plan_payroll_estimates(
@@ -276,6 +280,19 @@ def _matching_plan_payroll_estimates(
     total_planned_days = sum(service_days.values())
     if total_planned_days != contracted_days:
         raise ValueError("matching_plan_payroll_estimate_service_days_mismatch")
+    if case.get('_pricing') is not None:
+        from domains.payroll.calculation import AssignmentRateSnapshot, OfficialAssignmentServiceFacts, PayrollPolicyKind, PayrollTerms, build_case_payroll_candidate
+        from domains.payroll.installments import payroll_installments
+        from infrastructure.mysql.payroll_installments import payment_date_projection
+        from infrastructure.mysql.pricing_configuration_repository import payroll_tiers
+        tier = payroll_tiers(case['_pricing'])
+        services = tuple(OfficialAssignmentServiceFacts(str(int(item['assignment_id'])), int(item['staff_id']),
+            tuple(_required_date(item['assigned_start_date']) + timedelta(days=offset) for offset in range(service_days[str(int(item['assignment_id']))]))) for item in segments)
+        rates = tuple(AssignmentRateSnapshot(item.assignment_identity, 'case-pricing', PayrollPolicyKind.SUBSIDIZED_CITIZEN, MoneyNTD(tier.covered_rate), tier) for item in services)
+        candidate = build_case_payroll_candidate(services, rates, PayrollTerms(contracted_days, hours_per_day, MoneyNTD(int(case.get('floor_fee') or 0))))
+        planned_end = max(day for item in services for day in item.service_dates)
+        return {int(item.assignment_identity): {'estimated_total_salary': f'預估 {item.total_payable.amount} 元',
+            'estimated_salary_payment_date': f"預估 {payment_date_projection(tuple((p.funding_kind,p.amount,p.due_date) for p in payroll_installments(item,planned_end)))}"} for item in candidate.assignments}
     floor_allocations = allocate_largest_remainder(
         MoneyNTD(int(case.get("floor_fee") or 0)), service_days
     )
@@ -379,6 +396,12 @@ def _load_typed_payroll_facts(
             obligation = obligations[0]
             facts["total_salary"] = obligation.contracted_amount.amount
             facts["salary_payment_date"] = obligation.due_date
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT funding_kind,amount_ntd,due_date FROM staff_obligation_installments WHERE obligation_identity=%s ORDER BY due_date,funding_kind', (obligation.obligation_identity,))
+                portions = tuple((row['funding_kind'],int(row['amount_ntd']),row['due_date']) for row in cursor.fetchall())
+            if portions:
+                from infrastructure.mysql.payroll_installments import payment_date_projection
+                facts['salary_payment_date'] = payment_date_projection(portions)
             owners["staff_payables"] = projection_fingerprint(
                 {
                     "obligation_identity": obligation.obligation_identity,
@@ -483,6 +506,7 @@ _CASE_IMPORT_FACT_KEYS = (
 
 _CASE_SQL = """
 SELECT o.case_no, o.service_days, o.service_hours_per_day, o.requires_cooking,
+       o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date,
        o.service_start_time, o.service_end_time, o.service_end_day_offset,
        o.floor_fee, o.custom_rest_dates, o.staff_payment_due_date,

@@ -31,6 +31,10 @@ LINE_GUARDS = ("require_line_", "require_customer_service_")
 
 MATCHING_ROUTE_CONTRACT = {
     "candidate_contact_pool.py": {
+        "preview_case_information": ({"require_line_matching_reader"}, "none"),
+        "preview_case_weekly_service": ({"require_line_matching_reader"}, "none"),
+        "preview_case_weekly_dates": ({"require_line_matching_reader"}, "none"),
+        "preview_candidate_weekly_dates": ({"require_line_matching_reader"}, "none"),
         "query_candidate_contact_pool": (
             {"require_line_matching_reader"},
             "none",
@@ -386,6 +390,11 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
         assert set(nodes) == set(expected_routes), filename
         for route_name, (expected_dependencies, expected_side_effect) in expected_routes.items():
             dependencies = inventory[route_name]
+            if filename == "candidate_contact_pool.py" and route_name in {
+                "preview_case_weekly_dates", "preview_candidate_weekly_dates",
+            }:
+                assert "get_service_date_confirmation_workflow" in dependencies
+                dependencies = dependencies - {"get_service_date_confirmation_workflow"}
             assert dependencies == expected_dependencies, (filename, route_name)
             assert "require_root" not in dependencies, (filename, route_name)
             assert expected_dependencies <= set(registered_aliases), (filename, route_name)
@@ -395,7 +404,7 @@ def test_matching_and_runtime_routes_have_complete_guard_capability_matrix() -> 
             )
             route_count += 1
 
-    assert route_count == 38
+    assert route_count == 42
 
 
 def test_identity_public_liff_and_page_static_routes_are_explicit_exclusions() -> None:

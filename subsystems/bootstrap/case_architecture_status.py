@@ -42,7 +42,7 @@ class CaseArchitectureBootstrapStatusService:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT o.case_no,o.start_date,o.service_days,o.service_start_time,o.service_end_time,"
-                "o.service_end_day_offset,c.identity_status,c.created_at AS client_created_at,"
+                "o.service_end_day_offset,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,c.identity_status,c.created_at AS client_created_at,"
                 "cfa.case_no AS client_finance_case,cpt.case_no AS client_terms_case,"
                 "pca.case_no AS payroll_account_case,cps.case_no AS payroll_policy_case,"
                 "cae.case_no AS bootstrap_event_case,sag.case_no AS scheduling_case,"
@@ -57,6 +57,11 @@ class CaseArchitectureBootstrapStatusService:
                 (case_no,),
             )
             row = cursor.fetchone()
+            if isinstance(row, Mapping):
+                from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+                pricing = load_case_pricing(cursor, row)
+                if pricing is not None:
+                    row = {**row, "pricing_identity_rule": pricing.rule.value}
         return row if isinstance(row, Mapping) else None
 
 
@@ -110,6 +115,7 @@ def _recommendation(row):
         str(row["identity_status"]),
         row["client_created_at"],
         row["start_date"],
+        row.get("pricing_identity_rule"),
     )
 
 

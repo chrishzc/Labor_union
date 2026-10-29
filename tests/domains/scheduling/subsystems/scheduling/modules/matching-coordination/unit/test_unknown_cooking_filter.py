@@ -1,4 +1,4 @@
-"""Unknown cooking is not false; explicitly disabling that filter remains usable."""
+"""Legacy preference flags preserve intake facts and cannot exclude candidates."""
 from copy import deepcopy
 from decimal import Decimal
 
@@ -35,13 +35,17 @@ def test_unknown_cooking_can_be_explicitly_excluded_without_changing_source():
     before = deepcopy(facts.data)
     result = query(facts, cooking=False)
     assert result["candidate_options"][0]["staff_id"] == 3
-    assert result["candidate_options"][0]["filter_results"]["cooking"] is False
+    conditions = result["candidate_options"][0]["matching_conditions"]
+    assert set(conditions) == {"region", "preferred_service_days"}
+    assert {item["status"] for item in conditions.values()} == {"pending"}
     assert facts.data == before
 
 
-def test_enabled_cooking_filter_still_requires_known_requirement():
-    with pytest.raises(ValueError, match="matching_preference_source_not_ready"):
-        query(Facts(), cooking=True)
+def test_legacy_enabled_cooking_flag_does_not_block_unknown_requirement():
+    facts = Facts()
+    before = deepcopy(facts.data)
+    assert query(facts, cooking=True)["candidate_options"][0]["staff_id"] == 3
+    assert facts.data == before
 
 
 def test_disabling_cooking_does_not_override_unavailability():
@@ -75,7 +79,7 @@ def test_initial_inquiry_still_rejects_occupied_planned_days():
     assert result["candidate_options"][0]["full_case_coverage"] is False
 
 
-def test_initial_inquiry_keeps_known_cooking_filter():
+def test_initial_inquiry_preserves_known_cooking_without_excluding_candidates():
     facts = Facts()
     facts.data["confirmed_service_dates"] = []
     facts.data["order"]["requires_cooking"] = True
@@ -83,10 +87,11 @@ def test_initial_inquiry_keeps_known_cooking_filter():
         "INQUIRY-1", [], "2026-10-01", facts,
         filter_policy={"preferred_service_days": False, "daily_service_hours": False},
     )
-    assert result["candidate_options"] == []
+    assert [item["staff_id"] for item in result["candidate_options"]] == [3]
+    assert facts.data["order"]["requires_cooking"] is True
 
 
-def test_inquiry_preference_checkboxes_filter_known_requirements_only():
+def test_legacy_preference_flags_only_present_current_weekly_service_hints():
     facts = Facts()
     facts.data["order"].update({"service_days": 1, "service_type": "周休二日", "service_hours_per_day": Decimal("8.0")})
 
@@ -113,13 +118,18 @@ def test_inquiry_preference_checkboxes_filter_known_requirements_only():
         )
         return [item["staff_id"] for item in result["candidate_options"]]
 
-    assert matching_ids(days=True, hours=True) == [3]
-    assert matching_ids(days=False, hours=True) == [3, 4]
-    assert matching_ids(days=True, hours=False) == [3, 5]
+    assert matching_ids(days=True, hours=True) == [3, 4, 5, 6]
+    assert matching_ids(days=False, hours=True) == [3, 4, 5, 6]
+    assert matching_ids(days=True, hours=False) == [3, 4, 5, 6]
     assert matching_ids(days=False, hours=False) == [3, 4, 5, 6]
+    result = search_candidate_inquiry_availability("INQUIRY-1", [], "2026-10-01", facts)
+    assert [(item["staff_id"], item["matching_conditions"]["preferred_service_days"]["status"])
+            for item in result["candidate_options"]] == [
+        (3, "matched"), (4, "not_matched"), (5, "matched"), (6, "pending"),
+    ]
 
     facts.data["order"]["service_hours_per_day"] = None
-    assert matching_ids(days=True, hours=True) == [3, 5]
+    assert matching_ids(days=True, hours=True) == [3, 4, 5, 6]
     facts.data["order"]["service_type"] = None
     assert matching_ids(days=True, hours=True) == [3, 4, 5, 6]
 

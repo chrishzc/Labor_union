@@ -37,7 +37,7 @@ def _inputs(identity, payable, *, hours=8, floor=0, existing=None):
 
 @pytest.mark.parametrize('identity,payable,hours,floor,expected', [
     ('一般市民', 4800, 8, 0, date(2027, 2, 15)),
-    ('補助市民', 0, 8, 0, date(2027, 3, 15)),
+    ('社福', 0, 8, 0, date(2027, 3, 15)),
     ('補助市民', 1000, 8, 1000, date(2027, 2, 15)),
     ('補助市民', 2400, 80, 0, date(2027, 2, 15)),
 ])

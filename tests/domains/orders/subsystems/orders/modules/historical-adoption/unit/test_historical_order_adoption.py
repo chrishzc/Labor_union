@@ -221,7 +221,7 @@ def test_discussion_requires_blank_start_and_one_uniquely_resolved_caregiver(tmp
     assert nonblank_repository.staff_resolution_count == 0
 
 
-def test_matching_pending_deposit_apply_writes_formal_matching_root_before_receipt(tmp_path):
+def test_matching_pending_deposit_apply_persists_order_before_matching_in_same_uow(tmp_path):
     path = _workbook(
         tmp_path,
         ["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名"],
@@ -231,9 +231,15 @@ def test_matching_pending_deposit_apply_writes_formal_matching_root_before_recei
     ordering: list[str] = []
 
     class PersistingRepository(_Repository):
+        current_status = OrderLifecycleStatus.PENDING_COMPLETION.value
+
+        def load_order(self, case_no, client_name, *, for_update):
+            return _current(OrderLifecycleStatus(self.current_status))
+
         def persist(self, request, preview, assignment_ids):
             del request, assignment_ids
             ordering.append("receipt")
+            self.current_status = preview.after_status
             self.persist_count += 1
             return SimpleNamespace(
                 outcome=preview.outcome,
@@ -250,6 +256,7 @@ def test_matching_pending_deposit_apply_writes_formal_matching_root_before_recei
             self.command = None
 
         def ensure_pending_deposit_match(self, command):
+            assert repository.current_status == OrderLifecycleStatus.DISCUSSION.value
             ordering.append("matching")
             self.command = command
             return SimpleNamespace(plan_id=81, plan_version=1, created=True)
@@ -275,7 +282,7 @@ def test_matching_pending_deposit_apply_writes_formal_matching_root_before_recei
         )
     )
 
-    assert ordering == ["matching", "receipt"]
+    assert ordering == ["receipt", "matching"]
     assert matching.command.case_no == "CASE-1"
     assert matching.command.staff_id == 11
     assert matching.command.source_identity == row.source_identity

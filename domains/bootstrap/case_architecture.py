@@ -164,6 +164,7 @@ class CaseRootFacts:
     source_identity_status: str
     multi_birth_count: str | None = None
     floor_fee: MoneyNTD = MoneyNTD(0)
+    pricing_identity_rule: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.floor_fee, MoneyNTD) or self.floor_fee.amount < 0:
@@ -305,7 +306,12 @@ def build_case_architecture_bootstrap_candidate(
     )
 
 
-def policy_kind_for_identity(identity_status: str) -> PayrollPolicyKind:
+def policy_kind_for_identity(identity_status: str, pricing_identity_rule: str | None = None) -> PayrollPolicyKind:
+    if pricing_identity_rule is not None:
+        rules = {"citizen": PayrollPolicyKind.CITIZEN, "social": PayrollPolicyKind.SUBSIDIZED_CITIZEN, "non_citizen": PayrollPolicyKind.NON_CITIZEN}
+        if pricing_identity_rule not in rules:
+            _raise_invalid("pricing identity rule is invalid")
+        return rules[pricing_identity_rule]
     mappings = {
         "一般市民": PayrollPolicyKind.CITIZEN,
         "補助市民": PayrollPolicyKind.CITIZEN,
@@ -323,10 +329,11 @@ def policy_kind_for_identity(identity_status: str) -> PayrollPolicyKind:
 def payroll_policy_kind_for_case(
     identity_status: str,
     multi_birth_count: str | None,
+    pricing_identity_rule: str | None = None,
 ) -> PayrollPolicyKind:
     if is_twin_case(multi_birth_count):
         return PayrollPolicyKind.TWINS
-    return policy_kind_for_identity(identity_status)
+    return policy_kind_for_identity(identity_status, pricing_identity_rule)
 
 
 def is_twin_case(multi_birth_count: str | None) -> bool:
@@ -358,7 +365,7 @@ def _validate_client_payment_terms(order, payment_terms) -> None:
     if payment_terms.deposit_service_days > order.service_days:
         _raise_invalid("deposit service days exceed contracted service days")
     expected_deposit_days = _deposit_days_for_identity(
-        order.source_identity_status
+        order.source_identity_status, order.pricing_identity_rule
     )
     if payment_terms.deposit_service_days != expected_deposit_days:
         _raise_invalid("deposit service days do not match identity policy")
@@ -370,7 +377,7 @@ def _validate_client_payment_terms(order, payment_terms) -> None:
 
 def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
     coverage = derive_subsidy_coverage(
-        order.source_identity_status,
+        {"citizen": "補助市民", "social": "社福", "non_citizen": "非市民"}.get(order.pricing_identity_rule, order.source_identity_status),
         Decimal(order.service_days) * Decimal(str(order.service_hours_per_day)),
         Decimal(order.floor_fee.amount),
     )
@@ -389,8 +396,8 @@ def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
     return replace(terms, second_payment_due_date=second.due_date)
 
 
-def _deposit_days_for_identity(identity_status: str) -> int:
-    policy_kind = policy_kind_for_identity(identity_status)
+def _deposit_days_for_identity(identity_status: str, pricing_identity_rule: str | None = None) -> int:
+    policy_kind = policy_kind_for_identity(identity_status, pricing_identity_rule)
     if policy_kind is PayrollPolicyKind.SUBSIDIZED_CITIZEN:
         return 0
     return 5
@@ -406,6 +413,7 @@ def _require_rate_policy(facts, intent) -> RatePolicyFacts:
     expected_kind = payroll_policy_kind_for_case(
         facts.order.source_identity_status,
         facts.order.multi_birth_count,
+        facts.order.pricing_identity_rule,
     )
     if rate_policy.policy_version != intent.payroll_policy_version:
         _raise_rate_policy_not_found()

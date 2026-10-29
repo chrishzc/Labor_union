@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-10-24-v49",
+  "release_id": "labor-union-validation-schema-accounting-pricing-2026-10-29-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 178,
-    "ordered_digest_sha256": "ca5787f54e1e1a5e9a22502cb2c7cd621e108540dba6c7572e4c9db04d0cec8f",
-    "terminal_artifact": "233_government_subsidy_periods.sql"
+    "expected_count": 179,
+    "ordered_digest_sha256": "89a87eb515ac098dcef81bd94cb4f4fb90c46738ca0d2b60679939b6bb4919f7",
+    "terminal_artifact": "234_accounting_pricing.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "b97ceaa6fb89ec1c266695d5efba929df2bb093ec161a5aaa93aaac8826c38ee"
+    "sha256": "bdfcf18351090bf777e5c0ea07780a50b03aa6d25ccda7a597a44db37304ddff"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

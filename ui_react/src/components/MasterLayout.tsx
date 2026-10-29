@@ -49,6 +49,7 @@ export type PageType =
   | 'line-liff-studio'
   | 'line-security'
   | 'finance'
+  | 'accounting-parameters'
   | 'historical-service-accounting'
   | 'account-management'
   | 'storage-management'
@@ -70,6 +71,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'line-security': 'line',
 
   'finance': 'finance',
+  'accounting-parameters': 'finance',
   'historical-service-accounting': 'finance',
 
   'account-management': 'audit',
@@ -102,6 +104,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Finance Section
   { id: 'finance', icon: CircleDollarSign, label: '帳務中心', section: 'finance' },
+  { id: 'accounting-parameters', icon: CircleDollarSign, label: '帳務參數設定', section: 'finance' },
   { id: 'historical-service-accounting', icon: History, label: '歷史服務天數', section: 'finance' },
 
   // Audit & System Section

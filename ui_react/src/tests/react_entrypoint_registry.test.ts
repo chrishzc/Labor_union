@@ -17,7 +17,7 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
-  'finance', 'historical-service-accounting', 'account-management', 'storage-management', 'file-settings',
+  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'storage-management', 'file-settings',
 ] as const;
 
 // Explicit test oracle: presentation names map to the same 17 canonical LIFF assets.
@@ -28,7 +28,7 @@ const LIFF_ASSETS = [
   ['candidate_contact_customer.html', '媒合條件協調'], ['staff_order_search.html', '我的案件'],
   ['staff_schedule.html', '班表與請假'], ['staff_baby_log.html', '寶寶日誌與餐食照片'],
   ['staff_payout.html', '薪資與付款紀錄'], ['candidate_contact.html', '接案回覆'],
-  ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '月嫂身分審核'],
+  ['identity.html', '身分認證'], ['mobile_admin.html · 待辦工作台', '待辦工作台'],
   ['mobile_admin.html · 客服中心', '客服中心'], ['mobile_admin.html · 狀態追蹤', '訂單進度'],
   ['mobile_admin.html · 營運摘要', '營運摘要'],
 ] as const;
@@ -148,7 +148,7 @@ describe('React entrypoint registry', () => {
 
     fireEvent.click(liffAsset('register.html'));
     expect(screen.getByText('需求調查表單')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '預覽登記資料' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '送出完整服務登記表單' })).toBeDisabled();
     expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-registration',
@@ -172,7 +172,7 @@ describe('React entrypoint registry', () => {
 
     fireEvent.click(liffAsset('profile_update.html'));
     expect(screen.getByText('修改登記資料申請')).toBeInTheDocument();
-    expect(screen.getByText(/正式異動流程已接通後端 API/)).toBeInTheDocument();
+    expect(screen.getByText(/正式異動流程示意後端 API；送出後等待工會人員審核/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在預覽中開啟正式 LIFF 入口' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-profile-guard',
@@ -199,7 +199,7 @@ describe('React entrypoint registry', () => {
     );
 
     fireEvent.click(liffAsset('mobile_admin.html · 待辦工作台'));
-    expect(screen.getByText(/目前只列出待處理的月嫂身分審核/)).toBeInTheDocument();
+    expect(screen.getByText(/列出身分審核與案件待辦，可由工會決定是否發送提醒/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在預覽中開啟安全展示頁' })).toHaveAttribute(
       'href',
       'https://line-test.example.dev/line-mobile-admin?target=staff_review&studio_preview=1',

@@ -1,0 +1,404 @@
+"""
+File: test_hcm_beclass_reconciliation_adapter.py
+Description: 驗證 reconciliation adapter 借用 caller UoW，且 standalone wrapper 唯一提交。
+"""
+
+from datetime import date, time
+from types import SimpleNamespace
+
+import pytest
+
+from domains.orders.terms import OrderTerms, ServiceTimeTerms
+from infrastructure.mysql import hcm_beclass_reconciliation_adapter as adapter
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from shared_kernel.money import MoneyNTD
+from subsystems.case_import.hcm_beclass_reconciliation import (
+    CaseImportReconciliationApplication,
+    reconcile_hcm_beclass_cooking,
+)
+
+
+class _Connection:
+    def __init__(self):
+        self.begins = 0
+        self.commits = 0
+        self.rollbacks = 0
+
+    def begin(self):
+        self.begins += 1
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def _terms(requires_cooking=None):
+    return OrderTerms(
+        date(2026, 9, 1),
+        5,
+        8,
+        MoneyNTD(0),
+        ServiceTimeTerms(time(9), time(17), 0),
+        requires_cooking,
+    )
+
+
+def test_apply_cooking_terms_uses_current_uow_without_hidden_commit(monkeypatch):
+    connection = _Connection()
+    calls = []
+
+    class Repository:
+        def __init__(self, supplied_connection):
+            assert supplied_connection is connection
+
+        def load_cooking_requirement(self, _case_no):
+            return SimpleNamespace(requires_cooking=False, version=1)
+
+        def load_for_preview(self, _case_no):
+            return SimpleNamespace(order=SimpleNamespace(terms=_terms(False)))
+
+    class Workflow:
+        def __init__(self, repository, factory, _clock):
+            self.repository = repository
+            with pytest.raises(
+                RuntimeError, match="hcm_reconciliation_requires_caller_owned_uow"
+            ):
+                factory()
+
+        def preview(self, _case_no, proposed_terms):
+            return SimpleNamespace(
+                after=proposed_terms,
+                order_version=1,
+                scheduling_version=2,
+                client_finance_version=3,
+                payroll_version=4,
+                fingerprint=SimpleNamespace(value="f" * 64),
+                requires_formal_apply=True,
+            )
+
+        def apply(self, _request):
+            raise AssertionError("adapter must not own a nested UoW")
+
+        def apply_in_current_uow(self, request):
+            calls.append(request)
+
+    monkeypatch.setattr(adapter, "MySqlOrderTermsRepository", Repository)
+    monkeypatch.setattr(adapter, "OrderTermsWorkflow", Workflow)
+
+    adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
+        "115990823", 9, True
+    )
+
+    assert calls[0].case_no == "115990823"
+    assert calls[0].proposed_terms.requires_cooking is True
+    assert connection.begins == connection.commits == connection.rollbacks == 0
+
+
+def test_case_import_application_owns_exactly_one_uow(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(
+        adapter.MySqlHcmBeClassReconciliationAdapter,
+        "reconcile",
+        lambda _self, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
+    )
+
+    result = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: MySqlUnitOfWork(connection),
+    ).reconcile("115990823")
+
+    assert result.status == "reconciled"
+    assert connection.begins == 1
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
+
+
+def test_case_import_application_borrows_existing_uow(monkeypatch):
+    connection = _Connection()
+    monkeypatch.setattr(
+        adapter.MySqlHcmBeClassReconciliationAdapter,
+        "reconcile",
+        lambda _self, case_no: SimpleNamespace(status="reconciled", case_no=case_no),
+    )
+
+    result = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: (_ for _ in ()).throw(AssertionError("current path must not create a UoW")),
+    ).reconcile_in_current_uow("115990823")
+
+    assert result.status == "reconciled"
+    assert connection.begins == connection.commits == connection.rollbacks == 0
+
+
+def test_case_import_application_rolls_back_reconciliation_failure(monkeypatch):
+    connection = _Connection()
+
+    def fail(_self, _case_no):
+        raise RuntimeError("orders_apply_failed")
+
+    monkeypatch.setattr(
+        adapter.MySqlHcmBeClassReconciliationAdapter,
+        "reconcile",
+        fail,
+    )
+
+    application = CaseImportReconciliationApplication(
+        adapter.MySqlHcmBeClassReconciliationAdapter(connection),
+        lambda: MySqlUnitOfWork(connection),
+    )
+    try:
+        application.reconcile("115990823")
+    except RuntimeError as error:
+        assert str(error) == "orders_apply_failed"
+    else:
+        raise AssertionError("reconciliation failure must escape")
+
+    assert connection.begins == 1
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+
+
+def test_stale_owner_version_is_zero_write_and_rolls_back_outer_uow():
+    connection = _Connection()
+
+    class StalePort:
+        writes = 0
+
+        def reconcile(self, _case_no):
+            raise RuntimeError("stale_owner_version")
+
+    port = StalePort()
+    application = CaseImportReconciliationApplication(
+        port,
+        lambda: MySqlUnitOfWork(connection),
+    )
+
+    with pytest.raises(RuntimeError, match="stale_owner_version"):
+        application.reconcile("115990823")
+
+    assert port.writes == 0
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
+
+
+def test_reconciliation_replay_does_not_repeat_typed_terms_apply():
+    class Port:
+        def __init__(self):
+            self.requires_cooking = None
+            self.apply_count = 0
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {
+                    "月子餐點調理喜好/飲食習慣：": "複合週期題目",
+                    "葷食": "Y",
+                },
+                "requires_cooking": self.requires_cooking,
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("controlled checkbox must not create a review")
+
+        def apply_cooking_terms(self, _case_no, _beclass_id, requires_cooking):
+            self.apply_count += 1
+            self.requires_cooking = requires_cooking
+
+    port = Port()
+
+    first = reconcile_hcm_beclass_cooking(port, "115990823")
+    replay = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert first.requires_cooking is replay.requires_cooking is True
+    assert port.apply_count == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    (("需要下廚", True), ("不需要下廚", False)),
+)
+def test_reconciliation_applies_unique_explicit_line_cooking_answer(answer, expected):
+    class Port:
+        def __init__(self):
+            self.applied = []
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {"是否需要下廚：": answer},
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("controlled explicit answer must not create a review")
+
+        def apply_cooking_terms(self, case_no, beclass_id, requires_cooking):
+            self.applied.append((case_no, beclass_id, requires_cooking))
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status == "reconciled"
+    assert result.requires_cooking is expected
+    assert port.applied == [("115990823", 9, expected)]
+
+
+def test_reconciliation_reviews_explicit_line_answer_conflicting_with_legacy_answer_without_writing():
+    class Port:
+        applied = []
+        reviews = []
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {
+                    "是否需要下廚：": "不需要下廚",
+                    "月子餐點調理喜好/飲食習慣：": "葷食",
+                },
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, _case_no, _facts, issue_code):
+            self.reviews.append(issue_code)
+
+        def apply_cooking_terms(self, *_args):
+            self.applied.append(True)
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status == "cooking_review_required"
+    assert port.reviews == ["case_import_cooking_requirement_ambiguous"]
+    assert port.applied == []
+
+
+@pytest.mark.parametrize("hcm_count,beclass_count", ((0, 1), (1, 0), (2, 1), (1, 2)))
+def test_reconciliation_does_not_write_without_exactly_one_hcm_and_beclass_pair(hcm_count, beclass_count):
+    class Port:
+        applied = []
+
+        def load_pair_facts(self, _case_no):
+            return {"hcm_count": hcm_count, "beclass_count": beclass_count}
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("unpaired records must not enter cooking review")
+
+        def apply_cooking_terms(self, *_args):
+            self.applied.append(True)
+
+    port = Port()
+
+    result = reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert result.status in {"pending_counterpart", "identity_conflict"}
+    assert port.applied == []
+
+
+def test_reconciliation_propagates_service_data_lock_without_writing():
+    class Port:
+        attempts = 0
+
+        def load_pair_facts(self, _case_no):
+            return {
+                "hcm_count": 1,
+                "beclass_count": 1,
+                "beclass_id": 9,
+                "survey_details": {"是否需要下廚：": "需要下廚"},
+                "requires_cooking": None,
+            }
+
+        def record_cooking_review(self, *_args):
+            raise AssertionError("valid source must attempt the typed owner command")
+
+        def apply_cooking_terms(self, *_args):
+            self.attempts += 1
+            raise ValueError("service_data_locked")
+
+    port = Port()
+
+    with pytest.raises(ValueError, match="service_data_locked"):
+        reconcile_hcm_beclass_cooking(port, "115990823")
+
+    assert port.attempts == 1
+
+
+def test_reconciliation_does_not_create_retired_anomaly_rechecks(monkeypatch):
+    requests = []
+
+    class PairingRechecks:
+        def append_case_pairing_recheck(self, request):
+            requests.append(request)
+
+    monkeypatch.setattr(
+        adapter,
+        "reconcile_with_port",
+        lambda _port, _case_no: SimpleNamespace(status="reconciled"),
+    )
+    reconciliation = adapter.MySqlHcmBeClassReconciliationAdapter(
+        object(), PairingRechecks()
+    )
+    monkeypatch.setattr(
+        reconciliation,
+        "load_pair_facts",
+        lambda _case_no: {
+            "hcm_count": 1,
+            "hcm_version": 3,
+            "beclass_count": 1,
+            "beclass_id": 7,
+            "query_no": "CLIENT-001",
+        },
+    )
+
+    reconciliation.reconcile("115990823")
+
+    assert requests == []
+
+
+def test_apply_cooking_terms_falls_back_to_direct_update_when_client_finance_bootstrap_required(monkeypatch):
+    executed = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, statement, params):
+            executed.append((statement, params))
+
+    class Connection(_Connection):
+        def cursor(self):
+            return Cursor()
+
+    class Repository:
+        def __init__(self, _connection):
+            pass
+
+        def load_cooking_requirement(self, _case_no):
+            return SimpleNamespace(requires_cooking=False, version=1)
+
+        def load_for_preview(self, _case_no):
+            raise ValueError("client_finance_bootstrap_required")
+
+    monkeypatch.setattr(adapter, "MySqlOrderTermsRepository", Repository)
+
+    connection = Connection()
+    adapter.MySqlHcmBeClassReconciliationAdapter(connection).apply_cooking_terms(
+        "115990823", 9, True
+    )
+
+    assert executed == [
+        ("UPDATE orders SET requires_cooking=%s WHERE case_no=%s", (True, "115990823"))
+    ]
+    assert connection.begins == connection.commits == connection.rollbacks == 0

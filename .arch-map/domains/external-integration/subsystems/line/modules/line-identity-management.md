@@ -62,7 +62,7 @@
 - static:
   - `python -m py_compile domains/line/identity_binding.py subsystems/line/identity_application.py subsystems/line/identity_management_application.py infrastructure/mysql/line_identity_review_repository.py infrastructure/mysql/line_identity_management_repository.py`
 - test_root: `tests/domains/external-integration/subsystems/line/modules/line-identity-management/`
-- regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_friend_feedback_regressions.py` — canonical webhook friend-state／welcome composition 與同 handler 內 feedback continuation 的既有 cohesive regression。
+- higher_boundary: `tests/domains/external-integration/subsystems/line/integration/test_line_friend_feedback_regressions.py` — 由上位 LINE Subsystem 擁有；canonical webhook friend-state／welcome composition 與客服 feedback continuation 的交易 regression。
 - regression: `tests/domains/external-integration/subsystems/line/subsystems/test_line_menu_command_application.py` — 既有 scoped menu command／admin 視角與訪客回復 regression；雙角色選擇的新驗證沿用本 Module contract root。
 - test_root: `ui_react/src/tests/domains/external-integration/subsystems/line/modules/line-identity-management/` — identity presentation adapter masking and strict typed-state coverage.
 

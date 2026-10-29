@@ -458,6 +458,8 @@ class WeeklyOperationsReportQuery:
         def metric_total(field: str) -> int | None:
             total = 0
             for week in week_starts_between(start_date, end_date):
+                if month is None and week.year != year:
+                    continue  # Annual case dates are calendar-based; weekly metrics belong to their Monday year.
                 metric = by_week.get(week)
                 value = getattr(metric, field) if metric is not None else None
                 if value is None:

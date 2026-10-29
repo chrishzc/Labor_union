@@ -49,12 +49,12 @@
   ],
   "execution": {
     "runner": [
-      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_staging.py tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_orchestrator.py tests\\domains\\finance-import\\subsystems\\finance-import\\test_finance_transaction_classifier.py"
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_staging.py tests\\domains\\finance-import\\subsystems\\finance-import\\integration\\test_finance_import_orchestrator.py tests\\domains\\finance-import\\subsystems\\finance-import\\modules\\import006-owner-current-facts\\unit\\test_finance_transaction_classifier.py"
     ],
     "test_paths": [
       "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_staging.py",
       "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_orchestrator.py",
-      "tests/domains/finance-import/subsystems/finance-import/test_finance_transaction_classifier.py"
+      "tests/domains/finance-import/subsystems/finance-import/modules/import006-owner-current-facts/unit/test_finance_transaction_classifier.py"
     ]
   }
 }

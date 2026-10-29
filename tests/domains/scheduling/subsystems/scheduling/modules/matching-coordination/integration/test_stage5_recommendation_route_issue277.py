@@ -153,7 +153,7 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                 weekly_service_row_count=3,
                 order_information_1=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－1\n總薪資：預估 48000 元"),),
                 order_information_2=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－2\n飲食習慣：清淡"),),
-                weekly_service_rows=(SimpleNamespace(serial_number=1, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
+                weekly_service_rows=(SimpleNamespace(serial_number=1, staff_id=12, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
                 caregiver_resumes=(SimpleNamespace(
                     staff_id=12,
                     staff_name="王小美",
@@ -197,7 +197,7 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
         "weekly_service_row_count": 3,
         "order_information_1": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－1\n總薪資：預估 48000 元"}],
         "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2\n飲食習慣：清淡"}],
-        "weekly_service_rows": [{"serial_number": 1, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],
+        "weekly_service_rows": [{"serial_number": 1, "staff_id": 12, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],
         "caregiver_resumes": [{
             "staff_id": 12,
             "staff_name": "王小美",

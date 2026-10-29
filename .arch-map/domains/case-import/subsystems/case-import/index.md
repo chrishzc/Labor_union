@@ -25,6 +25,7 @@
 - `pairing-current-facts` — `BECLASS-001` owner follow-up facts；`IMPORT-003`不再形成 anomaly recheck；path: `modules/pairing-current-facts.md`
 
 ## Verification routing
+- owner-local HCM／BeClass reconciliation adapter coverage follows the pairing-current-facts Module's canonical test root.
 - default_boundary: Subsystem
 - integration_root: `tests/domains/case-import/subsystems/case-import/integration/` — real registry correction, first-use bootstrap and assigned Payroll coordination.
 - test_root: `tests/subsystems/case_import/`

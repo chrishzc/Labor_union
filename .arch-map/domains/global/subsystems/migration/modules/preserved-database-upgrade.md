@@ -10,7 +10,10 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- Accounting pricing additive release: `db/schema_parts/234_accounting_pricing.sql`, `db/schema_parts/1056_accounting_pricing.sql`, `db/migration_releases/labor_union_2026_10_29_accounting_pricing_v1.json` and `db/migration_releases/labor_union_2026_10_29_accounting_pricing_v1.descriptors.json`; no legacy finance backfill.
+- Accounting pricing evidence: `validation/receipts/ACCOUNTING-PRICING-implementation-20261029.json` — synthetic fresh/preserve and implementation verification; shared-workspace failures are explicit.
 - subsidy period policy: `scripts/migrate_subsidy_period_policy.py` — hash-bound one-time identity relabeling and replayable automatic-refund synchronization, selected by the default preserve-data route. Plan binds selected backfill inventory; invalid owner facts remain pending with case/reason evidence, including after verify or replay. Business backfills select the preserve route before schema-only qualification.
+- subsidy period hash successor: `db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.json` and `db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.descriptors.json` bind the unchanged 1055 SQL and unchanged policy backfill. The archived 2026-10-24 v1 manifest is excluded from default selection; schema, runtime grants and business behavior are unchanged. Preserve-data classification shares the approved fresh retirement projection, retaining the existing LINE append-only/successor contracts.
 - primary:
   - `db/schema_parts/1053_line_order_group_invitation_url.sql` — nullable 私有群組網址，無資料回填。
   - `db/migration_releases/labor_union_2026_10_22_line_order_group_invitation_url_v1.json`

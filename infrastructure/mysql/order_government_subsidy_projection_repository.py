@@ -243,6 +243,8 @@ SELECT
     o.actual_end_date AS actual_end_date,
     o.status AS order_status, o.service_days, o.service_hours_per_day,
     payroll_policy.hourly_rate_ntd AS payroll_hourly_rate_ntd,
+    pricing.pricing_active,pricing.pricing_override_active,pricing.pricing_rule,pricing.pricing_subsidy_hours,
+    pricing.pricing_payroll_covered,pricing.pricing_twins_payroll_covered,
     br.survey_details, correction.effective_values_json AS beclass_effective_values,
     i.id AS claim_item_id,
     i.batch_id AS batch_id,
@@ -261,6 +263,7 @@ SELECT
     overpayment.remaining_amount_ntd AS overpayment_remaining_ntd,
     overpayment.projection_version AS overpayment_version
 FROM orders o
+LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
 JOIN clients c ON c.id = o.client_id
 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
 LEFT JOIN beclass_records br ON (br.query_no=o.case_no OR br.bound_case_no=o.case_no)

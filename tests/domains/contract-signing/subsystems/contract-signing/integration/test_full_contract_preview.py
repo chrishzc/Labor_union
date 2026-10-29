@@ -775,7 +775,7 @@ def test_contract_templates_print_one_page_wide_without_horizontal_fragment_page
     assert worksheet.sheet_properties.pageSetUpPr.fitToPage is True
 
 
-def test_client_finance_coverage_projection_uses_exact_planned_hours():
+def test_client_finance_coverage_projection_caps_citizen_subsidy_at_current_limit():
     facts = {
         "identity_status": "補助市民",
         "total_hours": 80,
@@ -784,9 +784,9 @@ def test_client_finance_coverage_projection_uses_exact_planned_hours():
     }
     owners = {"client_finance": "a" * 64}
     _project_subsidy_coverage(facts, owners)
-    assert facts["subsidy_hours"] == 80
-    assert facts["client_finance_self_pay_days"] == 0
-    assert facts["projected_subsidy_amount"] == 28000
+    assert facts["subsidy_hours"] == 40
+    assert facts["client_finance_self_pay_days"] == 5
+    assert facts["projected_subsidy_amount"] == 12000
     assert owners["client_finance"] != "a" * 64
 
 

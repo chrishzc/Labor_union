@@ -24,7 +24,6 @@ NOTIFICATION_RECIPIENT_CONSUMERS = (
     "infrastructure/mysql/order_auto_completion_repository.py",
     "infrastructure/mysql/order_cancellation_repository.py",
     "infrastructure/mysql/order_information_repository.py",
-    "subsystems/line/candidate_contact_coordination_worker.py",
     "subsystems/line/candidate_contact_response_application.py",
     "subsystems/scheduling/candidate_contact_pool_workflow.py",
     "subsystems/scheduling/matching_communication_workflow.py",
@@ -47,3 +46,8 @@ def test_notification_recipients_require_canonical_bound_role() -> None:
         source = _source(relative_path)
         assert "line_identity_role_bindings" in source, relative_path
         assert "binding_status='bound'" in source.replace(" ", ""), relative_path
+    retired_worker = _source("subsystems/line/candidate_contact_coordination_worker.py").split(
+        "class CandidateContactCoordinationWorker", 1
+    )[1].split("def query_manual_followups", 1)[0]
+    assert "processing_status='cancelled'" in retired_worker
+    assert "enqueue" not in retired_worker and "INSERT INTO line_delivery_tasks" not in retired_worker

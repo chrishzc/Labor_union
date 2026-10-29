@@ -62,9 +62,9 @@ def test_lifecycle_projection_owns_order_update_for_typed_command():
     persist_order_lifecycle_projection(cursor, command)
 
     assert cursor.statement.startswith("UPDATE orders SET")
-    assert cursor.parameters == ("服務完成", date(2026, 8, 24), None, 5, "CASE-001", 4)
+    assert cursor.parameters == ("服務完成", date(2026, 8, 24), None, None, 5, "CASE-001", 4)
 
     command.staff_payment_due_date = date(2026, 9, 15)
     persist_order_lifecycle_projection(cursor, command)
-    assert cursor.parameters == ("服務完成", date(2026, 8, 24), date(2026, 9, 15), 5, "CASE-001", 4)
+    assert cursor.parameters == ("服務完成", date(2026, 8, 24), None, date(2026, 9, 15), 5, "CASE-001", 4)
     assert "staff_payment_due_date=COALESCE(staff_payment_due_date,%s)" in cursor.statement

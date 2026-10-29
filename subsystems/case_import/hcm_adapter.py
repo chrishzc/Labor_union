@@ -37,6 +37,7 @@ def build_hcm_case_import_intent(
     *,
     requires_cooking: bool | None = None,
     provisional_registration_id: int | None = None,
+    pricing_identity_rule: str | None = None,
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")
@@ -46,7 +47,7 @@ def build_hcm_case_import_intent(
         record, case_no, planned_end_date, requires_cooking=requires_cooking
     )
     bootstrap = build_approved_case_architecture_bootstrap_intent(
-        case_no, identity_status, created_at, planned_start_date
+        case_no, identity_status, created_at, planned_start_date, pricing_identity_rule
     )
     return CaseImportIntent(
         case_no,
@@ -54,6 +55,7 @@ def build_hcm_case_import_intent(
         order,
         bootstrap,
         provisional_registration_id=provisional_registration_id,
+        pricing_identity_rule=pricing_identity_rule,
     )
 
 
@@ -99,12 +101,13 @@ def _order_root_facts(
 
 
 def build_approved_case_architecture_bootstrap_intent(
-    case_no, identity_status, created_at, start_date
+    case_no, identity_status, created_at, start_date, pricing_identity_rule=None
 ) -> CaseArchitectureBootstrapIntent:
-    rate = _CLIENT_RATE_BY_IDENTITY.get(identity_status)
+    base_identity = {"citizen": "補助市民", "social": "社福", "non_citizen": "非市民"}.get(pricing_identity_rule, identity_status)
+    rate = _CLIENT_RATE_BY_IDENTITY.get(base_identity)
     if rate is None:
         raise ValueError("invalid_case_import_identity_policy")
-    deposit_days = 0 if identity_status in _SUBSIDIZED_IDENTITIES else 5
+    deposit_days = 0 if base_identity in _SUBSIDIZED_IDENTITIES else 5
     terms = ClientPaymentTermsRootFacts(
         CLIENT_PAYMENT_POLICY_VERSION,
         MoneyNTD(rate),

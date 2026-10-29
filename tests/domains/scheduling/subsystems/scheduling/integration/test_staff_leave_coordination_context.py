@@ -1,4 +1,5 @@
 from datetime import date
+import re
 
 import pytest
 
@@ -115,6 +116,8 @@ class _SqlCursor:
 
     def execute(self, sql, params):
         values = tuple(value.isoformat() if isinstance(value, date) else value for value in params)
+        sql = re.sub(r'CAST\(([^)]+) AS CHAR CHARACTER SET utf8mb4\)', r'CAST(\1 AS TEXT)', sql)
+        sql = sql.replace(' COLLATE utf8mb4_unicode_ci', '')
         self.cursor.execute(sql.replace("%s", "?"), values)
 
     @staticmethod

@@ -10,7 +10,27 @@ from shared_kernel.migration_release import load_migration_release_manifest
 
 ROOT=Path(__file__).resolve().parents[8]
 ARTIFACT='1055_government_subsidy_periods.sql'
-MANIFEST=ROOT/'db/migration_releases/labor_union_2026_10_24_government_subsidy_periods_v1.json'
+MANIFEST=ROOT/'db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.json'
+
+
+def test_hash_successor_preserves_sql_descriptors_backfill_and_archived_release():
+    old_path = ROOT/'db/migration_releases/labor_union_2026_10_24_government_subsidy_periods_v1.json'
+    old = json.loads(old_path.read_text(encoding='utf-8'))
+    current = json.loads((ROOT/'db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.json').read_text(encoding='utf-8'))
+    old_descriptors = json.loads((ROOT/old['descriptor_artifact']['relative_path']).read_text(encoding='utf-8'))
+    current_descriptors = json.loads((ROOT/current['descriptor_artifact']['relative_path']).read_text(encoding='utf-8'))
+    assert old['artifacts'][0]['sha256'] == '1d909e243914353cb485bef9475094c1d9ab810772500d94a4b5061a55b86e9b'
+    assert old_path.name not in migration.DEFAULT_RELEASE_MANIFESTS
+    assert current['source_baseline'] == old['source_baseline']
+    assert current['backfills'] == old['backfills']
+    assert current_descriptors['descriptors'] == old_descriptors['descriptors']
+    assert {k:v for k,v in current['artifacts'][0].items() if k != 'sha256'} == {
+        k:v for k,v in old['artifacts'][0].items() if k != 'sha256'
+    }
+    preserve = migration.split_sql((ROOT/'db/schema_parts'/ARTIFACT).read_text(encoding='utf-8'))
+    fresh = migration.split_sql((ROOT/'db/schema_parts/233_government_subsidy_periods.sql').read_text(encoding='utf-8'))
+    assert fresh[:-1] == preserve
+    assert fresh[-1].startswith('INSERT IGNORE INTO client_subsidy_policy_migrations')
 
 
 def metadata(descriptor):
@@ -40,11 +60,12 @@ def test_release_binds_separate_schema_and_backfill_and_fresh_does_not_relabel_c
     assert raw['artifacts'][0]['data_effect']=='schema_only' and len(raw['backfills'])==1
     for item in (raw['artifacts'][0],raw['descriptor_artifact'],raw['backfills'][0]['artifact']):
         assert hashlib.sha256((ROOT/item['relative_path']).read_bytes()).hexdigest()==item['sha256']
-    assert migration.DEFAULT_RELEASE_MANIFESTS[-1]==MANIFEST.name
+    assert MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
     assert 'subsidy-period-policy-v1' in {item.backfill_id for item in migration.RELEASE_MANIFEST.backfills}
     fresh=(ROOT/'db/schema_parts/233_government_subsidy_periods.sql').read_text(encoding='utf-8')
     assert 'INSERT IGNORE INTO client_subsidy_policy_migrations' in fresh
     assert not re.search(r'\b(?:UPDATE|DELETE)\s+clients\b',fresh,re.I)
+
 
 
 def test_exact_descriptor_rejects_partial_column_index_foreign_key_check_and_collation_drift():

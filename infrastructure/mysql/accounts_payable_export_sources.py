@@ -10,6 +10,7 @@ from domains.staff_payables.reconciliation import StaffPayableStatus
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem, ClientRefundExportFact, StaffPayableExportFact
 from infrastructure.mysql.order_terms_read_model import select_current_assignments, select_scheduling_aggregate
+from infrastructure.mysql.payroll_installments import installment_export_sql
 
 
 class MySqlReadOnlySnapshot:
@@ -41,7 +42,7 @@ class MySqlStaffPayableExportSource:
         target_payment_date: date,
     ) -> tuple[StaffPayableExportFact, ...]:
         with self._connection.cursor() as cursor:
-            cursor.execute(_STAFF_PAYABLES_SQL, (target_payment_date,))
+            cursor.execute(installment_export_sql(_STAFF_PAYABLES_SQL), (target_payment_date,))
             rows = tuple(cursor.fetchall())
         facts = tuple(_staff_fact(row) for row in rows)
         return tuple(sorted(facts, key=lambda item: (item.staff_id, item.obligation_identity)))
@@ -50,7 +51,7 @@ class MySqlStaffPayableExportSource:
         self, case_no: str, target_payment_date: date
     ) -> tuple[CaseStaffPayableAuditItem, ...]:
         with self._connection.cursor() as cursor:
-            cursor.execute(_STAFF_PAYABLE_CASE_AUDIT_SQL, (case_no,))
+            cursor.execute(installment_export_sql(_STAFF_PAYABLE_CASE_AUDIT_SQL), (case_no,))
             formal_rows = tuple(cursor.fetchall())
             cursor.execute(_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL, (case_no,))
             order_rows = tuple(cursor.fetchall())
@@ -110,6 +111,9 @@ def _staff_fact(row) -> StaffPayableExportFact:
 
 
 def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
+    if row.get("installment_funding") is not None:
+        balance, amount = int(row["export_amount_ntd"]), int(row["amount_due_ntd"])
+        row = {**row, "payout_status": "completed" if balance == 0 else "partially_paid" if balance < amount else "payable"}
     due_date = row.get("due_date")
     payout_status = str(row.get("payout_status") or "payable")
     historical_confirmation = row.get("historical_confirmation_kind")

@@ -306,7 +306,10 @@ def _bank_account_payload(bank_account):
 
 
 def _obligation_payload(obligation):
-    return {"identity": obligation.obligation_identity, "staff_id": obligation.staff_id, "amount_due_ntd": obligation.amount_due.amount, "events": tuple(_existing_event_payload(item) for item in sorted(obligation.events, key=lambda item: item.identity))}
+    payload = {"identity": obligation.obligation_identity, "staff_id": obligation.staff_id, "amount_due_ntd": obligation.amount_due.amount, "events": tuple(_existing_event_payload(item) for item in sorted(obligation.events, key=lambda item: item.identity))}
+    if obligation.installment_limit is not None:
+        payload["installment_limit_ntd"] = obligation.installment_limit.amount
+    return payload
 
 
 def _existing_event_payload(event):

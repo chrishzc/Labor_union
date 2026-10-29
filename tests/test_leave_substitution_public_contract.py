@@ -262,11 +262,8 @@ def test_apply_request_has_no_implicit_linked_identity_or_receipt_fields() -> No
     assert "receipt_key" not in request.model_dump()
 
 
-@pytest.mark.parametrize("code,category", [
-    ("leave_request_stale", "conflict"),
-    ("leave_request_idempotency_conflict", "idempotency_mismatch"),
-])
-def test_review_conflict_retains_specific_reason_through_global_error_boundary(code, category):
+@pytest.mark.parametrize("expected_version", [1, 99])
+def test_retired_review_rejects_current_and_stale_requests_without_opening_application(expected_version):
     from types import SimpleNamespace
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -274,26 +271,22 @@ def test_review_conflict_retains_specific_reason_through_global_error_boundary(c
     from api.dependencies.staff_leave_intake import get_staff_leave_customer_coordination_application
     from api.exception_handlers import install_typed_error_handlers
     from api.routes.staff_leave_management import router
-    from subsystems.scheduling.staff_leave_intake_workflow import StaffLeaveIntakeWorkflowError
-    class ConflictApplication:
-        def review(self, command):
-            if code == "leave_request_stale":
-                raise StaffLeaveIntakeWorkflowError(code)
-            raise ValueError(code)
+    class ForbiddenApplication:
+        def __init__(self):
+            pytest.fail("retired review must not open the application or write history")
     app = FastAPI()
     install_typed_error_handlers(app)
     app.include_router(router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(username="fixture")
-    app.dependency_overrides[get_staff_leave_customer_coordination_application] = ConflictApplication
+    app.dependency_overrides[get_staff_leave_customer_coordination_application] = ForbiddenApplication
     response = TestClient(app).post("/api/v1/scheduling/staff-leave-requests/1/review",
         headers={"Idempotency-Key": "review-conflict-fixture"},
-        json={"expected_version": 1, "action": "accept", "reason": "fixture"})
-    assert response.status_code == 409
+        json={"expected_version": expected_version, "action": "accept", "reason": "fixture"})
+    assert response.status_code == 410
     error = response.json()["detail"]["error"]
-    assert error["code"] == code
-    assert error["category"] == category
-    assert "重新整理" in error["message"]
-    assert error["message"] != "資料版本或目前狀態發生衝突"
+    assert error["code"] == "resource_retired"
+    assert error["category"] == "not_found"
+    assert error["retryable"] is False
 
 
 @pytest.mark.parametrize("code", ["leave_request_stale", "leave_request_state_conflict", "leave_request_idempotency_conflict"])

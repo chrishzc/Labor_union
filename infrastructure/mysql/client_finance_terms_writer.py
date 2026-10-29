@@ -25,7 +25,12 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
     changed = False
     if getattr(command.candidate, "subsidy_return_plan", None) is not None:
         changed = persist_subsidy_return_plan(cursor, command)
-    if not command.candidate.actions and command.candidate.payment_terms is None and not changed:
+    if (
+        not command.candidate.actions
+        and command.candidate.payment_terms is None
+        and not changed
+        and command.candidate.resulting_account_version == command.candidate.expected_account_version
+    ):
         return
     _advance_account_version(cursor, command)
     _append_outbox(cursor, command)

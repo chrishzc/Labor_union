@@ -12,8 +12,16 @@ MANIFEST = ROOT/'db/migration_releases/labor_union_2026_10_22_line_order_group_i
 
 
 def test_release_registry_fresh_assembly_and_descriptor_match_the_additive_sql():
-    assert migration._local_ordered_upgrade_entries()[-1]['artifact']['name'] == ARTIFACT
-    assert load_schema_assembly().active_artifact_paths[-1].name == ARTIFACT
+    preserve_parts = [entry['artifact']['name'] for entry in migration._local_ordered_upgrade_entries()]
+    preserve_index = preserve_parts.index(ARTIFACT)
+    assert preserve_parts[preserve_index:preserve_index + 3] == [
+        ARTIFACT, '1054_scheduling_service_start.sql', '1055_government_subsidy_periods.sql',
+    ]
+    fresh_parts = [path.name for path in load_schema_assembly().active_artifact_paths]
+    fresh_index = fresh_parts.index(ARTIFACT)
+    assert fresh_parts[fresh_index:fresh_index + 3] == [
+        ARTIFACT, '1054_scheduling_service_start.sql', '233_government_subsidy_periods.sql',
+    ]
     released = load_migration_release_manifest(MANIFEST, ROOT).owned_object_descriptors(ROOT)[ARTIFACT]
     canonical = migration._canonical_artifact_descriptor(ARTIFACT)
     assert released['parent_columns'] == canonical['parent_columns']

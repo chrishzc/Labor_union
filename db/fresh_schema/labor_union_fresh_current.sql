@@ -4,6 +4,33 @@
 
 SET FOREIGN_KEY_CHECKS=0;
 
+CREATE TABLE `accounting_pricing_policies` (
+  `id` bigint NOT NULL,
+  `effective_on` date NOT NULL,
+  `policy_json` json NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ix_accounting_pricing_effective` (`effective_on`,`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `accounting_pricing_receipts` (
+  `idempotency_key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `command_hash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `result_json` json NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL,
+  PRIMARY KEY (`idempotency_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `accounting_pricing_state` (
+  `singleton_id` tinyint NOT NULL,
+  `revision` bigint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`singleton_id`),
+  CONSTRAINT `chk_accounting_pricing_singleton` CHECK ((`singleton_id` = 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `actual_hours_adjustments` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `assignment_id` bigint NOT NULL,
@@ -992,6 +1019,19 @@ CREATE TABLE `case_payroll_rate_policy_snapshots` (
   CONSTRAINT `fk_case_payroll_policy_source_event` FOREIGN KEY (`source_event_id`) REFERENCES `case_architecture_bootstrap_events` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_case_payroll_policy_amount` CHECK ((`hourly_rate_ntd` > 0)),
   CONSTRAINT `chk_case_payroll_policy_identity` CHECK ((char_length(trim(`source_identity_status`)) > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `case_pricing_events` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `resulting_revision` bigint NOT NULL,
+  `pricing_json` json NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at_utc` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_case_pricing_revision` (`case_no`,`resulting_revision`),
+  CONSTRAINT `fk_case_pricing_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `case_staff_assignments` (
@@ -5980,10 +6020,17 @@ CREATE TABLE `orders` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `requires_cooking` tinyint(1) DEFAULT NULL COMMENT '是否需要月嫂下廚；NULL 只允許 legacy/待人工補正',
+  `pricing_policy_id` bigint DEFAULT NULL,
+  `pricing_override_event_id` bigint DEFAULT NULL,
+  `pricing_revision` bigint NOT NULL DEFAULT '0',
   PRIMARY KEY (`case_no`),
   KEY `client_id` (`client_id`),
   KEY `staff_id` (`staff_id`),
   KEY `idx_order_status` (`status`),
+  KEY `ix_orders_pricing_policy` (`pricing_policy_id`),
+  KEY `ix_orders_pricing_override` (`pricing_override_event_id`),
+  CONSTRAINT `fk_order_pricing_override` FOREIGN KEY (`pricing_override_event_id`) REFERENCES `case_pricing_events` (`id`),
+  CONSTRAINT `fk_order_pricing_policy` FOREIGN KEY (`pricing_policy_id`) REFERENCES `accounting_pricing_policies` (`id`),
   CONSTRAINT `fk_orders_case_no` FOREIGN KEY (`case_no`) REFERENCES `clients` (`case_no`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `orders_ibfk_1` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE,
   CONSTRAINT `orders_ibfk_2` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE SET NULL,
@@ -7494,6 +7541,16 @@ CREATE TABLE `staff_obligation_events` (
   CONSTRAINT `chk_staff_obligation_event_version` CHECK ((`resulting_payroll_version` = (`expected_payroll_version` + 1)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `staff_obligation_installments` (
+  `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `funding_kind` enum('client','subsidy') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  `due_date` date DEFAULT NULL,
+  PRIMARY KEY (`obligation_identity`,`funding_kind`),
+  CONSTRAINT `fk_payroll_installment_obligation` FOREIGN KEY (`obligation_identity`) REFERENCES `staff_obligations` (`obligation_identity`),
+  CONSTRAINT `chk_payroll_installment_amount` CHECK ((`amount_ntd` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `staff_obligations` (
   `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `assignment_id` bigint NOT NULL,
@@ -8021,6 +8078,8 @@ CREATE TABLE `weekly_report_metrics` (
   CONSTRAINT `chk_weekly_report_metrics_inquiry_nonnegative` CHECK (((`inquiry_count` is null) or (`inquiry_count` >= 0))),
   CONSTRAINT `chk_weekly_report_metrics_promotion_nonnegative` CHECK (((`promotion_count` is null) or (`promotion_count` >= 0)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `accounting_pricing_state` (`singleton_id`,`revision`) VALUES (1,0);
 
 INSERT INTO `client_subsidy_policy_migrations` (`policy_key`) VALUES ('subsidy-period-policy-2026-10-24-v1');
 
@@ -9220,6 +9279,8 @@ SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be deleted';
 
 CREATE TRIGGER `trg_staff_recovery_matchings_before_update` BEFORE UPDATE ON `staff_overpayment_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be updated';
+
+CREATE OR REPLACE VIEW `case_pricing_facts` AS select `o`.`case_no` AS `case_no`,1 AS `pricing_active`,(`e`.`id` is not null) AS `pricing_override_active`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.rule')),`i`.`rule_name`) AS `pricing_rule`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.subsidy_hours')),`i`.`subsidy_hours`) AS `pricing_subsidy_hours`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.covered')),`i`.`client_covered`) AS `pricing_client_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.excess')),`i`.`client_excess`) AS `pricing_client_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),`i`.`payroll_covered`) AS `pricing_payroll_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.excess')),`i`.`payroll_excess`) AS `pricing_payroll_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),json_unquote(json_extract(`p`.`policy_json`,'$.twins_payroll.covered'))) AS `pricing_twins_payroll_covered` from ((((`orders` `o` join `clients` `c` on((`c`.`id` = `o`.`client_id`))) left join `accounting_pricing_policies` `p` on((`p`.`id` = `o`.`pricing_policy_id`))) left join json_table(`p`.`policy_json`, '$.identities[*]' columns (`identity_name` varchar(100) character set utf8mb4 path '$.identity_name', `rule_name` varchar(20) character set utf8mb4 path '$.rule', `subsidy_hours` varchar(100) character set utf8mb4 path '$.subsidy_hours', `client_covered` varchar(30) character set utf8mb4 path '$.client.covered', `client_excess` varchar(30) character set utf8mb4 path '$.client.excess', `payroll_covered` varchar(30) character set utf8mb4 path '$.payroll.covered', `payroll_excess` varchar(30) character set utf8mb4 path '$.payroll.excess')) `i` on(((`i`.`identity_name` collate utf8mb4_unicode_ci) = ((case `c`.`identity_status` when '一般市民' then '補助市民' when '低收入戶' then '社福' when '中低收入戶' then '社福' else `c`.`identity_status` end) collate utf8mb4_unicode_ci)))) left join `case_pricing_events` `e` on(((`e`.`id` = `o`.`pricing_override_event_id`) and (`e`.`case_no` = `o`.`case_no`)))) where ((`o`.`pricing_policy_id` is not null) or (`o`.`pricing_override_event_id` is not null));
 
 CREATE OR REPLACE VIEW `v_order_details` AS select `o`.`case_no` AS `case_no`,`o`.`status` AS `order_status`,`o`.`lifecycle_version` AS `lifecycle_version`,`o`.`cancel_reason` AS `cancel_reason`,`o`.`line_group_id` AS `line_group_id`,`o`.`actual_start_date` AS `actual_start_date`,`o`.`actual_end_date` AS `actual_end_date`,`o`.`contract_identity` AS `contract_identity`,`c`.`id` AS `client_id`,`c`.`name` AS `client_name`,`c`.`phone` AS `client_phone`,`c`.`service_type` AS `service_mode`,`s`.`id` AS `staff_id`,`s`.`name` AS `staff_name`,`s`.`phone` AS `staff_phone`,`o`.`service_days` AS `service_days`,`o`.`service_hours_per_day` AS `service_hours_per_day`,`c`.`identity_status` AS `identity_status`,`o`.`floor_fee` AS `floor_fee`,`o`.`deposit_date` AS `deposit_date`,`o`.`start_date` AS `start_date`,`o`.`end_date` AS `end_date`,(`o`.`service_days` * `o`.`service_hours_per_day`) AS `total_hours`,(case when (`c`.`identity_status` = '一般市民') then 40 when (`c`.`identity_status` = '補助市民') then 120 else 0 end) AS `subsidy_hours`,greatest(0,((`o`.`service_days` * `o`.`service_hours_per_day`) - (case when (`c`.`identity_status` = '一般市民') then 40 when (`c`.`identity_status` = '補助市民') then 120 else 0 end))) AS `self_pay_hours`,(case when (`c`.`identity_status` = '非市民') then 350 else 300 end) AS `employer_unit_price`,(case when (`c`.`identity_status` = '補助市民') then 0 else 5 end) AS `deposit_days`,(((case when (`c`.`identity_status` = '補助市民') then 0 else 5 end) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) * `o`.`service_hours_per_day`) AS `deposit_amount`,((((case when (`c`.`identity_status` = '補助市民') then 0 else 5 end) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) * `o`.`service_hours_per_day`) + coalesce(`o`.`floor_fee`,0)) AS `initial_payment_payable`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then `o`.`start_date` else NULL end) AS `first_payment_date`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then greatest(0,(`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end))) else NULL end) AS `remaining_days`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then least(15,greatest(0,(`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)))) else NULL end) AS `first_payment_days`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then ((least(15,greatest(0,(`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)))) * `o`.`service_hours_per_day`) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) else NULL end) AS `first_payment_amount`,(case when ((`o`.`status` not in ('洽談中','訂單取消')) and (((`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)) - 15) > 0)) then (`o`.`start_date` + interval 15 day) else NULL end) AS `second_payment_date`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then greatest(0,((`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)) - 15)) else NULL end) AS `second_payment_days`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then ((greatest(0,((`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)) - 15)) * `o`.`service_hours_per_day`) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) else NULL end) AS `second_payment_amount`,((((((case when (`c`.`identity_status` = '補助市民') then 0 else 5 end) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) * `o`.`service_hours_per_day`) + coalesce(`o`.`floor_fee`,0)) + coalesce((case when (`o`.`status` not in ('洽談中','訂單取消')) then ((least(15,greatest(0,(`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)))) * `o`.`service_hours_per_day`) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) else 0 end),0)) + coalesce((case when (`o`.`status` not in ('洽談中','訂單取消')) then ((greatest(0,((`o`.`service_days` - (case when (`c`.`identity_status` = '補助市民') then 0 else 5 end)) - 15)) * `o`.`service_hours_per_day`) * (case when (`c`.`identity_status` = '非市民') then 350 else 300 end)) else 0 end),0)) AS `total_employer_self_pay_payable`,`payroll_rate`.`hourly_rate_ntd` AS `service_unit_price`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then ((`o`.`service_days` * `o`.`service_hours_per_day`) * `payroll_rate`.`hourly_rate_ntd`) else NULL end) AS `service_salary`,`o`.`staff_payment_due_date` AS `salary_payment_date_1`,(case when (`o`.`status` not in ('洽談中','訂單取消')) then ((case when (`c`.`identity_status` = '一般市民') then 40 when (`c`.`identity_status` = '補助市民') then 120 else 0 end) * `payroll_rate`.`hourly_rate_ntd`) else NULL end) AS `subsidy_salary`,(select max(cast(`claim_batch`.`submitted_at` as date)) from (`subsidy_claim_batch_items` `claim_item` join `subsidy_claim_batches` `claim_batch` on((`claim_batch`.`id` = `claim_item`.`batch_id`))) where ((`claim_item`.`case_no` = `o`.`case_no`) and (`claim_batch`.`submitted_at` is not null))) AS `govt_claim_date` from (((`orders` `o` join `clients` `c` on((`o`.`client_id` = `c`.`id`))) left join `staff` `s` on((`o`.`staff_id` = `s`.`id`))) left join `case_payroll_rate_policy_snapshots` `payroll_rate` on((`payroll_rate`.`case_no` = `o`.`case_no`)));
 

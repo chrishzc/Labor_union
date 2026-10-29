@@ -534,7 +534,7 @@ def test_preassignment_confirmed_dates_are_not_mislabeled_as_actual_start() -> N
     ).items[0]
 
     assert item.sop_steps[8].status == "completed"
-    assert item.sop_steps[8].label == "確認事前服務日期（精算）"
+    assert item.sop_steps[8].label == "協調服務日期與排班"
     assert item.sop_steps[9].status == "unavailable"
 
 

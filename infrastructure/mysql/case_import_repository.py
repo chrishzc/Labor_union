@@ -92,6 +92,7 @@ class MySqlCaseImportRepository:
                 intent,
                 multi_birth_count,
                 lock=for_update,
+                pricing_identity_rule=intent.pricing_identity_rule,
             )
             registration = _load_provisional_registration(cursor, intent, lock=for_update)
         return CaseImportFacts(
@@ -99,6 +100,7 @@ class MySqlCaseImportRepository:
             policy,
             registration,
             multi_birth_count,
+            intent.pricing_identity_rule,
         )
 
     def claim_command(self, command, command_fingerprint):
@@ -127,6 +129,8 @@ class MySqlCaseImportRepository:
         with _mysql_cursor(self._connection) as cursor:
             client_id = _upsert_case_client(cursor, candidate)
             _insert_order(cursor, candidate, client_id)
+            from infrastructure.mysql.pricing_configuration_repository import bind_initial_pricing
+            bind_initial_pricing(cursor, candidate.case_no)
         return client_id
 
     def consume_provisional_registration(self, command, candidate, client_id, import_event_id):
@@ -315,7 +319,7 @@ def _load_multi_birth_count(cursor, intent, *, lock) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _load_rate_policy(cursor, intent, multi_birth_count, *, lock):
+def _load_rate_policy(cursor, intent, multi_birth_count, *, lock, pricing_identity_rule=None):
     if intent.bootstrap is None:
         return None
     identity = str(_client_attribute(intent, "identity_status"))
@@ -323,6 +327,7 @@ def _load_rate_policy(cursor, intent, multi_birth_count, *, lock):
         policy_kind = payroll_policy_kind_for_case(
             identity,
             multi_birth_count,
+            pricing_identity_rule,
         )
     except BootstrapDomainError as error:
         raise CaseImportDomainError(

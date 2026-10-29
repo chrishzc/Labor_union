@@ -24,6 +24,7 @@
   - `api/schemas/line_staff_self_service.py`
 
 ## Verification
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/service-day-log/`
 - integration: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_day_log_controlled_media.py` — controlled meal/baby attachment gates and schema kind contract
 - legacy focused: `tests/test_service_day_log_workflow.py`
 - routing: `.arch-map/domains/scheduling/subsystems/scheduling/index.md`

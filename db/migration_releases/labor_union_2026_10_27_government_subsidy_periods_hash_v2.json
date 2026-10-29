@@ -1,0 +1,120 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-subsidy-periods-2026-10-27-v2",
+  "release_metadata": {
+    "release_name": "Subsidy period schema hash successor",
+    "application_version": "subsidy-periods-v1",
+    "published_at": "2026-10-27",
+    "description": "Immutable successor binding audited unchanged 1055 SQL bytes; retain the 2026-10-24 manifest unchanged. Schema, descriptor semantics and business backfill are unchanged."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-scheduling-service-start-2026-10-23-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1055_government_subsidy_periods.sql",
+      "relative_path": "db/schema_parts/1055_government_subsidy_periods.sql",
+      "sha256": "46584af7448105c02299b22735d44567ad23a6d1a196f235b8b8b4fb6d6b9f1c",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-additive-tables-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [
+    {
+      "backfill_id": "subsidy-period-policy-v1",
+      "artifact": {
+        "name": "migrate_subsidy_period_policy.py",
+        "relative_path": "scripts/migrate_subsidy_period_policy.py",
+        "sha256": "8fa81ff470282b0065c81f02195e177c6feaffb906ba9f39f84ccb99b75eb87b",
+        "dependencies": [
+          "1055_government_subsidy_periods.sql"
+        ]
+      },
+      "dry_run_arguments": [
+        "--dry-run",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{plan}"
+      ],
+      "apply_arguments": [
+        "--apply",
+        "--target-database",
+        "{candidate}",
+        "--plan-receipt",
+        "{plan}",
+        "--backup-receipt",
+        "{backup}",
+        "--receipt-path",
+        "{receipt}"
+      ],
+      "verify_arguments": [
+        "--verify",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{receipt}"
+      ],
+      "receipt_contract": "subsidy-period-policy-migration/v1",
+      "transaction_boundary": "script-owned-candidate-transaction",
+      "archive_policy": "operation-receipt-sibling-artifacts"
+    }
+  ],
+  "verification_contracts": [
+    {
+      "verification_id": "subsidy-periods-exact",
+      "phase": "post-schema",
+      "policy": "Exact additive period receipt, evidence and migration-journal objects; immutable historical roots retained",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "subsidy-periods-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "subsidy-periods-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_27_government_subsidy_periods_hash_v2.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.descriptors.json",
+    "sha256": "0773a7caebc480f042b219b4a547b76ad17fc74cefdae93033d9c3be0a635fbe",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

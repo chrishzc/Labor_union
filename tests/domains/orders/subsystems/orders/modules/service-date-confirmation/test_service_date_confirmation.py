@@ -563,7 +563,8 @@ def test_arrangement_lifecycle_uses_orders_writer_and_closes_version_conflict(up
     assert update_sql.startswith("UPDATE orders SET status=%s,actual_end_date=%s,")
     assert "staff_payment_due_date=COALESCE(staff_payment_due_date,%s)" in update_sql
     assert update_sql.endswith("lifecycle_version=%s WHERE case_no=%s AND lifecycle_version=%s")
-    assert parameters == ("服務中", facts.current_dates[-1], payment_due_date, 4, facts.case_no, 3)
+    assert "actual_start_date=COALESCE(%s,actual_start_date)" in update_sql
+    assert parameters == ("服務中", facts.current_dates[-1], None, payment_due_date, 4, facts.case_no, 3)
     assert not any("order_service_data_locks" in sql for sql, _ in statements)
 
 

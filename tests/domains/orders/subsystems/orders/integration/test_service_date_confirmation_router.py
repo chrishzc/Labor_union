@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 import pytest
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_line_matching_override
 from api.dependencies.service_date_confirmation import (
     get_historical_restart_arrangement_workflow,
     get_service_date_confirmation_workflow,
@@ -171,7 +171,7 @@ def _create_app(
         return JSONResponse(status_code=422, content={"detail": errors})
 
     if authenticate:
-        app.dependency_overrides[require_system_admin] = lambda: principal or AdminPrincipal(
+        app.dependency_overrides[require_line_matching_override] = lambda: principal or AdminPrincipal(
             id=1, username="admin_tester", display_name="Admin Tester", role="system_admin"
         )
     app.dependency_overrides[get_service_date_confirmation_workflow] = (
@@ -425,7 +425,8 @@ def test_apply_service_dates_reason_validation():
         headers=headers,
         json={**base_body, "reason": ""},
     )
-    assert res_empty.status_code == 422
+    assert res_empty.status_code == 200
+    assert repo.receipts[headers["Idempotency-Key"]][2] == ""
 
     # Whitespace only reason
     res_space = client.post(
@@ -433,7 +434,8 @@ def test_apply_service_dates_reason_validation():
         headers=headers,
         json={**base_body, "reason": "     "},
     )
-    assert res_space.status_code == 422
+    assert res_space.status_code == 200
+    assert repo.receipts[headers["Idempotency-Key"]][2] == ""
 
     # Missing reason field
     res_missing = client.post(
@@ -441,7 +443,8 @@ def test_apply_service_dates_reason_validation():
         headers=headers,
         json=base_body,
     )
-    assert res_missing.status_code == 422
+    assert res_missing.status_code == 200
+    assert repo.receipts[headers["Idempotency-Key"]][2] == ""
 
     # Single character reason (valid)
     res_single = client.post(
@@ -587,7 +590,9 @@ def test_historical_arrangement_missing_policy_reports_the_arrangement_blocker()
     )
 
 
-def test_service_dates_requires_auth():
+def test_service_dates_requires_auth(monkeypatch):
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
     repo = InMemoryServiceDateConfirmationRepository()
     app = _create_app(
         repo,

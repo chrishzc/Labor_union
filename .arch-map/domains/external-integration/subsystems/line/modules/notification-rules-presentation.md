@@ -47,6 +47,7 @@
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — 一般畫面資訊層級與closed error boundary。
 
 ## Verification
+- test_root: `tests/domains/external-integration/subsystems/line/modules/notification-rules-presentation/`
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx`
 - contract_test: `tests/domains/external-integration/subsystems/line/subsystems/test_line_notification_rule_api.py`

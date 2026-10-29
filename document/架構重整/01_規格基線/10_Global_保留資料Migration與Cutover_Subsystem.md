@@ -1,5 +1,8 @@
 # Global Preserve-data Migration／Cutover Subsystem
 
+
+> 2026-10-29 新帳務參數依規格04 §0 PRICE-09走additive fresh／preserve release；新增政策、Orders nullable綁定、人工事件及分期資料，不回填或重算既有案件、不覆寫既有快照／流水。不包含production、reset或switch授權。
+
 ## 1. 定位
 
 本 Subsystem 是 Global infrastructure capability，不是 Orders、Finance、Payroll 或 Anomalies Domain。

@@ -158,6 +158,7 @@ class CaseImportIntent:
     bootstrap: CaseArchitectureBootstrapIntent | None
     provisional_registration_id: int | None = None
     partial_service_time: ImportedOrderServiceTime | None = None
+    pricing_identity_rule: str | None = None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -197,6 +198,7 @@ class CaseImportFacts:
     payroll_rate_policy: RatePolicyFacts | None
     provisional_registration: ProvisionalRegistrationFacts | None = None
     multi_birth_count: str | None = None
+    pricing_identity_rule: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.case_exists, bool):
@@ -322,6 +324,7 @@ def _build_bootstrap_candidate(facts, intent):
             order.service_hours_per_day,
             _required_attribute(intent.client_attributes, "identity_status"),
             facts.multi_birth_count,
+            pricing_identity_rule=facts.pricing_identity_rule,
         ),
         facts.payroll_rate_policy,
         BootstrapPresence(),

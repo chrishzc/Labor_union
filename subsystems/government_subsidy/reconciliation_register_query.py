@@ -107,6 +107,8 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
             cursor.execute(
                 """
                 SELECT o.case_no, o.status AS order_status, c.identity_status, o.actual_start_date,
+                       pricing.pricing_active,pricing.pricing_rule,pricing.pricing_subsidy_hours,
+                       pricing.pricing_override_active,pricing.pricing_payroll_covered,pricing.pricing_twins_payroll_covered,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, s.union_no AS staff_union_no, br.survey_details,
@@ -123,6 +125,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                             AND schedule.effective_marker=1 AND schedule.is_work_day=1)
                        AS official_service_days
                 FROM orders o
+                LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
                 LEFT JOIN scheduling_generations current_generation
@@ -136,7 +139,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
-                  AND c.identity_status IN (%s, %s)
+                  AND (c.identity_status IN (%s, %s) OR pricing.pricing_active=1)
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
@@ -185,6 +188,8 @@ def _select_established_cases(
         cursor.execute(
                 f"""
                 SELECT o.case_no, o.status AS order_status, c.identity_status,
+                       pricing.pricing_active,pricing.pricing_rule,pricing.pricing_subsidy_hours,
+                       pricing.pricing_override_active,pricing.pricing_payroll_covered,pricing.pricing_twins_payroll_covered,
                        COALESCE(o.actual_start_date, o.start_date) AS actual_start_date,
                        COALESCE(o.actual_end_date, o.end_date) AS actual_end_date,
                        o.service_days, o.service_hours_per_day,
@@ -220,6 +225,7 @@ def _select_established_cases(
                             AND schedule.effective_marker=1 AND schedule.is_work_day=1)
                        AS official_service_days
                 FROM orders o
+                LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
                 JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
                 LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
                 LEFT JOIN scheduling_generations current_generation
@@ -234,7 +240,7 @@ def _select_established_cases(
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE o.status IN ({status_placeholders})
-                  AND c.identity_status IN (%s, %s)
+                  AND (c.identity_status IN (%s, %s) OR pricing.pricing_active=1)
                 {period_clause}
                 ORDER BY o.case_no {"FOR UPDATE" if lock else ""}
                 """,
@@ -393,8 +399,9 @@ def _subsidy_terms(
     eligibility: str,
     total_service_hours: Decimal,
     payroll_hourly_rate_ntd: object | None = None,
+    subsidy_hour_limit: object | None = None,
 ) -> tuple[Decimal, Decimal]:
-    hour_limit = _subsidy_hour_limit(eligibility)
+    hour_limit = _subsidy_hour_limit(eligibility) if subsidy_hour_limit is None else Decimal(str(subsidy_hour_limit))
     if hour_limit <= 0:
         return Decimal("0"), Decimal("0")
     subsidy_hours = min(hour_limit, total_service_hours)
@@ -417,7 +424,11 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
     """
     if source.get("scheduling_source_invalid"):
         return SubsidyReceivableEstimate(None, "scheduling_effective_generation_invalid")
-    if source.get("identity_status") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
+    if source.get("pricing_active") and source.get("pricing_rule") == "non_citizen":
+        return SubsidyReceivableEstimate(0, None)
+    if source.get("pricing_active") and source.get("pricing_subsidy_hours") is None:
+        return SubsidyReceivableEstimate(None, "pricing_policy_source_missing")
+    if not source.get("pricing_active") and source.get("identity_status") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
         return SubsidyReceivableEstimate(None, "eligibility_pending")
     days = source.get("service_days")
     hours = source.get("service_hours_per_day")
@@ -433,7 +444,7 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
     rate = Decimal(str(rate))
     if not rate.is_finite() or rate <= 0:
         return SubsidyReceivableEstimate(None, "rate_snapshot_missing")
-    subsidy_hours, unit_price = _subsidy_terms(source["identity_status"], total_hours, rate)
+    subsidy_hours, unit_price = _subsidy_terms(source["identity_status"], total_hours, rate, source.get("pricing_subsidy_hours"))
     amount = subsidy_hours * unit_price
     if not amount.is_finite() or amount != amount.to_integral_value():
         return SubsidyReceivableEstimate(None, "amount_not_integer")
@@ -460,7 +471,7 @@ def _service_volume(
         return contracted_service_days * daily_hours, source.get("service_days") or 0
     actual_hours = source.get("historical_actual_service_hours")
     if actual_hours is None:
-        return _subsidy_hour_limit(source.get("identity_status")), source.get("service_days") or 0
+        return (Decimal(str(source["pricing_subsidy_hours"])) if source.get("pricing_active") and source.get("pricing_subsidy_hours") is not None else _subsidy_hour_limit(source.get("identity_status"))), source.get("service_days") or 0
     return (
         Decimal(str(actual_hours)),
         source.get("historical_actual_service_days") or 0,
@@ -468,6 +479,8 @@ def _service_volume(
 
 
 def _effective_payroll_rate(source: dict) -> object | None:
+    if source.get("pricing_override_active"):
+        return source.get("pricing_payroll_covered")
     order_information = project_order_information(source.get("survey_details"))
     effective_values = source.get("beclass_effective_values")
     if isinstance(effective_values, str):
@@ -489,13 +502,15 @@ def _effective_payroll_rate(source: dict) -> object | None:
             and order_information.values.get("multi_birth_count") == "雙胞胎"
         )
     ):
-        return Decimal("450")
-    return source.get("payroll_hourly_rate_ntd")
+        return source.get("pricing_twins_payroll_covered") if source.get("pricing_active") else Decimal("450")
+    return source.get("pricing_payroll_covered") if source.get("pricing_active") else source.get("payroll_hourly_rate_ntd")
 
 
 def _to_register_row(source: dict) -> dict | None:
     if source.get("scheduling_source_invalid"):
         raise ValueError("scheduling_effective_generation_invalid")
+    if source.get("pricing_active") and source.get("pricing_subsidy_hours") is None:
+        raise ValueError("pricing_policy_source_missing")
     actual_start = _as_date(source.get("actual_start_date"))
     actual_end = _as_date(source.get("actual_end_date"))
     daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))
@@ -511,6 +526,7 @@ def _to_register_row(source: dict) -> dict | None:
         source.get("identity_status"),
         total_service_hours,
         _effective_payroll_rate(source),
+        source.get("pricing_subsidy_hours"),
     )
     if (
         subsidy_hours <= 0
