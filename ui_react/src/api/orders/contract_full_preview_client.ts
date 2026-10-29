@@ -45,9 +45,27 @@ export async function openContractPrintView(caseNo: string, scope: 'client' | 's
     if (blob.type.split(';')[0].trim().toLowerCase() !== 'text/html') throw new Error('契約列印內容格式無效。');
     const html = await blob.text();
     if (signal.aborted || view.closed) return;
+    // The popup inherits the admin CSP, which disallows inline styles. Apply
+    // the authenticated renderer's styles through CSSOM without relaxing CSP.
+    const printContent = document.createElement('template');
+    // These are the renderer's only styled tags; facts are HTML-escaped. Rename
+    // their attributes before parsing so even inert parsing cannot trip CSP.
+    printContent.innerHTML = html.replace(/<(?:col|tr|td)\b[^>]*>/g, tag => tag.replace(' style=', ' data-contract-css='));
+    const styles = Array.from(printContent.content.querySelectorAll('style'), element => {
+      element.remove();
+      return element.textContent ?? '';
+    });
+    printContent.content.querySelectorAll('[data-contract-css]').forEach((element, index) => {
+      styles.push(`[data-contract-style="${index}"]{${element.getAttribute('data-contract-css')}}`);
+      element.removeAttribute('data-contract-css');
+      element.setAttribute('data-contract-style', String(index));
+    });
     view.document.open();
-    view.document.write(html);
+    view.document.write(`<!doctype html><html lang="zh-Hant">${printContent.innerHTML}</html>`);
     view.document.close();
+    const stylesheet = new (view as Window & typeof globalThis).CSSStyleSheet();
+    stylesheet.replaceSync(styles.join('\n'));
+    view.document.adoptedStyleSheets = [stylesheet];
     view.document.getElementById('print-contract')?.addEventListener('click', () => view.print());
     await view.document.fonts.ready;
     if (signal.aborted || view.closed) return;

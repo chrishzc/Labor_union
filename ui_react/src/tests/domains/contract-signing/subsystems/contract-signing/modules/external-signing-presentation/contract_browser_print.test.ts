@@ -10,8 +10,12 @@ function popup() {
     title: '', body: { textContent: '' },
     open: vi.fn(), write: vi.fn(), close: vi.fn(),
     getElementById: vi.fn(() => button), fonts: { ready: Promise.resolve() },
+    adoptedStyleSheets: [] as CSSStyleSheet[],
   };
-  const view = { document, opener: window, closed: false, close: vi.fn(), focus: vi.fn(), print: vi.fn() };
+  class PrintStylesheet {
+    replaceSync = vi.fn();
+  }
+  const view = { document, CSSStyleSheet: PrintStylesheet, opener: window, closed: false, close: vi.fn(), focus: vi.fn(), print: vi.fn() };
   vi.spyOn(window, 'open').mockReturnValue(view as unknown as Window);
   return { view, button };
 }
@@ -25,7 +29,7 @@ describe('contract browser printing', () => {
     const controller = new AbortController();
     const pending = openContractPrintView('CASE-001', 'staff', 41, controller.signal);
     expect(window.open).toHaveBeenCalledWith('', '_blank');
-    await vi.waitFor(() => expect(view.document.write).toHaveBeenCalledWith('<html>完整契約</html>'));
+    await vi.waitFor(() => expect(view.document.write).toHaveBeenCalledWith(expect.stringContaining('完整契約')));
     expect(view.print).not.toHaveBeenCalled();
     fontsReady();
     await pending;
@@ -34,6 +38,25 @@ describe('contract browser printing', () => {
     button.dispatchEvent(new Event('click'));
     expect(view.print).toHaveBeenCalledTimes(2);
     expect(view.opener).toBeNull();
+  });
+
+  it('applies print rules and cell formatting without inline styles in the inherited CSP document', async () => {
+    const { view } = popup();
+    const html = '<html><head><style>@page{size:A4;margin:8mm}@media print{.print-controls{display:none}}</style></head><body><aside class="print-controls">列印提示</aside><table><tr><td style="background:#FCDCE9;font-size:14pt">示範客戶 &lt;td style=&quot;literal&quot;&gt; style=文字</td></tr></table></body></html>';
+    vi.spyOn(transport, 'get').mockResolvedValue(new Blob([html], { type: 'text/html' }));
+
+    await openContractPrintView('CASE-001', 'client', null, new AbortController().signal);
+
+    const written = view.document.write.mock.calls[0][0] as string;
+    const parsed = new DOMParser().parseFromString(written, 'text/html');
+    expect(written).not.toContain('<style');
+    expect(parsed.querySelectorAll('[style]')).toHaveLength(0);
+    expect(written).toContain('data-contract-style="0"');
+    expect(written).toContain('示範客戶');
+    expect(parsed.body.textContent).toContain('<td style="literal"> style=文字');
+    expect(view.document.adoptedStyleSheets).toHaveLength(1);
+    expect(view.document.adoptedStyleSheets[0].replaceSync).toHaveBeenCalledWith(expect.stringContaining('@media print{.print-controls{display:none}}'));
+    expect(view.document.adoptedStyleSheets[0].replaceSync).toHaveBeenCalledWith(expect.stringContaining('[data-contract-style="0"]{background:#FCDCE9;font-size:14pt}'));
   });
 
   it('reports popup blocking before making a request', async () => {

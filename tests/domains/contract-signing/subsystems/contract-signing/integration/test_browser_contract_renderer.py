@@ -96,6 +96,9 @@ def test_browser_print_contains_full_approved_wording_and_a4_layout_without_pdf_
     assert "<title>PRINT-TEST &lt;契約&gt;</title>" in html
     assert "<script>" not in html
     workbook = load_workbook(BytesIO(content), data_only=True)
+    if template_key == 'contract_client_copy':
+        for coordinate in ('A13', 'A14', 'A15', 'A16', 'A18', 'A19', 'A21'):
+            assert not workbook.active[coordinate].value.endswith('"'), coordinate
     # Every populated cell in the legal print area must survive the HTML conversion.
     from html import escape
     for row in workbook.active:
