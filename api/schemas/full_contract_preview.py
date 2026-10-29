@@ -18,6 +18,8 @@ class FullContractPreviewView(BaseModel):
     owner_fingerprints: dict[str, str]
     field_values: dict[str, Any | None]
     field_states: dict[str, str]
+    field_labels: dict[str, str] = Field(default_factory=dict)
+    field_keys: dict[str, str] = Field(default_factory=dict)
     warnings: list[str]
     blockers: list[str]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")

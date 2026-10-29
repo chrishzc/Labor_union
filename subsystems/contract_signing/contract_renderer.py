@@ -134,6 +134,12 @@ def render_contract_template(
     # Old external-link caches include unrelated historical order data. They
     # must not be copied into newly archived contract sources.
     workbook = load_workbook(template_path, keep_links=False)
+    worksheet_name = mapping.get('worksheet_name')
+    if worksheet_name:
+        if worksheet_name not in workbook.sheetnames:
+            workbook.close()
+            raise ContractRendererError('contract_pdf_worksheet_invalid', '模板指定工作表不存在。')
+        workbook.active = workbook.sheetnames.index(worksheet_name)
     worksheet = workbook.active
     # Approved static contract wording is versioned with the mapping digest.
     # It replaces the old workbook's missing catalogue links, not owner facts.

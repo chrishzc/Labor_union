@@ -60,11 +60,13 @@ export function OrderContractPreview({ caseNo, revision: factsRevision = 0, init
     {result && result.warnings.length > 0 && <p role="status">目前資料仍有缺漏；已有內容可繼續核對與列印，系統不會猜測或補造缺少的值。</p>}
     {result && !result.ready_to_print && <p role="alert">契約模板或文件產生發生技術問題，暫時無法產生文件。</p>}
     {result?.blockers.includes('contract_pdf_external_reference_unresolved') && <p role="alert">契約模板缺少舊版引用內容，暫不能產生可簽署 PDF。</p>}
-    <article className="order-information-paper"><header><small>案件 {caseNo} · 套值欄位預覽</small><h3>{scope === 'client' ? '坐月子到府服務契約' : '到宅坐月子服務人員委任契約'}</h3></header><dl>{FIELDS[scope].map(([cell, label]) => {
+    <article className="order-information-paper"><header><small>案件 {caseNo} · 套值欄位預覽</small><h3>{scope === 'client' ? '坐月子到府服務契約' : '到宅坐月子服務人員委任契約'}</h3></header><dl>{(result && Object.keys(result.field_labels ?? {}).length ? Object.entries(result.field_labels) : FIELDS[scope]).map(([cell, label]) => {
       const rawValue = result?.field_values[cell];
       const staffId = targetStaffId ?? Number(targets.find(target => target.segment_id === segmentId)?.staff_reference);
-      const value = cell === 'C4' && staffId ? staffIdentity.label(staffId, typeof rawValue === 'string' ? rawValue : null)
-        : cell === 'C10' && staffLabels.length ? staffLabels.join('、') : rawValue;
+      const fieldKey = result?.field_keys?.[cell];
+      const isStaffName = fieldKey ? fieldKey === 'staff_name' : cell === (scope === 'staff' ? 'C4' : 'C10');
+      const value = isStaffName && scope === 'staff' && staffId ? staffIdentity.label(staffId, typeof rawValue === 'string' ? rawValue : null)
+        : isStaffName && scope === 'client' && staffLabels.length ? staffLabels.join('、') : rawValue;
       const isEmpty = value == null || value === '';
       const fieldState = result?.field_states[cell];
       const isOptionalEmpty = isEmpty && (fieldState === 'optional_empty' || fieldState === 'not_applicable');

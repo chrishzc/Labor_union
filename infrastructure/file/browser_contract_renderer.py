@@ -21,6 +21,7 @@ from subsystems.contract_signing.contract_renderer import (
     render_contract_template,
 )
 from subsystems.contract_signing.template_catalog import CONTRACT_PDF_PRESENTATION_VERSION
+from infrastructure.file.contract_template_images import worksheet_images
 
 _RENDERER_IDENTITY = CONTRACT_PDF_PRESENTATION_VERSION
 _MAX_PDF_BYTES = 20 * 1024 * 1024
@@ -129,6 +130,8 @@ def _workbook_html(content: bytes, *, browser_print: bool = False) -> str:
     try:
         workbook = load_workbook(BytesIO(content), data_only=True)
         worksheet = workbook.active
+        images = worksheet_images(worksheet)
+        image_anchors = {(item['row'], item['col']) for item in images}
         min_col, min_row, max_col, max_row = _print_bounds(worksheet)
         merged = _merged_cells(worksheet, min_row, max_row, min_col, max_col)
         covered = {
@@ -164,6 +167,7 @@ def _workbook_html(content: bytes, *, browser_print: bool = False) -> str:
                         neighbour = worksheet.cell(row, column + colspan)
                         if (
                             neighbour.value is not None
+                            or (row, column + colspan) in image_anchors
                             or (row, column + colspan) in merged
                             or (row, column + colspan) in covered
                             or _aligned_fill(worksheet, row, column + colspan, 1, min_col, max_col) != background
@@ -179,8 +183,13 @@ def _workbook_html(content: bytes, *, browser_print: bool = False) -> str:
                 span = (f' rowspan="{rowspan}"' if rowspan > 1 else "") + (
                     f' colspan="{colspan}"' if colspan > 1 else ""
                 )
+                # Drawings extend past their anchor cell and above later row backgrounds.
+                drawing_overflow = ';overflow:visible' if (row, column) in image_anchors else ''
                 cells.append(
-                    f'<td{span} style="{_cell_style(cell, colspan, background, scale, browser_print=browser_print)}">{_cell_text(cell.value)}</td>'
+                    f'<td{span} style="position:relative;{_cell_style(cell, colspan, background, scale, browser_print=browser_print)}{drawing_overflow}">{_cell_text(cell.value)}'
+                    + ''.join(f'<img alt="Excel 內嵌圖片" src="{item["data_url"]}" style="position:absolute;z-index:1;left:{item["left"] * scale:.2f}px;top:{item["top"] * scale:.2f}px;width:{item["width"] * scale:.2f}px;height:{item["height"] * scale:.2f}px;max-width:none">'
+                              for item in images if item['row'] == row and item['col'] == column)
+                    + '</td>'
                 )
             row_style = f' style="height:{height * scale:.2f}pt"' if height else ""
             rows.append(f"<tr{row_style}>{''.join(cells)}</tr>")

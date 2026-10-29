@@ -5,6 +5,8 @@ Description: 組合外部簽約 FastAPI 所需的單一連線 workflow、交易�
 
 from __future__ import annotations
 
+from api.dependencies.contract_templates import get_contract_template_catalog
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -453,7 +455,7 @@ def get_full_contract_preview_application() -> Iterator[FullContractPreviewAppli
     """Read-only composition: printing needs neither storage nor signing secrets."""
     connection = get_connection()
     try:
-        yield FullContractPreviewApplication(MySqlFullContractProjectionRepository(connection))
+        yield FullContractPreviewApplication(MySqlFullContractProjectionRepository(connection), templates=get_contract_template_catalog())
     finally:
         connection.close()
 
@@ -491,6 +493,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
             unsigned_repository,
             ContractUnsignedPdfStorage(controlled),
             BrowserContractRenderer(),
+            templates=get_contract_template_catalog(),
         )
         yield ContractExternalSigningApplication(
             connection=connection,
@@ -511,6 +514,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
             full_preview=FullContractPreviewApplication(
                 MySqlFullContractProjectionRepository(connection),
                 clock,
+                templates=get_contract_template_catalog(),
             ),
             staff_documents=StaffContractSigningApplication(
                 get_connection,
@@ -519,6 +523,7 @@ def get_contract_external_signing_application() -> Iterator[ContractExternalSign
                 archive_document=archive_contract_document,
                 discard_document=discard_uncommitted_contract_document,
                 external_template_facts_loader=_load_external_staff_template_facts,
+                templates=get_contract_template_catalog(),
             ),
             unsigned_persistence=UnsignedContractPdfPersistenceWorkflow(
                 unsigned_documents,
@@ -576,7 +581,7 @@ def _controlled_file_storage_root() -> Path | None:
 
 
 def _load_external_staff_template_facts(
-    connection, case_no: str, matching_segment_id: int, now: datetime
+    connection, case_no: str, matching_segment_id: int, now: datetime, template=None
 ) -> tuple[dict[str, object], str]:
     repository = MySqlFullContractProjectionRepository(connection)
     projection = repository.load_staff_projection_for_segment(
@@ -588,9 +593,8 @@ def _load_external_staff_template_facts(
             "找不到指定契約預覽對象。",
             not_found=True,
         )
-    preview = FullContractPreviewApplication(repository).preview_staff_segment(
-        case_no, matching_segment_id
-    )
+    application = FullContractPreviewApplication(repository, templates=get_contract_template_catalog())
+    preview = application.preview_projection(projection, template) if template is not None else application.preview_staff_segment(case_no, matching_segment_id)
     if preview.blockers:
         raise FullContractPreviewError(
             preview.blockers[0],

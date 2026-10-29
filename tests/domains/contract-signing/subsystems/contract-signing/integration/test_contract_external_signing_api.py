@@ -172,6 +172,8 @@ class FakeFullPreview:
             owner_fingerprints={"orders": "b" * 64},
             field_values={"F1": CASE_NO},
             field_states={"F1": "present"},
+            field_labels={"F1": "案件編號"},
+            field_keys={"F1": "case_no"},
             warnings=(),
             blockers=(),
             preview_fingerprint=route.PreviewFingerprint("c" * 64),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.dependencies.contract_templates import get_contract_template_catalog
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -44,6 +45,7 @@ def get_staff_contract_signing_application() -> StaffContractSigningApplication:
         discard_document=discard_uncommitted_contract_document,
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
         order_selector=select_order,
+        templates=get_contract_template_catalog(),
     )
 
 
@@ -57,6 +59,7 @@ def get_client_contract_signing_application() -> ClientContractSigningApplicatio
         line_delivery_repository_factory=MySqlLineDeliveryTaskRepository,
         completion=_complete_contract_in_transaction,
         template_facts_loader=_load_client_contract_template_facts,
+        templates=get_contract_template_catalog(),
     )
 
 

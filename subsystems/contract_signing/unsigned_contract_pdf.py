@@ -23,7 +23,7 @@ from subsystems.contract_signing.contract_renderer import (
     PDF_MEDIA_TYPE,
     RenderedContract,
 )
-from subsystems.contract_signing.template_catalog import load_approved_template
+from subsystems.contract_signing.template_catalog import TemplateCatalogPort, load_approved_template
 
 
 _AUTHORIZED_LOCAL_OR_PERSISTED_ACTOR = re.compile(
@@ -192,7 +192,9 @@ class UnsignedContractPdfApplication:
         repository: UnsignedContractPdfRepository,
         storage: UnsignedContractPdfStoragePort,
         renderer: UnsignedWorkbookPdfRenderer,
+        templates: TemplateCatalogPort | None = None,
     ) -> None:
+        self._templates = templates
         self._repository = repository
         self._storage = storage
         self._renderer = renderer
@@ -212,7 +214,7 @@ class UnsignedContractPdfApplication:
                 "找不到未簽契約來源。",
             )
         _require_source_identity(command, source)
-        template = _load_current_approved_template(source)
+        template = _load_current_approved_template(source, self._templates)
         try:
             rendered = self._renderer.render_workbook(
                 content=source.source_content,
@@ -349,9 +351,9 @@ def _require_source_identity(
         )
 
 
-def _load_current_approved_template(source: UnsignedContractRenderSource):
+def _load_current_approved_template(source: UnsignedContractRenderSource, catalog: TemplateCatalogPort | None = None):
     try:
-        template = load_approved_template(source.template_key)
+        template = catalog.load_exact(source.template_key, source.template_sha256, source.mapping_sha256) if catalog is not None else load_approved_template(source.template_key)
     except Exception:
         raise _error(
             "domain_blocked",

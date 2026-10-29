@@ -19,6 +19,7 @@
 - `document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md` — canonical Contract Signing contract
 
 ## Modules
+- `template-management` — XLSX 上傳、typed 欄位映射、零寫入示範預覽、不可變版本與啟用；path: `modules/template-management.md`
 - `staff-contract-application` — staff-side contract send／signed-return／manual attestation application；path: `modules/staff-contract-application.md`
 
 ## Verification routing

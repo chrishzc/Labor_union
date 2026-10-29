@@ -10,6 +10,8 @@ const schema = z.strictObject({
   owner_fingerprints: z.record(z.string(), z.string()),
   field_values: z.record(z.string(), z.union([scalar, z.array(scalar)])),
   field_states: z.record(z.string(), z.enum(['present', 'missing', 'optional_empty', 'not_applicable', 'unresolved'])),
+  field_labels: z.record(z.string(), z.string()).default({}),
+  field_keys: z.record(z.string(), z.string()).default({}),
   warnings: z.array(z.string()),
   blockers: z.array(z.string()), preview_fingerprint: z.string().regex(/^[0-9a-f]{64}$/), ready_to_print: z.boolean(),
 });
@@ -50,7 +52,7 @@ export async function openContractPrintView(caseNo: string, scope: 'client' | 's
     const printContent = document.createElement('template');
     // These are the renderer's only styled tags; facts are HTML-escaped. Rename
     // their attributes before parsing so even inert parsing cannot trip CSP.
-    printContent.innerHTML = html.replace(/<(?:col|tr|td)\b[^>]*>/g, tag => tag.replace(' style=', ' data-contract-css='));
+    printContent.innerHTML = html.replace(/<(?:col|tr|td|img)\b[^>]*>/g, tag => tag.replace(' style=', ' data-contract-css='));
     const styles = Array.from(printContent.content.querySelectorAll('style'), element => {
       element.remove();
       return element.textContent ?? '';

@@ -7,11 +7,12 @@ import hashlib
 import json
 from pathlib import Path
 from collections.abc import Mapping
+from typing import Protocol
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIRECTORY = PROJECT_ROOT / "db" / "templates" / "contracts"
-CONTRACT_PDF_PRESENTATION_VERSION = "chromium-template-v3"
+CONTRACT_PDF_PRESENTATION_VERSION = "chromium-template-v4"
 _APPROVED_TEMPLATE_KEYS = frozenset({"contract_staff_service", "contract_client_copy"})
 _MAPPING_REQUIREDNESS = frozenset({"required", "conditional", "optional"})
 
@@ -23,6 +24,16 @@ class ContractTemplateVersion:
     template_filename: str
     template_sha256: str
     mapping_sha256: str
+    template_path: Path | None = None
+    mapping_path: Path | None = None
+    version_id: str | None = None
+    worksheet_name: str | None = None
+
+
+class TemplateCatalogPort(Protocol):
+    def load_active(self, template_key: str) -> ContractTemplateVersion: ...
+
+    def load_exact(self, template_key: str, template_sha256: str, mapping_sha256: str) -> ContractTemplateVersion: ...
 
 
 def load_approved_template(template_key: str) -> ContractTemplateVersion:
@@ -38,6 +49,9 @@ def load_approved_template(template_key: str) -> ContractTemplateVersion:
         template_filename=template_path.name,
         template_sha256=_sha256(template_path.read_bytes()),
         mapping_sha256=_sha256(mapping_bytes),
+        template_path=template_path,
+        mapping_path=mapping_path,
+        version_id='builtin',
     )
 
 

@@ -12,6 +12,7 @@ import {
   Database,
   FileBarChart,
   FolderOpen,
+  FileSpreadsheet,
   HardDrive,
   HeartHandshake,
   History,
@@ -53,7 +54,8 @@ export type PageType =
   | 'historical-service-accounting'
   | 'account-management'
   | 'storage-management'
-  | 'file-settings';
+  | 'file-settings'
+  | 'contract-templates';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'notifications': 'operations',
@@ -77,6 +79,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'account-management': 'audit',
   'storage-management': 'audit',
   'file-settings': 'audit',
+  'contract-templates': 'audit',
 };
 
 export interface NavItem {
@@ -111,6 +114,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
   { id: 'storage-management', icon: HardDrive, label: '儲存空間管理', section: 'audit' },
   { id: 'file-settings', icon: FolderOpen, label: '檔案設定', section: 'audit' },
+  { id: 'contract-templates', icon: FileSpreadsheet, label: '契約模板', section: 'audit' },
 ];
 
 const SECTION_LABELS: Record<SectionType, string> = {

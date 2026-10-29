@@ -8,7 +8,7 @@ projection, and returns cell values for the existing browser print view.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -22,6 +22,8 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.clock import BusinessClock, SystemBusinessClock
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 from subsystems.contract_signing.template_catalog import (
+    TemplateCatalogPort,
+    ContractTemplateVersion,
     approved_template_mapping_path,
     load_approved_template,
     mapping_is_applicable,
@@ -95,6 +97,8 @@ class FullContractPreviewResult:
     preview_fingerprint: PreviewFingerprint
     # Internal, transient source for browser printing; never part of public JSON.
     workbook_content: bytes | None = None
+    field_labels: Mapping[str, str] = field(default_factory=dict)
+    field_keys: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def ready_to_print(self) -> bool:
@@ -108,7 +112,9 @@ class FullContractPreviewApplication:
         self,
         repository: FullContractProjectionRepository,
         clock: BusinessClock | None = None,
+        templates: TemplateCatalogPort | None = None,
     ) -> None:
+        self._templates = templates
         self._repository = repository
         self._clock = clock or SystemBusinessClock()
 
@@ -131,11 +137,16 @@ class FullContractPreviewApplication:
         assignment_id = None if projection is None else projection.assignment_id
         return self._preview(projection, ContractPreviewScope.STAFF, assignment_id)
 
+    def preview_projection(self, projection: FullContractOwnerProjection, template: ContractTemplateVersion) -> FullContractPreviewResult:
+        """Use the writer's already captured owner projection and immutable pair."""
+        return self._preview(projection, projection.scope, projection.assignment_id, template=template)
+
     def _preview(
         self,
         projection: FullContractOwnerProjection | None,
         scope: ContractPreviewScope,
         assignment_id: int | None,
+        *, template: ContractTemplateVersion | None = None,
     ) -> FullContractPreviewResult:
         if projection is None:
             raise FullContractPreviewError(
@@ -154,7 +165,10 @@ class FullContractPreviewApplication:
             else "contract_staff_service"
         )
         try:
-            template = load_approved_template(template_key)
+            if template is None:
+                template = self._templates.load_active(template_key) if self._templates is not None else load_approved_template(template_key)
+            if template.template_key != template_key:
+                raise ValueError('template target mismatch')
         except Exception:
             raise FullContractPreviewError(
                 "contract_preview_template_unavailable",
@@ -166,7 +180,7 @@ class FullContractPreviewApplication:
         snapshot_date = self._clock.today()
         facts["contract_signed_date"] = snapshot_date
         facts["__today__"] = snapshot_date
-        mapping_path = approved_template_mapping_path(template_key)
+        mapping_path = template.mapping_path or approved_template_mapping_path(template_key)
         blockers, warnings, field_states = _mapping_validation(
             template_key, mapping_path, facts
         )
@@ -174,7 +188,7 @@ class FullContractPreviewApplication:
         if not blockers:
             from subsystems.contract_signing.contract_renderer import external_formula_cells, render_contract_template
             content = render_contract_template(
-                template_path=mapping_path.parent / template.template_filename,
+                template_path=template.template_path or mapping_path.parent / template.template_filename,
                 mapping_path=mapping_path, facts=facts,
             )
             if external_formula_cells(content):
@@ -215,6 +229,8 @@ class FullContractPreviewApplication:
             blockers=tuple(blockers),
             preview_fingerprint=fingerprint,
             workbook_content=content,
+            field_labels={cell: str(descriptor.get('label', cell)) for cell, descriptor in (_mapping_fields(mapping_path) or {}).items() if isinstance(descriptor, dict)},
+            field_keys={cell: str(descriptor.get('db_key') or '') for cell, descriptor in (_mapping_fields(mapping_path) or {}).items() if isinstance(descriptor, dict)},
         )
 
 

@@ -1181,6 +1181,8 @@ def _public_full_preview(value) -> dict[str, Any]:
         "owner_fingerprints": dict(value.owner_fingerprints),
         "field_values": dict(value.field_values),
         "field_states": dict(value.field_states),
+        "field_labels": dict(value.field_labels),
+        "field_keys": dict(value.field_keys),
         "warnings": list(value.warnings),
         "blockers": list(value.blockers),
         "preview_fingerprint": value.preview_fingerprint.value,

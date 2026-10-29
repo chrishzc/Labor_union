@@ -24,6 +24,7 @@ from subsystems.contract_signing.line_delivery import (
 )
 from subsystems.contract_signing.template_catalog import (
     TEMPLATE_DIRECTORY,
+    TemplateCatalogPort,
     approved_template_mapping_path,
     load_approved_template,
 )
@@ -115,7 +116,9 @@ class StaffContractSigningApplication:
         line_delivery_repository_factory: Callable[[object], object] | None = None,
         order_selector: Callable[..., object] | None = None,
         external_template_facts_loader: Callable[..., tuple[dict[str, object], str]] | None = None,
+        templates: TemplateCatalogPort | None = None,
     ) -> None:
+        self._templates = templates
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
@@ -124,6 +127,9 @@ class StaffContractSigningApplication:
         self._line_delivery_repository_factory = line_delivery_repository_factory
         self._order_selector = order_selector
         self._external_template_facts_loader = external_template_facts_loader
+
+    def _template(self, key: str):
+        return self._templates.load_active(key) if self._templates is not None else load_approved_template(key)
 
     def _archive(self, content: bytes, storage_key: str):
         fn = self._archive_document or archive_contract_document
@@ -161,7 +167,7 @@ class StaffContractSigningApplication:
         existing = self._existing_receipt(command.idempotency_key)
         if existing is not None:
             return existing
-        template = load_approved_template("contract_staff_service")
+        template = self._template("contract_staff_service")
         return self._persist_sent_contract(command, template)
 
     def prepare_external_document(
@@ -170,7 +176,7 @@ class StaffContractSigningApplication:
         """Persist the current unsigned XLSX source without creating a LINE task."""
         if self._external_template_facts_loader is None:
             raise RuntimeError("contract_external_template_facts_loader_not_configured")
-        template = load_approved_template("contract_staff_service")
+        template = self._template("contract_staff_service")
         archive = None
         try:
             def persist(connection):
@@ -184,6 +190,7 @@ class StaffContractSigningApplication:
                     command.case_no,
                     command.matching_segment_id,
                     self._now(),
+                    template,
                 )
                 existing = _existing_external_generated_document(
                     connection,
@@ -195,8 +202,8 @@ class StaffContractSigningApplication:
                 if existing is not None:
                     return PreparedExternalStaffContractDocument(existing, True)
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=facts,
                 )
                 archive = self._archive(
@@ -275,10 +282,10 @@ class StaffContractSigningApplication:
                 if command.preview_fingerprint != expected:
                     raise ValueError("manual_contract_preview_stale")
                 segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
-                template = load_approved_template("contract_staff_service")
+                template = self._template("contract_staff_service")
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=_staff_template_facts(connection, command.case_no, segment),
                 )
                 template_archive = self._archive(content, _manual_staff_template_storage_key(command))
@@ -363,8 +370,8 @@ class StaffContractSigningApplication:
                 nonlocal archive
                 segment = _staff_segment(connection, command.case_no, command.matching_segment_id)
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=_staff_template_facts(connection, command.case_no, segment),
                 )
                 archive = self._archive(content, _staff_template_storage_key(command))

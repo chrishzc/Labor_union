@@ -47,6 +47,7 @@ from api.routes import (
     client_refund_reversal,
     subsidy_advance_settlement,
     contract_signing,
+    contract_templates,
     contract_external_signing,
     client_payments,
     client_payment_destination,
@@ -314,6 +315,7 @@ app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
 app.include_router(contract_signing.router)
+app.include_router(contract_templates.router)
 app.include_router(contract_external_signing.router)
 app.include_router(order_actual_start.router)
 app.include_router(order_intake_terms_bootstrap.router)

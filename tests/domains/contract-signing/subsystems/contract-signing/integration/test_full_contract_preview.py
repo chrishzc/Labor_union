@@ -283,6 +283,7 @@ def test_client_preview_uses_exact_target_and_returns_typed_cell_values(monkeypa
             mapping_sha256="b" * 64,
             template_sha256="c" * 64,
             template_filename=template.name,
+            mapping_path=None, template_path=None,
         ),
     )
     monkeypatch.setattr(
@@ -314,6 +315,7 @@ def test_staff_segment_preview_uses_resolved_assignment_identity(monkeypatch, tm
             mapping_sha256="b" * 64,
             template_sha256="c" * 64,
             template_filename=template.name,
+            mapping_path=None, template_path=None,
         ),
     )
     monkeypatch.setattr(
@@ -350,6 +352,7 @@ def test_preview_reports_null_required_owner_fact_without_blocking(monkeypatch, 
         mapping_sha256="b" * 64,
         template_sha256="c" * 64,
         template_filename=template.name,
+            mapping_path=None, template_path=None,
     ))
     monkeypatch.setattr(module, "approved_template_mapping_path", lambda key: mapping)
     projection = FullContractOwnerProjection(
@@ -388,6 +391,7 @@ def test_client_preview_fingerprint_canonicalizes_native_owner_dates_and_amounts
             mapping_sha256="b" * 64,
             template_sha256="c" * 64,
             template_filename=template.name,
+            mapping_path=None, template_path=None,
         ),
     )
     monkeypatch.setattr(
@@ -1134,6 +1138,7 @@ def test_preview_exposes_mapping_blocker(tmp_path):
         mapping_sha256="b" * 64,
         template_sha256="c" * 64,
         template_filename=template.name,
+            mapping_path=None, template_path=None,
     )
     module.approved_template_mapping_path = lambda key: mapping
     try:

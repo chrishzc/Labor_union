@@ -18,6 +18,8 @@ const basePreview = {
   assignment_id: null,
   template_version: 'a'.repeat(64),
   owner_fingerprints: {},
+  field_labels: {},
+  field_keys: {},
   field_states: {},
   warnings: [],
   blockers: [],

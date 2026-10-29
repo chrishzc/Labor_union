@@ -34,6 +34,7 @@ import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccoun
 import { AccountManagementPage } from './pages/AccountManagementPage';
 import { StorageManagementPage } from './pages/StorageManagementPage';
 import { FileSettingsPage } from './pages/FileSettingsPage';
+import { ContractTemplatesPage } from './pages/ContractTemplatesPage';
 import { NotificationTasksPage } from './pages/NotificationTasksPreviewPage';
 import './pages/LineManagementPage.css';
 
@@ -187,6 +188,7 @@ const AppContent: React.FC = () => {
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'storage-management' && <StorageManagementPage />}
         {currentPage === 'file-settings' && <FileSettingsPage />}
+        {currentPage === 'contract-templates' && <ContractTemplatesPage />}
         </StaffIdentityProvider>
       </MasterLayout>
     </ErrorBoundary>

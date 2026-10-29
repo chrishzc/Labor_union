@@ -75,7 +75,7 @@ def test_browser_renderer_keeps_approved_workbook_content_and_returns_pdf(tmp_pa
     assert "border-right:1px solid" in cells.cells[-2]["style"]
     assert "white-space:pre-wrap" in observed["html"]
     assert result.mime_type == "application/pdf"
-    assert result.renderer_identity == "chromium-template-v3"
+    assert result.renderer_identity == "chromium-template-v4"
 
 
 @pytest.mark.parametrize("template_key", ["contract_client_copy", "contract_staff_service"])

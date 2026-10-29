@@ -21,6 +21,7 @@ from subsystems.contract_signing.line_delivery import (
 from subsystems.contract_signing.template_catalog import (
     CONTRACT_PDF_PRESENTATION_VERSION,
     TEMPLATE_DIRECTORY,
+    TemplateCatalogPort,
     approved_template_mapping_path,
     load_approved_template,
 )
@@ -108,7 +109,9 @@ class ClientContractSigningApplication:
             [object, str, dict[str, object], datetime], dict[str, object]
         ]
         | None = None,
+        templates: TemplateCatalogPort | None = None,
     ) -> None:
+        self._templates = templates
         self._connection_factory = connection_factory
         self._archive_root = archive_root
         self._now = now
@@ -117,6 +120,9 @@ class ClientContractSigningApplication:
         self._line_delivery_repository_factory = line_delivery_repository_factory
         self._completion = completion
         self._template_facts_loader = template_facts_loader
+
+    def _template(self, key: str):
+        return self._templates.load_active(key) if self._templates is not None else load_approved_template(key)
 
     def _archive(self, content: bytes, storage_key: str):
         fn = self._archive_document or archive_contract_document
@@ -167,7 +173,7 @@ class ClientContractSigningApplication:
         existing = self._existing_receipt(command.idempotency_key)
         if existing is not None:
             return existing
-        template = load_approved_template("contract_client_copy")
+        template = self._template("contract_client_copy")
         return self._persist_sent_contract(command, template)
 
     def record_signed_return(
@@ -222,10 +228,10 @@ class ClientContractSigningApplication:
                 if command.preview_fingerprint != expected:
                     raise ValueError("manual_contract_preview_stale")
                 facts = _client_contract_facts(connection, command.case_no)
-                template = load_approved_template("contract_client_copy")
+                template = self._template("contract_client_copy")
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=self._template_facts(connection, command.case_no, facts),
                 )
                 template_archive = self._archive(content, _manual_client_template_storage_key(command))
@@ -316,7 +322,7 @@ class ClientContractSigningApplication:
 
     def prepare_external_document(self, command: PrepareExternalClientContractCommand) -> tuple[int, bool]:
         """Prepare the current-plan source without LINE or completion facts."""
-        template = load_approved_template("contract_client_copy")
+        template = self._template("contract_client_copy")
         archive = None
         try:
             def persist(connection):
@@ -358,8 +364,8 @@ class ClientContractSigningApplication:
                 if existing and existing["facts_snapshot_sha256"] == snapshot:
                     return int(existing["id"]), True
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=template_facts,
                 )
                 archive = self._archive(
@@ -380,8 +386,8 @@ class ClientContractSigningApplication:
                 nonlocal archive
                 facts = _client_contract_facts(connection, command.case_no)
                 content = render_contract_template(
-                    template_path=TEMPLATE_DIRECTORY / template.template_filename,
-                    mapping_path=approved_template_mapping_path(template.template_key),
+                    template_path=template.template_path if self._templates is not None else TEMPLATE_DIRECTORY / template.template_filename,
+                    mapping_path=template.mapping_path if self._templates is not None else approved_template_mapping_path(template.template_key),
                     facts=self._template_facts(connection, command.case_no, facts),
                 )
                 archive = self._archive(content, _client_template_storage_key(command))
