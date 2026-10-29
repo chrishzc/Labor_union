@@ -26,3 +26,6 @@
 - default_boundary: Subsystem
 - test_root: `tests/domains/contract-signing/subsystems/contract-signing/`
 - integration_root: `tests/domains/contract-signing/subsystems/contract-signing/integration/`.
+
+- layout_status: `custom_current`
+- integration_root: `ui_react/src/tests/contract_signing_actions.test.tsx` — 既有月嫂／客戶人工證據、typed Preview／Apply、文件版本下載與寫入後回讀錯誤測試；保留獨立元件的現行 consumer。

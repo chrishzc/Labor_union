@@ -4,7 +4,7 @@ import { ContractSigningActions } from '../../../../../../../components/Contract
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import type { ContractSigningStatus } from '../../../../../../../api/orders/contract_signing_client';
 
-const mocks = vi.hoisted(() => ({ sendStaff: vi.fn(), previewManualStaffAttestation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ sendStaff: vi.fn(), previewManualStaffAttestation: vi.fn(), recordManualStaffAttestation: vi.fn() }));
 vi.mock('../../../../../../../api/orders/contract_signing_mutation_client', () => ({ contractSigningMutationClient: mocks }));
 const signing: ContractSigningStatus = { case_no: 'TEST', staff_segments: [{ segment_id: 1, staff_id: 11, sent: false, signed_received: false }],
   commitment_id: null, client_document_sent: false, client_signed_received: false, contract_identity: null, documents: [] };
@@ -19,16 +19,20 @@ function mount() {
 }
 
 describe('契約表單的未儲存基準', () => {
-  it('預覽成功仍保留待儲存證據，不能將 success 顯示狀態當作已儲存', async () => {
+  it('檢查成功但正式寫入失敗時仍保留證據，不能把檢查結果當作已儲存', async () => {
     mocks.previewManualStaffAttestation.mockResolvedValue({ case_no: 'TEST', scope: 'staff_segment', matching_segment_id: 1, confirmation_method: 'phone', preview_fingerprint: 'a'.repeat(64), can_apply: true, line_delivery_task_id: null });
+    mocks.recordManualStaffAttestation.mockRejectedValue(new Error('證據儲存失敗'));
     const leave = mount();
     const file = new File(['synthetic evidence'], 'evidence.pdf', { type: 'application/pdf' });
     const input = screen.getByLabelText('人工月嫂簽約證據檔');
     Object.defineProperty(input, 'files', { configurable: true, value: { 0: file, length: 1, item: () => file } });
     fireEvent.change(input);
-    fireEvent.change(screen.getByLabelText('月嫂人工確認依據'), { target: { value: '已電話核對' } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽人工月嫂簽約證據/ }));
-    await screen.findByText(/人工簽約證據已完成送出前檢查/);
+    fireEvent.change(screen.getByLabelText('月嫂備註（選填）'), { target: { value: '已電話核對' } });
+    fireEvent.click(screen.getByRole('button', { name: /確認記錄人工月嫂簽約/ }));
+    await screen.findByRole('alert');
+    expect(mocks.previewManualStaffAttestation).toHaveBeenCalledOnce();
+    expect(mocks.recordManualStaffAttestation).toHaveBeenCalledOnce();
+    expect(mocks.previewManualStaffAttestation.mock.invocationCallOrder[0]).toBeLessThan(mocks.recordManualStaffAttestation.mock.invocationCallOrder[0]);
     fireEvent.click(screen.getByRole('button', { name: '離開契約表單' }));
     const warning = screen.getByRole('dialog', { name: '尚有未儲存的變更' });
     expect(warning).toHaveTextContent('evidence.pdf'); expect(warning).toHaveTextContent('已電話核對');

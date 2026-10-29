@@ -100,15 +100,15 @@ describe('ContractSigningActions', () => {
       target: { files: { 0: evidence, length: 1, item: (index: number) => index === 0 ? evidence : null } },
     });
     fireEvent.change(screen.getByLabelText('月嫂人工確認方式'), { target: { value: 'paper' } });
-    fireEvent.change(screen.getByLabelText('月嫂人工確認依據'), { target: { value: '已核對紙本簽署頁與月嫂身分。' } });
-    expect(screen.getByRole('button', { name: /確認記錄人工月嫂簽約/ })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /預覽人工月嫂簽約證據/ }));
+    fireEvent.change(screen.getByLabelText('月嫂備註（選填）'), { target: { value: '已核對紙本簽署頁與月嫂身分。' } });
+    expect(recordManualStaffAttestation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /確認記錄人工月嫂簽約/ }));
 
     await waitFor(() => expect(previewManualStaffAttestation).toHaveBeenCalledWith(
       'CASE-1', 3, 'paper', '已核對紙本簽署頁與月嫂身分。', expect.objectContaining({ idempotencyKey: expect.any(String), correlationId: expect.any(String) }),
     ));
     expect(await screen.findByText(/未建立 LINE 寄送/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /確認記錄人工月嫂簽約/ }));
+    expect(previewManualStaffAttestation.mock.invocationCallOrder[0]).toBeLessThan(recordManualStaffAttestation.mock.invocationCallOrder[0]);
     await waitFor(() => expect(recordManualStaffAttestation).toHaveBeenCalledWith(
       'CASE-1', 3, evidence, 'paper', '已核對紙本簽署頁與月嫂身分。', manualPreview.preview_fingerprint,
       expect.objectContaining({ idempotencyKey: expect.any(String), correlationId: expect.any(String) }),
@@ -129,12 +129,13 @@ describe('ContractSigningActions', () => {
     fireEvent.change(screen.getByLabelText('人工客戶簽約證據檔'), {
       target: { files: { 0: evidence, length: 1, item: (index: number) => index === 0 ? evidence : null } },
     });
-    fireEvent.change(screen.getByLabelText('客戶人工確認依據'), { target: { value: '已由客戶電話確認並核對簽署文件。' } });
-    fireEvent.click(screen.getByRole('button', { name: /預覽人工客戶簽約證據/ }));
+    fireEvent.change(screen.getByLabelText('客戶備註（選填）'), { target: { value: '已由客戶電話確認並核對簽署文件。' } });
+    expect(recordManualClientAttestation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /確認記錄人工客戶簽約並完成契約/ }));
     await waitFor(() => expect(previewManualClientAttestation).toHaveBeenCalledWith(
       'CASE-1', 'phone', '已由客戶電話確認並核對簽署文件。', expect.objectContaining({ idempotencyKey: expect.any(String), correlationId: expect.any(String) }),
     ));
-    fireEvent.click(screen.getByRole('button', { name: /確認記錄人工客戶簽約並完成契約/ }));
+    expect(previewManualClientAttestation.mock.invocationCallOrder[0]).toBeLessThan(recordManualClientAttestation.mock.invocationCallOrder[0]);
     await waitFor(() => expect(recordManualClientAttestation).toHaveBeenCalledWith(
       'CASE-1', evidence, 'phone', '已由客戶電話確認並核對簽署文件。', manualPreview.preview_fingerprint,
       expect.objectContaining({ idempotencyKey: expect.any(String), correlationId: expect.any(String) }),
