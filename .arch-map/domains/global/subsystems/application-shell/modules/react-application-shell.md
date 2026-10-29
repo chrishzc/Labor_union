@@ -9,8 +9,6 @@
 
 ## Implementation
 - composed page: `ui_react/src/pages/ContractTemplatesPage.tsx` — `#contract-templates` in 稽核與系統；模板保存、啟用及檔案驗證歸 Contract Signing。
-- presentation transport: `ui_react/src/api/shared/application_fetch.ts` — optional build-time `/test` public prefix applied by shared transport and direct fetch consumers; no auth／body／business rule changes. `VITE_PUBLIC_PATH_PREFIX` defaults empty, keeping local `/admin/` and root API paths.
-- `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
 - shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。
@@ -20,9 +18,11 @@
 - composed page: `ui_react/src/pages/ClientRegistryPage.tsx`
 - composed page: `ui_react/src/pages/ClientRosterPage.tsx`
 - primary: `ui_react/vite.config.ts`
+- presentation transport: `ui_react/src/api/shared/application_fetch.ts` — optional build-time `/test` public prefix applied by shared transport and direct fetch consumers; no auth／body／business rule changes. `VITE_PUBLIC_PATH_PREFIX` defaults empty, keeping local `/admin/` and root API paths.
 - composed page: `ui_react/src/pages/FileSettingsPage.tsx` — `#file-settings` in 稽核與系統; the controlled-files owner enforces root permission and owns settings, not the shell.
 
 ## Contracts
+- `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。
 - 已登入的案件、客戶、財務、歷史服務帳務與 LINE 管理頁掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。
 - `document/架構重整/01_規格基線/25_Access_Control正式規格.md` — session/auth boundary。
