@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "4f25e2fbcfab8cf8d71e34f488dae9471a5b1a1dece4739eeb4d73c50590e1c3",
+  "active_artifacts_sha256": "912b36f96769554b3259323456567fb80f60e185a940b7245359f8880e3f11eb",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -189,7 +189,8 @@
     "db/schema_parts/235_finance_statement_workspace.sql",
     "db/schema_parts/236_client_refund_overage_receipt.sql",
     "db/schema_parts/237_non_citizen_case_sequences.sql",
-    "db/schema_parts/238_registry_case_deletion_guards.sql"
+    "db/schema_parts/238_registry_case_deletion_guards.sql",
+    "db/schema_parts/239_matching_manual_reason_optional.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -225,7 +226,8 @@
     "db/schema_parts/1057_finance_statement_workspace.sql": "migration-only",
     "db/schema_parts/1058_client_refund_overage_receipt.sql": "migration-only",
     "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only",
-    "db/schema_parts/1060_registry_case_deletion_guards.sql": "migration-only"
+    "db/schema_parts/1060_registry_case_deletion_guards.sql": "migration-only",
+    "db/schema_parts/1061_matching_manual_reason_optional.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -524,6 +526,15 @@
       "replay": "exact guarded triggers are no-op",
       "rollback": "retain verified backup and journal; restore protected predecessor definitions only through approved recovery",
       "unresolved_policy": "modified or partially missing guard definitions fail closed"
+    },
+    "db/schema_parts/1061_matching_manual_reason_optional.sql": {
+      "source_object": "matching_response_events obsolete nonempty manual reason CHECK",
+      "successor": "db/schema_parts/239_matching_manual_reason_optional.sql",
+      "terminal_schema_evidence": "fresh and preserve remove only the same obsolete CHECK",
+      "data_effect": "schema-only; no event rewrite, deletion or backfill",
+      "replay": "absent CHECK plus exact reason metadata is exact; the known predecessor is pending",
+      "rollback": "discard unpromoted candidate; retain valid empty reasons after apply, never invent historical text",
+      "unresolved_policy": "unknown CHECK expression, missing parent or changed reason metadata fail closed"
     }
   }
 }

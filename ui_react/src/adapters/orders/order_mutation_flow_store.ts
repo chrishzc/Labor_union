@@ -421,6 +421,10 @@ export class OrderMutationFlowStore {
   private candidateInformation = new Map<string, CandidateInformationFlowState>();
   private candidateWillingness = new Map<string, CandidateWillingnessFlowState>();
   private formalManualResponses = new Map<string, FormalManualResponseFlowState>();
+  private readonly formalManualBeforeUnload = (event: BeforeUnloadEvent): void => {
+    event.preventDefault();
+    event.returnValue = '';
+  };
   private formalPlanCreations = new Map<string, FormalPlanCreationFlowState>();
   private recommendationReplacements = new Map<string, RecommendationReplacementFlowState>();
   private externalSigningHandoffs = new Map<string, ExternalSigningHandoffFlowState>();
@@ -603,11 +607,13 @@ export class OrderMutationFlowStore {
 
   public setFormalManualResponse(caseNo: string, state: FormalManualResponseFlowState): void {
     this.formalManualResponses.set(caseNo, state);
+    if (typeof window !== 'undefined') window.addEventListener('beforeunload', this.formalManualBeforeUnload);
     this.notify();
   }
 
   public clearFormalManualResponse(caseNo: string): void {
     this.formalManualResponses.delete(caseNo);
+    if (!this.formalManualResponses.size && typeof window !== 'undefined') window.removeEventListener('beforeunload', this.formalManualBeforeUnload);
     this.notify();
   }
 
@@ -1140,6 +1146,7 @@ export class OrderMutationFlowStore {
     this.candidateInformation.clear();
     this.candidateWillingness.clear();
     this.formalManualResponses.clear();
+    if (typeof window !== 'undefined') window.removeEventListener('beforeunload', this.formalManualBeforeUnload);
     this.formalPlanCreations.clear();
     this.recommendationReplacements.clear();
     this.externalSigningHandoffs.clear();

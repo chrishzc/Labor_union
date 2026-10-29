@@ -75,6 +75,7 @@ from subsystems.scheduling.matching_notification_application import (
 )
 from subsystems.scheduling.matching_notification_contracts import (
     ApplyManualCustomerProfilesCommand,
+    ManualMatchingResponseRejectedError,
     ManualMatchingConfirmationMethod,
     PreviewManualCustomerProfilesCommand,
     RecordManualMatchingResponseCommand,
@@ -263,6 +264,17 @@ def send_matching_plan_information_route(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+def _manual_matching_rejection(error: ManualMatchingResponseRejectedError) -> HTTPException:
+    response = typed_http_error(
+        409, "conflict",
+        "matching_manual_response_not_committed",
+        "正式方案版本已變更，本次人工回覆未保存；請重新讀取後確認。",
+        "matching-manual-response",
+    )
+    response.detail["error"]["domain_blockers"] = [str(error)]
+    return response
+
+
 @router.put(
     "/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
     response_model=BaseResponse[MatchingCustomerDecisionReceiptView],
@@ -294,6 +306,8 @@ def record_matching_customer_decision_route(
             ),
             message="成功補登客戶配對決策",
         )
+    except ManualMatchingResponseRejectedError as error:
+        raise _manual_matching_rejection(error) from error
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -335,6 +349,8 @@ def record_matching_plan_willingness_route(
             ),
             message="成功更新月嫂意願",
         )
+    except ManualMatchingResponseRejectedError as error:
+        raise _manual_matching_rejection(error) from error
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -773,6 +789,8 @@ def _customer_confirmation_preview_data(preview) -> dict[str, Any]:
         "order_information_2_ready": preview.order_information_2_ready,
         "weekly_service_ready": preview.weekly_service_ready,
         "weekly_service_row_count": preview.weekly_service_row_count,
+        "service_period_start": preview.service_period_start,
+        "service_period_end": preview.service_period_end,
         "order_information_1": [
             {
                 "segment_id": item.segment_id,

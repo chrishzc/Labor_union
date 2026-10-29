@@ -14,6 +14,18 @@ from collections.abc import Iterable
 from subsystems.reporting.weekly_report_metrics_service import monday_of, sunday_of
 
 
+def matching_service_date_bounds(
+    service_dates: Iterable[date], required_days: int,
+) -> tuple[date, date]:
+    """Resolve the saved Orders date set shared by confirmation and reservation."""
+    dates = tuple(service_dates)
+    if any(value.__class__ is not date for value in dates):
+        raise ValueError("invalid current confirmed service dates")
+    if not dates or len(dates) != required_days or len(set(dates)) != len(dates):
+        raise ValueError("current confirmed service dates mismatch")
+    return min(dates), max(dates)
+
+
 @dataclass(frozen=True, slots=True)
 class ProposedServiceSegment:
     segment_id: int

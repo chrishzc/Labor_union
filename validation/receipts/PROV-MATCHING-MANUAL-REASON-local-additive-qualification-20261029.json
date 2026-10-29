@@ -1,0 +1,87 @@
+{
+  "artifact": {
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "descriptor_sha256": "094745ef708718f9404ff20ed94e5d30946e7f1acfc2240f51ad696bcfe53571",
+    "name": "1061_matching_manual_reason_optional.sql",
+    "sql_sha256": "103d1584733777e018bdbff8bfb5b9c7b2da91cdeae0653af0449efa5346b4bd"
+  },
+  "contract": "local-additive-qualification/v1",
+  "fresh_bootstrap": {
+    "data_rows_written": 0,
+    "schema_fingerprint": "81aae9e54ed413102a70dff02fe2e6c0d5765802eb696609cea2992660a877fa",
+    "status": "verified",
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e"
+  },
+  "manifest_artifact_inventory": [
+    {
+      "data_effect": "schema_only",
+      "dependencies": [],
+      "name": "1061_matching_manual_reason_optional.sql",
+      "sha256": "103d1584733777e018bdbff8bfb5b9c7b2da91cdeae0653af0449efa5346b4bd"
+    }
+  ],
+  "metadata_backup": {
+    "backup_dump_sha256": "3b2afbbeba16927a0623f61b6e3426d2cfa6bd9db1e8e3b339eb3cc4d52158b3",
+    "data_fingerprint_sha256": "756294ed6fb28efae4f9eca8432e245ca3b196fc1e1e7f893e0498c5e55f08ef",
+    "data_fingerprints": {
+      "matching_response_events": "dc61a95b1e67420da2e897827df752649a62c255c31ea0b619bf476e712b4161"
+    },
+    "data_row_counts": {
+      "matching_response_events": 1
+    },
+    "schema_sha256": "93c53ba42b1a1b4ee22a1c7dd3224dc70cc8bbcaf29cd93d9fd5ffd5f5daf669",
+    "status": "verified"
+  },
+  "payload_digest": "6fcdb9319aab174a827e07b5016b9d7e8e4213de2df6a89151724bc9c1f3840d",
+  "policy": {
+    "backfill": 0,
+    "destructive": 0,
+    "local_in_place_eligible": true,
+    "seed": 0
+  },
+  "policy_evidence": {
+    "candidate_dump_sha256": "08e93aabfd216b3688088c4163f20158a6e7337046d56b993350e020df8da8bb",
+    "fresh_schema_fingerprint": "81aae9e54ed413102a70dff02fe2e6c0d5765802eb696609cea2992660a877fa",
+    "fresh_target_projection_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e",
+    "preserve_candidate_schema_fingerprint": "03857ee8303455130eb0ccf53de91facf5d9bf7a637fad62ffb946d9c4a822f5",
+    "preserve_candidate_target_projection_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e",
+    "preserve_source_schema_fingerprint": "93c53ba42b1a1b4ee22a1c7dd3224dc70cc8bbcaf29cd93d9fd5ffd5f5daf669",
+    "source_dump_sha256": "3b2afbbeba16927a0623f61b6e3426d2cfa6bd9db1e8e3b339eb3cc4d52158b3"
+  },
+  "preserve_data_candidate": {
+    "candidate_data_fingerprints": {
+      "matching_response_events": "dc61a95b1e67420da2e897827df752649a62c255c31ea0b619bf476e712b4161"
+    },
+    "candidate_data_row_counts": {
+      "matching_response_events": 1
+    },
+    "candidate_dump_sha256": "08e93aabfd216b3688088c4163f20158a6e7337046d56b993350e020df8da8bb",
+    "candidate_schema_fingerprint": "03857ee8303455130eb0ccf53de91facf5d9bf7a637fad62ffb946d9c4a822f5",
+    "data_fingerprints": {
+      "matching_response_events": "dc61a95b1e67420da2e897827df752649a62c255c31ea0b619bf476e712b4161"
+    },
+    "data_row_counts": {
+      "matching_response_events": 1
+    },
+    "source_dump_sha256": "3b2afbbeba16927a0623f61b6e3426d2cfa6bd9db1e8e3b339eb3cc4d52158b3",
+    "source_schema_fingerprint": "93c53ba42b1a1b4ee22a1c7dd3224dc70cc8bbcaf29cd93d9fd5ffd5f5daf669",
+    "status": "verified",
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e"
+  },
+  "published_manifest_sha256": "1e3ceba6663347e37c00b667c0d94c9e8cd6b30bb6557139b56ac2d75131b5d4",
+  "release_fingerprint": "e7dc241da459cc3e7e516bca6799e81401168a340759b1fa28c2a3529eb0ad2d",
+  "release_id": "labor-union-matching-manual-reason-optional-2026-10-29-v1",
+  "target_projection": {
+    "artifact_name": "1061_matching_manual_reason_optional.sql",
+    "contract": "local-additive-target-projection/v1",
+    "descriptor_sha256": "094745ef708718f9404ff20ed94e5d30946e7f1acfc2240f51ad696bcfe53571",
+    "fresh_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e",
+    "fresh_state": "exact",
+    "preserve_candidate_fingerprint": "a04cf253b8e77c64ec184e39e2ae8c23fa36a99d89c62daf12c243fdede0f30e",
+    "preserve_candidate_state": "exact"
+  },
+  "work_package": "MATCH-ROOT-07"
+}

@@ -10,6 +10,7 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- `db/schema_parts/239_matching_manual_reason_optional.sql`／`db/schema_parts/1061_matching_manual_reason_optional.sql`、`db/migration_releases/labor_union_2026_10_29_matching_manual_reason_optional_v1.json` 及同名 descriptors；fresh bundle 為 `db/releases/labor_union_validation_schema_matching_manual_reason_v1.sql` — 移除已退役的人工媒合原因非空 CHECK，保留歷史列與其餘約束。原定義精確比對才 pending，已移除 exact，未知定義或 parent drift 停止；fresh／preserve 交易驗收在 matching-coordination integration root，metadata contract 在本 Module test root。
 - `db/schema_parts/1060_registry_case_deletion_guards.sql`、`db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.json` 及同名 descriptors — 精確替換 129 個保護 trigger，保留原始 default guard；僅 root 未簽約案件的 active claim scope 可刪除。歷史 release 比較僅將完整匹配的 successor 投影為 predecessor，未知改寫仍為 drift。
 - `validation/receipts/PROV-REGISTRY-GUARDS-local-additive-qualification-20261029.json` — fresh／含簽回與未簽回資料的 preserve candidate 證據；實際 source apply 另建 release-scoped 備份。
 - `db/schema_parts/237_non_citizen_case_sequences.sql`／`1059_non_citizen_case_sequences.sql`、`db/migration_releases/labor_union_2026_10_29_non_citizen_cases_v1.json` 及同名 descriptors — 核准交易內的非市民年度流水；schema-only，無既有案件回填；fresh／preserve 驗證由 Case Import integration owner 承接。

@@ -20,6 +20,7 @@ from domains.scheduling.waiting_deposit_lock import (
 from subsystems.scheduling.segmented_availability import (
     derive_segment_availability,
 )
+from subsystems.scheduling.proposed_weekly_service_projection import matching_service_date_bounds
 from subsystems.scheduling.ports import (
     SegmentedAvailabilityFactsPort,
     unconfigured_connection_factory,
@@ -166,9 +167,9 @@ def _search_availability(
             _as_optional_date(row["service_date"], "confirmed_service_date")
             for row in loaded_facts["confirmed_service_dates"]
         )
-        effective_dates = (planned_start, planned_end, *official_dates)
-        planned_start = min(effective_dates)
-        planned_end = max(effective_dates)
+        planned_start, planned_end = matching_service_date_bounds(
+            official_dates, int(order_row["service_days"]),
+        )
     maximum_period_days = 60 if inquiry else int(order_row["service_days"]) + 45
     if (planned_end - planned_start).days + 1 > maximum_period_days:
         raise ValueError("service period exceeds the Orders selectable range")

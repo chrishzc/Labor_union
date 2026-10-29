@@ -5551,7 +5551,6 @@ CREATE TABLE `matching_response_events` (
   CONSTRAINT `fk_matching_response_plan` FOREIGN KEY (`plan_id`) REFERENCES `caregiver_matching_plans` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_matching_response_segment` FOREIGN KEY (`segment_id`) REFERENCES `caregiver_matching_plan_segments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_matching_response_fingerprint` CHECK (regexp_like(`payload_fingerprint`,_utf8mb4'^[0-9a-f]{64}$')),
-  CONSTRAINT `chk_matching_response_manual_reason` CHECK (((`response_source` = _utf8mb4'line') or (char_length(trim(`reason`)) > 0))),
   CONSTRAINT `chk_matching_response_target` CHECK ((((`response_type` = _utf8mb4'caregiver_willingness') and (`segment_id` is not null) and (`response_value` in (_utf8mb4'willing',_utf8mb4'unwilling'))) or ((`response_type` = _utf8mb4'customer_decision') and (`segment_id` is null) and (`response_value` in (_utf8mb4'accepted',_utf8mb4'declined',_utf8mb4'contact_requested')))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

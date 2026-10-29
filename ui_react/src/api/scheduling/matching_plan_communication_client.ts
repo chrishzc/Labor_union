@@ -85,6 +85,8 @@ const CustomerConfirmationPreviewSchema = z.strictObject({
   order_information_2_ready: z.boolean(),
   weekly_service_ready: z.boolean(),
   weekly_service_row_count: z.number().int().nonnegative(),
+  service_period_start: IsoDateSchema.nullable().optional(),
+  service_period_end: IsoDateSchema.nullable().optional(),
   order_information_1: z.array(z.strictObject({
     segment_id: z.number().int().positive(), staff_id: z.number().int().positive(),
     staff_name: z.string().min(1).max(100), text: z.string().min(1).max(5000),

@@ -161,10 +161,14 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     || formalPlanCreation?.status === 'outcome_unknown'
     || formalPlanCreation?.status === 'observation_failed'
     || formalPlanCreation?.status === 'observing';
-  const hasDraft = willingnessChoice !== '' || willingnessReason.trim().length > 0 || decisionReason.trim().length > 0
+  const submittedManualKind = formalManualProtected ? formalManualResponse?.command.kind : undefined;
+  const hasDraft = (submittedManualKind !== 'willingness' && (willingnessChoice !== '' || willingnessReason.trim().length > 0))
+    || (submittedManualKind !== 'customer_decision' && decisionReason.trim().length > 0)
     || resumeNote !== '請查收正式推薦月嫂的完整確認資訊。';
   const protectedOperation = busy || formalManualProtected || formalPlanCreationProtected || replacementState.busy || replacementFlow !== undefined;
-  useEffect(() => { onEditStateChange?.({ dirty: hasDraft || replacementState.dirty, busy: protectedOperation || multiBusy }); }, [hasDraft, replacementState.dirty, protectedOperation, multiBusy, onEditStateChange]);
+  const navigationBusy = busy || formalManualResponse?.status === 'applying' || formalManualResponse?.status === 'observing'
+    || formalPlanCreationProtected || replacementState.busy || replacementFlow !== undefined || multiBusy;
+  useEffect(() => { onEditStateChange?.({ dirty: hasDraft || replacementState.dirty, busy: navigationBusy }); }, [hasDraft, replacementState.dirty, navigationBusy, onEditStateChange]);
   useEffect(() => () => { onEditStateChange?.({ dirty: false, busy: false }); }, [onEditStateChange]);
 
   useEffect(() => {
@@ -324,27 +328,33 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   const observeFormalManualResponse = async (state: FormalManualResponseFlowState, request: number) => {
     const { command, receipt } = state;
     if (receipt === null) throw new Error('正式人工回覆尚未收到收據，不能只讀取結果。');
+    const ownsResponse = () => sessionClient.getUser()?.username.trim() === command.actor
+      && orderMutationFlowStore.getFormalManualResponse(command.caseNo)?.command.key === command.key;
+    if (!ownsResponse()) return;
     orderMutationFlowStore.setFormalManualResponse(caseNo, { ...state, status: 'observing', error: null });
     const data = await readCurrentPlan(command.caseNo, command.planId);
+    if (!ownsResponse()) return;
     const receivedVersion = receipt.communication_version;
     const observed = data !== null && data.contact.plan.communication_version >= receivedVersion
       && (command.kind === 'willingness'
         ? data.contact.segments.some((segment) => segment.segment_id === command.segmentId && segment.willingness === (command.willingness ?? 'willing'))
         : data.contact.customer_decision === command.decision);
     if (!observed) throw new Error('正式人工回覆已收到收據，但目前方案回讀尚未確認相同版本與結果；只能重新讀取。');
-    if (activeCase.current !== caseNo || sequence.current !== request) {
-      throw new Error('案件已切換；保留收據，只能重新讀取原案件結果。');
-    }
+    // A readback completed after navigation still resolves the original case,
+    // without touching the newly displayed case or a different signed-in actor.
+    orderMutationFlowStore.clearFormalManualResponse(command.caseNo);
+    if (activeCase.current !== caseNo || sequence.current !== request) return;
     setActive({ status: 'ready', data });
     setNotice(command.kind === 'willingness' ? '月嫂意願變更已儲存並完成回讀。' : '客戶決定已完成正式回讀。');
     if (command.kind === 'willingness') { setWillingnessReason(''); setWillingnessChoice(''); setChangingSegmentId(null); }
     else { setDecisionReason(''); setShowManualDecision(false); }
-    orderMutationFlowStore.clearFormalManualResponse(caseNo);
     onObserved?.();
   };
 
-  const isDefinitiveManualRejection = (caught: unknown) => caught instanceof ApiHttpError
-    && caught.status >= 400 && caught.status < 500 && caught.status !== 408 && caught.status !== 429;
+  const isDefinitiveManualRejection = (caught: unknown, recovery: boolean) => caught instanceof ApiHttpError
+    && !caught.retryable && ((caught.status === 409 && caught.code === 'matching_manual_response_not_committed')
+      || (!recovery && caught.status >= 400 && caught.status < 500 && caught.status !== 408 && caught.status !== 429
+        && !['MATCHING_CUSTOMER_DECISION_FAILED', 'FORMAL_PLAN_WILLINGNESS_FAILED'].includes(caught.code)));
 
   const formalManualActor = (): string => {
     const actor = sessionClient.getUser()?.username.trim() ?? '';
@@ -353,7 +363,10 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
   };
 
   const submitFormalManualResponse = async (command: FormalManualResponseCommand, recovery: boolean) => {
+    if (sessionClient.getUser()?.username.trim() !== command.actor) throw new ApiHttpError(401, 'FORMAL_MANUAL_RESPONSE_ACTOR_CHANGED', '請以原操作帳號確認正式人工回覆。');
     orderMutationFlowStore.setFormalManualResponse(caseNo, { status: 'applying', command, receipt: null, error: null });
+    const ownsResponse = () => sessionClient.getUser()?.username.trim() === command.actor
+      && orderMutationFlowStore.getFormalManualResponse(command.caseNo)?.command.key === command.key;
     const request = sequence.current;
     let receipt: FormalManualResponseFlowState['receipt'];
     try {
@@ -365,23 +378,29 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           command.caseNo, command.planId, command.expectedVersion, command.decision, command.reason, command.key, command.actor,
         );
     } catch (caught) {
-      if (isDefinitiveManualRejection(caught) && !recovery) {
+      if (!ownsResponse()) return;
+      if (isDefinitiveManualRejection(caught, recovery)) {
         orderMutationFlowStore.clearFormalManualResponse(caseNo);
-        if (activeCase.current === caseNo && sequence.current === request) setError(errorMessage(caught));
+        if (activeCase.current === caseNo && sequence.current === request) {
+          setError(errorMessage(caught));
+          if (command.kind === 'customer_decision') { setDecisionReason(command.reason); setShowManualDecision(true); }
+          else { setWillingnessChoice(command.willingness ?? 'willing'); setWillingnessReason(command.reason); setChangingSegmentId(command.segmentId); }
+        }
       } else {
-        const message = recovery
-          ? '正式人工回覆結果仍未確認；請恢復權限後使用原操作重新確認。'
-          : '正式人工回覆結果尚未確認；請使用原操作重新確認。';
+        const unauthorized = caught instanceof ApiHttpError && [401, 403].includes(caught.status);
+        const message = `${errorMessage(caught)} 正式人工回覆結果尚未確認；${unauthorized ? '請恢復權限後' : '請稍後'}使用原操作重新確認。`;
         orderMutationFlowStore.setFormalManualResponse(caseNo, { status: 'outcome_unknown', command, receipt: null, error: message });
         if (activeCase.current === caseNo && sequence.current === request) setError(message);
       }
       return;
     }
+    if (!ownsResponse()) return;
     const received: FormalManualResponseFlowState = { status: 'observation_failed', command, receipt, error: null };
     orderMutationFlowStore.setFormalManualResponse(caseNo, received);
     try {
       await observeFormalManualResponse(received, request);
     } catch (caught) {
+      if (!ownsResponse()) return;
       const message = errorMessage(caught);
       const saved = orderMutationFlowStore.getFormalManualResponse(caseNo);
       if (saved?.receipt) orderMutationFlowStore.setFormalManualResponse(caseNo, { ...saved, status: 'observation_failed', error: message });
@@ -627,6 +646,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       } catch (caught) {
         const message = errorMessage(caught);
         const currentSaved = orderMutationFlowStore.getFormalManualResponse(caseNo);
+        if (sessionClient.getUser()?.username.trim() !== saved.command.actor || currentSaved?.command.key !== saved.command.key) return;
         if (currentSaved?.receipt) orderMutationFlowStore.setFormalManualResponse(caseNo, { ...currentSaved, status: 'observation_failed', error: message });
         if (activeCase.current === caseNo && sequence.current === request) {
           setError(message);
@@ -654,7 +674,15 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
     return staffDisplayLabel(segment?.staff_union_no ?? candidate?.staff_union_no, segment?.staff_name ?? candidate?.staff_name ?? '姓名未設定');
   };
   const informationReady = confirmationPreview.status === 'ready' ? [confirmationPreview.data.order_information_1_ready, confirmationPreview.data.order_information_2_ready, confirmationPreview.data.weekly_service_ready] : [false, false, false];
-  useUnsavedDraft('正式推薦確認', { '接案意願': willingnessChoice, '意願原因': willingnessReason, '確認原因': decisionReason, '傳送備註': resumeNote }, { busy: protectedOperation || multiBusy, resetKey: revision });
+  useUnsavedDraft('正式推薦確認', {
+    '接案意願': submittedManualKind === 'willingness' ? '' : willingnessChoice,
+    '意願原因': submittedManualKind === 'willingness' ? '' : willingnessReason,
+    '確認原因': submittedManualKind === 'customer_decision' ? '' : decisionReason,
+    '傳送備註': resumeNote,
+  }, { busy: navigationBusy, resetKey: revision, discard: () => {
+    setWillingnessChoice(''); setWillingnessReason(''); setDecisionReason('');
+    setResumeNote('請查收正式推薦月嫂的完整確認資訊。');
+  } });
 
 
   return (
@@ -702,6 +730,11 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
           {current.contact.customer_decision === 'contact_requested' && <div role="status"><strong>客戶希望進一步聯絡</strong><p>請查看客戶留言並回覆；客戶仍可由原 LINE 卡片接受配對，也可由人員記錄決定。</p></div>}
           {current.contact.customer_decision !== 'accepted' && <section className="formal-recommendation-customer-info" aria-label="客戶確認資訊"><div className="formal-recommendation-summary"><div><h4>客戶確認資訊</h4><p>本次推薦方案的確認內容與寄送狀態。</p></div><span>{profileStatusLabel(confirmationDeliveryStatus)}</span></div>
             {confirmationPreview.status === 'loading' && <p role="status">正在檢查確認資訊…</p>}
+            {confirmationPreview.status === 'ready' && confirmationPreview.data.service_period_start && confirmationPreview.data.service_period_end && <p className="formal-recommendation-hint">
+              已保存服務日期：{confirmationPreview.data.service_period_start} ～ {confirmationPreview.data.service_period_end}
+              {currentSegments.length === 1 && (currentSegments[0].assignedStartDate !== confirmationPreview.data.service_period_start || currentSegments[0].assignedEndDate !== confirmationPreview.data.service_period_end)
+                && '；與上方原詢問期間不同，本次確認及檔期保留使用已保存服務日期。'}
+            </p>}
             {confirmationPreview.status === 'error' && <div role="alert"><p>目前無法檢查確認資訊：{confirmationPreview.message}</p><button type="button" disabled={protectedOperation} onClick={() => setConfirmationPreviewGeneration(value => value + 1)}>重新檢查</button></div>}
             <div className="formal-recommendation-sheets">{informationLabels.map((label, index) => <article key={label}><strong>{label}</strong><small>{confirmationPreview.status === 'loading' ? '正在檢查' : informationReady[index] ? index === 2 && confirmationPreview.status === 'ready' ? `${confirmationPreview.data.weekly_service_row_count} 週已就緒` : '已就緒' : '尚未就緒'}</small><button type="button" aria-label={`查看${label}`} disabled={confirmationPreview.status !== 'ready'} onClick={() => setInformationTab(index as 0 | 1 | 2)}>查看</button></article>)}</div>
             {confirmationPreview.status === 'ready' && confirmationPreview.data.caregiver_resumes.some(resume => !resume.ready) && <p className="formal-recommendation-hint">{confirmationPreview.data.caregiver_resumes.filter(resume => !resume.ready).map(resume => staffIdentity.label(resume.staff_id, resume.staff_name)).join('、')}履歷 PDF 未附；可先寄送確認資訊，履歷由工會另行提供。</p>}
@@ -725,8 +758,8 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       </details>}
       {formalManualResponse?.status === 'outcome_unknown' && (
         <section aria-label="正式人工回覆結果未明" className="formal-recommendation-next">
-          <p role="alert">正式人工回覆結果尚未確認；請恢復權限後使用原操作重新確認。</p>
-          <button type="button" data-control-id="orders.formal-manual-response.reconcile-original" onClick={retryFormalManualResponse}>
+          <p role="alert">{formalManualResponse.error ?? '正式人工回覆結果尚未確認；請使用原操作重新確認。'}</p>
+          <button type="button" disabled={navigationBusy} data-control-id="orders.formal-manual-response.reconcile-original" onClick={retryFormalManualResponse}>
             以原操作重新確認正式人工回覆
           </button>
         </section>
@@ -734,7 +767,7 @@ export const OrderFormalRecommendationPanel: FC<OrderFormalRecommendationPanelPr
       {formalManualResponse?.status === 'observation_failed' && (
         <section aria-label="正式人工回覆回讀失敗" className="formal-recommendation-next">
           <p role="alert">正式人工回覆已收到收據，但回讀尚未確認；只能重新讀取。</p>
-          <button type="button" data-control-id="orders.formal-manual-response.readback" onClick={retryFormalManualReadback}>
+          <button type="button" disabled={navigationBusy} data-control-id="orders.formal-manual-response.readback" onClick={retryFormalManualReadback}>
             只重新讀取正式人工回覆結果
           </button>
         </section>

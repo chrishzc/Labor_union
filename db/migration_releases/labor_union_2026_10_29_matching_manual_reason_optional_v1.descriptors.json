@@ -1,0 +1,23 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-matching-manual-reason-optional-2026-10-29-v1",
+  "descriptors": {
+    "1061_matching_manual_reason_optional.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {
+        "matching_response_events": {
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      }
+    }
+  }
+}

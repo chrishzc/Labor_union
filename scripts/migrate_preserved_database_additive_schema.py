@@ -368,6 +368,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_29_client_refund_overage_receipt_v1.json",
     "labor_union_2026_10_29_non_citizen_cases_v1.json",
     "labor_union_2026_10_29_registry_case_deletion_guards_v1.json",
+    "labor_union_2026_10_29_matching_manual_reason_optional_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2543,6 +2544,20 @@ def _metadata_state_for_artifact(
     snapshot, registry_state = _registry_guard_snapshot(snapshot, artifact)
     if registry_state is not None:
         return registry_state
+    if artifact == "1061_matching_manual_reason_optional.sql":
+        parent_state = _artifact_metadata_state(snapshot, descriptor, artifact, defer_missing_triggers=defer_missing_triggers)
+        if parent_state != "exact":
+            return "partial" if parent_state == "absent" else parent_state
+        matches = [row for row in snapshot.get("constraints", ())
+                   if row["table_name"] == "matching_response_events"
+                   and row["constraint_name"] == "chk_matching_response_manual_reason"]
+        if not matches:
+            return "exact"
+        old = "response_source='line' OR CHAR_LENGTH(TRIM(reason)) > 0"
+        if len(matches) == 1 and matches[0].get("constraint_type") == "CHECK" and matches[0].get("enforced") == "YES" \
+                and _normalize_check_contract(matches[0].get("check_clause", "")) == _normalize_check_contract(old):
+            return "absent"
+        return "drift"
     # Current fresh databases omit retired structures; deployed historical
     # structures may remain. Neither case schedules DDL or weakens contracts
     # for any retained owner object.
@@ -3853,6 +3868,8 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        if normalized.rstrip(';') == "alter table matching_response_events drop check chk_matching_response_manual_reason":
+            return "alter_add_only"
         canonical_1008 = re.sub(
             r"\s+",
             " ",
@@ -5658,6 +5675,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
     if part_name == "1058_client_refund_overage_receipt.sql":
         descriptor["parent_columns"]["client_refund_reversal_apply_receipts"] = {
             "correction_type": _column_contract("enum('refund','refund_return','reversal','refund_overage')", "NO"),
+        }
+    if part_name == "1061_matching_manual_reason_optional.sql":
+        descriptor["parent_columns"]["matching_response_events"] = {
+            "reason": _column_contract("varchar(500)", "YES"),
         }
     trigger_pattern = re.compile(
         r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+"

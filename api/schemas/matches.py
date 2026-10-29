@@ -178,6 +178,8 @@ class CustomerConfirmationPreviewView(_ClosedModel):
     order_information_2_ready: bool
     weekly_service_ready: bool
     weekly_service_row_count: int = Field(ge=0)
+    service_period_start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    service_period_end: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     order_information_1: list[CustomerConfirmationInformationPreviewView]
     order_information_2: list[CustomerConfirmationInformationPreviewView]
     weekly_service_rows: list[CustomerConfirmationWeeklyServicePreviewView]

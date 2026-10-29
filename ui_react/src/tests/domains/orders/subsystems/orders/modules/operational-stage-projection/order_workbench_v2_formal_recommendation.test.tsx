@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderFormalRecommendationPanel } from '../../../../../../../components/OrderFormalRecommendationPanel';
 import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
@@ -6,6 +7,7 @@ import { sessionClient } from '../../../../../../../api/auth/session_client';
 import type { FormalPlanContactState } from '../../../../../../../api/scheduling/matching_plan_communication_client';
 import { orderMutationFlowStore } from '../../../../../../../adapters/orders/order_mutation_flow_store';
 import { OrderWorkbenchV2Drawer } from '../../../../../../../components/OrderWorkbenchV2Drawer';
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../../../../../../components/UnsavedChanges';
 import { CORE_STAGE_CODES, SUBSTATUS_BY_STAGE_STATUS } from '../../../../../../../api/orders/order_core_stage_projection_schemas';
 
 const mocks = vi.hoisted(() => ({
@@ -100,6 +102,23 @@ async function openExisting(onObserved = vi.fn()) {
   render(<OrderFormalRecommendationPanel caseNo={CASE} onObserved={onObserved} />);
   await screen.findByRole('heading', { name: /^推薦方案/ });
   return onObserved;
+}
+
+function ManualResponseNavigation() {
+  const [opened, setOpened] = useState(true);
+  const { requestLeave } = useUnsavedNavigation();
+  return <>
+    <button onClick={() => requestLeave(() => setOpened(false))}>前往其他頁面</button>
+    <button onClick={() => setOpened(true)}>返回原案件</button>
+    {opened ? <OrderFormalRecommendationPanel caseNo={CASE} /> : <h1>其他頁面</h1>}
+  </>;
+}
+
+function pendingManualResponse() {
+  const command = { kind: 'customer_decision' as const, caseNo: CASE, planId: 51, expectedVersion: 4,
+    decision: 'accepted' as const, reason: '原電話確認內容', key: 'original-manual-key', actor: 'operator-1' };
+  orderMutationFlowStore.setFormalManualResponse(CASE, { status: 'outcome_unknown', command, receipt: null, error: null });
+  return command;
 }
 
 describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
@@ -249,6 +268,119 @@ describe('待辦看板 Beta 正式方案建立與既有方案續辦', () => {
     expect(onObserved).toHaveBeenCalledTimes(1);
     if (decision === 'declined') expect(screen.getByText('客戶未接受本次推薦')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '記錄方案 51 客戶接受' })).not.toBeInTheDocument();
+  });
+
+  it.each([401, 403, 409, 422])('原命令核對遇到一般 %s 時保留未知結果與真正原因，不把狀態當成未提交證明', async status => {
+    const command = pendingManualResponse();
+    mocks.recordCustomerDecision.mockRejectedValue(new ApiHttpError(status, 'HTTP_TEST', '當次查核遭拒'));
+    await openExisting();
+    fireEvent.click(screen.getByRole('button', { name: '以原操作重新確認正式人工回覆' }));
+    await waitFor(() => expect(orderMutationFlowStore.getFormalManualResponse(CASE)).toMatchObject({
+      status: 'outcome_unknown', command, error: expect.stringContaining('當次查核遭拒'),
+    }));
+    const state = orderMutationFlowStore.getFormalManualResponse(CASE)!;
+    expect(state.error?.includes('恢復權限')).toBe(status === 401 || status === 403);
+    expect(mocks.recordCustomerDecision).toHaveBeenCalledWith(CASE, 51, 4, 'accepted', command.reason, command.key, command.actor);
+  });
+
+  it('原 writer 明確確認未提交後解除操作保護並恢復原輸入', async () => {
+    const command = pendingManualResponse();
+    mocks.recordCustomerDecision.mockRejectedValue(new ApiHttpError(409, 'matching_manual_response_not_committed', '原方案版本已變更，本次未保存'));
+    await openExisting();
+    fireEvent.click(screen.getByRole('button', { name: '以原操作重新確認正式人工回覆' }));
+    await screen.findByText('原方案版本已變更，本次未保存');
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)).toBeUndefined();
+    expect(screen.getByLabelText('方案 51 客戶決策依據')).toHaveValue(command.reason);
+    expect(screen.getByRole('button', { name: '記錄方案 51 客戶接受' })).toBeEnabled();
+  });
+
+  it('顯示後端保存日期與原詢問的差異，不從週外框推算服務結束日', async () => {
+    const preview = mocks.previewCustomerConfirmation.getMockImplementation()!;
+    mocks.previewCustomerConfirmation.mockImplementation(async (...args) => ({
+      ...await preview(...args), service_period_start: '2026-09-01', service_period_end: '2026-10-02',
+    }));
+    await openExisting();
+    await screen.findByText(/已保存服務日期：2026-09-01 ～ 2026-10-02/);
+    expect(screen.getByText(/與上方原詢問期間不同/)).toBeInTheDocument();
+    expect(mocks.recordCustomerDecision).not.toHaveBeenCalled();
+  });
+
+  it('結果未知時可以站內離頁、保留原命令與原生警告，返回後仍以原鍵核對', async () => {
+    exists = true;
+    mocks.recordCustomerDecision.mockRejectedValueOnce(new Error('模擬連線中斷'));
+    render(<UnsavedChangesProvider><ManualResponseNavigation /></UnsavedChangesProvider>);
+    await screen.findByRole('heading', { name: /^推薦方案/ });
+    await openManual();
+    fireEvent.change(screen.getByLabelText('方案 51 客戶決策依據'), { target: { value: '已送出的原電話紀錄' } });
+    fireEvent.click(screen.getByRole('button', { name: '記錄方案 51 客戶接受' }));
+    await screen.findByRole('button', { name: '以原操作重新確認正式人工回覆' });
+    const command = orderMutationFlowStore.getFormalManualResponse(CASE)!.command;
+    fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+    await screen.findByRole('heading', { name: '其他頁面' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)?.command).toEqual(command);
+    expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '返回原案件' }));
+    fireEvent.click(await screen.findByRole('button', { name: '以原操作重新確認正式人工回覆' }));
+    await screen.findByText('客戶決定已完成正式回讀。');
+    expect(mocks.recordCustomerDecision).toHaveBeenCalledTimes(2);
+    expect(mocks.recordCustomerDecision.mock.calls[1]).toEqual(mocks.recordCustomerDecision.mock.calls[0]);
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)).toBeUndefined();
+    expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+  });
+
+  it('回讀失敗可離頁返回並只重新讀取，不能重新提交決定', async () => {
+    exists = true;
+    mocks.recordCustomerDecision.mockResolvedValue({ event_id: 91, communication_version: 5 });
+    render(<UnsavedChangesProvider><ManualResponseNavigation /></UnsavedChangesProvider>);
+    await screen.findByRole('heading', { name: /^推薦方案/ });
+    await openManual();
+    fireEvent.click(screen.getByRole('button', { name: '記錄方案 51 客戶接受' }));
+    await screen.findByRole('button', { name: '只重新讀取正式人工回覆結果' });
+    fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+    await screen.findByRole('heading', { name: '其他頁面' });
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)?.receipt?.event_id).toBe(91);
+    contact = { ...contact, customer_decision: 'accepted', plan: { ...contact.plan, communication_version: 5, status: 'accepted' } };
+    fireEvent.click(screen.getByRole('button', { name: '返回原案件' }));
+    fireEvent.click(await screen.findByRole('button', { name: '只重新讀取正式人工回覆結果' }));
+    await screen.findByText('客戶決定已完成正式回讀。');
+    expect(mocks.recordCustomerDecision).toHaveBeenCalledTimes(1);
+  });
+
+  it('切換登入身分後抵達的舊回條不能復活原案件或覆蓋新身分的操作', async () => {
+    let finish!: (receipt: unknown) => void;
+    mocks.recordCustomerDecision.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    exists = true;
+    const view = render(<OrderFormalRecommendationPanel caseNo={CASE} />);
+    await screen.findByRole('heading', { name: /^推薦方案/ });
+    await openManual();
+    fireEvent.click(screen.getByRole('button', { name: '記錄方案 51 客戶接受' }));
+    await waitFor(() => expect(mocks.recordCustomerDecision).toHaveBeenCalledTimes(1));
+    view.unmount();
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-2' } as never);
+    orderMutationFlowStore.clearAll();
+    await act(async () => { finish({ event_id: 91, communication_version: 5 }); });
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)).toBeUndefined();
+  });
+
+  it('舊身分的延遲回讀失敗不能改寫新身分的案件操作', async () => {
+    const command = pendingManualResponse();
+    orderMutationFlowStore.setFormalManualResponse(CASE, { status: 'observation_failed', command,
+      receipt: { event_id: 91, communication_version: 5 } as never, error: null });
+    exists = true;
+    const view = render(<OrderFormalRecommendationPanel caseNo={CASE} />);
+    await screen.findByRole('heading', { name: /^推薦方案/ });
+    let rejectRead!: (reason: unknown) => void;
+    mocks.queryContactState.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRead = reject; }));
+    fireEvent.click(screen.getByRole('button', { name: '只重新讀取正式人工回覆結果' }));
+    await waitFor(() => expect(mocks.queryContactState).toHaveBeenCalledTimes(2));
+    view.unmount();
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-2' } as never);
+    orderMutationFlowStore.clearAll();
+    const replacement = { status: 'outcome_unknown' as const, command: { ...command, actor: 'operator-2', key: 'new-actor-command' }, receipt: null, error: null };
+    orderMutationFlowStore.setFormalManualResponse(CASE, replacement);
+    await act(async () => { rejectRead(new Error('舊查詢延遲失敗')); });
+    expect(orderMutationFlowStore.getFormalManualResponse(CASE)).toBe(replacement);
   });
 
   it('電話已談妥時不要求先寄送客戶確認資訊，仍可用既有人工入口記錄接受', async () => {

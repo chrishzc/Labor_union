@@ -9,6 +9,33 @@ from api.routes import candidate_contact_pool, matches
 from api.schemas.candidate_contact_pool import CandidateWeeklyServicePreviewView
 
 
+def test_manual_rejection_exposes_authoritative_not_committed_result(monkeypatch):
+    from subsystems.scheduling.matching_notification_contracts import ManualMatchingResponseRejectedError
+    from domains.scheduling.matching_communication import MatchingCommunicationStaleError
+
+    def reject(_command):
+        raise ManualMatchingResponseRejectedError(MatchingCommunicationStaleError("matching communication version is stale"))
+
+    monkeypatch.setattr(matches.matching_notifications, "record_manual_response", reject)
+    monkeypatch.setattr(matches, "_require_matching_actor", lambda *_: None)
+    principal = SimpleNamespace(actor_id="admin:1", capabilities=("line.matching.override",))
+    monkeypatch.setattr(matches, "admin_actor_context", lambda *_: None)
+    app = FastAPI()
+    app.include_router(matches.router)
+    app.dependency_overrides[matches.require_line_matching_override] = lambda: principal
+    response = TestClient(app).put(
+        "/api/v1/orders/CASE-1/matching-plans/10/customer-decision",
+        json={"actor": "operator-1", "event_key": "manual-failed", "expected_version": 0,
+              "decision": "accepted", "reason": ""},
+    )
+    assert response.status_code == 409
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "matching_manual_response_not_committed"
+    assert error["category"] == "conflict"
+    assert error["domain_blockers"] == ["matching communication version is stale"]
+    assert "版本已變更" in error["message"] and "未保存" in error["message"]
+
+
 def test_transient_weekly_dates_are_validated_by_orders_preview_without_writes(monkeypatch):
     from datetime import date
     seen = []
@@ -151,6 +178,8 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
                 order_information_2_ready=True,
                 weekly_service_ready=True,
                 weekly_service_row_count=3,
+                service_period_start="2026-09-14",
+                service_period_end="2026-09-18",
                 order_information_1=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－1\n總薪資：預估 48000 元"),),
                 order_information_2=(SimpleNamespace(segment_id=71, staff_id=12, staff_name="王小美", text="訂單資訊－2\n飲食習慣：清淡"),),
                 weekly_service_rows=(SimpleNamespace(serial_number=1, staff_id=12, staff_name="王小美", week_start_date="2026-09-14", week_end_date="2026-09-20", service_hours_per_day=8, weekly_work_days=5, weekly_hours=40),),
@@ -195,6 +224,8 @@ def test_stage5_customer_confirmation_preview_exposes_complete_send_readiness(mo
         "order_information_2_ready": True,
         "weekly_service_ready": True,
         "weekly_service_row_count": 3,
+        "service_period_start": "2026-09-14",
+        "service_period_end": "2026-09-18",
         "order_information_1": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－1\n總薪資：預估 48000 元"}],
         "order_information_2": [{"segment_id": 71, "staff_id": 12, "staff_name": "王小美", "text": "訂單資訊－2\n飲食習慣：清淡"}],
         "weekly_service_rows": [{"serial_number": 1, "staff_id": 12, "staff_name": "王小美", "week_start_date": "2026-09-14", "week_end_date": "2026-09-20", "service_hours_per_day": 8, "weekly_work_days": 5, "weekly_hours": 40}],

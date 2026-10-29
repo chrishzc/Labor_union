@@ -71,6 +71,7 @@ def test_customer_preview_and_send_use_all_saved_dates_including_weekends(monkey
     common = project_order_weekly_service(frozenset(date.fromisoformat(value) for value in saved), 8.5)
 
     assert preview["weekly_service_ready"] and not preview["blockers"]
+    assert (preview["service_period_start"], preview["service_period_end"]) == (min(saved), max(saved))
     assert preview["weekly_service_rows"] == package["weekly_service_rows"]
     for key in ("weekly_work_days", "weekly_hours"):
         assert sum(row[key] for row in preview["weekly_service_rows"]) == sum(row[key] for row in common)

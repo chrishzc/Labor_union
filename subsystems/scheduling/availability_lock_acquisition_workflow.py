@@ -22,6 +22,7 @@ from subsystems.scheduling.availability_lock_helpers import (
 )
 from subsystems.scheduling.ports import unconfigured_connection_factory
 from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
+from subsystems.scheduling.proposed_weekly_service_projection import matching_service_date_bounds
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 
 
@@ -244,8 +245,9 @@ def _with_current_confirmed_service_dates(
         if set(row) != {"service_date"} or row["service_date"].__class__ is not date:
             raise ValueError("invalid current confirmed service dates")
         service_dates.append(row["service_date"])
+    service_start, service_end = matching_service_date_bounds(service_dates, version["service_days"])
     if len(snapshot["segments"]) == 1:
-        start, end = min(service_dates).isoformat(), max(service_dates).isoformat()
+        start, end = service_start.isoformat(), service_end.isoformat()
         snapshot = {
             **snapshot,
             "case_start_date": start,

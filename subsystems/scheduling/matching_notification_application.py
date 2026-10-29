@@ -58,6 +58,7 @@ from subsystems.scheduling.matching_notification_contracts import (
     CustomerConfirmationWeeklyServicePreview,
     ManualCustomerProfilesPreview,
     ManualCustomerProfilesReceipt,
+    ManualMatchingResponseRejectedError,
     MatchingContactState,
     MatchingNotificationProjectionStatus,
     MatchingNotificationResult,
@@ -193,6 +194,8 @@ class MatchingNotificationApplication:
             ),
             caregiver_resumes=resumes,
             blockers=tuple(dict.fromkeys(blockers)),
+            service_period_start=raw.get("service_period_start"),
+            service_period_end=raw.get("service_period_end"),
         )
 
     def request_caregiver_information(
@@ -380,7 +383,13 @@ class MatchingNotificationApplication:
                 )
                 unit_of_work.commit()
                 return replay
-            _require_expected_state(state, command.plan.version)
+            try:
+                _require_expected_state(state, command.plan.version)
+            except MatchingCommunicationStaleError as error:
+                # Missing receipts alone cannot rule out an older in-flight
+                # request. A monotonic version mismatch also prevents that
+                # request from committing after this rejection releases its lock.
+                raise ManualMatchingResponseRejectedError(error) from error
             result = _append_manual_response(unit_of_work, command, state, self._now())
             _require_manual_response_receipt(result, command)
             unit_of_work.commit()
@@ -899,8 +908,10 @@ def _validate_availability(
         segment_drafts=[
             {
                 "staff_id": segment.staff_id,
-                "start_date": segment.assigned_start_date,
-                "end_date": segment.assigned_end_date,
+                # A single recommendation keeps its original inquiry lineage;
+                # confirmation and reservation use the current saved Orders dates.
+                **({"start_date": segment.assigned_start_date,
+                    "end_date": segment.assigned_end_date} if len(state.segments) > 1 else {}),
             }
             for segment in state.segments
         ],
@@ -916,9 +927,15 @@ def _validate_availability(
             "daily_service_hours": False,
         },
     )
-    if any(item.get("reason_code") != "buffer" for item in result.get("conflicts", ())):
+    reasons = {item.get("reason_code") for item in result.get("conflicts", ())}
+    if reasons & {"assignment", "schedule", "active_lock", "staff_unavailability"}:
         raise MatchingDecisionNotReadyError("matching plan is no longer fully available")
-    if result.get("feasibility") != "complete":
+    if "requires_review" in reasons or reasons - {
+        "assignment", "schedule", "active_lock", "staff_unavailability", "buffer",
+        "coverage_gap", "draft_overlap", "outside_case_period",
+    }:
+        raise ValueError("matching availability source requires review")
+    if reasons & {"coverage_gap", "draft_overlap", "outside_case_period"} or result.get("feasibility") != "complete":
         raise MatchingPlanDateMismatchError(
             "matching plan does not cover the current Orders service dates"
         )
@@ -926,7 +943,7 @@ def _validate_availability(
 
 def _availability_blocker(error: ValueError) -> str:
     if isinstance(error, MatchingPlanDateMismatchError):
-        return "正式方案日期與目前案件服務日期不一致，請重新建立方案。"
+        return "正式方案日期或分段與目前案件服務日期不一致，請重新確認服務日期與分段。"
     if isinstance(error, MatchingDecisionNotReadyError):
         return "正式方案中的月嫂目前檔期已有衝突，請重新確認。"
     return "案件服務日期或正式方案資料無法驗證，請重新確認服務日期。"

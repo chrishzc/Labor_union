@@ -39,8 +39,9 @@ Assignment Plan Query 與付款查核共用 current assignment 選取：有效 g
 - 全案有效正式服務量必須等於 Orders 契約服務量。
 - 全案條款變更只有在 current effective assignment 的 identity／人員／日期／區間形狀改變時才重建全部有效 assignments；費用、每日時數、下廚需求等不改變排班形狀的異動保留 current generation、assignment、schedule、buffer 與 occupancy。局部請假／代班只重建受影響 family，但仍重驗全案。
 - assignment 的整段連續區間都占用月嫂，休假不能被誤判為可接其他案件。
-- 一般洽談不占檔期；月嫂只表示承接意願，客戶接受推薦後仍由工會人員決定是否正式配對並以
-  current confirmed service dates 建立 waiting-deposit lock。鎖定不要求月嫂先簽約或先形成
+- 一般洽談不占檔期；月嫂只表示承接意願。依規格 21 的自動保留裁決，客戶接受及 current
+  confirmed service dates 齊備後，由最後條件的 Apply 在原 outer UoW 自動建立 waiting-deposit lock，
+  不另要求人員按保留；衝突時該次 Apply 整筆 rollback。鎖定不要求月嫂先簽約或先形成
   precontract service commitment。
 - 訂金逾期只形成異常，不自動釋放。
 - 每個尚未開始服務的 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。Current Query 亦須以全案第一個正式服務時刻排除已開始／已完成案件的 stale active buffer root，不得讓 persistence marker 覆蓋 `planned／active／completed` lifecycle。
@@ -61,7 +62,7 @@ Assignment Plan Query 與付款查核共用 current assignment 選取：有效 g
 
 ### Matching Segment Plan
 
-單一月嫂完整覆蓋優先，無法覆蓋才產生 2–4 個連續分段。草稿可顯示 gap／overlap，正式聯繫、鎖定與 Apply 前必須完整合法。
+單一月嫂優先；其推薦／說明日期與正式保留的邊界依下述「推薦、客戶決定與結果核對」。無法由單人承接時才產生 2–4 個連續分段；多月嫂草稿可顯示 gap／overlap，正式聯繫、鎖定與 Apply 前必須完整合法，不套用單月嫂的詢問期間規則來略過明確分段檢查。
 
 ### Waiting Deposit Lock
 
@@ -593,7 +594,7 @@ Stable errors：
 Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候選月嫂聯繫事實：候選人、完整 coverage evidence、資訊-1／資訊-2 發送事件與 delivery 狀態、月嫂意願、拒絕理由、人工補登 actor／時間。它不是 `caregiver_matching_plans` 或 `caregiver_matching_plan_segments`，不得建立 availability lock、正式 assignment、staff schedule、日期表 snapshot、客戶履歷傳送或正式指派資格。
 
 - 一次可加入多位候選人；對預計服務日期有部分或全部檔期衝突的人選仍可聯繫協調。加入與每次資訊發送皆須 fresh-read availability，保留目前 coverage evidence，不得把有衝突的人選標示成完整無衝突。
-- 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選；「偏好服務日」與「每日服務時數」勾選時，只列出符合已填需求的月嫂，未勾選時不以該項排除。查詢畫面每人只顯示空閒／總天數及彙總衝突提醒，不逐日列出衝突。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。正式 matching plan 仍須原有正式日期及完整 fresh-fact gates。
+- 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選；「偏好服務日」與「每日服務時數」勾選時，只列出符合已填需求的月嫂，未勾選時不以該項排除。查詢畫面每人只顯示空閒／總天數及彙總衝突提醒，不逐日列出衝突。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。單月嫂推薦沿下述「推薦、客戶決定與結果核對」的詢問／說明日期分工；多月嫂分段與實際保留／正式安排仍須其完整日期及 fresh-fact gates。
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
 - 每位候選人的意願及資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
 - 2026-10-14 人工裁決：候選與詢問使用同一個案件共用資訊入口，未有候選也能查閱；服務條件與費用、照護與飲食需求、每週服務說明三份內容可各自選擇候選月嫂並分開寄送。收件人確認與 Apply 仍逐人核對 canonical bound LINE identity、current facts、preview fingerprint 及 event key，同一份內容與每人的投遞回條分别保留；共用畫面不建立虛構 candidate／assignment。
@@ -678,8 +679,77 @@ fingerprint 語意；不得為省略輸入捏造聯繫紀錄。客戶資訊集�
 LINE identity、recipient binding 或 delivery 缺漏時，已登入的內部操作者可透過正式 matching-plan
 manual response 記錄特定 segment 的月嫂意願與客戶決策。客戶決策的「客戶回覆依據」為選填，空白亦可保存接受或拒絕；有填寫時保存內容並沿用 500 字上限。每筆仍須 actor、目前 plan
 version、idempotency identity 與正式回讀；不得為填滿依據捏造聯繫紀錄，也不得偽造 LINE delivery 或省略正式 plan recipient。LINE callback
-仍必須驗證 recipient／delivery state。客戶接受仍只形成 matching decision，後續鎖定、契約與 execution
-各自遵守其既有 Preview／Apply gate。
+仍必須驗證 recipient／delivery state。客戶接受不代表簽約或正式排班；日期齊備時仍依規格 21
+在原 outer UoW 自動保留，不能把「只形成 matching decision」解讀為略過保留或改成第二次人員確認。
+
+#### 推薦、客戶決定與結果核對（2026-10-29 根源修正）
+
+本節依當次人工要求修正推薦誤報與離頁鎖死；其日期來源由 Orders 規格 01 §3.4.1 擁有，
+自動保留與 rollback 沿規格 21，離頁與草稿沿規格 12 §3.5。這是正式修正契約，不表示程式已完成。
+
+**日期與意願。** 初步詢問使用當輪預計期間；單一已願意候選建立推薦時沿該詢問期間驗證。
+已保存的事前服務日期是說明與後續保留的來源，不得反向要求原詢問區間覆蓋其每個日曆日，
+也不得只因說明日期延伸就宣告月嫂被其他案件占用或強迫重建單月嫂推薦。
+單月嫂客戶確認、寄送前檢查及自動保留須使用同一 current date version 的有效日期投影；
+有已保存日期時，以其逐日集合及首末日解析本次有效期間，不將舊推薦區間與新日期外框拼成
+另一個必須全覆蓋的區間。沒有已保存日期時，推薦與人工客戶決定不因缺少正式排班日期而停用，
+但不得虛構日期或檔期鎖。畫面與通知明示目前說明日期及其與原詢問的差異；既有詢問、
+意願與通知快照保留，初步意願不冒充對後續實際服務日期的同意，正式安排仍遵守 SSTART。
+客戶確認 Preview 的 typed projection 以 `service_period_start`／`service_period_end` 回傳已保存服務日首末日，未就緒時皆為 NULL；不得由每週外框猜算實際首末日。
+多月嫂須沿當次明確分段重驗完整 coverage；新增、延長或換人不得由單月嫂投影推定。
+
+**單一日期解析與錯誤分類。** 各入口共用 owner 日期解析及既有版本檢查，不在 UI、寄送、
+人工決定與鎖定各自重算。Query／Preview 零寫入；Apply fresh-read／lock current facts。
+既有版本足夠時不新增 fingerprint、snapshot token、日期副本或第二個 writer。
+
+| 條件 | 正式意義與行為 |
+|---|---|
+| 有效 assignment／實際班表、有效等待鎖或不可服務期間與本次需求重疊 | 實際檔期衝突；阻擋保留／正式安排，回可辨識的 typed blocker，沿既有權限呈現衝突日期及來源 |
+| 日期不齊、服務量不符、分段 gap／overlap／超出合法範圍 | 日期或方案問題；回對應 typed validation／domain blocker，指出應調整的資料，不稱為月嫂已有排班衝突 |
+| 無法追溯 owner 的舊班表或來源不完整 | 資料待查核；不得宣稱已證實占用，也不得當成空閒放行正式保留 |
+| 七日 buffer 重疊 | 獨立協調提醒；沿既有規則不作 hard blocker |
+| owner version 已變 | typed conflict；重新讀取，不以 generic 500 或自動換鍵重送掩蓋 |
+
+**客戶決定與自動保留。** 人工及 LINE 回覆仍核對各自 actor／recipient、有效方案、當前意願、
+版本及原命令識別。接受且日期齊備時，在原 outer UoW 追加決定並取得唯一檔期鎖；
+任何實際衝突、日期完整性或 writer 失敗均整筆 rollback，回應須保留真正失敗分類。
+若先接受而日期未齊，僅保存合法決定，日期保存時再依同一自動保留契約處理。
+成功回條綁定原案件、方案、操作者與命令；回讀核對結果才顯示完成。不得以目前 customer
+decision 相同，推定某一原命令已提交；不得以沒有事件推定當次未知請求已終結。
+
+**結果核對。** 首次提交與原鍵重試採相同失敗語意；重試旗標本身不得把所有拒絕改成結果未知。
+明確未提交者保留真正原因與輸入，解除操作保護；已提交但回讀失敗者保留收據，只能重新讀取。
+逾時、斷線或無法驗證回條時保留原命令，沿既有 writer 的冪等回放／結果核對確認，禁止換鍵。
+401／403 只表示當次身分或權限不符，不證明先前未知命令未提交；只有這類錯誤才提示恢復權限。
+409／422 也須區分錯誤來源與原命令是否確定未提交；單憑 HTTP status、查無收據或查詢失敗
+不能清空未知狀態。核對不得建立第二份業務狀態 root；站內續辦與離頁依規格 12 §3.5。
+恢復時只有在原 writer 鎖定 current plan、查無原鍵成功收據，且單調遞增的 communication version
+已不符原 expected version，使尚在途中的舊命令也無法再提交時，才回明確未提交的 typed conflict。
+可消失的占用衝突或資料暫時不完整不構成此前提；不得只因同鍵重試失敗就開放新鍵。
+
+**持久化一致性。** 人工原因的選填契約須貫穿 API、Domain、writer 與 MySQL。省略／空白保存
+空字串；保留 500 字與既有 actor、target、fingerprint、冪等及 append-only 保護。
+`239_matching_manual_reason_optional.sql` 供 fresh bootstrap；byte-equivalent `1061` 供 preserve-data，
+只移除已知的 `chk_matching_response_manual_reason` 非空限制，分類為 schema-only，無 seed、
+backfill 或資料刪改。已有 NULL、空白或非空原因的歷史事件均不重寫；未知 constraint 定義、
+缺少 parent 或 reason column drift 須 fail closed。既有資料庫的實際升級另沿規格 10 §9 執行，
+本次實作／測試只允許隔離合成資料，不因程式完成而自動套用真實資料庫。
+
+**驗收。** 下列日期／天數僅為合成案例，不是新的業務常數；實際案件由 current owner facts 決定。
+
+| ID | 情境 | 必須觀察到的結果 |
+|---|---|---|
+| MATCH-ROOT-01 | 單月嫂原詢問／推薦為 11/9～11/28，20 個已保存服務日至 12/4，相關占用皆為零 | 客戶確認呈現已保存日期與差異；說明日期不製造 coverage gap 或檔期衝突；符合其餘條件可記錄接受並依同一日期來源保留 |
+| MATCH-ROOT-02 | 前例的已保存服務日期確有其他有效占用／不可服務事實 | 回正確 typed 衝突與日期；接受事件、版本推進與新鎖整筆零寫入 |
+| MATCH-ROOT-03 | 多月嫂分段缺口／重疊，或服務日數不符 | 回日期／方案錯誤，保留修正入口；不冒充月嫂已有排班衝突，不旁路正式保留 gate |
+| MATCH-ROOT-04 | 分別先接受後存日期、先存日期後接受；另含同命令重播 | 最後條件的 Apply 原子完成保留，只有一筆決定及一個有效鎖；日期未齊不偽造保留 |
+| MATCH-ROOT-05 | 首次或恢復操作遭明確未提交拒絕；另含恢復時權限不足／逾時 | 前者顯示原因並解鎖；後者保留原命令與真實錯誤，不把未知結果誤當已失敗或已成功 |
+| MATCH-ROOT-06 | 已取得收據但回讀失敗，或尚無收據且結果未知 | 前者只回讀；後者只用原命令核對；站內離頁、返回與延遲回應依規格 12 驗收，不重複決定或保留 |
+| MATCH-ROOT-07 | canonical fresh MySQL 及帶有舊原因限制／非空歷史事件的隔離來源 dump → candidate → upgrade | 空白依據可由正式 writer 保存；升級前後歷史列逐值不變，其餘保護保留；已知舊定義為 pending、移除後 exact、未知定義 drift，重播不重複套 DDL |
+
+本次 evidence 包含日期來源不一致、前端將恢復錯誤一律轉成未知，以及隔離 canonical MySQL
+對空白人工原因實際回傳 `chk_matching_response_manual_reason` 違反而使補登失敗。原案當次 API
+紀錄尚未取得，不將合成重現冒充原案紀錄；實作驗收須分別證明持久化、日期檢查與離頁問題已修復。
 
 2026-09-14 人工裁決：正式方案寄送客戶確認資訊時，月嫂履歷 PDF 是 optional attachment，缺少履歷、
 受控檔案儲存尚未配置或目前履歷不是有效 PDF 都不得阻擋其餘確認資訊與客戶決策入口。系統須在內部

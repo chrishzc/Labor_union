@@ -224,6 +224,35 @@ def test_manual_customer_decision_allows_optional_reason_without_line_delivery(d
     assert unit_of_work.delivery_tasks.requests == []
 
 
+@pytest.mark.parametrize("failure_stage", ["version", "writer", "replay_lookup", "commit"])
+def test_manual_rejection_only_certifies_not_committed_after_replay_lookup(monkeypatch, failure_stage):
+    from subsystems.scheduling.matching_notification_contracts import ManualMatchingResponseRejectedError
+
+    unit_of_work = _UnitOfWork(_state())
+    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW, availability_validator=lambda _: None)
+    command = RecordManualMatchingResponseCommand(
+        MatchingPlanReference("CASE-1", 10, 0), None, None, CustomerMatchingDecision.ACCEPTED, "",
+        ActorContext("admin:1", ("line.matching.override",)), ExpectedVersion(0),
+        IdempotencyKey("manual-customer-failure"), CorrelationId("manual-customer-failure"),
+    )
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("automatic_waiting_deposit_occupancy_conflict")
+
+    if failure_stage == "version":
+        from dataclasses import replace
+        unit_of_work.matching_notifications.state = replace(_state(), plan=MatchingPlanReference("CASE-1", 10, 1))
+    elif failure_stage == "commit":
+        monkeypatch.setattr(unit_of_work, "commit", fail)
+    else:
+        monkeypatch.setattr(unit_of_work.matching_notifications,
+                            "append_response" if failure_stage == "writer" else "get_response_result", fail)
+    with pytest.raises(ValueError) as caught:
+        application.record_manual_response(command)
+    assert isinstance(caught.value, ManualMatchingResponseRejectedError) == (failure_stage == "version")
+    assert not unit_of_work.committed
+
+
 def test_manual_customer_profiles_requires_preview_and_appends_distinct_evidence() -> None:
     willing_state = replace(
         _state(),

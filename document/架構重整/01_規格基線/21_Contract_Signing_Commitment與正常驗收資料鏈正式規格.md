@@ -44,7 +44,7 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
 ```text
 完整案件／服務條件保存 → 系統自動計算訂金及各期客戶應付（可先核銷）
 月嫂表示願意承接候選方案 → 客戶接受推薦方案
-→ 工會人員決定正式配對，以 current confirmed service dates 建立 waiting-deposit 檔期鎖
+→ 客戶接受與 current confirmed service dates 齊備，最後條件的 Apply 自動取得 waiting-deposit 檔期鎖
 → 每個月嫂 segment 產生、寄送並回收月嫂契約
 → 所有月嫂簽約完成，保存人員與精確服務日資料（commitment）
 ├─→ 訂金核銷 → 訂單成立（沿用已計算的金額）
@@ -66,6 +66,13 @@ execution schedule 才能完成客戶契約，以本規格較新的人工裁決�
    plan 與完整日期透過正式 writer 自動取得，且不得要求月嫂先簽約或先建立 precontract service commitment。
 
 ## 3. Ownership、SSOT 與 non-goals
+
+2026-10-29 一致性修正：本節自動保留契約同時約束人工與 LINE 客戶接受，以及後到的服務日期保存。
+日期來源及單月嫂原詢問／說明日期解析沿規格 01 §3.4.1 與規格 02「推薦、客戶決定與結果核對」；
+Query、客戶看到的確認內容與保留 writer 不得各自以不同區間判定。多月嫂保留明確分段檢查。
+自動保留仍由既有 Scheduling writer 在最後條件的原 outer UoW 完成，任何正式 blocker 整筆 rollback，
+不改成先提交接受再另外補鎖。日期不符、資料待核對與實際占用須分別回報，不能以 generic 500
+或統稱檔期衝突掩蓋；未知命令／已提交收據的恢復與離頁依規格 02／12，不另建命令狀態 root。
 
 2026-10-15 自動等待訂金鎖人工裁決：客戶接受正式配對及 Orders current confirmed service dates 齊備後，自動借用既有 Scheduling 鎖定 writer；不再要求管理員另按「保留月嫂檔期」。不論先確認配對或先保存日期，最後條件的 Apply 在原 outer UoW 內完成鎖定；先取得 canonical staff occupancy mutex，再鎖 Orders／Matching，fresh-read current roots。占用或不可服務衝突回 typed conflict 並整筆 rollback，不保留半套確認。依 plan／confirmed version 保存唯一 lock-acquired event；重播不重建鎖。Query／Preview 零寫入，既有有效鎖與已生效排班不重建。既有簽約紀錄不因補確認日期重簽；契約、訂金與規格 02 SSTART-03／05 的正式日期結果齊備後，沿既有排班 writer 將等待鎖轉為正式排班；日期表只作群組結果紀錄。
 

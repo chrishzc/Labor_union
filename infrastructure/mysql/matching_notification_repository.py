@@ -38,6 +38,7 @@ from subsystems.scheduling.matching_notification_contracts import (
 from infrastructure.mysql.order_information_repository import MySqlOrderInformationRepository
 from subsystems.scheduling.proposed_weekly_service_projection import (
     ProposedServiceSegment,
+    matching_service_date_bounds,
     project_proposed_weekly_service,
 )
 
@@ -453,11 +454,16 @@ class MySqlMatchingNotificationRepository:
         weekly_row_count = 0
         weekly_ready = True
         weekly = ()
+        service_period_start = service_period_end = None
         try:
             weekly = _customer_confirmation_weekly_rows(segments)
             weekly_row_count = len(weekly)
             if weekly_row_count == 0:
                 raise ValueError("weekly service projection is empty")
+            start, end = matching_service_date_bounds(
+                _json_dates(segments[0].get("service_dates")), segments[0]["service_days"],
+            )
+            service_period_start, service_period_end = start.isoformat(), end.isoformat()
         except MatchingDecisionNotReadyError as error:
             weekly_ready = False
             blockers.append(str(error))
@@ -470,6 +476,8 @@ class MySqlMatchingNotificationRepository:
             "order_information_2_ready": info_2_ready,
             "weekly_service_ready": weekly_ready,
             "weekly_service_row_count": weekly_row_count,
+            "service_period_start": service_period_start,
+            "service_period_end": service_period_end,
             "order_information_1": info_1,
             "order_information_2": info_2,
             "weekly_service_rows": weekly,
@@ -788,9 +796,10 @@ def _customer_confirmation_weekly_rows(segments):
         if not selected or allocated.intersection(selected):
             raise MatchingDecisionNotReadyError("推薦月嫂服務區段未完整且唯一涵蓋已保存日期，請重新確認分段。")
         allocated.update(selected)
+        start, end = matching_service_date_bounds(selected, len(selected))
         projected.append({
             **segment, "service_dates": selected,
-            "assigned_start_date": min(selected), "assigned_end_date": max(selected),
+            "assigned_start_date": start, "assigned_end_date": end,
         })
     if allocated != dates:
         raise MatchingDecisionNotReadyError("推薦月嫂服務區段未完整且唯一涵蓋已保存日期，請重新確認分段。")

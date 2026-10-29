@@ -30,6 +30,13 @@ from shared_kernel.validation import require_canonical_text, require_positive_ha
 _REASON_MAXIMUM_LENGTH = 500
 
 
+class ManualMatchingResponseRejectedError(ValueError):
+    """No replay exists and the monotonic plan version prevents this identity committing."""
+
+    def __init__(self, reason: ValueError) -> None:
+        super().__init__(str(reason))
+
+
 class MatchingNotificationProjectionStatus(StrEnum):
     PENDING = "pending"
     PROJECTED = "projected"
@@ -159,6 +166,8 @@ class CustomerConfirmationPreview:
     weekly_service_rows: tuple[CustomerConfirmationWeeklyServicePreview, ...]
     caregiver_resumes: tuple[CustomerConfirmationResumePreview, ...]
     blockers: tuple[str, ...]
+    service_period_start: str | None = None
+    service_period_end: str | None = None
 
     @property
     def send_allowed(self) -> bool:
@@ -438,6 +447,7 @@ __all__ = [
     "ManualCustomerProfilesPreview",
     "ManualCustomerProfilesReceipt",
     "ManualMatchingConfirmationMethod",
+    "ManualMatchingResponseRejectedError",
     "MatchingContactState",
     "MatchingNotificationProjectionStatus",
     "MatchingNotificationResult",
