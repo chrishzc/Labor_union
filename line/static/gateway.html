@@ -169,6 +169,21 @@
     }
     const liffStateParams = parseLiffStateParams();
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
+    const entryParam = urlParams.get('entry') || liffStateParams.get('entry');
+
+    // 解析直接跳轉的內部路徑（若 liff.state 本身即為 /line-... 路徑）
+    let directPath = '';
+    const rawState = urlParams.get('liff.state') || '';
+    if (rawState) {
+        try {
+            const decoded = decodeURIComponent(rawState);
+            if (decoded.startsWith('/') && !decoded.startsWith('//')) {
+                if (/^\/line-[a-z0-9_/-]+(\?.*)?$/i.test(decoded)) {
+                    directPath = decoded;
+                }
+            }
+        } catch (_) {}
+    }
     const interactionReference = urlParams.get('ref') || liffStateParams.get('ref') || '';
     const targetPaths = {
         gateway: '/line-gateway',
@@ -231,8 +246,16 @@
             }
 
             if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
+            if (directPath) {
+                navigateTo(directPath, false);
+                return;
+            }
             if (targetPaths[targetPage]) {
                 navigateTo(targetPaths[targetPage], false);
+                return;
+            }
+            if (entryParam && targetPaths[entryParam]) {
+                navigateTo(targetPaths[entryParam], false);
                 return;
             }
             renderActions();

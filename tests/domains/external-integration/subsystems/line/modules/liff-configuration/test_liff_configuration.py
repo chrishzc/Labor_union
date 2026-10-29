@@ -186,6 +186,38 @@ def test_system_fields_remain_protected(context):
     assert repo.revision == 1 and unit.commits == 0
 
 
+def test_non_citizen_page_and_gateway_are_created_in_one_configuration_version(context):
+    http, repo, unit, _ = context
+    old = definition()
+    old['pages'].pop('non_citizen_registration', None)
+    old['pages']['gateway']['actions'] = [a for a in old['pages']['gateway']['actions'] if a['id'] != 'non_citizen_registration']
+    repo.versions[1] = canonical_line_payload_json(old)
+    assert http.get('/api/config/liff/non-citizen').json()['page'] is None
+    result = http.post('/api/config/liff/non-citizen', headers={'If-Match':'1'})
+    assert result.status_code == 200, result.text
+    assert result.json()['revision'] == '2' and unit.commits == 1
+    saved = json.loads(repo.versions[2])
+    assert saved['pages']['registration'] == old['pages']['registration']
+    assert saved['pages']['gateway']['actions'][:-1] == old['pages']['gateway']['actions']
+    assert saved['pages']['gateway']['actions'][-1]['path'] == '/line-non-citizen-registration'
+    assert all(field['required'] for field in saved['pages']['non_citizen_registration']['fields'] if field['system_field'])
+    assert http.post('/api/config/liff/non-citizen', headers={'If-Match':'2'}).json()['revision'] == '2'
+    assert unit.commits == 1
+
+
+def test_non_citizen_settings_use_revision_and_cannot_disable_required_fields(context):
+    http, repo, unit, _ = context
+    state = http.get('/api/config/liff/non-citizen').json()
+    page = state['page']; page['title'] = '非市民自費服務'
+    response = http.put('/api/config/liff/non-citizen', json=page, headers={'If-Match':'1'})
+    assert response.status_code == 200 and response.json()['revision'] == '2'
+    assert http.get('/api/config/liff/runtime?page=non_citizen_registration').json()['page']['title'] == page['title']
+    assert http.put('/api/config/liff/non-citizen', json=page, headers={'If-Match':'1'}).status_code == 409
+    next(field for field in page['fields'] if field['id'] == 'service_time')['required'] = False
+    assert http.put('/api/config/liff/non-citizen', json=page, headers={'If-Match':'2'}).status_code == 422
+    assert repo.revision == 2
+
+
 def test_history_read_failure_is_503_and_does_not_write(context, monkeypatch):
     http, repo, unit, owner = context
     def unavailable(*args):raise ConnectionError('isolated history unavailable')
