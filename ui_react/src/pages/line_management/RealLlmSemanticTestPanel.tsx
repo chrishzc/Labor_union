@@ -1,3 +1,4 @@
+import { applicationFetch } from '../../api/shared/application_fetch';
 /**
  * File: RealLlmSemanticTestPanel.tsx
  * Description: 管理端真實 M2 語意測試；只由後端使用已儲存 Gemini secret，不發送 LINE 或建立工單。
@@ -58,7 +59,7 @@ export const RealLlmSemanticTestPanel: React.FC<{
     const headers: Record<string, string> = {};
     const token = sessionClient.getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
-    void fetch('/api/v1/knowledge/items?limit=100&lifecycle_status=published', {
+    void applicationFetch('/api/v1/knowledge/items?limit=100&lifecycle_status=published', {
       headers,
       credentials: 'include',
     }).then(async (response) => {
@@ -106,7 +107,7 @@ export const RealLlmSemanticTestPanel: React.FC<{
   const handleFeedback = async (choice: 'helpful' | 'unresolved') => {
     setFeedbackStatus({ state: 'submitting', message: '正在送出回覆滿意度…' });
     try {
-      const response = await fetch('/api/v1/line/feedback', {
+      const response = await applicationFetch('/api/v1/line/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

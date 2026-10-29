@@ -22,7 +22,10 @@ param(
     [int]$ApiPort = 8000,
     [int]$ReactPort = 5173,
 
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$StopRuntime,
+    [string]$FrontendArtifact,
+    [string]$AdoptFrontendState
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,11 +33,17 @@ $script:Owned = [System.Collections.Generic.List[object]]::new()
 $script:IdentityRegistry = [System.Collections.Generic.List[object]]::new()
 $script:ExitCode = 0
 $script:Stopping = $false
+$script:StopRequested = $false
+$script:CleanupSucceeded = $false
 $script:RunId = [guid]::NewGuid().ToString("N")
 $script:RunStartedAt = (Get-Date).ToUniversalTime()
 $script:CleanupUnknown = $false
 $script:ReactContainerName = $null
 $script:UnknownRootPids = [System.Collections.Generic.List[int]]::new()
+$script:SkipRuntimeCleanup = $false
+$script:RemoteFrontendControlEnabled = $false
+
+. (Join-Path $PSScriptRoot 'windows_frontend_control.ps1')
 
 function Get-RootStartTime {
     $root = @($script:Owned | Select-Object -First 1)
@@ -162,8 +171,8 @@ function Get-ProcessSnapshot {
         $state = "alive"
         try {
             if ($process.HasExited) {
-                $state = "exited"
-                $exitCode = [int]$process.ExitCode
+                try { $exitCode = [int]$process.ExitCode } catch { }
+                return [pscustomobject]@{ Id = $ProcessId; State = 'exited'; StartTime = $null; Process = $process; ExitCode = $exitCode; Alive = $false; Error = $null }
             }
         }
         catch {
@@ -171,6 +180,13 @@ function Get-ProcessSnapshot {
         }
         try { $startTime = $process.StartTime.ToUniversalTime() }
         catch {
+            # A console child may exit between Get-Process and StartTime. A
+            # verified exited handle needs no identity and must never be killed.
+            try {
+                if ($process.HasExited) {
+                    return [pscustomobject]@{ Id = $ProcessId; State = 'exited'; StartTime = $null; Process = $process; ExitCode = $null; Alive = $false; Error = $null }
+                }
+            } catch { }
             return [pscustomobject]@{ Id = $ProcessId; State = "unknown"; StartTime = $null; Process = $process; ExitCode = $exitCode; Alive = $false; Error = $_.Exception.Message }
         }
         return [pscustomobject]@{
@@ -413,6 +429,7 @@ function Stop-OwnedProcessTrees {
             Write-RuntimeEvent -Event "cleanup_unknown" -Code $script:ExitCode -Detail "a started root had no safely captured immutable identity; cleanup did not guess" -StoppedPids @() -SkippedPids @() -FailedPids @() -UnknownPids @($script:UnknownRootPids) -ChildExitCodes @{}
         }
         else {
+            $script:CleanupSucceeded = $true
             Write-RuntimeEvent -Event "cleanup_complete" -Detail "owned_identities=none" -StoppedPids @() -SkippedPids @() -FailedPids @() -UnknownPids @() -ChildExitCodes @{}
         }
         return
@@ -500,6 +517,7 @@ function Stop-OwnedProcessTrees {
         Write-RuntimeEvent -Event "cleanup_failed" -Code $script:ExitCode -Detail "one or more verified-owned processes could not be stopped" -StoppedPids $stoppedIds -SkippedPids $skippedIds -FailedPids $failedIds -UnknownPids @() -ChildExitCodes $childExitCodes
         return
     }
+    $script:CleanupSucceeded = $true
     Write-RuntimeEvent -Event "cleanup_complete" -Detail "all verified-owned live processes stopped or already exited" -StoppedPids $stoppedIds -SkippedPids $skippedIds -FailedPids $failedIds -UnknownPids @() -ChildExitCodes $childExitCodes
 }
 
@@ -641,6 +659,9 @@ function Wait-HttpReady {
             Write-RuntimeEvent -Event "ready" -Label $Label -Detail $Url
             return
         }
+        if ($null -ne $OwnedEntry -and -not (Test-OwnedAlive -Entry $OwnedEntry)) {
+            throw "$Label exited before becoming ready."
+        }
         Start-Sleep -Seconds 1
     }
     throw "$Label did not become ready: $Url"
@@ -667,11 +688,25 @@ function Assert-ChildrenAlive {
     Refresh-OwnedIdentityRegistry
     foreach ($entry in @($script:Owned)) {
         if (-not (Test-OwnedAlive -Entry $entry)) {
+            if ($script:RemoteFrontendControlEnabled -and $entry.Label -eq 'Remote React') {
+                # A frontend outage or failed maintenance must not stop API,
+                # workers or Tunnel. Recovery remains an explicit update command.
+                continue
+            }
             $code = Get-LastKnownExitCode -Entry $entry
             Write-RuntimeEvent -Event "survival_failed" -Label $entry.Label -ProcessId $entry.Pid -Code $(if ($null -ne $code) { $code } else { 1 }) -ChildExitCodes @{}
             throw "$($entry.Label) exited; stopping owned local runtime."
         }
     }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($FrontendArtifact)) {
+    try { Submit-FrontendUpdate $FrontendArtifact; exit 0 }
+    catch { Write-Error $_ -ErrorAction Continue; exit 1 }
+}
+if ($StopRuntime) {
+    try { Submit-RuntimeStop; exit 0 }
+    catch { Write-Error $_ -ErrorAction Continue; exit 1 }
 }
 
 try {
@@ -683,9 +718,16 @@ try {
         exit 0
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($AdoptFrontendState)) {
+        Initialize-AdoptedRemoteRuntime $AdoptFrontendState
+        $remoteMode = $true
+    }
+    else {
     Assert-LocalPortAvailable -Port $ApiPort
     Assert-LocalPortAvailable -Port $ReactPort
     Initialize-InternalServiceSharedKey
+    $remoteMode = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_REMOTE_ARTIFACT_DIR)
+    if ($remoteMode) { Publish-FrontendControlState -RuntimeStatus 'starting' }
     Write-RuntimeEvent -Event "supervision_started" -Detail ("api_port=" + $ApiPort + ";react_port=" + $ReactPort)
     $api = Start-Owned -Label "FastAPI" -FilePath $PythonPath -ArgumentList @(
         "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "$ApiPort"
@@ -702,7 +744,15 @@ try {
 
     $uiRoot = Join-Path $ProjectRoot "ui_react"
     $npm = Get-Command "npm.cmd" -CommandType Application -ErrorAction SilentlyContinue
-    if ($null -ne $npm) {
+    $remoteMode = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_REMOTE_ARTIFACT_DIR)
+    if ($remoteMode) {
+        $env:WINDOWS_REMOTE_API_PORT = "$ApiPort"
+        $react = Start-Owned -Label "Remote React" -FilePath $PythonPath -ArgumentList @(
+            "-m", "uvicorn", "scripts.windows_remote_runtime:create_app", "--factory",
+            "--host", "127.0.0.1", "--port", "$ReactPort", "--no-proxy-headers"
+        )
+    }
+    elseif ($null -ne $npm) {
         $react = Start-Owned -Label "React/Vite" -FilePath $npm.Source -WorkingDirectory $uiRoot -ArgumentList @(
             "run", "dev", "--", "--host", "127.0.0.1", "--port", "$ReactPort", "--strictPort"
         )
@@ -741,9 +791,27 @@ try {
             )
         }
     }
-    Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/admin/" -Label "React/Vite" -RequireHtmlRoot
+    if ($remoteMode) {
+        Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/test/" -Label "Remote React" -RequireHtmlRoot -OwnedEntry $react
+    }
+    else {
+        Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/admin/" -Label "React/Vite" -RequireHtmlRoot
+    }
     Refresh-OwnedIdentityRegistry
 
+    if ($remoteMode -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE)) {
+        if (-not (Test-Path -LiteralPath $env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE -PathType Leaf)) {
+            throw "Remote Tunnel token file is missing"
+        }
+        $connector = Get-Command "cloudflared.exe" -CommandType Application -ErrorAction SilentlyContinue
+        $connectorPath = if ($null -ne $connector) { $connector.Source } else {
+            Join-Path ${env:ProgramFiles(x86)} "cloudflared\cloudflared.exe"
+        }
+        if (-not (Test-Path -LiteralPath $connectorPath -PathType Leaf)) { throw "cloudflared is not installed" }
+        $tunnel = Start-Owned -Label "Cloudflare Tunnel" -FilePath $connectorPath -ArgumentList @(
+            "tunnel", "--no-autoupdate", "run", "--token-file", ('"' + $env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE + '"')
+        )
+    }
     & $PythonPath -m scripts.launcher_preflight --profile line-worker *> $null
     $linePreflightExit = $LASTEXITCODE
     if ($linePreflightExit -eq 0) {
@@ -764,9 +832,16 @@ try {
     }
 
     Assert-ChildrenAlive
+    }
+    if ($remoteMode) {
+        $script:RemoteFrontendControlEnabled = $true
+        Publish-FrontendControlState
+    }
     Write-RuntimeEvent -Event "runtime_ready" -Detail "required and configured optional processes are alive"
     while ($true) {
         Start-Sleep -Seconds 2
+        if ($script:RemoteFrontendControlEnabled) { Receive-FrontendControlRequest }
+        if ($script:StopRequested) { break }
         Assert-ChildrenAlive
     }
 }
@@ -775,8 +850,13 @@ catch {
     Write-RuntimeEvent -Event "supervision_failed" -Code $script:ExitCode -Detail $_.Exception.Message
 }
 finally {
-    Stop-OwnedReactContainer
-    Stop-OwnedProcessTrees
+    if (-not $script:SkipRuntimeCleanup) {
+        Stop-OwnedReactContainer
+        Stop-OwnedProcessTrees
+        if ($remoteMode) {
+            Publish-FrontendControlState -RuntimeStatus $(if ($script:ExitCode -eq 0) { 'stopped' } else { 'failed' })
+        }
+    }
 }
 
 exit $script:ExitCode

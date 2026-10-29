@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /**
  * File: subsidy_report_export_client.ts
  * Description: 下載既有季度／年度補助核銷 XLSX，驗證認證、媒體型別與非空內容。
@@ -29,7 +30,7 @@ export const subsidyReportExportClient = {
     if (query.kind === 'quarterly' || query.kind === 'combined') {
       params.set('quarter', String(query.quarter));
     }
-    const response = await fetch(`${path}?${params}`, {
+    const response = await applicationFetch(`${path}?${params}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       signal,

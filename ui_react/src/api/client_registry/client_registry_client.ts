@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
@@ -90,7 +91,7 @@ export const clientRegistryClient = {
   async downloadOrderAccounting(request: ClientRegistryListQuery = {}): Promise<ClientRegistryExportArtifact> {
     const params = exportParams(request);
     const suffix = params.size ? `?${params.toString()}` : '';
-    const response = await fetch(`/api/v1/admin/registries/clients/export/order-accounting${suffix}`, {
+    const response = await applicationFetch(`/api/v1/admin/registries/clients/export/order-accounting${suffix}`, {
       method: 'GET', headers: { Authorization: `Bearer ${token()}` },
     });
     if (!response.ok) throw new Error(`訂單帳務匯出失敗（HTTP ${response.status}）。`);
@@ -105,7 +106,7 @@ export const clientRegistryClient = {
   async downloadCaseInspection(request: ClientRegistryListQuery = {}): Promise<ClientRegistryExportArtifact> {
     const params = exportParams(request);
     const suffix = params.size ? `?${params.toString()}` : '';
-    const response = await fetch(`/api/v1/admin/registries/clients/export/case-inspection${suffix}`, {
+    const response = await applicationFetch(`/api/v1/admin/registries/clients/export/case-inspection${suffix}`, {
       method: 'GET', headers: { Authorization: `Bearer ${token()}` },
     });
     if (!response.ok) throw new Error(`案件資料檢查匯出失敗（HTTP ${response.status}）。`);

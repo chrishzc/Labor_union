@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /**
  * File: weekly_report_metrics_client.ts
  * Description: 查詢與儲存星期一至星期日的每週推廣及詢問數值。
@@ -44,7 +45,7 @@ async function decode<T>(response: Response, schema: z.ZodSchema, fallback: stri
 export const weeklyReportMetricsClient = {
   async list(startDate: string, endDate: string, signal?: AbortSignal): Promise<WeeklyReportMetric[]> {
     const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
-    const response = await fetch(`/api/v1/operations-reports/weekly/metrics?${params.toString()}`, {
+    const response = await applicationFetch(`/api/v1/operations-reports/weekly/metrics?${params.toString()}`, {
       method: 'GET',
       headers: headers(),
       credentials: 'include',
@@ -58,7 +59,7 @@ export const weeklyReportMetricsClient = {
     values: { promotion_count: number | null; inquiry_count: number | null },
     signal?: AbortSignal,
   ): Promise<WeeklyReportMetric> {
-    const response = await fetch(`/api/v1/operations-reports/weekly/metrics/${weekStartDate}`, {
+    const response = await applicationFetch(`/api/v1/operations-reports/weekly/metrics/${weekStartDate}`, {
       method: 'PUT',
       headers: headers(true),
       credentials: 'include',

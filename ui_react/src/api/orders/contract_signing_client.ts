@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /**
  * File: contract_signing_client.ts
  * Description: 嚴格解碼案件契約簽署狀態 GET，供 Orders 契約 Drawer 顯示真實簽回進度。
@@ -109,7 +110,7 @@ export const contractSigningClient = {
     }
     const token = sessionClient.getToken();
     if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
-    const response = await fetch(
+    const response = await applicationFetch(
       `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/contract-signing/documents/${documentVersionId}/download`,
       { method: 'GET', headers: { Authorization: `Bearer ${token}` }, signal },
     );

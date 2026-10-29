@@ -2,10 +2,14 @@
 
 本目錄是開發者與維運人員可直接執行之 launcher 的 current 入口。管理端固定使用 FastAPI＋React；不存在 Streamlit、ngrok supervisor 或 Cloud Run compat UI launcher。
 
+Windows 日常啟停／更新／搬機改用專案根目錄的 `Windows管理.bat`；人工 Cloudflare 設定及搬機順序見 [Windows 管理說明](WINDOWS-REMOTE.md)。原本開發、NAS、DB 維護入口保留各自用途，勿與管理入口同時啟動同一套服務。
+
 ## Current launchers
 
 | 腳本 | 用途 |
 |---|---|
+| `manage_windows.ps1` | 根目錄「Windows 管理」的唯一操作實作，委派既有 supervisor；支援整組啟停、完整更新、前端更新、狀態、安裝依賴、部署包。 |
+| `start_windows_remote.bat` | 舊參數的薄轉接：`--connect`→start、`--update-frontend`→frontend、`--prepare`→prepare、`--dry-run`→check；無參數→start LocalOnly。 |
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |

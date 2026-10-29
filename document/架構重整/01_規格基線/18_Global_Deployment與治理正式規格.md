@@ -38,6 +38,8 @@
 
 ## 3. Logical topology
 
+2026-10-26 人工授權的 NAS LIFF 路由修復：公開 LINE 的接案回覆、訂金付款、服務說明／回饋、手機工會管理與配套操作透過明確列出的既有路由轉送至管理 API 私人入口 `/internal/v1/line-operations`。只有 `line-operations-proxy` 的獨立機器憑證可使用此入口，且不得呼叫其他 Worker／照片私人操作。管理端沿用原 owner handler，逐次驗證 LINE ID token、目前有效綁定、工會能力或本人範圍、必要版本與冪等；機器憑證不代表使用者授權。未驗證或一般外部使用者不可藉此修改核心資料。公開容器不取得 management／access／maintenance DB 憑證，不放寬 LINE DB GRANT，並沿用既有私人 HTTPS／CA 與 line-media-control 網路。新 token 與僅含 hash 的 verifier 使用兩個獨立 named volumes；原 initialize 在驗證既有設定完整後只補這組憑證，不覆寫 `.env`、資料、原六組 Worker／照片憑證或其 registry，以保留舊映像回復能力。既有資料初始化規則、前後端業務契約、Cloudflare 雙 hostname 與 LINE Worker check-only 順序不變。
+
 2026-10-21 人工授權的 NAS 外網雙入口補充：採一個網頁管理的 Cloudflare Tunnel，以不同 hostname 分別導向 management-api 與 line-api；工會 hostname 必須以 Access 全 hostname 保護、指定信箱驗證及 connector Access token 驗證，進站後仍使用原網站帳號／MFA／業務權限，不能信任任意 Cf-Access 身分標頭作網站登入。LINE 不套人員 Access 登入，保留簽章、綁定／本人服務範圍與申請／工會核准流程。原內網 DNS／DSM HTTPS／反向代理與資料保留。token 僅為管理者保護的 host 檔案、唯讀掛給 UID 65532，不進 .env／命令列／映像／ZIP。兩個 origin 網路分別只有 connector 與對應 API，不加入 data 網路；只信任明確 connector IP，保留原 DSM 來源。程式以唯讀掛載相容既有映像，不建置或上傳映像。完整啟用 Compose 只改兩個服務的啟動 profiles，保留原 .env，LINE Worker 最後只 --check。憑證維護及 03:00 線上 SQL 備份保留；真實 Access／token／DNS／NAS ACL／防火牆／寄信與容量仍需實機驗收，不由隔離測試或 ZIP 存在冒充已上線。
 
 2026-10-20 人工授權的每日 SQL 備份：DSM 03:00 以獨立 root 維護腳本將本專案資料庫匯出到未掛入容器的 NAS 管理者專用資料夾，永久保存、不自動清理；不停止服務、不重建映像或變更 Compose／.env／DB GRANT。僅支援非空 InnoDB 資料庫的 single-transaction／quick 線上快照，包含結構、資料、view、routines、triggers、events；不包含實體檔案、金鑰或 MySQL 系統帳號。管理者不得同時執行 schema 變更。來源歸屬、權限／路徑、串流／壓縮／檢查碼與完成標記須檢查，失敗非零通知 DSM 並保留舊備份；不冒充完整災難備份或每日還原驗證。DSM ACL／實際收信／容量與 NAS 負載仍須實機驗收。操作由 deployment/nas/SQL-BACKUPS.md 承接。
@@ -133,6 +135,65 @@ gateway 與 Docker Vite 均須納入 readiness、存活檢查與本次 owned cle
 `scripts/launchers/start_local_development.bat` 與 `.sh` 不得啟動 Streamlit、查詢 8501 或引用 `ui/app.py`。
 
 `--dry-run` 只檢查 current dependency；`--smoke-test` 只建立 owned FastAPI＋React process，執行 GET-only readiness 後清理。
+
+## 5.1 Windows 遠端入口本機準備（2026-10-28 人工授權）
+
+狀態：current；Authority：使用者要求先準備 Windows 專用啟動，最新指定 `https://chrishzc.com/test/`，允許 Email 稍後提供。此入口不使用先前建議的 admin hostname，不影響既有根網站／NAS。
+
+- `WIN-REMOTE-01`：獨立 launcher 以 process-only 設定啟用原網站帳密／MFA，拒絕 bypass 與 development-session；不改 `.env`、帳號、MFA、DB schema 或原本本機入口。API、UI 都只綁 loopback。
+- `WIN-REMOTE-02`：遠端 UI、API、匯入／下載全部使用 `/test/` 前綴；以現有 artifact builder／manifest validator 與靜態供應器提供建置資源，不暴露 Vite source／HMR。transport 僅加前綴，原 body、token、版本、冪等與 typed conflict 不變。私人 `/internal`、debug／其他根路徑不得經此前綴到 API。
+- `WIN-REMOTE-03`：啟動沿用 canonical DB current gate、私人握手、Worker 與 owned cleanup；遠端 gateway 再以無 token 的 me Query 必須回 401 作 admission，失敗不服務。`--prepare` 僅建置／驗證、零服務／DB／provider；`--dry-run` 僅設定預檢。建置使用新 ignored artifact 目錄，不覆寫既有成果。
+- `WIN-REMOTE-04`：目前 Authority 僅本機 source／focused tests／build。Cloudflare 帳戶寫入、DNS、Tunnel、Access 信箱政策、真實背景工作、登入與業務操作本次 `NOT_RUN`。Email 是未來發布 gate，不阻塞本機準備；未設指定 Email Access 前不得發布。後續只導引 `/test` 路徑 segment 與子路徑，保留原根網站。
+
+收斂：`SPEC_READY`；`convergence: {status: READY, blockers: []}`（僅本機準備）。以上穩定要求來源為當次人工目標與原 Access／Deployment 認證、入口與副作用契約；8000／5173、60 秒 proxy timeout、scratch 位置屬既有設定或 implementation defaults，不是新增業務限制。
+
+最小工作包 `WP-WIN-REMOTE-PREP`：owner 為 Global local-runtime/runtime-supervision，前端 prefix 屬 application-shell。執行順序為 UI prefix → 驗證 artifact／loopback gateway → launcher 接 canonical supervisor → focused transport／Windows regression／實際 prepare build。01→認證拒絕測試；02→prefix／upload／binary／typed conflict 測試及 build；03→既有 supervisor regression 與 prepare；04→無 Cloudflare／DB 執行、原 .env bytes 保留。失敗只停止本次 owned 程序；回退使用原 launcher，不改任何資料。操作交接由 `scripts/launchers/WINDOWS-REMOTE.md` 承接，不新增獨立 receipt 或規格。
+
+## 5.2 Windows Tunnel 連線與指定信箱（2026-10-28 人工授權）
+
+Authority：同輪使用者完成 cloudflared 安裝並提供允許信箱，延續指定 `https://chrishzc.com/test/` 的遠端登入目標。允許信箱只存 Access 政策，不將個人信箱或憑證寫入 Git。5.1 的 NOT_RUN 是先前本機準備階段的狀態，不限制這輪已授權的連線工作。
+
+- `WIN-REMOTE-LIVE-01`：既有 root DNS／personal web Tunnel／非 test 路徑保留。root 目前指向另一條 Tunnel，因此以專用 Windows Tunnel、受同一 Access 應用保護的 origin hostname 與兩條 exact/slash-child Worker routes 接 `/test`；不改原 root DNS 或 Tunnel configuration。Worker 僅轉送此 path segment，原網站 session／cookies 不外傳至 origin，保留 Bearer、版本、body、下載及 typed status。Worker 的 workers.dev／preview 不提供另一個入口。
+- `WIN-REMOTE-LIVE-02`：Access 僅允許當輪提供的完整信箱與既有 Email PIN IdP；公開 prefix 與 origin host 屬同一 audience。connector 再驗 Access JWT，網站仍執行既有帳密／MFA／actor 能力驗證。秘密只進 ACL 限制的 ignored token-file，不進 .env、命令列、映像或 log；API→本機憑證傳遞只輸出加密密文。
+- `WIN-REMOTE-LIVE-03`：`start_windows_remote.bat --connect` 啟動既有 authenticated API、靜態入口與 owned cloudflared，停止時由同一 supervisor 清理。依 2026-10-28 最新人工明確指示，遠端與本機使用相同的背景工作／推播啟動規則，不因遠端連線停用 Worker／provider cycle；LINE 及知識庫仍遵守原本憑證 preflight／啟用設定。此 Authority 包含恢復原本排隊工作、排程及推播的正常執行，不新增測試推播或其他 provider 操作。資料庫只准啟動已確認的本專案既有 MySQL 容器並作唯讀 schema gate，不執行 migration、reset 或替換。
+- `WIN-REMOTE-LIVE-04`：依序完成 Access → 新 Tunnel／受保護 origin → 本機 readiness／無 token me 401 → exact Worker routes → 外網匿名阻擋及 root baseline 比對。信箱 PIN、真實網站 MFA 與人員業務操作由使用者完成；未驗不得宣稱完整登入操作已通過。失敗先保留拒絕政策，不以公開 bypass、關閉 JWT 或改 root DNS 排錯。
+
+收斂：`SPEC_READY`；`convergence: {status: READY, blockers: []}`（連線部署；使用者 PIN／MFA 為後續真實驗收，不由 Agent 冒充）。最小後續工作包 `WP-WIN-REMOTE-CONNECT` 依上述 01–04 的同序步驟執行；01→路徑 router negative/stream contract 與原 root DNS/config readback；02→Access policy／匿名請求及 connector config readback；03→DB gate／supervisor regression／local readiness；04→Tunnel healthy、Access 實網拒絕與操作文件狀態。新增資源可依文件 IDs 停用回復；不改既有 root、資料與其他 Tunnel。此處 hostname／script name／session duration 是目前部署設定，不是新增業務契約。
+
+## 5.3 Windows LINE Webhook 公開入口（2026-10-28 人工授權）
+
+Authority：使用者要求將 LINE Webhook 接至 Cloudflare、驗證事件接收，並明確限制 Agent 不讀取或更改 `.env`，交付新網址由使用者設定 LINE 後台。此限制優先於先前的設定更新建議。
+
+- `WIN-LINE-HOOK-01`：`https://line.chrishzc.com/webhook/line` 由既有 Windows Tunnel 以獨立 hostname／精確路徑轉送至執行中的 canonical API `127.0.0.1:8000`；保留既有管理路由、連接器、Worker、Access 政策與非本次修改的設定。
+- `WIN-LINE-HOOK-02`：Webhook 不套人員 Email Access，不新增公開 Bypass policy；沿用 canonical LINE signature、body size／payload、inbox 與去重契約。此 hostname 的管理 API、`/test`、私人 `/internal` 與其他路徑由 Tunnel catch-all 拒絕，不公開整個 API。
+- `WIN-LINE-HOOK-03`：Agent 只調整 Cloudflare 新 hostname ingress／DNS 及操作紀錄，不讀寫 `.env`、不取得 LINE secret／token、不代填 LINE 後台。以實網 GET、缺少／偽造簽章 POST 與管理／私人路徑 negative check 驗證 transport／邊界；真正 LINE 簽章 Verify 與實際事件由使用者於 LINE 後台及聊天室觸發，不以 unsigned request 冒充接收成功。
+
+有界交付：沿用 `WP-WIN-REMOTE-CONNECT`，順序為唯讀確認現有設定與本機入口 → 保留全部現有 ingress 後新增精確 Webhook route → 新 DNS → 公網邊界查核 → 網址／人工 Verify 交接。01 對應 ingress／DNS readback；02 對應公開路徑與未簽章拒絕；03 對應零 .env 操作及使用者 Verify／事件回報。回復只移除本次精確新增 route／DNS，不以舊整份 config 覆蓋其他進行中的變更。
+
+## 5.4 Windows 前端獨立換版（2026-10-28 人工授權）
+
+Authority：使用者要求啟動器可單獨更新／重啟 5173，不讀取 DB、不影響 API、背景工作與 Tunnel；完成後將本次候選新增修正切回 5173、取消 5174 分流並保留 LINE 路由。
+
+- `WIN-FRONTEND-01`：`start_windows_remote.bat --update-frontend` 先在新目錄建置並沿用 canonical artifact validator，通過後才向目前 supervisor 提交前端重啟請求；不進入完整啟動器、DB gate、Redis、私人握手或 Worker 啟動流程，不讀寫 `.env`。
+- `WIN-FRONTEND-02`：supervisor 只替換登記為 Remote React 的 PID／native start-time identities，5173 保持 loopback、既有 `/test`／API transport 與 production auth admission。無 Bearer 的 me admission 在取得 token 前即回 401，不開啟 DB 連線。API、背景工作與 Tunnel 保留原程序及設定。
+- `WIN-FRONTEND-03`：建置／驗證失敗不停止原前端；新版啟動或 static manifest 回讀失敗時恢復原 artifact。前端失敗不得觸發其他服務的連帶 cleanup；回報更新／回復／失敗結果，不自行重試業務操作。
+- `WIN-FRONTEND-04`：執行中舊 supervisor 的一次性接手，只接受同專案 supervisor 的既有 direct children，逐一核對 role、PID 與 native start time。新版先完成待命驗證，再終止舊 supervisor 本身、接手原服務 identities；不重啟非前端服務、不重新初始化內部憑證。待命失敗不得清理原服務。
+- `WIN-FRONTEND-05`：控制請求只經 ignored 本機檔案，綁定目前 run identity、唯一 request ID 並序列化；不新增公開維運 API 或傳遞秘密。重新查核 static version／digest 及非前端程序 identities 作為執行證據。
+- `WIN-FRONTEND-06`：讀取最新 Tunnel config，只將管理 `/test` 流量收回 5173，保留 LINE Webhook、Access 與其他 ingress；不整份還原歷史設定。新版 5173 確認成功後才停止經身分核對的 5174 程序，保留其 artifact 作回復證據。
+
+有界交付沿用 `WP-WIN-REMOTE-CONNECT`：控制入口／supervisor → 假服務的獨立重啟、失敗回復、接手與 identity 拒絕測試 → 5173 實際更新與非前端 before／after → 最新 config 的局部切回與 5174 停止 → static／Access／LINE 路由回讀。既有完整啟動與業務／資料契約不變。
+
+## 5.5 Windows 統一管理與獨立主機部署（2026-10-28 人工授權）
+
+Authority：使用者指定 Windows 各自主機資料獨立、共用同一網址且每次只啟動一台，要求單一管理入口、保留背景工作／推播／遠端連線及提供純人工 Cloudflare 步驟。Agent 不讀寫 `.env`、不發送測試訊息；Cloudflare 帳戶設定由人員操作，此輪不自動寫入。
+
+- `WIN-MANAGER-01`：根目錄 `Windows管理.bat` → `scripts/launchers/manage_windows.ps1` 委派既有 supervisor，提供整組啟停／更新、前端更新、狀態、來源部署包及依賴安裝。舊 remote launcher 只轉接參數；原開發／NAS／DB 入口各自保留。停止重用 run-bound 本機控制通道與 native PID／start-time 驗證，等候 owned cleanup；關閉選單不停止背景服務。未知 owner／未確認清理拒絕重啟，不按埠或名稱全機殺程序。
+- `WIN-MANAGER-02`：本機 `http://localhost:5173/admin/` 與遠端 `https://chrishzc.com/test/` 使用同一 Gateway／API／immutable artifact；本機別名沿用 artifact 絕對 `/test/` 資源／API。公開 Host 拒絕 `/admin/`，保留 production 網站帳密／MFA 與既有私有路徑拒絕契約。管理路由統一 5173，LINE hostname 精確 Webhook 仍到 8000、不套人員 Access。
+- `WIN-MANAGER-03`：完整更新先建置成功才整組停啟，不自動取得遠端版本／migration／reset；新後端啟動失敗明確報錯、不宣稱完整自動 rollback，前端單獨更新仍沿用 §5.4 回復機制。標準 monitor／durable／incident、既有設定啟用的 LINE／knowledge 全數保留。允許正常待辦／推播，不額外建立測試訊息或人工 provider cycle。
+- `WIN-MANAGER-04`：部署包重用 NAS source 秘密排除規則、附來源雜湊／release identity；讀檔前排除 `.env*`、credential、runtime data 及 ignored 檔案，不配送 DB／帳號／檔案／token。目標主機自行安裝 Python／Node／Docker／cloudflared、初始化程式依賴並提供自己的資料／設定。管理／建置不解析 `.env`，Windows managed Vite build 關閉 envDir discovery；正常啟動的原 application composition／preflight／supervisor 載入自己的設定，不輸出或封裝秘密。同主機本機／遠端一起更新，其他主機人工套用相同 release，不同步資料。
+- `WIN-MANAGER-05`：切換採人工整組停舊機、確認 connector 離線後啟新機；共用 token 並非跨機互斥鎖，不能只停 Tunnel 而保留舊背景推播。token-file 由人員保存於 ACL 限制目錄，manager 不安裝獨立 Tunnel service、不自動設定 DNS／Access／Worker。操作交接沿用 `scripts/launchers/WINDOWS-REMOTE.md`。
+
+收斂 `SPEC_READY`／READY。最小工作包 `WP-WIN-MANAGER`：owner Global/local-runtime/runtime-supervision；同 artifact 入口 → supervisor stop lifecycle → source package → 人工接線文件。驗收：01→隔離假服務整組停止與 stale identity 拒絕；02→同 bytes／manifest、公開別名拒絕及既有 auth／upload 契約；03→build-before-stop／build failure 保護、worker parity／frontend rollback；04→秘密禁止讀取負例、實際 build／ZIP inventory；05→人工交接、不執行外部設定或測試推播。失敗只清理本次 owned test 程序，不變更原資料；新主機／實網／真實推播未執行時標示 NOT_RUN。保留舊開發入口是現有開發／NAS consumer 所需；其使用者日後明確移轉後才評估退役，本次不刪除。
 
 ## 6. Release orchestration
 

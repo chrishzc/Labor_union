@@ -8,6 +8,8 @@
 組成React應用程式的hash navigation、session/auth shell、nested ErrorBoundary，以及開發伺服器的公開Host與API proxy邊界。預設crash畫面只提供closed recovery，不顯示render exception message；不得擁有任何Domain business rule、root fact或mutation workflow。
 
 ## Implementation
+- presentation transport: `ui_react/src/api/shared/application_fetch.ts` — optional build-time `/test` public prefix applied by shared transport and direct fetch consumers; no auth／body／business rule changes. `VITE_PUBLIC_PATH_PREFIX` defaults empty, keeping local `/admin/` and root API paths.
+- `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。
 - primary: `ui_react/src/App.tsx`
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
 - shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。

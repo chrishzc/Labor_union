@@ -6,9 +6,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const apiTarget = process.env.VITE_DEV_API_TARGET ?? 'http://127.0.0.1:8000';
+const publicPrefix = process.env.VITE_PUBLIC_PATH_PREFIX ?? '';
+if (publicPrefix && !/^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(publicPrefix)) {
+  throw new Error('VITE_PUBLIC_PATH_PREFIX must be an absolute path without a trailing slash');
+}
 
 export default defineConfig({
-  base: '/admin/',
+  // Managed Windows builds use explicit process settings only. In particular,
+  // Vite must not discover .env files when preparing a portable artifact.
+  envDir: process.env.WINDOWS_REMOTE_BUILD === '1' ? false : undefined,
+  base: publicPrefix ? `${publicPrefix}/` : '/admin/',
   plugins: [react(), {
     name: 'line-webhook-declared-size-limit',
     configureServer(server) {

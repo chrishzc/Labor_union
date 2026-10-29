@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /**
  * File: contract_external_signing_client.ts
  * Description: 嚴格解碼外部簽約 successor Query、PDF、完成回報、最終文件 Preview／Apply 與 readback。
@@ -551,7 +552,7 @@ export const contractExternalSigningClient = {
     if (!Number.isInteger(expectedDocumentVersionId) || expectedDocumentVersionId <= 0) throw new Error('未簽文件版本無效。');
     const token = authToken();
     const correlationId = `contract-external-download-${uuidHex()}`;
-    const response = await fetch(`${basePath(caseNo)}/unsigned-pdf`, {
+    const response = await applicationFetch(`${basePath(caseNo)}/unsigned-pdf`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -675,7 +676,7 @@ export const contractExternalSigningClient = {
   async downloadSignedPdf(caseNo: string, fileId: string): Promise<PdfDownloadArtifact> {
     ControlledFileIdSchema.parse(fileId);
     const token = authToken();
-    const response = await fetch(`${basePath(caseNo)}/final-document/download/${fileId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await applicationFetch(`${basePath(caseNo)}/final-document/download/${fileId}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) {
       if (response.status === 401) window.dispatchEvent(new CustomEvent(ADMIN_SESSION_UNAUTHORIZED_EVENT, { detail: { rejectedToken: token } }));
       throw await downloadError(response);

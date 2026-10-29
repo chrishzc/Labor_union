@@ -1,3 +1,4 @@
+import { applicationFetch } from '../../api/shared/application_fetch';
 /**
  * File: AiEventStudio.tsx
  * Description: 僅顯示 server-owned AI 客服事件／導航規則與正式測試，不再內建本機示範規則。
@@ -77,7 +78,7 @@ export const AiEventStudio: React.FC = () => {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    fetch('/api/v1/line/identity/runtime-config')
+    applicationFetch('/api/v1/line/identity/runtime-config')
       .then((res) => (res.ok ? res.json() : null))
       .then((payload: { data?: { liff_id?: string; public_base_url?: string } } | null) => {
         if (!active || !payload?.data) return;
@@ -85,7 +86,7 @@ export const AiEventStudio: React.FC = () => {
       })
       .catch(() => {});
 
-    fetch('/api/v1/line/ai-events/catalog', {
+    applicationFetch('/api/v1/line/ai-events/catalog', {
       headers,
       credentials: 'include',
     })
@@ -176,7 +177,7 @@ export const AiEventStudio: React.FC = () => {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      const response = await fetch('/api/v1/line/ai-events/router/preview', {
+      const response = await applicationFetch('/api/v1/line/ai-events/router/preview', {
         method: 'POST',
         headers,
         credentials: 'include',

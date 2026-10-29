@@ -1,3 +1,4 @@
+import { applicationFetch } from './application_fetch';
 /**
  * File: transport.ts
  * Description: 統一 Fetch 傳輸、嚴格 Global error 解碼與 HTTP fallback。
@@ -142,7 +143,7 @@ export async function request<T = unknown>(
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await applicationFetch(url, {
       method,
       headers: reqHeaders,
       body: serializedBody,

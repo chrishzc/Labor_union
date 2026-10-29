@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /** Download the existing authenticated, archived accounts-payable workbook. */
 import { sessionClient } from '../auth/session_client';
 
@@ -6,7 +7,7 @@ export const accountsPayableExportClient = {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) throw new Error('月份格式不正確。');
     const token = sessionClient.getToken();
     if (!token) throw Object.assign(new Error('請先登入。'), { status: 401 });
-    const response = await fetch(`/api/v1/finance-reports/accounts-payable/export?target_month=${targetMonth}`, {
+    const response = await applicationFetch(`/api/v1/finance-reports/accounts-payable/export?target_month=${targetMonth}`, {
       headers: { Authorization: `Bearer ${token}` }, signal,
     });
     if (!response.ok) throw Object.assign(new Error('應付帳款下載失敗。'), { status: response.status });

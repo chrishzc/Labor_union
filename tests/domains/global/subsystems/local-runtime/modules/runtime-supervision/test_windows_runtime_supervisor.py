@@ -17,6 +17,27 @@ SUPERVISOR = ROOT / "scripts" / "launchers" / "supervise_local_runtime.ps1"
 WINDOWS_LAUNCHER = ROOT / "scripts" / "launchers" / "start_local_development.bat"
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows native process exit race')
+def test_exited_handle_does_not_require_start_time_but_live_unknown_stays_unknown():
+    script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:SUPERVISOR_TEST_PATH,[ref]$tokens,[ref]$errors)
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+function Get-Process {param($Id,$ErrorAction);return [pscustomobject]@{HasExited=$script:fixtureExited;ExitCode=0}}
+$script:fixtureExited=$true
+if((Get-ProcessSnapshot 123).State -ne 'exited'){throw 'Exited handle misclassified as unknown'}
+$script:fixtureExited=$false
+if((Get-ProcessSnapshot 123).State -ne 'unknown'){throw 'Live process without identity was accepted'}
+Write-Output 'PASS'
+'''
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-Command', script],
+                            env={**os.environ, 'SUPERVISOR_TEST_PATH': str(SUPERVISOR)},
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS' in result.stdout
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows runtime port admission")
 @pytest.mark.parametrize("occupied_service", ["api", "react"])
 def test_occupied_port_rejects_startup_without_stopping_existing_service(
@@ -133,6 +154,51 @@ def test_private_auth_handshake_precedes_every_worker() -> None:
     line_start = supervisor.index('Start-Owned -Label "LINE Worker"', auth_check)
 
     assert api_ready < auth_check < react_start < line_start
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows worker launch parity")
+@pytest.mark.parametrize("remote_mode,knowledge_enabled", [(False, False), (False, True), (True, False), (True, True)])
+def test_remote_connection_keeps_the_normal_worker_set(
+    tmp_path: Path, remote_mode: bool, knowledge_enabled: bool,
+) -> None:
+    preflight = tmp_path / "preflight.ps1"
+    preflight.write_text("$global:LASTEXITCODE = 0\n", encoding="utf-8")
+    powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:SUPERVISOR_TEST_PATH, [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Supervisor syntax error' }
+$script:started = [System.Collections.Generic.List[string]]::new()
+$remoteMode = $env:REMOTE_MODE_TEST -eq '1'
+$env:WINDOWS_REMOTE_WEB_ONLY = 'true'
+$env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE = ''
+$PythonPath = $env:PREFLIGHT_STUB_TEST
+function Start-Owned {
+    param($Label, $FilePath, [string[]]$ArgumentList)
+    $script:started.Add($Label)
+    return [pscustomobject]@{Label=$Label}
+}
+function Write-RuntimeEvent { param($Event, $Label, $Detail) }
+function Test-EnabledFromDotEnv { param($Name); return $env:KNOWLEDGE_ENABLED_TEST -eq '1' }
+$source = $ast.Extent.Text
+$start = $source.IndexOf('    if ($remoteMode -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE))')
+$end = $source.IndexOf('    Assert-ChildrenAlive', $start)
+Invoke-Expression $source.Substring($start, $end - $start)
+ConvertTo-Json -InputObject @($script:started) -Compress
+'''
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-Command", script],
+        env={**os.environ, "SUPERVISOR_TEST_PATH": str(SUPERVISOR),
+             "REMOTE_MODE_TEST": "1" if remote_mode else "0",
+             "KNOWLEDGE_ENABLED_TEST": "1" if knowledge_enabled else "0",
+             "PREFLIGHT_STUB_TEST": str(preflight)},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [
+        "LINE Worker", "Runtime Monitor", "Durable Background Worker", "Incident Maintenance Worker",
+    ] + (["Knowledge Retrieval Worker"] if knowledge_enabled else [])
 
 
 def test_windows_launcher_keeps_supervision_failure_visible() -> None:

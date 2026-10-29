@@ -1,3 +1,4 @@
+import { applicationFetch } from '../../api/shared/application_fetch';
 /** Operational readback for real Knowledge questions, outcomes, and knowledge gaps. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, MessageCircle, Pencil, Plus, RefreshCw, ThumbsDown, ThumbsUp } from 'lucide-react';
@@ -76,8 +77,8 @@ export const KnowledgeFeedbackPanel: React.FC<{
     try {
       const requestHeaders = headers();
       const [questionsResponse, feedbackResponse] = await Promise.all([
-        fetch('/api/v1/knowledge/questions?limit=200', { headers: requestHeaders, credentials: 'include' }),
-        fetch('/api/v1/line/ai-events/feedback/aggregate', { headers: requestHeaders, credentials: 'include' }),
+        applicationFetch('/api/v1/knowledge/questions?limit=200', { headers: requestHeaders, credentials: 'include' }),
+        applicationFetch('/api/v1/line/ai-events/feedback/aggregate', { headers: requestHeaders, credentials: 'include' }),
       ]);
       if (!questionsResponse.ok || !feedbackResponse.ok) throw new Error('feedback_observation_read_failed');
       const questionRows = await questionsResponse.json() as QuestionObservation[];

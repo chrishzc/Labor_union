@@ -1,3 +1,4 @@
+import { applicationFetch } from '../../api/shared/application_fetch';
 import { useUnsavedDraft, useUnsavedNavigation } from '../../components/UnsavedChanges';
 import { useRef as useValidationRef } from 'react';
 import { useSaveValidation } from '../../components/useSaveValidation';
@@ -115,8 +116,8 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     setReadStatus('loading');
     try {
       const [itemsResponse, indexesResponse] = await Promise.all([
-        fetch('/api/v1/knowledge/items?limit=500', { headers: requestHeaders(), credentials: 'include' }),
-        fetch('/api/v1/knowledge/indexes?limit=20', { headers: requestHeaders(), credentials: 'include' }),
+        applicationFetch('/api/v1/knowledge/items?limit=500', { headers: requestHeaders(), credentials: 'include' }),
+        applicationFetch('/api/v1/knowledge/indexes?limit=20', { headers: requestHeaders(), credentials: 'include' }),
       ]);
       if (!itemsResponse.ok) throw new Error(await apiError(itemsResponse));
       if (!indexesResponse.ok) throw new Error(await apiError(indexesResponse));
@@ -165,7 +166,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     }
   };
 
-  const requestIndex = () => runMutation(() => fetch('/api/v1/knowledge/indexes', {
+  const requestIndex = () => runMutation(() => applicationFetch('/api/v1/knowledge/indexes', {
     method: 'POST', headers: { ...requestHeaders(), 'Idempotency-Key': operationIdentity('qa-index') }, credentials: 'include',
   }), '已送出問答搜尋資料更新工作；更新完成後才會供 AI 客服使用。');
 
@@ -173,7 +174,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     setBusy(true); setNotice(null);
     const identity = operationIdentity('qa-builtin-import');
     try {
-      const response = await fetch('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', {
+      const response = await applicationFetch('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', {
         method: 'POST',
         headers: { ...requestHeaders(), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
         credentials: 'include',
@@ -195,7 +196,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
   const transition = (item: ManagedQa, action: 'publish' | 'retire') => {
     const identity = operationIdentity(`qa-${action}`);
     const success = action === 'publish' ? '新答案已發布，問答搜尋資料更新完成後才會啟用。' : '已停用，正在更新問答搜尋資料以移除舊答案。';
-    return runMutation(() => fetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
+    return runMutation(() => applicationFetch(`/api/v1/knowledge/items/${item.id}/${action}`, {
       method: 'POST',
       headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity },
       credentials: 'include',
@@ -256,7 +257,7 @@ export const CommonQaCatalogPanel: React.FC<{ initialQaId?: string; initialQuest
     setBusy(true); setModalNotice(null);
     const identity = operationIdentity('qa-save');
     try {
-      const response = await fetch('/api/v1/knowledge/items', {
+      const response = await applicationFetch('/api/v1/knowledge/items', {
         method: 'POST', headers: { ...requestHeaders(true), 'Idempotency-Key': identity, 'X-Correlation-ID': identity }, credentials: 'include',
         body: JSON.stringify({
           source_identity: `${QA_SOURCE_PREFIX}${qa.id}`, source_trust_tier: 'internal_policy',

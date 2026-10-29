@@ -1,3 +1,4 @@
+import { applicationFetch } from '../shared/application_fetch';
 /**
  * File: weekly_operations_report_export_client.ts
  * Description: 下載營運報表三工作表 XLSX，驗證期間、認證、媒體型別與非空內容。
@@ -31,7 +32,7 @@ export const weeklyOperationsReportExportClient = {
       start_date: startDate,
       end_date: endDate,
     });
-    const response = await fetch(`/api/v1/operations-reports/weekly/export?${params.toString()}`, {
+    const response = await applicationFetch(`/api/v1/operations-reports/weekly/export?${params.toString()}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
       signal,
