@@ -21,6 +21,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 - `api/routes/nas_setup.py` — NAS-only HTTPS/same-origin first-root setup with no installation key or preconfigured URL, delegated to the existing bootstrap transaction; setup closes once the root designation exists. Standard `api.main` does not attach it.
 
 ## Current contract
+- `/me` 回應僅可更新發出請求的同一 token 所屬快取；晚到回應不得覆寫已登出或換人的 Session。Registry deletion UI 借用此既有 read boundary 即時確認 root。
 
 - Session expiry is bounded by the existing absolute deadline (maximum eight hours from issuance).
 - There is no idle-session expiry or idle renewal.

@@ -427,6 +427,20 @@ describe('SessionClient & Two-Step Auth Test Suite', () => {
   });
 
   // ==========================================================================
+  it('does not replace the current principal with a late /me response from another session', async () => {
+    sessionClient.setSession('old-session', MOCK_ADMIN_PUBLIC);
+    let finish!: (value: unknown) => void;
+    const response = new Promise(resolve => { finish = resolve; });
+    globalThis.fetch = vi.fn().mockReturnValue(response);
+    const pending = sessionClient.fetchCurrentUser();
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'ApiAbortError' });
+    sessionClient.setSession('new-session', { ...MOCK_ADMIN_PUBLIC, id: 2, username: 'second-admin', is_root: false });
+    finish({ ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json' }), json: async () => MOCK_ME_ENVELOPE });
+    await rejected;
+    expect(sessionClient.getToken()).toBe('new-session');
+    expect(sessionClient.getUser()?.id).toBe(2);
+  });
+
   // 4. Session Refresh Flow (POST /refresh)
   // ==========================================================================
   describe('Session Refresh (/refresh) Flow', () => {

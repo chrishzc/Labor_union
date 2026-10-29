@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { decodeEnvelope } from '../shared/runtime_decoder';
 import { transport, type RequestOptions } from '../shared/transport';
+import { ApiAbortError } from '../shared/typed_errors';
 import {
   AdminPasswordChallengeRequestSchema,
   AdminPasswordChallengeResponseSchema,
@@ -222,15 +223,17 @@ export const sessionClient = {
   async fetchCurrentUser(
     options?: Omit<RequestOptions, 'method' | 'body'>
   ): Promise<AdminPublic> {
-    if (!inMemoryToken) {
+    const requestedToken = inMemoryToken;
+    if (!requestedToken) {
       throw new Error('未登入或 Session 已清除');
     }
     const raw = await transport.get('/api/v1/admin/auth/me', {
       ...options,
-      token: inMemoryToken,
+      token: requestedToken,
     });
     const user = decodeEnvelope(AdminPublicSchema, raw);
-    this.setSession(inMemoryToken, user);
+    if (requestedToken !== inMemoryToken) throw new ApiAbortError();
+    this.setSession(requestedToken, user);
     return user;
   },
 
