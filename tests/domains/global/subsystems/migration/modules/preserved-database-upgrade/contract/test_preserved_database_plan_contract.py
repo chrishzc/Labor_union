@@ -340,7 +340,7 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
         "labor-union-nas-registration-approval-2026-10-19-v1",
         "labor-union-line-order-group-invitation-url-2026-10-22-v1",
         "labor-union-scheduling-service-start-2026-10-23-v1",
-        "labor-union-subsidy-periods-2026-10-27-v2",
+        "labor-union-subsidy-policy-replay-2026-10-29-v4",
     )
     assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
         "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"

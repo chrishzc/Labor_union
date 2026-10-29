@@ -33,7 +33,7 @@ def test_release_is_additive_hash_bound_and_connected_to_fresh_and_preserve():
         'labor_union_2026_10_19_nas_registration_approval_v1.json',
         'labor_union_2026_10_22_line_order_group_invitation_url_v1.json',
         'labor_union_2026_10_23_scheduling_service_start_v1.json',
-        'labor_union_2026_10_27_government_subsidy_periods_hash_v2.json',
+        'labor_union_2026_10_29_subsidy_policy_replay_v4.json',
     )
     fresh = (ROOT / 'db/schema_parts/231_staff_union_number.sql').read_text(encoding='utf-8')
     bridge = (ROOT / 'db/schema_parts' / ARTIFACT).read_text(encoding='utf-8')

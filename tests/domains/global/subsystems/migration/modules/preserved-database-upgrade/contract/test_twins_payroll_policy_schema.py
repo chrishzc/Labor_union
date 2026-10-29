@@ -350,7 +350,11 @@ def test_candidate_runner_executes_declared_backfill_dry_apply_verify(
         migration.write_receipt(
             receipt_path,
             {
-                "contract": backfill.RECEIPT_CONTRACT,
+                "contract": (
+                    'subsidy-period-policy-migration/v1'
+                    if command[1].endswith('migrate_subsidy_period_policy.py')
+                    else backfill.RECEIPT_CONTRACT
+                ),
                 "mode": mode,
                 "database": "lu_test_candidate",
                 "receipt_status": status,
@@ -376,9 +380,11 @@ def test_candidate_runner_executes_declared_backfill_dry_apply_verify(
         mysql_container=None,
     )
 
-    assert calls == ["dry-run", "apply", "verify"]
+    assert calls == ["dry-run", "apply", "verify"] * 2
     assert receipts[0]["backfill_id"] == "twins-payroll-rate-snapshots-v1"
     assert receipts[0]["phases"]["verify"]["receipt_status"] == "verified"
+    assert receipts[1]['backfill_id'] == 'subsidy-period-policy-v1'
+    assert receipts[1]['phases']['verify']['receipt_status'] == 'verified'
 
 
 def test_candidate_verification_preserves_old_snapshots_and_allows_only_marked_addition(
