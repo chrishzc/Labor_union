@@ -72,7 +72,7 @@ describe('正式 Knowledge QA 管理 panel', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: '匯入／補齊內建 54 題' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/v1/knowledge/catalogs/builtin-line-common-qa/import', expect.objectContaining({ method: 'POST' })));
-    expect(confirm).toHaveBeenCalledWith('將補齊系統內建的 54 題，不會覆寫既有編修。確定繼續？');
+    expect(confirm).not.toHaveBeenCalled();
     expect(await screen.findByText(/本次補入 51 題、發布 39 題/)).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '送審完成' })).not.toBeInTheDocument();

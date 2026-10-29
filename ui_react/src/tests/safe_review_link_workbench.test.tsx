@@ -51,7 +51,7 @@ describe('M4 safe-review-link workbench', () => {
     fireEvent.change(screen.getByLabelText(/一次性 token/), { target: { value: 'opaque-token-123456' } });
     fireEvent.change(screen.getByLabelText('目前目標路徑'), { target: { value: '/api/v1/runtime/health-status' } });
     fireEvent.change(screen.getByLabelText('目標版本'), { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認使用審核連結' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用審核連結' }));
 
     await waitFor(() => expect(screen.getByText('已使用')).toBeInTheDocument());
     expect(client.redeem).toHaveBeenCalledWith('link-96-1', expect.objectContaining({ raw_token: 'opaque-token-123456', current_target_version: 3 }));
