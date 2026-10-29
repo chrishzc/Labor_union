@@ -30,9 +30,7 @@ it('previews and reports email-only fills as a completed update without new case
     target: { files: [new File(['synthetic'], 'hcm.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })] },
   });
   fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]')!);
-  await screen.findByText('預覽結果');
-  fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
-  fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]')!);
+  expect(screen.queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('匯入結果')).toBeInTheDocument());
   expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['1', '1', '0', '0']);
   expect(screen.queryByText(/補入既有案件 email|含警示|需檢查/)).not.toBeInTheDocument();

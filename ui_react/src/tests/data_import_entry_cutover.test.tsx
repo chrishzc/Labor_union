@@ -76,7 +76,7 @@ describe('Data Import entry', () => {
       expect(control, controlId).toBeInTheDocument();
       expect(control, controlId).toBeDisabled();
       expect(screen.getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
-      expect(screen.getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
+      expect(screen.getByText('選擇檔案後即可匯入。')).toBeInTheDocument();
     }
     for (const controlId of ACTIVE_APPLY_CONTROL_IDS) {
       expect(document.querySelector(`[data-control-id="${controlId}"]`), controlId).toBeNull();

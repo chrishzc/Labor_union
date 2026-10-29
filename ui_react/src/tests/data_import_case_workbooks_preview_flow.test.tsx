@@ -2,10 +2,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
+import { ClientBeClassWorkbookSnapshot, clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
-import { staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
-import { historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
+import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
+import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
 import { DataImportPage } from '../pages/DataImportPage';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
@@ -20,17 +20,29 @@ const cases = [
   ['歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders', [4, 2, 0, 2]],
 ] as const;
 function metrics(card: HTMLElement): string[] { return Array.from(card.querySelectorAll('dd > span')).map(node => node.textContent ?? ''); }
-async function preview(kind: string, label: string, id: string) {
+async function selectWorkbook(kind: string, label: string, id: string) {
   fireEvent.click(screen.getByRole('button', { name: kind }));
-  fireEvent.change(screen.getByLabelText(label), { target: { files: [workbook(id)] } });
-  fireEvent.click(document.querySelector(`[data-control-id="imports.${id}.preview"]`) as HTMLButtonElement);
+  const file = workbook(id);
+  // Compute the real snapshot before tests take control of the retry clock.
+  // The one-click UI still performs Preview and Apply with this same snapshot.
+  if (id === 'client-beclass') {
+    const snapshot = await ClientBeClassWorkbookSnapshot.fromFile(file);
+    vi.spyOn(ClientBeClassWorkbookSnapshot, 'fromFile').mockResolvedValueOnce(snapshot);
+  } else if (id === 'staff-historical') {
+    const snapshot = await StaffHistoricalWorkbookSnapshot.fromFile(file);
+    vi.spyOn(StaffHistoricalWorkbookSnapshot, 'fromFile').mockResolvedValueOnce(snapshot);
+  } else {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(file);
+    vi.spyOn(HistoricalOrderWorkbookSnapshot, 'fromFile').mockResolvedValueOnce(snapshot);
+  }
+  fireEvent.change(screen.getByLabelText(label), { target: { files: [file] } });
   const card = document.querySelector(`[data-surface-id="imports.${id}.workbench"]`) as HTMLElement;
-  await within(card).findByText('預覽結果');
+  expect(within(card).getByRole('button', { name: '匯入' })).toBeEnabled();
   return card;
 }
 async function apply(card: HTMLElement) {
-  fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-  fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+  expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
   await within(card).findByText('匯入結果');
 }
 function ImportNavigationHarness() {
@@ -43,9 +55,10 @@ describe('Data Import simple result flows', () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
-    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
     expect(screen.queryByRole('heading', { name: '其他頁面' })).not.toBeInTheDocument();
     fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
@@ -69,11 +82,11 @@ describe('Data Import simple result flows', () => {
   it('stopping between confirmations clears scheduled retries and manual lookup reuses the original command', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '等待鎖逾時', true, 503));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     vi.useFakeTimers();
     try {
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
       fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
@@ -89,9 +102,10 @@ describe('Data Import simple result flows', () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
-    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
     vi.useFakeTimers();
     try {
@@ -110,9 +124,10 @@ describe('Data Import simple result flows', () => {
     let finish!: (value: typeof receipt) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
-    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
     await act(async () => { finish(receipt); });
     expect(within(card).getByText('匯入結果')).toBeInTheDocument();
@@ -126,7 +141,7 @@ describe('Data Import simple result flows', () => {
       ...(id === 'client-beclass' ? { query_no: `QUERY-${source_row}` } : id === 'historic-orders' ? { case_no: `CASE-${source_row}` } : {}) }));
     vi.spyOn(client, 'apply').mockResolvedValue({ ...receipt, row_issues } as never);
     render(<DataImportPage />);
-    const card = await preview(kind, label, id);
+    const card = await selectWorkbook(kind, label, id);
     await apply(card);
     const details = within(card).getByRole('region', { name: '未匯入明細' });
     expect(details.querySelectorAll('tbody tr')).toHaveLength(2);
@@ -138,11 +153,11 @@ describe('Data Import simple result flows', () => {
   it('automatically confirms a lock timeout using the same snapshot, preview and command identity', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '等待處理鎖 30 秒後逾時', true, 503));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     vi.useFakeTimers();
     try {
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
       expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
       expect(within(card).getByText('匯入處理中')).toBeInTheDocument();
       expect(within(card).getByRole('status')).toHaveTextContent('正在等待匯入結果');
@@ -160,11 +175,11 @@ describe('Data Import simple result flows', () => {
   it('stops automatic confirmation after six attempts and keeps manual result lookup available', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValue(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '處理鎖等待逾時', true, 503));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     vi.useFakeTimers();
     try {
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
       for (let attempt = 0; attempt < 8; attempt++) await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(7);
       expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
@@ -176,11 +191,11 @@ describe('Data Import simple result flows', () => {
   it.each([409, 422, 503])('does not automatically resend a definite conflict, validation error or generic unavailable response (%s)', async status => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValue(new ClientBeClassWorkbookApplyError('client_beclass_rejected', '服務回應未完成', status === 503, status));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     vi.useFakeTimers();
     try {
-      fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '確認匯入' })); });
+      expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
       await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
       if (status === 503) expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
@@ -200,13 +215,13 @@ describe('Data Import simple result flows', () => {
 
   it.each(cases)('%s shows only four final counters and replaces the preview', async (kind, label, id, expected) => {
     render(<DataImportPage />);
-    const card = await preview(kind, label, id);
-    expect(metrics(card)).toEqual(['4', '—', '—', '—']);
-    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
-    expect(Array.from(card.querySelectorAll('dt')).map(node => node.textContent)).toEqual(['來源筆數', '成功匯入', '重複略過', '未匯入']);
+    const card = await selectWorkbook(kind, label, id);
+    expect(metrics(card)).toEqual([]);
+    expect(within(card).getByRole('button', { name: '匯入' })).toBeEnabled();
     expect(within(card).queryByText(/CLIENT-007|CASE-012|原始資料問題|需人工檢查|既有衝突|身分阻擋/)).not.toBeInTheDocument();
     await apply(card);
     expect(metrics(card)).toEqual(expected.map(String));
+    expect(Array.from(card.querySelectorAll('dt')).map(node => node.textContent)).toEqual(['來源筆數', '成功匯入', '重複略過', '未匯入']);
     expect(within(card).queryByText('預覽結果')).not.toBeInTheDocument();
     expect(card.querySelectorAll('dl')).toHaveLength(1);
     expect(within(card).getByRole('button', { name: '匯入下一份檔案' })).toBeEnabled();
@@ -218,9 +233,10 @@ describe('Data Import simple result flows', () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
-    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
     expect(screen.getByRole('button', { name: '月嫂歷史資料' })).toBeDisabled();
@@ -246,7 +262,7 @@ describe('Data Import simple result flows', () => {
     const receipt = await client.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
     vi.spyOn(client, 'apply').mockResolvedValue({ ...receipt, replayed_workbook: true } as never);
     render(<DataImportPage />);
-    const card = await preview(kind, label, id);
+    const card = await selectWorkbook(kind, label, id);
     await apply(card);
     expect(within(card).getByText('已處理過，以下為原處理結果')).toBeInTheDocument();
     expect(metrics(card)).toEqual(expected.map(String));
@@ -256,7 +272,7 @@ describe('Data Import simple result flows', () => {
     const query = vi.spyOn(historicalReviewRemediationClient, 'query');
     vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 1, current_conflict_count: 0, assignments_created: 0, replayed_rows: 0, replayed_workbook: false, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, result_counts: { not_adopted: 0, matching_pending_deposit: 0, historical_unserved: 1, historical_in_service: 0, historical_service_completed: 0 }, review_references: ['historical-order-review:one'] });
     render(<DataImportPage />);
-    const card = await preview('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'); await apply(card);
+    const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'); await apply(card);
     expect(metrics(card)).toEqual(['1', '1', '0', '0']);
     expect(query).not.toHaveBeenCalled();
     expect(screen.queryByText(/處理歷史訂單待確認|歷史訂單欄位衝突更正/)).not.toBeInTheDocument();
@@ -266,34 +282,38 @@ describe('Data Import simple result flows', () => {
     render(<DataImportPage />);
     for (const name of ['HCM 案件', '客戶 BeClass', '月嫂歷史資料', '歷史訂單']) {
       fireEvent.click(screen.getByRole('button', { name }));
-      expect(screen.getByRole('button', { name: '預覽檔案' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '匯入' })).toBeDisabled();
       expect(screen.getByText('請先選擇 .xlsx 工作簿。')).toBeInTheDocument();
-      expect(screen.getByText('預覽成功後才能確認匯入。')).toBeInTheDocument();
+      expect(screen.getByText('選擇檔案後即可匯入。')).toBeInTheDocument();
     }
   });
 
   it('allows a fresh preview of the same file after a definite Apply conflict', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('stale', '請重新預覽。', false, 409));
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
-    fireEvent.click(within(card).getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(within(card).getByRole('button', { name: '確認匯入' }));
-    const retry = await within(card).findByRole('button', { name: '重新預覽' });
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
+    expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
+    const retry = await within(card).findByRole('button', { name: '重新匯入' });
     fireEvent.click(retry);
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.preview).toHaveBeenCalledTimes(2));
-    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
+    await within(card).findByText('匯入結果');
+    expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(2);
+    expect(within(card).queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
     expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('selecting another file clears previous results and confirmation', async () => {
     render(<DataImportPage />);
-    const card = await preview('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass'); await apply(card);
+    const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass'); await apply(card);
     fireEvent.change(screen.getByLabelText('選擇客戶 BeClass Workbook'), { target: { files: [workbook('another')] } });
     expect(within(card).queryByText('匯入結果')).not.toBeInTheDocument();
     expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
-    fireEvent.click(within(card).getByRole('button', { name: '預覽檔案' }));
-    await within(card).findByText('預覽結果');
-    expect(within(card).getByRole('button', { name: '確認匯入' })).toBeDisabled();
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
+    await within(card).findByText('匯入結果');
+    expect(within(card).queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
     const calls = vi.mocked(clientBeClassWorkbookPreviewClient.preview).mock.calls;
     expect(calls[0]?.[0].sha256).not.toBe(calls[1]?.[0].sha256);
   });

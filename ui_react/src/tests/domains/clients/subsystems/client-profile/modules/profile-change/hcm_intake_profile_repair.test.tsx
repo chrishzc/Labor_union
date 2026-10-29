@@ -37,50 +37,63 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-async function editAndPreview() {
+async function editDraft(note = '補齊電話與服務方式') {
   fireEvent.change(await screen.findByLabelText('電話（手機／市話）'), { target: { value: '0912345678' } });
   fireEvent.change(screen.getByRole('textbox', { name: '服務方式' }), { target: { value: '連續服務' } });
-  fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '補齊電話與服務方式' } });
-  fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
-  await screen.findByLabelText('欄位修正前後');
+  fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: note } });
 }
 
 it.each(['', '   ', '補齊電話與服務方式'])('repairs reviewed fields with optional note %j and fresh readback', async (note) => {
   const onSaved = vi.fn().mockResolvedValue(undefined);
   const onBusy = vi.fn();
   render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['行動電話', '服務方式']} disabled={false} onSaved={onSaved} onBusyChange={onBusy} />);
-  await editAndPreview();
-  expect(clientRegistryClient.preview).toHaveBeenCalledWith(detail.case_no, 'profile', { phone: '0912345678', service_type: '連續服務' }, 2);
+  await editDraft(note);
+  expect(clientRegistryClient.preview).not.toHaveBeenCalled();
   expect(clientRegistryClient.apply).not.toHaveBeenCalled();
   window.alert = vi.fn();
   const reason = screen.getByLabelText('備註（選填）');
   expect(reason).not.toHaveAttribute('aria-required');
-  fireEvent.change(reason, { target: { value: note } });
-  expect(screen.getByRole('button', { name: '確認儲存缺件資料' })).toBeEnabled();
+  expect(reason).toHaveValue(note);
+  expect(screen.getByRole('button', { name: '儲存缺件資料' })).toBeEnabled();
   vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...detail, client: { ...detail.client, version: 3, values: { ...detail.client.values, phone: '0912345678', service_type: '連續服務' } } });
-  fireEvent.click(screen.getByRole('button', { name: '確認儲存缺件資料' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存缺件資料' }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(window.alert).not.toHaveBeenCalled();
+  expect(clientRegistryClient.preview).toHaveBeenCalledWith(detail.case_no, 'profile', { phone: '0912345678', service_type: '連續服務' }, 2);
   expect(clientRegistryClient.apply).toHaveBeenCalledWith(detail.case_no, 'profile', { phone: '0912345678', service_type: '連續服務' }, 2, fingerprint, note.trim(), expect.stringContaining('hcm-intake-profile-'));
   await waitFor(() => expect(onBusy).toHaveBeenLastCalledWith(false));
 });
 
-it('invalidates the approved preview when a field is edited again', async () => {
+it('editing again submits only the current fields through a fresh Preview and Apply', async () => {
   render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['行動電話', '服務方式']} disabled={false} onSaved={vi.fn()} onBusyChange={vi.fn()} />);
-  await editAndPreview();
+  await editDraft();
   fireEvent.change(screen.getByLabelText('服務方式'), { target: { value: '週休2日' } });
   expect(screen.queryByRole('button', { name: '確認儲存缺件資料' })).not.toBeInTheDocument();
   expect(clientRegistryClient.apply).not.toHaveBeenCalled();
+  expect(clientRegistryClient.preview).not.toHaveBeenCalled();
+  vi.mocked(clientRegistryClient.preview).mockResolvedValue({
+    owner: 'client_profile', aggregate_identity: detail.case_no, current_version: 2,
+    before: { phone: null, service_type: null }, after: { phone: '0912345678', service_type: '週休2日' },
+    preview_fingerprint: 'b'.repeat(64),
+  });
+  fireEvent.click(screen.getByRole('button', { name: '儲存缺件資料' }));
+  await waitFor(() => expect(clientRegistryClient.apply).toHaveBeenCalledWith(
+    detail.case_no, 'profile', { phone: '0912345678', service_type: '週休2日' }, 2,
+    'b'.repeat(64), '補齊電話與服務方式', expect.stringContaining('hcm-intake-profile-'),
+  ));
+  expect(clientRegistryClient.preview).toHaveBeenCalledExactlyOnceWith(
+    detail.case_no, 'profile', { phone: '0912345678', service_type: '週休2日' }, 2,
+  );
 });
 
 it('keeps warnings and reads back without another write when the saved result is unconfirmed', async () => {
   const onSaved = vi.fn().mockResolvedValue(undefined);
   render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['行動電話', '服務方式']} disabled={false} onSaved={onSaved} onBusyChange={vi.fn()} />);
-  await editAndPreview();
-  fireEvent.click(screen.getByRole('button', { name: '確認儲存缺件資料' }));
+  await editDraft();
+  fireEvent.click(screen.getByRole('button', { name: '儲存缺件資料' }));
   await screen.findByText('儲存結果尚未確認，請重新讀取修正結果。');
   expect(onSaved).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: '確認儲存缺件資料' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '儲存缺件資料' })).toBeDisabled();
   vi.mocked(clientRegistryClient.query).mockResolvedValue({ ...detail, client: { ...detail.client, version: 3, values: { ...detail.client.values, phone: '0912345678', service_type: '連續服務' } } });
   fireEvent.click(screen.getByRole('button', { name: '重新讀取修正結果' }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
@@ -102,7 +115,7 @@ it('repairs an HCM email warning through the profile writer', async () => {
   expect(input).toHaveAttribute('type', 'email');
   fireEvent.change(input, { target: { value: 'hcm@example.com' } });
   fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '確認來源 email' } });
-  fireEvent.click(screen.getByRole('button', { name: '預覽欄位修正' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存缺件資料' }));
   await waitFor(() => expect(clientRegistryClient.preview).toHaveBeenCalledWith(detail.case_no, 'profile', { email: 'hcm@example.com' }, 2));
 });
 
@@ -112,5 +125,5 @@ it('honors owner field capabilities instead of exposing a locked field', async (
   } });
   render(<HcmIntakeProfileRepairPanel caseNo={detail.case_no} fields={['服務方式']} disabled={false} onSaved={vi.fn()} onBusyChange={vi.fn()} />);
   expect(await screen.findByLabelText('服務方式')).toBeDisabled();
-  expect(screen.getByRole('button', { name: '預覽欄位修正' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '儲存缺件資料' })).toBeDisabled();
 });

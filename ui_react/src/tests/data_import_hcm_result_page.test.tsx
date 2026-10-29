@@ -76,9 +76,7 @@ describe('DataImport HCM receipt review', () => {
 
     fireEvent.change(screen.getByLabelText('選擇 HCM Current Workbook'), { target: { files: [workbook()] } });
     fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.preview"]') as HTMLButtonElement);
-    await screen.findByText('預覽結果');
-    fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
-    fireEvent.click(document.querySelector('[data-control-id="imports.hcm-current.apply"]') as HTMLButtonElement);
+    expect(screen.queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
 
     expect(await screen.findByText('匯入結果')).toBeInTheDocument();
     expect(Array.from(document.querySelectorAll('dd > span')).map(node => node.textContent)).toEqual(['4', '2', '0', '2']);
@@ -98,16 +96,15 @@ describe('DataImport HCM receipt review', () => {
     render(<DataImportPage />);
     const input = screen.getByLabelText('選擇 HCM Current Workbook');
     fireEvent.change(input, { target: { files: [workbook()] } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽檔案' }));
-    await screen.findByText('預覽結果');
-    fireEvent.click(screen.getByLabelText('我已核對檔案名稱與預覽筆數'));
+    expect(screen.getByRole('button', { name: '匯入' })).toBeEnabled();
+    expect(screen.queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '取消選取檔案' }));
 
     expect(screen.getByText('未選擇任何檔案')).toBeInTheDocument();
     expect(screen.queryByText('預覽結果')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '預覽檔案' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '匯入' })).toBeDisabled();
     expect(hcmWorkbookPreviewClient.apply).not.toHaveBeenCalled();
   });
 

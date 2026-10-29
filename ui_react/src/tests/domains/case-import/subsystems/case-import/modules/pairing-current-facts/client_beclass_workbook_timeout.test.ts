@@ -59,7 +59,9 @@ describe('Client BeClass workbook slow responses', () => {
     vi.stubGlobal('fetch', fetchMock);
     const request = applyClientBeClassWorkbook(snapshot, fingerprint, command);
     const result = expect(request).rejects.toMatchObject({ code: 'client_beclass_apply_timeout', retryable: true, message: expect.stringContaining('資料可能已寫入') });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect((vi.mocked(fetch).mock.calls[0]?.[1]?.signal as AbortSignal).aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await result;
     await expect(request).rejects.toMatchObject({ message: expect.stringContaining('查詢這次匯入結果') });
     await expect(request).rejects.toMatchObject({ message: expect.not.stringContaining('Idempotency-Key') });
