@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { publishStaffAvailabilityChange } from '../api/staff_availability/staff_availability_changes';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import { holidayClient } from '../api/scheduling/holiday_client';
@@ -35,6 +36,8 @@ describe('SchedulingPage query-only presentation', () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
+    vi.spyOn(serviceStartClient, 'options').mockResolvedValue({ items: [] });
     vi.spyOn(holidayClient, 'query').mockImplementation(async query => ({ planning_horizon: 'from_date' in query ? query : { from_date: query.fromDate, to_date: query.toDate }, source_identity: 'test-holidays', calendar_version: 'a'.repeat(64), holidays: [] }));
     leaveSubstitutionFlowStore.clearAll();
     vi.spyOn(leaveSubstitutionClient, 'listAssignments').mockResolvedValue([...LEAVE_ASSIGNMENTS]);

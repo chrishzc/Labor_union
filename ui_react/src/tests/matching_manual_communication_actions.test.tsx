@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('MatchingManualCommunicationActions', () => {
-  it('keeps candidate information Apply locked until Preview is explicitly confirmed', async () => {
+  it('checks candidate information before saving the manual evidence once', async () => {
     const onCommitted = vi.fn().mockResolvedValue(undefined);
     const preview = {
       case_no: 'CASE-1', pool_id: 3, candidate_id: 7, staff_id: 31, info_type: 1 as const,
@@ -33,12 +33,10 @@ describe('MatchingManualCommunicationActions', () => {
     render(<CandidateManualInformationActions caseNo="CASE-1" candidateId={7} infoType={1} disabledReason={null} onCommitted={onCommitted} />);
 
     fireEvent.change(screen.getByLabelText('資訊-1 人工確認依據'), { target: { value: '電話逐項說明案況' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查人工已提供資訊的影響' }));
-    await screen.findByText(/目前聯繫狀態已核對/);
-    const apply = screen.getByRole('button', { name: '確認留存人工資訊證據' });
-    expect(apply).toBeDisabled();
-    fireEvent.click(screen.getByLabelText(/我已核對候選人/));
-    fireEvent.click(apply);
+    fireEvent.click(screen.getByRole('button', { name: '儲存人工已提供資訊' }));
+    await waitFor(() => expect(candidateContactPoolClient.previewManualInformation).toHaveBeenCalledOnce());
+    expect(candidateContactPoolClient.applyManualInformation).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 
     await screen.findByText('人工確認紀錄已留存。');
     expect(onCommitted).toHaveBeenCalledTimes(1);
@@ -67,10 +65,10 @@ describe('MatchingManualCommunicationActions', () => {
     const view = render(<CustomerProfilesManualActions caseNo="CASE-1" planId={12} currentStatus={null} onCommitted={onCommitted} />);
 
     fireEvent.change(screen.getByLabelText('履歷人工送達依據'), { target: { value: '電話提供履歷並確認收到' } });
-    fireEvent.click(screen.getByRole('button', { name: '檢查人工已送達履歷的影響' }));
-    await screen.findByText(/方案 #12/);
-    fireEvent.click(screen.getByLabelText(/我已核對正式方案/));
-    fireEvent.click(screen.getByRole('button', { name: '確認留存人工履歷送達證據' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存人工已送達履歷' }));
+    await waitFor(() => expect(matchingPlanCommunicationClient.previewManualCustomerProfiles).toHaveBeenCalledOnce());
+    expect(matchingPlanCommunicationClient.applyManualCustomerProfiles).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 
     await screen.findByText('客戶履歷人工送達紀錄已留存。');
     await waitFor(() => expect(onCommitted).toHaveBeenCalledTimes(1));

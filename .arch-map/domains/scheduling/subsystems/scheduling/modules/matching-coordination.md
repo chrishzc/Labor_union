@@ -127,3 +127,6 @@
 
 ## Change triggers
 Reconcile when coordination owner, case lifecycle eligibility, assignment occupancy semantics, package/event contract, presentation hierarchy, API route/schema, persistence adapter or focused test root moves.
+
+- test_root: `ui_react/src/tests/matching_coordination_workbench.test.tsx` — 既有獨立 typed 工作台的 17 種操作、內部核對與原鍵重試。
+- test_root: `ui_react/src/tests/matching_manual_communication_actions.test.tsx` — 既有人工資訊／履歷送達證據的 Preview／Apply 與 provider 狀態區分。

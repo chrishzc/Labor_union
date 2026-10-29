@@ -324,12 +324,16 @@ function installFetchStub(mode: FetchMode): FetchRecord[] {
     const method = String(init?.method ?? 'GET').toUpperCase();
     requests.push({ path: url.pathname, method, query: url.searchParams, signal: init?.signal ?? undefined });
 
+    if (url.pathname === '/api/v1/scheduling/service-start/staff-options') return jsonResponse({ success: true, message: 'ok', data: { items: [] } });
+    if (url.pathname === '/api/v1/scheduling/service-start/todos') return jsonResponse({ success: true, message: 'ok', data: { items: [], total: 0, page: 1, page_size: 25 } });
+    if (url.pathname === '/api/v1/holidays') return jsonResponse({ success: true, message: 'ok', error: null, data: { planning_horizon: { from_date: url.searchParams.get('from_date'), to_date: url.searchParams.get('to_date') }, source_identity: 'test-holidays', calendar_version: 'a'.repeat(64), holidays: [] } });
     if (url.pathname === SYSTEM_STATUS_ENDPOINT) {
       return jsonResponse(PERFORMANCE_RESPONSE);
     }
     if (url.pathname === STAFF_SUMMARY_ENDPOINT) {
       return jsonResponse({ ...STAFF_RESPONSE_ONE, data: { ...STAFF_RESPONSE_ONE.data, next_cursor: null } });
     }
+    if (url.pathname.endsWith('/leave-substitution/assignments')) return jsonResponse({ success: true, message: 'ok', data: [], error: null });
     if (url.pathname === ORDER_SUMMARY_ENDPOINT) {
       return schedulingOrderSummaryResponse();
     }
@@ -579,10 +583,10 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.leave.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.leave.apply"]')).not.toBeInTheDocument();
-    expect(await screen.findByText('目前沒有服務中且已有排班的案件。')).toBeInTheDocument();
+    expect(await screen.findByText('目前沒有已正式排班且尚未服務完成的案件。')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
-    expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled();
+    await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.holiday.query"]')).toBeEnabled());
     expect(document.querySelector('[data-control-id="scheduling.holiday.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();

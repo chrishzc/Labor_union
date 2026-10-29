@@ -34,3 +34,5 @@
 - owner and workflow: source_observed from subsystems/scheduling/holiday_maintenance.py and current typed client.
 - frontend presentation: source_observed from SchedulingPage.tsx and its OfficialHolidayCsvImport component.
 - canonical test placement: architecture_declared by the existing Scheduling Holiday module test root and current test routing.
+
+- test_root: `ui_react/src/tests/scheduling_no_fake_mutation.test.tsx` — 既有 SchedulingPage 假日入口的查詢與零自動 mutation 保護。

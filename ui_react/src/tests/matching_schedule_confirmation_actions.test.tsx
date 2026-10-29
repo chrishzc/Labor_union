@@ -27,7 +27,7 @@ it('只顯示協調結果與代班，不再顯示再次確認日期表的操作'
  vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[],total:0,page:1,page_size:25});
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
  render(<MatchingScheduleAndAssignmentActions caseNo="CASE" planId={1} planSegments={[]} waitingLockAcquired={false} assignmentExists={false} onAssignmentCompleted={async()=>{}}/>);
- await screen.findByText('目前沒有需要工會介入的服務開始代班。');
+ await screen.findByText('目前沒有需要工會處理的排程衝突或代班。');
  expect(screen.queryByRole('button',{name:/發送日期表|人工確認|確認排班/})).not.toBeInTheDocument();
  expect(screen.getByText(/由月嫂提交開始日期/)).toBeInTheDocument();
 });

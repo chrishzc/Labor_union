@@ -256,7 +256,7 @@ describe('candidateContactPoolClient', () => {
     );
   });
 
-  it('records manual willingness and rejects an empty unwilling reason before transport', async () => {
+  it('records willingness with an optional reason and retains its length limit and actor identity', async () => {
     const put = vi.spyOn(transport, 'put').mockResolvedValue(successEnvelope({
       status: 'recorded',
       event_id: 45,
@@ -268,17 +268,24 @@ describe('candidateContactPoolClient', () => {
       '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/willingness',
       expect.objectContaining({
         willingness: 'willing',
-        reason: '人工補登願意',
+          reason: '',
         actor: 'operator-1',
         event_key: command.eventKey,
       }),
       { token: 'volatile-token' },
     );
 
-    expect(() => createCandidateWillingnessCommand(
+    const unwilling = createCandidateWillingnessCommand(
       'CASE-POOL-001', 17, 'unwilling', ' ',
-    )).toThrow('必須填寫');
-    expect(put).toHaveBeenCalledTimes(1);
+    );
+    await expect(candidateContactPoolClient.recordWillingness(unwilling)).resolves.toEqual({ status: 'recorded', event_id: 45 });
+    expect(put).toHaveBeenLastCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/willingness',
+      expect.objectContaining({ willingness: 'unwilling', reason: '', actor: 'operator-1', event_key: unwilling.eventKey }),
+      { token: 'volatile-token' },
+    );
+    expect(() => createCandidateWillingnessCommand('CASE-POOL-001', 17, 'unwilling', 'a'.repeat(501))).toThrow();
+    expect(put).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed before sending when session identity is missing', async () => {

@@ -46,6 +46,7 @@
 - outbound: `external-integration/line` — 共用代班意願、單人原案件群組邀請、加入證據與無按鈕正式日期表，僅建立 committed delivery。
 
 ## Verification routing
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution/`
 - default_boundary: Subsystem
 - test_root: `ui_react/src/tests/service_handover_page.test.tsx`
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover.py`
@@ -63,5 +64,3 @@
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/service-start/service_start_workbench.test.tsx`
 
 - integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_service_handover_mysql.py`
-
-- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/leave-substitution/`
