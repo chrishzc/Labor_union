@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "9eba330e395b06dfb600a6552e5764e6cbee9d60e8fda51833ce65dc2890d12d",
+  "active_artifacts_sha256": "4f25e2fbcfab8cf8d71e34f488dae9471a5b1a1dece4739eeb4d73c50590e1c3",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -188,7 +188,8 @@
     "db/schema_parts/234_accounting_pricing.sql",
     "db/schema_parts/235_finance_statement_workspace.sql",
     "db/schema_parts/236_client_refund_overage_receipt.sql",
-    "db/schema_parts/237_non_citizen_case_sequences.sql"
+    "db/schema_parts/237_non_citizen_case_sequences.sql",
+    "db/schema_parts/238_registry_case_deletion_guards.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -221,12 +222,10 @@
     "db/schema_parts/233_government_subsidy_periods.sql": "active-bootstrap",
     "db/schema_parts/1055_government_subsidy_periods.sql": "migration-only",
     "db/schema_parts/1056_accounting_pricing.sql": "migration-only",
-    "db/schema_parts/235_finance_statement_workspace.sql": "active-bootstrap",
-    "db/schema_parts/236_client_refund_overage_receipt.sql": "active-bootstrap",
-    "db/schema_parts/237_non_citizen_case_sequences.sql": "active-bootstrap",
     "db/schema_parts/1057_finance_statement_workspace.sql": "migration-only",
     "db/schema_parts/1058_client_refund_overage_receipt.sql": "migration-only",
-    "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only"
+    "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only",
+    "db/schema_parts/1060_registry_case_deletion_guards.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -516,6 +515,15 @@
       "replay": "exact counter table is a no-op",
       "rollback": "discard isolated candidate before switch; retain forward-compatible counter after apply",
       "unresolved_policy": "partial or drift blocks apply"
+    },
+    "db/schema_parts/1060_registry_case_deletion_guards.sql": {
+      "source_object": "immutable event guards without root unsigned-case deletion context",
+      "successor": "db/schema_parts/238_registry_case_deletion_guards.sql",
+      "terminal_schema_evidence": "fresh and preserve use identical guarded trigger definitions",
+      "data_effect": "schema-only; preserve every row and all default immutable protections",
+      "replay": "exact guarded triggers are no-op",
+      "rollback": "retain verified backup and journal; restore protected predecessor definitions only through approved recovery",
+      "unresolved_policy": "modified or partially missing guard definitions fail closed"
     }
   }
 }

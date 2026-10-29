@@ -24,6 +24,7 @@ from api.dependencies.client_registry import (
 from api.dependencies.order_terms import get_order_terms_application
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
+from api.routes.registry_deletion import case_router as _case_deletion_router
 from api.schemas.client_registry import (
     BeClassCorrectionApplyRequest,
     BeClassCorrectionPreviewRequest,
@@ -75,6 +76,8 @@ from subsystems.client_profile.case_inspection_export import ClientRegistryCaseI
 
 
 router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"])
+
+router.include_router(_case_deletion_router)
 
 _FIELD_OPTIONS = {
     "client_profile": {

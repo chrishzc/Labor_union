@@ -5,6 +5,8 @@ Description: 驗證 release chain，並以本機備份證據安全執行隔離�
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import argparse
 from contextlib import contextmanager
 from copy import deepcopy
@@ -360,11 +362,12 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_19_nas_registration_approval_v1.json",
     "labor_union_2026_10_22_line_order_group_invitation_url_v1.json",
     "labor_union_2026_10_23_scheduling_service_start_v1.json",
-    "labor_union_2026_10_27_government_subsidy_periods_hash_v2.json",
+    "labor_union_2026_10_29_subsidy_policy_replay_v4.json",
     "labor_union_2026_10_29_accounting_pricing_v1.json",
     "labor_union_2026_10_29_finance_statement_workspace_v1.json",
     "labor_union_2026_10_29_client_refund_overage_receipt_v1.json",
     "labor_union_2026_10_29_non_citizen_cases_v1.json",
+    "labor_union_2026_10_29_registry_case_deletion_guards_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -663,7 +666,7 @@ def _configure_default_release_manifests() -> None:
         include_backfills=True,
         backfill_release_ids=frozenset(
             {"labor-union-twins-payroll-policy-2026-09-12-v2",
-             "labor-union-subsidy-periods-2026-10-27-v2"}
+             "labor-union-subsidy-policy-replay-2026-10-29-v4"}
         ),
     )
 
@@ -2479,6 +2482,57 @@ def _modified_parent_predecessor_absent_state(
     return None
 
 
+_REGISTRY_GUARD_METADATA = None
+
+
+@lru_cache(maxsize=512)
+def _registry_guard_action(action):
+    return _normalize_sql_contract(action)
+
+
+
+def _registry_guard_metadata():
+    global _REGISTRY_GUARD_METADATA
+    if _REGISTRY_GUARD_METADATA is None:
+        path = ROOT / "db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json"
+        _REGISTRY_GUARD_METADATA = json.loads(path.read_text(encoding="utf-8"))
+    return _REGISTRY_GUARD_METADATA
+
+
+def _registry_guard_snapshot(snapshot, artifact):
+    catalog = _registry_guard_metadata()
+    old, new = catalog["predecessor_triggers"], catalog["successor_triggers"]
+    rows = {row["trigger_name"]: row for row in snapshot.get("triggers", ())}
+    contracts = {}
+    states = []
+    for name, expected in new.items():
+        row = rows.get(name)
+        if row is None or not set(expected) <= set(row):
+            states.append("missing")
+            continue
+        action = row["action_statement"]
+        if action not in (expected["action_statement"], old[name]["action_statement"]):
+            action = _registry_guard_action(action)
+        actual = {"action_timing": str(row["action_timing"]).upper(),
+                  "event_manipulation": str(row["event_manipulation"]).upper(),
+                  "event_object_table": row["event_object_table"], "action_statement": action}
+        contracts[name] = actual
+        states.append("new" if actual == expected else "old" if actual == old[name] else "drift")
+    if artifact == "1060_registry_case_deletion_guards.sql":
+        if all(state == "new" for state in states):
+            return snapshot, "exact"
+        if all(state == "old" for state in states):
+            return snapshot, "absent"
+        return snapshot, "drift" if "drift" in states else "partial"
+    converted = []
+    for row in snapshot.get("triggers", ()):
+        name = row["trigger_name"]
+        if name in new and contracts.get(name) == new[name]:
+            row = {**row, "action_statement": old[name]["action_statement"]}
+        converted.append(row)
+    return {**snapshot, "triggers": converted}, None
+
+
 def _metadata_state_for_artifact(
     snapshot: Mapping[str, Any],
     descriptor: dict[str, Any],
@@ -2486,6 +2540,9 @@ def _metadata_state_for_artifact(
     *,
     defer_missing_triggers: bool,
 ) -> str:
+    snapshot, registry_state = _registry_guard_snapshot(snapshot, artifact)
+    if registry_state is not None:
+        return registry_state
     # Current fresh databases omit retired structures; deployed historical
     # structures may remain. Neither case schedules DDL or weakens contracts
     # for any retained owner object.
@@ -2663,6 +2720,7 @@ def _matching_holiday_work_agreement_owner_state(
 
 # 本機 qualified additive 例外的唯一執行邊界；update_local_database 只負責路由。
 LOCAL_ADDITIVE_MAX_DURATION_MS = 30_000
+LOCAL_ADDITIVE_VALIDATION_DURATION_MS = 300_000
 LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS = 5
 LOCAL_ADDITIVE_SYSTEM_DATABASES = frozenset(
     {"information_schema", "mysql", "performance_schema", "sys"}
@@ -2683,6 +2741,93 @@ class LocalAdditiveBlocked(RuntimeError):
         super().__init__(str(message)[:240])
         self.code = code
         self.details = dict(details or {})
+
+
+class _LocalAdditivePhase:
+    """One additive validation phase, with bounded reads and redacted timings."""
+
+    def __init__(self, config: Any, name: str) -> None:
+        self._config = config
+        self.name = name
+        self.started = time_module.monotonic()
+        self.ended: float | None = None
+        self.steps: dict[str, int] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._config, name)
+
+    def summary(self) -> dict[str, Any]:
+        end = self.ended if self.ended is not None else time_module.monotonic()
+        return {"elapsed_ms": int((end - self.started) * 1000),
+                "limit_ms": LOCAL_ADDITIVE_VALIDATION_DURATION_MS,
+                "steps_ms": dict(self.steps)}
+
+    def check(self) -> None:
+        if self.summary()["elapsed_ms"] >= LOCAL_ADDITIVE_VALIDATION_DURATION_MS:
+            raise LocalAdditiveBlocked(
+                f"additive {self.name} duration guard exceeded",
+                code=f"{self.name}_duration_exceeded",
+                details={"phase": self.name, **self.summary()},
+            )
+
+    def finish(self) -> None:
+        self.check()
+        self.ended = time_module.monotonic()
+
+    @contextmanager
+    def step(self, name: str):
+        self.check()
+        started = time_module.monotonic()
+        try:
+            yield
+        finally:
+            self.steps[name] = int((time_module.monotonic() - started) * 1000)
+        self.check()
+
+    def connect(self, database=None, *, timeout_seconds=None):
+        self.check()
+        remaining = (LOCAL_ADDITIVE_VALIDATION_DURATION_MS - self.summary()["elapsed_ms"]) / 1000
+        bounded = min(float(timeout_seconds or 30), 30, remaining)
+        connection = _local_connect(self._config, database, max(1, int(bounded * 1000)))
+        try:
+            self.check()
+        except BaseException:
+            connection.close()
+            raise
+        return _LocalAdditivePhaseConnection(connection, self)
+
+
+class _LocalAdditivePhaseConnection:
+    def __init__(self, connection, phase) -> None:
+        self._connection, self._phase = connection, phase
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def cursor(self, *args, **kwargs):
+        self._phase.check()
+        return _LocalAdditivePhaseCursor(self._connection.cursor(*args, **kwargs), self._phase)
+
+
+class _LocalAdditivePhaseCursor:
+    def __init__(self, cursor, phase) -> None:
+        self._cursor, self._phase = cursor, phase
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+    def __enter__(self):
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._cursor.__exit__(*args)
+
+    def execute(self, *args, **kwargs):
+        self._phase.check()
+        result = self._cursor.execute(*args, **kwargs)
+        self._phase.check()
+        return result
 
 
 def _local_canonical_json(value: Any) -> bytes:
@@ -3701,7 +3846,10 @@ def _local_classify_statement(statement: str) -> str:
         return "create_index"
     if normalized.startswith("create trigger"):
         body = normalized.split("for each row", 1)[-1]
-        if re.search(r"\b(insert|update|delete|replace|truncate|alter|drop|create)\b", body):
+        # A diagnostic such as 'matching plan create receipts cannot be deleted'
+        # is a string literal, not a CREATE/DML statement.
+        executable_body = re.sub(r"'(?:\\.|''|[^'\\])*'|\"(?:\\.|\"\"|[^\"\\])*\"|`(?:``|[^`])*`", " quoted ", body)
+        if re.search(r"\b(insert|update|delete|replace|truncate|alter|drop|create)\b", executable_body):
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
@@ -3829,6 +3977,12 @@ def _local_classify_statement(statement: str) -> str:
         ).casefold()
         if normalized == canonical_1051:
             return "candidate_weekly_information_enum_widen"
+        if re.fullmatch(
+            r"alter table client_refund_reversal_apply_receipts modify column correction_type "
+            r"enum\('refund',\s*'refund_return',\s*'reversal',\s*'refund_overage'\) not null;?",
+            normalized,
+        ):
+            return "client_refund_overage_receipt_enum_widen"
         buffer_advisory_alters = {
             re.sub(r"\s+", " ", value.strip()).casefold()
             for value in split_sql((ROOT / "db/schema_parts/1047_scheduling_buffer_advisory.sql").read_text(encoding="utf-8"))
@@ -3861,6 +4015,19 @@ def _local_journal_path(root: Path, source: str, release_id: str) -> Path:
 
 def _local_receipt_path(root: Path, source: str) -> Path:
     return Path(root) / "fast_additive" / f"{source}.receipt.json"
+
+
+def require_local_additive_completed_journal(preview: Mapping[str, Any], root: Path, source: str) -> None:
+    """Exact metadata cannot substitute for an interrupted Apply's verification."""
+    release_id = preview.get("latest_release_id") or preview.get("release_id")
+    if not isinstance(release_id, str):
+        raise LocalAdditiveBlocked("current release identity is incomplete", code="release_chain_invalid")
+    events = _local_read_events(root, source, release_id)
+    if events and events[-1]["state"] != "completed":
+        raise LocalAdditiveBlocked(
+            "schema is current but recorded Apply verification is incomplete; reconcile the original backup and journal",
+            code="verification_incomplete", details={"phase": "verification"},
+        )
 
 
 def _local_append_event(root: Path, source: str, release_id: str, state: str, previous: Mapping[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
@@ -4322,50 +4489,51 @@ def local_additive_apply(
         raise LocalAdditiveBlocked("duration guard must be between 1 and 30000 ms", code="duration_invalid")
     if not 1 <= lock_timeout_seconds <= LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS:
         raise LocalAdditiveBlocked("lock timeout must be between 1 and 5 seconds", code="duration_invalid")
-    preview = local_additive_plan(
-        config,
-        source,
-        receipt_root=receipt_root,
-        qualification_path=qualification_path,
-    )
-    if preview["status"] == "current":
-        return preview
-    qualification = (
-        _local_discover_qualification(
-            release_id=preview["release_id"],
-            artifact_name=preview["artifact"]["name"],
-        )
-        if qualification_path is None
-        else _local_discover_qualification(
-            qualification_path,
-            release_id=preview["release_id"],
-            artifact_name=preview["artifact"]["name"],
-        )
-    )
-    artifact = qualification["_canonical_artifact"]
-    sql_path = ROOT / artifact["relative_path"]
-    statements = split_sql(sql_path.read_text(encoding="utf-8"))
-    classes = [_local_classify_statement(statement) for statement in statements]
     started = time_module.monotonic()
-    events = _local_read_events(
-        receipt_root, source, qualification["release_id"]
-    )
-    statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
-    baseline, verified = _local_resume_context(
-        events,
-        qualification["release_id"],
-        source,
-        statement_hashes,
-        preview["source_schema_sha256"],
-    )
-    local_backup = _local_validate_backup(
-        config,
-        source,
-        qualification,
-        baseline,
-        backup_dump_path=backup_dump_path,
-        backup_receipt_path=backup_receipt_path,
-    )
+    preparation = _LocalAdditivePhase(config, "preparation")
+    with preparation.step("plan"):
+        preview = local_additive_plan(
+            preparation,
+            source,
+            receipt_root=receipt_root,
+            qualification_path=qualification_path,
+        )
+    if preview["status"] == "current":
+        preparation.finish()
+        require_local_additive_completed_journal(preview, receipt_root, source)
+        return preview
+    with preparation.step("qualification_and_resume"):
+        qualification = (
+            _local_discover_qualification(
+                release_id=preview["release_id"],
+                artifact_name=preview["artifact"]["name"],
+            )
+            if qualification_path is None
+            else _local_discover_qualification(
+                qualification_path,
+                release_id=preview["release_id"],
+                artifact_name=preview["artifact"]["name"],
+            )
+        )
+        artifact = qualification["_canonical_artifact"]
+        sql_path = ROOT / artifact["relative_path"]
+        statements = split_sql(sql_path.read_text(encoding="utf-8"))
+        classes = [_local_classify_statement(statement) for statement in statements]
+        events = _local_read_events(receipt_root, source, qualification["release_id"])
+        statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
+        baseline, verified = _local_resume_context(
+            events, qualification["release_id"], source, statement_hashes,
+            preview["source_schema_sha256"],
+        )
+    with preparation.step("backup_validation"):
+        local_backup = _local_validate_backup(
+            preparation,
+            source,
+            qualification,
+            baseline,
+            backup_dump_path=backup_dump_path,
+            backup_receipt_path=backup_receipt_path,
+        )
     previous: Mapping[str, Any] | None = events[-1] if events else None
     if not events:
         previous = _local_append_event(
@@ -4379,13 +4547,23 @@ def local_additive_apply(
             statement_hashes=statement_hashes,
             data_fingerprint_sha256=local_backup["data_fingerprint_sha256"],
         )
+    preparation.check()
+    lock_started = time_module.monotonic()
     with _local_maintenance_lock(config, source, lock_timeout_seconds):
-        locked_snapshot = _schema_snapshot(config, source)
-        if not events and locked_snapshot["sha256"] != baseline:
-            raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
-        if server_identity(config, source)["database"] != source:
-            raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
-        _local_verify_backup_rows(config, source, local_backup)
+        preparation.steps["maintenance_lock"] = int((time_module.monotonic() - lock_started) * 1000)
+        with preparation.step("locked_metadata"):
+            locked_snapshot = _schema_snapshot(preparation, source)
+            if not events and locked_snapshot["sha256"] != baseline:
+                raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
+            if server_identity(preparation, source)["database"] != source:
+                raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
+        with preparation.step("locked_row_verification"):
+            _local_verify_backup_rows(preparation, source, local_backup)
+        preparation.finish()
+        previous = _local_append_event(receipt_root, source, qualification["release_id"], "preparation_verified", previous,
+            source_database=source, source_schema_sha256=baseline, timing=preparation.summary())
+        ddl_started = time_module.monotonic()
+        completed_ordinals = set(verified)
         connection = _local_connect(config, source, duration_guard_ms)
         try:
             with connection.cursor() as cursor:
@@ -4398,8 +4576,11 @@ def local_additive_apply(
                         if verified[ordinal] != statement_hash:
                             raise LocalAdditiveBlocked("additive journal ordinal hash conflict", code="journal_conflict")
                         continue
-                    if (time_module.monotonic() - started) * 1000 >= duration_guard_ms:
-                        raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
+                    if (time_module.monotonic() - ddl_started) * 1000 >= duration_guard_ms:
+                        raise LocalAdditiveBlocked("additive DDL duration guard exceeded", code="blocked_duration_exceeded",
+                            details={"phase": "ddl", "limit_ms": duration_guard_ms,
+                                     "elapsed_ms": int((time_module.monotonic() - ddl_started) * 1000),
+                                     "verified_ordinals": sorted(completed_ordinals), "pending_ordinal": ordinal})
                     previous = _local_append_event(receipt_root, source, qualification["release_id"], "statement_started", previous, source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class)
                     try:
                         cursor.execute(statement)
@@ -4407,30 +4588,44 @@ def local_additive_apply(
                         raise LocalAdditiveBlocked(
                             "bounded DDL client timeout; outcome requires reconciliation",
                             code="blocked_duration_exceeded",
+                            details={"phase": "ddl", "limit_ms": duration_guard_ms,
+                                     "verified_ordinals": sorted(completed_ordinals),
+                                     "pending_ordinal": ordinal, "outcome": "requires_reconciliation"},
                         ) from error
-                    elapsed = int((time_module.monotonic() - started) * 1000)
+                    elapsed = int((time_module.monotonic() - ddl_started) * 1000)
                     previous = _local_append_event(receipt_root, source, qualification["release_id"], "statement_verified", previous, source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class, outcome="applied", elapsed_ms=elapsed)
+                    completed_ordinals.add(ordinal)
                     if elapsed >= duration_guard_ms:
-                        raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
+                        raise LocalAdditiveBlocked("additive DDL duration guard exceeded", code="blocked_duration_exceeded",
+                            details={"phase": "ddl", "limit_ms": duration_guard_ms, "elapsed_ms": elapsed,
+                                     "verified_ordinals": sorted(completed_ordinals)})
         finally:
             connection.close()
+        ddl_elapsed = int((time_module.monotonic() - ddl_started) * 1000)
         # Keep the post-DDL descriptor read under the named lock so another
         # local process cannot change the contract between apply and verify.
-        after = _schema_snapshot(config, source)
-        descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
-        if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
-            raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
-        _local_verify_backup_rows(config, source, local_backup, altered_tables=_local_altered_tables(statements))
+        verification = _LocalAdditivePhase(config, "verification")
+        with verification.step("descriptor"):
+            after = _schema_snapshot(verification, source)
+            descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
+            if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
+                raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
+        with verification.step("preserved_rows"):
+            _local_verify_backup_rows(verification, source, local_backup, altered_tables=_local_altered_tables(statements))
+        verification.finish()
     elapsed = int((time_module.monotonic() - started) * 1000)
     result = {
         **preview,
         "status": "completed",
         "elapsed_ms": elapsed,
+        "phase_timings": {"preparation": preparation.summary(),
+                          "ddl": {"elapsed_ms": ddl_elapsed, "limit_ms": duration_guard_ms},
+                          "verification": verification.summary()},
         "post_schema_sha256": after["sha256"],
         "backup_receipt": local_backup["receipt_path"],
         "backup_dump_sha256": local_backup["sha256"],
     }
-    previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed, backup_receipt=local_backup["receipt_path"], backup_dump_sha256=local_backup["sha256"])
+    previous = _local_append_event(receipt_root, source, qualification["release_id"], "completed", previous, source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed, phase_timings=result["phase_timings"], backup_receipt=local_backup["receipt_path"], backup_dump_sha256=local_backup["sha256"])
     _local_write_receipt(receipt_root, source, result)
     return result
 
@@ -4870,6 +5065,9 @@ def restore_candidate(
 
 
 def split_sql(sql: str) -> list[str]:
+    if re.search(r"(?im)^[ \t]*DELIMITER[ \t]+", sql):
+        from scripts.sql_statements import split_sql as split_delimited_sql
+        return split_delimited_sql(sql)
     statements: list[str] = []
     current: list[str] = []
     quote: str | None = None
@@ -5467,7 +5665,12 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         r"`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+?)(?=;\s*(?:$|\n))",
         re.I | re.S,
     )
-    for match in trigger_pattern.finditer(sql + "\n"):
+    if part_name == "1060_registry_case_deletion_guards.sql":
+        complete_pattern = re.compile(r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+`?([A-Za-z0-9_]+)`?\s+FOR\s+EACH\s+ROW\s+(.+)", re.I | re.S)
+        trigger_matches = [match for statement in split_sql(sql) if (match := complete_pattern.fullmatch(statement))]
+    else:
+        trigger_matches = trigger_pattern.finditer(sql + "\n")
+    for match in trigger_matches:
         name, timing, event, table, body = match.groups()
         descriptor["triggers"][name] = {
             "action_timing": timing.upper(),
@@ -6330,6 +6533,7 @@ def _release_descriptor_metadata_state(
         "1051_candidate_weekly_information.sql",
         "1052_nas_registration_approval.sql",
         "1053_line_order_group_invitation_url.sql",
+        "1058_client_refund_overage_receipt.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6929,6 +7133,9 @@ def _artifact_metadata_state(
     defer_missing_triggers: bool = False,
     owned_tables: frozenset[str] | None = None,
 ) -> str:
+    snapshot, registry_state = _registry_guard_snapshot(snapshot, part_name)
+    if registry_state is not None:
+        return registry_state
     if owned_tables is not None:
         _limit_descriptor_to_owned_tables(descriptor, owned_tables)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}

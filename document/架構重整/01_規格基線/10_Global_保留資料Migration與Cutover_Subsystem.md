@@ -66,6 +66,20 @@ Console output、README、測試名稱、候選 DB 名稱或人工記憶不是 S
 
 ### 4.1 Release Manifest
 
+2026-10-27 補助期款校驗修正：current preserve chain 選取
+`labor_union_2026_10_27_government_subsidy_periods_hash_v2.json`，綁定既有
+`1055_government_subsidy_periods.sql` 的實際 bytes；2026-10-24 v1 清單保留追溯、不再預設選取。
+v2 的 SQL、descriptor 語意及 `subsidy-period-policy-v1` backfill 均不改變；
+它不是新增資料結構或重新轉換已完成的資料。仍須執行 source 唯讀 plan、備份、candidate
+apply／verify 與 backfill 重送驗證，不得只更新校驗碼就宣稱保留資料升級通過。
+候選庫流程與唯讀 readiness 同樣依既有 fresh retirement policy 投影已核准退役的物件，
+不因新庫省略它們就重建或刪除歷史表；保留欄位沿用原 owner 的 metadata／successor 契約。
+LINE 舊 append-only 名稱契約仍由後續已選取 release 驗其演進，不拿早期欄位型別覆蓋新 owner。
+
+2026-10-29 最新人工裁決：移除 `migrate_subsidy_period_policy.py` 對 `lu_test_` 前綴的限制，接受明確指定的既有本機 development database，包括原有 preserve candidate 名稱；localhost／development、Apply 的 plan／backup 要求及既有 writer／驗證保持原契約。以 `labor_union_2026_10_29_subsidy_policy_database_names_v3.json` 綁定新工具 hash，取代 default chain 的 v2 選取；v1／v2 歷史 manifest 不改寫，1055 SQL、descriptor 與業務回填語意不變。移除前綴限制不授權額外資料變更或 production 執行。
+
+同次執行發現已提交政策的來源，在 replay preservation 被誤作首次身分轉換；既有 policy events 亦被再次計入 account version 增量。以 `labor_union_2026_10_29_subsidy_policy_replay_v4.json` 作為 current 工具 hash successor，取代 default chain 的 v3；驗證器必須依來源 marker 保持已轉換身分，只計 candidate 新增的 policy event ids，仍拒絕額外身分／版本變更。不改回填 writer、現金流水、SQL／descriptor 或已發布 manifest。
+
 Modules：
 
 - `MigrationReleaseManifest`
@@ -181,6 +195,9 @@ Local receipt 至少綁定 `source_database + release_id + server + host + port 
 fingerprint + dump digest + representative row fingerprints`；DDL 前、取得 maintenance lock 後與
 DDL 完成後都要 fresh-read 驗證。若同一 journal 已開始但原始 local dump／receipt 遺失、不完整或
 身分不符，固定以 `backup_required` 停止，不得重做新備份冒充原始 baseline。唯讀 plan 不建立 dump。
+
+2026-10-29 更新工具計時裁決：前置驗證與更新後驗證各有獨立 300 秒期限，DDL 的既有上限仍為 30 秒（caller 可要求更短），等鎖上限仍為 5 秒。前置驗證完成後才開始 DDL 計時，不把備份驗證、locked metadata／row readback 計入 DDL 額度；所有檢查仍必須完成。驗證階段在每次查詢前後及步驟邊界檢查期限，連線與單次 socket 讀寫上限不超過 30 秒，因此阻塞查詢須在 socket 返回／逾時後才回報階段超時。成功 local receipt 與 completed journal 追加 `phase_timings`（前置各步驟、DDL、更新後各步驟），失敗保留 `preparation_duration_exceeded`／`blocked_duration_exceeded`／`verification_duration_exceeded` 與去敏進度；DDL 結果未明仍須 reconciliation，不自動重跑。此修正不授權現有資料庫 Apply 或服務重啟。
+Apply／重播若 schema 已 exact、但相同 release 的既有 journal 未完成，必須回 `verification_incomplete`；不得因查到 current schema 就補發成功 receipt。沿用既有明確 recovery，重新核對原備份、已驗證進度與更新後資料；沒有執行歷史的既有 current schema 不因此被當作失敗。
 
 ### 4.6 Candidate Backfill
 
@@ -391,6 +408,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   `--switch`、全庫清理與其他超出 current scope 的破壞性操作。
 - schema／migration 仍須完整通過 disposable fresh-bootstrap 與 preserve-data candidate gates；既有 DB
   runtime 不能取代。
+- 2026-10-29 案件刪除保護規則修正：1060 以 hash-bound predecessor／successor 定義精確辨識條件式 trigger；歷史 release 僅相容完全匹配的 successor，未知修改仍阻擋。共用 SQL loader 支援 quote／comment-aware `DELIMITER`，compact 產生器須保留完整 trigger body；新生成檔使用 manifest 指定的 `db/releases/labor_union_validation_schema_registry_guards_v1.sql`，原受鎖定生成檔保留。此項 schema-only 更新須驗 fresh 與 preserve candidate 全表資料不變，再以 release-scoped 備份與 qualified Apply 更新既有本機資料庫。
 - 本裁決不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；更嚴格的
   scenario data policy 繼續適用。
 

@@ -12,11 +12,13 @@ import re
 import pymysql
 
 from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS
+from infrastructure.mysql.registry_case_deletion import CASE_CYCLE_LINKS, case_deletion_statements
 
 
 PROFILES = ("management", "line", "maintenance", "access")
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_]+$")
 DELETE_TABLES = frozenset({
+    *(table for table, _ in case_deletion_statements()),  # case-owned rows, definer only
     *RELATIONS, "holidays", "staff_matching_preference_values", "staff_bank_accounts",
     "client_legacy_virtual_accounts", "scheduling_effective_occupancy", "current_anomaly_issues",
     "admin_audit_logs", "knowledge_answer_requests", "knowledge_answer_receipts",
@@ -113,6 +115,7 @@ UPDATE_COLUMNS = {
                     "enabled", "authorization_version", "last_login_at", "updated_at"),
 }
 NO_DIRECT_UPDATE = frozenset({
+    "finance_manual_statements", "finance_statement_commands", "finance_statement_exclusions", "finance_accounting_dismissals",
     *RELATIONS, "client_legacy_virtual_accounts", "scheduling_effective_occupancy",
     "scheduling_service_day_logs", "scheduling_service_day_log_attachments",
     "controlled_file_objects", "admin_root_account",
@@ -286,6 +289,8 @@ def install_permissions(connection, database: str, passwords: dict[str, str]) ->
             privileges = ["SELECT"]
             if table in DELETE_TABLES:
                 privileges.append("DELETE")
+            if table in CASE_CYCLE_LINKS:
+                privileges.append("UPDATE (" + CASE_CYCLE_LINKS[table] + ")")
             if table in {"client_legacy_virtual_accounts", "admin_audit_log_archive"}:
                 privileges.append("INSERT")
             cursor.execute(f"GRANT {','.join(privileges)} ON {schema}.{_identifier(table)} TO '{names['definer']}'@'%'")

@@ -5,6 +5,7 @@
 outbox 與 runtime governance；不擁有各 business Domain 的根事實或公式。
 
 ## Subsystems
+- `registry-deletion` — root-only unsigned-case permanent deletion coordination; path: `subsystems/registry-deletion/index.md`
 - `jobs` — canonical durable command queue、worker terminal outcome 與安全公開回讀；path: `subsystems/jobs/index.md`
 - `application-shell` — React navigation、session/auth composition與global recovery；path: `subsystems/application-shell/index.md`
 - `local-runtime` — 本機開發 runtime 與 no-auth source-runtime entry；path: `subsystems/local-runtime/index.md`

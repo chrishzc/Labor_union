@@ -555,3 +555,21 @@ def test_metadata_failure_after_creation_preserves_empty_database_and_stops(exec
     assert connection.database_exists
     assert not any(sql.startswith(("CREATE TABLE", "DROP ", "INSERT ")) for sql in connection.statements)
     assert "synthetic-private-detail" not in str(failure.value)
+
+
+def test_compound_guard_delimiters_preserve_internal_and_quoted_semicolons():
+    from scripts.sql_statements import split_sql
+    from scripts import migrate_preserved_database_additive_schema as migration
+    sql = "DELIMITER $$\nCREATE TRIGGER t BEFORE DELETE ON example FOR EACH ROW BEGIN IF 1 THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='create; $$ is text'; END IF; END$$\nDELIMITER ;\nSELECT 'a;b';"
+    statements = split_sql(sql)
+    assert len(statements) == 2
+    assert statements[0].endswith("END IF; END")
+    assert "'create; $$ is text'" in statements[0]
+    assert statements[1] == "SELECT 'a;b'"
+    assert migration.split_sql(sql) == statements
+
+
+def test_partial_statement_cannot_change_delimiter():
+    from scripts.sql_statements import split_sql
+    with pytest.raises(ValueError, match="current statement"):
+        split_sql("SELECT 1\nDELIMITER $$\n")

@@ -1,10 +1,9 @@
-"""One-time vocabulary/automatic refund backfill, only on a preserved local candidate."""
+"""One-time vocabulary/automatic refund backfill for an explicitly selected local database."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,13 +102,22 @@ def verify_preserved_policy_table(config,source,candidate,table):
                 return tuple(cursor.fetchall())
         before=fetch(before_connection,f'SELECT * FROM `{table}`')
         after=fetch(after_connection,f'SELECT * FROM `{table}`')
+        source_has_policy_table=fetch(before_connection,
+            'SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=%s',
+            ('client_subsidy_policy_migrations',))
+        source_policy_applied=bool(source_has_policy_table and fetch(before_connection,
+            'SELECT policy_key FROM client_subsidy_policy_migrations WHERE policy_key=%s',(POLICY,)))
         journal={row['client_id']:row for row in fetch(after_connection,'SELECT * FROM client_subsidy_identity_label_changes')}
         events=fetch(after_connection,'SELECT * FROM client_obligation_events WHERE source_event_identity LIKE %s',(POLICY+':%',))
         events_by_id={row['id']:row for row in events}
         if any(row['actor']!='subsidy-policy-migration' or row['obligation_type']!='subsidy_return' or row['direction']!='payable_to_client' for row in events):
             raise ValueError('subsidy_policy_event_scope_invalid')
+        prior_event_ids={row['id'] for row in fetch(before_connection,
+            'SELECT id FROM client_obligation_events WHERE source_event_identity LIKE %s',(POLICY+':%',))}
         counts={}
-        for row in events:counts[row['case_no']]=counts.get(row['case_no'],0)+1
+        for row in events:
+            if row['id'] not in prior_event_ids:
+                counts[row['case_no']]=counts.get(row['case_no'],0)+1
         keys={'clients':'id','client_finance_accounts':'case_no','client_obligations':'obligation_identity',
               'client_obligation_events':'id','client_finance_outbox':'id'}
         key=keys[table]
@@ -118,7 +126,7 @@ def verify_preserved_policy_table(config,source,candidate,table):
         if not set(old)<=set(new):raise ValueError('subsidy_policy_preserved_row_missing')
         for identity,row in old.items():
             result=dict(new[identity])
-            if table=='clients' and row['identity_status'] in MAPPING:
+            if table=='clients' and not source_policy_applied and row['identity_status'] in MAPPING:
                 record=journal.get(identity)
                 if record is None or record['before_identity']!=row['identity_status'] or result['identity_status']!=MAPPING[row['identity_status']]:
                     raise ValueError('subsidy_policy_identity_journal_mismatch')
@@ -167,8 +175,6 @@ def main():
     parser.add_argument('--plan-receipt',type=Path)
     parser.add_argument('--backup-receipt',type=Path)
     args=parser.parse_args()
-    if not re.fullmatch(r'lu_test_[a-z0-9_]+',args.target_database):
-        raise ValueError('preserved disposable candidate required; no live database switch')
     from infrastructure.mysql.mysql_adapter import DB_CONFIG
     import pymysql
     settings={**DB_CONFIG,'database':args.target_database,'autocommit':False,'cursorclass':pymysql.cursors.DictCursor}

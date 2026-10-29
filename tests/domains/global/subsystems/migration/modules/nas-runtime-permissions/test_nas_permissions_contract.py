@@ -1,4 +1,5 @@
 """Offline policy oracles; real MySQL grants/rollback require engine qualification."""
+import re
 import pytest
 
 from infrastructure.mysql.nas_mutations import PROCEDURES, RELATIONS, call_mutation
@@ -46,7 +47,7 @@ def test_fixed_procedures_have_no_dynamic_sql_or_transaction_commit():
     for name, (_, body, _) in PROCEDURES.items():
         sql = procedure_sql(name, account_names("lu_test_nas_permissions")["definer"])
         assert "SQL SECURITY DEFINER" in sql
-        assert not any(word in body.upper() for word in ("COMMIT", "ROLLBACK", "PREPARE ", "EXECUTE ", "DROP ", "TRUNCATE"))
+        assert not re.search(r"\b(?:COMMIT|ROLLBACK|PREPARE|EXECUTE|DROP|TRUNCATE)\b", body, re.I)
     assert set(RELATIONS) == {"staff_regions", "staff_time_slots", "staff_cooking_skills", "staff_holiday_availability",
                               "staff_weekly_rest", "staff_baby_types", "staff_certifications", "staff_transportation"}
 
@@ -57,6 +58,22 @@ def test_unknown_procedure_never_reaches_database():
             pytest.fail("unapproved operation reached DB")
     with pytest.raises(ValueError, match="unknown NAS mutation"):
         call_mutation(NoSql(), "delete_arbitrary_table", "clients")
+
+
+def test_registry_delete_procedures_do_not_grant_runtime_direct_root_delete():
+    from infrastructure.mysql.nas_permissions import DELETE_TABLES
+    assert {"orders", "clients"} <= DELETE_TABLES
+    assert "staff" not in DELETE_TABLES
+    assert "lu_nas_delete_unused_staff_v1" not in PROCEDURES
+    assert "lu_nas_delete_unused_case_v1" not in PROCEDURES
+    for profile in ("management", "line", "access", "maintenance"):
+        assert all("DELETE" not in privilege for _, privileges in _table_grants(profile, ["staff", "orders", "clients"])
+                   for privilege in privileges)
+    _, body, profiles = PROCEDURES["lu_nas_delete_unsigned_case_v2"]
+    assert profiles == ("management",)
+    assert "registry_deletion_stale_version" in body
+    assert "registry_deletion_signed" in body
+    assert "signed_received" in body and "contract_completed" in body
 
 
 def test_account_namespace_is_database_specific_and_identifiers_cannot_escape():

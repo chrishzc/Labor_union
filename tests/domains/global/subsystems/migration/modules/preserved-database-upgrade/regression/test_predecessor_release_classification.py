@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts import migrate_preserved_database_additive_schema as migration
 
 
@@ -19,6 +21,23 @@ def _empty_snapshot() -> dict[str, list[object] | dict[str, object]]:
         "show_create_tables": {},
         "views": [],
     }
+
+
+def test_refund_overage_receipt_accepts_only_exact_predecessor_or_appended_successor():
+    artifact = "1058_client_refund_overage_receipt.sql"
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    assert descriptor["parent_columns"]["client_refund_reversal_apply_receipts"]["correction_type"]["column_type"] == "enum('refund','refund_return','reversal','refund_overage')"
+    snapshot = _empty_snapshot()
+    snapshot["columns"].append({
+        "table_name": "client_refund_reversal_apply_receipts", "column_name": "correction_type",
+        "column_type": "enum('refund','refund_return','reversal')", "is_nullable": "NO",
+        "column_default": None, "extra": "",
+    })
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, artifact) == "absent"
+    snapshot["columns"][0]["column_type"] = "enum('refund','refund_return','reversal','refund_overage')"
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, artifact) == "exact"
+    snapshot["columns"][0]["column_type"] = "enum('refund','reversal','refund_return','refund_overage')"
+    assert migration.local_additive_descriptor_state(snapshot, descriptor, artifact) == "drift"
 
 
 def test_contract_successor_accepts_exact_pre_1004_dependency_as_absent() -> None:
@@ -97,3 +116,17 @@ def test_104_accepts_exact_historical_accounting_check_successor() -> None:
         key: historical_descriptor["checks"][key]
         for key in check_keys
     }
+
+
+def test_refund_overage_local_runner_accepts_only_the_ordinal_preserving_append():
+    statement = migration.split_sql((migration.ROOT / "db/schema_parts/1058_client_refund_overage_receipt.sql").read_text(encoding="utf-8"))[0]
+    assert migration._local_classify_statement(statement) == "client_refund_overage_receipt_enum_widen"
+    for wrong in (
+        statement.replace("'refund_return', 'reversal'", "'reversal', 'refund_return'"),
+        statement.replace("'refund_return', ", ""),
+        statement.replace("'refund_overage'", "'unsupported'"),
+        statement.replace("client_refund_reversal_apply_receipts", "other_receipts"),
+    ):
+        with pytest.raises(migration.LocalAdditiveBlocked) as caught:
+            migration._local_classify_statement(wrong)
+        assert caught.value.code == "forbidden_sql_effect"

@@ -1,4 +1,5 @@
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
+import { RegistryDeletionPanel } from '../components/RegistryDeletionPanel';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 import React, { useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
@@ -79,7 +80,8 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [editState, setEditState] = useState<RegistryEditState>({ dirty: false, busy: false });
-  useEffect(() => { onEditStateChange?.(editState); }, [editState, onEditStateChange]);
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  useEffect(() => { onEditStateChange?.({ ...editState, busy: editState.busy || deletionBusy }); }, [editState, deletionBusy, onEditStateChange]);
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
 
@@ -170,7 +172,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   };
   const { requestLeave } = useUnsavedNavigation();
   const closeDetail = () => {
-    if (editState.busy) return;
+    if (editState.busy || deletionBusy) return;
     requestLeave(() => {
     setEditState({ dirty: false, busy: false });
     detailRequest.current += 1;
@@ -281,19 +283,28 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
       size="wide"
       closeLabel="關閉案件詳細資料"
       className="client-roster-detail-drawer"
-      closeDisabled={editState.busy}
+      closeDisabled={editState.busy || deletionBusy}
     >
-      {onReturnToCase && selectedCaseNo && <div className="registry-return-row"><button type="button" disabled={editState.busy} onClick={() => {
-        if (editState.busy) return;
+      {onReturnToCase && selectedCaseNo && <div className="registry-return-row"><button type="button" disabled={editState.busy || deletionBusy} onClick={() => {
+        if (editState.busy || deletionBusy) return;
         onReturnToCase(selectedCaseNo);
       }}>返回案件處理 →</button></div>}
       {detailLoading && <p role="status" className="client-roster-message">正在載入完整客戶資料…</p>}
       {detailError && <p role="alert" className="client-roster-message">{detailError}</p>}
+      <div inert={deletionBusy}>
       {detail?.case_no === selectedCaseNo && <ClientRegistryDetailEditor key={detail.case_no} detail={detail} focusField={focusField} onRefresh={refreshDetail} onStateChange={setEditState} onOpenServiceArrangement={recalculateDates => {
         if (editState.busy) return;
         if (onOpenServiceArrangement) onOpenServiceArrangement(detail.case_no, recalculateDates);
         else window.location.hash = `#order-workbench-v2?case=${encodeURIComponent(detail.case_no)}&work=service&from=clients${recalculateDates ? '&recalculate=1' : ''}`;
       }} />}
+      </div>
+      {detail?.case_no === selectedCaseNo && <RegistryDeletionPanel key={`delete-${detail.case_no}`} kind="case" identity={detail.case_no} label={`案件 ${detail.case_no}`}
+        disabled={editState.busy || editState.dirty} onBusyChange={setDeletionBusy} onDeleted={() => {
+          ++detailRequest.current; ++listRequest.current;
+          setPage(current => current ? { ...current, items: current.items.filter(item => item.case_no !== detail.case_no) } : current);
+          setSelectedCaseNo(null); setDetail(null); setDetailError(null); setEditState({ dirty: false, busy: false });
+          void load(appliedFilters, pageOffset);
+        }} />}
     </Drawer>
   </div>;
 };

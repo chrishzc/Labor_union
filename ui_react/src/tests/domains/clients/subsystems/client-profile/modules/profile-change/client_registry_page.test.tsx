@@ -129,6 +129,7 @@ describe('Client registry owner editing', () => {
     orderMutationFlowStore.clearAll();
     vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'registry-operator' } as never);
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
+    vi.spyOn(sessionClient, 'fetchCurrentUser').mockResolvedValue({ id: 1, username: 'registry-operator', display_name: 'Operator', role: 'system_admin', is_root: false, capabilities: [], access_control_version: 1 });
     candidateMocks.confirmationPreview.mockRejectedValue(new ApiHttpError(503, 'confirmation_preview_unavailable', '測試情境只驗證已人工送達後的客戶決定。'));
     candidateMocks.pool.mockResolvedValue({ pool_id: null, case_no: 'CASE-001', candidates: [] });
     candidateMocks.activePlan.mockRejectedValue(new ApiHttpError(404, 'not_found', 'no active plan'));
@@ -213,61 +214,15 @@ describe('Client registry owner editing', () => {
     expect(screen.queryByText('尚未建立正式指派。')).not.toBeInTheDocument();
   });
 
-  it('replaces through the formal workflow, refreshes history and assignments, and retains other drafts', async () => {
-    mocks.query.mockImplementation(async () => structuredClone(detail));
-    staffMocks.assignment.mockResolvedValueOnce(assignmentPlan).mockResolvedValue({ ...assignmentPlan, assignments: [] });
+  it('removes the registry replacement action while retaining successor selection and service navigation', async () => {
     window.location.hash = '#clients?case=CASE-001';
     render(<ClientRegistryPage />);
-    await screen.findByText('U-9 合成月嫂 9');
-    fireEvent.change(screen.getByLabelText('HCM Email'), { target: { value: 'unsaved@example.com' } });
-    fireEvent.click(screen.getByRole('button', { name: '換人' }));
-    expect(screen.queryByLabelText('目前進度')).not.toBeInTheDocument();
-    await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: replacementPreview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    expect(staffMocks.apply).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
-    await screen.findByText(/已登記更換/);
-    await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('尚未建立正式指派。')).toBeInTheDocument();
-    expect(screen.getByLabelText('HCM Email')).toHaveValue('unsaved@example.com');
-    expect(staffMocks.apply).toHaveBeenCalledWith('CASE-001', expect.objectContaining({ scenario: 'R-04', expected_generation_version: 2, reason: replacementPreview.reason }), expect.objectContaining({ idempotencyKey: expect.any(String) }), expect.any(AbortSignal));
-  });
-
-  it('locks drawer dismissal for an unknown replacement outcome and reconciles the same command', async () => {
-    staffMocks.apply.mockRejectedValueOnce(new ApiTimeoutError(10000)).mockResolvedValueOnce({ status: 'replayed', readback: { resume_step: 'step_2', candidate_count: 0, zero_candidate_disposition: 'blocked_no_candidate' } });
-    window.location.hash = '#clients?case=CASE-001';
-    render(<ClientRegistryPage />);
-    await waitFor(() => expect(screen.getByRole('button', { name: '換人' })).toBeEnabled());
-    fireEvent.click(await screen.findByRole('button', { name: '換人' }));
-    fireEvent.change(screen.getByLabelText('目前進度'), { target: { value: 'R-04' } });
-    await screen.findByText('可以辦理更換');
-    fireEvent.change(screen.getByLabelText('換人原因'), { target: { value: replacementPreview.reason } });
-    fireEvent.click(screen.getByRole('button', { name: '預覽換人影響' }));
-    await screen.findByText('預覽完成，尚未寫入');
-    fireEvent.click(screen.getByLabelText('我已確認換人原因及影響'));
-    fireEvent.click(screen.getByRole('button', { name: '確認更換' }));
-    await screen.findByText(/提交結果尚未確認/);
-    expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '收合換人' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '重新確認原操作結果' }));
-    await screen.findByText(/已確認既有結果/);
-    expect(staffMocks.apply.mock.calls[1][1]).toEqual(staffMocks.apply.mock.calls[0][1]);
-    expect(staffMocks.apply.mock.calls[1][2]).toBe(staffMocks.apply.mock.calls[0][2]);
-    await waitFor(() => expect(screen.getByRole('button', { name: '關閉案件詳細資料' })).toBeEnabled());
-  });
-
-  it('refers served cases to substitution without allowing a whole-case replacement', async () => {
-    staffMocks.query.mockResolvedValue({ ...replacementQuery, outcome: 'substitution_referral', actual_service_day_count: 1, actual_service_dates: ['2026-11-01'], blockers: ['actual_service_exists'] });
-    window.location.hash = '#clients?case=CASE-001';
-    render(<ClientRegistryPage />);
-    await waitFor(() => expect(screen.getByRole('button', { name: '換人' })).toBeEnabled());
-    fireEvent.click(await screen.findByRole('button', { name: '換人' }));
-    fireEvent.change(screen.getByLabelText('目前進度'), { target: { value: 'R-04' } });
-    expect(await screen.findByRole('button', { name: '前往請假代班' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: '預覽換人影響' })).not.toBeInTheDocument();
+    const region = await screen.findByRole('region', { name: '服務安排與月嫂' });
+    expect(await within(region).findByRole('button', { name: '選擇接任月嫂' })).toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: '換人' })).not.toBeInTheDocument();
+    expect(within(region).getByRole('link', { name: '前往本案服務安排確認 →' })).toBeInTheDocument();
+    expect(staffMocks.query).not.toHaveBeenCalled();
+    expect(staffMocks.preview).not.toHaveBeenCalled();
     expect(staffMocks.apply).not.toHaveBeenCalled();
   });
 

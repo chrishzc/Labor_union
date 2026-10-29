@@ -62,9 +62,10 @@ NOTIFICATION_CATALOG_PARTS = frozenset({
 class LocalDatabaseUpdateError(RuntimeError):
     """Bounded operator-facing updater failure."""
 
-    def __init__(self, message: str, *, code: str = "database_update_blocked"):
+    def __init__(self, message: str, *, code: str = "database_update_blocked", details=None):
         super().__init__(message)
         self.code = code
+        self.details = dict(details or {})
 
 
 def _plan_receipt_payload(preview: dict[str, object]) -> dict[str, object]:
@@ -358,6 +359,10 @@ def apply_additive_update(
         )
         if preview.get("status") == "current":
             current = require_current_database(preview)
+            try:
+                migration.require_local_additive_completed_journal(current, receipt_root, source)
+            except additive.LocalAdditiveBlocked as error:
+                raise LocalDatabaseUpdateError(str(error), code=error.code, details=error.details) from error
             current["applied_releases"] = applied_releases
             current["terminal_receipt"] = str(
                 migration._local_receipt_path(Path(receipt_root), source)
@@ -426,7 +431,7 @@ def apply_additive_update(
             )
         except additive.LocalAdditiveBlocked as error:
             raise LocalDatabaseUpdateError(
-                f"{error} [{error.code}]"
+                f"{error} [{error.code}]", code=error.code, details=error.details,
             ) from error
         except Exception as error:
             raise LocalDatabaseUpdateError(
@@ -1255,6 +1260,9 @@ def main() -> int:
             "error": str(error),
             "code": getattr(error, "code", "database_update_blocked"),
         }
+        timing = getattr(error, "details", {})
+        if timing.get("phase") in {"preparation", "ddl", "verification"}:
+            payload["phase_timing"] = timing
         print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
         return 2
     if result.get("status") == "blocked":

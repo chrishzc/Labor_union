@@ -32,7 +32,7 @@
   - 案件處理缺件入口以 `field=intake&from=workbench` 深連結到本案訂單條件，組合既有 Orders 補件 Preview／Apply；只編輯實際缺漏，保留已存在的日期與天數。儲存、收據及名冊／Orders 回讀完成後再允許返回相同案件；歷史與不適用進件修復的案件保留原 bootstrap 入口。完成補件後仍可開啟既有完整服務條件操作。
   - 變更歷程置於 Drawer 最下方，依選取案件與正式 detail 回讀自動重新 Query；保留 server 時間／流程順序、原因、操作人員及臺北時間。失敗可單獨重讀，晚回應不污染已切換案件；獨立歷程分頁已合併。
 - `ui_react/src/components/OrderTermsUnavailableNote.tsx` — 名冊編輯與唯讀詳情共用服務條件提示；日期／天數缺件以 Orders completion Preview 的 actual missing fields 顯示，查詢失敗不推定空值，錯誤代碼置於技術資訊。
-- `ui_react/src/components/ClientRegistryServiceStaff.tsx` — Drawer 顯示 Scheduling effective assignments，借用 Staff bounded 摘要讀取姓名與公會編號；組合既有服務前換人操作，完成後回讀且保留其他區草稿，已服務轉介請假代班。
+- `ui_react/src/components/ClientRegistryServiceStaff.tsx` — Drawer 顯示 Scheduling effective assignments，借用 Staff bounded 摘要讀取姓名與公會編號；保留接任人選與正式服務安排連結，依 2026-10-29 人工要求移除本區「換人」操作與局部表單，主流程 writer／API 保留。
   - 歷史與正常案件均使用 Scheduling Assignment Plan Query 的 canonical assignment；歷史 binding 由 owner 選取，不在 UI 另讀歷史來源。無逐日排班仍顯示已保存的人員／期間，不提供正常換人／日期更正操作。
   - 「服務安排與月嫂」倒數第二區加入 Orders actual-start 更正；有指派時原子更新各段排班。草稿／結果未明受既有名冊關閉鎖保護，成功後以相同 case 深連結至 service work group 核對。
 - `ui_react/src/components/ClientRegistryReplacementCandidates.tsx` — 倒數第二區續辦接任人選；組合現有候選查詢／保存、意願紀錄與正式推薦／客戶確認。三步保持草稿、結果未明及回讀關閉鎖；推薦不冒充 effective assignment。
@@ -41,11 +41,12 @@
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
 ## Dependencies
+- outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。
 - inbound: `case-import/hcm-current-workbook-import` — Client Profile email-only 命令 fresh-lock 空白資格並保存 version／事件／receipt；借用 workbook outer UoW，無自有 commit。
 - Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。欄位、writer、版本及 BeClass 獨立聯絡欄位保持既有契約。
 - Client-owned `clients.email` 保存 HCM email，管理端 Q/P/A 與名冊／唯讀詳情顯示「HCM Email」；BeClass effective `email` 獨立顯示「BeClass Email」。LIFF applicant 範圍不擴張。
 - outbound: `case-import/case-architecture-bootstrap` — `client_finance_bootstrap_required` 時提供明示 Preview／Apply 修復入口；Client Profile／名冊 Query 不自行建立 financial roots。
-- outbound: `scheduling/service-before-replacement`、`scheduling/matching-schedule-confirmation` — Drawer 借用既有 Assignment Plan Query 與正式換人 Q/P/A；歷程唯讀組合 Scheduling 更換主事件，不擁有指派 writer。Staff 摘要 Query 僅補人員名稱與公會編號。
+- outbound: `scheduling/service-before-replacement`、`scheduling/matching-schedule-confirmation` — Drawer 借用既有 Assignment Plan Query，歷程唯讀組合 Scheduling 更換主事件；換人 Q/P/A 保留於服務安排主流程，本區不再提供換人操作或擁有指派 writer。Staff 摘要 Query 僅補人員名稱與公會編號。
 - outbound: `scheduling/matching-coordination` — 更換登記後在 Drawer 重用 OrderCandidateQueryPanel、OrderCandidateContactStatusPanel、OrderFormalRecommendationPanel 續辦接任；每次保存刷新 current 候選與方案，正式指派仍由既有 gate 決定。
 - outbound: `orders/order-terms` — 名冊 Query 讀取保存條件與版本，不使用 mutation Preview 判定查閱資格；`order_terms_start_date_required`／`order_terms_service_days_required` 或 bootstrap status 缺件時，名冊組合既有 Orders-owned 契約條件 Preview／Apply，成功後重新查詢 Case Import bootstrap status。
 

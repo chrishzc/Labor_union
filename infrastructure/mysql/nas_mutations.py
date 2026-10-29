@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+from infrastructure.mysql.registry_case_deletion import nas_case_deletion_body
+
 
 # Identifiers are project-owned constants, never request parameters.
 RELATIONS = {
@@ -28,6 +30,10 @@ def _staff_guard() -> str:
 
 # name -> (SQL parameters, body, allowed execution profiles).
 PROCEDURES = {
+    # Fixed case-owned cascade; only the root-gated management caller can invoke it.
+    "lu_nas_delete_unsigned_case_v2": (
+        "IN p_case VARCHAR(50), IN p_version BIGINT, IN p_client BIGINT, IN p_client_version BIGINT, IN p_command_key VARCHAR(191)",
+        nas_case_deletion_body(), ("management",)),
     "lu_nas_delete_holiday_v1": (
         "IN p_date DATE", """
         IF p_date IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nas_invalid_date'; END IF;

@@ -1,6 +1,7 @@
 /** Verify canonical lifecycle filtering, tab isolation and post-save roster membership. */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { StaffPage } from '../../../../../../../pages/StaffPage';
 import { staffDirectoryClient, loadAllStaffDirectoryPages } from '../../../../../../../api/staff_directory/staff_directory_client';
 import { staffLifecycleClient } from '../../../../../../../api/staff_lifecycle/staff_lifecycle_client';
@@ -46,6 +47,7 @@ describe('Staff roster lifecycle tabs', () => {
       ? new Promise((resolve) => { resolveActive = resolve; })
       : Promise.resolve(retiredPage));
     render(<StaffPage />);
+    await waitFor(() => expect(resolveActive).toBeTypeOf('function'));
     fireEvent.click(screen.getByRole('tab', { name: '已退役月嫂' }));
     expect(await screen.findByText('去敏退役人員')).toBeInTheDocument();
     await act(async () => resolveActive(activePage));
@@ -61,6 +63,8 @@ describe('Staff roster lifecycle tabs', () => {
   });
 
   it.each(['retirement', 'reactivation'] as const)('%s removes staff from the old tab only after authoritative readback', async (action) => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-session');
+    const verifyRoot = vi.spyOn(sessionClient, 'fetchCurrentUser').mockResolvedValue({ id: 1, username: 'synthetic-root', display_name: 'Root', role: 'system_admin', is_root: true, linked_line_user_id: null, capabilities: [], access_control_version: 1 });
     const before = action === 'retirement' ? 'active' : 'retired';
     const after = action === 'retirement' ? 'retired' : 'active';
     vi.mocked(staffDirectoryClient.queryPage).mockResolvedValue(activePage);
@@ -75,6 +79,9 @@ describe('Staff roster lifecycle tabs', () => {
     const row = await screen.findByText('去敏人員甲');
     fireEvent.click(row);
     fireEvent.click(await screen.findByRole('button', { name: /辦理(退役|復職)登記/ }));
+    expect(verifyRoot).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: 'root 永久刪除' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '刪除此月嫂' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('生效日期'), { target: { value: '2026-08-15' } });
     fireEvent.click(screen.getByRole('button', { name: action === 'retirement' ? /^辦理退役$/ : /^辦理復職$/ }));
     expect(await screen.findByText('已確認最新任職狀態')).toBeInTheDocument();

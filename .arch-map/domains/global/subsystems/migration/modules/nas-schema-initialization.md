@@ -10,14 +10,14 @@
 
 ## Implementation
 - primary: `scripts/initialize_nas_schema.py`
-- compact generation/load: `scripts/compact_fresh_schema.py` — 僅從自行新建的 local disposable source 產生 final DDL。
+- compact generation/load: `scripts/compact_fresh_schema.py` — 僅從自行新建的 local disposable source 產生 final DDL；trigger 以 DELIMITER 包裝，保留 compound body。
 - retirement policy: `scripts/fresh_schema_policy.py`
 - entrypoints:
   - `scripts/launchers/initialize_nas_schema.bat`
   - `scripts/launchers/initialize_nas_schema.sh`
 - dependencies:
   - `scripts/schema_assembly.py`
-  - `scripts/sql_statements.py`
+  - `scripts/sql_statements.py` — 共用 quote／comment-aware DELIMITER scanner，禁止未結束 statement 中途換 delimiter。
   - `scripts/verify_validation_schema_manifest.py`
   - `scripts/check_runtime_database.py` — 最終 descriptor/current gate。
 - config:

@@ -15,6 +15,7 @@
 - canonical additive registration release: `db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.json`、`db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.descriptors.json`
 
 ## Contracts
+- Spec 33 RD-1：registry 專用 unsigned-case 永久刪除程序只授予 management EXECUTE；case-owned graph 的 DELETE 僅授予 locked definer，不授予 staff DELETE。caller root gate／簽回鎖／receipt 與 outer UoW 由 Global registry-deletion 擁有，不允許 LINE 執行。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` NAS-DB-01/02/03。
 - schema 先由 canonical fresh／preserve-data upgrade 處理；plan 零寫入；未知／partial／foreign grants／procedure drift 拒絕，不 reset 業務資料。
 - runtime 無直接 DELETE／DDL／GRANT；固定程序僅具名 EXECUTE，沒有動態 table 參數或內部 commit。逐功能 adapter 仍由其 owning Subsystem 控制 transaction 與業務驗證。
@@ -25,7 +26,7 @@
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/`
 - default_boundary: Module
-- engine: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_nas_permissions_mysql.py` — 明確 opt-in 的 localhost 隔離庫；四 profile grants／TLS 正負例、26 程序及 outer commit／rollback，不 reset／drop。
+- engine: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_nas_permissions_mysql.py` — 明確 opt-in 的 localhost 隔離庫；四 profile grants／TLS 正負例、固定用途程序及 outer commit／rollback，不 reset／drop。registry 專用案件程序另由 Global registry-deletion 的 opt-in engine tests 驗證 SQL 與同一交易；不以此替代目標 NAS grants 資格。
 - offline policy／plan 不代表真實 MySQL grants、DDL 或 rollback 通過；DB qualification 依 10 §9。
 
 ## Provenance

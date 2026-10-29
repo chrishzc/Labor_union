@@ -867,6 +867,9 @@ def test_preview_reuses_one_schema_snapshot_for_target_state(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(migration, "split_sql", lambda _sql: ["CREATE TABLE t (id int)"])
     monkeypatch.setattr(migration, "_schema_snapshot", snapshot_once)
+    # This query-count oracle uses synthetic SQL; full-catalog descriptor
+    # validation is covered separately with the real SQL parser.
+    monkeypatch.setattr(migration, "_owned_classification", lambda *_a, **_k: {})
     monkeypatch.setattr(migration, "_local_verify_prerequisite_metadata", lambda *_args: None)
     monkeypatch.setattr(migration, "_local_read_events", lambda *_args: [])
     monkeypatch.setattr(
@@ -1277,6 +1280,168 @@ def test_duration_guard_is_bounded(monkeypatch, tmp_path) -> None:
     with pytest.raises(additive.LocalAdditiveBlocked) as error:
         additive.apply(SimpleNamespace(), "lu_test_dataset", receipt_root=tmp_path, duration_guard_ms=30_001)
     assert error.value.code == "duration_invalid"
+
+
+@pytest.fixture
+def phased_additive_apply(monkeypatch, tmp_path):
+    """Fake only DB facts/effects; exercise the real journal and phase clocks."""
+    state = SimpleNamespace(now=100.0, preparation_seconds=90, verification_seconds=90,
+                            ddl_seconds=0.05, fail_ddl=False, drift=False, ddl=[])
+    monkeypatch.setattr(migration.time_module, "monotonic", lambda: state.now)
+    source, baseline = "lu_test_phase_budget", "a" * 64
+    artifact = {"name": "1001_line_rich_menu_publication_step_saga.sql",
+                "relative_path": "db/schema_parts/1001_line_rich_menu_publication_step_saga.sql"}
+    qualification = {"release_id": "phase-budget-fixture", "_canonical_artifact": artifact}
+    monkeypatch.setattr(migration, "local_additive_plan", lambda *_a, **_k: {
+        "status": "ready", "source_schema_sha256": baseline,
+        "release_id": qualification["release_id"], "artifact": artifact})
+    monkeypatch.setattr(migration, "_local_discover_qualification", lambda *_a, **_k: qualification)
+    monkeypatch.setattr(migration, "split_sql", lambda _s: ["CREATE TABLE a (id INT)", "CREATE TABLE b (id INT)"])
+    def backup(*_a, **_k):
+        state.now += state.preparation_seconds
+        return {"data_fingerprint_sha256": "b" * 64, "receipt_path": str(tmp_path / "backup.json"), "sha256": "c" * 64}
+    monkeypatch.setattr(migration, "_local_validate_backup", backup)
+    def verify_rows(*_a, **kwargs):
+        if "altered_tables" in kwargs: state.now += state.verification_seconds
+    monkeypatch.setattr(migration, "_local_verify_backup_rows", verify_rows)
+    monkeypatch.setattr(migration, "_schema_snapshot", lambda *_a: {"sha256": "drift" if state.drift else baseline})
+    monkeypatch.setattr(migration, "server_identity", lambda *_a: {"database": source})
+    monkeypatch.setattr(migration, "local_additive_release_qualification", lambda *_a: {"schema_artifacts": [{"descriptor": {}}]})
+    monkeypatch.setattr(migration, "local_additive_descriptor_state", lambda *_a: "exact")
+    class Connection:
+        def cursor(self): return self
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def close(self): pass
+        def execute(self, sql, *_a):
+            if sql.startswith("CREATE TABLE"):
+                state.ddl.append(sql)
+                if state.fail_ddl: raise OSError("synthetic unknown DDL outcome")
+                state.now += state.ddl_seconds
+    class Lock:
+        def __enter__(self): pass
+        def __exit__(self, *_a): return False
+    monkeypatch.setattr(migration, "_local_connect", lambda *_a: Connection())
+    monkeypatch.setattr(migration, "_local_maintenance_lock", lambda *_a: Lock())
+    def run():
+        return migration.local_additive_apply(SimpleNamespace(), source, receipt_root=tmp_path,
+            backup_dump_path=tmp_path / "backup.sql", backup_receipt_path=tmp_path / "backup.json")
+    state.run = run
+    state.events = lambda: migration._local_read_events(tmp_path, source, qualification["release_id"])
+    state.receipt = migration._local_receipt_path(tmp_path, source)
+    return state
+
+
+def test_slow_readonly_phases_do_not_consume_ddl_budget(phased_additive_apply):
+    h = phased_additive_apply
+    result = h.run()
+    assert len(h.ddl) == 2 and result["status"] == "completed"
+    timing = result["phase_timings"]
+    assert timing["preparation"]["elapsed_ms"] >= 90_000
+    assert timing["verification"]["elapsed_ms"] >= 90_000
+    assert timing["ddl"]["elapsed_ms"] < 30_000
+    assert h.events()[-1]["phase_timings"] == timing
+    assert json.loads(h.receipt.read_text())["phase_timings"] == timing
+
+
+@pytest.mark.parametrize("phase", ["preparation", "verification"])
+def test_validation_deadline_stops_without_success_receipt(phased_additive_apply, phase):
+    h = phased_additive_apply
+    setattr(h, phase + "_seconds", 301)
+    with pytest.raises(migration.LocalAdditiveBlocked) as error: h.run()
+    assert error.value.code == phase + "_duration_exceeded"
+    assert error.value.details["phase"] == phase
+    assert len(h.ddl) == (0 if phase == "preparation" else 2)
+    assert not h.receipt.exists()
+    assert all(e["state"] != "completed" for e in h.events())
+
+
+def test_exact_schema_after_verification_timeout_is_not_a_successful_replay(phased_additive_apply, monkeypatch, tmp_path):
+    h = phased_additive_apply
+    h.verification_seconds = 301
+    with pytest.raises(migration.LocalAdditiveBlocked): h.run()
+    current = {"status": "current", "release_id": "phase-budget-fixture"}
+    monkeypatch.setattr(migration, "local_additive_plan", lambda *_a, **_k: current)
+    with pytest.raises(migration.LocalAdditiveBlocked) as direct: h.run()
+    assert direct.value.code == "verification_incomplete"
+    monkeypatch.setattr(update, "build_additive_preview", lambda *_a, **_k: current)
+    monkeypatch.setattr(update, "require_current_database", lambda p: p)
+    with pytest.raises(update.LocalDatabaseUpdateError) as transport:
+        update.apply_additive_update(SimpleNamespace(), "lu_test_phase_budget", tmp_path)
+    assert transport.value.code == "verification_incomplete"
+    assert len(h.ddl) == 2 and not h.receipt.exists()
+
+
+def test_ddl_deadline_keeps_verified_progress_without_blind_replay(phased_additive_apply):
+    h = phased_additive_apply
+    h.ddl_seconds = 31
+    with pytest.raises(migration.LocalAdditiveBlocked) as error: h.run()
+    assert error.value.code == "blocked_duration_exceeded"
+    assert error.value.details["phase"] == "ddl"
+    assert error.value.details["verified_ordinals"] == [1]
+    assert len(h.ddl) == 1 and not h.receipt.exists()
+    events = h.events()
+    _, verified = migration._local_resume_context(events, "phase-budget-fixture", "lu_test_phase_budget",
+        events[0]["statement_hashes"], "changed-schema")
+    assert set(verified) == {1}
+
+
+def test_unknown_ddl_outcome_still_refuses_resume(phased_additive_apply):
+    h = phased_additive_apply
+    h.fail_ddl = True
+    with pytest.raises(migration.LocalAdditiveBlocked) as failed: h.run()
+    assert failed.value.details["outcome"] == "requires_reconciliation"
+    events = h.events()
+    with pytest.raises(migration.LocalAdditiveBlocked) as error:
+        migration._local_resume_context(events, "phase-budget-fixture", "lu_test_phase_budget",
+            events[0]["statement_hashes"], "unknown-schema")
+    assert error.value.code == "resume_uncertain" and not h.receipt.exists()
+
+
+def test_locked_source_drift_still_prevents_ddl(phased_additive_apply):
+    h = phased_additive_apply
+    h.drift = True
+    with pytest.raises(migration.LocalAdditiveBlocked) as error: h.run()
+    assert error.value.code == "source_changed" and not h.ddl
+
+
+def test_validation_cursor_bounds_driver_and_stops_after_expiry(monkeypatch):
+    clock = [100.0]
+    calls = []
+    monkeypatch.setattr(migration.time_module, "monotonic", lambda: clock[0])
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_a): return False
+        def execute(self, _sql):
+            calls.append("query")
+            clock[0] += 301
+    class Connection:
+        def cursor(self): return Cursor()
+    def connect(_database, *, timeout_seconds):
+        calls.append(timeout_seconds)
+        return Connection()
+    phase = migration._LocalAdditivePhase(SimpleNamespace(connect=connect), "preparation")
+    with phase.connect("lu_test_phase").cursor() as cursor:
+        with pytest.raises(migration.LocalAdditiveBlocked) as error: cursor.execute("SELECT 1")
+        assert error.value.code == "preparation_duration_exceeded"
+        with pytest.raises(migration.LocalAdditiveBlocked): cursor.execute("SELECT 2")
+    assert calls == [30.0, "query"]
+
+
+def test_updater_preserves_phase_failure_code_and_redacted_progress(monkeypatch, tmp_path):
+    monkeypatch.setattr(update, "build_additive_preview", lambda *_a, **_k: {
+        "status": "ready", "pending_releases": [{"release_id": "phase-fixture",
+        "qualification_receipt": str(tmp_path / "qualification.json")}],
+    })
+    monkeypatch.setattr(update.additive, "prepare_backup", lambda *_a, **_k: None)
+    def fail(*_a, **_k):
+        raise migration.LocalAdditiveBlocked("preparation deadline", code="preparation_duration_exceeded",
+            details={"phase": "preparation", "elapsed_ms": 300_001, "limit_ms": 300_000})
+    monkeypatch.setattr(update.additive, "apply", fail)
+    with pytest.raises(update.LocalDatabaseUpdateError) as error:
+        update.apply_additive_update(SimpleNamespace(), "lu_test_phase", tmp_path)
+    assert error.value.code == "preparation_duration_exceeded"
+    assert error.value.details == {"phase": "preparation", "elapsed_ms": 300_001, "limit_ms": 300_000}
 
 
 def test_journal_chain_detects_ordinal_or_digest_tampering(tmp_path) -> None:

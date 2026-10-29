@@ -8153,505 +8153,826 @@ INSERT INTO `staff_matching_preference_definitions` (`id`,`preference_key`,`disp
 
 INSERT INTO `staff_matching_preference_definitions` (`id`,`preference_key`,`display_name`,`value_kind`,`is_filterable`,`order_fact_key`,`comparison_operator`,`status`,`version`,`created_by`,`updated_by`) VALUES (1,'preferred_service_days','可承接服務天數','integer_range',1,'service_days','range_with_tolerance','active',1,'wp72','wp72');
 
+DELIMITER $$
 CREATE TRIGGER `trg_anomaly_workflow_events_before_delete` BEFORE DELETE ON `anomaly_workflow_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'anomaly_workflow_events records cannot be deleted';
+SET MESSAGE_TEXT = 'anomaly_workflow_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_anomaly_workflow_events_before_update` BEFORE UPDATE ON `anomaly_workflow_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'anomaly_workflow_events records cannot be updated';
+SET MESSAGE_TEXT = 'anomaly_workflow_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_application_command_claims_before_delete` BEFORE DELETE ON `application_command_claims` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'application_command_claims records cannot be deleted';
+SET MESSAGE_TEXT = 'application_command_claims records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_application_command_claims_before_update` BEFORE UPDATE ON `application_command_claims` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'application_command_claims records cannot be updated';
+SET MESSAGE_TEXT = 'application_command_claims records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_assignment_plan_receipts_before_delete` BEFORE DELETE ON `assignment_plan_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'assignment_plan_apply_receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_assignment_plan_receipts_before_delete` BEFORE DELETE ON `assignment_plan_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_plan_apply_receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_assignment_plan_receipts_before_update` BEFORE UPDATE ON `assignment_plan_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'assignment_plan_apply_receipts cannot be updated';
+SET MESSAGE_TEXT = 'assignment_plan_apply_receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_assignment_schedule_leave_substitution_batches_before_delete` BEFORE DELETE ON `assignment_schedule_leave_substitution_batches` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_batches records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_assignment_schedule_leave_substitution_batches_before_delete` BEFORE DELETE ON `assignment_schedule_leave_substitution_batches` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_batches records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_assignment_schedule_leave_substitution_batches_before_update` BEFORE UPDATE ON `assignment_schedule_leave_substitution_batches` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_batches records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_assignment_schedule_leave_substitution_batches_before_update` BEFORE UPDATE ON `assignment_schedule_leave_substitution_batches` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_batches records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_assignment_schedule_leave_substitution_events_before_delete` BEFORE DELETE ON `assignment_schedule_leave_substitution_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_assignment_schedule_leave_substitution_events_before_delete` BEFORE DELETE ON `assignment_schedule_leave_substitution_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_assignment_schedule_leave_substitution_events_before_update` BEFORE UPDATE ON `assignment_schedule_leave_substitution_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_assignment_schedule_leave_substitution_events_before_update` BEFORE UPDATE ON `assignment_schedule_leave_substitution_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_beclass_record_correction_events_before_delete` BEFORE DELETE ON `beclass_record_correction_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'beclass correction events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_beclass_record_correction_events_before_delete` BEFORE DELETE ON `beclass_record_correction_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `beclass_records` r31 WHERE ((r31.`bound_case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND r31.`client_id`=@registry_delete_client))) AND OLD.`beclass_record_id`=r31.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'beclass correction events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_beclass_record_correction_events_before_update` BEFORE UPDATE ON `beclass_record_correction_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'beclass correction events cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_beclass_record_correction_events_before_update` BEFORE UPDATE ON `beclass_record_correction_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'beclass correction events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_events_before_delete` BEFORE DELETE ON `beclass_import_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_events records cannot be deleted';
+SET MESSAGE_TEXT = 'beclass_import_review_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_events_before_update` BEFORE UPDATE ON `beclass_import_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_events records cannot be updated';
+SET MESSAGE_TEXT = 'beclass_import_review_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_receipts_before_delete` BEFORE DELETE ON `beclass_import_review_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'beclass_import_review_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_receipts_before_update` BEFORE UPDATE ON `beclass_import_review_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'beclass_import_review_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_rows_before_delete` BEFORE DELETE ON `beclass_import_review_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_rows records cannot be deleted';
+SET MESSAGE_TEXT = 'beclass_import_review_rows records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_beclass_review_rows_before_update` BEFORE UPDATE ON `beclass_import_review_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'beclass_import_review_rows records cannot be updated';
+SET MESSAGE_TEXT = 'beclass_import_review_rows records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_locks_before_delete` BEFORE DELETE ON `caregiver_availability_locks` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_locks records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_locks_before_delete` BEFORE DELETE ON `caregiver_availability_locks` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`plan_id`=r40.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_locks records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_locks_before_update` BEFORE UPDATE ON `caregiver_availability_locks` FOR EACH ROW SET NEW.created_by = IF(OLD.id <=> NEW.id AND OLD.plan_id <=> NEW.plan_id AND OLD.created_by <=> NEW.created_by AND OLD.created_at <=> NEW.created_at, NEW.created_by, NULL);
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_locks_before_update` BEFORE UPDATE ON `caregiver_availability_locks` FOR EACH ROW SET NEW.created_by = IF(OLD.id <=> NEW.id AND OLD.plan_id <=> NEW.plan_id AND OLD.created_by <=> NEW.created_by AND OLD.created_at <=> NEW.created_at, NEW.created_by, NULL)$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_lock_days_before_delete` BEFORE DELETE ON `caregiver_availability_lock_days` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_days records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_lock_days_before_delete` BEFORE DELETE ON `caregiver_availability_lock_days` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_availability_locks` r34 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r34.`plan_id`=r40.`id`))) AND OLD.`lock_id`=r34.`id`) OR EXISTS(SELECT 1 FROM `caregiver_matching_plan_segments` r39 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r39.`plan_id`=r40.`id`))) AND OLD.`segment_id`=r39.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_days records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_lock_days_before_update` BEFORE UPDATE ON `caregiver_availability_lock_days` FOR EACH ROW SET NEW.lock_id = IF(OLD.id <=> NEW.id AND OLD.lock_id <=> NEW.lock_id AND OLD.segment_id <=> NEW.segment_id AND OLD.staff_id <=> NEW.staff_id AND OLD.lock_date <=> NEW.lock_date AND OLD.created_at <=> NEW.created_at, NEW.lock_id, NULL);
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_lock_days_before_update` BEFORE UPDATE ON `caregiver_availability_lock_days` FOR EACH ROW SET NEW.lock_id = IF(OLD.id <=> NEW.id AND OLD.lock_id <=> NEW.lock_id AND OLD.segment_id <=> NEW.segment_id AND OLD.staff_id <=> NEW.staff_id AND OLD.lock_date <=> NEW.lock_date AND OLD.created_at <=> NEW.created_at, NEW.lock_id, NULL)$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_lock_events_before_delete` BEFORE DELETE ON `caregiver_availability_lock_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_lock_events_before_delete` BEFORE DELETE ON `caregiver_availability_lock_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_availability_locks` r34 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r34.`plan_id`=r40.`id`))) AND OLD.`lock_id`=r34.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_availability_lock_events_before_update` BEFORE UPDATE ON `caregiver_availability_lock_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_availability_lock_events_before_update` BEFORE UPDATE ON `caregiver_availability_lock_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plans_before_delete` BEFORE DELETE ON `caregiver_matching_plans` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plans records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plans_before_delete` BEFORE DELETE ON `caregiver_matching_plans` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plans records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plans_before_update` BEFORE UPDATE ON `caregiver_matching_plans` FOR EACH ROW SET NEW.created_by = IF(OLD.id <=> NEW.id AND OLD.case_no <=> NEW.case_no AND OLD.version <=> NEW.version AND OLD.start_date <=> NEW.start_date AND OLD.end_date <=> NEW.end_date AND OLD.created_by <=> NEW.created_by AND OLD.created_at <=> NEW.created_at, NEW.created_by, NULL);
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plans_before_update` BEFORE UPDATE ON `caregiver_matching_plans` FOR EACH ROW SET NEW.created_by = IF(OLD.id <=> NEW.id AND OLD.case_no <=> NEW.case_no AND OLD.version <=> NEW.version AND OLD.start_date <=> NEW.start_date AND OLD.end_date <=> NEW.end_date AND OLD.created_by <=> NEW.created_by AND OLD.created_at <=> NEW.created_at, NEW.created_by, NULL)$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plan_events_before_delete` BEFORE DELETE ON `caregiver_matching_plan_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plan_events_before_delete` BEFORE DELETE ON `caregiver_matching_plan_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`plan_id`=r40.`id`) OR EXISTS(SELECT 1 FROM `caregiver_matching_plan_segments` r39 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r39.`plan_id`=r40.`id`))) AND OLD.`segment_id`=r39.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plan_events_before_update` BEFORE UPDATE ON `caregiver_matching_plan_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plan_events_before_update` BEFORE UPDATE ON `caregiver_matching_plan_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plan_segments_before_delete` BEFORE DELETE ON `caregiver_matching_plan_segments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plan_segments_before_delete` BEFORE DELETE ON `caregiver_matching_plan_segments` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`plan_id`=r40.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_caregiver_matching_plan_segments_before_update` BEFORE UPDATE ON `caregiver_matching_plan_segments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_caregiver_matching_plan_segments_before_update` BEFORE UPDATE ON `caregiver_matching_plan_segments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_case_architecture_bootstrap_events_before_delete` BEFORE DELETE ON `case_architecture_bootstrap_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_architecture_bootstrap_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_case_architecture_bootstrap_events_before_delete` BEFORE DELETE ON `case_architecture_bootstrap_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_architecture_bootstrap_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_architecture_bootstrap_events_before_update` BEFORE UPDATE ON `case_architecture_bootstrap_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_architecture_bootstrap_events records cannot be updated';
+SET MESSAGE_TEXT = 'case_architecture_bootstrap_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_case_architecture_bootstrap_receipts_before_delete` BEFORE DELETE ON `case_architecture_bootstrap_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_architecture_bootstrap_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_case_architecture_bootstrap_receipts_before_delete` BEFORE DELETE ON `case_architecture_bootstrap_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_architecture_bootstrap_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_architecture_bootstrap_receipts_before_update` BEFORE UPDATE ON `case_architecture_bootstrap_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_architecture_bootstrap_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'case_architecture_bootstrap_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_case_import_events_before_delete` BEFORE DELETE ON `case_import_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_case_import_events_before_delete` BEFORE DELETE ON `case_import_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND OLD.`client_id`=@registry_delete_client)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_import_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_import_events_before_update` BEFORE UPDATE ON `case_import_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_events records cannot be updated';
+SET MESSAGE_TEXT = 'case_import_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_import_hcm_review_rows_before_delete` BEFORE DELETE ON `case_import_hcm_review_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be deleted';
+SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_import_hcm_review_rows_before_update` BEFORE UPDATE ON `case_import_hcm_review_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be updated';
+SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_case_import_receipts_before_delete` BEFORE DELETE ON `case_import_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_case_import_receipts_before_delete` BEFORE DELETE ON `case_import_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND OLD.`client_id`=@registry_delete_client)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_import_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_import_receipts_before_update` BEFORE UPDATE ON `case_import_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'case_import_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_case_payroll_policy_snapshots_before_delete` BEFORE DELETE ON `case_payroll_rate_policy_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_payroll_rate_policy_snapshots records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_case_payroll_policy_snapshots_before_delete` BEFORE DELETE ON `case_payroll_rate_policy_snapshots` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_payroll_rate_policy_snapshots records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_payroll_policy_snapshots_before_update` BEFORE UPDATE ON `case_payroll_rate_policy_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_payroll_rate_policy_snapshots records cannot be updated';
+SET MESSAGE_TEXT = 'case_payroll_rate_policy_snapshots records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_staff_assignments_original_period_insert` BEFORE INSERT ON `case_staff_assignments` FOR EACH ROW SET NEW.original_assigned_start_date = COALESCE(NEW.original_assigned_start_date, NEW.assigned_start_date),
-    NEW.original_assigned_end_date = COALESCE(NEW.original_assigned_end_date, NEW.assigned_end_date);
+    NEW.original_assigned_end_date = COALESCE(NEW.original_assigned_end_date, NEW.assigned_end_date)$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_case_staff_assignments_original_period_update` BEFORE UPDATE ON `case_staff_assignments` FOR EACH ROW SET NEW.original_assigned_start_date = OLD.original_assigned_start_date,
-    NEW.original_assigned_end_date = OLD.original_assigned_end_date;
+    NEW.original_assigned_end_date = OLD.original_assigned_end_date$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_deposit_reversal_receipts_before_delete` BEFORE DELETE ON `client_deposit_reversal_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_deposit_reversal_receipts_before_delete` BEFORE DELETE ON `client_deposit_reversal_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_deposit_reversal_receipts_before_update` BEFORE UPDATE ON `client_deposit_reversal_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_finance_receipts_before_delete` BEFORE DELETE ON `client_finance_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_finance_receipts_before_delete` BEFORE DELETE ON `client_finance_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_finance_receipts_before_update` BEFORE UPDATE ON `client_finance_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_ledger_allocations_before_delete` BEFORE DELETE ON `client_ledger_obligation_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client ledger allocations cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_ledger_allocations_before_delete` BEFORE DELETE ON `client_ledger_obligation_allocations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_ledger_entries` r59 WHERE ((r59.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`ledger_entry_id`=r59.`id`) OR EXISTS(SELECT 1 FROM `client_obligations` r63 WHERE ((r63.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r63.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client ledger allocations cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_ledger_allocations_before_update` BEFORE UPDATE ON `client_ledger_obligation_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client ledger allocations cannot be updated';
+SET MESSAGE_TEXT = 'client ledger allocations cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_ledger_entries_before_delete` BEFORE DELETE ON `client_ledger_entries` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_ledger_entries records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_ledger_entries_before_delete` BEFORE DELETE ON `client_ledger_entries` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_ledger_entries records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_ledger_entries_before_update` BEFORE UPDATE ON `client_ledger_entries` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_ledger_entries records cannot be updated';
+SET MESSAGE_TEXT = 'client_ledger_entries records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_obligation_events_before_delete` BEFORE DELETE ON `client_obligation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_obligation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_obligation_events_before_delete` BEFORE DELETE ON `client_obligation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_obligation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_obligation_events_before_update` BEFORE UPDATE ON `client_obligation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_obligation_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_client_obligation_events_before_update` BEFORE UPDATE ON `client_obligation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND NEW.`source_obligation_identity` IS NULL AND NEW.`id` <=> OLD.`id` AND NEW.`obligation_identity` <=> OLD.`obligation_identity` AND NEW.`case_no` <=> OLD.`case_no` AND NEW.`obligation_type` <=> OLD.`obligation_type` AND NEW.`direction` <=> OLD.`direction` AND NEW.`event_type` <=> OLD.`event_type` AND NEW.`before_amount_ntd` <=> OLD.`before_amount_ntd` AND NEW.`after_amount_ntd` <=> OLD.`after_amount_ntd` AND NEW.`before_due_date` <=> OLD.`before_due_date` AND NEW.`after_due_date` <=> OLD.`after_due_date` AND NEW.`source_event_identity` <=> OLD.`source_event_identity` AND NEW.`expected_account_version` <=> OLD.`expected_account_version` AND NEW.`idempotency_key` <=> OLD.`idempotency_key` AND NEW.`actor` <=> OLD.`actor` AND NEW.`reason` <=> OLD.`reason` AND NEW.`created_at` <=> OLD.`created_at`),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_obligation_events records cannot be updated'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_over_refund_adjustment_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_adjustment_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund adjustment receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_over_refund_adjustment_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_adjustment_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_over_refund_recoveries` r64 WHERE ((r64.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`recovery_identity`=r64.`recovery_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client over-refund adjustment receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_over_refund_adjustment_receipts_before_update` BEFORE UPDATE ON `client_over_refund_recovery_adjustment_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund adjustment receipts cannot be updated';
+SET MESSAGE_TEXT = 'client over-refund adjustment receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_over_refund_recovery_events_before_delete` BEFORE DELETE ON `client_over_refund_recovery_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_over_refund_recovery_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_over_refund_recovery_events_before_delete` BEFORE DELETE ON `client_over_refund_recovery_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_ledger_entries` r59 WHERE ((r59.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`receipt_ledger_entry_id`=r59.`id`) OR EXISTS(SELECT 1 FROM `client_over_refund_recoveries` r64 WHERE ((r64.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`recovery_identity`=r64.`recovery_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_over_refund_recovery_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_over_refund_recovery_events_before_update` BEFORE UPDATE ON `client_over_refund_recovery_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_over_refund_recovery_events records cannot be updated';
+SET MESSAGE_TEXT = 'client_over_refund_recovery_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_over_refund_recovery_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_over_refund_recovery_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_ledger_entries` r59 WHERE ((r59.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`receipt_ledger_entry_id`=r59.`id`) OR EXISTS(SELECT 1 FROM `client_over_refund_recoveries` r64 WHERE ((r64.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`recovery_identity`=r64.`recovery_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_over_refund_recovery_receipts_before_update` BEFORE UPDATE ON `client_over_refund_recovery_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be updated';
+SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_payment_destination_events_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable';
+DELIMITER $$
+CREATE TRIGGER `trg_client_payment_destination_events_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_payment_destination_events_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable';
+DELIMITER $$
+CREATE TRIGGER `trg_client_payment_destination_events_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_payment_destination_receipts_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable';
+DELIMITER $$
+CREATE TRIGGER `trg_client_payment_destination_receipts_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_payment_destination_receipts_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable';
+DELIMITER $$
+CREATE TRIGGER `trg_client_payment_destination_receipts_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_payment_terms_events_before_delete` BEFORE DELETE ON `client_payment_terms_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_payment_terms_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_payment_terms_events_before_delete` BEFORE DELETE ON `client_payment_terms_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_payment_terms_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_payment_terms_events_before_update` BEFORE UPDATE ON `client_payment_terms_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_payment_terms_events records cannot be updated';
+SET MESSAGE_TEXT = 'client_payment_terms_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_profile_admin_change_events_before_delete` BEFORE DELETE ON `client_profile_admin_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client profile admin events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_profile_admin_change_events_before_delete` BEFORE DELETE ON `client_profile_admin_change_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND (((@registry_delete_client_owned AND OLD.`client_id`=@registry_delete_client)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client profile admin events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_profile_admin_change_events_before_update` BEFORE UPDATE ON `client_profile_admin_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client profile admin events cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_client_profile_admin_change_events_before_update` BEFORE UPDATE ON `client_profile_admin_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client profile admin events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_profile_change_events_before_delete` BEFORE DELETE ON `client_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_profile_change_events_before_delete` BEFORE DELETE ON `client_profile_change_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND (((@registry_delete_client_owned AND OLD.`client_id`=@registry_delete_client)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_profile_change_events_before_update` BEFORE UPDATE ON `client_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_client_profile_change_events_before_update` BEFORE UPDATE ON `client_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='client profile change events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_receipt_overage_dispositions_before_delete` BEFORE DELETE ON `client_receipt_overage_dispositions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_receipt_overage_dispositions records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_receipt_overage_dispositions_before_delete` BEFORE DELETE ON `client_receipt_overage_dispositions` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_receipt_overage_dispositions records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_receipt_overage_dispositions_before_update` BEFORE UPDATE ON `client_receipt_overage_dispositions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_receipt_overage_dispositions records cannot be updated';
+SET MESSAGE_TEXT = 'client_receipt_overage_dispositions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_recovery_matchings_before_delete` BEFORE DELETE ON `client_over_refund_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery matchings cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_recovery_matchings_before_delete` BEFORE DELETE ON `client_over_refund_recovery_matchings` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client over-refund recovery matchings cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_recovery_matchings_before_update` BEFORE UPDATE ON `client_over_refund_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery matchings cannot be updated';
+SET MESSAGE_TEXT = 'client over-refund recovery matchings cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_recovery_matching_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_matching_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery matching receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_recovery_matching_receipts_before_delete` BEFORE DELETE ON `client_over_refund_recovery_matching_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_over_refund_recovery_matchings` r69 WHERE ((r69.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`matching_identity`=r69.`matching_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client over-refund recovery matching receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_recovery_matching_receipts_before_update` BEFORE UPDATE ON `client_over_refund_recovery_matching_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client over-refund recovery matching receipts cannot be updated';
+SET MESSAGE_TEXT = 'client over-refund recovery matching receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_recipient_snapshots_before_delete` BEFORE DELETE ON `client_refund_recipient_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_recipient_snapshots_before_delete` BEFORE DELETE ON `client_refund_recipient_snapshots` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_recipient_snapshots_before_update` BEFORE UPDATE ON `client_refund_recipient_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be updated';
+SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_return_review_event_before_delete` BEFORE DELETE ON `client_refund_return_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund return review events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_return_review_event_before_delete` BEFORE DELETE ON `client_refund_return_review_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund return review events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_return_review_event_before_update` BEFORE UPDATE ON `client_refund_return_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund return review events cannot be updated';
+SET MESSAGE_TEXT = 'client refund return review events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_return_review_receipt_before_delete` BEFORE DELETE ON `client_refund_return_review_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund return review receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_return_review_receipt_before_delete` BEFORE DELETE ON `client_refund_return_review_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_refund_return_review_events` r84 WHERE ((r84.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`review_event_id`=r84.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund return review receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_return_review_receipt_before_update` BEFORE UPDATE ON `client_refund_return_review_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund return review receipts cannot be updated';
+SET MESSAGE_TEXT = 'client refund return review receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_reversal_receipt_before_delete` BEFORE DELETE ON `client_refund_reversal_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund reversal receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_reversal_receipt_before_delete` BEFORE DELETE ON `client_refund_reversal_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund reversal receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_reversal_receipt_before_update` BEFORE UPDATE ON `client_refund_reversal_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund reversal receipts cannot be updated';
+SET MESSAGE_TEXT = 'client refund reversal receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_underpayment_sources_before_delete` BEFORE DELETE ON `client_refund_underpayment_sources` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment sources cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_underpayment_sources_before_delete` BEFORE DELETE ON `client_refund_underpayment_sources` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund underpayment sources cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_underpayment_sources_before_update` BEFORE UPDATE ON `client_refund_underpayment_sources` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment sources cannot be updated';
+SET MESSAGE_TEXT = 'client refund underpayment sources cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_underpayment_source_obligations_before_delete` BEFORE DELETE ON `client_refund_underpayment_source_obligations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment source obligations cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_underpayment_source_obligations_before_delete` BEFORE DELETE ON `client_refund_underpayment_source_obligations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_obligations` r63 WHERE ((r63.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`refund_obligation_identity`=r63.`obligation_identity`) OR EXISTS(SELECT 1 FROM `client_refund_underpayment_sources` r89 WHERE ((r89.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`underpayment_identity`=r89.`underpayment_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund underpayment source obligations cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_underpayment_source_obligations_before_update` BEFORE UPDATE ON `client_refund_underpayment_source_obligations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment source obligations cannot be updated';
+SET MESSAGE_TEXT = 'client refund underpayment source obligations cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_refund_underpayment_source_rows_before_delete` BEFORE DELETE ON `client_refund_underpayment_source_bank_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment source bank rows cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_refund_underpayment_source_rows_before_delete` BEFORE DELETE ON `client_refund_underpayment_source_bank_rows` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `client_refund_underpayment_sources` r89 WHERE ((r89.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`underpayment_identity`=r89.`underpayment_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client refund underpayment source bank rows cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_refund_underpayment_source_rows_before_update` BEFORE UPDATE ON `client_refund_underpayment_source_bank_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund underpayment source bank rows cannot be updated';
+SET MESSAGE_TEXT = 'client refund underpayment source bank rows cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_subsidy_advance_recovery_before_delete` BEFORE DELETE ON `client_subsidy_advance_recoveries` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_subsidy_advance_recoveries cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_subsidy_advance_recovery_before_delete` BEFORE DELETE ON `client_subsidy_advance_recoveries` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_subsidy_advance_recoveries cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_subsidy_advance_recovery_before_update` BEFORE UPDATE ON `client_subsidy_advance_recoveries` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_subsidy_advance_recoveries cannot be updated';
+SET MESSAGE_TEXT = 'client_subsidy_advance_recoveries cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_client_subsidy_return_claim_item_link_before_delete` BEFORE DELETE ON `client_subsidy_return_claim_item_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_subsidy_return_claim_item_links cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_client_subsidy_return_claim_item_link_before_delete` BEFORE DELETE ON `client_subsidy_return_claim_item_links` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `subsidy_claim_batch_items` r385 WHERE ((r385.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`claim_item_id`=r385.`id`) OR EXISTS(SELECT 1 FROM `client_obligations` r63 WHERE ((r63.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r63.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_subsidy_return_claim_item_links cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_client_subsidy_return_claim_item_link_before_update` BEFORE UPDATE ON `client_subsidy_return_claim_item_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client_subsidy_return_claim_item_links cannot be updated';
+SET MESSAGE_TEXT = 'client_subsidy_return_claim_item_links cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_document_versions_before_delete` BEFORE DELETE ON `contract_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_document_versions records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_document_versions_before_delete` BEFORE DELETE ON `contract_document_versions` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_document_versions records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_document_versions_before_update` BEFORE UPDATE ON `contract_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_document_versions records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_document_versions_before_update` BEFORE UPDATE ON `contract_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_document_versions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_external_receipts_before_delete` BEFORE DELETE ON `contract_external_signing_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_external_receipts_before_delete` BEFORE DELETE ON `contract_external_signing_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `contract_final_document_versions` r103 WHERE ((r103.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`final_document_version_id`=r103.`id`) OR EXISTS(SELECT 1 FROM `contract_external_completion_reports` r100 WHERE ((r100.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`completion_report_id`=r100.`id`) OR EXISTS(SELECT 1 FROM `contract_external_signing_sessions` r102 WHERE ((r102.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`external_signing_session_id`=r102.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_external_receipts_before_update` BEFORE UPDATE ON `contract_external_signing_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_external_receipts_before_update` BEFORE UPDATE ON `contract_external_signing_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_signing_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_external_reports_before_delete` BEFORE DELETE ON `contract_external_completion_reports` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_external_reports_before_delete` BEFORE DELETE ON `contract_external_completion_reports` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_external_reports_before_update` BEFORE UPDATE ON `contract_external_completion_reports` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_external_reports_before_update` BEFORE UPDATE ON `contract_external_completion_reports` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_external_completion_reports records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_final_documents_before_delete` BEFORE DELETE ON `contract_final_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_final_documents_before_delete` BEFORE DELETE ON `contract_final_document_versions` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_final_documents_before_update` BEFORE UPDATE ON `contract_final_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_final_documents_before_update` BEFORE UPDATE ON `contract_final_document_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_final_document_versions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_signing_events_before_delete` BEFORE DELETE ON `contract_signing_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_signing_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_signing_events_before_delete` BEFORE DELETE ON `contract_signing_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_signing_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_contract_signing_events_before_update` BEFORE UPDATE ON `contract_signing_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_signing_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_contract_signing_events_before_update` BEFORE UPDATE ON `contract_signing_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'contract_signing_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_apply_receipts_before_delete` BEFORE DELETE ON `controlled_file_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_apply_receipts_before_delete` BEFORE DELETE ON `controlled_file_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `controlled_file_objects` r112 WHERE (((r112.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r112.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`controlled_object_id`=r112.`id`) OR EXISTS(SELECT 1 FROM `controlled_file_staging_objects` r115 WHERE (((r115.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r115.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`staging_object_id`=r115.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_apply_receipts_before_update` BEFORE UPDATE ON `controlled_file_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_apply_receipts records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_apply_receipts_before_update` BEFORE UPDATE ON `controlled_file_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_cleanup_events_before_delete` BEFORE DELETE ON `controlled_file_cleanup_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_cleanup_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_cleanup_events_before_delete` BEFORE DELETE ON `controlled_file_cleanup_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `controlled_file_staging_objects` r115 WHERE (((r115.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r115.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`staging_object_id`=r115.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_cleanup_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_cleanup_events_before_update` BEFORE UPDATE ON `controlled_file_cleanup_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_cleanup_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_cleanup_events_before_update` BEFORE UPDATE ON `controlled_file_cleanup_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_cleanup_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_objects_before_delete` BEFORE DELETE ON `controlled_file_objects` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_objects records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_objects_before_delete` BEFORE DELETE ON `controlled_file_objects` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND (((OLD.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND OLD.`owner_type` IN ('orders','scheduling','contract_signing'))))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_objects records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_objects_before_update` BEFORE UPDATE ON `controlled_file_objects` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_objects records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_objects_before_update` BEFORE UPDATE ON `controlled_file_objects` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_objects records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_reconciliation_events_before_delete` BEFORE DELETE ON `controlled_file_reconciliation_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_reconciliation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_reconciliation_events_before_delete` BEFORE DELETE ON `controlled_file_reconciliation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `controlled_file_objects` r112 WHERE (((r112.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r112.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`controlled_object_id`=r112.`id`) OR EXISTS(SELECT 1 FROM `controlled_file_staging_objects` r115 WHERE (((r115.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r115.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`staging_object_id`=r115.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_reconciliation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_reconciliation_events_before_update` BEFORE UPDATE ON `controlled_file_reconciliation_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_reconciliation_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_reconciliation_events_before_update` BEFORE UPDATE ON `controlled_file_reconciliation_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_reconciliation_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_controlled_file_references_before_delete` BEFORE DELETE ON `controlled_file_references` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'controlled_file_references cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_controlled_file_references_before_delete` BEFORE DELETE ON `controlled_file_references` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `scheduling_service_day_log_attachments` r323 WHERE ((EXISTS(SELECT 1 FROM `controlled_file_objects` r112 WHERE (((r112.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r112.`owner_type` IN ('orders','scheduling','contract_signing')))) AND r323.`controlled_file_object_id`=r112.`id`) OR EXISTS(SELECT 1 FROM `scheduling_service_day_logs` r326 WHERE ((r326.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r323.`service_day_log_id`=r326.`id`))) AND OLD.`service_day_log_attachment_id`=r323.`id`) OR EXISTS(SELECT 1 FROM `controlled_file_objects` r112 WHERE (((r112.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r112.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`controlled_file_object_id`=r112.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'controlled_file_references cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_controlled_file_references_before_update` BEFORE UPDATE ON `controlled_file_references` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'controlled_file_references cannot be updated';
+SET MESSAGE_TEXT = 'controlled_file_references cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_customer_service_escalation_events_before_delete` BEFORE DELETE ON `customer_service_escalation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_customer_service_escalation_events_before_delete` BEFORE DELETE ON `customer_service_escalation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `customer_service_escalations` r118 WHERE ((EXISTS(SELECT 1 FROM `customer_service_tickets` r120 WHERE ((r120.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND r120.`client_id`=@registry_delete_client))) AND r118.`ticket_id`=r120.`id`))) AND OLD.`escalation_id`=r118.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_customer_service_escalation_events_before_update` BEFORE UPDATE ON `customer_service_escalation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be updated';
+SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_anomaly_occurrences_before_delete` BEFORE DELETE ON `finance_anomaly_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be deleted';
+SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_anomaly_occurrences_before_update` BEFORE UPDATE ON `finance_anomaly_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be updated';
+SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_apply_receipt_before_delete` BEFORE DELETE ON `finance_import_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_apply_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_apply_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_apply_receipt_before_update` BEFORE UPDATE ON `finance_import_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_apply_receipts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_apply_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_classification_before_delete` BEFORE DELETE ON `finance_import_classification_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_classification_events cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_classification_events cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_classification_before_update` BEFORE UPDATE ON `finance_import_classification_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_classification_events cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_classification_events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_correction_receipt_before_delete` BEFORE DELETE ON `finance_import_correction_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_correction_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_correction_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_correction_receipt_before_update` BEFORE UPDATE ON `finance_import_correction_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_correction_receipts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_correction_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_dispatch_before_delete` BEFORE DELETE ON `finance_import_dispatch_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_dispatch_events cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_dispatch_events cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_dispatch_before_update` BEFORE UPDATE ON `finance_import_dispatch_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_dispatch_events cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_dispatch_events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_historical_reprocess_receipt_before_delete` BEFORE DELETE ON `finance_import_historical_reprocess_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_historical_reprocess_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_historical_reprocess_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_historical_reprocess_receipt_before_update` BEFORE UPDATE ON `finance_import_historical_reprocess_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_historical_reprocess_receipts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_historical_reprocess_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_ingestion_attempt_before_delete` BEFORE DELETE ON `finance_import_ingestion_attempts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_ingestion_attempt_before_update` BEFORE UPDATE ON `finance_import_ingestion_attempts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_ingestion_receipt_before_delete` BEFORE DELETE ON `finance_import_ingestion_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_ingestion_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_ingestion_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_ingestion_receipt_before_update` BEFORE UPDATE ON `finance_import_ingestion_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_ingestion_receipts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_ingestion_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_integrity_before_delete` BEFORE DELETE ON `finance_import_integrity_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_integrity_events cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_integrity_events cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_integrity_before_update` BEFORE UPDATE ON `finance_import_integrity_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_integrity_events cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_integrity_events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_reconciliation_before_delete` BEFORE DELETE ON `finance_import_reconciliation_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_reconciliation_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_reconciliation_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_reconciliation_before_update` BEFORE UPDATE ON `finance_import_reconciliation_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_reconciliation_receipts cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_reconciliation_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_reprocess_runs_before_delete` BEFORE DELETE ON `finance_import_reprocess_runs` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_reprocess_runs records cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_reprocess_runs records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_reprocess_runs_before_update` BEFORE UPDATE ON `finance_import_reprocess_runs` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_reprocess_runs records cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_reprocess_runs records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_source_reviews_before_delete` BEFORE DELETE ON `finance_import_source_reviews` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_source_reviews cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_source_reviews cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_import_source_reviews_before_update` BEFORE UPDATE ON `finance_import_source_reviews` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_source_reviews cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_source_reviews cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_source_review_occurrences_before_delete` BEFORE DELETE ON `finance_import_source_review_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_source_review_occurrences cannot be deleted';
+SET MESSAGE_TEXT = 'finance_import_source_review_occurrences cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_finance_source_review_occurrences_before_update` BEFORE UPDATE ON `finance_import_source_review_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'finance_import_source_review_occurrences cannot be updated';
+SET MESSAGE_TEXT = 'finance_import_source_review_occurrences cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_financial_adjustments_before_delete` BEFORE DELETE ON `financial_adjustments` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustments cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_financial_adjustments_before_delete` BEFORE DELETE ON `financial_adjustments` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'financial adjustments cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_financial_adjustments_before_update` BEFORE UPDATE ON `financial_adjustments` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustments cannot be updated';
+SET MESSAGE_TEXT = 'financial adjustments cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_financial_adjustment_receipt_before_delete` BEFORE DELETE ON `financial_adjustment_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustment receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_financial_adjustment_receipt_before_delete` BEFORE DELETE ON `financial_adjustment_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'financial adjustment receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_financial_adjustment_receipt_before_update` BEFORE UPDATE ON `financial_adjustment_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustment receipts cannot be updated';
+SET MESSAGE_TEXT = 'financial adjustment receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_financial_adjustment_staff_before_delete` BEFORE DELETE ON `financial_adjustment_staff_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustment staff allocations cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_financial_adjustment_staff_before_delete` BEFORE DELETE ON `financial_adjustment_staff_allocations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `financial_adjustments` r147 WHERE ((r147.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`financial_adjustment_id`=r147.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'financial adjustment staff allocations cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_financial_adjustment_staff_before_update` BEFORE UPDATE ON `financial_adjustment_staff_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'financial adjustment staff allocations cannot be updated';
+SET MESSAGE_TEXT = 'financial adjustment staff allocations cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_overpayment_apply_receipts_before_delete` BEFORE DELETE ON `government_subsidy_overpayment_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_overpayment_apply_receipts_before_update` BEFORE UPDATE ON `government_subsidy_overpayment_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_government_subsidy_allocations_before_delete` BEFORE DELETE ON `government_subsidy_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_allocations cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_allocations_before_delete` BEFORE DELETE ON `government_subsidy_allocations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `subsidy_claim_batch_items` r385 WHERE ((r385.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`claim_item_id`=r385.`id` AND OLD.`claim_batch_id`=r385.`batch_id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government_subsidy_allocations cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_allocations_before_update` BEFORE UPDATE ON `government_subsidy_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_allocations cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_allocations cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_approval_before_delete` BEFORE DELETE ON `government_subsidy_claim_approval_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy approval cannot be deleted';
+SET MESSAGE_TEXT = 'government subsidy approval cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_approval_before_update` BEFORE UPDATE ON `government_subsidy_claim_approval_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy approval cannot be updated';
+SET MESSAGE_TEXT = 'government subsidy approval cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_government_subsidy_approval_item_before_delete` BEFORE DELETE ON `government_subsidy_claim_approval_items` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy approval item cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_approval_item_before_delete` BEFORE DELETE ON `government_subsidy_claim_approval_items` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `subsidy_claim_batch_items` r385 WHERE ((r385.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`claim_item_id`=r385.`id` AND OLD.`batch_id`=r385.`batch_id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government subsidy approval item cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_approval_item_before_update` BEFORE UPDATE ON `government_subsidy_claim_approval_items` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy approval item cannot be updated';
+SET MESSAGE_TEXT = 'government subsidy approval item cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_claim_receipt_before_delete` BEFORE DELETE ON `government_subsidy_claim_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy claim receipt cannot be deleted';
+SET MESSAGE_TEXT = 'government subsidy claim receipt cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_claim_receipt_before_update` BEFORE UPDATE ON `government_subsidy_claim_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy claim receipt cannot be updated';
+SET MESSAGE_TEXT = 'government subsidy claim receipt cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_overpayment_events_before_delete` BEFORE DELETE ON `government_subsidy_overpayment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be deleted';
+SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_overpayment_events_before_update` BEFORE UPDATE ON `government_subsidy_overpayment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_projection_events_before_delete` BEFORE DELETE ON `government_subsidy_projection_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_projection_events cannot be deleted';
+SET MESSAGE_TEXT = 'government_subsidy_projection_events cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_projection_events_before_update` BEFORE UPDATE ON `government_subsidy_projection_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_projection_events cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_projection_events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_receipts_before_delete` BEFORE DELETE ON `government_subsidy_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_apply_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'government_subsidy_apply_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_receipts_before_update` BEFORE UPDATE ON `government_subsidy_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_apply_receipts cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_apply_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_submission_before_delete` BEFORE DELETE ON `government_subsidy_claim_submission_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy submission cannot be deleted';
+SET MESSAGE_TEXT = 'government subsidy submission cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_submission_before_update` BEFORE UPDATE ON `government_subsidy_claim_submission_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government subsidy submission cannot be updated';
+SET MESSAGE_TEXT = 'government subsidy submission cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_transactions_before_delete` BEFORE DELETE ON `government_subsidy_transactions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_transactions cannot be deleted';
+SET MESSAGE_TEXT = 'government_subsidy_transactions cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_transactions_before_update` BEFORE UPDATE ON `government_subsidy_transactions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_transactions cannot be updated';
+SET MESSAGE_TEXT = 'government_subsidy_transactions cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_hcm_correction_events_before_delete` BEFORE DELETE ON `case_import_hcm_correction_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_correction_events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_hcm_correction_events_before_delete` BEFORE DELETE ON `case_import_hcm_correction_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND OLD.`client_id`=@registry_delete_client)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_import_hcm_correction_events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_hcm_correction_events_before_update` BEFORE UPDATE ON `case_import_hcm_correction_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_correction_events cannot be updated';
+SET MESSAGE_TEXT = 'case_import_hcm_correction_events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_hcm_correction_receipts_before_delete` BEFORE DELETE ON `case_import_hcm_correction_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_correction_receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_hcm_correction_receipts_before_delete` BEFORE DELETE ON `case_import_hcm_correction_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_import_hcm_correction_events` r44 WHERE ((r44.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) OR (@registry_delete_client_owned AND r44.`client_id`=@registry_delete_client))) AND OLD.`correction_event_id`=r44.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_import_hcm_correction_receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_hcm_correction_receipts_before_update` BEFORE UPDATE ON `case_import_hcm_correction_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_correction_receipts cannot be updated';
+SET MESSAGE_TEXT = 'case_import_hcm_correction_receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_hcm_review_case_bindings_before_delete` BEFORE DELETE ON `case_import_hcm_review_case_bindings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_review_case_bindings cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_hcm_review_case_bindings_before_delete` BEFORE DELETE ON `case_import_hcm_review_case_bindings` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'case_import_hcm_review_case_bindings cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_hcm_review_case_bindings_before_update` BEFORE UPDATE ON `case_import_hcm_review_case_bindings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'case_import_hcm_review_case_bindings cannot be updated';
+SET MESSAGE_TEXT = 'case_import_hcm_review_case_bindings cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_client_payment_events_before_delete` BEFORE DELETE ON `historical_client_payment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_client_payment_events_before_delete` BEFORE DELETE ON `historical_client_payment_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_client_payment_events_before_update` BEFORE UPDATE ON `historical_client_payment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be updated';
+SET MESSAGE_TEXT = 'historical_client_payment_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_client_payment_links_before_delete` BEFORE DELETE ON `historical_client_payment_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_client_payment_links_before_delete` BEFORE DELETE ON `historical_client_payment_obligation_links` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_client_payment_events` r168 WHERE ((r168.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`event_id`=r168.`id`) OR EXISTS(SELECT 1 FROM `client_obligations` r63 WHERE ((r63.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r63.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_client_payment_links_before_update` BEFORE UPDATE ON `historical_client_payment_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be updated';
+SET MESSAGE_TEXT = 'historical_client_payment_obligation_links records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_operational_baseline_events_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_operational_baseline_events_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_operational_baseline_events_before_update` BEFORE UPDATE ON `historical_order_operational_baseline_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_operational_baseline_outbox_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_operational_baseline_outbox records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_operational_baseline_outbox_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_outbox` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_order_operational_baseline_events` r175 WHERE ((r175.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`event_id`=r175.`id`) OR EXISTS(SELECT 1 FROM `historical_order_operational_baseline_receipts` r177 WHERE ((EXISTS(SELECT 1 FROM `historical_order_operational_baseline_events` r175 WHERE ((r175.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r177.`event_id`=r175.`id`))) AND OLD.`receipt_id`=r177.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_operational_baseline_outbox records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_operational_baseline_outbox_before_update` BEFORE UPDATE ON `historical_order_operational_baseline_outbox` FOR EACH ROW SET NEW.event_id = IF(
     OLD.id <=> NEW.id
     AND OLD.event_id <=> NEW.event_id
@@ -8662,449 +8983,699 @@ CREATE TRIGGER `trg_historical_operational_baseline_outbox_before_update` BEFORE
     AND OLD.created_at <=> NEW.created_at,
     NEW.event_id,
     NULL
-);
+)$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_operational_baseline_receipts_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_operational_baseline_receipts_before_delete` BEFORE DELETE ON `historical_order_operational_baseline_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_order_operational_baseline_events` r175 WHERE ((r175.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`event_id`=r175.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_operational_baseline_receipts_before_update` BEFORE UPDATE ON `historical_order_operational_baseline_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_operational_baseline_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_order_adoption_receipts_before_delete` BEFORE DELETE ON `historical_order_adoption_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_order_adoption_receipts_before_delete` BEFORE DELETE ON `historical_order_adoption_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_adoption_receipts_before_update` BEFORE UPDATE ON `historical_order_adoption_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_adoption_reviews_before_delete` BEFORE DELETE ON `historical_order_adoption_reviews` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be deleted';
+SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_adoption_reviews_before_update` BEFORE UPDATE ON `historical_order_adoption_reviews` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_order_pairing_evidence_before_delete` BEFORE DELETE ON `historical_order_pairing_evidence` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_order_pairing_evidence_before_delete` BEFORE DELETE ON `historical_order_pairing_evidence` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `historical_order_adoption_receipts` r173 WHERE ((r173.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`receipt_id`=r173.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_pairing_evidence_before_update` BEFORE UPDATE ON `historical_order_pairing_evidence` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_order_review_remediation_events_before_delete` BEFORE DELETE ON `historical_order_review_remediation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_order_review_remediation_events_before_delete` BEFORE DELETE ON `historical_order_review_remediation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_order_adoption_receipts` r173 WHERE ((r173.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`original_adoption_receipt_id`=r173.`id`) OR EXISTS(SELECT 1 FROM `historical_order_adoption_receipts` r173 WHERE ((r173.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`replacement_adoption_receipt_id`=r173.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_review_remediation_events_before_update` BEFORE UPDATE ON `historical_order_review_remediation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_review_remediation_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_order_review_remediation_receipts_before_delete` BEFORE DELETE ON `historical_order_review_remediation_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_order_review_remediation_receipts_before_delete` BEFORE DELETE ON `historical_order_review_remediation_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_order_review_remediation_events` r179 WHERE ((EXISTS(SELECT 1 FROM `historical_order_adoption_receipts` r173 WHERE ((r173.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r179.`original_adoption_receipt_id`=r173.`id`) OR EXISTS(SELECT 1 FROM `historical_order_adoption_receipts` r173 WHERE ((r173.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r179.`replacement_adoption_receipt_id`=r173.`id`))) AND OLD.`event_id`=r179.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_order_review_remediation_receipts_before_update` BEFORE UPDATE ON `historical_order_review_remediation_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'historical_order_review_remediation_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_owner_selection_before_delete` BEFORE DELETE ON `historical_owner_selection_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_owner_selection_before_delete` BEFORE DELETE ON `historical_owner_selection_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_owner_selection_before_update` BEFORE UPDATE ON `historical_owner_selection_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be updated';
+SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_service_day_events_before_delete` BEFORE DELETE ON `historical_service_day_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_service_day_events_before_delete` BEFORE DELETE ON `historical_service_day_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_service_day_events_before_update` BEFORE UPDATE ON `historical_service_day_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_service_day_events_before_update` BEFORE UPDATE ON `historical_service_day_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_service_day_items_before_delete` BEFORE DELETE ON `historical_service_day_items` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_service_day_items_before_delete` BEFORE DELETE ON `historical_service_day_items` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `historical_service_day_events` r184 WHERE ((r184.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`event_id`=r184.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_service_day_items_before_update` BEFORE UPDATE ON `historical_service_day_items` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_service_day_items_before_update` BEFORE UPDATE ON `historical_service_day_items` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='historical_service_day_items records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_staff_payout_events_before_delete` BEFORE DELETE ON `historical_staff_payout_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_staff_payout_events_before_delete` BEFORE DELETE ON `historical_staff_payout_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_staff_payout_events_before_update` BEFORE UPDATE ON `historical_staff_payout_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be updated';
+SET MESSAGE_TEXT = 'historical_staff_payout_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_historical_staff_payout_links_before_delete` BEFORE DELETE ON `historical_staff_payout_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_historical_staff_payout_links_before_delete` BEFORE DELETE ON `historical_staff_payout_obligation_links` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `historical_staff_payout_events` r187 WHERE ((r187.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`event_id`=r187.`id`) OR EXISTS(SELECT 1 FROM `staff_obligations` r360 WHERE ((r360.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r360.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_historical_staff_payout_links_before_update` BEFORE UPDATE ON `historical_staff_payout_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be updated';
+SET MESSAGE_TEXT = 'historical_staff_payout_obligation_links records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_occurrences_before_delete` BEFORE DELETE ON `import_warning_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be deleted';
+SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_occurrences_before_update` BEFORE UPDATE ON `import_warning_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be updated';
+SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_tracking_events_before_delete` BEFORE DELETE ON `import_warning_tracking_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be deleted';
+SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_tracking_events_before_update` BEFORE UPDATE ON `import_warning_tracking_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be updated';
+SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_tracking_receipts_before_delete` BEFORE DELETE ON `import_warning_tracking_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_import_warning_tracking_receipts_before_update` BEFORE UPDATE ON `import_warning_tracking_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_knowledge_item_versions_before_delete` BEFORE DELETE ON `knowledge_item_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='knowledge_item_versions records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_knowledge_item_versions_before_delete` BEFORE DELETE ON `knowledge_item_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='knowledge_item_versions records cannot be deleted'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_knowledge_item_versions_before_update` BEFORE UPDATE ON `knowledge_item_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='knowledge_item_versions records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_knowledge_item_versions_before_update` BEFORE UPDATE ON `knowledge_item_versions` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='knowledge_item_versions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_alert_delivery_intents_before_delete` BEFORE DELETE ON `line_alert_delivery_intents` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_alert_delivery_intents records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_alert_delivery_intents_before_delete` BEFORE DELETE ON `line_alert_delivery_intents` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `line_delivery_tasks` r213 WHERE (((r213.`source_aggregate_identity`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r213.`source_aggregate_type` IN ('orders','scheduling','contract_signing','client_finance','payroll')) OR JSON_CONTAINS(@registry_delete_tasks,CAST(r213.id AS JSON)))) AND OLD.`delivery_task_id`=r213.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_alert_delivery_intents records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_alert_delivery_intents_before_update` BEFORE UPDATE ON `line_alert_delivery_intents` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_alert_delivery_intents records cannot be updated';
+SET MESSAGE_TEXT = 'line_alert_delivery_intents records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_command_receipts_before_delete` BEFORE DELETE ON `line_command_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_command_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'line_command_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_command_receipts_before_update` BEFORE UPDATE ON `line_command_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_command_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'line_command_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_configuration_revisions_before_delete` BEFORE DELETE ON `line_configuration_revisions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_configuration_revisions records cannot be deleted';
+SET MESSAGE_TEXT = 'line_configuration_revisions records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_configuration_revisions_before_update` BEFORE UPDATE ON `line_configuration_revisions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_configuration_revisions records cannot be updated';
+SET MESSAGE_TEXT = 'line_configuration_revisions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_delivery_attempt_events_before_delete` BEFORE DELETE ON `line_delivery_attempt_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_delivery_attempt_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_delivery_attempt_events_before_delete` BEFORE DELETE ON `line_delivery_attempt_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `line_delivery_tasks` r213 WHERE (((r213.`source_aggregate_identity`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r213.`source_aggregate_type` IN ('orders','scheduling','contract_signing','client_finance','payroll')) OR JSON_CONTAINS(@registry_delete_tasks,CAST(r213.id AS JSON)))) AND OLD.`task_id`=r213.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_delivery_attempt_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_delivery_attempt_events_before_update` BEFORE UPDATE ON `line_delivery_attempt_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_delivery_attempt_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_delivery_attempt_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_domain_audit_events_before_delete` BEFORE DELETE ON `line_domain_audit_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_domain_audit_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_domain_audit_events_before_delete` BEFORE DELETE ON `line_domain_audit_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND (((OLD.`aggregate_identity`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND OLD.`aggregate_type` IN ('orders','scheduling','contract_signing','client_finance','payroll'))))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_domain_audit_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_domain_audit_events_before_update` BEFORE UPDATE ON `line_domain_audit_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_domain_audit_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_domain_audit_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_friend_state_events_before_delete` BEFORE DELETE ON `line_friend_state_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_friend_state_events records cannot be deleted';
+SET MESSAGE_TEXT = 'line_friend_state_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_friend_state_events_before_update` BEFORE UPDATE ON `line_friend_state_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_friend_state_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_friend_state_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_notification_decisions_before_delete` BEFORE DELETE ON `line_notification_decisions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_notification_decisions records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_notification_decisions_before_delete` BEFORE DELETE ON `line_notification_decisions` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `line_notification_source_events` r227 WHERE (((r227.`source_aggregate_identity`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r227.`source_aggregate_type` IN ('orders','scheduling','contract_signing','client_finance','payroll')))) AND OLD.`source_event_id`=r227.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_notification_decisions records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_notification_decisions_before_update` BEFORE UPDATE ON `line_notification_decisions` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_notification_decisions records cannot be updated';
+SET MESSAGE_TEXT = 'line_notification_decisions records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_notification_source_events_before_delete` BEFORE DELETE ON `line_notification_source_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_notification_source_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_notification_source_events_before_delete` BEFORE DELETE ON `line_notification_source_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND (((OLD.`source_aggregate_identity`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND OLD.`source_aggregate_type` IN ('orders','scheduling','contract_signing','client_finance','payroll'))))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_notification_source_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_notification_source_events_before_update` BEFORE UPDATE ON `line_notification_source_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_notification_source_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_notification_source_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_order_group_binding_events_before_delete` BEFORE DELETE ON `line_order_group_binding_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_order_group_binding_events_before_delete` BEFORE DELETE ON `line_order_group_binding_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_order_group_binding_events_before_update` BEFORE UPDATE ON `line_order_group_binding_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_order_group_runtime_events_before_delete` BEFORE DELETE ON `line_order_group_runtime_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_order_group_runtime_events_before_delete` BEFORE DELETE ON `line_order_group_runtime_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_order_group_runtime_events_before_update` BEFORE UPDATE ON `line_order_group_runtime_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_line_review_decision_events_before_delete` BEFORE DELETE ON `line_review_decision_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_review_decision_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_line_review_decision_events_before_delete` BEFORE DELETE ON `line_review_decision_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `line_review_requests` r234 WHERE (((@registry_delete_client_owned AND r234.`subject_reference`=(CAST(@registry_delete_client AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci) AND r234.`subject_type`='customer'))) AND OLD.`review_request_id`=r234.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'line_review_decision_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_review_decision_events_before_update` BEFORE UPDATE ON `line_review_decision_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_review_decision_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_review_decision_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_cleanup_anomaly_before_delete` BEFORE DELETE ON `line_rich_menu_publication_cleanup_anomalies` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be deleted';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_cleanup_anomaly_before_update` BEFORE UPDATE ON `line_rich_menu_publication_cleanup_anomalies` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be updated';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_ack_before_delete` BEFORE DELETE ON `line_rich_menu_publication_step_acknowledgements` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be deleted';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_ack_before_update` BEFORE UPDATE ON `line_rich_menu_publication_step_acknowledgements` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be updated';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_attempt_before_delete` BEFORE DELETE ON `line_rich_menu_publication_step_attempt_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be deleted';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_attempt_before_update` BEFORE UPDATE ON `line_rich_menu_publication_step_attempt_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_receipts_before_delete` BEFORE DELETE ON `line_rich_menu_publication_step_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_rich_menu_step_receipts_before_update` BEFORE UPDATE ON `line_rich_menu_publication_step_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_rich_menu_publication_step_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_links_before_delete` BEFORE DELETE ON `line_safe_review_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_links records cannot be deleted';
+SET MESSAGE_TEXT = 'line_safe_review_links records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_events_before_delete` BEFORE DELETE ON `line_safe_review_link_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be deleted';
+SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_events_before_update` BEFORE UPDATE ON `line_safe_review_link_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be updated';
+SET MESSAGE_TEXT = 'line_safe_review_link_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_outbox_before_delete` BEFORE DELETE ON `line_safe_review_link_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be deleted';
+SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_outbox_before_update` BEFORE UPDATE ON `line_safe_review_link_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be updated';
+SET MESSAGE_TEXT = 'line_safe_review_link_outbox records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_receipts_before_delete` BEFORE DELETE ON `line_safe_review_link_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_safe_review_link_receipts_before_update` BEFORE UPDATE ON `line_safe_review_link_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'line_safe_review_link_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_webhook_security_receipts_before_delete` BEFORE DELETE ON `line_webhook_security_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_webhook_security_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'line_webhook_security_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_line_webhook_security_receipts_before_update` BEFORE UPDATE ON `line_webhook_security_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'line_webhook_security_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'line_webhook_security_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_apply_receipts_before_delete` BEFORE DELETE ON `matching_coordination_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_apply_receipts_before_delete` BEFORE DELETE ON `matching_coordination_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_apply_receipts_before_update` BEFORE UPDATE ON `matching_coordination_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_coordination_events_before_delete` BEFORE DELETE ON `matching_coordination_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_coordination_events_before_delete` BEFORE DELETE ON `matching_coordination_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_coordination_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_coordination_events_before_update` BEFORE UPDATE ON `matching_coordination_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_events records cannot be updated';
+SET MESSAGE_TEXT = 'matching_coordination_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_criteria_snapshots_before_delete` BEFORE DELETE ON `matching_coordination_criteria_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_criteria_snapshots_before_delete` BEFORE DELETE ON `matching_coordination_criteria_snapshots` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_criteria_snapshots_before_update` BEFORE UPDATE ON `matching_coordination_criteria_snapshots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be updated';
+SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_outbox_before_delete` BEFORE DELETE ON `matching_coordination_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_outbox_before_delete` BEFORE DELETE ON `matching_coordination_outbox` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_outbox_before_update` BEFORE UPDATE ON `matching_coordination_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be updated';
+SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_package_lineage_before_delete` BEFORE DELETE ON `matching_coordination_package_lineage` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_package_lineage_before_delete` BEFORE DELETE ON `matching_coordination_package_lineage` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_package_lineage_before_update` BEFORE UPDATE ON `matching_coordination_package_lineage` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be updated';
+SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_plan_create_receipts_before_delete` BEFORE DELETE ON `matching_plan_create_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching plan create receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_plan_create_receipts_before_delete` BEFORE DELETE ON `matching_plan_create_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching plan create receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_plan_create_receipts_before_update` BEFORE UPDATE ON `matching_plan_create_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching plan create receipts cannot be updated';
+SET MESSAGE_TEXT = 'matching plan create receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_matching_response_events_before_delete` BEFORE DELETE ON `matching_response_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_response_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_matching_response_events_before_delete` BEFORE DELETE ON `matching_response_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`plan_id`=r40.`id`) OR EXISTS(SELECT 1 FROM `caregiver_matching_plan_segments` r39 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r39.`plan_id`=r40.`id`))) AND OLD.`segment_id`=r39.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'matching_response_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_matching_response_events_before_update` BEFORE UPDATE ON `matching_response_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'matching_response_events records cannot be updated';
+SET MESSAGE_TEXT = 'matching_response_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_actual_start_events_before_delete` BEFORE DELETE ON `order_actual_start_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_actual_start_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_actual_start_events_before_delete` BEFORE DELETE ON `order_actual_start_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_actual_start_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_actual_start_events_before_update` BEFORE UPDATE ON `order_actual_start_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_actual_start_events records cannot be updated';
+SET MESSAGE_TEXT = 'order_actual_start_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_actual_start_receipts_before_delete` BEFORE DELETE ON `order_actual_start_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_actual_start_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_actual_start_receipts_before_delete` BEFORE DELETE ON `order_actual_start_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_actual_start_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_actual_start_receipts_before_update` BEFORE UPDATE ON `order_actual_start_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_actual_start_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'order_actual_start_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_auto_completion_receipts_before_delete` BEFORE DELETE ON `order_auto_completion_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_auto_completion_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_auto_completion_receipts_before_delete` BEFORE DELETE ON `order_auto_completion_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_auto_completion_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_auto_completion_receipts_before_update` BEFORE UPDATE ON `order_auto_completion_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_auto_completion_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'order_auto_completion_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_cancellation_events_before_delete` BEFORE DELETE ON `order_cancellation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_cancellation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_cancellation_events_before_delete` BEFORE DELETE ON `order_cancellation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_cancellation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_cancellation_events_before_update` BEFORE UPDATE ON `order_cancellation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_cancellation_events records cannot be updated';
+SET MESSAGE_TEXT = 'order_cancellation_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_cancellation_receipts_before_delete` BEFORE DELETE ON `order_cancellation_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_cancellation_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_cancellation_receipts_before_delete` BEFORE DELETE ON `order_cancellation_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_cancellation_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_cancellation_receipts_before_update` BEFORE UPDATE ON `order_cancellation_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_cancellation_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'order_cancellation_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_contract_completion_receipts_before_delete` BEFORE DELETE ON `order_contract_completion_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_contract_completion_apply_receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_contract_completion_receipts_before_delete` BEFORE DELETE ON `order_contract_completion_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_contract_completion_apply_receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_contract_completion_receipts_before_update` BEFORE UPDATE ON `order_contract_completion_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_contract_completion_apply_receipts cannot be updated';
+SET MESSAGE_TEXT = 'order_contract_completion_apply_receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_contract_flow_events_before_delete` BEFORE DELETE ON `order_contract_flow_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_contract_flow_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_contract_flow_events_before_delete` BEFORE DELETE ON `order_contract_flow_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_contract_flow_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_contract_flow_events_before_update` BEFORE UPDATE ON `order_contract_flow_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_contract_flow_events records cannot be updated';
+SET MESSAGE_TEXT = 'order_contract_flow_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_lifecycle_control_events_before_delete` BEFORE DELETE ON `order_lifecycle_control_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'order_lifecycle_control_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_lifecycle_control_events_before_delete` BEFORE DELETE ON `order_lifecycle_control_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_lifecycle_control_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_lifecycle_control_events_before_update` BEFORE UPDATE ON `order_lifecycle_control_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'order_lifecycle_control_events records cannot be updated';
+    SET MESSAGE_TEXT = 'order_lifecycle_control_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_lifecycle_control_state_before_delete` BEFORE DELETE ON `order_lifecycle_control_state` FOR EACH ROW SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'order_lifecycle_control_state records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_lifecycle_control_state_before_delete` BEFORE DELETE ON `order_lifecycle_control_state` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_lifecycle_control_state records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_lifecycle_state_events_before_delete` BEFORE DELETE ON `order_lifecycle_state_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'order_lifecycle_state_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_lifecycle_state_events_before_delete` BEFORE DELETE ON `order_lifecycle_state_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_lifecycle_state_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_lifecycle_state_events_before_update` BEFORE UPDATE ON `order_lifecycle_state_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-    SET MESSAGE_TEXT = 'order_lifecycle_state_events records cannot be updated';
+    SET MESSAGE_TEXT = 'order_lifecycle_state_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_reopen_events_before_delete` BEFORE DELETE ON `order_reopen_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_reopen_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_reopen_events_before_delete` BEFORE DELETE ON `order_reopen_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_reopen_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_reopen_events_before_update` BEFORE UPDATE ON `order_reopen_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_reopen_events records cannot be updated';
+SET MESSAGE_TEXT = 'order_reopen_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_reopen_receipts_before_delete` BEFORE DELETE ON `order_reopen_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_reopen_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_reopen_receipts_before_delete` BEFORE DELETE ON `order_reopen_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_reopen_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_reopen_receipts_before_update` BEFORE UPDATE ON `order_reopen_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_reopen_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'order_reopen_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_service_data_locks_before_delete` BEFORE DELETE ON `order_service_data_locks` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_service_data_locks records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_service_data_locks_before_delete` BEFORE DELETE ON `order_service_data_locks` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_service_data_locks records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_service_data_locks_before_update` BEFORE UPDATE ON `order_service_data_locks` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_service_data_locks records cannot be updated';
+SET MESSAGE_TEXT = 'order_service_data_locks records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_terms_apply_receipts_before_delete` BEFORE DELETE ON `order_terms_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_terms_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_terms_apply_receipts_before_delete` BEFORE DELETE ON `order_terms_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_terms_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_terms_apply_receipts_before_update` BEFORE UPDATE ON `order_terms_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_terms_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'order_terms_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_order_terms_change_events_before_delete` BEFORE DELETE ON `order_terms_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_terms_change_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_order_terms_change_events_before_delete` BEFORE DELETE ON `order_terms_change_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'order_terms_change_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_order_terms_change_events_before_update` BEFORE UPDATE ON `order_terms_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'order_terms_change_events records cannot be updated';
+SET MESSAGE_TEXT = 'order_terms_change_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_payroll_adjustment_allocations_before_delete` BEFORE DELETE ON `payroll_adjustment_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_adjustment_allocations records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_payroll_adjustment_allocations_before_delete` BEFORE DELETE ON `payroll_adjustment_allocations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `payroll_adjustment_events` r287 WHERE ((r287.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`adjustment_event_id`=r287.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_adjustment_allocations records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_payroll_adjustment_allocations_before_update` BEFORE UPDATE ON `payroll_adjustment_allocations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_adjustment_allocations records cannot be updated';
+SET MESSAGE_TEXT = 'payroll_adjustment_allocations records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_payroll_adjustment_events_before_delete` BEFORE DELETE ON `payroll_adjustment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_adjustment_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_payroll_adjustment_events_before_delete` BEFORE DELETE ON `payroll_adjustment_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_adjustment_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_payroll_adjustment_events_before_update` BEFORE UPDATE ON `payroll_adjustment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_adjustment_events records cannot be updated';
+SET MESSAGE_TEXT = 'payroll_adjustment_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_payroll_apply_receipts_before_delete` BEFORE DELETE ON `payroll_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_payroll_apply_receipts_before_delete` BEFORE DELETE ON `payroll_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_payroll_apply_receipts_before_update` BEFORE UPDATE ON `payroll_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_payroll_special_pay_events_before_delete` BEFORE DELETE ON `payroll_special_pay_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_special_pay_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_payroll_special_pay_events_before_delete` BEFORE DELETE ON `payroll_special_pay_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_special_pay_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_payroll_special_pay_events_before_update` BEFORE UPDATE ON `payroll_special_pay_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'payroll_special_pay_events records cannot be updated';
+SET MESSAGE_TEXT = 'payroll_special_pay_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitments_before_delete` BEFORE DELETE ON `precontract_service_commitments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitments records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitments_before_delete` BEFORE DELETE ON `precontract_service_commitments` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitments records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitments_before_update` BEFORE UPDATE ON `precontract_service_commitments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitments records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitments_before_update` BEFORE UPDATE ON `precontract_service_commitments` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitments records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitment_days_before_delete` BEFORE DELETE ON `precontract_service_commitment_days` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_days records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitment_days_before_delete` BEFORE DELETE ON `precontract_service_commitment_days` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `precontract_service_commitments` r295 WHERE ((r295.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`commitment_id`=r295.`id`) OR EXISTS(SELECT 1 FROM `caregiver_matching_plan_segments` r39 WHERE ((EXISTS(SELECT 1 FROM `caregiver_matching_plans` r40 WHERE ((r40.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND r39.`plan_id`=r40.`id`))) AND OLD.`matching_segment_id`=r39.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_days records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitment_days_before_update` BEFORE UPDATE ON `precontract_service_commitment_days` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_days records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitment_days_before_update` BEFORE UPDATE ON `precontract_service_commitment_days` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_days records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitment_events_before_delete` BEFORE DELETE ON `precontract_service_commitment_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitment_events_before_delete` BEFORE DELETE ON `precontract_service_commitment_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `precontract_service_commitments` r295 WHERE ((r295.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`commitment_id`=r295.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_precontract_service_commitment_events_before_update` BEFORE UPDATE ON `precontract_service_commitment_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_precontract_service_commitment_events_before_update` BEFORE UPDATE ON `precontract_service_commitment_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_runtime_health_events_before_delete` BEFORE DELETE ON `runtime_health_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'runtime_health_events records cannot be deleted';
+SET MESSAGE_TEXT = 'runtime_health_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_runtime_health_events_before_update` BEFORE UPDATE ON `runtime_health_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'runtime_health_events records cannot be updated';
+SET MESSAGE_TEXT = 'runtime_health_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_bootstrap_review_events_before_delete` BEFORE DELETE ON `scheduling_bootstrap_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_bootstrap_review_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_bootstrap_review_events_before_delete` BEFORE DELETE ON `scheduling_bootstrap_review_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_bootstrap_review_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_bootstrap_review_events_before_update` BEFORE UPDATE ON `scheduling_bootstrap_review_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_bootstrap_review_events records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_bootstrap_review_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_command_receipts_before_delete` BEFORE DELETE ON `scheduling_command_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_command_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_command_receipts_before_delete` BEFORE DELETE ON `scheduling_command_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_command_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_command_receipts_before_update` BEFORE UPDATE ON `scheduling_command_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_command_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_command_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_leave_batches_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_batches` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_batches cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_leave_batches_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_batches` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_leave_substitution_batches cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_leave_batches_before_update` BEFORE UPDATE ON `scheduling_leave_substitution_batches` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_batches cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_leave_substitution_batches cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_leave_outcomes_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_outcomes` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_outcomes cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_leave_outcomes_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_outcomes` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `scheduling_leave_substitution_batches` r309 WHERE ((r309.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`batch_key`=r309.`batch_key`) OR EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`original_assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `staff_schedule` r379 WHERE ((r379.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`original_schedule_id`=r379.`id`) OR EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`resulting_assignment_id`=r53.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_leave_substitution_outcomes cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_leave_outcomes_before_update` BEFORE UPDATE ON `scheduling_leave_substitution_outcomes` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_outcomes cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_leave_substitution_outcomes cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_leave_receipts_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_receipts cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_leave_receipts_before_delete` BEFORE DELETE ON `scheduling_leave_substitution_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_leave_substitution_receipts cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_leave_receipts_before_update` BEFORE UPDATE ON `scheduling_leave_substitution_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_leave_substitution_receipts cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_leave_substitution_receipts cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_rebuild_events_before_delete` BEFORE DELETE ON `scheduling_rebuild_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_rebuild_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_rebuild_events_before_delete` BEFORE DELETE ON `scheduling_rebuild_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_rebuild_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_rebuild_events_before_update` BEFORE UPDATE ON `scheduling_rebuild_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_rebuild_events records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_rebuild_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_rebuild_lineage_before_delete` BEFORE DELETE ON `scheduling_rebuild_lineage` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_rebuild_lineage records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_rebuild_lineage_before_delete` BEFORE DELETE ON `scheduling_rebuild_lineage` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`new_assignment_id`=r53.`id` AND OLD.`new_generation_id`=r53.`generation_id`) OR EXISTS(SELECT 1 FROM `scheduling_rebuild_events` r312 WHERE ((r312.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`rebuild_event_id`=r312.`id` AND OLD.`new_generation_id`=r312.`new_generation_id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_rebuild_lineage records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_rebuild_lineage_before_update` BEFORE UPDATE ON `scheduling_rebuild_lineage` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_rebuild_lineage records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_rebuild_lineage records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_service_day_checkpoints_before_delete` BEFORE DELETE ON `scheduling_service_day_checkpoints` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_service_day_checkpoints_before_delete` BEFORE DELETE ON `scheduling_service_day_checkpoints` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_service_day_checkpoints_before_update` BEFORE UPDATE ON `scheduling_service_day_checkpoints` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_service_day_checkpoint_events_before_delete` BEFORE DELETE ON `scheduling_service_day_checkpoint_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_service_day_checkpoint_events_before_delete` BEFORE DELETE ON `scheduling_service_day_checkpoint_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `scheduling_service_day_checkpoints` r322 WHERE ((r322.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`checkpoint_id`=r322.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_service_day_checkpoint_events_before_update` BEFORE UPDATE ON `scheduling_service_day_checkpoint_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_service_day_log_attachments_before_delete` BEFORE DELETE ON `scheduling_service_day_log_attachments` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_service_day_log_attachments_before_delete` BEFORE DELETE ON `scheduling_service_day_log_attachments` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `controlled_file_objects` r112 WHERE (((r112.`subject_reference`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND r112.`owner_type` IN ('orders','scheduling','contract_signing')))) AND OLD.`controlled_file_object_id`=r112.`id`) OR EXISTS(SELECT 1 FROM `scheduling_service_day_logs` r326 WHERE ((r326.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`service_day_log_id`=r326.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_service_day_log_attachments_before_update` BEFORE UPDATE ON `scheduling_service_day_log_attachments` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_scheduling_service_day_log_events_before_delete` BEFORE DELETE ON `scheduling_service_day_log_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_scheduling_service_day_log_events_before_delete` BEFORE DELETE ON `scheduling_service_day_log_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `case_staff_assignments` r53 WHERE ((r53.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`assignment_id`=r53.`id`) OR EXISTS(SELECT 1 FROM `scheduling_service_day_logs` r326 WHERE ((r326.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`service_day_log_id`=r326.`id`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_scheduling_service_day_log_events_before_update` BEFORE UPDATE ON `scheduling_service_day_log_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_service_before_replacement_events_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_service_before_replacement_events_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_events_before_insert` BEFORE INSERT ON `scheduling_service_before_replacement_events` FOR EACH ROW SET NEW.case_no = IF(
     EXISTS(
         SELECT 1
@@ -9130,14 +9701,19 @@ CREATE TRIGGER `trg_service_before_replacement_events_before_insert` BEFORE INSE
     ),
     NEW.case_no,
     NULL
-);
+)$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_events_before_update` BEFORE UPDATE ON `scheduling_service_before_replacement_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_service_before_replacement_outbox_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_outbox` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_outbox records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_service_before_replacement_outbox_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_outbox` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_before_replacement_outbox records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_outbox_before_insert` BEFORE INSERT ON `scheduling_service_before_replacement_outbox` FOR EACH ROW SET NEW.case_no = IF(
     EXISTS(
         SELECT 1
@@ -9149,8 +9725,10 @@ CREATE TRIGGER `trg_service_before_replacement_outbox_before_insert` BEFORE INSE
     ),
     NEW.case_no,
     NULL
-);
+)$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_outbox_before_update` BEFORE UPDATE ON `scheduling_service_before_replacement_outbox` FOR EACH ROW SET NEW.replacement_event_id = IF(
     OLD.id <=> NEW.id
     AND OLD.replacement_event_id <=> NEW.replacement_event_id
@@ -9163,11 +9741,14 @@ CREATE TRIGGER `trg_service_before_replacement_outbox_before_update` BEFORE UPDA
     AND OLD.created_at <=> NEW.created_at,
     NEW.replacement_event_id,
     NULL
-);
+)$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_service_before_replacement_receipts_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_service_before_replacement_receipts_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_receipts_before_insert` BEFORE INSERT ON `scheduling_service_before_replacement_receipts` FOR EACH ROW SET NEW.case_no = IF(
     NEW.retained_root_count = (
         SELECT COUNT(*)
@@ -9213,20 +9794,28 @@ CREATE TRIGGER `trg_service_before_replacement_receipts_before_insert` BEFORE IN
     ),
     NEW.case_no,
     NULL
-);
+)$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_receipts_before_update` BEFORE UPDATE ON `scheduling_service_before_replacement_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_receipts records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_service_before_replacement_roots_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_roots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_service_before_replacement_roots_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_roots` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_roots_before_update` BEFORE UPDATE ON `scheduling_service_before_replacement_roots` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_roots records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_service_before_replacement_successors_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_successors` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_service_before_replacement_successors_before_delete` BEFORE DELETE ON `scheduling_service_before_replacement_successors` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_successors_before_insert` BEFORE INSERT ON `scheduling_service_before_replacement_successors` FOR EACH ROW SET NEW.case_no = IF(
     EXISTS(
         SELECT 1
@@ -9242,99 +9831,160 @@ CREATE TRIGGER `trg_service_before_replacement_successors_before_insert` BEFORE 
     ),
     NEW.case_no,
     NULL
-);
+)$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_service_before_replacement_successors_before_update` BEFORE UPDATE ON `scheduling_service_before_replacement_successors` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_service_before_replacement_successors records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_bank_account_events_before_delete` BEFORE DELETE ON `staff_bank_account_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff bank account events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_bank_account_events_before_delete` BEFORE DELETE ON `staff_bank_account_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff bank account events cannot be deleted'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_bank_account_events_before_update` BEFORE UPDATE ON `staff_bank_account_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff bank account events cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_bank_account_events_before_update` BEFORE UPDATE ON `staff_bank_account_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff bank account events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_historical_adoption_receipts_before_delete` BEFORE DELETE ON `staff_historical_adoption_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_historical_adoption_receipts_before_update` BEFORE UPDATE ON `staff_historical_adoption_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_request_events_before_delete` BEFORE DELETE ON `scheduling_staff_leave_request_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be deleted';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_request_events_before_update` BEFORE UPDATE ON `scheduling_staff_leave_request_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_request_receipts_before_delete` BEFORE DELETE ON `scheduling_staff_leave_request_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be deleted';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_request_receipts_before_update` BEFORE UPDATE ON `scheduling_staff_leave_request_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_resolution_links_before_delete` BEFORE DELETE ON `scheduling_staff_leave_request_resolution_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be deleted';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_leave_resolution_links_before_update` BEFORE UPDATE ON `scheduling_staff_leave_request_resolution_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be updated';
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_obligation_events_before_delete` BEFORE DELETE ON `staff_obligation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_obligation_events records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_obligation_events_before_delete` BEFORE DELETE ON `staff_obligation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff_obligation_events records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_obligation_events_before_update` BEFORE UPDATE ON `staff_obligation_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_obligation_events records cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_obligation_events_before_update` BEFORE UPDATE ON `staff_obligation_events` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND NEW.`source_obligation_identity` IS NULL AND NEW.`id` <=> OLD.`id` AND NEW.`obligation_identity` <=> OLD.`obligation_identity` AND NEW.`assignment_id` <=> OLD.`assignment_id` AND NEW.`case_no` <=> OLD.`case_no` AND NEW.`staff_id` <=> OLD.`staff_id` AND NEW.`obligation_kind` <=> OLD.`obligation_kind` AND NEW.`direction` <=> OLD.`direction` AND NEW.`event_type` <=> OLD.`event_type` AND NEW.`before_amount_ntd` <=> OLD.`before_amount_ntd` AND NEW.`after_amount_ntd` <=> OLD.`after_amount_ntd` AND NEW.`due_date` <=> OLD.`due_date` AND NEW.`payroll_fingerprint` <=> OLD.`payroll_fingerprint` AND NEW.`expected_payroll_version` <=> OLD.`expected_payroll_version` AND NEW.`resulting_payroll_version` <=> OLD.`resulting_payroll_version` AND NEW.`idempotency_key` <=> OLD.`idempotency_key` AND NEW.`actor` <=> OLD.`actor` AND NEW.`reason` <=> OLD.`reason` AND NEW.`created_at` <=> OLD.`created_at`),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff_obligation_events records cannot be updated'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_overpayment_recoveries_before_delete` BEFORE DELETE ON `staff_overpayment_recoveries` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_overpayment_recoveries root facts cannot be deleted';
+SET MESSAGE_TEXT = 'staff_overpayment_recoveries root facts cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_overpayment_recovery_events_before_delete` BEFORE DELETE ON `staff_overpayment_recovery_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_overpayment_recovery_events records cannot be deleted';
+SET MESSAGE_TEXT = 'staff_overpayment_recovery_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_overpayment_recovery_events_before_update` BEFORE UPDATE ON `staff_overpayment_recovery_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_overpayment_recovery_events records cannot be updated';
+SET MESSAGE_TEXT = 'staff_overpayment_recovery_events records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payables_receipts_before_delete` BEFORE DELETE ON `staff_payables_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payables_apply_receipts records cannot be deleted';
+SET MESSAGE_TEXT = 'staff_payables_apply_receipts records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payables_receipts_before_update` BEFORE UPDATE ON `staff_payables_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payables_apply_receipts records cannot be updated';
+SET MESSAGE_TEXT = 'staff_payables_apply_receipts records cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_difference_sources_before_delete` BEFORE DELETE ON `staff_payout_difference_sources` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference sources cannot be deleted';
+SET MESSAGE_TEXT = 'staff payout difference sources cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_difference_sources_before_update` BEFORE UPDATE ON `staff_payout_difference_sources` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference sources cannot be updated';
+SET MESSAGE_TEXT = 'staff payout difference sources cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_payout_difference_source_obligations_before_delete` BEFORE DELETE ON `staff_payout_difference_source_obligations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference source obligations cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_payout_difference_source_obligations_before_delete` BEFORE DELETE ON `staff_payout_difference_source_obligations` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `staff_obligations` r360 WHERE ((r360.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r360.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff payout difference source obligations cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_difference_source_obligations_before_update` BEFORE UPDATE ON `staff_payout_difference_source_obligations` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference source obligations cannot be updated';
+SET MESSAGE_TEXT = 'staff payout difference source obligations cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_difference_source_rows_before_delete` BEFORE DELETE ON `staff_payout_difference_source_bank_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference source bank rows cannot be deleted';
+SET MESSAGE_TEXT = 'staff payout difference source bank rows cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_difference_source_rows_before_update` BEFORE UPDATE ON `staff_payout_difference_source_bank_rows` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff payout difference source bank rows cannot be updated';
+SET MESSAGE_TEXT = 'staff payout difference source bank rows cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_events_before_delete` BEFORE DELETE ON `staff_payout_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payout_events records cannot be deleted';
+SET MESSAGE_TEXT = 'staff_payout_events records cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_events_before_update` BEFORE UPDATE ON `staff_payout_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payout_events records cannot be updated';
+SET MESSAGE_TEXT = 'staff_payout_events records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_payout_links_before_delete` BEFORE DELETE ON `staff_payout_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payout_obligation_links records cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_payout_links_before_delete` BEFORE DELETE ON `staff_payout_obligation_links` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((EXISTS(SELECT 1 FROM `staff_obligations` r360 WHERE ((r360.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci))) AND OLD.`obligation_identity`=r360.`obligation_identity`)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff_payout_obligation_links records cannot be deleted'; END IF; END$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_payout_links_before_update` BEFORE UPDATE ON `staff_payout_obligation_links` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff_payout_obligation_links records cannot be updated';
+SET MESSAGE_TEXT = 'staff_payout_obligation_links records cannot be updated'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_profile_change_events_before_delete` BEFORE DELETE ON `staff_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff profile events cannot be deleted';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_profile_change_events_before_delete` BEFORE DELETE ON `staff_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff profile events cannot be deleted'$$
+DELIMITER ;
 
-CREATE TRIGGER `trg_staff_profile_change_events_before_update` BEFORE UPDATE ON `staff_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff profile events cannot be updated';
+DELIMITER $$
+CREATE TRIGGER `trg_staff_profile_change_events_before_update` BEFORE UPDATE ON `staff_profile_change_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff profile events cannot be updated'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_recovery_matchings_before_delete` BEFORE DELETE ON `staff_overpayment_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be deleted';
+SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be deleted'$$
+DELIMITER ;
 
+DELIMITER $$
 CREATE TRIGGER `trg_staff_recovery_matchings_before_update` BEFORE UPDATE ON `staff_overpayment_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be updated';
+SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be updated'$$
+DELIMITER ;
 
 CREATE OR REPLACE VIEW `case_pricing_facts` AS select `o`.`case_no` AS `case_no`,1 AS `pricing_active`,(`e`.`id` is not null) AS `pricing_override_active`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.rule')),`i`.`rule_name`) AS `pricing_rule`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.subsidy_hours')),`i`.`subsidy_hours`) AS `pricing_subsidy_hours`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.covered')),`i`.`client_covered`) AS `pricing_client_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.excess')),`i`.`client_excess`) AS `pricing_client_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),`i`.`payroll_covered`) AS `pricing_payroll_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.excess')),`i`.`payroll_excess`) AS `pricing_payroll_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),json_unquote(json_extract(`p`.`policy_json`,'$.twins_payroll.covered'))) AS `pricing_twins_payroll_covered` from ((((`orders` `o` join `clients` `c` on((`c`.`id` = `o`.`client_id`))) left join `accounting_pricing_policies` `p` on((`p`.`id` = `o`.`pricing_policy_id`))) left join json_table(`p`.`policy_json`, '$.identities[*]' columns (`identity_name` varchar(100) character set utf8mb4 path '$.identity_name', `rule_name` varchar(20) character set utf8mb4 path '$.rule', `subsidy_hours` varchar(100) character set utf8mb4 path '$.subsidy_hours', `client_covered` varchar(30) character set utf8mb4 path '$.client.covered', `client_excess` varchar(30) character set utf8mb4 path '$.client.excess', `payroll_covered` varchar(30) character set utf8mb4 path '$.payroll.covered', `payroll_excess` varchar(30) character set utf8mb4 path '$.payroll.excess')) `i` on(((`i`.`identity_name` collate utf8mb4_unicode_ci) = ((case `c`.`identity_status` when '一般市民' then '補助市民' when '低收入戶' then '社福' when '中低收入戶' then '社福' else `c`.`identity_status` end) collate utf8mb4_unicode_ci)))) left join `case_pricing_events` `e` on(((`e`.`id` = `o`.`pricing_override_event_id`) and (`e`.`case_no` = `o`.`case_no`)))) where ((`o`.`pricing_policy_id` is not null) or (`o`.`pricing_override_event_id` is not null));
 

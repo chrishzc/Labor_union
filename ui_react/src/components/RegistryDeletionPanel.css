@@ -1,0 +1,21 @@
+.registry-deletion-panel {
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid #dba8a2;
+  border-radius: 12px;
+  background: #fff7f6;
+  color: #542c29;
+}
+.registry-deletion-panel h3 { margin: 0 0 .5rem; }
+.registry-deletion-panel p { line-height: 1.6; }
+.registry-deletion-panel button {
+  margin: .25rem .75rem .25rem 0;
+  padding: .6rem .85rem;
+  border: 1px solid #9b3932;
+  border-radius: 6px;
+  background: white;
+  color: #812b25;
+  cursor: pointer;
+}
+.registry-deletion-panel button:disabled { opacity: .55; cursor: default; }
+.registry-deletion-panel button:focus-visible { outline: 3px solid #a55246; outline-offset: 3px; }

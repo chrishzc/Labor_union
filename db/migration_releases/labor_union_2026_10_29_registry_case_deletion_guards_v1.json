@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-registry-case-deletion-guards-2026-10-29-v1",
+  "release_metadata": {
+    "release_name": "Root unsigned case deletion within an active transaction-scoped command",
+    "application_version": "registry-case-deletion-guards-v1",
+    "published_at": "2026-10-29",
+    "description": "Keep ordinary append-only guards and all signed-case protection; permit only the current root deletion command case scope."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-non-citizen-cases-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1060_registry_case_deletion_guards.sql",
+      "relative_path": "db/schema_parts/1060_registry_case_deletion_guards.sql",
+      "sha256": "583b0838cfea0820e930d3d711e7a94bbfd68f060ca248a6fce7803323307980",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-owned-candidate-before-switch; retain-additive-events-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "registry-case-deletion-guards-exact",
+      "phase": "post-schema",
+      "policy": "Exact guarded triggers; every original trigger remains the default without a valid pending command context; business rows unchanged",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "registry-case-deletion-guards-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "registry-case-deletion-guards-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json",
+    "sha256": "0af401f8153c02c313a296a773cc9e8f4a058d1b2cc9112276624bfd28c2df62",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}
