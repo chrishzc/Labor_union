@@ -8,6 +8,8 @@ Staff owner Query／Preview／Apply for the six canonical service-capability rel
   - `domains/staff/case_preference_manual.py`
   - `subsystems/staff/case_preference_manual_workflow.py`
   - `infrastructure/mysql/staff_case_preference_manual_repository.py`
+  - `subsystems/staff/case_preference_summary_query.py` — 六項 canonical relation 的唯讀摘要及明確未知投影。
+  - `infrastructure/mysql/staff_case_preference_summary_query_repository.py`
   - `api/routes/staff_case_preference_manual.py`
   - `api/dependencies/staff_case_preference_manual.py`
   - `api/schemas/staff_case_preference_manual.py`

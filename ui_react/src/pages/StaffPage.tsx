@@ -521,8 +521,12 @@ export const StaffPage: React.FC = () => {
 
   useEffect(() => {
     mountedRef.current = true;
-    void loadInitialDirectory();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void loadInitialDirectory();
+    });
     return () => {
+      cancelled = true;
       mountedRef.current = false;
       sliceGenerationRef.current += 1;
       sliceControllerRef.current?.abort();
@@ -1329,6 +1333,7 @@ export const StaffPage: React.FC = () => {
 
       <Drawer
         isOpen={selectedStaff !== null}
+        closeDisabled={interactionLocked}
         onClose={() => { if (!interactionLocked) setSelectedStaff(null); }}
         title={`月嫂詳情 — ${selectedStaff ? staffDisplayLabel(selectedStaff.unionNo, selectedStaff.displayName) : ''}`}
         size="wide"

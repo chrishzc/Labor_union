@@ -56,9 +56,10 @@ describe('StaffOverpaymentRecoveryActions', () => {
     expect(screen.queryByText(/版本 3|owner root|receipt|staff-overpayment-recovery:1/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/調整金額/)).not.toBeInTheDocument();
     fillExplanation();
-    fireEvent.click(screen.getByRole('button', { name: /檢查精確調整影響/ }));
-    await waitFor(() => expect(screen.getByText('處理影響已確認（尚未寫入）')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '確認並提交' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '儲存精確調整' }));
+    await waitFor(() => expect(staffOverpaymentRecoveryClient.previewAdjustment).toHaveBeenCalledOnce());
+    await waitFor(() => expect(staffOverpaymentRecoveryClient.applyAdjustment).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('button', { name: '確認並提交' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('處理理由'), { target: { value: '改寫理由使舊 Preview 失效。' } });
     expect(screen.queryByText('處理影響已確認（尚未寫入）')).not.toBeInTheDocument();
     expect(onCommitted).not.toHaveBeenCalled();
@@ -78,9 +79,9 @@ describe('StaffOverpaymentRecoveryActions', () => {
     render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity={openQuery.recovery_identity} initialFinanceImportRowId={11} onCommitted={onCommitted} />);
     await waitFor(() => expect(screen.getByText(/目前狀態：待處理/)).toBeInTheDocument());
     fillExplanation();
-    fireEvent.click(screen.getByRole('button', { name: /檢查收款核銷影響/ }));
-    await waitFor(() => expect(screen.getByText(/收款後剩餘 NT\$ 0/)).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '確認並提交' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存收款核銷' }));
+    await waitFor(() => expect(staffOverpaymentRecoveryClient.previewCollection).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('button', { name: '確認並提交' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('已重新確認追償餘額歸零且完成處理，異常可解除。')).toBeInTheDocument());
     expect(apply).toHaveBeenCalledWith(collectionPreview, expect.objectContaining({ finance_import_row_id: 11, matching_identity: 'staff-recovery-match:1', matching_version: 1 }), expect.anything());
     expect(query).toHaveBeenCalledTimes(2);
@@ -94,6 +95,6 @@ describe('StaffOverpaymentRecoveryActions', () => {
     });
     render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity={openQuery.recovery_identity} initialFinanceImportRowId={11} />);
     await waitFor(() => expect(screen.getByText(/目前有多筆入款配對/)).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /檢查收款核銷影響/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存收款核銷' })).not.toBeInTheDocument();
   });
 });

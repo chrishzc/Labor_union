@@ -30,7 +30,7 @@ describe('StaffPage no fake mutation', () => {
     });
     vi.spyOn(staffCasePreferenceManualClient, 'preview');
     vi.spyOn(staffCasePreferenceManualClient, 'apply');
-    vi.spyOn(staffAvailabilityClient, 'getBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
+    vi.spyOn(staffAvailabilityClient, 'getAllBlocks').mockResolvedValue([STAFF_AVAILABILITY_BLOCK]);
     vi.spyOn(staffAvailabilityClient, 'previewChange');
     vi.spyOn(staffAvailabilityClient, 'applyChange');
     vi.spyOn(staffLifecycleClient, 'query').mockResolvedValue(STAFF_LIFECYCLE_VIEW);
@@ -53,7 +53,9 @@ describe('StaffPage no fake mutation', () => {
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: '預覽結束暫停' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '套用取消' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '預覽結束暫停' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '套用取消' })).not.toBeInTheDocument();
+    expect(staffAvailabilityClient.previewChange).not.toHaveBeenCalled();
+    expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
   });
 });

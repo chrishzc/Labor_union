@@ -210,7 +210,7 @@ describe('Staff #staff entry cutover candidate', () => {
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /查看 去敏人員甲 的詳情/ }));
     expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="staff.availability.end-pause"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/人事任職狀態與異動辦理/)).toBeInTheDocument());
     expect(countPath(requests, STAFF_LIFECYCLE_ENDPOINT)).toBe(1);

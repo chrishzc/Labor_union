@@ -70,7 +70,7 @@ describe('StaffPage directory presentation', () => {
     expect(within(bank).getByText('末四碼 1098')).toBeInTheDocument();
     expect(screen.getByRole('table').querySelectorAll('tbody tr')).toHaveLength(1);
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
-    expect(staffDirectoryClient.queryPage).toHaveBeenCalledWith({pageSize:200,includeProfile:true},expect.objectContaining({signal:expect.any(AbortSignal)}));
+    expect(staffDirectoryClient.queryPage).toHaveBeenCalledWith({pageSize:200,includeProfile:true,lifecycleState:'active'},expect.objectContaining({signal:expect.any(AbortSignal)}));
     for (const label of ['最多照顧寶寶數','可承接區域','可承接時段','下廚能力','交通方式','週間服務／排休','特殊節日意願','可承接胎數']) {
       expect(screen.getByRole('columnheader', {name:label})).toBeInTheDocument();
     }
@@ -119,7 +119,7 @@ describe('StaffPage directory presentation', () => {
 
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledWith(
-      { pageSize: 200, afterId: 12, includeProfile:true },
+      { pageSize: 200, afterId: 12, includeProfile:true, lifecycleState: 'active' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -164,7 +164,7 @@ describe('StaffPage directory presentation', () => {
       next_cursor: null,
     });
     const empty = render(<StaffPage />);
-    await waitFor(() => expect(screen.getByText(/目前沒有可顯示/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/目前沒有現役月嫂/)).toBeInTheDocument());
     empty.unmount();
 
     vi.mocked(staffDirectoryClient.queryPage).mockRejectedValueOnce(new Error('typed failure'));

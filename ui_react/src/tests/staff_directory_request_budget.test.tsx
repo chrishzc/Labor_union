@@ -33,7 +33,7 @@ describe('StaffPage request budget', () => {
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(2);
     expect(staffDirectoryClient.queryPage).toHaveBeenLastCalledWith(
-      { pageSize: 200, afterId: 12, includeProfile:true },
+      { pageSize: 200, afterId: 12, includeProfile:true, lifecycleState: 'active' },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
   });
@@ -51,7 +51,7 @@ describe('StaffPage request budget', () => {
     await waitFor(() => expect(screen.getByText('去敏人員乙')).toBeInTheDocument());
     expect(staffDirectoryClient.queryPage).toHaveBeenNthCalledWith(
       4,
-      { pageSize: 200, afterId: 12, includeProfile:true },
+      { pageSize: 200, afterId: 12, includeProfile:true, lifecycleState: 'active' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -73,6 +73,7 @@ describe('StaffPage request budget', () => {
       }
     );
     const view = render(<StaffPage />);
+    await waitFor(() => expect(receivedSignal).toBeInstanceOf(AbortSignal));
     view.unmount();
     await Promise.resolve();
 

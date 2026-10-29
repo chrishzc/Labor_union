@@ -33,7 +33,7 @@ describe('StaffPage zero fake mutation', () => {
       'staff.availability.end-pause',
       'staff.availability.end-pause.apply',
     ]) {
-      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
+      expect(document.querySelector(`[data-control-id="${id}"]`)).not.toBeInTheDocument();
     }
     const unsupportedIds = [
       'staff.master.save',
@@ -46,7 +46,7 @@ describe('StaffPage zero fake mutation', () => {
       expect(document.querySelector(`[data-control-id="${id}"]`)).not.toBeInTheDocument();
     }
     expect(screen.getByText('正在載入人事異動主檔…')).toBeInTheDocument();
-    expect(screen.getByText(/填寫生效時間與原因後/)).toBeInTheDocument();
+    expect(screen.getByText('退役生效日期是停止接案的日期；仍有未結束案件時，須先完成案件或辦理改派。已退役者可辦理復職；原因可選填。')).toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.lifecycle.retirement.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.lifecycle.reactivation.preview"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="staff.lifecycle.reactivation.apply"]')).not.toBeInTheDocument();
