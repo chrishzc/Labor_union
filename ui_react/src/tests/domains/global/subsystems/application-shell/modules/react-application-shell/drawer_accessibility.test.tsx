@@ -36,7 +36,9 @@ describe('Drawer 無障礙互動', () => {
     expect(document.body).toHaveClass('modal-open');
     await waitFor(() => expect(screen.getByRole('button', { name: '關閉測試抽屜' })).toHaveFocus());
 
-    fireEvent.keyDown(window, { key: 'Escape' });
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true });
+    fireEvent(window, escape);
+    expect(escape.defaultPrevented).toBe(true);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(document.body).not.toHaveClass('modal-open');
     expect(trigger).toHaveFocus();

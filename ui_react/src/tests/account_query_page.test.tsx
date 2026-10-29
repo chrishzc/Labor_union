@@ -57,13 +57,11 @@ describe('AccountManagementPage query slice', () => {
     });
     render(<AccountManagementPage />);
     await screen.findByText(/根帳號/);
-    fireEvent.click(screen.getByRole('button', { name: /強制登出/ }));
     expect(revoke).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('操作原因'), { target: { value: '  已確認登出需求  ' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認執行' }));
-    expect(screen.getByRole('button', { name: '確認執行' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /強制登出/ }));
+    expect(screen.queryByRole('button', { name: '確認執行' })).not.toBeInTheDocument();
     expect(revoke).toHaveBeenCalledExactlyOnceWith(1, {
-      reason: '已確認登出需求', expected_version: 2, idempotency_key: expect.any(String),
+      reason: '', expected_version: 2, idempotency_key: expect.any(String),
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(accountDirectoryClient.query).toHaveBeenCalledTimes(2);

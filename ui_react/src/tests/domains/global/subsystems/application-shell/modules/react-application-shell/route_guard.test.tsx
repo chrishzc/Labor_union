@@ -135,14 +135,10 @@ describe('Route Guard & Shell Hash Navigation', () => {
 
     // Stage 2
     await waitFor(() => {
-      expect(document.getElementById('totp-0')).toBeInTheDocument();
+      expect(screen.getByLabelText('六位數驗證碼')).toBeInTheDocument();
     });
 
-    for (let i = 0; i < 6; i++) {
-      fireEvent.change(document.getElementById(`totp-${i}`)!, {
-        target: { value: '9' },
-      });
-    }
+    fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '999999' } });
 
     fireEvent.click(screen.getByRole('button', { name: /驗證並登入系統/ }));
 
@@ -173,7 +169,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     fireEvent.click(workbenchNav);
 
     expect(window.location.hash).toBe('#order-workbench-v2');
-    expect(workbenchNav).toHaveClass('active');
+    await waitFor(() => expect(workbenchNav).toHaveClass('active'));
   });
 
   it('切換頂部主作業區分頁應切換側邊欄與頁面視圖', async () => {
@@ -190,7 +186,7 @@ describe('Route Guard & Shell Hash Navigation', () => {
     const financeTab = screen.getByRole('button', { name: /帳務作業/ });
     fireEvent.click(financeTab);
 
-    expect(screen.getByTitle('帳務中心')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('帳務中心')).toBeInTheDocument());
   });
 
   it('觸發 hashchange 事件時應響應式更新對應頁面視圖', async () => {
