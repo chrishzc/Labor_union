@@ -8,6 +8,7 @@
 以單一 owned Windows supervisor 啟動並監督 FastAPI、React 與各背景 worker。Private API shared key 依序沿用明確 process value、本機 `.env` 現有值，僅兩者都缺少時產生當次臨時值，並由所有 child 共用；API ready 後先通過無副作用認證握手，才能啟動 worker。
 
 ## Implementation
+- NAS LIFF operation bridge：`api/routes/nas_line_operations.py`、`infrastructure/http/line_operations_client.py` 與 `api/nas_apps.py` 明確組合接案回覆、訂金、服務說明／回饋、手機工會管理及其既有子路由。公開容器只轉送原 JSON 契約，管理端私人入口 `/internal/v1/line-operations` 以 `line-operations-proxy` 獨立機器憑證保護，仍執行原 LINE 憑證／綁定／能力／本人範圍／版本與冪等驗證。新 token／verifier 分別掛載，不改舊 Worker registry 或公開 LINE DB GRANT；既有安裝由 initialize 只補此獨立憑證組，其他秘密及資料不覆寫。測試 `test_nas_line_operations.py` 位於本 Module root。
 - Windows management entry: `Windows管理.bat`、`scripts/launchers/manage_windows.ps1` — single daily management surface using the existing supervisor and run-bound maintenance channel.
 - Windows source handoff: `scripts/package_windows_runtime.py` — secret-filtered current program ZIP with source hash manifest, reusing NAS `include_source`; no configuration or runtime data.
 - Windows 遠端專用入口：`scripts/launchers/start_windows_remote.bat`、`scripts/windows_remote_runtime.py`，操作由 `scripts/launchers/WINDOWS-REMOTE.md` 承接。建置驗證靜態 artifact，僅 loopback 5173 的 `/test/` 與 `/test/api/`；Gateway 不擁有業務規則，API 保留原授權／writer。supervisor 只在明確 artifact 環境 binding 時改用靜態 Gateway，不啟動 Vite；原 DB gate／worker／cleanup 不變。`--prepare` 不啟動服務、不接觸 DB 或 Cloudflare。測試 `test_windows_remote_runtime.py` 位於既有 Module root。

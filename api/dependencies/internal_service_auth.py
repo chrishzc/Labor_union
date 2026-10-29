@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request, status
-from infrastructure.runtime.worker_credentials import read_verifiers, LINE_MEDIA_SERVICE
+from infrastructure.runtime.worker_credentials import read_verifiers, LINE_MEDIA_SERVICE, LINE_OPERATIONS_SERVICE
 
 
 LOCAL_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
@@ -54,6 +54,13 @@ def require_internal_service(
             "message": "The photo credential cannot run other internal operations.",
             "retryable": False,
         })
+    if (principal.service_name == LINE_OPERATIONS_SERVICE
+            and not request.url.path.startswith("/internal/v1/line-operations/")):
+        raise HTTPException(status_code=403, detail={
+            "code": "internal_service_operation_forbidden",
+            "message": "The LINE operations credential cannot run other internal operations.",
+            "retryable": False,
+        })
     request.state.internal_service_principal = principal
     return principal
 
@@ -91,9 +98,12 @@ def _authenticate_nas(
     service_name: str,
     authorization: str | None,
 ) -> InternalServicePrincipal:
-    path = os.getenv("INTERNAL_SERVICE_CREDENTIALS_FILE", "").strip()
+    operations = service_name == LINE_OPERATIONS_SERVICE
+    setting = "LINE_OPERATIONS_CREDENTIALS_FILE" if operations else "INTERNAL_SERVICE_CREDENTIALS_FILE"
+    path = os.getenv(setting, "").strip()
     try:
-        verifiers = read_verifiers(path)
+        verifiers = (read_verifiers(path, allowed_services=(LINE_OPERATIONS_SERVICE,))
+                     if operations else read_verifiers(path))
     except (OSError, ValueError, TypeError):
         raise _authentication_unavailable() from None
     digest = hashlib.sha256(_bearer_token(authorization).encode("utf-8")).hexdigest()

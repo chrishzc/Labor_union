@@ -71,6 +71,43 @@ def test_build_source_filter_rejects_live_settings_and_credentials(name):
     assert include_source('scripts/nas_security_runtime.py')
 
 
+def test_historical_zod_security_update_preserves_ui_and_only_migrates_reviewed_syntax(tmp_path):
+    import json
+    from scripts.package_nas_preview import _use_patched_previous_ui_toolchain
+    for folder, zod, vite in [("ui_react", "4.6.7", "8.2.4"), ("previous_ui", "^3.24.2", "^8.2.0")]:
+        target = tmp_path / folder
+        target.mkdir()
+        (target / "package.json").write_text(json.dumps({"dependencies": {"zod": zod},
+            "devDependencies": {"vite": vite}}), encoding="utf-8")
+        (target / "package-lock.json").write_text(json.dumps({"packages": {
+            "node_modules/zod": {"version": zod}, "node_modules/react": {"version": "unchanged"}}}), encoding="utf-8")
+        (target / "App.tsx").write_text(folder, encoding="utf-8")
+    source = tmp_path / "previous_ui/src/api/client_registry/client_registry_schemas.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("before: z.record(orderInformationValue), after: z.record(orderInformationValue)", encoding="utf-8")
+    assert _use_patched_previous_ui_toolchain(tmp_path) == [source.relative_to(tmp_path / "previous_ui").as_posix()]
+    assert source.read_text() == "before: z.record(z.string(), orderInformationValue), after: z.record(z.string(), orderInformationValue)"
+    assert (tmp_path / "previous_ui/App.tsx").read_text() == "previous_ui"
+    assert (tmp_path / "previous_ui/package-lock.json").read_bytes() == (tmp_path / "ui_react/package-lock.json").read_bytes()
+
+
+def test_historical_zod_upgrade_stops_before_mutation_when_the_source_needs_review(tmp_path):
+    import json
+    from scripts.package_nas_preview import _use_patched_previous_ui_toolchain
+    for folder, zod in [("ui_react", "4.6.7"), ("previous_ui", "^3.24.2")]:
+        target = tmp_path / folder
+        target.mkdir()
+        (target / "package.json").write_text(json.dumps({"dependencies": {"zod": zod}}), encoding="utf-8")
+        (target / "package-lock.json").write_text(json.dumps({"packages": {"node_modules/zod": {"version": zod}}}), encoding="utf-8")
+    source = tmp_path / "previous_ui/src/api/client_registry/client_registry_schemas.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("only_one: z.record(orderInformationValue)", encoding="utf-8")
+    before = {p: p.read_bytes() for p in (tmp_path / "previous_ui").rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="historical Zod API syntax differs"):
+        _use_patched_previous_ui_toolchain(tmp_path)
+    assert {p: p.read_bytes() for p in before} == before
+
+
 def test_private_api_certificates_include_strict_chain_identifiers(tmp_path, monkeypatch):
     from cryptography import x509
     from scripts import nas_security_runtime as runtime
@@ -198,7 +235,7 @@ def isolated_initializer(tmp_path, monkeypatch):
     from scripts import compact_fresh_schema, nas_security_runtime as runtime
     from subsystems.line.configuration_store import CONFIG_FILES
     monkeypatch.setattr(compact_fresh_schema, 'load_compact_plan', lambda: {})
-    for name in ['SETTINGS', 'LINE_SETTINGS', 'PROFILES_ROOT', 'WORKERS', 'API_TLS', 'CA', 'DB_CA', 'LINE_CONFIG']:
+    for name in ['SETTINGS', 'LINE_SETTINGS', 'PROFILES_ROOT', 'WORKERS', 'LINE_OPERATIONS', 'API_TLS', 'CA', 'DB_CA', 'LINE_CONFIG']:
         path = tmp_path/name; path.mkdir(); monkeypatch.setattr(runtime, name, path)
     roots = tuple(tmp_path/name for name in ['files', 'media', 'knowledge'])
     for root in roots: root.mkdir()
@@ -280,6 +317,23 @@ def test_tunnel_routes_only_to_public_api_and_denies_private_operations():
     assert rules[1]["service"] == "https://line-api:8443"
     assert rules[1]["originRequest"]["noTLSVerify"] is False
     assert rules[-1] == {"service": "http_status:404"}
+
+
+def test_existing_installation_adds_only_the_separate_line_bridge_credentials(isolated_initializer, monkeypatch):
+    runtime = isolated_initializer
+    prepare_bridge = runtime._prepare_line_operations
+    # Model the already-installed six-service release without touching NAS data.
+    monkeypatch.setattr(runtime, "_prepare_line_operations", lambda: None)
+    runtime.initialize()
+    before = {path: path.read_bytes() for path in runtime.SETTINGS.parent.rglob("*") if path.is_file()}
+    monkeypatch.setattr(runtime, "_prepare_line_operations", prepare_bridge)
+    runtime.initialize()
+    assert {path: path.read_bytes() for path in before} == before
+    assert (runtime.LINE_OPERATIONS / "line-operations-proxy/token").is_file()
+    assert (runtime.LINE_OPERATIONS / "api/verifiers.json").is_file()
+    all_files = {path: path.read_bytes() for path in runtime.SETTINGS.parent.rglob("*") if path.is_file()}
+    runtime.initialize()
+    assert {path: path.read_bytes() for path in all_files} == all_files
 
 
 def test_stale_compact_schema_stops_before_initialization(monkeypatch):

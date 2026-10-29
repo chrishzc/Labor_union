@@ -100,6 +100,8 @@ services:
       - line-token:/workers/line-worker
       - monitor-token:/workers/runtime-monitor
       - line-media-token:/workers/line-media-proxy
+      - line-operations-token:/line-operations-credentials/line-operations-proxy
+      - line-operations-verifier:/line-operations-credentials/api
       - management-tls:/api-tls/management-api
       - line-tls:/api-tls/line-api
       - private-ca:/private-ca
@@ -174,6 +176,7 @@ services:
       NAS_TRUSTED_PROXY_IPS: ${NAS_TUNNEL_MANAGEMENT_PROXY_IP:-172.31.251.2}
       REACT_ADMIN_PREVIOUS_ARTIFACT_DIR: /opt/react-admin/previous
       REACT_ADMIN_ACTIVE_SELECTOR: current
+      LINE_OPERATIONS_CREDENTIALS_FILE: /run/line-operations-verifier/verifiers.json
       FILE_SETTINGS_PATH: /data/file-settings.json
       ACCOUNTS_PAYABLE_ARCHIVE_ROOT: /data/accounts-payable-archive
       FILE_PHOTO_MAX_BYTES: ${FILE_PHOTO_MAX_BYTES:-10485760}
@@ -193,6 +196,7 @@ services:
         read_only: true
         bind: {create_host_path: false}
       - access-db:/run/db-access:ro
+      - line-operations-verifier:/run/line-operations-verifier:ro
       - maintenance-db:/run/db-maintenance:ro
       - worker-verifiers:/run/worker-verifiers:ro
       - management-tls:/run/api-tls:ro
@@ -246,6 +250,9 @@ services:
       LINE_MEDIA_API_BASE_URL: https://management-api:8443
       LINE_MEDIA_SERVICE_TOKEN_FILE: /run/line-media-proxy/token
       LINE_MEDIA_API_CA_FILE: /run/private-ca/ca.pem
+      LINE_OPERATIONS_API_BASE_URL: https://management-api:8443
+      LINE_OPERATIONS_SERVICE_TOKEN_FILE: /run/line-operations-proxy/token
+      LINE_OPERATIONS_API_CA_FILE: /run/private-ca/ca.pem
       FILE_TRANSFER_TIMEOUT_SECONDS: ${FILE_TRANSFER_TIMEOUT_SECONDS:-60}
     volumes:
       - line-settings:/line-settings:ro
@@ -260,6 +267,7 @@ services:
       - private-ca:/run/private-ca:ro
       - db-ca:/run/db-ca:ro
       - line-media-token:/run/line-media-proxy:ro
+      - line-operations-token:/run/line-operations-proxy:ro
       - type: bind
         source: ${NAS_DATA_ROOT}/line-media
         target: /data/media
@@ -390,6 +398,8 @@ volumes:
   line-token: {}
   monitor-token: {}
   line-media-token: {}
+  line-operations-token: {}
+  line-operations-verifier: {}
   management-tls: {}
   line-tls: {}
   private-ca: {}

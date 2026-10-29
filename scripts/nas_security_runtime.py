@@ -13,7 +13,9 @@ import sys
 from dotenv import dotenv_values
 
 from infrastructure.mysql.nas_permissions import account_names, PROFILES
-from infrastructure.runtime.worker_credentials import prepare_credentials, SERVICES
+from infrastructure.runtime.worker_credentials import (
+    prepare_credentials, SERVICES, LINE_OPERATIONS_SERVICE, ensure_line_operations_credentials,
+)
 from scripts import nas_appliance, nas_test_runtime
 
 
@@ -21,6 +23,7 @@ SETTINGS = Path("/settings")
 LINE_SETTINGS = Path("/line-settings")
 PROFILES_ROOT = Path("/profiles")
 WORKERS = Path("/workers")
+LINE_OPERATIONS = Path("/line-operations-credentials")
 API_TLS = Path("/api-tls")
 CA = Path("/private-ca")
 DB_CA = Path("/db-ca")
@@ -31,6 +34,14 @@ FILE_ROOTS = (Path("/controlled-files"), Path("/line-media"), Path("/knowledge-d
 def _write(path, value, mode=0o400):
     nas_test_runtime._write(path, value, mode)
     os.chown(path, 1000, -1)
+
+
+def _prepare_line_operations():
+    ensure_line_operations_credentials(LINE_OPERATIONS)
+    for path in (LINE_OPERATIONS / LINE_OPERATIONS_SERVICE,
+                 LINE_OPERATIONS / LINE_OPERATIONS_SERVICE / "token",
+                 LINE_OPERATIONS / "api", LINE_OPERATIONS / "api/verifiers.json"):
+        os.chown(path, 1000, -1)
 
 
 def _management_certificate_names():
@@ -104,6 +115,7 @@ def initialize():
                     *(API_TLS / s / file for s in ("management-api", "line-api") for file in ("server-cert.pem", "server-key.pem"))]
         if json.loads(marker.read_text()) != {"format": "nas-security/v1"} or not all(p.is_file() for p in expected):
             raise ValueError("partial NAS security settings; existing files preserved")
+        _prepare_line_operations()
         print("Existing NAS security settings preserved.")
         return
     if (SETTINGS / "prepared.json").exists() or any(any(p.iterdir()) for p in
@@ -130,6 +142,7 @@ def initialize():
     prepare_credentials(WORKERS, services=SERVICES)
     for path in WORKERS.rglob("*"):
         os.chown(path, 1000, -1)
+    _prepare_line_operations()
     _prepare_api_tls(management_names)
     _write(nas_appliance.DATA / "management-api-ca.crt", (CA / "ca.pem").read_bytes(), 0o444)
     common = ("APP_ENV=production\nDEPLOYMENT_PROFILE=nas\nACCESS_CONTROL_PROFILE=production\nENABLE_ADMIN_AUTH=true\n"
