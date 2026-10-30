@@ -6,7 +6,7 @@ import os
 import shutil
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Iterable, Protocol
 
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
@@ -162,8 +162,10 @@ def _media_storage_observation(now: datetime) -> RuntimeHealthObservation:
 
 
 def _media_storage_root() -> Path | None:
-    if os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
-        configured_root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
+    configured_root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
+    windows = PureWindowsPath(configured_root)
+    nas_root = windows.is_absolute() and windows.drive.startswith("\\\\") and not windows.drive.startswith("\\\\?\\")
+    if nas_root or os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
         return Path(configured_root) if configured_root else None
     configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
     path = Path(configured)

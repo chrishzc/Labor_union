@@ -610,6 +610,7 @@ Windows 操作入口為 `backup_nas_database.bat`、`initialize_nas_schema.bat`�
 
 - Target／授權：獨立 `.env.nas-maintenance` 須明確啟用並固定 NAS host／port，與選定 runtime `.env` 一致。
   拒絕 loopback、本機開發庫及 process override 衝突。缺設定與 `--dry-run` 均零連線／DB 寫入／排程。
+  Override 檢查固定 DB／TLS／根目錄；Windows source 模式的 process APP_ENV 與原檔不同不代表切換 DB，不因此誤擋。
   技術人員一次備妥原 runtime 帳號、備份與維護連線帳密、MySQL 8 原生 clients。
   依後續人工核准，備份與維護可共用同一帳號（含 root），兩組帳密仍須明確填妥；備份 session 維持唯讀。
   不啟用 SSH、不修改 NAS 容器或全域 MySQL 設定、不放寬 TLS。

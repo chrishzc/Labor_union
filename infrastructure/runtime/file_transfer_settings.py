@@ -24,7 +24,7 @@ class FileSettingsError(RuntimeError):
 def file_settings_path() -> Path:
     explicit = os.getenv("FILE_SETTINGS_PATH", "").strip()
     root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
-    if not explicit and not is_development_environment():
+    if not explicit and (not is_development_environment() or unified_storage_enabled()):
         try:
             configured = configured_storage_root()
         except StorageLayoutError:

@@ -84,6 +84,16 @@ def test_process_storage_override_cannot_redirect_backup(settings, monkeypatch):
         nas.load_settings(settings["environment_file"], settings["settings_file"])
 
 
+def test_windows_source_mode_flag_does_not_override_pinned_nas_target(settings, monkeypatch):
+    path = settings["environment_file"]
+    path.write_text(path.read_text(encoding="utf-8") + "APP_ENV=production\n", encoding="utf-8")
+    monkeypatch.setenv("APP_ENV", "development")
+    assert nas.load_settings(path, settings["settings_file"])["host"] == "nas.invalid"
+    monkeypatch.setenv("DB_HOST", "other.invalid")
+    with pytest.raises(nas.MaintenanceBlocked, match="執行環境與設定檔不同"):
+        nas.load_settings(path, settings["settings_file"])
+
+
 @pytest.mark.parametrize("root", ["D:/backups", "Z:/share", r"\\localhost\share"])
 def test_runtime_local_storage_root_is_rejected_for_nas_backup(settings, monkeypatch, root):
     monkeypatch.setattr(nas, "is_nas_destination", IS_NAS_DESTINATION)

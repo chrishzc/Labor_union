@@ -1,5 +1,6 @@
 """One production root, write-time layout, and untouched legacy development data."""
 import hashlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -137,6 +138,27 @@ def test_development_explicit_roots_and_existing_data_are_unchanged(nas_root, mo
     assert sentinel.read_bytes() == b"old development bytes"
     assert not list(nas_root.iterdir())
     assert not layout.unified_storage_enabled()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows UNC source-mode deployment")
+def test_windows_source_mode_uses_explicit_nas_root_despite_development_flag(nas_root, monkeypatch):
+    from api.dependencies.contract_signing import _archive_root
+    from api.dependencies.line_worker_operation import _media_storage_root, _rich_menu_storage_root
+    from infrastructure.runtime.file_transfer_settings import file_settings_path
+    from api.routes.line_rich_menus import _menu_media_storage_root
+    from subsystems.line.runtime_monitoring_application import _media_storage_root as monitored_root
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("CONTROLLED_FILE_STORAGE_ROOT", r"\\nas.invalid\shared")
+    monkeypatch.delenv("FILE_SETTINGS_PATH", raising=False)
+    expected = Path(r"\\nas.invalid\shared")
+    assert layout.unified_storage_enabled()
+    assert _archive_root() == expected / layout.ORDERS_DIRECTORY
+    assert _rich_menu_storage_root() == expected / layout.MEDIA_DIRECTORY
+    assert _media_storage_root() == expected / layout.STAGING_DIRECTORY / "line_media"
+    assert file_settings_path() == expected / ".file-settings.json"
+    assert _menu_media_storage_root() == expected / layout.MEDIA_DIRECTORY
+    assert monitored_root() == expected
+    assert not list(nas_root.iterdir())
 
 
 def test_old_staging_bytes_and_idempotency_replay_are_read_without_migration(nas_root):

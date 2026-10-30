@@ -201,7 +201,9 @@ def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
     require(1 <= port <= 65535 and port == int(values.get("NAS_EXPECTED_PORT") or "3306"), "NAS 連線埠與維護目標不同。")
     database = runtime.get("DB_DATABASE") or ""
     require(IDENTIFIER.fullmatch(database) and (database == "union_db" or database.startswith("lu_nas_")), "不是核准的 NAS 業務資料庫。")
-    for key in ("APP_ENV", "CONTROLLED_FILE_STORAGE_ROOT", *(key for key in runtime if key.startswith("DB_"))):
+    # The Windows source-mode launcher changes APP_ENV independently of the
+    # actual DB target. Pin credentials/DB/TLS/root rather than this UI flag.
+    for key in ("CONTROLLED_FILE_STORAGE_ROOT", *(key for key in runtime if key.startswith("DB_"))):
         require(key not in os.environ or os.environ[key] == runtime.get(key), "目前執行環境與設定檔不同，已停止，請維護人員確認。")
     required = ("NAS_BACKUP_USER", "NAS_BACKUP_PASSWORD", "NAS_MAINTENANCE_USER", "NAS_MAINTENANCE_PASSWORD")
     require(all(values.get(key) for key in required), "缺少備份或升級維護帳號，請維護人員設定。")

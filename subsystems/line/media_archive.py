@@ -6,7 +6,7 @@ import hashlib
 import io
 import os
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Protocol
 
 import pymysql
@@ -119,7 +119,9 @@ def _save_asset(
     os.replace(temporary, target)
     digest = hashlib.sha256(content).hexdigest()
     provider = os.getenv("MEDIA_STORAGE_PROVIDER", "local").strip().lower()
-    if os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
+    windows = PureWindowsPath(str(media_storage_root()))
+    nas_root = windows.is_absolute() and windows.drive.startswith("\\\\") and not windows.drive.startswith("\\\\?\\")
+    if nas_root or os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
         provider = "nas"
     if provider not in {"local", "nas"}:
         provider = "local"

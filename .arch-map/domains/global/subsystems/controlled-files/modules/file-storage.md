@@ -13,6 +13,7 @@
 - shared layout: `infrastructure/file/storage_layout.py` — one production `CONTROLLED_FILE_STORAGE_ROOT`, fixed 01–05 and `_staging`, write-time child creation, no missing-root creation or local fallback. Explicit development archive/media roots remain unchanged.
 - New staging uses `_staging`; the legacy hidden staging directory is read/replayed without migration, and both staging namespaces plus the SQL backup area are excluded from business discovery/direct reads. Finalized staff files create resume/certificates/health_and_police siblings.
 - `DATABASE_BACKUP_DIRECTORY` is defined by storage_layout and re-exported by the storage adapter for `scripts/nas_database_maintenance.py`.
+- Explicit Windows UNC roots also enable the unified layout in the manager's source-mode APP_ENV=development process. Only local, non-NAS development roots retain legacy archive/media precedence; existing bytes are not migrated.
 
 ## Contracts
 - `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` §13B — shared root, backup subtree exclusion, no SQL attachment download.

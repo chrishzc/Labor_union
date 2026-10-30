@@ -330,6 +330,9 @@ UI 不能：
 - Windows 正式環境只設定 `.env` 的 `CONTROLLED_FILE_STORAGE_ROOT` 為 NAS 共用根目錄；合約歸檔、模板目錄、
   受控附件、LINE 媒體與資料庫備份共用此根。正式環境不再採用 `CONTRACT_DOCUMENT_ARCHIVE_ROOT`／
   `MEDIA_STORAGE_ROOT`，即使舊值仍存在也不得覆寫新根；未設定根目錄不得回存專案或本機預設位置。
+- Windows 統一入口的 source 模式會將 process `APP_ENV` 設為 `development`，這不是資料儲存目的地。
+  明確設定的 NAS UNC 根目錄優先於此標記及舊合約／媒體路徑，歸檔、設定保存、選單資源與容量監測均使用同一 NAS 根。
+  不修改啟動入口的既有 source／access profile；維護工具只固定實際 DB／TLS／根目錄，不因此 UI 執行標記不同而誤擋。
 - 共用 root 由 NAS 管理者準備。第一次寫入時自動建立 01～05、`_staging` 與 `04_LINE選單資源 (media)/rich_menus`，
   繼承 NAS ACL，不建立缺失的 share／root、不更改 Windows／NAS ACL。正式唯讀 Query、建構 storage adapter 及 dry run 不建立資料夾。
 - 案件合約沿用案件編號及既有版本／storage key，archive component 位於 `01_案件合約 (orders)`；模板技術材料仍位於該分類的
@@ -344,9 +347,10 @@ UI 不能：
 - 新正式受控附件在原 outer transaction 內保存既有 finalize intent，commit 後由既有 durable cycle 的 bounded finalize runner 驗證並歸檔。
   照護照片維持 Scheduling attachment writer 建立 reference 與 finalize intent，不重複排程。新 runner 只選取 01～04 新 locator，
   不掃描／搬移舊 locator；registered staging identity、下載、digest、CAS、lease、失敗對帳與無 hidden commit 契約不變。
-- 開發環境既有明確合約／媒體路徑保留；本次不改任何現存 `.env`、不搬移／刪除資料、不執行 migration。
+- 本機開發使用非 NAS UNC 根目錄時，既有明確合約／媒體路徑保留；本次不改任何現存 `.env`、不搬移／刪除資料、不執行 migration。
   新 staging 使用 `_staging`；舊 `.controlled-file-staging` 僅保留必要的讀取與同 idempotency key 重播，不自動改寫舊 bytes／metadata。
-  同一 staging ID 在兩處出現時停止核對，不猜測正本；新 NAS finalize cycle 在 development／test 不執行。
+  同一 staging ID 在兩處出現時停止核對，不猜測正本；新 NAS finalize cycle 不處理本機 development／test 的舊資料，
+  已設定 UNC 根目錄的 source 模式也僅選取新 01～04 locator。
 
 **實體檔案命名規範**：
 - 規則：`[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`

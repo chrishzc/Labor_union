@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ORDERS_DIRECTORY = "01_案件合約 (orders)"
 SCHEDULING_DIRECTORY = "02_照護日誌 (scheduling)"
@@ -31,7 +31,15 @@ def is_development_environment() -> bool:
 
 
 def unified_storage_enabled() -> bool:
-    return configured_storage_root() is not None and not is_development_environment()
+    root = configured_storage_root()
+    return root is not None and (is_nas_storage_root(root) or not is_development_environment())
+
+
+def is_nas_storage_root(root: Path) -> bool:
+    # Windows source-mode launchers set APP_ENV=development even on the formal
+    # NAS installation. The explicitly configured UNC root is authoritative.
+    windows = PureWindowsPath(str(root))
+    return windows.is_absolute() and windows.drive.startswith("\\\\") and not windows.drive.startswith("\\\\?\\")
 
 
 def safe_filename_component(value: str) -> str:
@@ -44,11 +52,11 @@ def safe_filename_component(value: str) -> str:
 
 
 def component_storage_root(directory: str, *, legacy_variable: str, development_default: Path) -> Path:
-    """Production has one root; retain explicit development roots without migration."""
+    """Explicit NAS roots take precedence; local development roots are not migrated."""
     root = configured_storage_root()
     development = is_development_environment()
     legacy = os.getenv(legacy_variable, "").strip()
-    if development and legacy:
+    if development and legacy and not (root is not None and is_nas_storage_root(root)):
         return Path(legacy)
     if root is not None:
         return root / directory
