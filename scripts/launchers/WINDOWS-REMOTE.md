@@ -2,7 +2,9 @@
 
 ## Windows 統一管理入口（目前操作方式）
 
-日常雙擊專案根目錄的 **`Windows管理.bat`**。選單提供啟動全部、停止全部、套用更新／整組重啟、只更新前端、狀態／版本、產生部署包、首次安裝程式依賴及檢查程式環境。關閉選單不會停止背景服務；離開前或切換主機前，請明確選「停止全部」。
+日常雙擊專案根目錄的 **`Windows管理.bat`**。選單提供啟動全部、停止全部、套用更新／整組重啟、只更新前端、狀態／版本、備份資料庫、安全升級資料庫、復原資料庫備份、首次安裝程式依賴及檢查程式環境；不再顯示「產生部署包」。關閉選單不會停止背景服務；離開前或切換主機前，請明確選「停止全部」。
+
+資料庫操作集中在 **6 備份、7 安全升級、8 復原備份**，委派同一套 NAS 維護工具，保留中文確認、獨立正式機設定及原庫保留流程。備份可在線上進行；升級／復原若偵測到本機服務仍在執行，會要求先選「2 停止全部」，不自行停止或重啟服務。每日備份時間仍在「稽核與系統 → 資料庫備份」設定，預設 18:00。設定與復原限制見 [NAS 維護操作說明](README.md#nas-正式資料庫備份升級復原)。
 
 | 用途 | 固定入口 |
 |---|---|
@@ -16,7 +18,7 @@
 
 「套用更新／整組重啟」針對已放到本機的新版程式：先建置成功，再整組停止並重啟，因此會套用你修改的設定。它不會自行 Git pull、下載其他版本或同步其他主機；依賴清單改變時，先停止、執行安裝依賴，再啟動。「只更新前端」保留 API／workers／Tunnel 的原程序並有前端失敗回復。完整更新若新後端啟動失敗會明確報錯，不宣稱自動回復整個後端；保留原程式版本以人工回復。
 
-管理程式、檢查、建置、封裝與前端更新不解析或改寫 `.env`。完整啟動／重啟時，原應用程式及其既有 preflight／supervisor 正常載入自己需要的設定；不把設定值輸出到管理選單或部署包。正常背景工作仍可能處理真實待辦與推播，測試驗證不另外建立訊息。
+一般管理、檢查、建置、封裝與前端更新不解析或改寫 `.env`。只有明確選擇資料庫升級／復原，才由 NAS 維護工具在確認與副本驗證後切換資料庫設定。完整啟動／重啟時，原應用程式及其既有 preflight／supervisor 正常載入自己需要的設定；不把設定值輸出到管理選單或部署包。正常背景工作仍可能處理真實待辦與推播，測試驗證不另外建立訊息。
 
 命令列同樣只有根目錄入口：
 
@@ -27,6 +29,9 @@
 .\Windows管理.bat -Action frontend
 .\Windows管理.bat -Action status
 .\Windows管理.bat -Action check
+.\Windows管理.bat -Action database-backup
+.\Windows管理.bat -Action database-upgrade
+.\Windows管理.bat -Action database-restore
 .\Windows管理.bat -Action package
 ```
 
@@ -34,7 +39,7 @@
 
 ### 搬到另一台 Windows
 
-1. 在有 Git 的開發主機，選「產生部署包」。輸出於 `scratch/windows-remote/packages/windows-*.zip`；包內 `windows-release.json` 記錄程式檔案雜湊與 release ID。這是目前工作目錄的程式來源包，包含尚未提交但符合既有 source 過濾規則的程式變更；不是已發布的 Docker 映像，也不複製本機虛擬環境。
+1. 維護人員在有 Git 的開發主機執行 `Windows管理.bat -Action package`（已移出日常選單）。輸出於 `scratch/windows-remote/packages/windows-*.zip`；包內 `windows-release.json` 記錄程式檔案雜湊與 release ID。這是目前工作目錄的程式來源包，包含尚未提交但符合既有 source 過濾規則的程式變更；不是已發布的 Docker 映像，也不複製本機虛擬環境。
 2. 在新 Windows 解壓縮到獨立資料夾。安裝 Python 3.14（含 `py` launcher）、相容專案的 Node.js／npm、Docker Desktop 及原生 cloudflared。開發用程式包不包含這些工具；不要把舊機 `.venv` 或 `node_modules` 搬過去。
 3. 雙擊管理入口，選「首次安裝程式依賴」；它建立本機 `.venv`、依 `requirements.txt` 安裝 Python 套件、`npm ci` 及 Playwright Chromium。此步驟需要網路，不安裝或更改 Cloudflare／Docker／DB 設定。
 4. 由你準備該機自己的 `.env`、資料庫／current schema、帳號、檔案根目錄及 LINE Channel 設定。部署包排除 `.env*`、金鑰、token、ignored 檔案、資料與執行紀錄，不是備份／資料搬遷包。

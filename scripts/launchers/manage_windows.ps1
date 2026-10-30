@@ -1,7 +1,7 @@
 ﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package')]
+    [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore')]
     [string]$Action = 'menu',
     [switch]$LocalOnly
 )
@@ -111,7 +111,8 @@ function Start-ManagedRuntime {
     }
     if (-not $Artifact) { $Artifact = New-ManagedArtifact }
     # Only normal application startup loads its own configuration. The manager
-    # never parses or changes .env, and never performs schema upgrades or resets.
+    # never parses or changes .env during startup. Database maintenance is a
+    # separate explicit action; startup never performs an upgrade or reset.
     & $PythonPath -m scripts.check_runtime_database
     if ($LASTEXITCODE -ne 0) { throw 'Database readiness failed; no runtime was started.' }
     & docker.exe compose up -d redis
@@ -160,6 +161,20 @@ function Show-ManagedStatus {
     Write-Host 'Tunnel process status does not prove external connectivity; check the Cloudflare dashboard.'
 }
 
+function Invoke-DatabaseMaintenance {
+    param([ValidateSet('backup','upgrade','restore')][string]$Mode)
+    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        throw '找不到系統執行環境，請先安裝程式依賴。'
+    }
+    if ($Mode -ne 'backup' -and (Get-ManagedState)) {
+        throw '請先選擇「2 停止全部」，再執行資料庫升級或復原。'
+    }
+    & $PythonPath -m scripts.nas_database_maintenance $Mode
+    if ($LASTEXITCODE -ne 0) {
+        throw '資料庫操作未完成；請保留備份與紀錄，依上方訊息處理。'
+    }
+}
+
 function Invoke-ManagerAction {
     param([string]$Selected)
     if ($Selected -eq 'status') { Show-ManagedStatus; return }
@@ -175,6 +190,9 @@ function Invoke-ManagerAction {
     $lock = [IO.File]::Open((Join-Path $runtimeDirectory 'manager.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     try {
         switch ($Selected) {
+            'database-backup' { Invoke-DatabaseMaintenance 'backup' }
+            'database-upgrade' { Invoke-DatabaseMaintenance 'upgrade' }
+            'database-restore' { Invoke-DatabaseMaintenance 'restore' }
             'start' { Start-ManagedRuntime }
             'stop' { Stop-ManagedRuntime }
             {$_ -in 'restart','update'} {
@@ -221,10 +239,11 @@ if ($Action -ne 'menu') {
 while ($true) {
     Write-Host "`nWindows 管理（切換主機前，請先整組停止舊主機）"
     Write-Host '1 啟動全部  2 停止全部  3 套用更新／整組重啟  4 只更新前端'
-    Write-Host '5 狀態／版本  6 產生部署包  7 首次安裝程式依賴  8 檢查程式環境  0 離開'
+    Write-Host '5 狀態／版本  6 備份資料庫  7 安全升級資料庫  8 復原資料庫備份'
+    Write-Host '9 首次安裝程式依賴  10 檢查程式環境  0 離開'
     $choice = Read-Host '請選擇'
     if ($choice -eq '0') { break }
-    $actions = @{'1'='start';'2'='stop';'3'='update';'4'='frontend';'5'='status';'6'='package';'7'='setup';'8'='check'}
+    $actions = @{'1'='start';'2'='stop';'3'='update';'4'='frontend';'5'='status';'6'='database-backup';'7'='database-upgrade';'8'='database-restore';'9'='setup';'10'='check'}
     if (-not $actions.ContainsKey($choice)) { continue }
     try { Invoke-ManagerAction $actions[$choice] }
     catch { Write-Host ('[Error] ' + $_.Exception.Message) }

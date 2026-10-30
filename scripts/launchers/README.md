@@ -75,6 +75,8 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 
 ### NAS 正式資料庫：備份、升級、復原
 
+日常可直接雙擊根目錄 **`Windows管理.bat`**，選 **6 備份資料庫、7 安全升級資料庫、8 復原資料庫備份**，不必另外尋找腳本。以下三個獨立入口仍保留相同功能與確認流程。
+
 適用架構：Windows 電腦執行程式，NAS 只跑 Docker MySQL。三個腳本都在正式 Windows 電腦操作，只用 MySQL 連線，不需要 SSH。
 **目前開發電腦不會自動啟用或安裝正式排程。**
 
