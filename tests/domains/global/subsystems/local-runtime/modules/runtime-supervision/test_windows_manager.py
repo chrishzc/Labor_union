@@ -47,6 +47,78 @@ def test_secret_names_are_rejected_before_open(name):
     assert not included(name)
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows database menu')
+def test_database_menu_dispatches_three_existing_operations_without_packaging(tmp_path):
+    script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Manager syntax error'}
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+$runtimeDirectory=$env:MANAGER_TEST_DIRECTORY
+$script:databaseCalls=[System.Collections.Generic.List[string]]::new()
+$script:shown=[System.Collections.Generic.List[string]]::new()
+$script:choices=[System.Collections.Generic.Queue[string]]::new()
+foreach($value in @('6','7','8','0')){$script:choices.Enqueue($value)}
+function Read-Host {param($Prompt);return $script:choices.Dequeue()}
+function Write-Host {$script:shown.Add(($args -join ' '))}
+function Invoke-DatabaseMaintenance {param($Mode);$script:databaseCalls.Add($Mode)}
+function Stop-ManagedRuntime {throw 'Menu must not stop services implicitly'}
+function Start-ManagedRuntime {throw 'Menu must not start services implicitly'}
+$menu=@($ast.EndBlock.Statements | Where-Object {$_ -is [System.Management.Automation.Language.WhileStatementAst]})
+if($menu.Count -ne 1){throw 'Expected one manager menu'}
+Invoke-Expression $menu[0].Extent.Text
+if(($script:databaseCalls -join ',') -ne 'backup,upgrade,restore'){throw 'Wrong database operation dispatch'}
+if(($script:shown -join ',') -match '產生部署包'){throw 'Packaging is still in the daily menu'}
+if(($script:shown -join ',') -notmatch '10 檢查程式環境'){throw 'Renumbered environment check is missing'}
+Write-Output 'PASS'
+'''
+    result = subprocess.run([str(POWERSHELL), '-NoProfile', '-Command', script],
+                            env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER),
+                                 'MANAGER_TEST_DIRECTORY': str(tmp_path)},
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS' in result.stdout
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows database admission')
+def test_database_delegate_requires_stop_for_upgrade_restore_and_propagates_failure():
+    script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Manager syntax error'}
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+$PythonPath='Invoke-TestPython'
+$script:running=$true;$script:pythonExit=0;$script:stops=0
+$script:calls=[System.Collections.Generic.List[string]]::new()
+function Test-Path {param($LiteralPath,$PathType);return $true}
+function Get-ManagedState {if($script:running){return [pscustomobject]@{runtime_status='ready'}};return $null}
+function Invoke-TestPython {$script:calls.Add(($args -join '|'));$global:LASTEXITCODE=$script:pythonExit}
+function Stop-ManagedRuntime {$script:stops++;throw 'Implicit stop forbidden'}
+function Assert-ProgramEnvironment {throw 'Database tools must not require frontend dependencies'}
+Invoke-DatabaseMaintenance backup
+foreach($mode in @('upgrade','restore')){
+    $rejected=$false
+    try{Invoke-DatabaseMaintenance $mode}catch{$rejected=$true}
+    if(-not $rejected -or $script:calls.Count -ne 1 -or $script:stops -ne 0){throw 'Live runtime admitted for database switch'}
+}
+$script:running=$false
+Invoke-DatabaseMaintenance upgrade
+Invoke-DatabaseMaintenance restore
+if(($script:calls -join ',') -ne '-m|scripts.nas_database_maintenance|backup,-m|scripts.nas_database_maintenance|upgrade,-m|scripts.nas_database_maintenance|restore'){throw 'Wrong maintenance transport'}
+$script:pythonExit=7;$rejected=$false
+try{Invoke-DatabaseMaintenance backup}catch{$rejected=$true}
+if(-not $rejected -or $script:stops -ne 0){throw 'Database failure was hidden or services stopped'}
+Write-Output 'PASS'
+'''
+    result = subprocess.run([str(POWERSHELL), '-NoProfile', '-Command', script],
+                            env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER)},
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS' in result.stdout
+
+
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows manager')
 def test_update_builds_before_stop_and_preserves_full_group_on_build_failure(tmp_path):
     script = r'''
