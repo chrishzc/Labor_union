@@ -1329,9 +1329,11 @@ def test_orders_legacy_projection_mismatch_fails_closed(
         )
 
 
+@pytest.mark.parametrize("custom_writer", [False, True])
 def test_switch_identity_config_staleness_and_quoted_round_trip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    custom_writer: bool,
 ) -> None:
     environment = tmp_path / "quoted.env"
     environment.write_text(
@@ -1379,13 +1381,19 @@ def test_switch_identity_config_staleness_and_quoted_round_trip(
         "_table_evidence",
         lambda config, database: {"orders": {"count": 1}},
     )
+    writes = []
+    def publish(path, payload):
+        writes.append(path)
+        migration._atomic_write(path, payload)
     switch_environment(
         environment,
         "source_db",
         "candidate_db",
         verified_path,
         switch_path,
+        environment_writer=publish if custom_writer else None,
     )
+    assert writes == ([environment] if custom_writer else [])
     assert b'DB_DATABASE = "candidate_db"  ' in environment.read_bytes()
     rollback_environment(environment, switch_path)
     assert environment.read_bytes() == original

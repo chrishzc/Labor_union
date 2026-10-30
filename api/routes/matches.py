@@ -431,27 +431,9 @@ def send_matching_plan_customer_confirmation_route(
 
 
 @router.get("/matching-confirmation-files/{token}")
-def download_matching_confirmation_resume(
-    token: str,
-    workflow: ControlledFileWorkflow = Depends(get_controlled_file_workflow),
-):
-    """Customer-facing, expiring, file-scoped reference issued in a package."""
-    try:
-        claim = verify_resume_download_token(token, now=datetime.now(timezone.utc))
-        file_id, staff_id = str(claim["file_id"]), int(claim["staff_id"])
-        readback = workflow.readback(file_id)
-        if (readback.owner is not ControlledFileOwner.STAFF
-                or readback.purpose is not ControlledFilePurpose.STAFF_RESUME
-                or readback.subject_reference != str(staff_id)):
-            raise ValueError("confirmation file identity is invalid")
-        content = workflow.download(file_id)
-    except (ValueError, KeyError) as error:
-        raise HTTPException(status_code=404, detail="確認資訊附件不存在或連結已失效。") from error
-    safe_filename = content.filename.replace('"', "").replace("\r", "").replace("\n", "")
-    return Response(content=content.content, media_type="application/pdf", headers={
-        "Content-Disposition": f'attachment; filename="{safe_filename}"',
-        "Cache-Control": "private, no-store",
-    })
+def download_matching_confirmation_resume(token: str):
+    """Customer-facing resume download retired; resumes are handled offline."""
+    raise HTTPException(status_code=410, detail="履歷下載功能已退役，改由專人線下提供。")
 
 
 @router.post(

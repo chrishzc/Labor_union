@@ -16,7 +16,7 @@ export function notificationHref(item:NotificationItem):string | null {
   const caseNo = encodeURIComponent(item.case_no ?? '');
   switch(item.source) {
     case 'identity': return `#line-management?tab=binding&identity=reviews&review=${item.reference_id}`;
-    case 'runtime': return '#line-security';
+    case 'runtime': return '/line-mobile-admin?target=staff_review';
     case 'followup': return `#order-workbench-v2?case=${caseNo}&work=matching`;
     case 'recommendation': return item.reference_id ? null : `#order-workbench-v2?case=${caseNo}&work=${item.tag==='待簽約'?'contracts':'recommendation'}`;
     default: return null;

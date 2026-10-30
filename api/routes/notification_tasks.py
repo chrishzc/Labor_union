@@ -57,7 +57,7 @@ SOURCES = {
     Source.CUSTOMER_SERVICE: ('客服與服務協助', 'support', Cap.CUSTOMER_SERVICE_READ),
     Source.DELIVERY: ('LINE 寄送異常', 'support', Cap.TASK_READ),
     Source.NOTIFICATION_FAILURE: ('LINE 通知建立異常', 'support', Cap.MONITOR_READ),
-    Source.RUNTIME: ('系統與通知對象', 'support', Cap.MONITOR_READ),
+    Source.RUNTIME: ('系統狀態', 'support', Cap.MONITOR_READ),
 }
 
 
@@ -68,7 +68,7 @@ def _allowed(principal, source):
 
 def _catalog(principal):
     return [NotificationSourceView(source=key, label=value[0], group=value[1])
-            for key, value in SOURCES.items() if _allowed(principal, key)]
+            for key, value in SOURCES.items() if key != Source.RUNTIME and _allowed(principal, key)]
 
 
 def _item(source, identity, title, summary, reason, **kwargs):
@@ -238,10 +238,6 @@ def _read_source(source, cursor, principal):
         try:
             repository = MySqlRuntimeMonitorRepository(connection)
             statuses = repository.list_status()
-            from api.routes.runtime_health import _app
-            if not _app().has_available_admin_target():
-                items.append(_item(source, 'targets', '系統通知尚無可用對象', '請核對管理員啟用狀態、LINE 綁定及通知對象設定。',
-                                   '通知對象須啟用，且管理員仍啟用並具有目前有效的 LINE 綁定。'))
             for r in statuses:
                 if r.status in ('warning', 'critical'):
                     items.append(_item(source, r.check_name, '系統狀態需要處理', r.message,

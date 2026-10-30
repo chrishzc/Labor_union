@@ -19,7 +19,7 @@
   Scheduling Matching Coordination Phase A–D、M4 runtime target／human escalation ownership 已核准；
   後續人工已核准 M1-A、M2-A、M3-A～D、M4-A 的 exact production implementation slice；這不擴張為
   provider、deployment、production DB、未另行核准 schema 或其他外部副作用授權。
-- 2026-10-22 人工裁決取消整個群組告警功能；先前登錄、同群重綁、重設與群組審核連結要求均退役。保留管理員個人通知與案件服務群組。
+- 2026-10-22 人工裁決取消整個群組告警功能；先前登錄、同群重綁、重設與群組審核連結要求均退役。管理員個人通知於 2026-10-30 一併退役；案件服務群組保留。
 
 ## 2. Global Integration Boundary
 
@@ -520,7 +520,7 @@ Authority：使用者核准本次最終權限清單並授權實作、設定與�
 - NAS-WORKER-02：私人操作只在隔離網路提供 HTTPS，Worker 驗證 server 憑證；缺憑證、未知／撤銷 token、錯服務、明文連線皆 fail closed。初始化準備憑證，不新增人員啟用碼。既有 local development shared-key 工作流限 local/test，不能 fallback 成 production。
 - NAS-LINE-01：LINE token 於後端驗證，再核對 current bound identity 與本人案件／assignment/day。需求表單先保存完整申請，工會核准才建立 Client／BeClass 與完成對應 binding；同筆申請重複核准不得建立重複客戶。既有已建立客戶不回退成待審。
 - NAS-LINE-02：異動申請仍只寫 Customer Service intake；正式核心異動由工會與既有 owner writer 執行。日誌／照片保留本人有效服務範圍直接提交，不增加逐筆工會核准。
-- NAS-LINE-03（2026-10-22 人工裁決）：取消群組告警及其分類模擬、登錄、重新啟用、重設與群組審核連結。管理端只顯示管理員個人通知對象，保留既有個人通知 Query／Preview／Apply；分類仍使用固定規則，不新增偏好表。舊群組入口明確拒絕，歷史工作不得繼續送往告警群組。客服受理／工單／hold、管理員個人通知、案件服務群組綁定與私人邀請不受影響。
+- NAS-LINE-03（2026-10-30 人工裁決）：群組與管理員個人自動告警 Push 全部退役，包含系統異常、重大客訴及人工升級管理員通知。保留監測、歷史 target／event／receipt／audit、客服受理／工單／hold 與案件服務群組。管理員於既有 LIFF 待辦工作台頂端主動查看唯讀系統狀態，不另設通知對象頁；舊 target Preview／Apply／偏好寫入回 typed 410，查詢不排送。歷史 outbox 消化但不建投遞工作；未寄出的告警工作在 provider 前取消，禁止補送恢復。
 - NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。現行 LIFF 日誌頁直接送出並提供照片選檔預覽及本人附件查看／下載；部署 UID／ACL／掛載仍由 NAS 部署契約負責，不因本機介面驗證變更。
 
 - NAS-LINE-04 的資料庫邊界：公開 LINE profile 對 controlled-file staging／objects／receipts／finalize／lease／reference／cleanup／reconciliation 及日誌主檔／附件／完成事件僅 SELECT，不可直接 INSERT／UPDATE；私人管理後端保留原受限 management profile 的合法 writer。原 LINE 通知 outbox／checkpoint、LINE 專用媒體及其他既有功能權限不變；不加寬任何 DB 權限，不新增表。
@@ -1282,9 +1282,9 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 - LINE-COPY-01：本次工作包依人工要求開放「通知與發送」目前目錄全部通知文字，以及卡片摘要、固定標題、說明及按鈕名稱；不以原為固定文案或沒有通知規則而拒絕編輯。公版資料及動態 owner 欄位仍由原流程提供；按鈕的 URI、postback、識別、資格及動作不屬文案維護。
 - LINE-COPY-TABLE-01（2026-10-30 最新人工裁決）：初步候選聯絡與正式媒合推薦包的訂單資訊一、資訊二、每週服務安排各產生一張乾淨緊湊的表格圖片；資料由現有 owner projection 帶入，初步候選維持原去識別界線。圖片不以長段純文字替代。兩個流程最後的「是否願意承接」或「是否接受月嫂推薦」互動卡片獨立保留，只維護這些確認卡片的標題、說明及按鈕名稱；兩邊設定互不共用。每週圖片沒有可編輯文案，也不新增操作按鈕。
 - LINE-TABLE-IMAGE-01：圖片顯示資料沿同一 outer UoW 保存於原 durable delivery snapshot，無新圖片 schema／檔案 writer／發送工作。provider 只收到三張圖片的 bounded HTTPS reference 及原互動卡片；內部顯示資料不得穿透 provider。已排入／寄出的圖片不重新讀取目前案件或文案，重播仍由原 key／receipt 收斂。歷史純文字 payload 不改寫。
-- LINE-TABLE-IMAGE-02：`GET /api/v1/line/table-images/{token}` 僅接受 purpose-bound opaque reference，驗證後才唯讀取得 committed snapshot，PNG 於記憶體產生，無暫存圖片檔案。連結實作沿用既有確認附件的七日短效存取及 secret 設定；無效／過期／不存在回 closed 404，配置或渲染暫時不可用回 closed 503，不輸出內部資料。回應 private no-store、nosniff、no-referrer。NAS 公開入口只經既有 `line-media-proxy` 機器身分轉送到 private API 的專用圖片讀取；此用途以圖片 reference 授權，不代用 LIFF 身分，也不擴充任意路徑／檔案讀取。
-- LINE-TABLE-IMAGE-03：後台 sample／record 預覽重用同一 PNG renderer，只回傳 display-only PNG data，不回傳 delivery URL／token，不建立 task、憑證、檔案或 provider effect。縮圖可開啟完整圖片。執行端須有中文字型；Windows 沿系統微軟正黑體，其他環境使用 `LINE_TABLE_IMAGE_FONT` 或已安裝的 Noto／文泉驛字型，不以缺字圖片冒充成功。
-- LINE-TABLE-IMAGE-04（2026-10-30 薪資受眾補充）：月嫂收到的資訊一顯示「薪資單價、預估總薪資、預計付款日」，由 Payroll 及 Orders owner 提供唯讀預估，不含客戶訂金、分期與客戶應付；客戶版資訊一顯示客戶費用及繳款約定，不含月嫂薪資。兩邊圖片標題明確區分月嫂薪資與客戶費用，只共用表格樣式。預估依規格 03，不建立正式薪資義務。圖片連結在所有環境均須使用已設定的確認附件 secret，不使用已知 development／範例值；網址或取用金鑰設定不足時停止排入並回 closed 503；中文字型等渲染設定缺失時，圖片讀取與預覽回 closed 503。不退回純文字或不安全連結。capability 不得進入 access／proxy／provider error 日誌或管理端投遞明細。
+- LINE-TABLE-IMAGE-02：`GET /api/v1/line/table-images/{token}` 僅接受 purpose-bound opaque reference，驗證後才唯讀取得 committed snapshot，PNG 於記憶體產生，無暫存圖片檔案。連結實作使用 purpose-bound 七日短效存取及系統內部安全金鑰（不依賴 .env 外部排班金鑰參數）；無效／過期／不存在回 closed 404，配置或渲染暫時不可用回 closed 503，不輸出內部資料。回應 private no-store、nosniff、no-referrer。NAS 公開入口只經既有 `line-media-proxy` 機器身分轉送到 private API 的專用圖片讀取；此用途以圖片 reference 授權，不代用 LIFF 身分，也不擴充任意路徑／檔案讀取。
+- LINE-TABLE-IMAGE-03：後台 sample／record 預覽重用同一 PNG renderer，只回傳 display-only PNG data，不回傳 delivery URL／token，不建立 task、憑證、檔案或 provider effect。縮圖可開啟完整圖片。執行端須有中文字型；Windows 沿系統微軟正黑體，其他環境使用已安裝的 Noto／文泉驛字型，不以缺字圖片冒充成功。
+- LINE-TABLE-IMAGE-04（2026-10-30 薪資受眾補充）：月嫂收到的資訊一顯示「薪資單價、預估總薪資、預計付款日」，由 Payroll 及 Orders owner 提供唯讀預估，不含客戶訂金、分期與客戶應付；客戶版資訊一顯示客戶費用及繳款約定，不含月嫂薪資。兩邊圖片標題明確區分月嫂薪資與客戶費用，只共用表格樣式。預估依規格 03，不建立正式薪資義務。圖片連結金鑰由系統內部自動產生處理，不依賴 .env 外部參數；網址或取用金鑰設定不足時停止排入並回 closed 503；字型等渲染設定缺失時，圖片讀取與預覽回 closed 503。不退回純文字或不安全連結。capability 不得進入 access／proxy／provider error 日誌或管理端投遞明細。
 - LINE-COPY-02：沿既有 MESSAGE_TEMPLATES 版本化 owner 及 notification-rules/{id}/message-template Query／PUT，額外解析目錄中的 standalone template 與內建訊息 ID。文字維持原欄位；卡片回傳具中文標籤及字數上限的 closed display fields，PUT 只接受同一已知欄位集合的文字。不得將完整 provider payload 或動作送入編輯器。沿原 read/manage 授權、revision CAS、typed 409、驗證與稽核；不新增資料表或通知規則。
 - LINE-COPY-EDITOR-01（2026-10-30 最新人工裁決）：所有現行卡片式訊息使用整張文案編輯，集中顯示標題、自由換行／增加段落的說明內容及按鈕名稱；說明欄固定 504px，標題／按鈕為精簡輸入，其他既有標籤及摘要收合。不得要求逐欄切換。原卡片缺少標題或說明節點時，可在已知 body 位置新增純顯示節點；只處理已知 closed 文案欄位，不接受自訂 provider 結構、URI、postback 或資格。卡片 Query 額外回傳欄位用途及是否允許空白；舊文案設定唯讀承接，新可選說明預設留空，不遺失原有內容。
 - LINE-COPY-EDITOR-02：客戶、月嫂及不同流程使用各自原 template ID，編輯一方不更新另一方。插入資料只列可用的顯示變數，不列 action-only token；Preview 與新訊息共用組裝器，保留 action 及動態資料。多張推薦包預設預覽最後的可編輯確認卡，圖片內容保持唯讀；自訂說明只加入對應卡片，不能錯置到月嫂個人資料、其他圖片或其他流程。沿用原 revision CAS、驗證及零寫入預覽，已建立的工作不改寫。
@@ -1359,7 +1359,7 @@ webhook dispatch 任一業務處理失敗時，當次 business Unit of Work 必�
 
 ### M3／M4 boundaries
 
-Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。管理員個人通知 target enable／disable 共用既有 advisory serialization boundary、opaque CAS 與 same-key replay；群組告警登錄與重設已取消；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
+Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。管理員個人通知 target enable／disable／Preview／Apply 於 2026-10-30 退役，於開啟 UoW 前拒絕；歷史 target、receipt 與 audit 唯讀保留。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
 
 M3 的 service-date Apply 必須在單一 outer UoW 內 fresh-lock owner service dates、assignment與shifted-date availability後重算preview。leave Preview／Apply只讀Scheduling-owned immutable canonical receipt；Apply須在同一outer UoW重新讀取並把receipt identity、version與fingerprint綁入完整M3 source tuple。package／criteria／leave version／original staff／preview任一stale時，必須在M3 lineage、receipt與intent前rollback；M3不得藉此寫Leave、Orders、Assignment、Payroll或直接呼叫LINE provider。
 
@@ -1373,4 +1373,13 @@ schema／DDL與 external side effect 仍不在授權範圍。
 `設定異常通知群組` 不登錄、不回覆成功、不建立投遞；群組重設／啟用 API 與群組專用審核連結簽發／使用拒絕操作。
 管理端不得提供群組登錄教學、分類推播或虛構訊息模擬；預覽收件人不得寫死為幹部群。
 既存群組告警工作在 provider 前拒絕，不改寫歷史投遞、receipt、audit 或已發布 schema。
-保留管理員個人告警與歷史 Query／撤銷，以及案件服務群組的綁定、成員紀錄與私人邀請。
+管理員個人告警於 2026-10-30 退役；保留歷史 Query，以及案件服務群組的綁定、成員紀錄與私人邀請。
+
+
+## 2026-10-30 管理員告警改為 LIFF 主動查詢
+
+系統異常與重大客訴不再自動 Push 給管理員，通知文案清單及流程圖不提供這兩類告警的編輯／發送設定。客服工單與 automation hold 的建立、接續、處理及結案維持原 owner 流程，既有客戶／月嫂業務通知不受影響。新 escalation 不建立管理員 alert intent；無寄送請求的 alert status 使用既有 `unknown`，不冒充 pending、sent 或 failed。
+
+既有 `/api/v1/line/mobile-admin/notification-task-actions/runtime/query` 改為封閉唯讀系統摘要：overall／worker status、待發／失敗數、最近監測時間與白名單服務狀態。先驗證 LINE token、current bound enabled Admin 及 `line.monitor.read`；不回傳通知對象、候選管理員、原始錯誤、路徑或 details。沿用監測 freshness 設定，過期或缺資料顯示待確認；查詢失敗明確回 unavailable，不回假正常。查詢不探測外部服務、不寫 DB、不產生通知。
+
+歷史 LINE admin 告警來源 `runtime_health_event`、`customer_service_escalation` 及規則事件 `runtime.alert.review_required`、`complaint.ingress.hold_high_ticket` 不再投影／補送；舊告警 outbox 完成但不產生 task，已排隊 task 由原 delivery worker 於 provider 前取消，保留原歷史。

@@ -406,10 +406,15 @@ class MySqlLineNotificationRepository:
 
         if delivery_task_id <= 0:
             raise ValueError("LINE delivery task ID is invalid")
+        from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
         with self._connection.cursor() as cursor:
             cursor.execute(_MANUAL_REPLAY_TASK_VALIDATION_SQL, (delivery_task_id,))
             row = cursor.fetchone()
         if not isinstance(row, dict):
+            return None
+        if row.get('event_code') in RETIRED_ADMIN_NOTIFICATION_EVENTS:
+            return 'line_admin_push_retired'
+        if row.get('source_domain', 'manual_replay') != 'manual_replay':
             return None
         original_source_id = _manual_replay_original_source_id(
             str(row.get("source_event_identity", ""))
@@ -630,6 +635,9 @@ class MySqlLineNotificationRepository:
         source: NotificationSourceEvent,
         occurred_at: datetime,
     ) -> None:
+        from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
+        if source.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
+            raise LineNotificationManualReplayValidationError('line_admin_push_retired')
         if source.source_domain == "manual_replay":
             raise LineNotificationManualReplayValidationError(
                 "manual_replay_source_must_be_original"
@@ -857,6 +865,11 @@ class MySqlLineNotificationRepository:
         rule_id = rule.get("id")
         selector = rule.get("recipient_selector")
         if not isinstance(rule_id, str) or not isinstance(selector, str):
+            return
+        from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
+        if event.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
+            self._record_decision(source_event_id, rule_revision_id, rule_id, selector, None,
+                                  'suppressed', 'line_admin_push_retired', event)
             return
         policy_event = event
         if event.source_domain == 'manual_replay':
@@ -1257,7 +1270,7 @@ _LINE006_REPLAY_IDENTITY_FOR_TASK_SQL = (
 )
 
 _MANUAL_REPLAY_TASK_VALIDATION_SQL = (
-    "SELECT replay.source_event_identity,replay.event_code,replay.source_aggregate_type,"
+    "SELECT replay.source_domain,replay.source_event_identity,replay.event_code,replay.source_aggregate_type,"
     "replay.source_aggregate_identity,replay.source_version,replay.facts_snapshot,"
     "decision.rule_id,decision.recipient_type,decision.recipient_identity,"
     "intent.template_id,task.recipient_type AS task_recipient_type,"
@@ -1266,7 +1279,7 @@ _MANUAL_REPLAY_TASK_VALIDATION_SQL = (
     "JOIN line_notification_intents intent ON intent.delivery_task_id=task.id "
     "JOIN line_notification_decisions decision ON decision.id=intent.decision_id "
     "JOIN line_notification_source_events replay ON replay.id=decision.source_event_id "
-    "WHERE task.id=%s AND replay.source_domain='manual_replay'"
+    "WHERE task.id=%s"
 )
 
 _SOURCE_HAS_NEWER_VERSION_SQL = (

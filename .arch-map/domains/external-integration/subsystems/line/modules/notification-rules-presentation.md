@@ -48,9 +48,11 @@
 
 服務完工滿意度問卷邀請沿現有流程導覽、可編輯文字模板及公版預覽；問卷網址先留空，不提供無網址按鈕，後續可直接加入文字內容。
 
-流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」公版沿實際自助導覽卡，收費與補助共用現行 40／120 小時文案。
+流程圖顯示簽約與訂金付款可先後交錯、訂金核銷後建群；正式目錄缺規則／模板時呈現「缺少訊息設定」，不提供假的可用預覽。客服導覽說明明確呼叫門檻；「其他問題」舊連結及 API 解析至唯一 `service-menu` 設定，目錄不再列獨立 `service-other`；訂單異動導覽只提供正式 LIFF URI，舊五按鈕文案作唯讀投影，服務流程及收費補助統一導向 AI 客服 LIFF；`service-flow`／`service-payment` 不再列入公版、文案編輯或預設模板，客服流程只保留維護位置說明。資料修改與訂單修改受理通知仍可編輯，歷史設定不刪除。
 
 補列 current 身分／登記模板、客服導覽及受理／結案、候選資訊一／二／每週說明、工會詢問／回覆及完整推薦確認包。卡片重用 `subsystems/scheduling/matching_line_cards.py` 純組裝；公版使用明列範例，訂單資訊欄位沿用 Orders owner `subsystems/orders/order_information.py` 的純格式化；既有 record API 透過 Orders／Matching owner 唯讀 projection。工會逐案詢問與回覆草稿僅預覽，共用卡片的標題、說明與按鈕名稱沿文案設定儲存。D+1～D+3 與未具正式用途的測試模板不列入。零候選固定協調通知已由現行人工協調取代，預覽、有效規則／模板與 bootstrap 均移除，writer 拒絕重新加入。補列訂金、服務群組成功／錯誤、配對回覆、請假回覆、進度與身分入口、完整去敏告警；公版共用原純組裝函式，欄位值明列，record API 對新增純公版項目明示不可用。告警收件者改稱已設定管理員個人對象，不寫死幹部群；群組告警已取消。
+
+經 current source、規格及本機 DB 引用查核的 11 個舊身分／選單模板不再列 standalone 編輯及預覽入口，清單與範圍依規格 29 §3；原設定與歷史保留，若仍有有效 rule 引用則保留 rule-backed 維護。現行受理、身分成功及審核拒絕通知維持原設定。
 
 ## Contracts
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` — LINE-PREVIEW-01～08、LINE-COPY-01～05、authenticated zero-write preview 與原版本化文案維護。
@@ -70,3 +72,7 @@
 Reconcile when unified notification content presentation、welcome composition、configured card copy、Preview／Confirm／Save／Delete gating、closed result/error或focused test location changes。
 
 - test_root: `tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py`
+
+2026-10-30：目錄與文案編輯清單排除重大客訴／系統異常管理員告警模板及 runtime-system-health。流程圖改為主動查看系統／客服狀態；保留歷史設定，不提供重新啟用 Push。
+
+2026-10-30 最新裁決：18 項給操作人員的 group-bound／group-invitations-queued／group-error-*／group-format-* 改固定 Reply-only，目錄、default copy 與舊編輯／公版入口均移除。管理員告警 rule 文案 Query／PUT 同樣關閉，保留原設定及歷史；客戶／月嫂邀請與有效業務通知不變。

@@ -264,7 +264,7 @@ def test_complaint_resolve_uses_customer_service_handling_evidence_not_runtime_g
     created = app.create(_command())
     assert created.resulting_workflow_status is EscalationWorkflowStatus.OPEN
     assert created.resulting_hold_state is AutomationHoldState.ACTIVE
-    assert len(repo.alerts) == 1
+    assert repo.alerts == []
     claimed = app.claim(ClaimHumanEscalation(created.escalation_id, 0, ActorContext("admin:1"), IdempotencyKey("claim-1"), CorrelationId("corr-claim")))
     handling = app.start_handling(StartHumanEscalationHandling(created.escalation_id, 1, 0, ActorContext("admin:1"), IdempotencyKey("handling-1"), CorrelationId("corr-handling")))
     resolved = app.resolve(ResolveHumanEscalation(created.escalation_id, 2, 1, "handled", _SOURCE_DIGEST, ActorContext("admin:1"), IdempotencyKey("resolve-1"), CorrelationId("corr-resolve")))
@@ -451,7 +451,7 @@ def test_same_idempotency_payload_replays_without_duplicate_alert():
     assert replay.replayed is True
     assert replay.committed_at == first.committed_at
     assert len(repo.rows) == 1
-    assert len(repo.alerts) == 1
+    assert repo.alerts == []
 
 
 def test_stale_transition_is_typed_conflict():
@@ -493,7 +493,7 @@ def test_active_scope_appends_source_and_saves_replay_receipt_without_new_alert(
     assert appended.escalation_id == first.escalation_id
     assert replayed.replayed is True
     assert len(repo.rows) == 1
-    assert len(repo.alerts) == 1
+    assert repo.alerts == []
     assert [event for _, event, _ in repo.events].count("source_appended") == 1
 
 
@@ -510,7 +510,7 @@ def test_create_for_ticket_uses_precreated_ticket_and_caller_owned_uow_without_c
     assert repo.rows[1]["ticket_id"] == ticket["id"]
     assert len(repo.events) == 1
     assert len(repo.receipts) == 1
-    assert len(repo.alerts) == 1
+    assert repo.alerts == []
     assert existing_uow.committed is False
 
 

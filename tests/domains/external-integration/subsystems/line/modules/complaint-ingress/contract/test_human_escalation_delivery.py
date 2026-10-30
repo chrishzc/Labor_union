@@ -182,74 +182,24 @@ def _work_item(outbox_id=17, escalation_ref="escalation:7", payload=None):
     )
 
 
-@patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
-def test_masked_alert_is_projected_then_canonical_delivery_records_provider_outcome():
-    item = _work_item()
-    outbox, delivery, escalations = _Outbox(item), _Delivery(), _Escalations()
+def test_retired_admin_outbox_completes_without_task_or_provider_outcome():
+    outbox, delivery, escalations = _Outbox(_work_item()), _Delivery(), _Escalations()
     uow = _Uow(outbox, delivery, escalations)
-    projection_worker = HumanEscalationDeliveryWorker(
-        lambda: uow,
-        "task96",
-        lambda: NOW,
-    )
-
-    assert projection_worker.run_once() == 1
-    assert delivery.task.status is LineDeliveryStatus.PENDING
-    assert delivery.attempts == []
-    assert escalations.task_ref == ("escalation:7", 91)
-    assert escalations.outcome_ref is None
-    assert escalations.status is None
+    worker = HumanEscalationDeliveryWorker(lambda: uow, "task96", lambda: NOW)
+    assert worker.run_once() == 1 and worker.failures == ()
     assert len(outbox.completed) == 1
-
-    request_payload = json.loads(delivery.task.request.payload_json)
-    assert request_payload["type"] == "text"
-    assert "complaint_explicit" in request_payload["text"]
-    assert "https://example.test/line-mobile-admin?target=customer_service" in request_payload["text"]
-    assert "U-admin-test" in delivery.task.request.recipient.identity.value
-    assert "source_digest" not in request_payload["text"]
-
-    provider = _Provider()
-    delivery_worker = LineDeliveryWorker(
-        lambda: uow,
-        provider,
-        "task96-delivery",
-        lambda: NOW,
-    )
-
-    assert delivery_worker.run_once() == 1
-    assert delivery.task.status is LineDeliveryStatus.SENT
-    assert len(delivery.attempts) == 1
-    assert provider.requests == [delivery.task.request]
-    assert escalations.outcome_ref == (
-        "escalation:7",
-        "line-delivery-attempt:91:1",
-    )
-    assert escalations.status == "sent"
+    assert delivery.task is None and delivery.attempts == []
+    assert escalations.task_ref is None and escalations.outcome_ref is None and escalations.status is None
 
 
-@patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
-@pytest.mark.parametrize('trigger,template_id', [
-    ('complaint', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'),
-    ('runtime_critical', 'LU96-M4-SAFE-ALERT-CARD-V1'),
-])
-def test_configured_alert_copy_preserves_masked_facts_recipient_and_management_entry(trigger, template_id):
-    payload = json.loads(_work_item().payload_json)
-    payload['trigger_code'] = trigger
+@pytest.mark.parametrize('trigger', ['complaint', 'runtime_critical'])
+def test_retired_alert_never_reads_saved_copy_or_recipient_configuration(trigger):
+    payload = json.loads(_work_item().payload_json); payload['trigger_code'] = trigger
     outbox, delivery, escalations = _Outbox(_work_item(payload=payload)), _Delivery(), _Escalations()
     uow = _Uow(outbox, delivery, escalations)
-    uow.configurations = SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(
-        kind, LineConfigurationRevision(4), canonical_line_payload_json({'templates': [{
-            'id': template_id, 'message_type': 'text',
-            'content': '請由工會專員接手確認本次客訴。', 'variables': [],
-        }]}),
-    ))
+    uow.configurations = SimpleNamespace(get=lambda kind: pytest.fail('retired Push must not read content'))
     assert HumanEscalationDeliveryWorker(lambda: uow, 'copy-check', lambda: NOW).run_once() == 1
-    text = json.loads(delivery.task.request.payload_json)['text']
-    assert text.startswith('請由工會專員接手確認本次客訴。\n\n')
-    assert 'complaint_explicit' in text
-    assert 'https://example.test/line-mobile-admin?target=customer_service' in text
-    assert delivery.task.request.recipient.identity.value == 'U-admin-test'
-    assert delivery.task.status is LineDeliveryStatus.PENDING
+    assert delivery.task is None and len(outbox.completed) == 1
 
 
 @patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"})
@@ -262,26 +212,16 @@ def test_general_human_request_does_not_read_or_use_complaint_copy():
         raise AssertionError('ordinary handoff must not consume complaint templates')
     uow.configurations = SimpleNamespace(get=unexpected_read)
     assert HumanEscalationDeliveryWorker(lambda: uow, 'handoff-check', lambda: NOW).run_once() == 1
-    assert json.loads(delivery.task.request.payload_json)['text'].startswith('客服人工升級（other）：')
+    assert delivery.task is None and len(outbox.completed) == 1
 
 
-def test_missing_target_is_a_durable_manual_fallback():
-    item = _work_item(
-        outbox_id=18,
-        escalation_ref="escalation:8",
-        payload={"urgency": "high", "hold_state": "active"},
-    )
+def test_old_alert_without_target_is_drained_without_retry_or_fake_failure():
+    item = _work_item(payload={'urgency': 'high', 'hold_state': 'active'})
     outbox, delivery, escalations = _Outbox(item), _Delivery(), _Escalations()
     uow = _Uow(outbox, delivery, escalations)
-    worker = HumanEscalationDeliveryWorker(lambda: uow, "task96", lambda: NOW)
-
-    assert worker.run_once() == 1
-    assert worker.failures == (
-        ("escalation:8", "human_escalation_alert_target_missing"),
-    )
-    assert escalations.status == "failed"
-    assert outbox.completed[0].retryable is True
-    assert delivery.task is None
+    worker = HumanEscalationDeliveryWorker(lambda: uow, 'task96', lambda: NOW)
+    assert worker.run_once() == 1 and worker.failures == ()
+    assert len(outbox.completed) == 1 and delivery.task is None and escalations.status is None
 
 
 def test_old_group_alert_intent_is_rejected_before_delivery():
@@ -292,17 +232,27 @@ def test_old_group_alert_intent_is_rejected_before_delivery():
         _request(_item(_work_item(payload=payload)), NOW)
 
 
-def test_existing_group_delivery_is_rejected_without_provider_send():
+@pytest.mark.parametrize('source,recipient_type', [('customer_service_escalation','user'), ('runtime_health_event','user'), ('customer_service_escalation','group')])
+def test_already_queued_admin_push_is_cancelled_before_provider(source, recipient_type):
     from dataclasses import replace
     from domains.line.delivery import LineRecipient, LineRecipientType
     from domains.line.identities import LineGroupId
+    from subsystems.line.human_escalation_delivery import _request, _item
+    with patch.dict(os.environ, {'LINE_PUBLIC_BASE_URL':'https://example.test'}):
+        request, _ = _request(_item(_work_item()), NOW)
+    if recipient_type == 'group':
+        request = replace(request, recipient=LineRecipient(LineRecipientType.GROUP, LineGroupId('C-retired')))
+    request = replace(request, source_aggregate_type=source)
     outbox, delivery, escalations = _Outbox(_work_item()), _Delivery(), _Escalations()
+    delivery.enqueue(request)
+    cancelled = []
+    def cancel(command):
+        cancelled.append(command)
+        delivery.task = replace(delivery.task, status=LineDeliveryStatus.CANCELLED, lease=None)
+    delivery.cancel = cancel
     uow = _Uow(outbox, delivery, escalations)
-    with patch.dict(os.environ, {"LINE_PUBLIC_BASE_URL": "https://example.test"}):
-        HumanEscalationDeliveryWorker(lambda: uow, "test", lambda: NOW).run_once()
-    delivery.task = replace(delivery.task, request=replace(delivery.task.request,
-        recipient=LineRecipient(LineRecipientType.GROUP, LineGroupId("C-old-alert"))))
     provider = _Provider()
-    assert LineDeliveryWorker(lambda: uow, provider, "test", lambda: NOW).run_once() == 1
-    assert provider.requests == []
-    assert delivery.task.status is LineDeliveryStatus.FAILED
+    assert LineDeliveryWorker(lambda: uow, provider, 'retirement-check', lambda: NOW).run_once() == 1
+    assert provider.requests == [] and delivery.attempts == [] and len(cancelled) == 1
+    assert delivery.task.status is LineDeliveryStatus.CANCELLED
+    assert escalations.outcome_ref is None

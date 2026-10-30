@@ -2,6 +2,11 @@
 
 本目錄僅負責 **NAS 端 MySQL 8.0 資料庫容器、每日不停機 SQL 備份與資料庫保留資料升級**。
 
+Windows 非技術人員日常維護改用 [三個資料庫腳本與操作說明](../../scripts/launchers/README.md#nas-正式資料庫備份升級復原)：
+`backup_nas_database.bat`、`initialize_nas_schema.bat`（現為安全升級）、`restore_nas_database.bat`。
+這條路只使用 MySQL，無需 SSH；每日預設 18:00，由工會電腦執行，可於「稽核與系統 → 資料庫備份」修改。
+本目錄的 DSM 03:00 SQL／冷卷維護是另一條管理者工具，不會因啟用 Windows 備份而自動安裝。
+
 正式架構已定案為：
 
 - **工會電腦（Windows）**：執行 FastAPI 後端、React 管理端、背景 Workers、LINE Webhook 與 Cloudflare Tunnel（由專案根目錄 `Windows管理.bat` 與 `docker-compose.yml` 的本機 Redis 驅動，操作詳見 [`scripts/launchers/WINDOWS-REMOTE.md`](../../scripts/launchers/WINDOWS-REMOTE.md)）。
@@ -32,6 +37,8 @@
    - 於 Synology Container Manager 新增專案，選擇上述目錄與 `compose.yaml` 啟動，等待 `db` 狀態變為 `healthy`。
 4. **從工會電腦初始化正式 Schema**：
    - 在工會電腦 `.env` 填好 NAS 的 `DB_HOST`、`DB_PORT=3306`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE=union_db`（並授予初始化所需的 DDL／trigger／view／routine 權限）。
-   - 於工會電腦雙擊執行 `scripts\launchers\initialize_nas_schema.bat`，通過預檢後輸入 `Y` 完成 371 張表與必要系統資料初始化。
+   - 技術人員先以 `python -m scripts.initialize_nas_schema --apply` 完成既有空庫初始化；此低階入口拒絕覆蓋非空庫。
+   - `scripts\launchers\initialize_nas_schema.bat` 已改為日後的保留資料安全升級，不再用於清空重建。
 5. **設定每日自動備份**：
-   - 依 [`SQL-BACKUPS.md`](SQL-BACKUPS.md) 在 DSM 工作排程器設定每日 03:00 執行 `backup-database.sh`。
+   - 正式電腦完成一次維護設定後，在「稽核與系統 → 資料庫備份」啟用每日備份（預設 18:00）；詳見上方 Windows 操作說明。
+   - DSM 管理者若另需 NAS 自主 SQL 備份，可依 [`SQL-BACKUPS.md`](SQL-BACKUPS.md) 設定；不是 Windows 路徑的必要步驟。

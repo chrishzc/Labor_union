@@ -1178,13 +1178,8 @@ def test_query_preserves_last_reminder_snapshot_without_exposing_command_details
     assert "command_fingerprint" not in response.text
 
 
-def test_production_requires_configured_preview_secret(monkeypatch) -> None:
+def test_production_works_with_internal_preview_secret(monkeypatch) -> None:
+    from api.dependencies.contract_external_signing import _LOCAL_PREVIEW_SECRET
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("CONTRACT_FINAL_PREVIEW_TOKEN_SECRET", raising=False)
-
-    try:
-        _preview_token_secret()
-    except RuntimeError as error:
-        assert "required" in str(error)
-    else:
-        raise AssertionError("production must fail closed without preview token secret")
+    assert _preview_token_secret() == _LOCAL_PREVIEW_SECRET

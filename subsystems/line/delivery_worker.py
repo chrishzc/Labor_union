@@ -112,6 +112,14 @@ class LineDeliveryWorker:
         validation_failure = self._manual_replay_validation_failure(task)
         if not self._still_sendable(task):
             return
+        if validation_failure == "line_admin_push_retired":
+            with self._unit_of_work_factory() as unit:
+                unit.delivery_tasks.cancel(CancelLineDeliveryTaskCommand(
+                    task.task_id, ActorContext(self._worker_identity),
+                    IdempotencyKey(f"retired-admin-push:{task.task_id.value}"), task.request.correlation_id,
+                ))
+                unit.commit()
+            return
         outcome = (
             LineProviderOutcome(
                 LineProviderOutcomeType.REJECTED,
@@ -247,6 +255,8 @@ class LineDeliveryWorker:
     def _manual_replay_validation_failure(
         self, task: LineDeliveryTaskSnapshot
     ) -> str | None:
+        if task.request.source_aggregate_type in {"runtime_health_event", "customer_service_escalation"}:
+            return "line_admin_push_retired"
         if task.request.source_aggregate_type in {'staff_leave_customer_coordination', 'staff_leave_customer_decision'}:
             return 'leave_customer_confirmation_retired'
         if task.request.source_aggregate_type=='matching_schedule_recipient':

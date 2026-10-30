@@ -1,14 +1,7 @@
-"""Project bounded Customer Service alert intents into canonical LINE delivery.
+"""Drain retired administrator alert intents without creating LINE delivery.
 
-This bounded worker validates the bounded alert, creates the durable canonical
-LINE delivery task, and records the Customer Service task readback. Provider
-I/O and delivery retries remain owned by LineDeliveryWorker.
-
-Timeout/5xx retry and retry exhaustion remain the existing delivery-task
-semantics from LINE Access §3.3: only the task retries, then becomes failed
-with a manual fallback; the Customer Service ticket and automation hold are
-not rolled back. Customer Service §20 defines no separate escalation timeout
-state, so this worker does not invent one.
+Tickets, automation holds and historical delivery outcomes remain unchanged.
+Pure historical payload helpers remain available for readback validation.
 """
 
 from __future__ import annotations
@@ -77,48 +70,12 @@ class HumanEscalationDeliveryApplication:
         self._now = now
         del worker_identity
 
-    def consume(self, item: HumanEscalationOutboxItem) -> HumanEscalationDeliveryReceipt:
+    def consume(self, item: HumanEscalationOutboxItem) -> None:
+        """Drain historical admin alerts without creating delivery tasks."""
         with self._unit_of_work_factory() as uow:
-            from domains.line.configuration import LineConfigurationKind
-            from subsystems.line.message_configuration import LineMessageConfigurationError, notification_description
-
-            template_id = {
-                "runtime_critical": "LU96-M4-SAFE-ALERT-CARD-V1",
-                "complaint": "LU96-M4-COMPLAINT-HIGH-CARD-V1",
-            }.get(item.payload.get("trigger_code"))
-            try:
-                description = (notification_description(uow.configurations.get(LineConfigurationKind.MESSAGE_TEMPLATES), template_id)
-                               if template_id else "")
-            except LineMessageConfigurationError as error:
-                raise HumanEscalationDeliveryError("human_escalation_notification_content_invalid") from error
-            request, target = _request(item, self._now(), description=description)
-            result = uow.delivery_tasks.enqueue(request)
-            task = uow.delivery_tasks.get(result.task_id)
-            if task is None:
-                raise HumanEscalationDeliveryError("human_escalation_delivery_task_readback_missing")
-            escalations = getattr(uow, "escalations", None)
-            if escalations is None:
-                raise HumanEscalationDeliveryError("human_escalation_escalation_repository_missing")
-            escalations.record_alert_delivery_task(item.aggregate_identity, task.task_id.value)
-            outcome_ref = None
-            if task.status in {LineDeliveryStatus.SENT, LineDeliveryStatus.FAILED}:
-                outcome_ref = f"delivery-task:{task.task_id.value}:{task.status.value}"
-                escalations.record_alert_delivery_outcome(
-                    item.aggregate_identity,
-                    outcome_ref,
-                    task.status.value,
-                )
             uow.outbox.complete(CompleteLineOutboxCommand(item_to_work(item), self._now()))
             uow.commit()
-        return HumanEscalationDeliveryReceipt(
-            item.aggregate_identity,
-            task.task_id.value,
-            task.status,
-            target,
-            task.status.value,
-            outcome_ref,
-            result.outcome.value == "existing",
-        )
+
 
 
 class HumanEscalationDeliveryWorker:

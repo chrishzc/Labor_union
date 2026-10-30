@@ -11,6 +11,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from shared_kernel.fingerprints import PreviewFingerprint
 
 
+HealthStatus = Literal['healthy', 'warning', 'critical', 'unknown', 'maintenance']
+
+
+class SystemCheckResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    label: str
+    status: HealthStatus
+    checked_at: datetime
+
+
+class SystemStatusResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid', from_attributes=True)
+    status: HealthStatus
+    worker_status: HealthStatus
+    pending_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    last_checked_at: datetime | None
+    checks: tuple[SystemCheckResponse, ...]
+
+
 class RuntimeHealthRecordResponse(BaseModel):
     check_name: str
     component: str

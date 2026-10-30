@@ -46,11 +46,6 @@ const LlmConfigurationPage = lazy(() =>
 const LiffCardStudio = lazy(() =>
   import('./pages/line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio }))
 );
-const AlertGroupSecurity = lazy(() =>
-  import('./pages/line_management/AlertGroupSecurity').then((m) => ({
-    default: m.AlertGroupSecurity,
-  }))
-);
 const AccountingParametersPage = lazy(() =>
   import('./pages/AccountingParametersPage').then((m) => ({
     default: m.AccountingParametersPage,
@@ -66,6 +61,9 @@ const AccountManagementPage = lazy(() =>
 );
 const ContractTemplatesPage = lazy(() =>
   import('./pages/ContractTemplatesPage').then((m) => ({ default: m.ContractTemplatesPage }))
+);
+const DatabaseBackupPage = lazy(() =>
+  import('./pages/DatabaseBackupPage').then((m) => ({ default: m.DatabaseBackupPage }))
 );
 const NotificationTasksPage = lazy(() =>
   import('./pages/NotificationTasksPreviewPage').then((m) => ({
@@ -85,7 +83,6 @@ export const HASH_ALIASES: Record<string, PageType> = {
   'line-llm-settings': 'line-llm-settings',
   'line-studio': 'line-liff-studio',
   'line-liff-studio': 'line-liff-studio',
-  'line-security': 'line-security',
   'order-beta': 'order-workbench-v2',
 };
 
@@ -213,7 +210,6 @@ const AppContent: React.FC = () => {
         {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
         {currentPage === 'line-llm-settings' && <LlmConfigurationPage />}
         {currentPage === 'line-liff-studio' && <LiffCardStudio />}
-        {currentPage === 'line-security' && <AlertGroupSecurity />}
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}
@@ -223,6 +219,7 @@ const AppContent: React.FC = () => {
         {/* Audit & System Section */}
         {currentPage === 'account-management' && <AccountManagementPage />}
         {currentPage === 'contract-templates' && <ContractTemplatesPage />}
+        {currentPage === 'database-backup' && <DatabaseBackupPage />}
         </Suspense>
         </StaffIdentityProvider>
       </MasterLayout>

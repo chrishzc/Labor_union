@@ -44,7 +44,7 @@ from subsystems.line.order_group_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.delivery_contracts import CancelLineDeliveryTaskCommand
-from subsystems.line.message_copy_catalog import configured_payload, default_copy_templates
+from subsystems.line.message_copy_catalog import configured_payload
 
 _BIND_FORMAT = "格式：綁定訂單 案件編號 邀請網址\n例如：綁定訂單 115000157 https://line.me/R/ti/g/xxxxx\n各項之間可用空白或換行，網址請完整貼上。"
 _INVITE_COMMAND_FORMAT = "邀請指令只需輸入「發送邀請」。\n首次設定或更新網址請使用：\n" + _BIND_FORMAT
@@ -100,9 +100,6 @@ class LineOrderGroupApplication:
             if isinstance(error, RuntimeError) and str(error) not in _SAFE_RUNTIME_ERRORS:
                 raise
             message = _safe_error_message(error)
-            key = next((key for key, template in default_copy_templates().items() if key.startswith(("group-error-", "group-format-")) and template["content"] == message), None)
-            if key:
-                message = configured_payload(unit_of_work, key, {"type": "text", "text": message})["text"]
             self._reply_to_group(inbox, unit_of_work, message, "error")
         return True
 
@@ -163,7 +160,7 @@ class LineOrderGroupApplication:
         self._reply_to_group(
             inbox,
             unit_of_work,
-            configured_payload(unit_of_work, "group-bound", {"type": "text", "text": group_binding_acknowledgement(case_no)}, {"case_no": case_no})["text"],
+            group_binding_acknowledgement(case_no),
             "bound",
         )
 
@@ -223,7 +220,7 @@ class LineOrderGroupApplication:
         self._reply_to_group(
             inbox,
             unit_of_work,
-            configured_payload(unit_of_work, "group-invitations-queued", {"type": "text", "text": group_invitation_acknowledgement(binding.case_no, len(recipients))}, {"case_no": binding.case_no, "recipient_count": len(recipients)})["text"],
+            group_invitation_acknowledgement(binding.case_no, len(recipients)),
             "invite-queued",
         )
 
@@ -240,7 +237,7 @@ class LineOrderGroupApplication:
                 inbox.event.occurred_at,
                 IdempotencyKey(f"group-reply:{event_identity}:{suffix}"),
                 CorrelationId(f"line-event:{event_identity}"),
-                REPLY_ONLY_WEBHOOK_SOURCE if suffix == "error" else "line_webhook_event",
+                REPLY_ONLY_WEBHOOK_SOURCE,
                 event_identity,
             )
         )

@@ -10,6 +10,8 @@
 工會 LINE 工作台另以正式已核銷的未結案案件與現有群組綁定差集呈現「尚未建群」，server 分頁、
 零寫入，僅提供案號、已核銷金額及複製綁定指令；不要求客戶簽約或推進案件。
 
+操作人員的 18 項群組設定完成、邀請排入、資格／設定與格式錯誤均使用既有純函式的固定中文；新提示只建立原群組、原事件的 Reply-only 工作，不讀通知文案設定，缺少或失敗 Reply 不補 Push。客戶／月嫂私人邀請卡仍沿原發送與可編輯文案契約，歷史設定不刪改。
+
 ## Implementation
 - domain: `domains/line/order_group.py`
 - application: `subsystems/line/order_group_application.py`

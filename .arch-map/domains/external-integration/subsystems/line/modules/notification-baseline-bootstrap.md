@@ -11,6 +11,7 @@ assignments, profiles, payroll obligations, or provider calls.
 
 ## Implementation
 - `subsystems/line/notification_baseline.py`
+- `subsystems/line/notification_policy.py` — 純規則評估與已退役管理員通知事件白名單；不執行 provider effect。
 - `domains/line/notification_rules.py`
 - `infrastructure/mysql/line_notification_repository.py`
 - `subsystems/line/configuration_application.py`
@@ -30,3 +31,5 @@ assignments, profiles, payroll obligations, or provider calls.
 2026-10-22：零候選固定通知從有效 rules／templates 與 fixture 移除，new candidate validation 拒絕恢復；historical grammar readback 仍可解析舊定義，專用刪除 writer 可取消其 intent／task，歷史不重寫。
 
 目前 message templates 與 fresh bootstrap 僅保留有效內容；三日排程與 14 個已確認殘留模板移除。歷史 synthetic source producer 只保留 immutable provenance，不恢復現行通知。
+
+2026-10-30：runtime.alert.review_required／complaint.ingress.hold_high_ticket 永遠 suppressed（line_admin_push_retired）；歷史規則補送拒絕，已建任務由既有 provider 前驗證回退役原因並取消。不重寫歷史來源或設定。

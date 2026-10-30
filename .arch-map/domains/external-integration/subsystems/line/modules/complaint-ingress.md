@@ -11,7 +11,11 @@
 escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，請協助處理。」。
 一般「退費／主管處理」語句不因此自動取得 complaint 語意。
 
-另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold、masked alert intent 與簡短受理回覆；一般留言不啟動聊天室 AI 或自動轉人工。「問題／其他問題／5／6」只開自助導覽，active hold 內仍附加原案件。專員正式結案時解除 hold 並通知完成。舊回答錯誤／繼續／恢復 AI 入口只提示停用，不開單、不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
+另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold 與簡短受理回覆；2026-10-30 管理員自動告警退役，不建立 masked alert intent；一般留言不啟動聊天室 AI 或自動轉人工。「問題／其他問題／5／6」只開自助導覽，active hold 內仍附加原案件。專員正式結案時解除 hold 並通知完成。舊回答錯誤／繼續／恢復 AI 入口只提示停用，不開單、不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
+
+服務流程及收費補助只導向 AI 客服 LIFF：自助導覽按鈕使用既有 LIFF URI，舊文字／數字別名回共用 LIFF 導覽，不再讀取或回覆固定說明。資料修改受理、訂單修改受理及人工客服通知維持原流程；歷史設定與已提交 payload 不改寫。
+
+服務自助導覽只使用 `service-menu` 共用文案；訂單異動導覽只提供已設定的 `?target=order_update` URI，未設定時提示專員協助，不產生五分類按鈕或猜測連結。原資料／訂單受理及有效結果通知不變。
 
 ## Implementation
   - `subsystems/line/webhook_immediate_reply.py` — 專人服務受理僅使用當次 Reply API；由 runtime 注入既有文案 reader，缺 Token／設定或 Reply 失敗不建立背景受理 Push，工單保存獨立。
@@ -61,3 +65,5 @@ source fingerprint is evidence only. Provider delivery remains the existing
 committed intent/outbox boundary.
 
 客服正式結案沿 Customer Service owner 的 version／lock；LINE 的舊 AI 按鈕與指令不得呼叫 requester resume writer，也不改寫既有結案 receipt。
+
+2026-10-30：重大客訴不 Push；保留工單／hold／冪等／事件／結案，新的 escalation 不呼叫 alert enqueue。既有 human-escalation outbox 消化並 complete，不建 task 或偽造寄送 outcome；delivery worker 在 provider 前取消 historical admin-alert tasks。

@@ -10,6 +10,7 @@ import re
 from uuid import uuid4
 from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
 from subsystems.line.message_copy import validate_copy_content, copy_fields, apply_copy_payload
+from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Path as ApiPath
 from pymysql.err import InterfaceError, OperationalError
@@ -434,8 +435,13 @@ def _message_template_view(
     templates_definition: dict[str, object],
     revision: int,
 ) -> LineNotificationMessageTemplateView:
+    rule_id = "service-menu" if rule_id == "service-other" else rule_id
     rule = next((item for item in rules.rules if item.id == rule_id), None)
     if rule is not None:
+        if rule.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS or rule.template_id in {
+            "LU96-M4-SAFE-ALERT-CARD-V1", "LU96-M4-COMPLAINT-HIGH-CARD-V1",
+        }:
+            raise HTTPException(status_code=404, detail="此管理員告警已改由 LIFF 工作台查看。")
         template_id = rule.template_id
     elif rule_id in default_copy_templates():
         template_id = default_copy_templates()[rule_id]["id"]

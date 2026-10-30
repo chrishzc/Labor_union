@@ -4,25 +4,13 @@ chcp 65001 >nul
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 cd /d "%PROJECT_ROOT%"
 set "PYTHONUTF8=1"
-set "INIT_EXIT=1"
-if not exist ".venv\Scripts\python.exe" goto :MISSING_PYTHON
-if "%~1"=="" goto :INTERACTIVE
-".venv\Scripts\python.exe" -m scripts.initialize_nas_schema %*
-set "INIT_EXIT=%ERRORLEVEL%"
-goto :FINISH
-
-:INTERACTIVE
-echo.
-echo [Info] Checking NAS connection, schema compatibility, permissions and database...
-".venv\Scripts\python.exe" -m scripts.initialize_nas_schema --interactive
-set "INIT_EXIT=%ERRORLEVEL%"
-goto :FINISH
-
-:MISSING_PYTHON
-echo [ERROR] Missing project Python .venv\Scripts\python.exe
-
-:FINISH
-echo.
-if not "%INIT_EXIT%"=="0" echo [ERROR] NAS schema check or initialization stopped. Exit code: %INIT_EXIT%
+if not exist ".venv\Scripts\python.exe" (
+  echo 找不到系統執行環境，請通知維護人員。
+  if "%~1"=="" pause
+  exit /b 2
+)
+echo NAS 資料庫安全升級（保留原庫；不再提供清空重建）
+".venv\Scripts\python.exe" -m scripts.nas_database_maintenance upgrade %*
+set "MAINTENANCE_EXIT=%ERRORLEVEL%"
 if "%~1"=="" pause
-exit /b %INIT_EXIT%
+exit /b %MAINTENANCE_EXIT%

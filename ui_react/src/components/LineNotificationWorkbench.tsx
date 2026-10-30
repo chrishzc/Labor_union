@@ -174,7 +174,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         return;
       }
       const snapshot = rulesResult.value;
-      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3'].includes(rule.templateId));
+      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3', 'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'].includes(rule.templateId));
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);
@@ -312,6 +312,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   useEffect(() => {
     if (!selectedEntryId || loading || previewCatalogLoading) return;
     const resolvedId = ({ 'template-bind_success_new_order': 'identity-bound-customer', 'template-staff_switch_success': 'identity-bound-staff',
+      'service-other': 'service-menu',
       'card-caregiver-information': 'card-customer-confirmation', 'card-caregiver-information-2': 'card-customer-confirmation', 'card-customer-profiles': 'card-customer-confirmation',
     } as Record<string, string>)[selectedEntryId] ?? selectedEntryId;
     const entry = allEntries.find(item => item.id === resolvedId);

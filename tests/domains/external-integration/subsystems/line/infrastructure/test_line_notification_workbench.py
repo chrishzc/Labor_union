@@ -183,16 +183,53 @@ def test_source_failure_is_closed_error_instead_of_zero_or_sql_leak(monkeypatch)
     assert failure.value.detail['error']['retryable'] is True
 
 
-@pytest.mark.parametrize('available,total',[(True,0),(False,1)])
-def test_runtime_todo_uses_current_recipient_availability_instead_of_enabled_target_label(monkeypatch,available,total):
-    from api.routes import runtime_health
-    calls=[]
+def test_runtime_is_a_readonly_workbench_card_without_recipient_setup_todo(monkeypatch):
     monkeypatch.setattr(query,'get_connection',lambda:SimpleNamespace(close=lambda:None))
     monkeypatch.setattr(query,'MySqlRuntimeMonitorRepository',lambda conn:SimpleNamespace(list_status=lambda:()))
-    monkeypatch.setattr(runtime_health,'_app',lambda:SimpleNamespace(has_available_admin_target=lambda:(calls.append('available') or available)))
     result=query._read_source(NotificationSource.RUNTIME,0,PRINCIPAL)
-    assert result.total==total and calls==['available']
-    if result.items:assert result.items[0].title=='系統通知尚無可用對象'
+    assert result.total == 0 and result.items == []
+    assert NotificationSource.RUNTIME not in [entry.source for entry in query._catalog(PRINCIPAL)]
+
+
+def test_mobile_system_status_refresh_errors_and_late_responses_are_readonly():
+    import subprocess
+    script = r'''
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+import {Window} from './ui_react/node_modules/happy-dom/lib/index.js';
+const html=fs.readFileSync('line/static/mobile_admin.html','utf8').replace(/\r\n/g,'\n');
+const window=new Window();const document=window.document;
+document.body.innerHTML=html.slice(html.indexOf('<body>')+6,html.indexOf('<script'));
+const status=document.getElementById('systemStatus');
+assert.equal(status.parentElement.id,'reviewPane');assert.equal(status.open,false);
+assert(status.compareDocumentPosition(document.querySelector('.workbench-summary'))&4);
+const requests=[];let resolve, reject;
+const ctx=vm.createContext({document,Date,Object,Number,console,
+ notificationText:(tag,value)=>{const element=document.createElement(tag);element.textContent=value;return element},
+ postJson:(url,body)=>{requests.push([url,body]);return new Promise((ok,fail)=>{resolve=ok;reject=fail})}});
+vm.runInContext("let target='staff_review';const studioPreview=false;",ctx);
+vm.runInContext(html.slice(html.indexOf('const systemStatusNames ='),html.indexOf('\nfunction requireMatchingFollowupPage')),ctx);
+const data={status:'healthy',worker_status:'healthy',pending_count:2,failed_count:0,last_checked_at:'2026-10-30T00:00:00Z',checks:[{label:'LINE 訊息發送服務',status:'healthy',checked_at:'2026-10-30T00:00:00Z'}]};
+let loading=vm.runInContext('loadSystemStatus()',ctx);
+assert.equal(document.getElementById('systemStatusLabel').textContent,'讀取中');
+assert.equal(document.getElementById('refreshSystemStatus').disabled,true);
+resolve(data);await loading;
+assert.equal(status.dataset.status,'healthy');assert.equal(document.getElementById('systemPending').textContent,'2 件');
+loading=vm.runInContext('loadSystemStatus()',ctx);reject(new Error('private SQL details'));await loading;
+assert.equal(status.dataset.status,'unknown');assert.equal(document.getElementById('systemWorker').textContent,'—');
+assert.equal(document.getElementById('systemStatusLabel').textContent,'無法讀取');
+assert(!status.textContent.includes('private SQL'));
+const old=vm.runInContext('loadSystemStatus()',ctx),oldResolve=resolve;
+vm.runInContext("target='customer_service'",ctx);oldResolve(data);await old;
+assert.notEqual(status.dataset.status,'healthy','late success changed a departed surface');
+vm.runInContext("target='staff_review'",ctx);
+loading=vm.runInContext('loadSystemStatus()',ctx);resolve({...data,checks:[{label:'invalid',status:'broken'}]});await loading;
+assert.equal(document.getElementById('systemStatusLabel').textContent,'無法讀取');
+assert(requests.every(([url,body])=>url.endsWith('/runtime/query')&&Object.keys(body).length===0));
+assert.equal(document.getElementById('refreshSystemStatus').disabled,false);
+await window.happyDOM.abort();
+'''
+    result = subprocess.run(['node','--input-type=module','-e',script], capture_output=True, text=True, timeout=25)
+    assert result.returncode == 0, result.stderr
 
 
 def test_only_current_contact_request_uses_ticket_identity_not_signing_or_later_followup(monkeypatch):

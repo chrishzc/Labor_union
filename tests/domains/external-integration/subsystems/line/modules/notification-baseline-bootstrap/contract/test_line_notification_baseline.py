@@ -143,3 +143,27 @@ def test_retired_notifications_cannot_be_reintroduced(identifier):
     definition = {'templates': [{'id': identifier, 'message_type': 'text', 'content': '舊通知', 'variables': []}]}
     with pytest.raises(LineMessageConfigurationError, match='已退役'):
         validate_message_templates(definition)
+
+
+@pytest.mark.parametrize('event_code', ['runtime.alert.review_required', 'complaint.ingress.hold_high_ticket'])
+@pytest.mark.parametrize('source_domain', ['runtime', 'manual_replay'])
+def test_retired_admin_rules_cannot_project_or_send_historical_intents(event_code, source_domain):
+    from types import SimpleNamespace
+    from infrastructure.mysql.line_notification_repository import MySqlLineNotificationRepository
+    from subsystems.line.notification_policy import NotificationSourceEvent, evaluate_notification_rules
+    calls = []
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
+        def execute(self, sql, params): calls.append((sql, params))
+        def fetchone(self): return {'event_code':event_code, 'source_domain':source_domain}
+    repo = MySqlLineNotificationRepository(SimpleNamespace(cursor=Cursor))
+    assert repo.manual_replay_delivery_validation_failure(7) == 'line_admin_push_retired'
+    assert calls[0][1] == (7,)
+    decisions = []
+    repo._record_decision = lambda *args: decisions.append(args)
+    event = NotificationSourceEvent('old-alert',event_code,False,{},source_domain=source_domain)
+    repo._project_rule(7,event,1,{'id':'old-rule','recipient_selector':'admin.review_actor'}, {}, 1)
+    assert decisions[0][5:7] == ('suppressed','line_admin_push_retired')
+    policy = evaluate_notification_rules(event, {'rules':[{'id':'old-rule','event_code':event_code,'enabled':True,'predicates':[]}]})
+    assert [(item.status,item.reason_code) for item in policy] == [('suppressed','line_admin_push_retired')]

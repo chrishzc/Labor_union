@@ -169,7 +169,7 @@ def test_preferences_query_and_rejected_edit_do_not_commit():
     assert app.get_target_preferences(1) == {"system_health": False}
     with pytest.raises(RuntimeAlertTargetError) as error:
         app.save_target_preferences(1, {"system_health": True})
-    assert error.value.code == "line_alert_preferences_fixed"
+    assert error.value.code == "line_admin_push_retired"
     assert all(unit.commits == 0 for unit in units)
     assert repo.update_calls == repo.save_calls == 0
 
@@ -182,7 +182,7 @@ def test_preferences_edit_preserves_missing_target_error():
     app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
     with pytest.raises(RuntimeAlertTargetError) as error:
         app.save_target_preferences(1, {"system_health": True})
-    assert error.value.code == "line_alert_target_not_found"
+    assert error.value.code == "line_admin_push_retired"
 
 
 def _disable_command(expected, reason, key, correlation, actor, fingerprint=None):
@@ -202,119 +202,6 @@ def _reset(repo, expected, key="reset-1"):
     )
 
 
-def test_reset_requires_fresh_version_and_commits_receipt_and_audit():
-    repo = _Repo((_row(),))
-    app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
-    current = app.list_targets()[0].current_version
-
-    result = app.set_enabled(
-        _disable_command(
-            current,
-            "群組輪替",
-            IdempotencyKey("reset-1"),
-            CorrelationId("corr-1"),
-            _actor(),
-        )
-    )
-
-    assert result.resulting_state == "disabled"
-    assert repo.rows[1]["enabled"] is False
-    assert repo.save_calls == 1
-    assert repo.release_calls == 1
-
-
-def test_reset_preview_is_zero_write_and_apply_requires_matching_fingerprint():
-    repo = _Repo((_row(),))
-    holder = []
-    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    command = _disable_command(
-        current,
-        "群組輪替",
-        IdempotencyKey("reset-preview-1"),
-        CorrelationId("corr-preview-1"),
-        _actor(),
-    )
-
-    preview = app.preview(command)
-
-    assert preview.operation == "disable"
-    assert preview.previous_state == "active"
-    assert preview.resulting_state == "disabled"
-    assert preview.current_version == current
-    assert preview.apply_ready is True
-    assert repo.update_calls == 0
-    assert repo.save_calls == 0
-    assert repo.audits == []
-    assert repo.lock_calls == []
-
-    with pytest.raises(RuntimeAlertTargetError) as mismatch:
-        app.set_enabled(_disable_command(
-            current,
-            "群組輪替",
-            IdempotencyKey("reset-preview-1"),
-            CorrelationId("corr-preview-1"),
-            _actor(),
-            PreviewFingerprint("0" * 64),
-        ))
-    assert mismatch.value.code == "line_alert_target_preview_conflict"
-    assert repo.update_calls == 0
-
-    receipt = app.set_enabled(_disable_command(
-        current,
-        "群組輪替",
-        IdempotencyKey("reset-preview-1"),
-        CorrelationId("corr-preview-1"),
-        _actor(),
-        preview.preview_fingerprint,
-    ))
-    assert receipt.resulting_state == "disabled"
-    assert repo.update_calls == 1
-
-
-def test_stale_reset_is_zero_write_and_typed_conflict():
-    repo = _Repo((_row(),))
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        _reset(repo, "stale-token")
-    assert error.value.code == "line_alert_target_version_conflict"
-    assert repo.update_calls == 0
-
-
-def test_same_key_replay_returns_receipt_without_second_write():
-    repo = _Repo((_row(),))
-    holder = []
-    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    command = _disable_command(
-        current,
-        "群組輪替",
-        IdempotencyKey("reset-1"),
-        CorrelationId("corr-1"),
-        _actor(),
-    )
-    first = app.set_enabled(command)
-    second = app.set_enabled(command)
-    assert first.receipt_id == second.receipt_id
-    assert second.replayed is True
-    assert repo.update_calls == 1
-    assert repo.save_calls == 1
-
-
-def test_same_key_different_payload_is_rejected():
-    repo = _Repo((_row(),))
-    holder = []
-    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    app.set_enabled(_disable_command(
-        current, "第一次", IdempotencyKey("reset-1"), CorrelationId("corr-1"), _actor()
-    ))
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        app.set_enabled(_disable_command(
-            current, "不同原因", IdempotencyKey("reset-1"), CorrelationId("corr-1"), _actor()
-        ))
-    assert error.value.code == "line_alert_target_idempotency_mismatch"
-
-
 def test_group_cannot_be_enabled_or_previewed_and_is_not_listed():
     repo = _Repo((_row(1, target_type="group"), _row(2, target_type="group", enabled=False)))
     app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
@@ -325,54 +212,8 @@ def test_group_cannot_be_enabled_or_previewed_and_is_not_listed():
     for operation in (app.preview, app.set_enabled):
         with pytest.raises(RuntimeAlertTargetError) as error:
             operation(command)
-        assert error.value.code == "line_alert_group_retired"
+        assert error.value.code == "line_admin_push_retired"
     assert repo.update_calls == repo.save_calls == 0
-
-
-def test_lock_failure_is_unavailable_and_does_not_write():
-    repo = _Repo((_row(),))
-    repo.acquire_alert_target_lock = lambda _timeout: False
-    app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        app.set_enabled(_disable_command(
-            current, "鎖定測試", IdempotencyKey("reset-lock"),
-            CorrelationId("corr-lock"), _actor()
-        ))
-    assert error.value.code == "line_alert_target_serialization_unavailable"
-    assert repo.update_calls == 0
-
-
-def test_post_commit_release_failure_is_typed_unknown_without_rollback_mask():
-    repo = _Repo((_row(),))
-    holder = []
-    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    repo.release_alert_target_lock = lambda: False
-    command = _disable_command(
-        current, "群組輪替", IdempotencyKey("release-unknown"), CorrelationId("corr-release"), _actor()
-    )
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        app.set_enabled(command)
-    assert error.value.code == "line_alert_target_commit_outcome_unknown"
-    assert holder[-1].commits == 1
-    assert holder[-1].rollbacks == 0
-
-
-def test_atomic_admin_audit_failure_prevents_commit():
-    repo = _Repo((_row(),))
-    holder = []
-    app = RuntimeAlertTargetApplication(_factory(repo, holder), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    repo.save_alert_target_admin_audit = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("audit"))
-    command = _disable_command(
-        current, "群組輪替", IdempotencyKey("audit-failure"), CorrelationId("corr-audit"), _actor()
-    )
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        app.set_enabled(command)
-    assert error.value.code == "line_alert_target_persistence_unavailable"
-    assert holder[-1].commits == 0
-    assert holder[-1].rollbacks == 1
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -405,26 +246,25 @@ def test_aware_non_utc_datetime_is_rejected_as_corrupt():
     assert error.value.code == "line_alert_target_persistence_corrupt"
 
 
-@pytest.mark.parametrize("snapshot", ["{broken", {}, {"receipt_id": "only-one-field"}])
-def test_corrupt_receipt_is_closed_typed_error(snapshot):
-    repo = _Repo((_row(),))
-    app = RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW)
-    current = app.list_targets()[0].current_version
-    command = _disable_command(
-        current, "群組輪替", IdempotencyKey("reset-1"), CorrelationId("corr-1"), _actor()
-    )
-    repo.receipts[("line_alert_target", "reset-1")] = {
-        "request_fingerprint": command_fingerprint(command).value,
-        "result_snapshot": snapshot,
-    }
-    with pytest.raises(RuntimeAlertTargetError) as error:
-        app.set_enabled(command)
-    assert error.value.code == "line_alert_target_persistence_corrupt"
-
-
 def test_corrupt_target_row_is_closed_typed_error():
     repo = _Repo((_row(),))
     del repo.rows[1]["minimum_status"]
     with pytest.raises(RuntimeAlertTargetError) as error:
         RuntimeAlertTargetApplication(_factory(repo, []), lambda: NOW).list_targets()
     assert error.value.code == "line_alert_target_persistence_corrupt"
+
+
+@pytest.mark.parametrize("operation", ["add", "enable", "disable", "preview", "preferences"])
+@pytest.mark.parametrize("stored_receipt", [None, "{broken", {"historical":"receipt"}])
+def test_retired_personal_target_writers_reject_before_opening_any_uow(operation, stored_receipt):
+    from types import SimpleNamespace
+    def forbidden():
+        pytest.fail("retired writer opened a read/write transaction")
+    app = RuntimeAlertTargetApplication(forbidden, lambda: NOW)
+    command = SimpleNamespace(enabled=operation == "enable", existing_receipt=stored_receipt)
+    call = {"add": lambda: app.add_admin_target(command), "enable": lambda: app.set_enabled(command),
+            "disable": lambda: app.set_enabled(command), "preview": lambda: app.preview(command),
+            "preferences": lambda: app.save_target_preferences(1, {"system_health":True})}[operation]
+    with pytest.raises(RuntimeAlertTargetError) as error:
+        call()
+    assert error.value.code == "line_admin_push_retired"

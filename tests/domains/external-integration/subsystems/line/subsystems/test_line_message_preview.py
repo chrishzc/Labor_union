@@ -90,15 +90,22 @@ def test_render_uses_selected_facts_and_ephemeral_copy_without_saving():
     assert ("客戶", "林小姐") in [(f.id, f.label) for f in result.facts]
 
 
-def test_general_question_preview_is_current_self_service_menu_and_subsidy_copy():
-    from subsystems.line.service_help_application import _PAYMENT_REPLY
+def test_general_question_preview_is_current_self_service_menu():
     application = app()
     other = application.render('service-other', None, None, None, actor(), sample=True)
     menu = application.render('service-menu', None, None, None, actor(), sample=True)
     assert other.format == 'flex' and other.bubbles == menu.bubbles
-    payment = application.render('service-payment', None, None, None, actor(), sample=True)
-    assert payment.text == _PAYMENT_REPLY
-    assert '最高40小時' in payment.text and '最高120小時' in payment.text
+    assert 'service-other' not in {entry.id for entry in application.catalog(actor())}
+
+
+@pytest.mark.parametrize('key', ['service-flow', 'service-payment'])
+def test_retired_explanations_are_not_listed_or_previewed(key):
+    application = app()
+    catalog = application.catalog(actor())
+    assert key not in {item.id for item in catalog}
+    assert {'service-profile-update', 'service-order-update'} <= {item.id for item in catalog}
+    with pytest.raises(MessagePreviewNotFound):
+        application.render(key, None, None, None, actor(), sample=True)
 
 
 def test_case_not_found_is_not_replaced_with_other_case():
@@ -212,15 +219,33 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
     templates = read_raw_config("message_templates")
     catalog = LineMessagePreviewApplication._catalog(templates, {"rules": [
         {"id": "retired", "template_id": "new_user_d1"},
+        {"id": "old-admin-health", "template_id": "LU96-M4-SAFE-ALERT-CARD-V1"},
+        {"id": "old-complaint", "template_id": "LU96-M4-COMPLAINT-HIGH-CARD-V1"},
     ]})
     ids = {entry.id for entry in catalog}
     assert {"card-customer-confirmation", "card-union-question", "card-union-answer",
             "card-candidate-information-1", "card-candidate-information-2", "card-candidate-information-3",
             "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
-            "template-register_success", "template-staff_verification_requested"} <= ids
+            "template-client_rebind_rejected", "template-staff_verification_rejected"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
     assert {entry.id for entry in catalog if entry.format == 'flex' and entry.name.startswith('正式媒合－')} == {'card-customer-confirmation'}
     assert not {'card-caregiver-information', 'card-caregiver-information-2', 'card-customer-profiles'} & ids
+    assert not {'runtime-system-health', 'old-admin-health', 'old-complaint'} & ids
+
+
+def test_unused_identity_templates_are_hidden_without_removing_rule_backed_notifications():
+    from subsystems.line.configuration_store import read_raw_config
+    from copy import deepcopy
+    templates = read_raw_config('message_templates')
+    before = deepcopy(templates)
+    unused = {'staff_switch_fail','staff_menu_not_set','esc_success','esc_fail','bind_link_msg',
+              'register_success','bind_success_existing','bind_confirm_rebind','bind_fail_no_data',
+              'client_rebind_approved','staff_verification_requested'}
+    catalog = LineMessagePreviewApplication._catalog(templates, {'rules': [
+        {'id': 'configured-active-notification', 'template_id': 'register_success'}]})
+    assert not {'template-' + key for key in unused} & {item.id for item in catalog}
+    assert 'configured-active-notification' in {item.id for item in catalog}
+    assert templates == before
 
 
 def test_start_day_group_card_public_preview_has_copy_and_inert_buttons_only():
@@ -259,7 +284,7 @@ def test_second_payment_public_preview_is_short_group_copy_without_actions(key,p
     assert application.render(key,None,None,None,actor()).status=='unavailable'
 
 
-@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-flow", "service-payment", "service-profile-update", "service-order-update", "service-other"])
+@pytest.mark.parametrize("key", ["service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-pending", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin", "service-profile-update", "service-order-update", "service-other"])
 def test_fixed_runtime_messages_need_no_database_and_expose_no_actions(key):
     def forbidden():
         pytest.fail("fixed runtime message must not read subjects or create an interaction")
@@ -449,7 +474,7 @@ def test_substitute_and_date_record_preview_disclose_sparse_dates_and_caregiver(
 def test_current_group_preview_names_use_case_group_terminology():
     names = [item.name for item in app().catalog(actor()) if item.id.startswith('group-')]
     assert names and all('服務群組' not in name for name in names)
-    assert '案件群組－設定完成' in names
+    assert set(names) == {'案件群組邀請卡－客戶', '案件群組邀請卡－月嫂'}
 
 
 def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_period_amounts():
@@ -635,3 +660,23 @@ def test_old_card_copy_preserves_its_saved_title_while_the_new_description_is_em
     body = next(field['id'] for field in template['copy_fields'] if field['kind'] == 'body')
     assert current[body] == ''
     assert original == before
+
+
+def test_fixed_operator_feedback_and_admin_alerts_have_no_catalog_or_default_copy():
+    from subsystems.line.message_copy_catalog import default_copy_templates
+    from subsystems.line.configuration_store import read_raw_config
+    keys = {'group-bound','group-invitations-queued','group-error-invitation-url','group-format-invite',
+            'group-error-admin','group-error-order','group-error-unbound','group-error-identity',
+            'group-error-cancelled','group-error-unpaid','group-error-occupied','group-format-empty',
+            'group-format-case','group-format-url','group-format-spacing','group-format-split',
+            'group-format-invalid-case','group-format-invalid-url','runtime-system-health'}
+    from pathlib import Path
+    rules = json.loads(Path('config/notification_rules.json').read_text(encoding='utf-8'))
+    catalog = LineMessagePreviewApplication._catalog(read_raw_config('message_templates'),rules)
+    ids = {item.id for item in catalog}
+    assert not keys & ids and not keys & set(default_copy_templates())
+    assert {'group-invitation-customer','group-invitation-staff','service-order-update','service-profile-update'} <= ids
+    assert not {'LU96-M4-SAFE-ALERT-RULE-V1','LU96-M4-COMPLAINT-HIGH-RULE-V1'} & ids
+    for key in keys:
+        with pytest.raises(MessagePreviewNotFound):
+            app().render(key,None,None,None,actor(),sample=True)

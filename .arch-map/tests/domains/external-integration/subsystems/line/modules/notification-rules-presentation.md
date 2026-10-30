@@ -22,3 +22,9 @@ test_root: tests/domains/external-integration/subsystems/line/subsystems/test_li
 - 同一 React oracle 保護訊息清單六則分頁與搜尋定位、整張卡片同時編輯標題／自由段落／按鈕及插入系統資料、範例展開，以及多卡逐張切換不重建／發送訊息；實際畫面檢查說明固定 504px 與移除清單／編輯外框／預覽內層捲動。確認包預設顯示最後的確認卡。
 - 同一 API／preview roots 保護沒有舊說明節點仍可增加段落、舊標題文案承接、所有內建卡片可編輯正文、客戶與月嫂及不同流程各自儲存，以及多月嫂 carousel 的說明只進入最後確認卡；圖片 root 同時保護清空說明不將 owner 表格誤放入互動卡。
 - 同一 catalog／React oracle 保護正式媒合只列完整推薦確認包、初步候選項目保留，三個原單卡編輯入口導向完整包；原唯讀單卡 preview 仍沿既有測試驗證。
+
+服務流程與收費補助統一導向 AI 客服 LIFF；既有預覽／通知 API 測試驗證兩個退役內建 ID 不列入目錄，歷史文案存在時 Query／PUT 仍回 404，並保留資料修改及訂單修改受理通知。
+
+同一 API／preview／React roots 驗證 service-other 舊連結、Query／PUT／preview 共用 service-menu，歷史文案不覆寫；11 個未使用 standalone 模板退出且 rule-backed 通知仍可維護；訂單導覽只含正式 LIFF URI，缺少設定時零假連結，舊五按鈕文案投影不改原設定。
+
+同一 API／preview roots 驗證 18 項固定操作提示及 3 類管理員告警不再列目錄或開放文案編輯，拒絕舊 Query／PUT 零寫入；私人邀請與業務受理仍可編輯。群組 source／Reply 與發送隔離由 order-group-coordination 及既有 informational-reply integration roots 驗證。

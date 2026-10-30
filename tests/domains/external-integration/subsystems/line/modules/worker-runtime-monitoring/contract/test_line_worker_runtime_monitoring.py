@@ -154,4 +154,4 @@ def test_group_alert_projection_is_retired_even_if_old_preferences_enable_it():
     def forbidden(*args):
         pytest.fail("retired group alerts cannot enqueue delivery")
     assert RuntimeLineAlertProjector(lambda: None).project(41, repo, SimpleNamespace(enqueue=forbidden)) == 0
-    assert intents[0][-1] == "line_alert_group_retired"
+    assert intents == []

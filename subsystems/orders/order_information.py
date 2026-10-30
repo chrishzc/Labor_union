@@ -321,7 +321,6 @@ def _candidate_line_sections(
             ('薪資單價', f'NT$ {unit:,}／時' if isinstance(unit, int) else str(unit or '待確認')),
             ('預估總薪資', str(facts.get('staff_salary_total') or '待確認')),
             ('預計付款日', str(facts.get('staff_salary_due') or '待確認')),
-            ('預估說明', '依目前約定天數與時數預估；未確認的雙薪、加價及調整不列為已確定薪資。'),
         ]
     return tuple(
         CandidateInformationSection(title, tuple(rows))

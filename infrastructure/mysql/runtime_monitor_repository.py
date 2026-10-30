@@ -18,6 +18,22 @@ from subsystems.line.runtime_monitoring import (
 
 
 class MySqlRuntimeMonitorRepository:
+    def notification_queue_counts(self):
+        from subsystems.line.runtime_status_query import NotificationQueueCounts
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(SUM(processing_status IN ('pending','processing','retryable_failed')),0) AS pending,"
+                "COALESCE(SUM(processing_status='failed'),0) AS failed FROM line_delivery_tasks "
+                "WHERE source_aggregate_type NOT IN ('runtime_health_event','customer_service_escalation') "
+                "AND NOT EXISTS (SELECT 1 FROM line_notification_intents i "
+                "JOIN line_notification_decisions d ON d.id=i.decision_id "
+                "JOIN line_notification_source_events s ON s.id=d.source_event_id "
+                "WHERE i.delivery_task_id=line_delivery_tasks.id "
+                "AND s.event_code IN ('runtime.alert.review_required','complaint.ingress.hold_high_ticket'))"
+            )
+            row = cursor.fetchone()
+        return NotificationQueueCounts(int(row["pending"]), int(row["failed"]))
+
     def alert_message(self, target):
         from infrastructure.mysql.line_message_copy import configured_message_payload
         from subsystems.line.runtime_alert_application import _message

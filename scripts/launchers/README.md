@@ -13,7 +13,10 @@ Windows 日常啟停／更新／搬機改用專案根目錄的 `Windows管理.ba
 | `start_local_development.bat` | Windows 本機入口。通過 DB current gate 後，由 `supervise_local_runtime.ps1` 啟動 FastAPI 8000、React/Vite 5173、runtime monitor、durable job worker 與 incident worker。 |
 | `start_local_development.sh` | macOS／Linux 本機入口；服務邊界同 Windows。 |
 | `start_nas_development.bat`／`.sh` | 使用 `.env` 的 NAS MySQL；拒絕 localhost，委派標準開發入口。 |
-| `initialize_nas_schema.bat`／`.sh` | 初始化 NAS 空白 `union_db`；Windows 雙擊可確認初始化、清空重建或建立缺少的測試庫。`--apply` 僅限既有空庫。 |
+| `backup_nas_database.bat` | 手動備份或設定每日 18:00 的 NAS SQL 備份。 |
+| `initialize_nas_schema.bat` | NAS 安全升級：先備份，在新庫升級並驗證後切換，不清空原庫。 |
+| `restore_nas_database.bat` | 選擇成功備份，復原到新庫、驗證後切換。 |
+| `initialize_nas_schema.sh` | 技術人員的空庫 fresh 初始化，與 Windows 日常維護入口分開。 |
 | `supervise_local_runtime.ps1` | Windows owned-process supervisor；負責 readiness、存活檢查與 scoped cleanup。 |
 | `start_local_development_no_auth.bat`／`.sh` | 只供隔離本機的 `local_bypass` 包裝；委派標準入口，不複製啟動流程。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | 修改本機開發認證設定，不啟動服務。 |
@@ -70,70 +73,42 @@ Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only r
 
 ## Database operations
 
-### NAS MySQL 測試
+### NAS 正式資料庫：備份、升級、復原
 
-若 NAS 已建立空白 `union_db`，先在專案 `.env` 設定 `APP_ENV=development`、NAS `DB_HOST`、
-`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE=union_db`。初始化帳號必須能讀取完整 schema metadata，
-並具有 canonical DDL／system seed 所需權限（包含 table、index、foreign key、view、trigger 與 routine）；
-預設不執行刪庫或建庫；只有下述完整確認的清空測試庫操作會刪庫重建。view 的權限需求見下方。若 MySQL binary logging 的 trigger／function policy 阻擋，請由 NAS 管理員配置權限，
-腳本不修改全域設定。執行期間停止其他連線 writer。
+適用架構：Windows 電腦執行程式，NAS 只跑 Docker MySQL。三個腳本都在正式 Windows 電腦操作，只用 MySQL 連線，不需要 SSH。
+**目前開發電腦不會自動啟用或安裝正式排程。**
 
-```powershell
-.\scripts\launchers\initialize_nas_schema.bat --dry-run
-.\scripts\launchers\initialize_nas_schema.bat
-.\scripts\launchers\initialize_nas_schema.bat --apply
-```
+| 需要做的事 | 雙擊腳本 | 操作方式 |
+|---|---|---|
+| 保存資料 | `backup_nas_database.bat` | 選「立即備份」或「設定每日備份」。 |
+| 更新資料庫 | `initialize_nas_schema.bat` | 已改為安全升級；先停止工會系統，依中文提示確認。沒有清空重建選項。 |
+| 從備份復原 | `restore_nas_database.bat` | 先停止工會系統，選備份編號並確認；先建立新庫驗證，保留原庫。 |
 
-Windows 可直接雙擊 `initialize_nas_schema.bat`：先唯讀檢查連線與空庫，通過後輸入 `Y` 並 Enter 初始化，輸入 `N` 取消；
-結束時保留結果，按鍵才關閉，不需要另外輸入 `--apply`。預檢失敗就顯示錯誤，不會進入初始化。
-macOS／Linux 使用 `bash ./scripts/launchers/initialize_nas_schema.sh`，無參數只做唯讀預檢。
-`--dry-run` 只驗設定與正式 schema 雜湊、不連線；明確指定 `--apply` 會再檢查空庫後初始化。
-Windows 指定參數執行時不詢問 Y/N，也不等待按鍵，保留原本的命令列用法。
-設定直接取自 `.env`，process APP_ENV／DB_* 若有不同值會停止，請先清除 override。
-目標不是 `union_db` 或指向 localhost 都停止。資料庫不存在或已有物件時預設停止，互動模式提供下述確認選項。
-初始化會建立完整結構與正式 artifacts 宣告的必要系統資料，不會匯入業務資料或建立管理員帳號。
-NAS 新庫直接使用 `db/fresh_schema/labor_union_fresh_current.sql` 的最終結構，
-目前為 371 張表、1 個 view、377 個 trigger、758 條指令，不再重播 1,946 條歷史升級指令。
-[逐表退役清單](../../db/schema_assembly/labor_union_fresh_table_retirements_v1.json) 列出 38 張複核表的用途、
-規格依據與決策：保留政府付款方主檔，其餘 37 張不建立於新庫；既有資料庫的表與資料保留。
-NAS 空庫、本機完整初始化及 `reset_DB` 共用此精簡 profile；明確指定舊版 fixture 的初始化及保留資料升級仍走原 assembly／migration。
-SQL 與 manifest 由 `scripts/compact_fresh_schema.py` 從新建的本機測試庫產生，綁定原 assembly、
-validation manifest 與退役清單的雜湊；來源改變時會停止並要求重新產生，請勿手改 SQL。
-成功必須通過與 NAS 啟動器相同的 current gate，然後才執行 `start_nas_development`。
-MySQL DDL 可能已提交；失敗時查看 `scratch/nas_schema_initialization/<run>/journal.jsonl`，
-腳本不會自動清空 partial database；只有確認資料可丟棄時，才使用下述清空選項。
-錯誤會區分執行 SQL 與最後驗證，列出 phase、完成指令數及安全的 MySQL 數字錯誤碼。
-`All schema statements completed, but verification failed` 表示指令已執行完，尚未通過完整結構檢查，不能直接視為成功。
-唯讀 schema 查核保留 5 秒連線上限，讀寫等待預設 30 秒；明確較短的 caller budget 仍優先。
-不需另跑檢查腳本：同一個初始化入口先檢查 MySQL 8.0.16+、InnoDB、可寫狀態、目前帳號與啟用角色的
-必要權限、binary log 的 trigger 限制、本機版本驗證檔案及唯讀 metadata 查詢。
-完整預檢通過才詢問 Y/N；按 Y 後重新預檢並再讀空庫條件，通過才建表。預檢不建測試表、不更改 NAS 設定。
-目前 final view 使用 OR REPLACE，MySQL 因此要求該 view 的 DROP 權限；一般空庫初始化接受只授權該 view。清空重建另要求整個目標資料庫的 CREATE／DROP 權限。
-缺權限、版本不相容、唯讀及 binary log 限制會直接在同一視窗顯示原因。執行中或最終驗證失敗則顯示
-phase、完成數及安全原因；保留現場，不清空、不重跑，兩層最終驗證通過才回報成功。
-已有物件時仍停止初始化；同一入口會再做唯讀版本查核，直接說明現有結構是否完整或為何無法確認。
-「現有結構已通過完整版本查核」表示可直接啟動服務，並不會允許對非空庫重跑初始化。
+每日備份預設 **18:00（Windows 當地時間）**。現場在「稽核與系統 → 資料庫備份」修改時間、查看最近成功備份及失敗提示；第一次按「啟用每日備份」才建立排程。
+電腦須開機並登入執行系統的 Windows 帳號；錯過時會在下次登入後補跑。排程只備份，不會自動升級或復原。
 
-若 `union_db` 只有可丟棄的測試資料，可在同一個 Windows 視窗選擇清空後重建：
+備份期間可繼續一般業務操作，但不要變更資料表、執行 migration 或 TRUNCATE。SQL 備份包含資料、view、routine、trigger、event，成功須通過匯出完成、結構穩定及檢查碼驗證。
+備份不自動覆蓋、輪替或刪除；請維護人員定期確認成功備份、可用容量及獨立設備副本。備份有完整個資，僅授權人員可存取，不提供網頁下載。
 
-1. 先停止使用該資料庫的服務；雙擊 `initialize_nas_schema.bat`。
-2. 出現非空庫診斷後，輸入 `R` 並 Enter；腳本先檢查重建權限等條件，有問題就停止。
-3. 核對畫面上的 NAS 位址、port、資料庫及 server，再輸入完整 `RESET union_db` 並 Enter。
+升級會先備份，再在新的資料庫副本執行既有 migration 與資料保留驗證；復原也先匯入新的副本。
+通過驗證及原帳號連線測試後，才切換正式電腦 `.env` 的資料庫名稱。**原庫、舊備份及失敗副本都保留。**
+完成後重新啟動工會系統，使用原帳號及 MFA 確認登入、資料查詢與操作。切換後已產生新資料時，不能直接切回舊庫而忽略新資料。
+失敗時不要清空或重複執行，保留畫面與備份紀錄交給維護人員；備份版本不符會停止切換。
 
-這會**刪除並重建整個 `union_db`**，移除所有表、檢視、routine、event 與資料，再建立精簡結構和必要系統資料；無法復原。
-輸入 N、空白、錯字或中斷輸入就取消，不修改資料庫。確認後仍會重新預檢；可見其他資料庫有外鍵參照時拒絕清空。
-重建保留原本 default charset/collation，不修改帳號或全域設定；失敗顯示階段、原因與 journal，不會自動重試。
-重建連線等待 MySQL 回應的上限為 600 秒（一般初始化仍 30 秒、連線仍 5 秒），每次 metadata 鎖等待上限為 15 秒，
-僅設定於目前 session。畫面會立即列出 `drop_database`／`create_database`／`select_database` 的開始與完成耗時，請勿重複啟動。
-失敗會列出目前操作與最後確認完成項。1205 表示鎖等待逾時；2013／2006 表示連線中斷，不能判定目前 DDL 是否完成，
-MySQL 可能仍在執行，先確認 NAS 現況，不要立即重跑清空。初始化指令完成數不包含這三個重建操作。
-命令列 `--apply` 仍只接受空庫；需要相同互動時可明確指定 `--interactive`。
+#### 技術人員：正式機的一次設定
 
-若上次刪庫已完成，但連線中斷而未建回資料庫，雙擊同一個 `.bat` 會先顯示「目標資料庫不存在」，
-接著在同一視窗完成伺服器與權限預檢，顯示目標，輸入 `Y`（或 `y`）並 Enter 即確認建庫，`N` 或空白取消。
-確認後會建立 utf8mb4／utf8mb4_unicode_ci 的 `union_db`，再建立精簡結構與必要系統資料；不用另外手動建庫。
-取消或輸入錯誤不寫入。若確認期間其他程序已建立該資料庫，會停止，不會覆蓋或接著初始化它。
-此分支沒有 DROP、不會自動重試；命令列 `--apply` 遇到缺庫仍停止，其他連線錯誤也不會進入建庫流程。
+1. 準備 MySQL 8 的 `mysql.exe` 與 `mysqldump.exe`，加入正式機 PATH。保留原 `.env`，勿複製開發機設定覆蓋正式環境。
+2. 將 `nas_database_maintenance.env.example` 複製到專案根目錄 `.env.nas-maintenance`，填寫固定 NAS 位址／port、獨立 backup-read 與 candidate-write 帳號及備份位置；確認與 runtime `.env` 指向同一目標後，才將 `NAS_MAINTENANCE_ENABLED` 設為 `1`。
+3. Backup-read 需能完整讀取目標資料、定義及 routine／trigger／event metadata；candidate-write 需能建立與維護 `lu_nas_*` 副本，以及把原 runtime／backup 帳號既有 schema 層級權限等量授予新副本。工具不修改密碼或原庫權限。角色／細粒度權限不會自動升格，遇到時由原權限維護者處理。
+4. `.env.nas-maintenance` 僅限正式執行帳號及管理者讀取。密碼不進參數、Git、畫面或 receipt；含空白或 `#` 時保留 dotenv 引號。TLS 沿用原 `.env` 的 DB_SSL_*，不自動降級。
+5. 選擇完整路徑 `NAS_BACKUP_DIR`；工具建立專用 `labor_union_nas` 子目錄、限制其存取。先跑三入口的 `--dry-run`（零連線），再人工做首次備份與隔離復原驗收，最後啟用每日排程。
+6. Task Scheduler 工作由正式執行帳號擁有，API 亦須在該 Windows 帳號下執行。修改時間不需要重新輸入密碼。
+
+SQL 不包含 MySQL 帳號／GRANT、照片／附件、Windows 設定與 MFA 加密金鑰；這些須另外安全保存。
+若 MySQL／NAS 已無法啟動，先由維護人員恢復 MySQL 8 服務與原帳號，再用復原腳本。
+不要把 SQL 備份當成整台 NAS 或整套應用程式的完整災難備份。
+
+首次空庫建置仍由技術人員使用低階 `python -m scripts.initialize_nas_schema --apply`（或 Unix `.sh`）；此路徑拒絕覆蓋非空庫，不是三個日常 Windows 入口的一部分。
 
 Compose 現在只啟動 Redis；所有開發入口直接連線 `.env`／process environment 的 MySQL，
 不再啟動或管理 `mysql_db`。既有容器與資料卷保留，請勿使用 `down -v` 或 `--remove-orphans` 清除。

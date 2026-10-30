@@ -233,3 +233,13 @@ def test_confirmation_preview_allows_send_when_only_resume_is_missing(hours_per_
     assert preview.caregiver_resumes[0].staff_name == "王小美"
     assert preview.order_information_1[0].text == "訂單資訊－1"
     assert preview.weekly_service_rows[0].weekly_hours == hours_per_day * work_days
+
+
+def test_download_matching_confirmation_resume_is_retired_410():
+    from fastapi import HTTPException
+    from api.routes.matches import download_matching_confirmation_resume
+
+    with pytest.raises(HTTPException) as exc:
+        download_matching_confirmation_resume("mcf_test_token")
+    assert exc.value.status_code == 410
+    assert "退役" in str(exc.value.detail)

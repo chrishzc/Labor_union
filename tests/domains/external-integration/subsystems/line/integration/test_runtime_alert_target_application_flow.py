@@ -106,43 +106,18 @@ class _UnitOfWork:
         self.hooks.append(hook)
 
 
-def test_disable_preview_apply_readback_then_retired_group_registration_has_no_effect():
+def test_historical_targets_remain_readable_but_preview_and_apply_cannot_reenable_push():
+    from subsystems.line.runtime_alert_target_contracts import RuntimeAlertTargetError
     repository = _Repository()
     units = []
     app = RuntimeAlertTargetApplication(lambda: units.append(_UnitOfWork(repository)) or units[-1], lambda: NOW)
     current = app.list_targets()[0].current_version
-    actor = ActorContext("admin:7", ())
-    preview_command = SetLineAlertTargetEnabledCommand(
-        7, current, False, "解除目前群組", IdempotencyKey("disable-group-a"),
-        CorrelationId("corr-disable-group-a"), actor,
-    )
-
-    preview = app.preview(preview_command)
-
-    assert preview.operation == "disable"
-    assert preview.previous_state == "active"
-    assert preview.resulting_state == "disabled"
-    assert repository.update_calls == 0
+    before = len(units)
+    command = SetLineAlertTargetEnabledCommand(7, current, False, "停用", IdempotencyKey("old-key"),
+        CorrelationId("corr-old"), ActorContext("admin:7", ()))
+    for action in (lambda: app.preview(command), lambda: app.set_enabled(command)):
+        with pytest.raises(RuntimeAlertTargetError) as error:
+            action()
+        assert error.value.code == "line_admin_push_retired"
+    assert len(units) == before and repository.update_calls == 0 and repository.audits == []
     assert app.list_targets()[0].state == "active"
-
-    receipt = app.set_enabled(SetLineAlertTargetEnabledCommand(
-        7, current, False, "解除目前群組", IdempotencyKey("disable-group-a"),
-        CorrelationId("corr-disable-group-a"), actor, preview.preview_fingerprint,
-    ))
-
-    assert receipt.operation == "disable"
-    assert receipt.previous_state == "active"
-    assert receipt.resulting_state == "disabled"
-    assert repository.update_calls == 1
-    assert repository.audits
-    assert app.list_targets()[0].state == "disabled"
-
-    registration_unit = _UnitOfWork(repository)
-    with pytest.raises(RuntimeAlertTargetError) as rejected:
-        app.register_group(registration_unit, "group-b", "admin:7", "event-group-b")
-    assert rejected.value.code == "line_alert_group_retired"
-    assert registration_unit.commits == 0
-
-    targets = app.list_targets()
-    assert [(target.target_kind, target.state) for target in targets] == [("admin_user", "disabled")]
-    assert list(repository.rows) == [7]

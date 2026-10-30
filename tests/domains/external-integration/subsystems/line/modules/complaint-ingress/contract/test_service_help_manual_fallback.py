@@ -155,19 +155,62 @@ def test_general_question_during_active_ticket_is_appended_without_auto_reply(me
     assert not unit.delivery_tasks.requests and not gateway.create_calls
 
 
-@pytest.mark.parametrize('message', ['收費與補助', '補助市民（最高40小時）', '社福（最高120小時）'])
-def test_current_subsidy_copy_and_clarification_choices_do_not_open_ticket(message):
+@pytest.mark.parametrize('message', [
+    '服務流程', '流程', '怎麼申請', '如何登記', '怎麼媒合', '1',
+    '收費與補助', '收費', '費用', '價格', '補助', '政府補助', '要付多少', '2',
+    '補助市民（最高40小時）', '社福（最高120小時）',
+])
+def test_explanatory_commands_open_ai_liff_without_ticket_or_old_copy(message, monkeypatch):
+    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-service-help')
     unit = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
     assert application.handle(_inbox(), unit, LineUserId('U123456789'), message)
+    assert len(unit.delivery_tasks.requests) == 1
     payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
-    assert '補助市民（最高40小時）' in payload['text']
-    assert '社福（最高120小時）' in payload['text']
-    assert '實際補助金額依本案服務資料計算' in payload['text']
-    assert '資格需' not in payload['text'] and not unit.customer_service.messages
+    assert payload['type'] == 'flex'
+    assert payload['contents']['body']['contents'][0]['action'] == {
+        'type': 'uri', 'label': '開啟 AI 客服',
+        'uri': 'https://liff.line.me/1234567890-service-help?target=ai_assistant',
+    }
+    assert '最高40小時' not in json.dumps(payload, ensure_ascii=False)
+    assert '最高120小時' not in json.dumps(payload, ensure_ascii=False)
+    assert not unit.customer_service.messages and not unit.audit.intents
 
 
-def test_service_help_menu_keeps_all_six_approved_categories(monkeypatch) -> None:
+@pytest.mark.parametrize('message', ['服務流程', '收費與補助'])
+def test_legacy_handler_uses_the_same_ai_liff_navigation(message, monkeypatch):
+    from subsystems.line.webhook_identity_handlers import _handle_service_help_text
+    from subsystems.line.service_help_application import _ai_assistant_payload
+    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-service-help')
+    unit = _unit_of_work()
+    assert _handle_service_help_text(_inbox(), unit, LineUserId('U123456789'), message, datetime.now(timezone.utc))
+    assert json.loads(unit.delivery_tasks.requests[0].payload_json) == _ai_assistant_payload()
+    assert not unit.customer_service.messages
+
+
+def test_legacy_menu_opens_explanations_in_liff(monkeypatch):
+    from subsystems.line.webhook_identity_handlers import _handle_service_help_text
+    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-service-help')
+    unit = _unit_of_work()
+    assert _handle_service_help_text(_inbox(), unit, LineUserId('U123456789'), '服務說明', datetime.now(timezone.utc))
+    payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
+    actions = [item['action'] for item in payload['quickReply']['items']]
+    assert [action['label'] for action in actions[:2]] == ['服務流程', '收費與補助']
+    assert all(action['type'] == 'uri' and action['uri'] == 'https://liff.line.me/1234567890-service-help?target=ai_assistant' for action in actions[:2])
+    assert actions[3]['text'] == '修改登記資料'
+
+
+def test_profile_update_still_creates_ticket_and_sends_acknowledgement():
+    unit = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime.now(timezone.utc))
+    assert application.handle(_inbox(), unit, LineUserId('U123456789'), '修改登記資料')
+    assert len(unit.customer_service.messages) == 1
+    assert unit.customer_service.messages[0].category is CustomerServiceCategory.PROFILE_UPDATE
+    payload = json.loads(unit.delivery_tasks.requests[0].payload_json)
+    assert payload['type'] == 'text' and '已收到修改資料需求' in payload['text']
+
+
+def test_service_help_menu_opens_liff_for_explanations_and_preserves_service_actions(monkeypatch) -> None:
     monkeypatch.setenv("LINE_LIFF_ID", "1234567890-service-help")
     unit_of_work = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
@@ -186,8 +229,8 @@ def test_service_help_menu_keeps_all_six_approved_categories(monkeypatch) -> Non
         or button["action"].get("uri")
         for button in buttons
     ] == [
-        "服務流程",
-        "收費與補助",
+        f"https://liff.line.me/{liff_id}?target=ai_assistant",
+        f"https://liff.line.me/{liff_id}?target=ai_assistant",
         "查詢服務進度",
         "修改登記資料",
         "customer-service:handoff:confirm",
@@ -227,7 +270,8 @@ def test_service_help_and_faq_aliases_share_one_card() -> None:
     assert "月嫂身分認證" not in service_request.payload_json
 
 
-def test_order_update_menu_creates_human_review_request_without_mutating_order() -> None:
+def test_order_update_menu_opens_form_and_preserves_existing_intake(monkeypatch) -> None:
+    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-order')
     menu_uow = _unit_of_work()
     request_uow = _unit_of_work()
     application = LineServiceHelpApplication(lambda: datetime(2026, 8, 21, tzinfo=timezone.utc))
@@ -239,13 +283,10 @@ def test_order_update_menu_creates_human_review_request_without_mutating_order()
     menu_request = menu_uow.delivery_tasks.requests[0]
     payload = json.loads(menu_request.payload_json)
     assert payload["contents"]["header"]["contents"][1]["text"] == "修改訂單資訊"
-    assert [button["action"]["label"] for button in payload["contents"]["body"]["contents"]] == [
-        "修改服務地址",
-        "修改下廚需求",
-        "修改服務天數",
-        "修改每日服務時段",
-        "其他訂單內容",
-    ]
+    actions = [button['action'] for button in payload['contents']['body']['contents']]
+    assert actions == [{'type': 'uri', 'label': '開啟訂單異動表單',
+                        'uri': 'https://liff.line.me/1234567890-order?target=order_update'}]
+    assert not menu_uow.customer_service.messages
 
     assert application.handle(
         _inbox("event-order-request"), request_uow, LineUserId("U123456789"), "修改服務地址"
@@ -431,3 +472,13 @@ def test_explicit_preview_manual_fallback_can_reuse_active_hold_ticket() -> None
     assert ticket_id == 31
     assert gateway.hold_calls == []
     assert len(gateway.create_calls) == 1
+
+
+@pytest.mark.parametrize('liff_id', ['', 'your_liff_id_here'])
+def test_order_update_menu_without_configured_liff_has_no_invented_link(liff_id, monkeypatch):
+    from subsystems.line.service_help_application import _order_update_menu_payload
+    monkeypatch.setenv('LINE_LIFF_ID', liff_id)
+    payload = _order_update_menu_payload()
+    assert payload['contents']['body']['contents'] == []
+    assert '入口尚未完成設定' in payload['contents']['header']['contents'][2]['text']
+    assert '修改服務天數' not in json.dumps(payload, ensure_ascii=False)

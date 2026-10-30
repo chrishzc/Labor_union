@@ -9,10 +9,6 @@ import json
 from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
-from domains.line.canonical_payload import canonical_line_payload_json
-from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
-from domains.line.identities import LineGroupId, LineUserId
-from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.runtime_contracts import LineWebhookSecurityReceipt, LineWorkerHeartbeat
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation
 
@@ -178,32 +174,9 @@ class RuntimeLineAlertProjector:
         self._now = now
 
     def project(self, event_id: int, repository, delivery_tasks) -> int:
-        queued = 0
-        for target in repository.pending_alert_targets(event_id):
-            if target["target_type"] == "group":
-                repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", "group", "", "line_alert_group_retired")
-                continue
-            resolved_type, resolved_id = _resolve_target(target)
-            if not _category_enabled(target, "system_health"):
-                repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", resolved_type, resolved_id, "category_system_health_disabled")
-                continue
-            if not resolved_id or not _meets_threshold(str(target["resulting_status"]), str(target["minimum_status"])):
-                repository.append_alert_intent(event_id, int(target["id"]), None, "skipped", resolved_type, resolved_id, "target_unavailable_or_below_threshold")
-                continue
-            identity = LineGroupId(resolved_id) if resolved_type == "group" else LineUserId(resolved_id)
-            result = delivery_tasks.enqueue(LineDeliveryRequest(
-                LineRecipient(LineRecipientType(resolved_type), identity),
-                LineMessageKind.TEXT,
-                canonical_line_payload_json({"type": "text", "text": repository.alert_message(target) if callable(getattr(repository, "alert_message", None)) else _message(target)}),
-                self._now(),
-                IdempotencyKey(f"runtime-alert:{event_id}:{target['id']}"),
-                CorrelationId(f"runtime-health-event:{event_id}"),
-                "runtime_health_event",
-                str(event_id),
-            ))
-            repository.append_alert_intent(event_id, int(target["id"]), result.task_id.value, "queued", resolved_type, resolved_id)
-            queued += 1
-        return queued
+        # Monitoring remains active; administrators inspect status in LIFF.
+        return 0
+
 
 
 def register_group_alert_target(inbox, unit_of_work, actor) -> bool:

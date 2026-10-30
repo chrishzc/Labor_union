@@ -117,8 +117,8 @@ class MySqlCustomerServiceEscalationRepository:
             "INSERT INTO customer_service_escalations "
             "(source_event_identity,source_kind,source_fingerprint,trigger_code,"
             "trigger_policy_version,ticket_id,ticket_category,urgency,hold_scope_ref,"
-            "actor_ref,context,idempotency_key,correlation_id) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,'high',%s,%s,%s,%s,%s)"
+            "actor_ref,context,idempotency_key,correlation_id,alert_status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,'high',%s,%s,%s,%s,%s,'unknown')"
         )
         params = (
             command.source_event_identity,
@@ -275,44 +275,8 @@ class MySqlCustomerServiceEscalationRepository:
     def enqueue_alert(self, intent: object) -> None:
         if not isinstance(intent, EscalationAlertIntent):
             raise CustomerServiceEscalationNotImplementedError("invalid bounded alert intent")
-        target_snapshot = self._active_alert_target_snapshot()
-        payload = {
-            "escalation_ref": intent.escalation_ref,
-            "ticket_ref": intent.ticket_ref,
-            "trigger_code": intent.trigger_code.value,
-            "category": intent.category,
-            "safe_summary": intent.safe_summary,
-            "hold_state": intent.hold_state.value,
-            "urgency": intent.urgency,
-            "correlation_id": intent.correlation_id,
-            "source_digest": intent.source_digest,
-            "target_snapshot": target_snapshot,
-        }
-        payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        identity = "human-escalation-alert:" + hashlib.sha256(
-            f"{intent.escalation_ref}:{intent.correlation_id}".encode("utf-8")
-        ).hexdigest()
-        sql = (
-            "INSERT INTO line_domain_outbox "
-            "(aggregate_type,aggregate_identity,intent_type,payload_snapshot,idempotency_identity) "
-            "VALUES (%s,%s,%s,%s,%s)"
-        )
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                sql,
-                (
-                    "customer_service_escalation",
-                    intent.escalation_ref,
-                    "line.customer_service.human_escalation",
-                    payload_json,
-                    identity,
-                ),
-            )
-            escalation_id = _escalation_id(intent.escalation_ref)
-            cursor.execute(
-                "UPDATE customer_service_escalations SET alert_status='queued',alert_intent_ref=%s WHERE id=%s",
-                (identity, escalation_id),
-            )
+        # Admin Push is retired; historical target records remain read-only.
+        return None
 
     def record_alert_delivery_task(self, escalation_ref: str, task_id: int) -> None:
         escalation_id = _escalation_id(escalation_ref)

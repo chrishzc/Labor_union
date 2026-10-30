@@ -91,7 +91,21 @@ function flowWorkbench() {
 
 describe('LINE 精簡流程圖與正式訊息定位', () => {
 
-  it('服務當天受理回覆、進度查詢與管理員個人告警在既有步驟次層精確定位', async () => {
+  it('管理員告警規則保留於設定快照，但不列編輯項目或查詢文案', async () => {
+    const alertRules = [
+      { ...CATALOG.definition.rules[0], id: 'retired-runtime-alert', event_code: 'runtime.alert.review_required', template_id: 'LU96-M4-SAFE-ALERT-CARD-V1' },
+      { ...CATALOG.definition.rules[0], id: 'retired-complaint-alert', event_code: 'complaint.ingress.hold_high_ticket', template_id: 'LU96-M4-COMPLAINT-HIGH-CARD-V1' },
+    ];
+    const { Harness, templates } = contentWorkbench({ ...CATALOG, definition: { rules: [...CATALOG.definition.rules, ...alertRules] } });
+    render(<Harness />);
+    await screen.findByRole('button', { name: '編輯訂金確認通知內容' });
+    expect(vi.mocked(templates.get).mock.calls.map(([id]) => id)).toEqual(['deposit_notice']);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋通知名稱或內容' }), { target: { value: '告警' } });
+    expect(await screen.findByText('沒有符合條件的通知')).toBeInTheDocument();
+  });
+
+
+  it('服務當天受理與進度仍可定位，管理員告警改為內部主動查詢', async () => {
     const { configuration, previews, catalog } = flowWorkbench(); const onOpen = vi.fn();
     const current = await previews.catalog();
     const fixed = [
@@ -118,10 +132,9 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     fireEvent.click(screen.getByRole('button', { name: /服務進度查詢結果/ }));
     expect(onOpen).toHaveBeenLastCalledWith('service-progress');
     fireEvent.click(screen.getByRole('button', { name: /3 人工處理/ }));
-    fireEvent.click(screen.getByRole('button', { name: '管理員個人告警 3 則訊息 查看訊息' }));
-    expect(within(document.querySelector('.line-flow-nested') as HTMLElement).getAllByText('由流程控制')).toHaveLength(3);
-    fireEvent.click(screen.getByRole('button', { name: /current-safe-alert/ }));
-    expect(onOpen).toHaveBeenLastCalledWith('current-safe-alert');
+    expect(screen.getByText('查看系統狀態與客服待辦')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /管理員個人告警|current-safe-alert|current-complaint-alert/ })).not.toBeInTheDocument();
+    expect(onOpen).toHaveBeenLastCalledWith('service-progress');
     expect(previews.render).not.toHaveBeenCalled(); expect(previews.subjects).not.toHaveBeenCalled();
   });
 
@@ -160,17 +173,18 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(onOpen).not.toHaveBeenCalled(); expect(previews.render).not.toHaveBeenCalled();
   });
 
-  it('客服流程說明明確呼叫門檻與目前補助分類，導向實際預覽', async () => {
+  it('客服說明統一由 AI 客服 LIFF 提供，通知流程不再提供重複編輯', async () => {
     const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
     const current = await previews.catalog();
-    vi.mocked(previews.catalog).mockResolvedValue([...current, ...['service-menu','service-other','service-payment'].map(id => ({id,name:id,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
+    vi.mocked(previews.catalog).mockResolvedValue([...current, ...['service-menu'].map(id => ({id,name:id,template_id:null,format:'text' as const,requires_case:false,requires_staff:false,builtin:true,allows_draft:false}))]);
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
     fireEvent.click(screen.getByRole('tab', { name: '客服與支援' }));
     await screen.findByText(/一般留言不啟動聊天室 AI/);
-    fireEvent.click(await screen.findByRole('button', { name: '1 開啟服務 3 則訊息' }));
-    expect(screen.getByText(/補助市民最高40小時，社福最高120小時/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /收費與補助說明.*調整訊息/ }));
-    expect(onOpen).toHaveBeenCalledWith('service-payment');
+    fireEvent.click(await screen.findByRole('button', { name: '1 開啟服務 1 則訊息' }));
+    expect(screen.getByText(/統一在 AI 客服 LIFF 查看常見問答或提問/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收費與補助說明.*調整訊息/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /查看服務導覽.*調整訊息/ }));
+    expect(onOpen).toHaveBeenCalledWith('service-menu');
   });
 
   it('服務完工通知沿既有流程導向可編輯問卷邀請，網址可後續加入', async () => {
@@ -565,6 +579,16 @@ describe('通知內容統一工作區', () => {
     expect(card()).toHaveTextContent(titles[3]);
     expect(previews.render).toHaveBeenCalledTimes(requests);
     expect(templates.update).not.toHaveBeenCalled();
+  });
+  it('舊其他問題導覽深連結開啟共用服務導覽，不建立第二個編輯入口', async () => {
+    const { previews, templates, configuration, onboarding } = contentWorkbench();
+    const onSelectedEntryChange = vi.fn();
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'service-menu', template_id: null, name: '服務與問答導覽卡', format: 'flex', requires_case: false, requires_staff: false, builtin: true, allows_draft: false }]);
+    render(<UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} previews={previews} search="" enabled="all" onSearchChange={vi.fn()} onEnabledChange={vi.fn()} selectedEntryId="service-other" onSelectedEntryChange={onSelectedEntryChange} /></UnsavedChangesProvider>);
+    expect(await screen.findByRole('heading', { name: '服務與問答導覽卡' })).toBeInTheDocument();
+    expect(onSelectedEntryChange).toHaveBeenCalledWith('service-menu');
+    await waitFor(() => expect(templates.get).toHaveBeenCalledWith('service-menu', expect.anything()));
+    expect(vi.mocked(templates.get).mock.calls.some(([id]) => id === 'service-other')).toBe(false);
   });
   it('既有客戶綁定成功連結解析至客戶獨立文案', async () => {
     const { previews, templates, configuration, onboarding } = contentWorkbench();

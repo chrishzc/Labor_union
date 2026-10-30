@@ -119,14 +119,12 @@ _CASE_VARIABLES = {"name", "client_name", "case_no", "planned_start_date", "serv
                    "second_payment_due_date", "first_payment_status", "second_payment_status",
                    "first_payment_notice", "caregiver_names", "response_token"}
 
-_RETIRED = {"LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1", "LU96-M3-LEAVE-DISAGREE-CARD-V1","new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1",
+_RETIRED = {"LU96-M4-SAFE-ALERT-CARD-V1", "LU96-M4-COMPLAINT-HIGH-CARD-V1", "LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1", "LU96-M3-LEAVE-DISAGREE-CARD-V1","new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1",
             "LU96-ORDER-PRE-START-REMINDER-CARD-V1", "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
             "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1"}
 _IDENTITY_TEMPLATES = (
-    "staff_switch_success", "staff_switch_fail", "staff_menu_not_set", "esc_success", "esc_fail",
-    "bind_link_msg", "register_success", "bind_success_new_order", "bind_success_existing",
-    "bind_confirm_rebind", "bind_fail_no_data", "client_rebind_approved", "client_rebind_rejected",
-    "staff_verification_requested", "staff_verification_rejected",
+    "staff_switch_success", "bind_success_new_order", "client_rebind_rejected",
+    "staff_verification_rejected",
 )
 _CURRENT_FLOW_PREVIEWS = (
     ("contract-signing-client", "簽署提醒－客戶", "text"),
@@ -138,30 +136,12 @@ _CURRENT_FLOW_PREVIEWS = (
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
     ("deposit-settled", "訂金已確認入帳卡", "flex"),
     ("deposit-assistance", "訂金專人協助－受理回覆", "text"),
-    ("group-bound", "案件群組－設定完成", "text"),
-    ("group-invitations-queued", "案件群組－邀請排入發送", "text"),
     ("group-invitation-customer", "案件群組邀請卡－客戶", "flex"),
     ("service-start-inquiry", "服務開始－代班接案意願詢問", "flex"),
     ("service-start-result", "服務開始－群組日期結果紀錄", "text"),
     ("service-start-normal-received", "服務當天－服務正常受理回覆", "text"),
     ("service-start-help-received", "服務當天－協助需求受理回覆", "text"),
     ("group-invitation-staff", "案件群組邀請卡－月嫂", "flex"),
-    ("group-error-invitation-url", "案件群組－尚未設定邀請網址", "text"),
-    ("group-format-invite", "群組指令－發送邀請格式錯誤", "text"),
-    ("group-error-admin", "案件群組－尚未綁定工會身分", "text"),
-    ("group-error-order", "案件群組－找不到訂單", "text"),
-    ("group-error-unbound", "案件群組－尚未設定群組", "text"),
-    ("group-error-identity", "案件群組－客戶或月嫂尚未綁定", "text"),
-    ("group-error-cancelled", "案件群組－訂單已取消", "text"),
-    ("group-error-unpaid", "案件群組－訂金尚未核銷", "text"),
-    ("group-error-occupied", "案件群組－已綁定其他訂單", "text"),
-    ("group-format-empty", "群組指令－缺案件與網址", "text"),
-    ("group-format-case", "群組指令－缺案件編號", "text"),
-    ("group-format-url", "群組指令－缺邀請網址", "text"),
-    ("group-format-spacing", "群組指令－缺分隔空白", "text"),
-    ("group-format-split", "群組指令－網址被拆開", "text"),
-    ("group-format-invalid-case", "群組指令－案件編號格式錯誤", "text"),
-    ("group-format-invalid-url", "群組指令－邀請網址格式錯誤", "text"),
     ("candidate-willing-received", "初步候選聯絡－月嫂意願受理", "text"),
     ("matching-willing-received", "正式媒合－月嫂意願受理", "text"),
     ("matching-customer-accepted", "正式媒合－客戶接受配對回覆", "text"),
@@ -173,7 +153,6 @@ _CURRENT_FLOW_PREVIEWS = (
     ("service-registration-unavailable", "服務登記入口尚未設定", "text"),
     ("identity-staff-link", "月嫂身分資料填寫入口", "text"),
     ("identity-admin-link", "工會帳號綁定入口", "text"),
-    ("runtime-system-health", "系統健康異常－管理員通知", "text"),
 )
 _CURRENT_FLOW_IDS = {row[0] for row in _CURRENT_FLOW_PREVIEWS}
 _UNLISTED_FORMAL_CARDS = {'card-caregiver-information', 'card-caregiver-information-2', 'card-customer-profiles'}
@@ -191,11 +170,8 @@ _BUILTINS = (
     ("order-update-menu", "修改訂單資訊導覽卡", "flex", False, False, False),
     ("service-contact", "呼叫專員－需求受理", "text", False, False, False),
     ("service-resolved", "客服案件處理完成", "text", False, False, False),
-    ("service-flow", "服務流程說明", "text", False, False, False),
-    ("service-payment", "收費與補助說明", "text", False, False, False),
     ("service-profile-update", "登記資料修改受理", "text", False, False, False),
     ("service-order-update", "訂單資訊修改受理", "text", False, False, False),
-    ("service-other", "其他問題－自助服務導覽", "flex", False, False, False),
     ("identity-pending", "身分申請受理通知", "text", False, False, False),
     ("identity-bound-customer", "客戶綁定成功", "text", False, False, False),
     ("identity-bound-staff", "月嫂綁定成功", "text", False, False, False),
@@ -259,7 +235,8 @@ class LineMessagePreviewApplication:
 
     def render(self, key: str, content: str | None, case_no: str | None,
                staff_id: int | None, actor: ActorContext, *, sample: bool = False) -> PreviewResult:
-        key = {"template-bind_success_new_order": "identity-bound-customer", "template-staff_switch_success": "identity-bound-staff"}.get(key, key)
+        key = {"template-bind_success_new_order": "identity-bound-customer", "template-staff_switch_success": "identity-bound-staff",
+               "service-other": "service-menu"}.get(key, key)
         templates, rules = self._definitions(actor)
         # The library lists the bundled delivery. Existing direct preview callers
         # keep their readonly contract; no send operation or saved copy is retired.
@@ -365,13 +342,13 @@ class LineMessagePreviewApplication:
             from subsystems.scheduling.matching_line_cards import candidate_customer_question_card, candidate_caregiver_answer_card
             payload = json.loads(candidate_customer_question_card(case.case_no, authored_content, "https://preview.invalid/question")
                 if key == "card-union-question" else candidate_caregiver_answer_card(case.case_no, authored_content, "preview-only", "https://preview.invalid/answer"))
-        elif key in {"service-menu", "service-other", "order-update-menu"}:
+        elif key in {"service-menu", "order-update-menu"}:
             from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
             payload = _order_update_menu_payload() if key == "order-update-menu" else _service_menu_payload()
-        elif key in {"service-flow", "service-payment", "service-profile-update", "service-order-update"}:
+        elif key in {"service-profile-update", "service-order-update"}:
             from domains.customer_service.ticket import CustomerServiceCategory
-            from subsystems.line.service_help_application import _SERVICE_FLOW_REPLY, _PAYMENT_REPLY, _TICKET_ACKNOWLEDGEMENTS, _ORDER_UPDATE_ACKNOWLEDGEMENT
-            payload = {"type": "text", "text": {"service-flow": _SERVICE_FLOW_REPLY, "service-payment": _PAYMENT_REPLY,
+            from subsystems.line.service_help_application import _TICKET_ACKNOWLEDGEMENTS, _ORDER_UPDATE_ACKNOWLEDGEMENT
+            payload = {"type": "text", "text": {
                 "service-profile-update": _TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
                 "service-order-update": _ORDER_UPDATE_ACKNOWLEDGEMENT}[key]}
         elif key in {"service-contact", "service-resolved", "identity-pending"} or key.startswith("identity-bound-"):

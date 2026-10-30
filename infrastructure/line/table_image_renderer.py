@@ -1,6 +1,5 @@
 """Render owner-projected text into a compact PNG without browser or file writes."""
 from io import BytesIO
-import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -8,7 +7,7 @@ from subsystems.line.table_image_contracts import TableDocument, TableImageUnava
 
 
 def _font(size):
-    for path in (os.getenv('LINE_TABLE_IMAGE_FONT', ''), 'C:/Windows/Fonts/msjh.ttc',
+    for path in ('C:/Windows/Fonts/msjh.ttc',
                  '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
                  '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'):
         if path and Path(path).is_file():

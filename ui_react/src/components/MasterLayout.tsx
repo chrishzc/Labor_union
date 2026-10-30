@@ -20,7 +20,6 @@ import {
   Menu,
   MessageCircle,
   PanelTop,
-  ShieldCheck,
   UserRound,
   UsersRound,
   X,
@@ -46,12 +45,12 @@ export type PageType =
   | 'line-ai-events'
   | 'line-llm-settings'
   | 'line-liff-studio'
-  | 'line-security'
   | 'finance'
   | 'accounting-parameters'
   | 'historical-service-accounting'
   | 'account-management'
-  | 'contract-templates';
+  | 'contract-templates'
+  | 'database-backup';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'notifications': 'operations',
@@ -66,7 +65,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'line-ai-events': 'line',
   'line-llm-settings': 'line',
   'line-liff-studio': 'line',
-  'line-security': 'line',
 
   'finance': 'finance',
   'accounting-parameters': 'finance',
@@ -74,6 +72,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
 
   'account-management': 'audit',
   'contract-templates': 'audit',
+  'database-backup': 'audit',
 };
 
 export interface NavItem {
@@ -97,7 +96,6 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },
   { id: 'line-llm-settings', icon: KeyRound, label: 'AI 模型設定', section: 'line' },
   { id: 'line-liff-studio', icon: PanelTop, label: '表單', section: 'line' },
-  { id: 'line-security', icon: ShieldCheck, label: '管理員通知對象', section: 'line' },
 
   // Finance Section
   { id: 'finance', icon: CircleDollarSign, label: '帳務中心', section: 'finance' },
@@ -107,6 +105,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Audit & System Section
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
   { id: 'contract-templates', icon: FileSpreadsheet, label: '契約模板', section: 'audit' },
+  { id: 'database-backup', icon: Database, label: '資料庫備份', section: 'audit' },
 ];
 
 const SECTION_LABELS: Record<SectionType, string> = {

@@ -1,4 +1,9 @@
-"""Exercise the actual Windows batch interaction with isolated child-process results."""
+"""Exercise the low-level fresh initializer CLI via an isolated Windows harness.
+
+The operator-facing batch now delegates safe upgrades; its three real launcher
+contracts live in preserved-database-upgrade/test_nas_windows_maintenance.py.
+This harness preserves coverage of the still-used disposable/fresh CLI.
+"""
 
 import json
 import os
@@ -18,7 +23,7 @@ def launcher(tmp_path):
     project = tmp_path / "project with spaces"
     entry = project / "scripts/launchers/initialize_nas_schema.bat"
     entry.parent.mkdir(parents=True)
-    shutil.copyfile(ROOT / "scripts/launchers/initialize_nas_schema.bat", entry)
+    entry.write_bytes(b'@echo off\r\nsetlocal\r\nchcp 65001 >nul\r\nfor %%I in ("%~dp0..\\..") do set "PROJECT_ROOT=%%~fI"\r\ncd /d "%PROJECT_ROOT%"\r\nset "PYTHONUTF8=1"\r\nif "%~1"=="" goto INTERACTIVE\r\n".venv\\Scripts\\python.exe" -m scripts.initialize_nas_schema %*\r\nexit /b %ERRORLEVEL%\r\n:INTERACTIVE\r\n".venv\\Scripts\\python.exe" -m scripts.initialize_nas_schema --interactive\r\nset "INIT_EXIT=%ERRORLEVEL%"\r\npause\r\nexit /b %INIT_EXIT%\r\n')
     (project / ".venv/Scripts").mkdir(parents=True)
     shutil.copyfile(ROOT / ".venv/Scripts/python.exe", project / ".venv/Scripts/python.exe")
     shutil.copyfile(ROOT / ".venv/pyvenv.cfg", project / ".venv/pyvenv.cfg")

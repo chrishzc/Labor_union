@@ -1,0 +1,19 @@
+.database-backup-page { max-width: 900px; padding: 32px; color: var(--md-sys-color-on-surface, #243246); }
+.database-backup-page header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.database-backup-page h1 { font-size: 26px; margin: 0 0 6px; }
+.database-backup-page h2 { font-size: 18px; margin: 0 0 16px; }
+.database-backup-page p { line-height: 1.7; margin: 8px 0; }
+.backup-card { background: var(--color-bg-primary, #fff); border: 1px solid #dce3ea; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+.backup-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 0; }
+.backup-card dt { color: #59697d; font-size: 14px; margin-bottom: 8px; }
+.backup-card dd { margin: 0; font-weight: 600; }
+.backup-message { padding: 12px 16px; border-radius: 8px; background: #eff4fa; margin-bottom: 16px; line-height: 1.6; }
+.backup-error { color: #a12525; background: #fff3f2; }
+.backup-success { color: #186042; background: #edf8f2; }
+.backup-card form { margin-top: 20px; }
+.backup-card label { display: block; margin-bottom: 8px; font-weight: 600; }
+.backup-time-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.backup-time-row input { padding: 10px 12px; border: 1px solid #aab7c8; border-radius: 8px; font: inherit; }
+.backup-time-row button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 10px 18px; background: var(--md-sys-color-primary, #b44e0d); color: var(--md-sys-color-on-primary, #fff); font: inherit; cursor: pointer; }
+.backup-time-row button:disabled { opacity: .5; cursor: default; }
+@media (max-width: 600px) { .database-backup-page { padding: 18px; } .backup-card { padding: 18px; } .backup-card dl { grid-template-columns: 1fr; } }

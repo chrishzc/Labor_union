@@ -23,6 +23,7 @@ from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
+    database_backup,
     admin_audit,
     admin_auth,
     admin_entry_targets,
@@ -268,6 +269,7 @@ app.include_router(admin_auth.router)
 app.include_router(account_center.router)
 app.include_router(registration_applications.router)
 app.include_router(admin_audit.router)
+app.include_router(database_backup.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)

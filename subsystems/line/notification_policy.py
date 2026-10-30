@@ -8,6 +8,11 @@ from datetime import datetime
 from typing import Mapping
 
 
+RETIRED_ADMIN_NOTIFICATION_EVENTS = frozenset({
+    "runtime.alert.review_required", "complaint.ingress.hold_high_ticket",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class NotificationSourceEvent:
     identity: str
@@ -41,7 +46,9 @@ def evaluate_notification_rules(
         if not isinstance(rule, dict) or rule.get("event_code") != event.event_code:
             continue
         rule_id = str(rule.get("id", ""))
-        if event.historical_silent:
+        if event.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
+            decisions.append(NotificationDecision(rule_id, "suppressed", "line_admin_push_retired"))
+        elif event.historical_silent:
             decisions.append(NotificationDecision(rule_id, "suppressed", "historical_source_silent"))
         elif rule.get("enabled", False) is not True:
             decisions.append(NotificationDecision(rule_id, "suppressed", "rule_shadow_mode"))

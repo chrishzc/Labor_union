@@ -35,20 +35,8 @@ _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳�
 _CUSTOMER_COMMANDS = {"服務登記", "綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
 _SERVICE_HELP_COMMANDS = {"服務與問答", "服務說明", "常見問答", "問答", "FAQ"}
 _SERVICE_HELP_CATEGORIES = {
-    "服務流程": (
-        "服務流程如下：\n\n"
-        "1. 先完成服務登記。\n"
-        "2. 工會確認您的資料與服務期程。\n"
-        "3. 系統篩選可配合的月嫂。\n"
-        "4. 月嫂同意接案後，工會提供月嫂資料給您確認。\n"
-        "5. 雙方確認後，進入後續媒合與簽約流程。\n\n"
-        "如您尚未登記，請點選下方選單的「服務登記」。"
-    ),
-    "收費與補助": (
-        "收費與補助說明：\n\n"
-        "實際費用會依服務天數、每日服務時數、服務地點與個案條件確認。"
-        "若要申請補助，請於服務登記時填寫身分證字號與戶籍資料，工會會再依規範協助確認資格。"
-    ),
+    "服務流程": None,
+    "收費與補助": None,
     "查詢服務進度": (
         "若要查詢服務進度，請先完成服務登記或帳號綁定。\n\n"
         "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
@@ -390,7 +378,11 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
     if normalized not in _SERVICE_HELP_CATEGORIES:
         return False
     reply_text = _SERVICE_HELP_CATEGORIES[normalized]
-    payload = _text_message_payload(reply_text)
+    if reply_text is None:
+        from subsystems.line.service_help_application import _ai_assistant_payload
+        payload = _ai_assistant_payload()
+    else:
+        payload = _text_message_payload(reply_text)
     if normalized == "月嫂身分認證":
         payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
     unit_of_work.delivery_tasks.enqueue(
@@ -412,13 +404,15 @@ def _service_help_menu_delivery(
     correlation_id,
     scheduled_at,
 ):
+    from subsystems.line.service_help_application import _ai_assistant_liff_url
     payload = {
         "type": "text",
         "text": "請選擇您想了解或處理的項目：",
         "quickReply": {
             "items": [
-                _quick_reply_item(label)
-                for label in _SERVICE_HELP_CATEGORIES
+                {"type": "action", "action": {"type": "uri", "label": label, "uri": _ai_assistant_liff_url()}}
+                if reply is None else _quick_reply_item(label)
+                for label, reply in _SERVICE_HELP_CATEGORIES.items()
             ]
         },
     }

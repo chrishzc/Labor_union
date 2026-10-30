@@ -478,12 +478,8 @@ class MatchingNotificationApplication:
         if not 1 <= len(profiles) <= 4:
             raise MatchingDecisionNotReadyError("customer profile count must be between 1 and 4")
         now = self._now()
-        resume_urls = {
-            int(item["staff_id"]): confirmation_download_url(issue_resume_download_token(
-                case_no=command.plan.case_no, plan_id=command.plan.plan_id,
-                staff_id=int(item["staff_id"]), file_id=str(item["file_id"]), now=now,
-            )) for item in package["caregiver_resumes"]
-        }
+        # 履歷下載連結已退役，改由業務線下直接傳送，卡片不嵌入下載按鈕
+        resume_urls: dict[int, str] = {}
         token = self._token_factory()
         payload_json = customer_confirmation_card(
             command.plan.case_no, profiles, package["order_information_1"],

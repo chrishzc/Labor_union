@@ -119,8 +119,7 @@ class HumanEscalationApplication:
                     raise _error("unavailable", "human_escalation_persistence_unavailable", retryable=True)
                 ticket = ticket_port.create_or_append_escalation_ticket(command)
             escalation = repo.create(command, ticket)
-            intent = _intent(escalation, ticket, command)
-            repo.enqueue_alert(intent)
+            # Keep the ticket and automation hold without requesting admin Push.
             repo.append_event(
                 int(_field(escalation, "id")), EscalationEventType.CREATED,
                 expected_escalation_version=0, resulting_escalation_version=int(_field(escalation, "workflow_version", 0)),

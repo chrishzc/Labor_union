@@ -16,8 +16,8 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
-  'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
-  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'contract-templates',
+  'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio',
+  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'contract-templates', 'database-backup',
 ] as const;
 
 // Explicit test oracle: presentation names map to the same 18 canonical LIFF assets.
@@ -65,12 +65,13 @@ describe('React entrypoint registry', () => {
   });
 
   it('新版 LINE 工作頁 hash 各自導向 canonical page', () => {
+    expect(NAV_ITEMS.some(item => String(item.id) === 'line-security')).toBe(false);
+    expect(HASH_ALIASES).not.toHaveProperty('line-security');
     expect(HASH_ALIASES).toMatchObject({
       'line-ai': 'line-ai-events',
       'line-ai-events': 'line-ai-events',
       'line-studio': 'line-liff-studio',
       'line-liff-studio': 'line-liff-studio',
-      'line-security': 'line-security',
     });
   });
 

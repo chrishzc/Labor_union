@@ -53,14 +53,10 @@ class RuntimeAlertTargetApplication:
         _group_retired()
 
     def set_enabled(self, command: SetLineAlertTargetEnabledCommand) -> LineAlertTargetMutationReceipt:
-        with self._unit_of_work_factory() as reader:
-            target = reader.runtime_monitor.get_alert_target(command.target_id, for_update=False)
-            if target is not None:
-                _ensure_admin_target(target)
-        return self._apply(command, operation="enable" if command.enabled else "disable")
+        _admin_push_retired()
 
     def add_admin_target(self, command: AddLineAlertAdminTargetCommand) -> LineAlertTargetMutationReceipt:
-        return self._apply(command, operation="admin_target_add")
+        _admin_push_retired()
 
     def get_target_preferences(self, target_id: int) -> dict[str, bool]:
         with self._unit_of_work_factory() as unit_of_work:
@@ -72,32 +68,12 @@ class RuntimeAlertTargetApplication:
                 ) from error
 
     def save_target_preferences(self, target_id: int, preferences: dict[str, bool]) -> dict[str, bool]:
-        self.get_target_preferences(target_id)
-        raise RuntimeAlertTargetError(
-            "conflict", "line_alert_preferences_fixed", "通知分類使用固定規則，無法個別修改"
-        )
+        _admin_push_retired()
 
     def preview(self, command) -> LineAlertTargetMutationPreview:
         if isinstance(command, ResetLineAlertGroupCommand):
             _group_retired()
-        operation = _operation(command)
-        with self._unit_of_work_factory() as unit_of_work:
-            snapshot = _preview_snapshot(
-                unit_of_work.runtime_monitor,
-                command,
-                operation,
-                for_update=False,
-            )
-            fingerprint = _preview_fingerprint(command, snapshot)
-            return LineAlertTargetMutationPreview(
-                operation=operation,
-                target_id=snapshot["target_id"],
-                previous_state=snapshot["previous_state"],
-                resulting_state=snapshot["resulting_state"],
-                current_version=snapshot["current_version"],
-                preview_fingerprint=fingerprint,
-                apply_ready=True,
-            )
+        _admin_push_retired()
 
     def register_group(
         self,
@@ -559,3 +535,7 @@ __all__ = ["RuntimeAlertTargetApplication"]
 
 def _group_retired():
     raise RuntimeAlertTargetError("conflict", "line_alert_group_retired", "群組告警功能已取消。")
+
+
+def _admin_push_retired():
+    raise RuntimeAlertTargetError("conflict", "line_admin_push_retired", "管理員自動通知已取消，請至管理員 LIFF 待辦工作台查看系統狀態。")

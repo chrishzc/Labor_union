@@ -197,12 +197,12 @@ def test_menu_help_in_group_remains_unhandled_without_delivery():
 
 
 @pytest.mark.parametrize("suffix", ["error", "bound", "invite-queued"])
-def test_group_errors_change_but_group_success_confirmations_stay_push(suffix):
+def test_all_group_operator_feedback_uses_reply_only(suffix):
     unit = Unit()
     LineOrderGroupApplication(lambda: NOW)._reply_to_group(inbox(group=True), unit, "same group copy", suffix)
     task = unit.delivery_tasks.tasks[1]
     assert task.request.recipient == LineRecipient(LineRecipientType.GROUP, GROUP)
-    assert task.request.source_aggregate_type == (REPLY_ONLY_WEBHOOK_SOURCE if suffix == "error" else "line_webhook_event")
+    assert task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
 
 
 @pytest.mark.parametrize("outcome", [LineProviderOutcomeType.REJECTED, LineProviderOutcomeType.RATE_LIMITED,

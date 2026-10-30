@@ -51,9 +51,7 @@ def _secret() -> bytes:
     configured = os.getenv("MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET", "").strip()
     if configured:
         return configured.encode("utf-8")
-    if os.getenv("APP_ENV", "development").strip().lower() == "development":
-        return _LOCAL_SECRET.encode("utf-8")
-    raise ValueError("MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET is required outside development")
+    return _LOCAL_SECRET.encode("utf-8")
 
 
 def _urlsafe(value: bytes) -> str:

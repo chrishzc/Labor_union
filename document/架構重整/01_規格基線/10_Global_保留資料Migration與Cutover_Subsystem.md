@@ -1,5 +1,7 @@
 # Global Preserve-data Migration／Cutover Subsystem
 
+> 2026-10-30 最新人工 Authority：正式架構為 Windows 工會電腦執行程式、NAS 只跑 Docker MySQL；三個 Windows 維護入口只透過 MySQL、不啟用 SSH。`initialize_nas_schema.bat` 改為安全升級，不再提供清空重建；每日備份預設 18:00，現場可於「稽核與系統」修改；另提供備份復原腳本。當前電腦僅為開發環境，禁止以開發驗收操作現有 DB／NAS 或安裝正式排程。執行契約及 bounded package 見 §9.5。
+
 > 2026-10-29 新帳務參數依規格04 §0 PRICE-09走additive fresh／preserve release；新增政策、Orders nullable綁定、人工事件及分期資料，不回填或重算既有案件、不覆寫既有快照／流水。不包含production、reset或switch授權。\n
 
 
@@ -592,3 +594,54 @@ Owner 仍為 Global migration。Write set 為 DSM adapter、原 package inclusio
 
 驗收：靜態及負例 → 舊 image 合成帳號／MFA／檔案 → cold copy → 既有工具 upgrade／verify → source bytes
 及設定不變 → explicit volume switch → r2 啟動與原帳號／MFA／檔案回讀。原 NAS apply／GUI／負載仍由 operator 現場驗收。
+
+### 9.5 Windows 三入口與每日 NAS SQL 備份（2026-10-30）
+
+本節為上述人工 Authority 的 bounded execution package；owner 為 Global migration。
+Windows 操作入口為 `backup_nas_database.bat`、`initialize_nas_schema.bat`、`restore_nas_database.bat`，
+共用 `scripts/nas_database_maintenance.py`。本節取代 §9.2 的 Windows 雙擊 reset／create 行為；
+低階 fresh initializer 仍供技術人員與 disposable fixtures，DSM 冷備份工具維持獨立用途。
+
+- Target／授權：獨立 `.env.nas-maintenance` 須明確啟用並固定 NAS host／port，與選定 runtime `.env` 一致。
+  拒絕 loopback、本機開發庫及 process override 衝突。缺設定與 `--dry-run` 均零連線／DB 寫入／排程。
+  技術人員一次備妥原 runtime 帳號、不同的 backup-read 與 candidate-write 帳號、MySQL 8 原生 clients。
+  不啟用 SSH、不修改 NAS 容器或全域 MySQL 設定、不放寬 TLS。
+- Backup：每日或手動使用原生 `mysqldump --single-transaction --quick` 匯出 InnoDB SQL、view、routine、
+  trigger、event。期間禁止 DDL／TRUNCATE；不要求停止一般業務寫入。UTF-8、binary hex、成功 exit、完成尾註、
+  前後 schema 定義／目標一致及 SHA-256 全部通過才由 partial 目錄發布成功備份。歷史與失敗 partial 保留，
+  不自動覆蓋／刪除。SQL／credential 不進 console／API；備份位於專用私有目錄。
+- Upgrade：人工先停止整套 Windows writer，明確確認後才執行。先 canonical 零寫入 plan，再完整備份；
+  新建 `lu_nas_upgrade_*` schema，只於該副本重用原 restore／ordered schema／backfill／verify／fresh-read switch。
+  Source 全程不執行 DDL／DML／DROP。不同 read/write principal，TLS 與原生 client 選取由 connection transport 提供。
+  remote candidate 的補助 policy 使用原 hash-checked library rules，receipt 仍由 canonical runner 驗證；
+  Twins Payroll 沿原 CLI。未知 backfill 預檢停止，不跳過或假設完成；不改既有 hash-bound artifact／business semantics。
+  新建且未曝光給 runtime 的 NAS 副本，已 exact／允許 retired-absent 的 parts 可沿用入場完整快照，
+  避免逐項重讀全部 metadata；pending／partial 保留每步 fresh-read，最後完整 metadata／row／switch fresh-read 不省略。
+- Runtime／backup access：僅將目前兩個帳號既有的 source schema 層級權限等量授予新副本，實際原 credential
+  連線成功後才可切換；不改密碼、全域權限或原庫 grants。角色／細粒度等無法證明等價的配置停止，
+  留原 permission owner 處理，不自動改成 broad policy。
+- Restore：人工選一份已完成且 hash 相符的備份，先匯入全新 `lu_nas_restore_*`，不清空／覆寫原庫；
+  只執行已放入專用受保護備份目錄的 SQL，不直接執行外部下載路徑或符號連結。
+  原庫缺失或損壞不阻止建立副本。保留 charset／collation，比對完整 object definitions／inventory，逐表 CHECK，
+  目前程式的 readonly current gate 通過並驗原 credential 後，才原子修改 `.env` 唯一 DB_DATABASE。
+  未改綁而仍參照原庫的 object definitions 停止切換；含 SQL events 且 server event_scheduler 開啟時，
+  在匯入前停止並交維護人員隔離處理，不自動修改全域排程設定。
+  備份版本不相容時保留副本、停止切換；不猜測資料轉換或自動回復。MySQL server 必須可連線；
+  SQL 不含照片／附件實體檔、Windows 設定、MySQL 帳號／GRANT、MFA／其他加密 key，這些須另作災難備份。
+- Switch／failure：預覽／操作期間的原設定 digest 改變即 typed safe stop；持久化切換 before／after hash 後才
+  原子改設定，不寫含秘密的完整 `.env` receipt。失敗保留原庫、備份、副本與紀錄，不 retry／DROP／自動 rollback。
+  Windows 換檔前先把原 `.env` 存取規則複製到空白暫存檔，成功才寫內容；權限與最後 config digest 核對失敗不切換。
+  切換完成仍需重新啟動服務及人工登入／MFA／讀取驗收，不將設定切換宣稱完整 cutover。
+- Schedule／UI：正式 Windows 由明確操作安裝同一帳號的每日 Task Scheduler 工作，預設當地時間 18:00，
+  開機並登入時執行，錯過後補跑；排程只可 backup，不能升級／復原。`稽核與系統 → 資料庫備份` 顯示
+  已設定時間、最近成功及失敗狀態，經既有 enabled human session 修改時間。使用 schedule version＋本機 lock
+  fresh-read，過期回 typed 409，不 blind retry。頁面不回傳 credential、完整設定或 raw SQL；不提供備份下載。
+
+Write set：三 launcher／共用 transport、canonical runner 的 client／candidate adapter 接點、schedule API／typed UI、
+既有 launcher README／NAS README、直接 focused tests 與 migration／shell map facts。沒有新 schema release、
+business rule、來源資料 backfill、production apply、部署或排程安裝。此開發驗收只可新建隔離測試容器／合成資料。
+
+驗收順序：static／target opt-in／cancel／hash／failure negatives → 三個真 Windows batch → 隔離 MySQL 完整 source
+SQL dump／全新 restore／canonical upgrade／原庫及鄰庫不變／原 credential → UI 時間修改／stale／未設定／失敗狀態與
+實際畫面 → focused architecture closure。正式機的排程註冊、每日實際執行、NAS 原 credential、MFA／實體檔與服務重啟
+仍須現場驗收；未執行不得標為 PASS。

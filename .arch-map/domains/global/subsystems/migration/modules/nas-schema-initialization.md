@@ -13,8 +13,8 @@
 - compact generation/load: `scripts/compact_fresh_schema.py` — 僅從自行新建的 local disposable source 產生 final DDL；trigger 以 DELIMITER 包裝，保留 compound body。
 - retirement policy: `scripts/fresh_schema_policy.py`
 - entrypoints:
-  - `scripts/launchers/initialize_nas_schema.bat`
   - `scripts/launchers/initialize_nas_schema.sh`
+  - `python -m scripts.initialize_nas_schema` — technician/disposable fresh tool. The former Windows operator batch now belongs to `preserved-database-upgrade` and performs safe upgrade only (§9.5).
 - dependencies:
   - `scripts/schema_assembly.py`
   - `scripts/sql_statements.py` — 共用 quote／comment-aware DELIMITER scanner，禁止未結束 statement 中途換 delimiter。
@@ -30,7 +30,7 @@
 ## Contracts
 - owning spec: `document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md#93-nas-新庫結構精簡與退役清單2026-10-15`
 - compact final CREATE/seed，hash-bound source/SQL；retired tables 不進新庫，舊庫不刪表，保留物件結構與系統資料等價。
-- Python／Unix 無參數唯讀預檢；Windows 無參數委派 --interactive，空庫通過後輸入 Y 才 apply，結果按鍵後關閉。
+- Python／Unix 無參數唯讀預檢；低階 Python 明確 --interactive 仍保留 fresh/test 確認流程。Windows 日常 batch 已改由 preserve-data owner 提供 upgrade，不再提供 reset/create。
 - dry-run 零連線，--apply fresh-read 空庫後才執行；除明確 --interactive 外，命令列參數不進入互動流程。
 - 同入口在寫入前唯讀檢查 MySQL/InnoDB/writable、目前帳號及啟用角色權限、binary log trigger 限制、release files 與 metadata 查詢；Apply 再驗空庫後才寫入，不另要求檢查腳本。
 - 預設非空或 partial 重跑停止；journal 不保存 SQL、credential 或 provider exception。

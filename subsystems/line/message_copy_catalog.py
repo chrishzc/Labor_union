@@ -17,10 +17,6 @@ def _text_defaults():
     from domains.line.identity_flow import LineIdentityFlowPurpose
     from domains.scheduling.matching_communication import CustomerMatchingDecision
     from subsystems.line import service_help_application as help
-    from subsystems.line.order_group_application import (
-        _safe_error_message, _parse_binding, _INVITATION_URL_REQUIRED, _INVITE_COMMAND_FORMAT,
-        group_binding_acknowledgement, group_invitation_acknowledgement,
-    )
     from subsystems.line.deposit_notifications import ASSISTANCE_ACK
     from subsystems.line.service_day_log_reminders import reminder_text as log_reminder
     from subsystems.line.service_start_day import start_day_response_text
@@ -30,14 +26,10 @@ def _text_defaults():
     result = {
         "service-contact": CONTACT_RECEIVED, "service-resolved": CONTACT_RESOLVED,
         "identity-pending": IDENTITY_PENDING,
-        "service-flow": help._SERVICE_FLOW_REPLY, "service-payment": help._PAYMENT_REPLY,
         "service-profile-update": help._TICKET_ACKNOWLEDGEMENTS[CustomerServiceCategory.PROFILE_UPDATE],
         "service-order-update": help._ORDER_UPDATE_ACKNOWLEDGEMENT,
         "deposit-assistance": ASSISTANCE_ACK,
         "service-day-log-reminder": log_reminder("{staff_name}"),
-        "group-bound": group_binding_acknowledgement("{case_no}"),
-        "group-invitations-queued": group_invitation_acknowledgement("{case_no}", "{recipient_count}"),
-        "group-error-invitation-url": _INVITATION_URL_REQUIRED, "group-format-invite": _INVITE_COMMAND_FORMAT,
         "candidate-willing-received": CANDIDATE_WILLING_RECEIVED,
         "service-start-normal-received": start_day_response_text("normal"),
         "service-start-help-received": start_day_response_text("help"),
@@ -48,24 +40,11 @@ def _text_defaults():
         "service-registration-unavailable": help._registration_reply(None),
         "identity-staff-link": _identity_link_message(LineIdentityFlowPurpose.STAFF_VERIFICATION, "{identity_url}"),
         "identity-admin-link": _identity_link_message(LineIdentityFlowPurpose.ADMIN_BINDING, "{identity_url}"),
-        "runtime-system-health": "【{heading}】\n元件：{check_name}\n狀態：{status}\n說明：{message}\n時間：{occurred_at} UTC",
     }
     for role in ("client", "staff"):
         result["contract-signing-" + role] = external_platform_staff_reminder_text("{case_no}")
     for stage in ("deposit", "first", "second"):
         result["payment-overdue-" + stage] = "本案{payment_stage}尚有 NT$ {remaining_amount} 未確認入帳，請協助確認繳款，謝謝。"
-    for key, code in {"admin": "linked_admin_required", "order": "order_not_found", "unbound": "group_not_bound",
-                      "identity": "order_line_audience_not_ready", "cancelled": "cancelled_order_cannot_bind_line_group",
-                      "unpaid": "settled_deposit_required_for_line_group", "occupied": "line_group_already_bound_to_another_order"}.items():
-        result["group-error-" + key] = _safe_error_message(RuntimeError(code))
-    for key, command in {"empty": "綁定訂單", "case": "綁定訂單 https://line.me/R/ti/g/entry",
-                          "url": "綁定訂單 CASE", "spacing": "綁定訂單CASE https://line.me/R/ti/g/entry",
-                          "split": "綁定訂單 CASE https://line.me/R/ti/g/ entry", "invalid-case": "綁定訂單 ??? https://line.me/R/ti/g/entry",
-                          "invalid-url": "綁定訂單 CASE https://example.invalid/group"}.items():
-        try:
-            _parse_binding(command)
-        except ValueError as error:
-            result["group-format-" + key] = str(error)
     for key, willing, decision in (
         ("matching-willing-received", "willing", None),
         ("matching-customer-accepted", None, CustomerMatchingDecision.ACCEPTED),
@@ -80,7 +59,7 @@ def _card_defaults():
     from subsystems.line.service_help_application import _service_menu_payload, _order_update_menu_payload
     from subsystems.line.order_group_application import group_invitation_payload
     from subsystems.line.service_start_messages import substitute_inquiry
-    result = {"service-menu": _service_menu_payload(), "service-other": _service_menu_payload(),
+    result = {"service-menu": _service_menu_payload(),
               "order-update-menu": _order_update_menu_payload(),
               "service-start-inquiry": substitute_inquiry("{case_no}", "", "", "not-a-token", service_dates=["{service_dates}"])}
     result["service-start-inquiry"]["contents"]["body"]["contents"][1]["text"] = "案件：{case_no}\n{service_period}"
@@ -178,6 +157,12 @@ def effective_copy_definition(definition):
     for template in result.get("templates", []):
         if template["id"] in specs:
             key = template['id'].removeprefix('LINE-COPY-')
+            if key == 'order-update-menu':
+                current = json.loads(template['content'])
+                defaults = json.loads(specs[template['id']]['content'])
+                if isinstance(current, dict) and not set(current) <= set(defaults):
+                    # Project the former five-button menu without rewriting its history.
+                    template['content'] = specs[template['id']]['content']
             if key in {'card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'}:
                 # Preserve saved action wording while retiring image-body copy.
                 current = json.loads(template['content'])

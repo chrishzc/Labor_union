@@ -52,6 +52,22 @@ def _copy_client(monkeypatch):
     return TestClient(web), application
 
 
+def test_retired_explanation_templates_cannot_be_read_or_edited_even_if_saved(monkeypatch):
+    client, application = _copy_client(monkeypatch)
+    templates = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
+    for key in ('service-flow', 'service-payment'):
+        saved_template = {'id': 'LINE-COPY-' + key, 'name': key, 'message_type': 'text',
+            'enabled': True, 'content': '舊說明內容', 'variables': []}
+        templates.append(saved_template)
+        endpoint = f'/api/v1/line/notification-rules/{key}/message-template'
+        assert client.get(endpoint).status_code == 404
+        assert client.put(endpoint, json={'content': '不得覆寫', 'expected_revision': 7}).status_code == 404
+        assert saved_template['content'] == '舊說明內容'
+    assert application.revision == 7
+    for key in ('service-profile-update', 'service-order-update'):
+        assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
+
+
 def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monkeypatch):
     from subsystems.line.message_preview import LineMessagePreviewApplication
     client, application = _copy_client(monkeypatch)
@@ -519,3 +535,85 @@ def test_manual_replay_api_requires_previewable_source_and_reason(monkeypatch) -
         ("preview", 12),
         ("apply", 12, "核准重送歷史通知", "manual-replay-12", "manual-replay-12"),
     ]
+
+
+def test_service_guide_alias_reads_and_saves_one_canonical_setting_without_rewriting_legacy(monkeypatch):
+    import json
+    client, application = _copy_client(monkeypatch)
+    legacy = {'id': 'LINE-COPY-service-other', 'name': '舊導覽', 'message_type': 'text',
+              'enabled': True, 'content': '{}', 'variables': []}
+    application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates'].append(legacy)
+    base = '/api/v1/line/notification-rules/'
+    original = client.get(base + 'service-menu/message-template').json()['data']
+    alias = client.get(base + 'service-other/message-template').json()['data']
+    assert alias['template_id'] == original['template_id'] == 'LINE-COPY-service-menu'
+    assert alias['content'] == original['content']
+    content = json.loads(alias['content'])
+    content[next(iter(content))] = '合併後的服務導覽'
+    changed = json.dumps(content, ensure_ascii=False)
+    saved = client.put(base + 'service-other/message-template', json={'content': changed, 'expected_revision': 7})
+    assert saved.status_code == 200, saved.text
+    assert json.loads(client.get(base + 'service-menu/message-template').json()['data']['content']) == content
+    persisted = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
+    assert next(row for row in persisted if row['id'] == legacy['id']) == legacy
+
+
+def test_unused_standalone_template_editors_are_closed_but_saved_settings_and_active_rules_remain(monkeypatch):
+    from copy import deepcopy
+    client, application = _copy_client(monkeypatch)
+    before = deepcopy(application.definitions)
+    unused = ('staff_switch_fail','staff_menu_not_set','esc_success','esc_fail','bind_link_msg',
+              'register_success','bind_success_existing','bind_confirm_rebind','bind_fail_no_data',
+              'client_rebind_approved','staff_verification_requested')
+    for key in unused:
+        endpoint = f'/api/v1/line/notification-rules/template-{key}/message-template'
+        assert client.get(endpoint).status_code == 404
+        assert client.put(endpoint, json={'content':'不得覆寫', 'expected_revision':7}).status_code == 404
+    assert application.definitions == before and application.revision == 7
+    rules = application.definitions[LineConfigurationKind.NOTIFICATION_RULES]['rules']
+    active = next(rule for rule in rules if rule['id'] == 'LINE-SECOND-PAYMENT-DUE-V1')
+    rules.append({**active, 'id':'still-active-notification', 'template_id':'register_success'})
+    assert client.get('/api/v1/line/notification-rules/still-active-notification/message-template').status_code == 200
+    for key in ('template-client_rebind_rejected','template-staff_verification_rejected','identity-pending',
+                'identity-bound-customer','identity-bound-staff','identity-bound-admin','service-profile-update','service-order-update'):
+        assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200
+
+
+def test_legacy_order_menu_copy_is_projected_to_liff_without_mutating_saved_definition(monkeypatch):
+    import json
+    from copy import deepcopy
+    from subsystems.line.message_copy_catalog import effective_copy_definition
+    from subsystems.line.message_copy import copy_template_id
+    monkeypatch.setenv('LINE_LIFF_ID', '1234567890-order')
+    definition = {'version':1, 'templates':[{'id':copy_template_id('order-update-menu'), 'name':'舊訂單異動導覽',
+        'message_type':'text', 'enabled':True, 'variables':[], 'content':json.dumps({
+            'contents/body/contents/0/action/label':'修改服務地址',
+            'contents/body/contents/4/action/label':'其他訂單內容'})}]}
+    before = deepcopy(definition)
+    projected = effective_copy_definition(definition)
+    view = next(row for row in projected['templates'] if row['id'] == copy_template_id('order-update-menu'))
+    assert '開啟訂單異動表單' in view['content'] and '修改服務天數' not in view['content']
+    assert 'contents/body/contents/4/action/label' not in json.loads(view['content'])
+    assert definition == before
+
+
+def test_fixed_feedback_and_liff_admin_alert_editors_are_closed_without_deleting_saved_settings(monkeypatch):
+    from copy import deepcopy
+    client, application = _copy_client(monkeypatch)
+    keys = ('group-bound','group-invitations-queued','group-error-invitation-url','group-format-invite',
+            'group-error-admin','group-error-order','group-error-unbound','group-error-identity',
+            'group-error-cancelled','group-error-unpaid','group-error-occupied','group-format-empty',
+            'group-format-case','group-format-url','group-format-spacing','group-format-split',
+            'group-format-invalid-case','group-format-invalid-url','runtime-system-health')
+    saved = application.definitions[LineConfigurationKind.MESSAGE_TEMPLATES]['templates']
+    for key in keys:
+        saved.append({'id':'LINE-COPY-'+key,'name':key,'message_type':'text','enabled':True,'content':'歷史固定提示','variables':[]})
+    before = deepcopy(application.definitions)
+    ids = (*keys,'LU96-M4-SAFE-ALERT-RULE-V1','LU96-M4-COMPLAINT-HIGH-RULE-V1')
+    for key in ids:
+        endpoint=f'/api/v1/line/notification-rules/{key}/message-template'
+        assert client.get(endpoint).status_code == 404
+        assert client.put(endpoint,json={'content':'不應儲存','expected_revision':7}).status_code == 404
+    assert application.revision == 7 and application.definitions == before
+    for key in ('group-invitation-customer','group-invitation-staff','service-profile-update','service-order-update'):
+        assert client.get(f'/api/v1/line/notification-rules/{key}/message-template').status_code == 200

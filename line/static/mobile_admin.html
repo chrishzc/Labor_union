@@ -64,6 +64,18 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     .loading-shell { max-width:760px; margin:0 auto; padding:28px 14px; color:var(--muted); }
     .compact-filter { max-width:220px; }
     .workbench-summary { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 4px 22px; border-bottom:1px solid var(--line); }
+    .system-status { border:1px solid var(--line); border-radius:14px; background:var(--sage-soft); margin-bottom:18px; padding:0 16px; }
+    .system-status summary { cursor:pointer; padding:16px 0; font-weight:800; }
+    .system-status summary span { float:right; font-weight:600; }
+    .system-status[data-status="healthy"] summary span { color:var(--green); }
+    .system-status[data-status="warning"] summary span, .system-status[data-status="critical"] summary span { color:#a33822; }
+    .system-status dl { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:0 0 14px; }
+    .system-status dl div { min-width:0; }
+    .system-status dt { color:var(--muted); font-size:13px; margin-bottom:4px; }
+    .system-status dd { margin:0; font-weight:700; }
+    .system-status footer { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 0; border-top:1px solid var(--line); }
+    .system-status footer small { color:var(--muted); }
+    .system-status ul { padding-left:20px; font-size:14px; line-height:1.7; }
     .workbench-total { display:flex; align-items:baseline; gap:9px; color:var(--green-strong); }
     .workbench-total strong { color:var(--green); font-size:64px; line-height:1; letter-spacing:-.06em; }
     .workbench-total span { font-size:24px; font-weight:800; }
@@ -144,6 +156,18 @@ Description: 提供 LINE 工會人員獨立的待辦、客服、訂單狀態與�
     <div id="tickets" class="surface-list"></div>
   </section>
   <section id="reviewPane" class="hidden">
+    <details id="systemStatus" class="system-status" data-status="unknown">
+      <summary>系統狀態 <span id="systemStatusLabel" role="status" aria-live="polite">待確認</span></summary>
+      <p id="systemStatusNotice" class="muted">主動查看系統狀態，不會自動發送管理員通知。</p>
+      <dl>
+        <div><dt>LINE 發送服務</dt><dd id="systemWorker">—</dd></div>
+        <div><dt>待發通知</dt><dd id="systemPending">—</dd></div>
+        <div><dt>寄送失敗</dt><dd id="systemFailed">—</dd></div>
+        <div><dt>最近檢查</dt><dd id="systemChecked">—</dd></div>
+      </dl>
+      <ul id="systemChecks"></ul>
+      <footer><small>查看已記錄的監測結果</small><button id="refreshSystemStatus" class="quiet" type="button">重新整理狀態</button></footer>
+    </details>
     <div class="workbench-summary">
       <div class="workbench-total"><strong id="reviewTotal">—</strong><span>件已載入</span></div>
       <button id="refreshReviews" class="quiet" type="button">重新整理</button>
@@ -655,7 +679,7 @@ function switchPane(next) {
     renderSchedulingReview();
     loadSchedulingCaseOptions();
   }
-  else if (target === "staff_review") loadReviewWorkbench();
+  else if (target === "staff_review") { loadSystemStatus(); loadReviewWorkbench(); }
   else if (target === "order_tracking") loadOrderStatuses(true);
   else if (target === "dashboard") loadOperationsSummary();
 }
@@ -1575,31 +1599,45 @@ async function renderNotificationFailure(root,item,current) {
 }
 
 async function renderNotificationRuntime(root,current=()=>root.isConnected) {
-  const base='/api/v1/line/mobile-admin/notification-task-actions/runtime';const data=await postJson(base+'/query',{});
-  if(!current())return;
-  for(const status of data.statuses)root.appendChild(notificationText('p',`${status.check_name}：${status.status}・${status.message}`));
-  const label=notificationText('label','新增管理員通知對象');const select=document.createElement('select');select.setAttribute('aria-label','選擇管理員通知對象');
-  select.appendChild(notificationText('option','請選擇人員'));select.options[0].value='';
-  for(const candidate of data.candidates){const option=notificationText('option',candidate.display_label+(candidate.line_linked?'':'（未綁定 LINE）'));option.value=candidate.candidate_id;select.appendChild(option);}
-  label.appendChild(select);root.appendChild(label);let addIntent=null;
-  root.appendChild(notificationButton('新增通知對象',async()=>{
-    if(!select.value)throw new Error('請先選擇人員。');
-    if(addIntent?.admin_user_id!==Number(select.value)){const key=crypto.randomUUID();addIntent={admin_user_id:Number(select.value),minimum_status:'warning',reason:'',idempotency_key:key,correlation_id:key};}
-    const preview=await postJson(base+'/add/preview',addIntent);
-    if(!current())return;
-    await postJson(base+'/add',{...addIntent,preview_fingerprint:preview.preview_fingerprint});if(current()){await loadReviewWorkbench();showStatus('通知對象已新增。');}
-  }));
-  root.appendChild(notificationText('p','未綁定 LINE 時，請先由該人員完成官方帳號的身分綁定。'));
-  for(const target of data.targets){
-    const card=document.createElement('article');card.appendChild(notificationText('p',`${target.display_label}・${target.state==='active'?'啟用':'停用'}`));
-    const key=crypto.randomUUID();const payload={expected_version:target.current_version,enabled:target.state!=='active',reason:'',idempotency_key:key,correlation_id:key};
-    card.appendChild(notificationButton(target.state==='active'?'停用通知':'啟用通知',async()=>{
-      const path=base+'/'+target.target_id+'/toggle';const preview=await postJson(path+'/preview',payload);
-      if(!current())return;
-      await postJson(path,{...payload,preview_fingerprint:preview.preview_fingerprint});if(current())await loadReviewWorkbench();
-    }));root.appendChild(card);
-  }
+  if(current())root.appendChild(notificationText('p','系統狀態已整合至待辦工作台上方，請展開查看。'));
 }
+
+const systemStatusNames = {healthy:'正常',warning:'需留意',critical:'異常',unknown:'待確認',maintenance:'維護中'};
+let systemStatusSequence = 0;
+function clearSystemStatus(label,notice) {
+  document.getElementById('systemStatus').dataset.status='unknown';
+  document.getElementById('systemStatusLabel').textContent=label;
+  document.getElementById('systemStatusNotice').textContent=notice;
+  for(const id of ['systemWorker','systemPending','systemFailed','systemChecked'])document.getElementById(id).textContent='—';
+  document.getElementById('systemChecks').replaceChildren();
+}
+async function loadSystemStatus() {
+  if(studioPreview || target!=='staff_review')return;
+  const sequence=++systemStatusSequence;
+  const button=document.getElementById('refreshSystemStatus');button.disabled=true;
+  clearSystemStatus('讀取中','正在讀取系統狀態…');
+  try {
+    const data=await postJson('/api/v1/line/mobile-admin/notification-task-actions/runtime/query',{});
+    if(sequence!==systemStatusSequence || target!=='staff_review')return;
+    if(!data || !Object.hasOwn(systemStatusNames,data.status) || !Object.hasOwn(systemStatusNames,data.worker_status)
+        || !Number.isInteger(data.pending_count) || data.pending_count<0 || !Number.isInteger(data.failed_count) || data.failed_count<0
+        || !Array.isArray(data.checks) || data.checks.some(check=>typeof check.label!=='string' || !Object.hasOwn(systemStatusNames,check.status)
+          || !Number.isFinite(Date.parse(check.checked_at)))
+        || (data.last_checked_at!==null && !Number.isFinite(Date.parse(data.last_checked_at))))throw new Error('invalid status');
+    document.getElementById('systemStatus').dataset.status=data.status;
+    document.getElementById('systemStatusLabel').textContent=systemStatusNames[data.status];
+    document.getElementById('systemStatusNotice').textContent=data.status==='unknown'?'尚無最新監測結果，請稍後重新整理。':'主動查看系統狀態，不會自動發送管理員通知。';
+    document.getElementById('systemWorker').textContent=systemStatusNames[data.worker_status];
+    document.getElementById('systemPending').textContent=String(data.pending_count)+' 件';
+    document.getElementById('systemFailed').textContent=String(data.failed_count)+' 件';
+    document.getElementById('systemChecked').textContent=data.last_checked_at?new Date(data.last_checked_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'尚無紀錄';
+    for(const check of data.checks)document.getElementById('systemChecks').appendChild(notificationText('li',check.label+'：'+systemStatusNames[check.status]));
+  } catch(error) {
+    if(sequence===systemStatusSequence && target==='staff_review')clearSystemStatus('無法讀取','系統狀態暫時無法讀取，請確認權限或稍後再試。');
+  } finally { if(sequence===systemStatusSequence)button.disabled=false; }
+}
+document.getElementById('refreshSystemStatus').addEventListener('click',loadSystemStatus);
+
 
 function requireMatchingFollowupPage(data) {
   if (!data || !Array.isArray(data.items) || !Number.isInteger(data.total)

@@ -57,16 +57,12 @@ def test_invalid_link_never_opens_a_database():
 
 
 @pytest.mark.parametrize('environment', ['production', 'development'])
-def test_picture_links_require_the_existing_configured_secret_without_a_known_dev_key(monkeypatch, environment):
-    from subsystems.line.table_image_contracts import TableImageUnavailable
+def test_picture_links_work_with_internal_cipher_without_env_secret(monkeypatch, environment):
     monkeypatch.setenv('APP_ENV', environment)
-    monkeypatch.delenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET')
-    with pytest.raises(TableImageUnavailable):
-        token()
-    for public_example in ('replace_with_download_token_secret', 'local-only-matching-confirmation-download-v1'):
-        monkeypatch.setenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', public_example)
-        with pytest.raises(TableImageUnavailable):
-            token()
+    monkeypatch.delenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', raising=False)
+    monkeypatch.delenv('LINE_CHANNEL_SECRET', raising=False)
+    issued = token()
+    assert issued.startswith('lti_')
 
 
 @pytest.mark.parametrize('flow', ['candidate', 'customer'])

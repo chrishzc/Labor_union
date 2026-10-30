@@ -336,10 +336,8 @@ class LineServiceHelpApplication:
         return int(ticket.ticket_id)
 
     def _handle_category(self, inbox, unit_of_work, line_user_id, category, text):
-        if category is CustomerServiceCategory.SERVICE_FLOW:
-            payload = _text_payload(_SERVICE_FLOW_REPLY)
-        elif category is CustomerServiceCategory.PAYMENT_SUBSIDY:
-            payload = _text_payload(_PAYMENT_REPLY)
+        if category in {CustomerServiceCategory.SERVICE_FLOW, CustomerServiceCategory.PAYMENT_SUBSIDY}:
+            payload = _ai_assistant_payload()
         elif category is CustomerServiceCategory.SERVICE_PROGRESS:
             payload = self._progress_payload(inbox, unit_of_work, line_user_id)
         elif category is CustomerServiceCategory.PROFILE_UPDATE:
@@ -399,7 +397,7 @@ class LineServiceHelpApplication:
             and getattr(source, "user_id", None) == line_user_id
         )
         copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "ticket": "service-contact",
-                    "service_flow": "service-flow", "payment_subsidy": "service-payment", "profile_update": "service-profile-update", "order-update": "service-order-update", "other": "service-other"}.get(suffix)
+                    "profile_update": "service-profile-update", "order-update": "service-order-update", "other": "service-menu"}.get(suffix)
         if copy_key:
             payload = configured_payload(unit_of_work, copy_key, payload)
         request = LineDeliveryRequest(
@@ -567,8 +565,8 @@ def _ai_assistant_liff_url():
 
 def _service_menu_payload():
     actions = (
-        ("如何申請服務？", "服務流程", "secondary"),
-        ("費用與補助怎麼算？", "收費與補助", "secondary"),
+        ("如何申請服務？", "ai_assistant", "secondary"),
+        ("費用與補助怎麼算？", "ai_assistant", "secondary"),
         ("如何查詢目前進度？", "查詢服務進度", "secondary"),
         ("登記資料填錯怎麼辦？", "修改登記資料", "secondary"),
         ("呼叫專員", "聯絡工會人員", "primary"),
@@ -584,20 +582,32 @@ def _service_menu_payload():
     )
 
 
-def _order_update_menu_payload():
-    actions = (
-        ("修改服務地址", "修改服務地址", "secondary"),
-        ("修改下廚需求", "修改下廚需求", "secondary"),
-        ("修改服務天數", "修改服務天數", "secondary"),
-        ("修改每日服務時段", "修改每日服務時段", "secondary"),
-        ("其他訂單內容", "其他訂單內容", "primary"),
-    )
+def _ai_assistant_payload():
     return _navigation_card_payload(
-        alt_text="修改訂單資訊：請選擇要調整的項目",
+        alt_text="服務說明請至 AI 客服查看",
+        eyebrow="新竹市月子工會",
+        title="AI 客服與常見問答",
+        description="服務流程、收費與補助等說明，請至 AI 客服查看常見問答或提問。",
+        actions=(("開啟 AI 客服", "ai_assistant", "primary"),),
+        hint="如需人員協助，請回到聊天室輸入「呼叫專員」。",
+    )
+
+
+def _order_update_liff_url():
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if not liff_id or liff_id == "your_liff_id_here":
+        return None
+    return f"https://liff.line.me/{liff_id}?target=order_update"
+
+
+def _order_update_menu_payload():
+    available = _order_update_liff_url() is not None
+    return _navigation_card_payload(
+        alt_text="修改訂單資訊：開啟正式申請表單",
         eyebrow="新竹市月子工會",
         title="修改訂單資訊",
-        description="這些內容可能影響訂單或月嫂接案意願。請選擇項目，由工會人員與您及相關月嫂確認。",
-        actions=actions,
+        description="請開啟正式訂單異動表單，選擇您的有效訂單與要修改的內容。" if available else "訂單異動入口尚未完成設定，請輸入「呼叫專員」取得協助。",
+        actions=(("開啟訂單異動表單", "order_update", "primary"),) if available else (),
         hint="送出需求不代表訂單已變更；正式結果以工會確認為準。",
     )
 
@@ -643,6 +653,9 @@ def _navigation_card_payload(*, alt_text, eyebrow, title, description, actions, 
 
 
 def _navigation_button(label, action_text, style):
+    if action_text == "order_update":
+        return {"type": "button", "style": style, "height": "sm",
+                "action": {"type": "uri", "label": label, "uri": _order_update_liff_url()}}
     if action_text == "聯絡工會人員":
         return {
             "type": "button",
@@ -686,8 +699,6 @@ def _navigation_button(label, action_text, style):
     return button
 
 
-_SERVICE_FLOW_REPLY = "服務流程如下：\n1. 完成服務登記。\n2. 工會確認資料與服務期程。\n3. 系統篩選可配合的月嫂。\n4. 月嫂同意接案後，工會提供資料給您確認。\n5. 雙方確認後，進入媒合與簽約流程。\n\n如您尚未登記，請點選下方「服務登記」。"
-_PAYMENT_REPLY = "服務費依服務天數、每日時數及樓層費計算。補助分為補助市民（最高40小時）及社福（最高120小時），實際補助金額依本案服務資料計算。\n\n如您尚未登記，請先點選「服務登記」完成資料填寫。"
 _TICKET_ACKNOWLEDGEMENTS = {
     CustomerServiceCategory.PROFILE_UPDATE: "已收到修改資料需求，工會人員確認後會聯絡您核對要修改的內容。",
 }

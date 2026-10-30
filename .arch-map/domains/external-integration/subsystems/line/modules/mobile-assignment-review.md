@@ -17,7 +17,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 ## Implementation
 - Binding reminder sources `customer_binding` / `staff_binding` reuse LINE Identity's bounded owner query and binding-read capability. Desktop and mobile expose manual telephone/copy actions only; no new notification state or outbound task.
 - `api/routes/notification_tasks.py`、`api/schemas/notification_tasks.py` — 桌面與 LIFF 共用逐來源唯讀 projection、allowlisted catalog 及 bounded cursor；每次請求只讀原 owner，不新增 inbox／read state。來源失敗明示，來源原分頁保留；搜尋明示只限已載入事項。同一客服聯絡需求使用同一 ticket identity，不重複列入推薦與客服事項。
-- `api/routes/notification_task_actions.py` — session／LINE capability 薄轉接原訂金、資訊回覆、條件審核、重新詢問、登記、runtime target 與 delivery command；原 owner 擁有 fresh check、冪等、receipt 及 outer commit。LIFF 不接受桌面 Session。
+- `api/routes/notification_task_actions.py` — session／LINE capability 薄轉接原訂金、資訊回覆、條件審核、重新詢問、登記與 delivery command；runtime/query 改為 authenticated 唯讀系統摘要，舊 target command 由原 owner 回退役錯誤；原 owner 擁有 fresh check、冪等、receipt 及 outer commit。LIFF 不接受桌面 Session。
 - `ui_react/src/pages/NotificationTasksPreviewPage.tsx`、`ui_react/src/pages/NotificationTasksPreviewPage.css`、`ui_react/src/api/line_notifications/notification_tasks_client.ts` — 正式通知事項查詢、來源分頁、寄送紀錄、同案工作區入口及缺綁定修復入口；沒有範例資料 fallback。
 - `ui_react/src/components/NotificationTaskActions.tsx`、`ui_react/src/components/NotificationTermsReview.tsx` — 重用登記審核、客服、代班面板與既有 owner Query／Preview／Apply；新條件審核沿手機既有共用 helper，不新增流程或寫入者。
 - `ui_react/src/components/RegistrationApplications.tsx` — notification initial ID 與原核准後 readback callback。
@@ -27,7 +27,7 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - `api/routes/line_mobile_staff_leave_coordination.py` — 客戶同意順延的舊手機入口回 410；現行請假協調結果沿共用工會 result 待辦，不再操作客戶 consent。
 - 舊請假 source 與受理／退回入口回 410，不列共用待辦；歷史列表／readback 保留。現行請假使用 service-start／leave-result 原流程。客戶資料異動、月嫂確認／協調、推薦／簽約與回覆提醒均使用 owner 分頁及完整總數；已處理後重新讀取，不以本機扣數。
 - `api/dependencies/line_identity.py`
-- `line/static/mobile_admin.html`
+- `line/static/mobile_admin.html` — staff_review 最上方提供可展開系統狀態卡及手動刷新；只讀既有 runtime/query，不顯示通知對象設定，查詢錯誤不阻塞待辦。
 - `line/static/identity.html`
 - `line/static/gateway.html`
 - deposit payment tasks: `api/routes/line_deposit_payment.py`，見同層 `deposit-notifications.md`；工會人員 Query／Send，缺繳費資訊或客戶 LINE 綁定時保留人工待辦。
@@ -63,3 +63,5 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_admin_review_pagination.py`
 - integration_root: `tests/domains/external-integration/subsystems/line/infrastructure/test_line_mobile_admin_work_surfaces.py`
 - higher_boundary: `tests/domains/external-integration/subsystems/line/integration/test_line_static_mutation_ui.py` — 上位 LINE Subsystem 的身分、客服與手機操作跨 owner 靜態契約。
+
+2026-10-30：runtime 不再列為逐來源待辦或通知對象設定；系統狀態由 `worker-runtime-monitoring` 的 RuntimeStatusQuery 擁有，mobile adapter 先驗 LINE token／enabled current Admin／MONITOR_READ，再輸出去敏封閉 view。

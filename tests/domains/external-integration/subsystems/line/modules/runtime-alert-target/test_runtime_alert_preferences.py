@@ -70,12 +70,10 @@ def test_projector_skips_retired_group_without_delivery():
 
     assert queued == 0
     delivery_tasks.enqueue.assert_not_called()
-    repo.append_alert_intent.assert_called_once_with(
-        100, 10, None, "skipped", "group", "", "line_alert_group_retired"
-    )
+    repo.append_alert_intent.assert_not_called()
 
 
-def test_projector_enqueues_when_system_health_enabled():
+def test_projector_does_not_enqueue_even_when_old_personal_target_is_enabled():
     repo = MagicMock()
     delivery_tasks = MagicMock()
     task_result = MagicMock()
@@ -100,11 +98,9 @@ def test_projector_enqueues_when_system_health_enabled():
     projector = RuntimeLineAlertProjector(lambda: now)
     queued = projector.project(101, repo, delivery_tasks)
 
-    assert queued == 1
-    delivery_tasks.enqueue.assert_called_once()
-    repo.append_alert_intent.assert_called_once_with(
-        101, 11, 888, "queued", "user", "U-test-admin"
-    )
+    assert queued == 0
+    delivery_tasks.enqueue.assert_not_called()
+    repo.append_alert_intent.assert_not_called()
 
 
 def test_preferences_schema_rejects_extra_fields():

@@ -19,6 +19,19 @@ def _principal() -> AdminPrincipal:
     return AdminPrincipal(1, "admin", "管理員", "system_admin")
 
 
+def test_retired_writer_returns_410_without_opening_a_transaction(monkeypatch):
+    from subsystems.line.runtime_alert_target_application import RuntimeAlertTargetApplication
+    def forbidden():
+        raise AssertionError('retired writer opened UoW')
+    monkeypatch.setattr(runtime_health, '_app', lambda: RuntimeAlertTargetApplication(forbidden, lambda: None))
+    app = FastAPI(); app.include_router(runtime_health.router)
+    app.dependency_overrides[require_line_alert_manager] = _principal
+    response = TestClient(app).post('/api/v1/runtime/line-alert-targets/7/preview', json={
+        'expected_version':'old', 'enabled':True, 'reason':'', 'idempotency_key':'old-key', 'correlation_id':'old-corr'})
+    assert response.status_code == 410
+    assert response.json()['detail']['error']['code'] == 'line_admin_push_retired'
+
+
 def test_disable_preview_serializes_typed_fingerprint(monkeypatch) -> None:
     class Application:
         def preview(self, command):

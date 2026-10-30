@@ -4962,7 +4962,10 @@ def _mysql_base(
     *,
     container: str | None = None,
 ) -> list[str]:
-    prefix = [executable]
+    # A NAS transport may supply local Docker clients and the original TLS
+    # options. Database selection and migration semantics remain owned here.
+    client_prefix = getattr(config, "client_prefix", None)
+    prefix = client_prefix(executable) if client_prefix else [executable]
     host = config.host
     port = config.port
     if container:
@@ -8098,10 +8101,21 @@ def apply_schema(
             if cursor.fetchone()["db"] != candidate:
                 raise UpgradeBlocked("mutation connection is not candidate")
             for part in SCHEMA_PARTS:
-                part_before = _schema_snapshot(
-                    config, candidate, owned_part=part.name
-                )
-                before_state = _owned_classification(part_before)[part.name]
+                # A newly created NAS candidate is not exposed to runtime
+                # writers. Exact parts have no statements to run; reuse the
+                # complete admission snapshot for them. Pending/partial parts
+                # retain their per-statement fresh reads, and final whole-copy
+                # verification and switch fresh reads remain mandatory.
+                initial_state = states.get(part.name)
+                isolated = getattr(_candidate_connection_config(config, candidate), "isolated_candidate", False)
+                if isolated and (initial_state == "exact" or
+                        initial_state == "absent" and part.name in LOCAL_RETIRED_ABSENT_ARTIFACTS):
+                    part_before, before_state = before, initial_state
+                else:
+                    part_before = _schema_snapshot(
+                        config, candidate, owned_part=part.name
+                    )
+                    before_state = _owned_classification(part_before)[part.name]
                 if (
                     before_state == "exact"
                     or (
@@ -8717,6 +8731,7 @@ def _run_manifest_backfills(
             "DB_DATABASE": candidate,
         }
     )
+    environment.update(getattr(candidate_config, "backfill_environment", {}))
     receipts: list[dict[str, Any]] = []
     for backfill in backfills:
         safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", backfill.backfill_id)
@@ -8743,14 +8758,19 @@ def _run_manifest_backfills(
                 str(artifact_path),
                 *(replacements.get(argument, argument) for argument in arguments),
             ]
-            completed = subprocess.run(
-                command,
-                cwd=ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=environment,
-                check=False,
-            )
+            candidate_runner = getattr(candidate_config, "run_manifest_backfill", None)
+            handled = candidate_runner and candidate_runner(backfill, mode, candidate, plan_path, backup_path, receipt_path)
+            if handled:
+                completed = subprocess.CompletedProcess(command, 0)
+            else:
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment,
+                    check=False,
+                )
             if completed.returncode != 0:
                 raise UpgradeBlocked(
                     f"manifest backfill {backfill.backfill_id} {mode} failed"
@@ -8828,6 +8848,8 @@ def switch_environment(
     verified_receipt_path: Path,
     switch_receipt_path: Path,
     config: DatabaseConfig | SeparateDatabaseConfig | None = None,
+    *,
+    environment_writer=None,
 ) -> dict[str, Any]:
     verified = read_receipt(verified_receipt_path)
     if verified.get("status") != "verified":
@@ -8889,7 +8911,10 @@ def switch_environment(
         "verified_receipt_sha256": _sha256_file(verified_receipt_path),
     }
     write_receipt(switch_receipt_path, receipt)
-    _atomic_write(environment_file, updated)
+    if environment_writer is None:
+        _atomic_write(environment_file, updated)
+    else:
+        environment_writer(environment_file, updated)
     receipt.update(status="switched", switched_at=_now())
     write_receipt(switch_receipt_path, receipt)
     return receipt

@@ -94,7 +94,8 @@ def test_create_serializes_allowlisted_masked_context():
         _command(), {"ticket_id": 21}
     )
     assert result["id"] == 11
-    _, params = insert.calls[0]
+    sql, params = insert.calls[0]
+    assert 'alert_status' in sql and "'unknown'" in sql
     assert any("complaint_explicit" in str(value) for value in params)
     assert all("line_user_id" not in str(value) for value in params)
 
@@ -141,45 +142,21 @@ def test_receipt_snapshot_is_written_to_existing_immutable_receipt_table():
     assert "receipt:m4" in str(params[3:5])
 
 
-def test_masked_alert_uses_existing_global_outbox_and_updates_status():
+def test_retired_alert_does_not_write_an_outbox_or_change_ticket_status():
     cursor = _Cursor()
-    intent = EscalationAlertIntent(
-        "escalation:7", "ticket:21", TriggerCode.COMPLAINT, "other",
-        "complaint_explicit", AutomationHoldState.ACTIVE, "corr-m4", "a" * 64,
-    )
+    intent = EscalationAlertIntent('escalation:7', 'ticket:21', TriggerCode.COMPLAINT, 'other',
+        'complaint_explicit', AutomationHoldState.ACTIVE, 'corr-m4', 'a'*64)
     MySqlCustomerServiceEscalationRepository(_Connection(cursor)).enqueue_alert(intent)
-    assert len(cursor.calls) == 2
-    assert "line_domain_outbox" in cursor.calls[0][0]
-    assert "UPDATE customer_service_escalations" in cursor.calls[1][0]
-    assert all("line_user_id" not in str(value) for value in cursor.calls[0][1])
+    assert cursor.calls == []
 
 
-def test_masked_alert_captures_active_target_and_configuration_snapshot():
-    target = _TargetCursor(({
-        "id": 3,
-        "target_type": "admin_user",
-        "group_id": "Ctask96M4Alert0901",
-        "minimum_status": "warning",
-        "updated_at_utc": datetime(2026, 9, 1, tzinfo=timezone.utc),
-        "linked_line_user_id": "U-admin-test",
-    },))
-    outbox, update = _Cursor(), _Cursor()
-    intent = EscalationAlertIntent(
-        "escalation:7", "ticket:21", TriggerCode.COMPLAINT, "other",
-        "complaint_explicit", AutomationHoldState.ACTIVE, "corr-m4", "a" * 64,
-    )
-    MySqlCustomerServiceEscalationRepository(_Connection(target, outbox, update)).enqueue_alert(intent)
-    payload = json.loads(outbox.calls[0][1][3])
-    assert payload["target_snapshot"] == {
-        "target_id": 3,
-        "recipient_type": "user",
-        "recipient_identity": "U-admin-test",
-        "active": True,
-        "configuration": {
-            "minimum_status": "warning",
-            "revision": "2026-09-01T00:00:00+00:00",
-        },
-    }
+def test_retired_alert_never_reads_old_target_even_when_configured():
+    intent = EscalationAlertIntent('escalation:7', 'ticket:21', TriggerCode.COMPLAINT, 'other',
+        'complaint_explicit', AutomationHoldState.ACTIVE, 'corr-m4', 'a'*64)
+    class Connection:
+        def cursor(self):
+            pytest.fail('retired alert must not resolve or expose old recipients')
+    MySqlCustomerServiceEscalationRepository(Connection()).enqueue_alert(intent)
 
 
 def test_source_append_uses_existing_ticket_timeline_without_raw_identity():

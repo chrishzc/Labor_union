@@ -218,3 +218,28 @@ def test_retired_alert_registration_command_has_no_effect_on_service_groups():
     assert application.handle_message(inbox("設定異常通知群組"), uow)
     assert not uow.delivery_tasks.requests and not uow.order_groups.binds
     assert not uow.audits and not uow.commits
+
+
+def test_operator_feedback_ignores_saved_copy_and_is_reply_only_while_private_invitations_remain_push():
+    from subsystems.line.message_copy import copy_template_id
+    uow = Uow()
+    reads = []
+    def settings(kind):
+        reads.append(kind)
+        return NS(revision=NS(value=1), definition_json=json.dumps({'templates':[
+            {'id':copy_template_id(key), 'name':key, 'message_type':'text', 'enabled':True,
+             'content':'不可顯示的舊設定', 'variables':[]}
+            for key in ('group-bound','group-invitations-queued','group-format-empty')]}))
+    uow.configurations = NS(get=settings)
+    command(uow, '綁定訂單', 'bad-input')
+    command(uow, f'綁定訂單 {CASE} {URL}', 'setup')
+    assert not reads
+    command(uow, '發送邀請', 'send')
+    feedback = [request for request in uow.delivery_tasks.requests.values()
+                if request.recipient.identity.value == 'C-group']
+    assert len(feedback) == 3
+    assert all(request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE for request in feedback)
+    assert all('不可顯示的舊設定' not in request.payload_json for request in feedback)
+    assert len(invitations(uow)) == 2
+    assert {request.recipient.identity.value for request in invitations(uow)} == {'U-customer','U-staff'}
+    assert all(request.source_aggregate_type == 'line_order_group_invitation' for request in invitations(uow))

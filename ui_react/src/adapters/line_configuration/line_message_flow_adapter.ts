@@ -60,17 +60,17 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
   { id: 'identity', name: '登記與身分', stages: [
     { title: '加入好友', nodes: [{ id: 'welcome', title: '加入 LINE 好友', ids: ['welcome'] }] },
     { title: '登記需求', nodes: [{ id: 'registration', title: '開啟服務登記', ids: ['service-registration'] }] },
-    { title: '身分確認', nodes: [{ id: 'identity-pending', title: '受理身分申請', ids: ['identity-pending'], templates: ['staff_verification_requested', 'staff_verification_rejected'] }] },
-    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'], templates: ['bind_success_existing', 'client_rebind_approved', 'client_rebind_rejected'] }] },
+    { title: '身分確認', nodes: [{ id: 'identity-pending', title: '受理身分申請', ids: ['identity-pending'], templates: ['staff_verification_rejected'] }] },
+    { title: '完成綁定', nodes: [{ id: 'identity-bound', title: '各身分綁定完成', ids: ['identity-bound-customer', 'identity-bound-staff', 'identity-bound-admin'], templates: ['client_rebind_rejected'] }] },
   ] },
   { id: 'support', name: '客服與支援', summary: '一般留言不啟動聊天室 AI，也不自動開客服單。「問題／其他問題」回到自助導覽；明確呼叫專員後，留言才加入同一客服案件。舊 AI 回答錯誤按鈕只提示功能停用。', stages: [
     { title: '開啟服務', nodes: [
-      { id: 'service-menu', title: '查看服務導覽', ids: ['service-menu', 'service-other'] },
-      { id: 'service-payment', title: '收費與補助說明', ids: ['service-payment'], summary: '補助市民最高40小時，社福最高120小時；實際補助金額依本案服務資料計算。' },
+      { id: 'service-menu', title: '查看服務導覽', ids: ['service-menu'] },
+      { id: 'service-explanations', title: '服務流程與收費說明', internal: true, summary: '統一在 AI 客服 LIFF 查看常見問答或提問；說明內容由 AI 客服工作室維護，不另設固定回覆。' },
       { id: 'service-progress', title: '查詢服務進度', ids: ['service-progress', 'service-progress-unbound'], summary: '查看已綁定案件的進度回覆，以及尚未綁定時的入口提示。' },
     ] },
     { title: '聯絡專人', nodes: [{ id: 'contact', title: '聯絡專人服務', ids: ['service-contact'], summary: '明確呼叫即建立或接續客服需求，不再要求轉真人確認。既有資料異動與訂單申請仍走原受理流程。' }] },
-    { title: '人工處理', nodes: [{ id: 'admin-alerts', title: '管理員個人告警', ids: ['runtime-system-health'], templates: ['LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'], summary: '系統健康、重大異常及重大客訴依正式流程通知已設定的管理員個人對象。' }] },
+    { title: '人工處理', nodes: [{ id: 'admin-status', title: '查看系統狀態與客服待辦', internal: true, summary: '管理員於 LIFF 待辦工作台上方主動查看系統狀態；客服案件照常受理，不自動推播系統異常或重大客訴。' }] },
     { title: '案件完成', nodes: [{ id: 'resolved', title: '客服正式結案', ids: ['service-resolved'] }] },
   ] },
 ];

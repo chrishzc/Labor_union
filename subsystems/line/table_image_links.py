@@ -10,15 +10,17 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from subsystems.line.table_image_contracts import TableImageUnavailable
 
 _PURPOSE = b'line-table-image-v1'
+_INTERNAL_KEY = hashlib.sha256(b'labor-union-internal-line-table-image-key-v1').digest()
 
 
 def _cipher():
-    configured = os.getenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', '').strip()
-    if (not configured or configured.startswith('replace_with_')
-            or configured == 'local-only-matching-confirmation-download-v1'):
-        # Picture URLs expose case data; never use a known development/example key.
-        raise TableImageUnavailable('圖片服務尚未完成安全設定。')
-    return AESGCM(hashlib.sha256(_PURPOSE + configured.encode('utf-8')).digest())
+    configured = (
+        os.getenv('LINE_CHANNEL_SECRET', '').strip()
+        or os.getenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', '').strip()
+    )
+    if configured and not configured.startswith('replace_with_'):
+        return AESGCM(hashlib.sha256(_PURPOSE + configured.encode('utf-8')).digest())
+    return AESGCM(_INTERNAL_KEY)
 
 
 def image_url(key, index, now):

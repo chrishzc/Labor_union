@@ -257,14 +257,22 @@ def mobile_delivery_control(identity:int,action:Literal['cancel','retry'],body:M
     return {'cancel':cancel_task,'retry':retry_task}[action](identity,LineTaskActionRequest(**body.model_dump(exclude={'line_id_token'})),request,principal)
 
 
-@mobile_router.post('/runtime/query')
+from api.schemas.runtime_health import SystemStatusResponse
+from subsystems.line.runtime_status_query import RuntimeStatusQuery
+
+
+def get_runtime_status_query():
+    return RuntimeStatusQuery(open_line_unit_of_work)
+
+
+@mobile_router.post('/runtime/query', response_model=BaseResponse[SystemStatusResponse])
 def mobile_runtime_query(body:MobileAuth):
-    from api.routes.runtime_health import alert_targets,admin_alert_candidates,health_status
-    from api.schemas.runtime_health import RuntimeHealthRecordResponse
-    principal=_mobile(body.line_id_token,LineCapability.MONITOR_READ)
-    return BaseResponse(data={'targets':alert_targets(principal).data,
-        'candidates':admin_alert_candidates(principal).data if has_alert_manager(principal) else [],
-        'statuses':[RuntimeHealthRecordResponse.model_validate(item) for item in health_status(principal)]})
+    _mobile(body.line_id_token,LineCapability.MONITOR_READ)
+    try:
+        return BaseResponse(data=SystemStatusResponse.model_validate(get_runtime_status_query().query()))
+    except Exception as error:
+        raise typed_http_error(503, 'unavailable', 'runtime_status_unavailable',
+                               '系統狀態暫時無法讀取，請稍後再試。', 'runtime-status', retryable=True) from error
 
 
 def has_alert_manager(principal):

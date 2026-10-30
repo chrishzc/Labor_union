@@ -25,10 +25,10 @@
 - `line-ai-events`
 - `line-llm-settings`
 - `line-liff-studio`
-- `line-security`
 - `finance`
 - `accounting-parameters`
 - `historical-service-accounting`
+- `database-backup` — 稽核與系統內的每日備份時間與狀態，owner 為 Global migration §9.5。
 - `account-management`
 - `contract-templates`
 
@@ -64,11 +64,22 @@ API endpoint 與 operator CLI 需依 current objective 個別判定：
 
 不得因 UI 已改為 React，自動刪除仍被 React、worker、provider 或操作人員使用的 API／CLI。
 
+2026-10-30 Windows NAS 維護人工裁決：`initialize_nas_schema.bat` 的 operator contract 改為備份後的
+candidate 安全升級，不再委派 fresh/reset；新增 `backup_nas_database.bat`、`restore_nas_database.bat`。
+低階 Python fresh initializer／Unix `.sh` 仍有 technician/disposable consumer，保留原功能與直接測試。
+`GET /api/v1/system/database-backup` 與 `PUT /api/v1/system/database-backup/schedule` 只供既有 authenticated
+內部使用者查閱狀態／修改本機每日備份時間，不提供資料庫 reset、SQL 執行、備份下載或網頁復原。
+新舊 entry 的 owner／驗收及作用上限依 Global migration §9.5；正式排程與 NAS Apply 不由開發驗收啟用。
+
 2026-10-13 人工裁決退役 HCM 修正版工作簿各頁面入口與 `/api/v1/case-import/hcm/resubmissions/{preview|apply}`。
 保留 `/hcm/reviews`、單筆 Query、逐欄略過、一般 workbook intake、已提交 correction outbox 與全部歷史證據。
 2026-10-16 最新人工裁決直接移除異常審核頁、側欄及專用鈴鐺入口，不新增替代清單，也不搬移 HCM／import／LINE 逐筆略過或 LINE 人工重送操作。此裁決 supersede 前述管理端入口保留要求；既有後端 API、Query／Preview／Apply、audit／receipt、worker 與資料不在移除範圍。舊 `#anomalies` 沿用 App 既有未知 hash 規則顯示待辦看板。
 
 Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source_id}` 的 authenticated、bounded archive Query。舊 `GET /api/v1/admin/data-browser/{table}` raw table metadata 與 generic PATCH／source-correction 不屬此保留範圍；其路由已移除，不提供原始 rows、欄位或舊 editable metadata，也不新增相容 writer。Smoke 工具使用現行 OpenAPI 與明確 fixture，不自動展開原始資料表。
+
+
+
+2026-10-30 人工裁決退役「月嫂履歷暫存下載」端點（`GET /api/v1/matching-confirmation-files/{token}` 回應 typed 410 Gone），月嫂履歷改由業務線下直接傳送，LINE 排班確認卡片不嵌入下載連結；環境變數 `MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET` 與 `CONTRACT_FINAL_PREVIEW_TOKEN_SECRET` 一併自 `.env.example` 移除，相關防偽/加密改由內部密鑰自動處理。
 
 ## 5. Standard local runtime
 
@@ -95,3 +106,8 @@ Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source
 ## 政府補助現行入口
 
 政府入款與代墊回收改用 `/api/v1/government-subsidy/periods` 月／季／年整期核銷。原 claim planning／submission／approval、逐案 receipt、offset，以及逐案 advance settlement POST 入口回 410，指向整期工作台；既有歷史 Query 與原交易沖正保留。Durable worker 拒絕舊 claim／receipt 建立命令；runtime 不再消費逐案 allocation 進行代墊回收。申請與核准作業在系統外辦理，不保留舊操作關卡。
+
+
+### 2026-10-30 管理員通知對象入口退役
+
+React `line-security` 的導航、hash alias 與 render branch 一併移除；舊 hash 沿用未知入口的既有預設頁處理，不另建相容頁。管理員系統狀態移至既有 `line-mobile-admin?target=staff_review` 頂端唯讀卡片，不新增獨立頁或 LIFF target。歷史 target 查詢保留；舊設定 mutation 由 LINE owner 明確拒絕。
