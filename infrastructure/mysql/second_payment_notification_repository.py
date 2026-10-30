@@ -104,6 +104,8 @@ class MySqlSecondPaymentNotificationRepository:
                     and not self._attempted(current, excluding_task=task.task_id.value))
 
     def source_is_current(self, facts, event_code, *, lock=False):
+        if event_code == DUE_EVENT:
+            return False  # Old rule/manual-replay paths cannot resurrect group billing reminders.
         if event_code == SETTLED_EVENT:
             current = self.settlement(facts['case_no'], facts['settlement_identity'], lock=lock)
         else:

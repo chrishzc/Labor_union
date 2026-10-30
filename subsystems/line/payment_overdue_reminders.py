@@ -52,6 +52,7 @@ class PaymentOverdueReminderPort(Protocol):
     def payment(self, identity: str, *, lock: bool = False) -> OverdueClientPayment | None: ...
     def recipient(self, payment: OverdueClientPayment, *, lock: bool = False) -> ReminderRecipient | None: ...
     def existing(self, key: IdempotencyKey): ...
+    def has_pending(self, identity: str, *, lock: bool = False) -> bool: ...
     def delivery_is_current(self, task: object, now: datetime) -> bool: ...
 
 
@@ -74,6 +75,8 @@ class PaymentOverdueReminderApplication:
         key = IdempotencyKey('payment-overdue:'+key)
         with self._unit() as unit:
             repository = unit.payment_overdue_reminders
+            # Serialize sends for this obligation before inspecting queue state.
+            current = repository.payment(expected.obligation_identity,lock=True)
             existing = repository.existing(key)
             if existing is not None:
                 if (existing.request.source_aggregate_type != SOURCE_TYPE
@@ -81,10 +84,11 @@ class PaymentOverdueReminderApplication:
                         or not existing.request.correlation_id.value.startswith(payment_reference(expected)+':')):
                     raise PaymentOverdueReminderConflict('payment_overdue_idempotency_conflict')
                 return existing.task_id.value, existing.status.value
-            current = repository.payment(expected.obligation_identity,lock=True)
             now = self._now()
             if current != expected or not current.overdue_on(now.astimezone(TAIPEI_TIME_ZONE).date()):
                 raise PaymentOverdueReminderConflict('payment_overdue_changed')
+            if repository.has_pending(current.obligation_identity,lock=True):
+                raise PaymentOverdueReminderConflict('payment_overdue_reminder_in_flight')
             recipient = repository.recipient(current,lock=True)
             if recipient is None:
                 raise PaymentOverdueReminderConflict('payment_overdue_recipient_unavailable')

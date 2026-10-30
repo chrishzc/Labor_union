@@ -55,7 +55,7 @@ def test_rules_cannot_switch_second_payment_to_a_private_or_repeated_notice(even
 
 
 @pytest.mark.parametrize('kind,retired,current,expected',[
-    (REMINDER,False,True,True),(REMINDER,False,False,False),(SETTLED,False,False,False),
+    (REMINDER,False,True,False),(REMINDER,False,False,False),(SETTLED,False,False,False),
     ('order',True,True,False),('unrelated',False,False,True),
 ])
 def test_provider_guard_cancels_stale_and_retired_work(kind,retired,current,expected):
@@ -66,3 +66,8 @@ def test_provider_guard_cancels_stale_and_retired_work(kind,retired,current,expe
         correlation_id=SimpleNamespace(value='line-notification:order-second-payment-reminder:case:date' if retired else 'current')))
     assert second_payment_delivery_is_current(unit,task,NOW) is expected
     assert len(cancelled)==len(committed)==(0 if expected else 1)
+
+
+def test_retired_group_due_source_cannot_be_revived_by_manual_rule_replay():
+    from infrastructure.mysql.second_payment_notification_repository import MySqlSecondPaymentNotificationRepository
+    assert not MySqlSecondPaymentNotificationRepository(None).source_is_current(PAYMENT.facts(),DUE_EVENT,lock=True)

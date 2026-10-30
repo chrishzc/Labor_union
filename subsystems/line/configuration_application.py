@@ -57,6 +57,11 @@ class LineConfigurationApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.configurations.get(kind)
 
+    def get_applied(self, kind: LineConfigurationKind, key: IdempotencyKey, actor: ActorContext):
+        require_line_capability(actor, LineCapability.CONFIG_READ)
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.configurations.get_by_idempotency_key(kind,key)
+
     def get_safe(
         self,
         query: GetLineConfigurationSafeQuery,
@@ -377,11 +382,8 @@ class LineConfigurationApplication:
         if kind is LineConfigurationKind.MESSAGE_TEMPLATES:
             validate_message_templates(definition)
         elif kind is LineConfigurationKind.MESSAGE_SCHEDULES:
-            templates = configuration_definition(
-                unit_of_work.configurations.get(
-                    LineConfigurationKind.MESSAGE_TEMPLATES
-                )
-            )
+            from subsystems.line.message_copy import message_definition
+            templates = message_definition(unit_of_work)
             validate_message_schedules(definition, templates)
         elif kind is LineConfigurationKind.LIFF:
             from subsystems.line.liff_models import LiffSettingsConfig

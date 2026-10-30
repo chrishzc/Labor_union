@@ -35,21 +35,22 @@ export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
       { id: 'signing-reminders', title: '人工發送簽署提醒', ids: ['contract-signing-client', 'contract-signing-staff'], summary: '人員點擊後建立客戶及月嫂私人提醒工作，無再次確認視窗；簽約完成仍以簽回文件為準。' },
     ] },
     { title: '收款與建群', nodes: [
-      { id: 'deposit-reminder', title: '寄送訂金繳費提醒', ids: ['deposit-reminder', 'deposit-assistance'] },
+      { id: 'deposit-reminder', title: '自動私訊訂金繳費提醒', ids: ['deposit-reminder', 'deposit-assistance'], summary: '雙方簽約完成且資料齊備後，依帳務提醒排程自動寄客戶私訊。' },
       { id: 'deposit-settled', title: '訂金確認入帳', ids: ['deposit-settled'] },
-      { id: 'deposit-overdue', title: '訂金逾期－工會決定提醒', ids: ['payment-overdue-deposit'], summary: '逾期隔天列工會待辦，人員點發送提醒才寄客戶私人聊天室；寄送前複核訂金剩餘金額。' },
+      { id: 'deposit-overdue', title: '訂金逾期－私訊補寄與人工提醒', ids: ['payment-overdue-deposit'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；任何私訊或按鈕回覆後改人工提醒，未核銷款項保留待辦。' },
       { id: 'group-invitation', title: '寄送案件群組邀請', ids: ['group-invitation-customer', 'group-invitation-staff'], summary: '訂金正式核銷後，人員在案件群組設定綁定與邀請網址，再輸入「發送邀請」；不以簽約完成作為建群門檻。' },
     ] },
     { title: '開始服務', nodes: [
       { id: 'coordinated-dates', title: '月嫂提交已協調的開始日', internal: true, summary: '客戶與月嫂在案件群組自行協調；月嫂由訂單查詢或排班資訊與請假提交日期。無衝突即更新正式日期、排班與第一期款到期日；需要代班或衝突才交工會。' },
       { id: 'start-date-record', title: '正式日期表記錄到案件群組', ids: ['service-start-result'], summary: '正式保存成功後寄送群組日期表，僅記錄結果，沒有再次確認或拒絕按鈕。' },
       { id: 'service-start', title: '服務開始當天', templates: ['LINE-ORDER-SERVICE-START-DAY-CARD-V1'], ids: ['service-start-normal-received', 'service-start-help-received'], summary: '查看當天卡片，以及「服務正常」「需要協助」後寄到原案件群組的受理回覆。' },
-      { id: 'first-overdue', title: '第一期款逾期－工會決定提醒', ids: ['payment-overdue-first'], summary: '第一期款逾期隔天才列待辦，人員選擇發送至案件群組；已結清不提醒。' },
+      { id: 'first-payment', title: '第一期款－自動客戶私訊', ids: ['payment-first-reminder','payment-first-greeting'], summary: '正式服務開始當天依排程私訊；已結清只保留服務問候。' },
+      { id: 'first-overdue', title: '第一期款逾期－私訊補寄與人工提醒', ids: ['payment-overdue-first'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
     ] },
     { title: '持續服務與異動', nodes: [
       { id: 'baby-log', title: '日誌連續缺漏－工會決定提醒', ids: ['service-day-log-reminder'] },
-      { id: 'second-payment', title: '第二期款到期與入帳', templates: ['LINE-SECOND-PAYMENT-DUE-TEXT-V1', 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1'] },
-      { id: 'second-overdue', title: '第二期款逾期－工會決定提醒', ids: ['payment-overdue-second'], summary: '有第二期款且逾期未清才列待辦，由人員決定提醒案件群組；不需第二期款不觸發。' },
+      { id: 'second-payment', title: '第二期款到期與入帳', ids: ['payment-second-reminder'], templates: ['LINE-SECOND-PAYMENT-SETTLED-TEXT-V1'], summary: '到期當天仍有餘額時，依排程自動私訊客戶；不需第二期或已結清不催繳。' },
+      { id: 'second-overdue', title: '第二期款逾期－私訊補寄與人工提醒', ids: ['payment-overdue-second'], summary: '逾期且距原提醒滿 24 小時、客戶未回覆時自動補寄一次；回覆後改人工提醒，未核銷款項保留待辦。' },
       { id: 'leave', title: '請假、順延、代班與換人（共用流程）', ids: ['service-start-inquiry', 'group-invitation-staff', 'service-start-result'], summary: '雙方自行協調。無衝突順延直接更新；代班或換人共用詢問意願、邀請加入原案件群組、工會記錄日期及帳務更新，最後寄無確認按鈕的日期表。' },
     ] },
     { title: '完工與結案', nodes: [

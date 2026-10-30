@@ -141,6 +141,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.service_day_log_reminders = MySqlServiceDayLogReminderRepository(connection)
         from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
         self.payment_overdue_reminders = MySqlPaymentOverdueReminderRepository(connection)
+        from infrastructure.mysql.payment_reminder_notification_repository import MySqlPaymentReminderNotificationRepository
+        self.payment_reminder_notifications = MySqlPaymentReminderNotificationRepository(connection)
         self.candidate_contact_pool_replies = MySqlCandidateContactPoolLineReplyRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)

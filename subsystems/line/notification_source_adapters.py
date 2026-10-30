@@ -117,10 +117,7 @@ def from_scheduling_service_day_checkpoint_outbox(
 
 def from_order_service_start_day(candidate: ServiceStartDayCandidate, *, occurred_at: datetime) -> NotificationSourceEvent:
     """Freeze one current group/day/payment snapshot; no payment or service mutation."""
-    notice = ''
-    if candidate.first_payment_amount > 0:
-        notice = (f'第一期款尚待繳納：{candidate.first_payment_amount:,} 元，請於今天完成繳款。'
-                  '若已匯款，請勿重複繳納，待工會核對入帳。')
+    notice = ''  # Financial reminders are sent only to the customer's private chat.
     facts = {**candidate.facts(), 'first_payment_notice': notice,
              'caregiver_names': '、'.join(item.name for item in candidate.caregivers),
              'response_token': candidate.token}

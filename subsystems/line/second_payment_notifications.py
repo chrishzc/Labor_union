@@ -62,6 +62,7 @@ def second_payment_delivery_is_current(unit, task, now):
 
     request = task.request
     retired = request.correlation_id.value.startswith('line-notification:order-second-payment-reminder:')
+    retired = retired or request.source_aggregate_type == REMINDER
     if not retired and request.source_aggregate_type not in (REMINDER, SETTLED):
         return True
     if not retired and unit.second_payment_notifications.delivery_is_current(task, now):

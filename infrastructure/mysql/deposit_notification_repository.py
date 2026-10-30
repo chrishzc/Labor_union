@@ -110,6 +110,14 @@ class MySqlDepositNotificationRepository:
                         (SETTLED if payment.settled else REMINDER, payment_source(payment)),
                     )
                     delivery = cursor.fetchone()
+                if not payment.settled:
+                    with self._connection.cursor() as cursor:
+                        cursor.execute('SELECT processing_status FROM line_delivery_tasks WHERE source_aggregate_identity=%s '
+                            'AND source_aggregate_type IN (%s,%s) ORDER BY id DESC LIMIT 1',
+                            (payment.obligation_identity,'client_payment_initial_reminder','client_payment_automatic_followup'))
+                        automatic = cursor.fetchone()
+                    if automatic:
+                        delivery = automatic
                 # Settled cases without a new notification intent are historical; do not backfill them.
                 if payment.settled:
                     with self._connection.cursor() as cursor:

@@ -13,6 +13,8 @@ from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
 from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderConflict
 
 router = APIRouter(prefix='/api/v1/line/payment-overdue-reminders',tags=['LINE Payment Overdue Reminders'])
+from api.routes.line_payment_reminder_settings import router as settings_router
+router.include_router(settings_router)
 
 
 class PaymentSnapshot(BaseModel):

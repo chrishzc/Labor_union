@@ -47,7 +47,7 @@ export function PaymentOverdueReminderWorkbench({client=paymentOverdueReminderCl
   }
   return <section className="line-table-container payment-overdue-workbench" aria-labelledby="payment-overdue-title">
     <div className="line-section-heading"><div><h2 id="payment-overdue-title">逾期提醒</h2>
-      <p>僅列雙方簽約完成且各期到期日已過、仍有未核銷餘額的款項。訂金提醒客戶私訊；第一、二期提醒案件群組。</p></div>
+      <p>僅列雙方簽約完成且各期到期日已過、仍有未核銷餘額的款項。各期提醒均寄客戶私訊；回覆後由人員手動提醒，未核銷款項保留待辦。</p></div>
       <button className="line-secondary-btn" type="button" disabled={loading||!!pending} onClick={()=>setReload(value=>value+1)}>重新整理逾期待辦</button></div>
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
     {loading?<p role="status">正在查詢各期繳款逾期待辦…</p>:data&&<>

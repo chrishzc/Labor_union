@@ -17,6 +17,7 @@ from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPa
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from infrastructure.mysql.overdue_payment_query_repository import MySqlOverduePaymentQueryRepository
 from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
+from infrastructure.mysql.payment_reminder_notification_repository import MySqlPaymentReminderNotificationRepository
 from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
 from infrastructure.mysql.customer_service_repository import MySqlCustomerServiceRepository
 from infrastructure.mysql.line_receipt_outbox_audit import MySqlLineAuditRepository
@@ -83,6 +84,7 @@ class Uow:
         self.deposit_payments = MySqlDepositPaymentQueryRepository(connection)
         self.deposit_notifications = MySqlDepositNotificationRepository(connection)
         self.payment_overdue_reminders = MySqlPaymentOverdueReminderRepository(connection)
+        self.payment_reminder_notifications = MySqlPaymentReminderNotificationRepository(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.audit = MySqlLineAuditRepository(connection)
         self.customer_service = SimpleNamespace(create_or_append=lambda command: SimpleNamespace(ticket_id=55))
@@ -106,6 +108,7 @@ def db():
     raw.row_factory = sqlite3.Row
     raw.create_function('JSON_UNQUOTE', 1, lambda value: value)
     raw.create_function('CONCAT', -1, lambda *values: ''.join(str(value) for value in values))
+    raw.create_function('SUBSTRING_INDEX',3,lambda value,delimiter,count:delimiter.join(value.split(delimiter)[:count]))
     raw.executescript('''
     CREATE TABLE orders(case_no TEXT PRIMARY KEY,client_id INTEGER,status TEXT,contract_identity TEXT);
     CREATE TABLE order_contract_flow_events(case_no TEXT,contract_identity TEXT,event_type TEXT);

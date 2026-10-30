@@ -280,6 +280,8 @@ def test_second_payment_public_preview_is_short_group_copy_without_actions(key,p
     application=LineMessagePreviewApplication(CurrentConfiguration(),forbidden_reader)
     result=application.render(key,None,None,None,actor(),sample=True)
     assert result.status=='ready' and result.format=='text' and phrase in result.text
+    if key=='LINE-SECOND-PAYMENT-DUE-V1':
+        assert key not in {descriptor.id for descriptor in application.catalog(actor())}
     assert not result.bubbles
     assert application.render(key,None,None,None,actor()).status=='unavailable'
 
@@ -484,7 +486,7 @@ def test_signing_and_each_overdue_preview_use_real_owner_copy_and_distinct_perio
     assert client.text == staff.text and '外部簽約平台' in client.text
     assert any(fact.label=='客戶私人聊天室' for fact in client.facts)
     assert any(fact.label=='月嫂私人聊天室' for fact in staff.facts)
-    for stage,label,amount,recipient in [('deposit','訂金','6,000','客戶私人聊天室'),('first','第一期款','12,000','案件群組'),('second','第二期款','8,000','案件群組')]:
+    for stage,label,amount,recipient in [('deposit','訂金','6,000','客戶私人聊天室'),('first','第一期款','12,000','客戶私人聊天室'),('second','第二期款','8,000','客戶私人聊天室')]:
         result=application.render('payment-overdue-'+stage,None,None,None,actor(),sample=True)
         assert label in result.text and amount in result.text
         assert any(fact.label==recipient for fact in result.facts)

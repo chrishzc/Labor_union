@@ -29,6 +29,7 @@ from subsystems.line.second_payment_notifications import second_payment_delivery
 from subsystems.line.service_completion_notifications import service_completion_delivery_is_current
 from subsystems.line.service_day_log_reminders import service_day_log_reminder_delivery_is_current
 from subsystems.line.payment_overdue_reminders import payment_overdue_delivery_is_current
+from subsystems.line.payment_reminder_notifications import payment_reminder_delivery_is_current
 from subsystems.line.order_group_application import group_invitation_delivery_is_current
 from subsystems.line.notification_failure_current_fact import (
     append_line_notification_failure_rechecks,
@@ -245,6 +246,7 @@ class LineDeliveryWorker:
             return (lease_valid
                     and service_completion_delivery_is_current(unit_of_work, task)
                     and payment_overdue_delivery_is_current(unit_of_work, task, self._now())
+                    and payment_reminder_delivery_is_current(unit_of_work, task, self._now())
                     and service_day_log_reminder_delivery_is_current(unit_of_work, task, self._now())
                     and second_payment_delivery_is_current(unit_of_work, task, self._now())
                     and start_day_delivery_is_current(unit_of_work, task, self._now())

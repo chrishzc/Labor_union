@@ -63,13 +63,7 @@ class OrderPreStartNotificationSourceProjector:
             self._registry.register_and_project(event)
             processed += 1
 
-        # 2. Second payment reminder candidates (only for orders requiring second payment)
-        find_second = getattr(self._scanner, "find_second_payment_due_candidates", None)
-        if callable(find_second):
-            second_candidates = find_second(effective_target)
-            for sc in second_candidates:
-                self._registry.register_and_project(sc.event(now))
-                processed += 1
+        # Second-payment reminders belong to the private payment schedule worker.
 
         find_settlements = getattr(self._scanner, 'find_second_payment_settlement_candidates', None)
         if callable(find_settlements):

@@ -176,13 +176,26 @@ def current_message_sample(key):
         from subsystems.contract_signing.line_delivery import external_platform_staff_reminder_text
         field("收件人", "recipient", "客戶私人聊天室" if key.endswith("client") else "月嫂私人聊天室")
         payload = text(external_platform_staff_reminder_text(case()))
+    elif key in {'payment-first-reminder','payment-first-greeting','payment-second-reminder'}:
+        from datetime import date
+        from types import SimpleNamespace
+        from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+        from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+        from subsystems.line.payment_reminder_notifications import initial_payload
+        stage='second' if key=='payment-second-reminder' else 'first'
+        amount=field('未核銷餘額','amount_ntd',0 if key=='payment-first-greeting' else 6000)
+        field('收件人','recipient','客戶私人聊天室')
+        field('正式到期日','due_date','2026-11-01')
+        facts=ClientPaymentReminderFacts(OverdueClientPayment(case(),stage,'preview-only',1,1,date(2026,11,1),amount),date(2026,11,1),True,'服務中')
+        _,content=initial_payload(SimpleNamespace(),facts)
+        payload=json.loads(content)
     elif key.startswith("payment-overdue-"):
         from datetime import date
         from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
         from subsystems.line.payment_overdue_reminders import reminder_text, STAGE_LABELS
         stage = key.removeprefix("payment-overdue-")
         field("期別", "payment_stage", STAGE_LABELS[stage])
-        field("收件人", "recipient", "客戶私人聊天室" if stage == "deposit" else "案件群組")
+        field("收件人", "recipient", "客戶私人聊天室")
         amount = field("剩餘待繳金額", "remaining_amount_ntd", {"deposit": 6000, "first": 12000, "second": 8000}[stage])
         payload = text(reminder_text(OverdueClientPayment(case(), stage, "preview-only", 1, 1, date(2026,11,1), amount)))
     elif key in {"deposit-reminder", "deposit-settled"}:

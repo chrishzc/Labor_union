@@ -54,10 +54,9 @@ class MySqlServiceStartDayRepository:
             caregivers = tuple(StartDayCaregiver(int(row['staff_id']), str(row['name'])) for row in cursor.fetchall())
             if not caregivers:
                 return None
-            cursor.execute("SELECT amount_due_ntd FROM client_obligations "
-                           "WHERE case_no=%s AND obligation_type='first' AND direction='receivable_from_client' "
-                           "AND status='open'" + (' FOR UPDATE' if lock else ''), (case_no,))
-            amount = max(0, sum(int(row['amount_due_ntd']) for row in cursor.fetchall()))
+            # Payment reminders have their own private-customer workflow. This
+            # source now asks only the assigned caregivers about service status.
+            amount = 0
         return ServiceStartDayCandidate(case_no, service_date, str(group['group_id']),
                                         int(group['effective_generation_id']), amount, caregivers)
 

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from subsystems.line.second_payment_notifications import SecondPaymentNotificationPort
     from subsystems.line.service_completion_notifications import ServiceCompletionNotificationPort
     from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
+    from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationPort
     from subsystems.line.service_start_day import ServiceStartDayRepositoryPort
 
 
@@ -708,6 +709,7 @@ class LineAnomalyRecheckPort(Protocol):
 
 class LineConfigurationRepositoryPort(Protocol):
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot: ...
+    def get_by_idempotency_key(self, kind: LineConfigurationKind, key: IdempotencyKey) -> LineConfigurationSnapshot | None: ...
 
     def history(self, kind: LineConfigurationKind) -> tuple["LineConfigurationHistoryEntry", ...]: ...
 
@@ -1055,6 +1057,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     service_completion_notifications: "ServiceCompletionNotificationPort"
     service_day_log_reminders: "ServiceDayLogReminderPort"
     payment_overdue_reminders: "PaymentOverdueReminderPort"
+    payment_reminder_notifications: "PaymentReminderNotificationPort"
 
 
 __all__ = [

@@ -161,10 +161,28 @@ describe('Finance source-review owner readback', () => {
     await showPreview();
 
     const entry = await screen.findByRole('button', { name: '指定正確訂單' });
+    expect(screen.getByText(/尚未確認可自動核銷的案件及待收款項/)).toBeInTheDocument();
+    entry.focus();
     fireEvent.click(entry);
-    expect(screen.getByRole('region', { name: '指定銀行入款的正確訂單' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '指定銀行入款的正確訂單' })).toBeInTheDocument();
+    expect(screen.getAllByText(/尚未確認可自動核銷的案件及待收款項/)).toHaveLength(2);
     expect(screen.getByLabelText('案件編號')).toBeInTheDocument();
     expect(screen.getByText('查詢待核銷款項')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(entry).toHaveFocus();
+  });
+
+  it.each([
+    ['suspected_duplicate_business_match', '多筆銀行交易對應到同一筆待收款，需確認是否重複入款。'],
+    ['sinopac_valid_virtual_account', '銷帳編號格式可辨識，但尚未唯一配對到金額相符的待收款項，請確認案件與入款金額。'],
+  ])('shows the specific %s preview reason for the exact row in the list and drawer', async (code, reason) => {
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [{ ...REVIEW_PAGE.items[0], disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] }] });
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, rows: [{ row_identity: REVIEW_PAGE.items[0].row_identity, canonical_fact_version: 0, amount_ntd: 5000, classification_type: 'client_receipt', disposition: 'business_pending', target_identities: [], evidence: [code], available_actions: [], integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false }] });
+    await showPreview();
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '指定正確訂單' }));
+    expect(screen.getAllByText(reason, { exact: false })).toHaveLength(2);
   });
 
   it('paginates a full review page instead of treating its cursor as an inconsistency', async () => {
@@ -263,6 +281,7 @@ describe('Finance source-review owner readback', () => {
   (refundExchangePath ? it : it.skip)('completes same-run refund-review entry, partial payment, balance refresh and top-up through real typed clients', async () => {
     const raw = JSON.parse(readFileSync(refundExchangePath!, 'utf-8')) as Record<string, any>;
     vi.restoreAllMocks();
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: raw.case_no, client_name: '測試客戶' }], next_cursor: null, etag: 'c'.repeat(64) } as never);
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
     let phase: 'partial' | 'topup' = 'partial';
     let posted = false;
@@ -296,6 +315,7 @@ describe('Finance source-review owner readback', () => {
     expect(raw.partial.before.manifest.data.review_count).toBe(1);
     fireEvent.click(entry);
     expect(screen.getByLabelText('款項用途')).toHaveValue('client_refund');
+    await screen.findByRole('option', { name: `${raw.case_no}｜測試客戶` });
     fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
     fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 12,000/ }));
@@ -323,6 +343,7 @@ describe('Finance source-review owner readback', () => {
     fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
     fireEvent.click(await screen.findByRole('button', { name: '處理客戶退款' }));
     expect(reviewCount()).toBe('1');
+    await screen.findByRole('option', { name: `${raw.case_no}｜測試客戶` });
     fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: raw.case_no } });
     fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: /待退 NT\$ 8,000/ }));

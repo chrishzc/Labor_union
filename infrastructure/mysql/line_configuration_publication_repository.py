@@ -85,6 +85,14 @@ class MySqlLineConfigurationRepository:
         return tuple(LineConfigurationHistoryEntry(LineConfigurationRevision(int(row['revision'])),
             aware_utc(row['created_at_utc']), str(row['actor_id']), str(row['reason'])) for row in rows)
 
+    def get_by_idempotency_key(self, kind: LineConfigurationKind, key: IdempotencyKey) -> LineConfigurationSnapshot | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CONFIG_BY_KEY_SQL,(key.value,))
+            row=optional_row(cursor.fetchone())
+        if row is None or str(row['configuration_kind'])!=kind.value:
+            return None
+        return _configuration_snapshot(row)
+
     def get_revision(self, kind: LineConfigurationKind, revision: LineConfigurationRevision) -> LineConfigurationSnapshot | None:
         with self._connection.cursor() as cursor:
             cursor.execute(

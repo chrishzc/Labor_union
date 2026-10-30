@@ -30,9 +30,13 @@ import './LineNotificationWorkbench.css';
 const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }> = {
   'contract-signing-client': { recipient: '客戶私人聊天室', trigger: '人員點「發送簽署提醒」後建立工作，無再次確認視窗' },
   'contract-signing-staff': { recipient: '月嫂私人聊天室', trigger: '人員點「發送簽署提醒」後建立工作，無再次確認視窗' },
-  'payment-overdue-deposit': { recipient: '客戶私人聊天室', trigger: '訂金逾期隔天列待辦，由工會點「發送提醒」才建立工作' },
-  'payment-overdue-first': { recipient: '案件群組', trigger: '第一期款逾期隔天列待辦，由工會點「發送提醒」才建立工作' },
-  'payment-overdue-second': { recipient: '案件群組', trigger: '有第二期款且逾期未清才列待辦，由工會點「發送提醒」才建立工作' },
+  'payment-overdue-deposit': { recipient: '客戶私人聊天室', trigger: '訂金逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
+  'deposit-reminder': { recipient: '客戶私人聊天室', trigger: '雙方簽約完成、繳費資料齊備後，依帳務提醒排程自動寄送' },
+  'payment-overdue-first': { recipient: '客戶私人聊天室', trigger: '第一期款逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
+  'payment-overdue-second': { recipient: '客戶私人聊天室', trigger: '第二期款逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
+  'payment-first-reminder': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天，依帳務提醒排程自動寄送' },
+  'payment-first-greeting': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天已結清，僅寄送服務問候' },
+  'payment-second-reminder': { recipient: '客戶私人聊天室', trigger: '正式第二期到期當天仍有餘額，依帳務提醒排程自動寄送' },
   'service-day-log-reminder': { recipient: '案件群組', trigger: '由工會逐次決定，點「發送提醒」後建立寄送工作' },
 };
 
@@ -174,7 +178,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
         return;
       }
       const snapshot = rulesResult.value;
-      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3', 'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1'].includes(rule.templateId));
+      const rules = adaptLineNotificationRulesCatalog(snapshot).rules.filter(rule => !['customer_onboarding_welcome', 'new_user_d1', 'new_user_d2', 'new_user_d3', 'LU96-M4-SAFE-ALERT-CARD-V1', 'LU96-M4-COMPLAINT-HIGH-CARD-V1', 'LINE-SECOND-PAYMENT-DUE-TEXT-V1'].includes(rule.templateId));
       const contents = await Promise.allSettled(rules.map(rule => templates.get(rule.id, { signal: controller.signal })));
       if (controller.signal.aborted || generation.current !== request) return;
       setCatalog(snapshot);

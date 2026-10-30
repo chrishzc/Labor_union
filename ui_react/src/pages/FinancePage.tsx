@@ -6,6 +6,7 @@ import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { FinanceImportCorrectionForm } from '../components/FinanceImportCorrectionForm';
+import { Drawer } from '../components/Drawer';
 import './FinancePage.css';
 import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_query_client';
 import { adaptOrderSummaryPage } from '../adapters/orders/order_summary_adapter';
@@ -16,7 +17,7 @@ import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_quer
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { financeImportBlockerMessage } from '../adapters/finance/finance_import_query_adapter';
+import { financeImportBlockerMessage, financeImportDispositionLabel, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
@@ -28,7 +29,8 @@ import { FinanceReceiptsWorkspace } from '../components/FinanceReceiptsWorkspace
 import { FinancePaymentsWorkspace } from '../components/FinancePaymentsWorkspace';
 import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
 import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
-import { FinanceCaseAccounting, FinanceAccountingWarnings } from '../components/FinanceCaseAccounting';
+import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
+import { FinanceWarningWorkspace } from '../components/FinanceWarningWorkspace';
 import { FinanceStatementArchive } from '../components/FinanceStatementArchive';
 
 type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination' | 'case-accounting' | 'accounting-warnings';
@@ -119,6 +121,7 @@ export const FinancePage: React.FC = () => {
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
   const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
+  const [correctionBusy, setCorrectionBusy] = useState(false);
   const [applyReason, setApplyReason] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
@@ -614,7 +617,7 @@ export const FinancePage: React.FC = () => {
       )}
 
       {activeTab === 'case-accounting' && <FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} />}
-      {activeTab === 'accounting-warnings' && <FinanceAccountingWarnings onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} />}
+      {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} />}
       {activeTab === 'finance-import' && (
         <section className="finance-workspace">
           <FinanceStatementArchive />
@@ -742,6 +745,7 @@ export const FinancePage: React.FC = () => {
                               <th>方向</th>
                               <th>金額</th>
                               <th>分類</th>
+                              <th>需人工處理原因</th>
                               <th>處置</th>
                             </tr>
                           </thead>
@@ -752,6 +756,7 @@ export const FinancePage: React.FC = () => {
                                 <td colSpan={3}>來源資料未形成銀行交易</td>
                                 <td>來源資料待人工確認</td>
                                 <td>{row.issue_codes.join('、')}</td>
+                                <td>請核對來源資料</td>
                               </tr>
                             ))}
                             {sourceReview.data.items.map((row) => (
@@ -761,20 +766,22 @@ export const FinancePage: React.FC = () => {
                                 <td>{row.direction}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
                                 <td>{{ receivable: '應收', payable: '應付', government_subsidy: '政府補助', subsidy_return: '補助退款', review: '待核對', legacy: '歷史格式' }[row.bank_type ?? 'legacy']}</td>
-                                <td>{row.disposition}{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
+                                <td className="finance-review-reason">{financeImportReviewReason(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity))}</td>
+                                <td><span className="finance-secondary">{financeImportDispositionLabel(row.disposition)}</span>{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
                     )}
-                    {correctionRow && <section className="finance-detail-block" aria-label="指定銀行入款的正確訂單" style={{ marginTop: '12px' }}>
-                      <div className="finance-meta">
-                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}｜{correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</strong>
-                        <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(null))}>關閉</button>
+                    {correctionRow && <Drawer isOpen onClose={() => setCorrectionRow(null)} closeDisabled={correctionBusy} closeLabel="關閉" ariaLabel="指定銀行入款的正確訂單" title={correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}>
+                      <div className="finance-scope-note">
+                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}</strong>
+                        <p>{correctionRow.transaction_date ?? '日期未提供'}｜{['incoming', 'credit'].includes(correctionRow.direction) ? '存入' : '支出'} NT$ {correctionRow.amount_ntd.toLocaleString()}</p>
+                        <p><strong>需人工處理原因：</strong>{financeImportReviewReason(correctionRow, batchPreview.data.rows.find(item => item.row_identity === correctionRow.row_identity))}</p>
                       </div>
-                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onPosted={() => { setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
-                    </section>}
+                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onBusyChange={setCorrectionBusy} onPosted={() => { setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
+                    </Drawer>}
                   </div>
                 )}
 

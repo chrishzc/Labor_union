@@ -62,7 +62,7 @@ def test_projector_uses_today_for_second_payment_and_projects_committed_success(
         def find_second_payment_settlement_candidates(self):return (paid,)
     class Registry:
         def register_and_project(self,event):events.append(event);return len(events)
-    assert OrderPreStartNotificationSourceProjector(Scanner(),Registry()).run_once(datetime(2026,9,9,17,tzinfo=timezone.utc))==2
-    assert scanned==[today]
-    assert [e.event_code for e in events]==['client.second_payment_due','client.second_payment_settled']
+    assert OrderPreStartNotificationSourceProjector(Scanner(),Registry()).run_once(datetime(2026,9,9,17,tzinfo=timezone.utc))==1
+    assert scanned==[]  # Reminders now belong to the private payment schedule worker.
+    assert [e.event_code for e in events]==['client.second_payment_settled']
     assert all(e.facts['group_id']=='C_ORIGINAL' and 'line_user_id' not in e.facts for e in events)

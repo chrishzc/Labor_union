@@ -593,6 +593,7 @@
 .finance-correction-form input:not([type="checkbox"]), .finance-correction-form select { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid #d9cbbf; border-radius: 8px; background: #fff; font: inherit; }
 .finance-correction-form button { min-height: 40px; padding: 9px 15px; border: 1px solid var(--md-sys-color-primary); border-radius: 8px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); font: inherit; cursor: pointer; }
 .finance-correction-form button:disabled { opacity: .55; cursor: not-allowed; }
+.finance-review-reason { min-width: 240px; max-width: 360px; white-space: normal; line-height: 1.6; }
 
 .finance-detail-block {
   margin-top: 16px;

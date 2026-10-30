@@ -108,6 +108,9 @@ def validate_message_schedules(
     definition: Mapping[str, object],
     templates: Mapping[str, object],
 ) -> None:
+    if 'payment_reminders' in definition:
+        from subsystems.line.payment_reminder_schedule import parse_schedule
+        parse_schedule(definition['payment_reminders'])
     validate_message_templates(templates)
     available_templates = {
         _identifier(item.get("id"), "template id")

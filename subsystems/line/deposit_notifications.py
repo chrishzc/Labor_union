@@ -134,6 +134,8 @@ class DepositNotificationApplication:
             recipient = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
             if recipient is None:
                 raise DepositNotificationConflict('deposit_customer_not_bound')
+            if uow.payment_reminder_notifications.pending(payment.obligation_identity):
+                raise DepositNotificationConflict('deposit_reminder_in_flight')
             result = uow.delivery_tasks.enqueue(self._request(payment, recipient, REMINDER, key, uow))
             uow.audit.append(LineAuditIntent('deposit_reminder_queued', actor.actor_id, REMINDER, str(result.task_id.value)))
             uow.commit()

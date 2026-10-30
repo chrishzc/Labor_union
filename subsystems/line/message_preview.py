@@ -122,6 +122,7 @@ _CASE_VARIABLES = {"name", "client_name", "case_no", "planned_start_date", "serv
 _RETIRED = {"LU96-M4-SAFE-ALERT-CARD-V1", "LU96-M4-COMPLAINT-HIGH-CARD-V1", "LU96-M1-LEAVE-EXTENSION-CARD-V1", "LU96-M3-LEAVE-AGREE-CARD-V1", "LU96-M3-LEAVE-DISAGREE-CARD-V1","new_user_d1", "new_user_d2", "new_user_d3", "LU96-M3-ZERO-POOL-CARD-V1",
             "LU96-ORDER-PRE-START-REMINDER-CARD-V1", "LU96-ORDER-SECOND-PAYMENT-REMINDER-CARD-V1",
             "LINE-SERVICE-DAY-LOG-REMINDER-TEXT-V1"}
+_UNLISTED_RULE_TEMPLATES = {"LINE-SECOND-PAYMENT-DUE-TEXT-V1"}
 _IDENTITY_TEMPLATES = (
     "staff_switch_success", "bind_success_new_order", "client_rebind_rejected",
     "staff_verification_rejected",
@@ -130,8 +131,11 @@ _CURRENT_FLOW_PREVIEWS = (
     ("contract-signing-client", "簽署提醒－客戶", "text"),
     ("contract-signing-staff", "簽署提醒－月嫂", "text"),
     ("payment-overdue-deposit", "訂金逾期－人工提醒客戶", "text"),
-    ("payment-overdue-first", "第一期款逾期－人工提醒案件群組", "text"),
-    ("payment-overdue-second", "第二期款逾期－人工提醒案件群組", "text"),
+    ("payment-overdue-first", "第一期款逾期－客戶私訊補寄與人工提醒", "text"),
+    ("payment-overdue-second", "第二期款逾期－客戶私訊補寄與人工提醒", "text"),
+    ("payment-first-reminder", "第一期款－服務開始日客戶私訊", "text"),
+    ("payment-first-greeting", "第一期已結清－服務開始問候", "text"),
+    ("payment-second-reminder", "第二期款－到期日客戶私訊", "text"),
     ("service-day-log-reminder", "服務日誌－工會發送案件群組提醒", "text"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),
     ("deposit-settled", "訂金已確認入帳卡", "flex"),
@@ -205,7 +209,8 @@ class LineMessagePreviewApplication:
         by_id = {t["id"]: t for t in templates.get("templates", [])}
         references = [("welcome", "customer_onboarding_welcome")]
         references += [(r["id"], r["template_id"]) for r in rules.get("rules", [])
-                       if r["template_id"] != "customer_onboarding_welcome" and r["template_id"] not in _RETIRED]
+                       if r["template_id"] != "customer_onboarding_welcome" and r["template_id"] not in _RETIRED
+                       and (include_unlisted or r["template_id"] not in _UNLISTED_RULE_TEMPLATES)]
         referenced = {template_id for _, template_id in references}
         references += [("template-" + key, key) for key in _IDENTITY_TEMPLATES if key not in referenced and key not in {"bind_success_new_order", "staff_switch_success"}]
         descriptors = []

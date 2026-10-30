@@ -3,14 +3,18 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
+import json
 import pytest
 from domains.line.delivery import LineRecipient, LineRecipientType
-from domains.line.identities import LineUserId
+from domains.line.identities import LineGroupId, LineUserId
 from shared_kernel.identities import ActorContext
 from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
 from subsystems.line.payment_overdue_reminders import (
     PaymentOverdueReminderApplication,PaymentOverdueReminderConflict,ReminderRecipient,payment_reference,reminder_text,
+    payment_overdue_delivery_is_current,
 )
+from infrastructure.mysql.payment_overdue_reminder_repository import MySqlPaymentOverdueReminderRepository
+from subsystems.line.message_copy_catalog import default_copy_templates
 
 NOW=datetime(2032,5,10,16,tzinfo=timezone.utc)  # Taipei has entered May 11.
 PAYMENT=OverdueClientPayment('CASE-1','deposit','case-1:deposit',3,7,date(2032,5,10),18000)
@@ -19,7 +23,8 @@ PAYMENT=OverdueClientPayment('CASE-1','deposit','case-1:deposit',3,7,date(2032,5
 class Unit:
     def __init__(self):
         self.payment_overdue_reminders=SimpleNamespace(list=Mock(return_value=((),0)),payment=Mock(return_value=PAYMENT),
-            existing=Mock(return_value=None),recipient=Mock(return_value=ReminderRecipient(LineRecipient(LineRecipientType.USER,LineUserId('U'+'1'*32)),0)))
+            existing=Mock(return_value=None),has_pending=Mock(return_value=False),
+            recipient=Mock(return_value=ReminderRecipient(LineRecipient(LineRecipientType.USER,LineUserId('U'+'1'*32)),0)))
         self.delivery_tasks=SimpleNamespace(enqueue=Mock(return_value=SimpleNamespace(task_id=SimpleNamespace(value=1),status=SimpleNamespace(value='pending'))))
         self.audit=SimpleNamespace(append=Mock());self.commit=Mock()
     def __enter__(self):return self
@@ -78,10 +83,80 @@ def test_send_commits_task_and_human_audit_without_provider():
 
 def test_replay_returns_original_work_even_after_finance_changed():
     unit=Unit()
+    unit.payment_overdue_reminders.payment.return_value=None
     unit.payment_overdue_reminders.existing.return_value=SimpleNamespace(task_id=SimpleNamespace(value=8),status=SimpleNamespace(value='sent'),
         request=SimpleNamespace(source_aggregate_type='manual_payment_overdue_reminder',source_aggregate_identity=PAYMENT.obligation_identity,correlation_id=SimpleNamespace(value=payment_reference(PAYMENT)+':0')))
     assert PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(PAYMENT,'key',ActorContext('union'))==(8,'sent')
-    unit.payment_overdue_reminders.payment.assert_not_called();unit.delivery_tasks.enqueue.assert_not_called()
+    unit.payment_overdue_reminders.has_pending.assert_not_called();unit.delivery_tasks.enqueue.assert_not_called()
+
+
+def test_different_operation_cannot_queue_while_same_obligation_is_in_flight():
+    unit=Unit()
+    unit.payment_overdue_reminders.has_pending.return_value=True
+    with pytest.raises(PaymentOverdueReminderConflict,match='payment_overdue_reminder_in_flight'):
+        PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(PAYMENT,'new-operation',ActorContext('union'))
+    unit.payment_overdue_reminders.payment.assert_called_once_with(PAYMENT.obligation_identity,lock=True)
+    unit.payment_overdue_reminders.has_pending.assert_called_once_with(PAYMENT.obligation_identity,lock=True)
+    unit.delivery_tasks.enqueue.assert_not_called();unit.audit.append.assert_not_called();unit.commit.assert_not_called()
+
+
+@pytest.mark.parametrize('stage',['deposit','first','second'])
+def test_configured_copy_survives_delivery_guard_but_stale_facts_still_cancel(stage):
+    payment=replace(PAYMENT,payment_stage=stage)
+    unit=Unit()
+    unit.payment_overdue_reminders.payment.return_value=payment
+    if stage!='deposit':
+        unit.payment_overdue_reminders.recipient.return_value=ReminderRecipient(
+            LineRecipient(LineRecipientType.GROUP,LineGroupId('C'+'1'*32)),1)
+    template=dict(default_copy_templates()['payment-overdue-'+stage])
+    template['content']+=' 感謝您的協助。'
+    unit.configurations=SimpleNamespace(get=lambda _:SimpleNamespace(
+        revision=SimpleNamespace(value=1),definition_json=json.dumps({'templates':[template]})))
+    PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(payment,'custom-copy',ActorContext('union'))
+    request=unit.delivery_tasks.enqueue.call_args.args[0]
+    assert '感謝您的協助。' in json.loads(request.payload_json)['text']
+    assert f'{payment.remaining_amount_ntd:,}' in request.payload_json
+    repository=MySqlPaymentOverdueReminderRepository(None)
+    repository.payments=SimpleNamespace(get=Mock(return_value=payment))
+    repository.recipient=unit.payment_overdue_reminders.recipient
+    unit.payment_overdue_reminders=repository
+    unit.delivery_tasks.cancel=Mock()
+    task=SimpleNamespace(task_id=SimpleNamespace(value=1),request=request)
+    # Later configuration edits do not invalidate the already queued snapshot.
+    unit.configurations.get=Mock(side_effect=AssertionError('delivery must not re-render queued copy'))
+    assert payment_overdue_delivery_is_current(unit,task,NOW)
+    unit.delivery_tasks.cancel.assert_not_called()
+    repository.payments.get.return_value=replace(payment,remaining_amount_ntd=payment.remaining_amount_ntd-1)
+    assert not payment_overdue_delivery_is_current(unit,task,NOW)
+    unit.delivery_tasks.cancel.assert_called_once()
+
+
+@pytest.mark.parametrize('change',[
+    {'projection_version':4},{'obligation_event_id':8},{'due_date':date(2032,5,11)},
+    {'payment_stage':'first'},{'remaining_amount_ntd':0},
+])
+def test_provider_guard_still_rejects_changed_payment_provenance(change):
+    unit=Unit()
+    PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(PAYMENT,'key',ActorContext('union'))
+    repository=MySqlPaymentOverdueReminderRepository(None)
+    repository.payments=SimpleNamespace(get=Mock(return_value=replace(PAYMENT,**change)))
+    repository.recipient=unit.payment_overdue_reminders.recipient
+    task=SimpleNamespace(request=unit.delivery_tasks.enqueue.call_args.args[0])
+    assert not repository.delivery_is_current(task,NOW)
+
+
+@pytest.mark.parametrize('recipient',[
+    None,ReminderRecipient(LineRecipient(LineRecipientType.USER,LineUserId('U'+'2'*32)),0),
+    ReminderRecipient(LineRecipient(LineRecipientType.USER,LineUserId('U'+'1'*32)),1),
+])
+def test_provider_guard_still_rejects_unavailable_or_changed_recipient(recipient):
+    unit=Unit()
+    PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send(PAYMENT,'key',ActorContext('union'))
+    repository=MySqlPaymentOverdueReminderRepository(None)
+    repository.payments=SimpleNamespace(get=Mock(return_value=PAYMENT))
+    repository.recipient=Mock(return_value=recipient)
+    task=SimpleNamespace(request=unit.delivery_tasks.enqueue.call_args.args[0])
+    assert not repository.delivery_is_current(task,NOW)
 
 
 @pytest.mark.parametrize('stage,label',[('deposit','訂金'),('first','第一期款'),('second','第二期款')])

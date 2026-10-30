@@ -54,5 +54,5 @@ def test_adapts_formal_start_day_for_group_only(amount):
     assert event.event_code == 'order.service_start_day'
     assert event.facts['group_id'] == 'C_SERVICE'
     assert 'line_user_id' not in event.facts
-    assert ('24,000' in event.facts['first_payment_notice']) == (amount > 0)
+    assert event.facts['first_payment_notice']==''
     assert event.facts['caregiver_names'] == '測試月嫂'

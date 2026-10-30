@@ -22,6 +22,7 @@
   - `infrastructure/mysql/deposit_payment_query_repository.py`
   - `subsystems/client_finance/overdue_payment_query.py` — 訂金／第一期／第二期各筆正式到期日與未核銷餘額的 typed 唯讀契約。
   - `infrastructure/mysql/overdue_payment_query_repository.py` — 依各筆 obligation 查詢，不跨期合計；Query 無寫入。
+  - `subsystems/client_finance/payment_reminder_query.py`、`infrastructure/mysql/client_payment_reminder_query_repository.py` — typed current initial/reminder facts, unique required second stage, remaining balance, readonly current contract evidence and Orders start-date projection; no new payment state or writer.
 - entrypoints:
   - `api/routes/client_receipt_reconciliation.py`
 

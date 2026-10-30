@@ -1,8 +1,10 @@
 """Real local owner/API/queue transactions. Every provider is a task-scoped fake."""
 from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date,datetime,timedelta,timezone
 from types import SimpleNamespace
 from uuid import uuid4
+from threading import Barrier
 import json,os,runpy
 import pytest
 from fastapi import HTTPException
@@ -12,6 +14,9 @@ from domains.line.identities import LineDeliveryTaskId,LineProviderMessageId
 from subsystems.line.delivery_contracts import ClaimLineDeliveryTasksQuery,LineProviderOutcome,LineProviderOutcomeType
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderApplication,SOURCE_TYPE
+from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderConflict
+from subsystems.client_finance.overdue_payment_query import OverdueClientPayment
+from shared_kernel.identities import ActorContext
 
 support=runpy.run_path('tests/domains/external-integration/subsystems/line/infrastructure/test_service_start_day_mysql.py')
 http=support['http'];rows,write,checked=support['rows'],support['write'],support['checked']
@@ -120,6 +125,28 @@ def test_all_stages_have_separate_tasks_amounts_and_recipients(http):
         assert request.recipient.recipient_type.value==('user' if stage=='deposit' else 'group')
         assert f"{item['payment']['remaining_amount_ntd']:,}" in json.loads(request.payload_json)['text']
     assert len(tasks(case))==3
+
+
+def test_concurrent_different_operations_queue_only_one_obligation_reminder(http):
+    case,_,_=prepare(http)
+    snapshot=listing(http,case)[0]['payment']
+    payment=OverdueClientPayment(**{**snapshot,'due_date':date.fromisoformat(snapshot['due_date'])})
+    app=PaymentOverdueReminderApplication(open_line_unit_of_work,lambda:NOW)
+    start=Barrier(2)
+
+    def request():
+        start.wait(timeout=10)
+        try:
+            return app.send(payment,uuid4().hex,ActorContext('synthetic-overdue'))[1]
+        except PaymentOverdueReminderConflict as error:
+            return str(error)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results=list(executor.map(lambda _:request(),range(2)))
+    assert sorted(results)==['payment_overdue_reminder_in_flight','pending']
+    assert len(tasks(case))==1
+    item=listing(http,case)[0]
+    assert not item['can_send'] and item['unavailable_reason']
 
 
 @pytest.mark.parametrize('change',['amount','date','stage','binding','group'])

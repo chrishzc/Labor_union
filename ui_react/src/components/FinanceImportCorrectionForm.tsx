@@ -1,5 +1,6 @@
 import { useUnsavedDraft } from './UnsavedChanges';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { ordersQueryClient } from '../api/orders/order_query_client';
 import { financeImportCorrectionClient, type FinanceImportCorrectionPreview, type FinanceImportCorrectionSelection } from '../api/finance_import/finance_import_correction_client';
 import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
 import { StaffPayoutRemediationWorkbench, type StaffPayoutRemediationTarget } from './StaffPayoutRemediationWorkbench';
@@ -12,10 +13,11 @@ type CorrectionCommand = {
   identity: { idempotencyKey: string; correlationId: string };
 };
 
-export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, initialKind = 'client_receipt', onPosted }: {
+export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, initialKind = 'client_receipt', onPosted, onBusyChange }: {
   rowIdentity: string; sourceLabel: string; staff: readonly { id: number; label: string }[];
   initialKind?: 'client_receipt' | 'staff_payout' | 'client_refund';
   onPosted?: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [payoutTarget, setPayoutTarget] = useState<StaffPayoutRemediationTarget | null>(null);
   const [payoutBusy, setPayoutBusy] = useState(false);
@@ -23,6 +25,12 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
   const [kind, setKind] = useState(initialKind);
   const [partialRefund, setPartialRefund] = useState(false);
   const [target, setTarget] = useState('');
+  const [caseSearch, setCaseSearch] = useState('');
+  const [cases, setCases] = useState<{ case_no: string; client_name: string }[]>([]);
+  const [caseCursor, setCaseCursor] = useState<string | null>(null);
+  const [caseSearching, setCaseSearching] = useState(true);
+  const [caseError, setCaseError] = useState('');
+  const caseRequest = useRef<AbortController | null>(null);
   const [options, setOptions] = useState<{ id: string; label: string }[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState('');
@@ -35,6 +43,27 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
   const [completed, setCompleted] = useState(false);
   const [identity] = useState(() => ({ idempotencyKey: `finance-correction-${crypto.randomUUID()}`, correlationId: `finance-correction-${crypto.randomUUID()}` }));
   const [retryCommand, setRetryCommand] = useState<CorrectionCommand | null>(null);
+  const closeLocked = busy || payoutBusy || (!!retryCommand && !submitted) || (!!jobId && !completed);
+  useEffect(() => { onBusyChange?.(closeLocked); return () => onBusyChange?.(false); }, [closeLocked, onBusyChange]);
+  const loadCases = async (query: string, after?: string) => {
+    caseRequest.current?.abort();
+    const controller = new AbortController(); caseRequest.current = controller;
+    setCaseSearching(true); setCaseError('');
+    try {
+      const page = await ordersQueryClient.getOrderSummaries({ query_text: query, page_size: 50, ...(after ? { after_case_no: after } : {}) }, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        setCases(items => after ? [...new Map([...items, ...page.items].map(item => [item.case_no, item])).values()] : page.items);
+        setCaseCursor(page.next_cursor);
+      }
+    } catch { if (!controller.signal.aborted) setCaseError('案件清單載入失敗，請重新搜尋或重試。'); }
+    finally { if (!controller.signal.aborted) setCaseSearching(false); }
+  };
+  useEffect(() => {
+    if (kind === 'staff_payout') { setCaseSearching(false); return; }
+    setCases([]); setCaseCursor(null); setCaseSearching(true); setCaseError('');
+    const timer = window.setTimeout(() => void loadCases(caseSearch.trim()), 250);
+    return () => { window.clearTimeout(timer); caseRequest.current?.abort(); };
+  }, [caseSearch, kind]);
   const invalidate = () => { setPayoutTarget(null); setPreview(null); setSelection(null); setMessage(''); };
   const load = async () => {
     if (retryCommand) return;
@@ -111,13 +140,20 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, i
     } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
     finally { setBusy(false); }
   };
-  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '部分退款': partialRefund, '原因': reason }, { enabled: kind !== 'staff_payout' || !payoutTarget, busy: busy || payoutBusy || (!!retryCommand && !submitted) || (!!jobId && !completed), resetKey: completed, save: review, discard: () => { setSelected([]); setTarget(''); setReason(''); setPartialRefund(false); invalidate(); } });
+  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '部分退款': partialRefund, '原因': reason }, { enabled: kind !== 'staff_payout' || !payoutTarget, busy: closeLocked, resetKey: completed, save: review, discard: () => { setSelected([]); setTarget(''); setReason(''); setPartialRefund(false); invalidate(); } });
 
   return <section aria-label="銀行款項更正" className="order-case-review-note finance-correction-form">
     <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款或月嫂付款。金額由後端核對，不可手動標記已付。</p>
     <fieldset disabled={busy || payoutBusy || submitted || retryCommand !== null}>
-      <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setPartialRefund(false); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="staff_payout">月嫂付款</option></select></label>
-      {kind !== 'staff_payout' ? <label>案件編號<input value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }} /></label> : <label>月嫂<select aria-label="月嫂" value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label>}
+      <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setPartialRefund(false); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="staff_payout">月嫂付款</option></select></label>
+      {kind !== 'staff_payout' ? <>
+        <label>搜尋案件<input type="search" maxLength={50} placeholder="輸入部分案件編號或客戶姓名" value={caseSearch} onChange={(event) => { caseRequest.current?.abort(); setCaseSearch(event.target.value); setCaseSearching(true); setCases([]); setCaseCursor(null); setTarget(''); setOptions([]); setSelected([]); invalidate(); }} /></label>
+        <label>案件編號<select value={target} disabled={caseSearching} onChange={(event) => { setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇案件</option>{cases.map(item => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}</option>)}</select></label>
+        {caseSearching && <p role="status">正在搜尋案件…</p>}
+        {caseError && <div role="alert">{caseError}<button type="button" onClick={() => void loadCases(caseSearch.trim())}>重新載入案件</button></div>}
+        {!caseSearching && !caseError && !cases.length && <p role="status">找不到符合的案件，請改用其他編號或客戶姓名搜尋。</p>}
+        {caseCursor && <button type="button" disabled={caseSearching} onClick={() => void loadCases(caseSearch.trim(), caseCursor)}>載入更多案件</button>}
+      </> : <label>月嫂<select aria-label="月嫂" value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label>}
       <button type="button" disabled={!target.trim()} onClick={() => void load()}>查詢待核銷款項</button>
       {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
       {kind === 'staff_payout' && bankRow && <button type="button" disabled={!selected.length} onClick={() => setPayoutTarget({ staffId: Number(target), obligationIdentity: selected[0], obligationIdentities: selected })}>處理付款不足或超額</button>}
