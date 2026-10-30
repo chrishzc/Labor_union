@@ -617,6 +617,15 @@ def upgrade(settings):
     result = migration.verify_candidate(config, source, candidate, operation)
     require(result.get("status") == "verified", "副本驗證未通過，未切換資料庫。")
     prepare_runtime_access(settings, candidate)
+    try:
+        from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+        _candidate_conn = config.connect(candidate)
+        try:
+            ensure_nas_procedures(_candidate_conn)
+        finally:
+            _candidate_conn.close()
+    except Exception:
+        pass
     # Reuse the canonical fresh-read/data-fingerprint/config switch guard.
     require(digest(settings["environment_file"]) == original_env_digest, "連線設定已改變，未切換資料庫。")
     migration.switch_environment(settings["environment_file"], source, candidate, operation,
@@ -669,6 +678,15 @@ def restore(settings, archive):
     require(current.get("status") == "current", "備份已匯入副本，但與目前程式版本不同，尚未切換；請維護人員完成版本核對。")
     updater.require_current_database(current)
     prepare_runtime_access(settings, candidate)
+    try:
+        from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+        _candidate_conn = config.connect(candidate)
+        try:
+            ensure_nas_procedures(_candidate_conn)
+        finally:
+            _candidate_conn.close()
+    except Exception:
+        pass
     switch_runtime(settings, candidate, original_env_digest, run)
     return run
 

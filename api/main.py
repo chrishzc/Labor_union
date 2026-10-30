@@ -207,6 +207,16 @@ def _allowed_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    from infrastructure.mysql.mysql_adapter import get_connection
+    try:
+        _conn = get_connection()
+        try:
+            ensure_nas_procedures(_conn)
+        finally:
+            _conn.close()
+    except Exception:
+        pass
     ensure_development_root_admin()
     from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
     ensure_builtin_knowledge_catalog()

@@ -1,4 +1,7 @@
-"""Fixed-purpose NAS delete procedures; caller retains the outer transaction."""
+"""
+File: nas_mutations.py
+Description: 定義與調用受控 NAS 刪除與替換預存程序，並提供資料庫程序同步與檢查。
+"""
 from __future__ import annotations
 
 import json
@@ -203,3 +206,36 @@ def call_mutation(cursor, name: str, *arguments) -> None:
 def relation_snapshot(values, columns) -> str:
     return json.dumps([dict(zip(columns, row)) for row in sorted(values, key=str)],
                       ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def ensure_nas_procedures(connection, *, force: bool = False) -> list[str]:
+    """Ensure all declared NAS procedures exist in the current database.
+
+    Creates any missing procedures with SQL SECURITY DEFINER and MODIFIES SQL DATA.
+    If force=True, recreates all declared procedures to match current definitions.
+    Returns the list of procedure names that were created or updated.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT routine_name AS name FROM information_schema.routines "
+            "WHERE routine_schema = DATABASE() AND routine_type = 'PROCEDURE'"
+        )
+        existing = {
+            row.get("name") or row.get("NAME") or row.get("routine_name") or row.get("ROUTINE_NAME")
+            for row in cursor.fetchall()
+            if isinstance(row, dict)
+        }
+        modified = []
+        for name, (signature, body, _) in sorted(PROCEDURES.items()):
+            if force or name not in existing:
+                if name in existing:
+                    cursor.execute(f"DROP PROCEDURE IF EXISTS `{name}`")
+                sql = (
+                    f"CREATE PROCEDURE `{name}`({signature})\n"
+                    f"SQL SECURITY DEFINER\n"
+                    f"MODIFIES SQL DATA\n"
+                    f"BEGIN\n{body.strip()}\nEND"
+                )
+                cursor.execute(sql)
+                modified.append(name)
+        return modified

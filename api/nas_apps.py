@@ -12,6 +12,16 @@ from api.middleware.compression import ResponseCompressionMiddleware
 async def _management_lifespan(_):
     from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
     from infrastructure.mysql.mysql_adapter import close_connection_pools
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+    from infrastructure.mysql.mysql_adapter import get_connection
+    try:
+        _conn = get_connection()
+        try:
+            ensure_nas_procedures(_conn)
+        finally:
+            _conn.close()
+    except Exception:
+        pass
     ensure_builtin_knowledge_catalog()
     try:
         yield

@@ -368,6 +368,15 @@ def apply_additive_update(
             current["terminal_receipt"] = str(
                 migration._local_receipt_path(Path(receipt_root), source)
             )
+            try:
+                from infrastructure.mysql.nas_mutations import ensure_nas_procedures
+                _conn = config.connect(source)
+                try:
+                    ensure_nas_procedures(_conn)
+                finally:
+                    _conn.close()
+            except Exception:
+                pass
             return current
         if preview.get("status") != "ready":
             raise LocalDatabaseUpdateError(

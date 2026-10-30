@@ -178,3 +178,54 @@ def test_read_only_configuration_plan_does_not_read_runtime_passwords(tmp_path, 
     result = cli.configure(settings)
     assert result["status"] == "planned" and result["business_rows_changed"] is False
     connection.close.assert_called_once_with()
+
+
+def test_ensure_nas_procedures_creates_missing_and_respects_existing():
+    from unittest.mock import MagicMock
+    from infrastructure.mysql.nas_mutations import ensure_nas_procedures, PROCEDURES
+
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+
+    all_names = sorted(PROCEDURES.keys())
+    missing_name = "lu_nas_replace_staff_banks_v1"
+    existing_names = [n for n in all_names if n != missing_name]
+
+    cursor.fetchall.return_value = [{"routine_name": n} for n in existing_names]
+    created = ensure_nas_procedures(connection)
+
+    assert created == [missing_name]
+    assert cursor.execute.call_count == 2
+    create_sql = cursor.execute.call_args_list[1][0][0]
+    assert f"CREATE PROCEDURE `{missing_name}`" in create_sql
+    assert "SQL SECURITY DEFINER" in create_sql
+    assert "MODIFIES SQL DATA" in create_sql
+
+    cursor.reset_mock()
+    cursor.fetchall.return_value = [{"routine_name": n} for n in all_names]
+    none_created = ensure_nas_procedures(connection)
+    assert none_created == []
+    assert cursor.execute.call_count == 1
+
+
+def test_ensure_nas_procedures_cli_dry_run(capsys, monkeypatch):
+    import json
+    from unittest.mock import MagicMock
+    from scripts import ensure_nas_procedures as cli
+
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = {"db_name": "test_union_db"}
+    cursor.fetchall.return_value = [{"routine_name": "lu_nas_archive_audits_v1"}]
+    monkeypatch.setattr(cli, "get_connection", lambda: connection)
+
+    exit_code = cli.main(["--dry-run"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "planned"
+    assert payload["database"] == "test_union_db"
+    assert payload["missing_count"] == len(cli.PROCEDURES) - 1
+    assert "lu_nas_replace_staff_banks_v1" in payload["missing_procedures"]
