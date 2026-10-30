@@ -1,17 +1,22 @@
 """
 File: nas_apps.py
-Description: 組合獨立管理端與公開 LINE 路由應用介面。
+Description: 組合獨立管理端與公開 LINE 路由應用介面，支援壓縮與連線池釋放。
 """
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from api.middleware.compression import ResponseCompressionMiddleware
 
 
 @asynccontextmanager
 async def _management_lifespan(_):
     from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
+    from infrastructure.mysql.mysql_adapter import close_connection_pools
     ensure_builtin_knowledge_catalog()
-    yield
+    try:
+        yield
+    finally:
+        close_connection_pools()
 
 
 def management_app():
@@ -32,10 +37,14 @@ def management_app():
 @asynccontextmanager
 async def _line_lifespan(_):
     from subsystems.line.runtime_cutover import validate_line_api_runtime, validate_line_worker_runtime
+    from infrastructure.mysql.mysql_adapter import close_connection_pools
     import os
     validate_line_api_runtime(os.environ)
     validate_line_worker_runtime(os.environ)
-    yield
+    try:
+        yield
+    finally:
+        close_connection_pools()
 
 
 def line_app():
@@ -47,6 +56,7 @@ def line_app():
     from api.routes.nas_line_operations import public_router as line_operations_router
     app = FastAPI(title="LINE public service", docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=_line_lifespan)
+    app.add_middleware(ResponseCompressionMiddleware, minimum_size=1024, compresslevel=5)
     app.add_api_route("/webhook/line", canonical_line_webhook, methods=["POST"])
     app.include_router(line_identity.page_router)
     app.include_router(line_order_change.page_router)

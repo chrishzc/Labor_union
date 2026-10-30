@@ -1,6 +1,6 @@
 /**
- * @file vite.config.ts
- * @description Vite 構建配置，包含後端 API 代理設定與 Vitest happy-dom 測試環境。
+ * File: vite.config.ts
+ * Description: Vite 建置設定，含 vendor chunk 拆分、後端 API 代理與 Vitest 測試環境。
  */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -51,6 +51,29 @@ export default defineConfig({
       '/webhook': {
         target: apiTarget,
         changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (
+            id.includes('/react/') ||
+            id.includes('\\react\\') ||
+            id.includes('/react-dom/') ||
+            id.includes('\\react-dom\\') ||
+            id.includes('/scheduler/') ||
+            id.includes('\\scheduler\\')
+          ) {
+            return 'vendor-react';
+          }
+          if (id.includes('lucide-react')) {
+            return 'vendor-icons';
+          }
+          return 'vendor-utils';
+        },
       },
     },
   },

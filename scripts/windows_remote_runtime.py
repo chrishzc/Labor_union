@@ -1,4 +1,7 @@
-"""Serve the validated Windows remote UI and its bounded same-origin API proxy."""
+"""
+File: windows_remote_runtime.py
+Description: 提供已驗證 Windows 遠端 React 靜態介面（含 Gzip 壓縮）與同源 API 代理。
+"""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +18,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Mount, Route
 
+from api.middleware.compression import ResponseCompressionMiddleware
 from infrastructure.runtime.react_admin_artifact import (
     ReactAdminStaticApplication, validate_react_admin_artifact,
 )
@@ -85,15 +89,18 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
     async def redirect(request):
         return RedirectResponse(PREFIX + '/', status_code=307)
 
+    static_app = ResponseCompressionMiddleware(
+        ReactAdminStaticApplication(artifact), minimum_size=1024, compresslevel=5,
+    )
     app = Starlette(lifespan=lifespan, routes=[
         Route(PREFIX, redirect, methods=['GET', 'HEAD']),
         Route(PREFIX + '/api/{path:path}', proxy,
               methods=['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']),
-        Mount(PREFIX, app=ReactAdminStaticApplication(artifact)),
+        Mount(PREFIX, app=static_app),
         # The same immutable /test build is available locally at the familiar
         # /admin URL. Its absolute /test assets/API still use this same gateway.
         Route('/admin', lambda _: RedirectResponse('/admin/', status_code=307)),
-        Mount('/admin', app=ReactAdminStaticApplication(artifact)),
+        Mount('/admin', app=static_app),
     ])
 
     async def boundary(request: Request, call_next):

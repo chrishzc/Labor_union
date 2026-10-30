@@ -1,8 +1,8 @@
 /**
  * File: App.tsx
- * Description: 應用程式根元件，實作含 bounded query 的 Hash 路由、認證守衛與頁面切換。
+ * Description: 應用程式根元件，實作 Hash 路由、認證守衛、頁面切換與低頻頁面動態載入。
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { UnsavedChangesProvider, useUnsavedNavigation } from './components/UnsavedChanges';
 import './styles/design-tokens.css';
 import {
@@ -20,23 +20,64 @@ import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from './api/shared/transport';
 import { OrderWorkbenchV2Page } from './pages/OrderWorkbenchV2Page';
 import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
-import { DataImportPage } from './pages/DataImportPage';
 import { ClientRegistryPage } from './pages/ClientRegistryPage';
-import { LineManagementPage } from './pages/LineManagementPage';
-import { AiCustomerServiceStudioPage } from './pages/line_management/AiCustomerServiceStudioPage';
-import { LlmConfigurationPage } from './pages/line_management/LlmConfigurationPage';
-import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
-import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
-import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
-import { AccountingParametersPage } from './pages/AccountingParametersPage';
-import { HistoricalServiceAccountingPage } from './pages/HistoricalServiceAccountingPage';
-import { AccountManagementPage } from './pages/AccountManagementPage';
-import { StorageManagementPage } from './pages/StorageManagementPage';
-import { FileSettingsPage } from './pages/FileSettingsPage';
-import { ContractTemplatesPage } from './pages/ContractTemplatesPage';
-import { NotificationTasksPage } from './pages/NotificationTasksPreviewPage';
 import './pages/LineManagementPage.css';
+
+const DataImportPage = lazy(() =>
+  import('./pages/DataImportPage').then((m) => ({ default: m.DataImportPage }))
+);
+const ReportsPage = lazy(() =>
+  import('./pages/ReportsPage').then((m) => ({ default: m.ReportsPage }))
+);
+const LineManagementPage = lazy(() =>
+  import('./pages/LineManagementPage').then((m) => ({ default: m.LineManagementPage }))
+);
+const AiCustomerServiceStudioPage = lazy(() =>
+  import('./pages/line_management/AiCustomerServiceStudioPage').then((m) => ({
+    default: m.AiCustomerServiceStudioPage,
+  }))
+);
+const LlmConfigurationPage = lazy(() =>
+  import('./pages/line_management/LlmConfigurationPage').then((m) => ({
+    default: m.LlmConfigurationPage,
+  }))
+);
+const LiffCardStudio = lazy(() =>
+  import('./pages/line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio }))
+);
+const AlertGroupSecurity = lazy(() =>
+  import('./pages/line_management/AlertGroupSecurity').then((m) => ({
+    default: m.AlertGroupSecurity,
+  }))
+);
+const AccountingParametersPage = lazy(() =>
+  import('./pages/AccountingParametersPage').then((m) => ({
+    default: m.AccountingParametersPage,
+  }))
+);
+const HistoricalServiceAccountingPage = lazy(() =>
+  import('./pages/HistoricalServiceAccountingPage').then((m) => ({
+    default: m.HistoricalServiceAccountingPage,
+  }))
+);
+const AccountManagementPage = lazy(() =>
+  import('./pages/AccountManagementPage').then((m) => ({ default: m.AccountManagementPage }))
+);
+const StorageManagementPage = lazy(() =>
+  import('./pages/StorageManagementPage').then((m) => ({ default: m.StorageManagementPage }))
+);
+const FileSettingsPage = lazy(() =>
+  import('./pages/FileSettingsPage').then((m) => ({ default: m.FileSettingsPage }))
+);
+const ContractTemplatesPage = lazy(() =>
+  import('./pages/ContractTemplatesPage').then((m) => ({ default: m.ContractTemplatesPage }))
+);
+const NotificationTasksPage = lazy(() =>
+  import('./pages/NotificationTasksPreviewPage').then((m) => ({
+    default: m.NotificationTasksPage,
+  }))
+);
 
 export const HASH_ALIASES: Record<string, PageType> = {
   databrowser: 'clients',
@@ -163,6 +204,7 @@ const AppContent: React.FC = () => {
         onLogout={handleLogout}
       >
         <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'historical-service-accounting', 'line-management'].includes(currentPage)}>
+        <Suspense fallback={<div className="app-route-loading" role="status" aria-live="polite">載入頁面中…</div>}>
         {/* Operations Section */}
         {currentPage === 'notifications' && <NotificationTasksPage />}
         {currentPage === 'order-workbench-v2' && <OrderWorkbenchV2Page homeNavigationRequest={workbenchHomeRequest} />}
@@ -189,6 +231,7 @@ const AppContent: React.FC = () => {
         {currentPage === 'storage-management' && <StorageManagementPage />}
         {currentPage === 'file-settings' && <FileSettingsPage />}
         {currentPage === 'contract-templates' && <ContractTemplatesPage />}
+        </Suspense>
         </StaffIdentityProvider>
       </MasterLayout>
     </ErrorBoundary>

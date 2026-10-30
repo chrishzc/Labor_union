@@ -6,3 +6,4 @@ subsystems:
   local-runtime: `subsystems/local-runtime/index.md`
   reporting: `subsystems/reporting/index.md`
   runtime-governance: `subsystems/runtime-governance/index.md`
+  shared-kernel: `subsystems/shared-kernel/index.md`

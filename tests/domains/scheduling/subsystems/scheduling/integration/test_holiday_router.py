@@ -1,6 +1,6 @@
 """
 File: test_holiday_router.py
-Description: 以真實 FastAPI 邊界驗證 Holiday typed query、preview、apply 與錯誤 envelope。
+Description: 以真實 FastAPI 邊界驗證 Holiday 延遲連線快取、零寫入預覽、儲存失效與錯誤封套。
 """
 
 from __future__ import annotations
@@ -95,6 +95,13 @@ class _Repository:
 
 
 def _client(monkeypatch):
+    from subsystems.scheduling.holiday_query_cache import (
+        configure_holiday_query_cache_backend,
+        invalidate_holiday_query_cache,
+    )
+
+    configure_holiday_query_cache_backend(lambda: None)
+    invalidate_holiday_query_cache()
     connection = _Connection()
     repository = _Repository()
     monkeypatch.setattr(route, "get_connection", lambda: connection)
@@ -224,3 +231,69 @@ def test_openapi_declares_global_typed_errors_for_every_holiday_operation(monkey
             "application/json"
         ]["schema"]
         assert response_schema["$ref"].endswith("/GlobalTypedErrorResponseView")
+
+
+def test_holiday_query_reuses_projection_cache_without_opening_db_until_apply_invalidates(
+    monkeypatch,
+):
+    from subsystems.scheduling.holiday_query_cache import (
+        configure_holiday_query_cache_backend,
+        invalidate_holiday_query_cache,
+    )
+
+    client, _connection, _repository = _client(monkeypatch)
+    opened_connections = 0
+
+    def counted_connection():
+        nonlocal opened_connections
+        opened_connections += 1
+        return _Connection()
+
+    redis_store: dict[str, str] = {}
+
+    class _Backend:
+        def get(self, key: str) -> str | None:
+            return redis_store.get(key)
+
+        def set(self, key: str, payload: str, ttl_seconds: float) -> None:
+            del ttl_seconds
+            redis_store[key] = payload
+
+        def delete(self, keys: tuple[str, ...]) -> None:
+            for key in keys:
+                redis_store.pop(key, None)
+
+        def delete_prefix(self, prefix: str) -> None:
+            for key in [item for item in redis_store if item.startswith(prefix)]:
+                redis_store.pop(key, None)
+
+    monkeypatch.setattr(route, "get_connection", counted_connection)
+    configure_holiday_query_cache_backend(lambda: _Backend())
+    invalidate_holiday_query_cache()
+    try:
+        first = client.get("/api/v1/holidays?from_date=2026-10-01&to_date=2026-10-31")
+        second = client.get("/api/v1/holidays?from_date=2026-10-01&to_date=2026-10-31")
+        assert first.status_code == second.status_code == 200
+        assert opened_connections == 1
+        assert len(redis_store) == 1
+
+        preview = _preview(client).json()["data"]
+        applied = client.post(
+            "/api/v1/holidays/apply",
+            headers={"Idempotency-Key": "holiday-cache-invalidate-01"},
+            json={
+                **preview["command"],
+                "preview_fingerprint": preview["preview_fingerprint"],
+                "reason": "年度新增",
+            },
+        )
+        assert applied.status_code == 200
+        assert redis_store == {}
+
+        refreshed = client.get("/api/v1/holidays?from_date=2026-10-01&to_date=2026-10-31")
+        assert refreshed.status_code == 200
+        assert opened_connections == 2
+        assert len(refreshed.json()["data"]["holidays"]) == 1
+    finally:
+        configure_holiday_query_cache_backend(route.default_redis_cache_backend)
+        invalidate_holiday_query_cache()

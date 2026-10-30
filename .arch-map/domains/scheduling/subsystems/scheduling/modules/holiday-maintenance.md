@@ -9,6 +9,8 @@
 
 ## Implementation
 - primary owner: subsystems/scheduling/holiday_maintenance.py
+- read-only projection cache: `subsystems/scheduling/holiday_query_cache.py` — 支援選用外部 Redis＋L1 TTL 唯讀快取，僅於 `POST /api/v1/holidays/apply` 成功提交後以命名前綴失效。
+- HTTP boundary & lazy query wiring: `api/dependencies/holidays.py`、`api/routes/holidays.py`
 - holiday command adapter: `infrastructure/mysql/admin_command_repository.py` — 共用 adapter 檔案中的 holiday mutation，由 owner UoW 呼叫固定用途刪除程序。
 - holiday query adapter: `infrastructure/mysql/scheduling_holiday_query.py`
 - typed client: ui_react/src/api/scheduling/holiday_client.ts
@@ -25,6 +27,7 @@
 ## Verification
 - layout_status: custom_current
 - tests: see the holiday-maintenance test module leaf.
+- integration_root: `tests/domains/scheduling/subsystems/scheduling/integration/test_holiday_router.py`
 - test_root: `ui_react/src/tests/domains/scheduling/subsystems/scheduling/modules/holiday-maintenance/`
 - test_root: `ui_react/src/tests/scheduling_holiday_flow.test.tsx` — 既有管理工作台的自動查詢、版本化儲存與結果回讀；保留 current legacy UI 路徑。
 - boundary: Subsystem

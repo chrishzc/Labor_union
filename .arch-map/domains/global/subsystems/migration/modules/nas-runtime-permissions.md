@@ -11,7 +11,7 @@
 - primary: `infrastructure/mysql/nas_permissions.py`
 - fixed operations: `infrastructure/mysql/nas_mutations.py`
 - entrypoint: `scripts/configure_nas_permissions.py`
-- connection profiles: `infrastructure/mysql/mysql_adapter.py`
+- connection profiles: `infrastructure/mysql/mysql_adapter.py` — 含執行緒安全有界 LIFO 常駐連線池（按 profile／DB／TLS 分桶、歸還時自動 `rollback()` 與重置 `autocommit(False)`、閒置逾時 `ping(reconnect=False)`、`lu_test_*` 一次性測試庫自動繞過，並於 `api/main.py` 與 `api/nas_apps.py` lifespan 結束時排空）。
 - canonical additive registration release: `db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.json`、`db/migration_releases/labor_union_2026_10_19_nas_registration_approval_v1.descriptors.json`
 
 ## Contracts
@@ -26,6 +26,7 @@
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/`
 - default_boundary: Module
+- module_unit: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_mysql_connection_pool.py` — 常駐連線池重用、交易重置、斷線／逾期淘汰、profile 隔離與 `lu_test_*` 繞過契約。
 - engine: `tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_nas_permissions_mysql.py` — 明確 opt-in 的 localhost 隔離庫；四 profile grants／TLS 正負例、固定用途程序及 outer commit／rollback，不 reset／drop。registry 專用案件程序另由 Global registry-deletion 的 opt-in engine tests 驗證 SQL 與同一交易；不以此替代目標 NAS grants 資格。
 - offline policy／plan 不代表真實 MySQL grants、DDL 或 rollback 通過；DB qualification 依 10 §9。
 

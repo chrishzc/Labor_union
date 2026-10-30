@@ -1,12 +1,20 @@
-"""Authenticated policy and per-case pricing commands."""
+"""
+File: accounting_pricing.py
+Description: 驗證帳務計價政策與個案計價命令路由，目錄唯讀查詢接入受控快取並於提交後失效。
+"""
 
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 from pymysql.err import IntegrityError, OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
-from api.dependencies.accounting_pricing import get_pricing_application
+from api.dependencies.accounting_pricing import (
+    get_pricing_application,
+    invalidate_pricing_catalog_cache,
+    query_cached_pricing_catalog_view,
+)
 from api.error_contracts import typed_http_error
 from api.schemas.accounting_pricing import (
     CasePricingApplyBody, CasePricingPreviewBody, CasePricingPreviewView, CasePricingView,
@@ -17,6 +25,7 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.client_finance.pricing_configuration import PricingConfigurationApplication, PricingConflict
 
 
+LOGGER = logging.getLogger("labor_union.api.routes.accounting_pricing")
 router = APIRouter(prefix="/api/v1/accounting-pricing", tags=["Accounting Pricing"])
 Application = Annotated[PricingConfigurationApplication, Depends(get_pricing_application)]
 Principal = Annotated[AdminPrincipal, Depends(require_system_admin)]
@@ -42,9 +51,10 @@ def _case_view(facts, impact):
 
 
 @router.get("", response_model=BaseResponse[PricingCatalogView])
-def query_catalog(principal: Principal, application: Application):
+def query_catalog(request: Request, principal: Principal):
+    del principal
     try:
-        return BaseResponse(data=PricingCatalogView.model_validate(application.catalog()), message="帳務參數版本")
+        return BaseResponse(data=query_cached_pricing_catalog_view(request), message="帳務參數版本")
     except (ValueError, OperationalError) as error:
         raise _error(error) from error
 
@@ -53,13 +63,18 @@ def query_catalog(principal: Principal, application: Application):
 def save_policy(body: SavePricingPolicyBody, principal: Principal, application: Application, key: CommandKey):
     try:
         revision = application.save_policy(body.policy.domain(), body.expected_revision, principal.username, body.reason.strip(), key)
-        return BaseResponse(data=PricingReceiptView(revision=revision), message="新政策版本已儲存")
     except (ValueError, IntegrityError, OperationalError) as error:
         raise _error(error) from error
+    try:
+        invalidate_pricing_catalog_cache()
+    except Exception:
+        LOGGER.exception("Pricing catalog cache invalidation failed after committed save")
+    return BaseResponse(data=PricingReceiptView(revision=revision), message="新政策版本已儲存")
 
 
 @router.get("/cases/{case_no}", response_model=BaseResponse[CasePricingView])
 def query_case(case_no: str, principal: Principal, application: Application):
+    del principal
     try:
         facts, impact = application.query_case(case_no)
         return BaseResponse(data=_case_view(facts, impact), message="本案計價設定")
@@ -69,6 +84,7 @@ def query_case(case_no: str, principal: Principal, application: Application):
 
 @router.post("/cases/{case_no}/preview", response_model=BaseResponse[CasePricingPreviewView])
 def preview_case(case_no: str, body: CasePricingPreviewBody, principal: Principal, application: Application):
+    del principal
     try:
         preview = application.preview_case(case_no, body.terms.domain(), body.expected_revision)
         return BaseResponse(data=CasePricingPreviewView(current=_case_view(preview.facts, preview.before),

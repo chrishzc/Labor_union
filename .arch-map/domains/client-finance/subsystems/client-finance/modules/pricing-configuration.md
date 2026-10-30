@@ -15,7 +15,7 @@ No query writes; one outer transaction and typed stale/idempotency conflicts.
 - `infrastructure/mysql/pricing_configuration_repository.py`
 - `infrastructure/mysql/case_category_query.py` — read-only category expression from the bound per-case pricing rule, selected policy identity rule and legacy identity fallback; it creates no classification root or mutation.
 - `api/schemas/accounting_pricing.py`
-- `api/dependencies/accounting_pricing.py`
+- `api/dependencies/accounting_pricing.py` — 延遲取得 MySQL 連線，並對唯讀 `GET /api/v1/accounting-pricing` 提供選用 Redis＋L1 TTL 投影快取（`POST /api/v1/accounting-pricing/policies` 提交成功後失效；Preview／Apply 一律走 fresh DB 讀取）。
 - `api/routes/accounting_pricing.py`
 - `ui_react/src/api/client_finance/accounting_pricing_client.ts`
 - `ui_react/src/pages/AccountingParametersPage.tsx`

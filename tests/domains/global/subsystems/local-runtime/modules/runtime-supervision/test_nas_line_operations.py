@@ -1,6 +1,6 @@
 """
 File: test_nas_line_operations.py
-Description: 驗證獨立 LINE 操作代理與內部私人 HTTPS 憑證授權邊界。
+Description: 驗證獨立 LINE 操作代理、內部私人 HTTPS 憑證授權與公開回應 Gzip 壓縮邊界。
 """
 import asyncio
 from contextlib import contextmanager
@@ -445,3 +445,19 @@ def test_real_private_tls_requires_the_correct_ca_hostname_and_machine_token(tmp
         thread.join(timeout=10)
         listener.close()
         assert not thread.is_alive()
+
+
+def test_public_line_app_gzip_compresses_large_liff_html_responses(bridge):
+    async def check():
+        response = await bridge.request(
+            "GET",
+            "/line-mobile-admin",
+            headers={"Accept-Encoding": "gzip"},
+        )
+        assert response.status_code == 200
+        assert response.headers.get("content-encoding") == "gzip"
+        assert "Accept-Encoding" in response.headers.get("vary", "")
+        assert len(response.text.encode("utf-8")) >= 1024
+        assert "<html" in response.text.lower()
+
+    asyncio.run(check())

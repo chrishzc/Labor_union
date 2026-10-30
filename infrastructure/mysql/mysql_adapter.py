@@ -1,6 +1,6 @@
 """
 File: mysql_adapter.py
-Description: 提供既有 MySQL 存取與服務日精算 adapter；人工服務日只覆蓋固定週休。
+Description: 提供具執行緒安全連線池的 MySQL 存取與服務日精算 adapter；人工服務日只覆蓋固定週休。
 """
 
 import os
@@ -10,6 +10,8 @@ import pymysql
 import math
 from pathlib import Path
 from datetime import datetime, date, timedelta
+from threading import Lock
+from time import monotonic
 from dotenv import load_dotenv
 from subsystems.client_finance.virtual_account_resolution import (
     build_client_virtual_account,
@@ -109,8 +111,175 @@ def generate_virtual_account(case_no) -> str:
     """Compatibility wrapper around the Client Finance-owned rule."""
     return build_client_virtual_account(case_no) or ""
 
+_POOL_LOCK = Lock()
+_CONNECTION_POOLS: dict[tuple, list[tuple[object, float, float]]] = {}
+_DEFAULT_POOL_MAX_IDLE = 10
+_MAXIMUM_POOL_MAX_IDLE = 32
+_DEFAULT_POOL_MAX_AGE_SECONDS = 300.0
+_DEFAULT_POOL_PING_IDLE_SECONDS = 15.0
+
+
+def _pool_max_idle() -> int:
+    raw = os.getenv("DB_POOL_MAX_IDLE", str(_DEFAULT_POOL_MAX_IDLE)).strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return _DEFAULT_POOL_MAX_IDLE
+    return max(0, min(_MAXIMUM_POOL_MAX_IDLE, parsed))
+
+
+def _pool_max_age_seconds() -> float:
+    raw = os.getenv("DB_POOL_MAX_AGE_SECONDS", str(_DEFAULT_POOL_MAX_AGE_SECONDS)).strip()
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return _DEFAULT_POOL_MAX_AGE_SECONDS
+    return max(1.0, parsed)
+
+
+def _pool_ping_idle_seconds() -> float:
+    raw = os.getenv("DB_POOL_PING_IDLE_SECONDS", str(_DEFAULT_POOL_PING_IDLE_SECONDS)).strip()
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return _DEFAULT_POOL_PING_IDLE_SECONDS
+    return max(0.0, parsed)
+
+
+def _pool_key(profile: str | None, config: dict) -> tuple:
+    ssl = config.get("ssl")
+    ssl_key = tuple(sorted(ssl.items())) if isinstance(ssl, dict) else ssl
+    return (
+        profile,
+        config.get("host"),
+        config.get("port"),
+        config.get("user"),
+        config.get("password"),
+        config.get("database"),
+        config.get("charset"),
+        ssl_key,
+    )
+
+
+def _is_poolable_config(config: dict) -> bool:
+    if _pool_max_idle() <= 0:
+        return False
+    database_name = str(config.get("database", "") or "")
+    if database_name.startswith("lu_test_") and os.getenv("DB_POOL_ALLOW_TEST_DB", "").strip() != "1":
+        return False
+    return True
+
+
+def _safe_close_raw(raw) -> None:
+    if raw is None:
+        return
+    try:
+        raw.close()
+    except Exception:
+        pass
+
+
+def _release_pooled_connection(key: tuple, raw, created_at: float) -> None:
+    max_idle = _pool_max_idle()
+    now = monotonic()
+    if (
+        raw is None
+        or max_idle <= 0
+        or not getattr(raw, "open", False)
+        or (now - created_at) >= _pool_max_age_seconds()
+    ):
+        _safe_close_raw(raw)
+        return
+    try:
+        raw.rollback()
+        if hasattr(raw, "get_autocommit") and raw.get_autocommit() is not False:
+            raw.autocommit(False)
+    except Exception:
+        _safe_close_raw(raw)
+        return
+    overflow = False
+    with _POOL_LOCK:
+        bucket = _CONNECTION_POOLS.setdefault(key, [])
+        if len(bucket) >= max_idle:
+            overflow = True
+        else:
+            bucket.append((raw, created_at, monotonic()))
+    if overflow:
+        _safe_close_raw(raw)
+
+
+class _PooledMySqlConnection:
+    """Lease wrapper returning reset PyMySQL connections to the bounded pool on close."""
+
+    def __init__(self, raw, pool_key: tuple, created_at: float) -> None:
+        self._raw = raw
+        self._pool_key = pool_key
+        self._created_at = created_at
+        self._closed = False
+
+    def _require_open(self):
+        if self._closed or self._raw is None:
+            raise pymysql.err.InterfaceError(0, "Already closed")
+        return self._raw
+
+    @property
+    def open(self) -> bool:
+        return bool(not self._closed and getattr(self._raw, "open", False))
+
+    def cursor(self, cursor=None):
+        raw = self._require_open()
+        return raw.cursor() if cursor is None else raw.cursor(cursor)
+
+    def begin(self) -> None:
+        self._require_open().begin()
+
+    def commit(self) -> None:
+        self._require_open().commit()
+
+    def rollback(self) -> None:
+        self._require_open().rollback()
+
+    def autocommit(self, value: bool) -> None:
+        self._require_open().autocommit(value)
+
+    def get_autocommit(self) -> bool:
+        return self._require_open().get_autocommit()
+
+    def ping(self, reconnect: bool = True):
+        return self._require_open().ping(reconnect=reconnect)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        raw = self._raw
+        self._raw = None
+        _release_pooled_connection(self._pool_key, raw, self._created_at)
+
+    def __enter__(self):
+        self._require_open()
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        del exc_info
+        self.close()
+
+    def __getattr__(self, name: str):
+        return getattr(self._require_open(), name)
+
+
+def close_connection_pools() -> None:
+    """Close and drain all idle pooled MySQL connections."""
+    with _POOL_LOCK:
+        buckets = list(_CONNECTION_POOLS.values())
+        _CONNECTION_POOLS.clear()
+    for bucket in buckets:
+        for raw, _created_at, _returned_at in bucket:
+            _safe_close_raw(raw)
+
+
 def get_connection(profile=None):
-    """建立並回傳資料庫連線"""
+    """建立並回傳資料庫連線（一般資料庫自動重用執行緒安全常駐連線池）。"""
     config = dict(DB_CONFIG)
     if profile is not None and os.getenv("DEPLOYMENT_PROFILE") == "nas":
         if profile not in {"access", "maintenance"}:
@@ -121,7 +290,33 @@ def get_connection(profile=None):
         if not user or user == "root" or not password_file:
             raise RuntimeError("NAS privileged operation connection is not configured")
         config.update(user=user, password=Path(password_file).read_text(encoding="utf-8").strip())
-    return pymysql.connect(**config, cursorclass=pymysql.cursors.DictCursor)
+    if not _is_poolable_config(config):
+        return pymysql.connect(**config, cursorclass=pymysql.cursors.DictCursor)
+    key = _pool_key(profile, config)
+    max_age = _pool_max_age_seconds()
+    ping_idle = _pool_ping_idle_seconds()
+    while True:
+        item = None
+        with _POOL_LOCK:
+            bucket = _CONNECTION_POOLS.get(key)
+            if bucket:
+                item = bucket.pop()
+        if item is None:
+            break
+        raw, created_at, returned_at = item
+        now = monotonic()
+        if not getattr(raw, "open", False) or (now - created_at) >= max_age:
+            _safe_close_raw(raw)
+            continue
+        if (now - returned_at) >= ping_idle:
+            try:
+                raw.ping(reconnect=False)
+            except Exception:
+                _safe_close_raw(raw)
+                continue
+        return _PooledMySqlConnection(raw, key, created_at)
+    raw = pymysql.connect(**config, cursorclass=pymysql.cursors.DictCursor)
+    return _PooledMySqlConnection(raw, key, monotonic())
 
 
 def _resolve_case_no(case_ref) -> str:

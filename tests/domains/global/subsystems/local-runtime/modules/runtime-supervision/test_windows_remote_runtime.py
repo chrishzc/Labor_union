@@ -1,4 +1,7 @@
-"""Windows remote transport: prefix isolation, real auth admission and downloads."""
+"""
+File: test_windows_remote_runtime.py
+Description: 驗證 Windows 遠端靜態入口前綴隔離、授權探測、二進位串流與靜態資源 Gzip 壓縮契約。
+"""
 import httpx
 import pytest
 from starlette.testclient import TestClient
@@ -95,3 +98,29 @@ def test_factory_refuses_inherited_bypass_before_loading_artifact(monkeypatch):
     monkeypatch.setenv('ENABLE_ADMIN_AUTH', 'false')
     with pytest.raises(RuntimeError, match='refuses development'):
         remote.create_app()
+
+
+def test_static_assets_above_threshold_are_gzip_compressed_across_test_and_admin_mounts(tmp_path):
+    source = tmp_path / 'gzip_source'
+    assets = source / 'assets'
+    assets.mkdir(parents=True)
+    bundle_text = 'export const workbenchLabel = "產後照護排班與帳務管理平台";\n' * 80
+    (source / 'index.html').write_text(
+        '<div id="root"></div><script type="module" src="/test/assets/index-a1b2c3d4.js"></script>',
+        encoding='utf-8',
+    )
+    (assets / 'index-a1b2c3d4.js').write_text(bundle_text, encoding='utf-8', newline='\n')
+    output = tmp_path / 'gzip_artifact'
+    build_artifact(output, source=source)
+    validated = validate_react_admin_artifact(output, workspace_root=remote.ROOT)
+
+    app = remote.create_gateway(validated, transport=httpx.MockTransport(lambda _: httpx.Response(401)))
+    raw_size = len(bundle_text.encode('utf-8'))
+    with TestClient(app, base_url='http://127.0.0.1:5173') as client:
+        for mount in ('/test/assets/index-a1b2c3d4.js', '/admin/assets/index-a1b2c3d4.js'):
+            response = client.get(mount, headers={'Accept-Encoding': 'gzip'})
+            assert response.status_code == 200
+            assert response.headers.get('content-encoding') == 'gzip'
+            assert int(response.headers['content-length']) < raw_size
+            assert response.text == bundle_text
+            assert response.headers['cache-control'] == 'public, max-age=31536000, immutable'

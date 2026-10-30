@@ -211,7 +211,11 @@ async def lifespan(_: FastAPI):
     ensure_builtin_knowledge_catalog()
     ensure_development_line_configuration()
     line_webhook_runtime_mode()
-    yield
+    try:
+        yield
+    finally:
+        from infrastructure.mysql.mysql_adapter import close_connection_pools
+        close_connection_pools()
 
 
 app = FastAPI(

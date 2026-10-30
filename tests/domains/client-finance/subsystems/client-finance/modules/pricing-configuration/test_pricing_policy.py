@@ -1,3 +1,8 @@
+"""
+File: test_pricing_policy.py
+Description: 驗證帳務計價規則、試算不可變性、延遲連線唯讀目錄快取與儲存後失效邊界。
+"""
+
 from datetime import date
 from decimal import Decimal
 
@@ -225,3 +230,115 @@ def test_policy_http_to_owner_writer_accepts_optional_reason(reason):
     writes = [args for sql, args in connection.calls if sql.startswith('INSERT INTO accounting_pricing_policies')]
     assert len(writes) == 1 and writes[0][-1] == ''
     assert connection.commits == 1
+
+
+def test_pricing_catalog_endpoint_uses_lazy_connection_redis_cache_and_post_commit_invalidation(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies import accounting_pricing as pricing_deps
+    from api.dependencies.admin_auth import require_system_admin
+    from api.routes.accounting_pricing import router
+    from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.client_finance.pricing_configuration import pricing_payload
+
+    state = {'revision': 0, 'policies': [], 'opens': 0, 'commits': 0}
+    redis_store: dict[str, str] = {}
+
+    class FakeBackend:
+        def get(self, key: str) -> str | None:
+            return redis_store.get(key)
+
+        def set(self, key: str, payload: str, ttl_seconds: float) -> None:
+            del ttl_seconds
+            redis_store[key] = payload
+
+        def delete(self, keys: tuple[str, ...]) -> None:
+            for key in keys:
+                redis_store.pop(key, None)
+
+        def delete_prefix(self, prefix: str) -> None:
+            for key in [item for item in redis_store if item.startswith(prefix)]:
+                redis_store.pop(key, None)
+
+    class Cursor:
+        rowcount = 1
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, sql, args=()):
+            self.sql = sql
+            if sql.startswith('UPDATE accounting_pricing_state'):
+                state['revision'] += 1
+            elif sql.startswith('INSERT INTO accounting_pricing_policies'):
+                state['policies'].append({
+                    'id': args[0],
+                    'policy_json': args[2],
+                    'actor': args[3],
+                    'reason': args[4],
+                })
+        def fetchone(self):
+            return {'revision': state['revision']} if 'accounting_pricing_state' in self.sql else None
+        def fetchall(self):
+            return list(state['policies']) if 'accounting_pricing_policies' in self.sql else []
+
+    class Connection:
+        def cursor(self): return Cursor()
+        def begin(self): pass
+        def commit(self): state['commits'] += 1
+        def rollback(self): pass
+        def close(self): pass
+
+    def fake_get_connection():
+        state['opens'] += 1
+        return Connection()
+
+    monkeypatch.setattr(pricing_deps, 'get_connection', fake_get_connection)
+    pricing_deps._pricing_catalog_cache.configure_backend(lambda: FakeBackend())
+    pricing_deps.invalidate_pricing_catalog_cache()
+    try:
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(
+            1, 'synthetic', 'Synthetic', 'system_admin'
+        )
+        with TestClient(app) as client:
+            first = client.get('/api/v1/accounting-pricing')
+            second = client.get('/api/v1/accounting-pricing')
+            assert first.status_code == second.status_code == 200
+            assert first.json()['data'] == {'revision': 0, 'versions': []}
+            assert state['opens'] == 1
+            assert len(redis_store) == 1
+
+            # Evict L1 only: L2 Redis should serve GET with zero new DB connections
+            with pricing_deps._pricing_catalog_cache._lock:
+                pricing_deps._pricing_catalog_cache._entries.clear()
+            third = client.get('/api/v1/accounting-pricing')
+            assert third.status_code == 200
+            assert state['opens'] == 1
+
+            policy = PricingPolicy(
+                date(2026, 11, 1),
+                (
+                    CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+                    terms(),
+                    CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 320), HourlyRates(320, 320)),
+                ),
+                HourlyRates(450, 450),
+                HourlyRates(450, 450),
+            )
+            saved = client.post(
+                '/api/v1/accounting-pricing/policies',
+                json={'policy': pricing_payload(policy), 'expected_revision': 0},
+                headers={'Idempotency-Key': 'catalog-cache-invalidate-01'},
+            )
+            assert saved.status_code == 200
+            assert redis_store == {}
+            assert state['opens'] == 2
+
+            refreshed = client.get('/api/v1/accounting-pricing')
+            assert refreshed.status_code == 200
+            assert refreshed.json()['data']['revision'] == 1
+            assert len(refreshed.json()['data']['versions']) == 1
+            assert state['opens'] == 3
+    finally:
+        pricing_deps._pricing_catalog_cache.configure_backend(pricing_deps.default_redis_cache_backend)
+        pricing_deps.invalidate_pricing_catalog_cache()

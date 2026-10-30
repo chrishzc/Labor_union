@@ -23,6 +23,7 @@ from api.schemas.holidays import (
     HolidayReceiptView,
     HolidayRowView,
 )
+from infrastructure.cache import default_redis_cache_backend
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
 from subsystems.access.authentication_session import AdminPrincipal
@@ -32,7 +33,33 @@ from subsystems.scheduling.holiday_calendar_query import (
     HolidayCalendarUnavailable,
     HolidayFact,
 )
-from subsystems.scheduling.holiday_query_cache import query_holidays
+from subsystems.scheduling.holiday_query_cache import (
+    configure_holiday_query_cache_backend,
+    query_holidays,
+)
+
+configure_holiday_query_cache_backend(default_redis_cache_backend)
+
+
+class _LazyHolidayQuery:
+    """Acquire a DB connection only when the read-only projection cache misses."""
+
+    def query(
+        self,
+        service_start_date: date,
+        service_end_date: date,
+        *,
+        lock: bool,
+    ) -> HolidayCalendarFacts:
+        connection = get_connection()
+        try:
+            return MySqlSchedulingHolidayQuery(connection).query(
+                service_start_date,
+                service_end_date,
+                lock=lock,
+            )
+        finally:
+            connection.close()
 
 router = APIRouter(prefix="/api/v1/holidays", tags=["Holidays 國定假日設定"])
 _LEGACY_FROM = date(1900, 1, 1)
@@ -80,9 +107,8 @@ def get_all_holidays(
             "國定假日查詢區間不正確。",
             "holiday-query",
         )
-    connection = get_connection()
     try:
-        calendar = query_holidays(MySqlSchedulingHolidayQuery(connection), start, end)
+        calendar = query_holidays(_LazyHolidayQuery(), start, end)
         data = _calendar_payload(calendar, start, end) if requested_range else [
             _fact_payload(item) for item in calendar.holidays
         ]
@@ -102,8 +128,6 @@ def get_all_holidays(
             "國定假日查詢失敗。",
             "holiday-query",
         ) from error
-    finally:
-        connection.close()
 
 
 @router.post(
