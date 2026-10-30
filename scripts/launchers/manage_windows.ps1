@@ -29,6 +29,14 @@ function Assert-NoRemainingRuntime {
     # candidates; unknown command lines also prevent recovery. Never kill them.
     $candidates = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' OR Name='cloudflared.exe'" -ErrorAction Stop)
     foreach ($candidate in $candidates) {
+        if ($candidate.Name -eq 'cloudflared.exe') {
+            $isService = $candidate.CommandLine -match 'service run'
+            if (-not $isService) {
+                $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($candidate.ParentProcessId)" -ErrorAction SilentlyContinue
+                if ($parent -and $parent.Name -eq 'services.exe') { $isService = $true }
+            }
+            if ($isService) { continue }
+        }
         if (-not $candidate.CommandLine -or $candidate.Name -eq 'cloudflared.exe' -or
             $candidate.CommandLine -match 'uvicorn (api.main:app|scripts.windows_remote_runtime)|-m scripts.run_(line_worker|service_monitor|durable_job_worker|incident_worker|knowledge_worker)') {
             throw 'An unconfirmed runtime or connector may still be running. Close the old installation first; no process was stopped.'
@@ -73,7 +81,9 @@ function Set-RuntimeEnvironment {
     $env:REACT_ADMIN_PREVIOUS_ARTIFACT_DIR = ''
     $env:REACT_ADMIN_ACTIVE_SELECTOR = ''
     $env:UI_HEALTH_URL = 'http://127.0.0.1:5173/admin/'
-    $env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE = if ($LocalOnly) { '' } else { $tokenPath }
+    $cfService = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+    $isServiceRunning = ($null -ne $cfService -and $cfService.Status -eq 'Running')
+    $env:WINDOWS_REMOTE_TUNNEL_TOKEN_FILE = if ($LocalOnly -or $isServiceRunning) { '' } else { $tokenPath }
 }
 
 function New-ManagedArtifact {
@@ -103,8 +113,12 @@ function Start-ManagedRuntime {
     if (Get-ManagedState) { throw 'This installation is already running. Use update or stop.' }
     Assert-ProgramEnvironment
     Set-RuntimeEnvironment
-    if (-not $LocalOnly) {
-        if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) { throw 'Save the Tunnel token file using the manual Cloudflare guide first.' }
+    $cfService = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+    $isServiceRunning = ($null -ne $cfService -and $cfService.Status -eq 'Running')
+    if (-not $LocalOnly -and -not $isServiceRunning) {
+        if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
+            throw '未偵測到運作中的 cloudflared 系統服務，亦無本機 tunnel-token 檔案。請先確認 Windows 服務已啟動，或手動放置 token。'
+        }
         $connector = Get-Command cloudflared.exe -ErrorAction SilentlyContinue
         $installedConnector = Join-Path ${env:ProgramFiles(x86)} 'cloudflared\cloudflared.exe'
         if (-not $connector -and -not (Test-Path -LiteralPath $installedConnector)) { throw 'Install cloudflared first.' }
@@ -132,7 +146,11 @@ function Start-ManagedRuntime {
             $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
             if ($state.supervisor_pid -eq $owner.Id -and $state.runtime_status -eq 'ready') {
                 Write-Host '[Ready] Local: http://localhost:5173/admin/'
-                if (-not $LocalOnly) { Write-Host '[Tunnel started] Check Cloudflare status, then https://chrishzc.com/test/' }
+                if ($isServiceRunning) {
+                    Write-Host '[Tunnel] Cloudflare Tunnel 透過 Windows 系統服務連線中'
+                } elseif (-not $LocalOnly) {
+                    Write-Host '[Tunnel started] Check Cloudflare status'
+                }
                 Write-Host '[Workers] Normal configured background work and push are enabled.'
                 return
             }
@@ -180,8 +198,13 @@ function Invoke-ManagerAction {
     if ($Selected -eq 'status') { Show-ManagedStatus; return }
     if ($Selected -eq 'check') {
         Assert-ProgramEnvironment
-        foreach ($command in @('docker.exe','npm.cmd')) {
-            if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is missing." }
+        if (-not (Get-Command 'docker.exe' -ErrorAction SilentlyContinue)) { throw "docker.exe is missing. 請確認已安裝並啟動 Docker Desktop。" }
+        if (-not (Get-Command 'npm.cmd' -ErrorAction SilentlyContinue) -and -not (Get-Command 'npm' -ErrorAction SilentlyContinue)) {
+            throw "npm is missing. 請確認已安裝 Node.js (含 npm)。"
+        }
+        $cf = Get-Service -Name 'cloudflared' -ErrorAction SilentlyContinue
+        if ($cf) {
+            Write-Host "[PASS] Cloudflare Tunnel 系統服務存在 (狀態: $($cf.Status))"
         }
         Write-Host '[PASS] Program paths present. No configuration, database, provider or Cloudflare access performed.'
         return
