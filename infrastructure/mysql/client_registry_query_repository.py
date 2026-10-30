@@ -1,4 +1,7 @@
-"""MySQL read adapter for the case-centered client registry."""
+"""
+File: client_registry_query_repository.py
+Description: 提供案件中心客戶名冊查詢、訂單條件與歷史帳務投影之讀取配接。
+"""
 
 from __future__ import annotations
 
@@ -659,20 +662,83 @@ def _finance_values(connection, case_no):
             subsidy_rows = tuple(cursor.fetchall() or ())
         if len(subsidy_rows) > 1:
             return "not_ready", "client_subsidy_return_ambiguous", None
-        candidate = build_client_finance_terms_candidate(
-            facts, f"client-registry:{case_no}"
-        )
-        stages = {item.payment_stage.value: item for item in candidate.stage_plans}
-        customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
+        if len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
+            candidate = build_client_finance_terms_candidate(
+                facts, f"client-registry:{case_no}"
+            )
+            stages = {item.payment_stage.value: item for item in candidate.stage_plans}
+            customer_payable = sum(item.amount.amount for item in candidate.stage_plans)
+            deposit_amount = stages["deposit"].amount.amount
+            first_payment_amount = stages["first"].amount.amount
+            second_payment_amount = stages["second"].amount.amount
+            service_hours = len(facts.charge_days) * facts.service_hours_per_day
+        else:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT obligation_identity,obligation_type,direction,amount_due_ntd,status "
+                    "FROM client_obligations WHERE case_no=%s ORDER BY obligation_identity",
+                    (case_no,),
+                )
+                obligation_rows = tuple(cursor.fetchall() or ())
+                historical_projection = None
+                if status.startswith("歷史"):
+                    cursor.execute(
+                        "SELECT total_actual_service_days,total_actual_service_hours "
+                        "FROM historical_service_day_projections WHERE case_no=%s",
+                        (case_no,),
+                    )
+                    historical_projection = cursor.fetchone()
+
+            receivable_rows = tuple(
+                r for r in obligation_rows if r.get("direction") == "receivable_from_client"
+            )
+            deposit_amount = sum(
+                int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "deposit"
+            )
+            first_payment_amount = sum(
+                int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "first"
+            )
+            second_payment_amount = sum(
+                int(r["amount_due_ntd"]) for r in receivable_rows if r.get("obligation_type") == "second"
+            )
+            if status.startswith("歷史"):
+                if historical_projection is not None:
+                    actual_days = int(historical_projection.get("total_actual_service_days") or 0)
+                    service_hours = float(historical_projection.get("total_actual_service_hours") or 0)
+                else:
+                    actual_days = int(order_row.get("service_days") or 0)
+                    service_hours = float(Decimal(str(actual_days)) * Decimal(str(facts.service_hours_per_day)))
+
+                if receivable_rows:
+                    customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
+                elif actual_days > 0 and facts.payment_terms.client_hourly_rate.amount > 0:
+                    from domains.client_finance.historical_obligation_calculation import (
+                        build_historical_client_obligation_candidate,
+                    )
+                    candidate = build_historical_client_obligation_candidate(
+                        identity_status=str(facts.identity_status or "非市民"),
+                        client_policy_version="historical-baseline",
+                        client_hourly_rate=facts.payment_terms.client_hourly_rate,
+                        actual_service_days=actual_days,
+                        service_hours_per_day=facts.service_hours_per_day,
+                        historical_floor_fee=facts.floor_fee,
+                    )
+                    customer_payable = candidate.total_receivable.amount
+                else:
+                    customer_payable = 0
+            else:
+                service_hours = len(facts.charge_days) * facts.service_hours_per_day
+                customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
+
         subsidy = subsidy_rows[0] if subsidy_rows else None
         return "ready", None, {
             "virtual_account": _case_virtual_account(connection, case_no),
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
-            "service_hours": len(facts.charge_days) * facts.service_hours_per_day,
+            "service_hours": service_hours,
             "customer_payable_total_ntd": customer_payable,
-            "deposit_amount_ntd": stages["deposit"].amount.amount,
-            "first_payment_amount_ntd": stages["first"].amount.amount,
-            "second_payment_amount_ntd": stages["second"].amount.amount,
+            "deposit_amount_ntd": deposit_amount,
+            "first_payment_amount_ntd": first_payment_amount,
+            "second_payment_amount_ntd": second_payment_amount,
             "received_total_ntd": received_total,
             "customer_balance_ntd": customer_payable - received_total,
             "subsidy_return_amount_ntd": (

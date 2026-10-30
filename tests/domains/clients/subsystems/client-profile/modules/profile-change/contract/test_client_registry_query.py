@@ -624,6 +624,102 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
     assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
 
 
+def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeypatch):
+    facts = ClientFinanceTermsFacts(
+        case_no="CASE-HIST-01",
+        account_version=1,
+        service_hours_per_day=10,
+        floor_fee=MoneyNTD(0),
+        charge_days=(),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=3,
+            client_hourly_rate=MoneyNTD(350),
+            deposit_due_date=date(2026, 9, 20),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=None,
+        ),
+        existing_obligations=(),
+        identity_status="非市民",
+    )
+    connection = _SqlConnection(
+        [
+            {"case_no": "CASE-HIST-01", "status": "歷史訂單－服務完成", "service_days": 20, "service_hours_per_day": 10, "floor_fee": 0},
+            {"received_total_ntd": 70000},
+            (),
+            [
+                {
+                    "obligation_identity": "historical-service:CASE-HIST-01:revision:1:client:receivable_from_client",
+                    "obligation_type": "adjustment",
+                    "direction": "receivable_from_client",
+                    "amount_due_ntd": 70000,
+                    "status": "settled",
+                }
+            ],
+            {"total_actual_service_days": 20, "total_actual_service_hours": 200.0},
+            ({"virtual_account": "99781699114999"},),
+        ]
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
+        lambda _cursor, _order, lock: facts,
+    )
+
+    status, code, values = _finance_values(connection, "CASE-HIST-01")
+
+    assert (status, code) == ("ready", None)
+    assert values["customer_payable_total_ntd"] == 70000
+    assert values["received_total_ntd"] == 70000
+    assert values["customer_balance_ntd"] == 0
+    assert values["service_hours"] == 200.0
+    assert values["deposit_amount_ntd"] == 0
+    assert values["first_payment_amount_ntd"] == 0
+    assert values["second_payment_amount_ntd"] == 0
+    assert values["virtual_account"] == "99781699114999"
+
+
+def test_registry_finance_handles_historical_unserved_order_projection(monkeypatch):
+    facts = ClientFinanceTermsFacts(
+        case_no="CASE-HIST-02",
+        account_version=1,
+        service_hours_per_day=8,
+        floor_fee=MoneyNTD(0),
+        charge_days=(),
+        payment_terms=ClientPaymentTerms(
+            deposit_service_days=3,
+            client_hourly_rate=MoneyNTD(350),
+            deposit_due_date=date(2026, 9, 20),
+            first_payment_due_date=date(2026, 10, 1),
+            second_payment_due_date=None,
+        ),
+        existing_obligations=(),
+        identity_status="非市民",
+    )
+    connection = _SqlConnection(
+        [
+            {"case_no": "CASE-HIST-02", "status": "歷史訂單－未服務", "service_days": 10, "service_hours_per_day": 8, "floor_fee": 0},
+            {"received_total_ntd": 0},
+            (),
+            [],
+            None,
+            ({"virtual_account": "99781699114888"},),
+        ]
+    )
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_contract_client_finance_facts",
+        lambda _cursor, _order, lock: facts,
+    )
+
+    status, code, values = _finance_values(connection, "CASE-HIST-02")
+
+    assert (status, code) == ("ready", None)
+    assert values["customer_payable_total_ntd"] == 28000
+    assert values["received_total_ntd"] == 0
+    assert values["customer_balance_ntd"] == 28000
+    assert values["service_hours"] == 80.0
+    assert values["deposit_amount_ntd"] == 0
+    assert values["virtual_account"] == "99781699114888"
+
+
 @pytest.mark.parametrize('note', ['', '   ', '補齊聯絡資料'])
 def test_change_history_preserves_optional_note_without_losing_actor_and_time(note):
     class Repository(_Repository):
