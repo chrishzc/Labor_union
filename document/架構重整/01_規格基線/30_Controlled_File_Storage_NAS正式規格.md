@@ -39,7 +39,7 @@
 - `baby_log_photo`：寶寶照護日誌照片（JPG / PNG，月嫂每日到府照護打卡上傳之佐證相片）
 - `meal_photo`：每日月子餐點照片（JPG / PNG，月嫂每日到府備餐上傳之佐證相片）
 - `rich_menu_background`：LINE 圖文選單底圖（PNG，官方帳號發布圖文選單之圖片資源）
-- `database_backup`：資料庫每日冷備份（SQL.GZ + SHA256，NAS DSM 每日 03:00 自動匯出之資料庫快照）
+- `database_backup`：資料庫 SQL 快照備份（SQL.GZ + SHA256，正式 Windows 每日預設 18:00 觸發並寫至 NAS；時間可於「稽核與系統」修改，Global migration §9.5 擁有執行與復原契約）。此為 InnoDB 不停機一致性快照，不代表關閉 MySQL 後的實體資料卷冷備份。
 
 **明確排除與非永久儲存規範**：
 1. `unsigned_contract`（待簽約草案）：需要時由系統依即時事實動態產製供即時下載，不於 NAS 落地永久儲存。
@@ -279,7 +279,9 @@ UI 不能：
 - `/api/v1/storage/settings` 僅允許 enabled persisted root human session。一般登入工會人員仍可透過既有 `/transfer-settings` 與業務入口使用檔案，不取得 NAS 路徑設定權限；公開 LINE 與機器憑證不能讀寫管理設定。
 - 依後續人工確認，取消可編輯 NAS 路徑備註與待部署狀態。設定只保存照片／履歷 bytes 上限、等待秒數與設定 version；Query 的 `container_root` 唯讀顯示 `CONTROLLED_FILE_STORAGE_ROOT` 解析後的程式路徑，未設定回 null。容器無法據此證明 NAS host source path、掛載或 ACL；實體掛載留待 Compose 設定。
 - PUT 不接受 `nas_path` 或 `container_root`；前端預覽／儲存僅有容量與等待時間。先前 JSON 裡的 `nas_path` 不再採用或投影，既有容量、版本與讀取容量仍保留，不以舊備註切換儲存位置。
-- `FILE_SETTINGS_PATH` 指向部署者配置的持久化 JSON 設定檔；未指定時，使用受控根目錄的父層 `file-settings.json`，無根目錄的本機開發則使用 `data/runtime/file-settings.json`。原子替換與程序間鎖保護同一設定檔；`expected_version` CAS 拒絕 stale／busy，無新 DB table、fingerprint 或 migration。
+- `FILE_SETTINGS_PATH` 指向部署者配置的持久化 JSON 設定檔；未指定時，正式單一根目錄使用 root 內隱藏的 `.file-settings.json`，不寫到 root 外。
+  開發環境保留原受控根目錄父層 `file-settings.json`；無根目錄的本機開發仍使用 `data/runtime/file-settings.json`，不搬移舊設定。
+  原子替換與程序間鎖保護同一設定檔；`expected_version` CAS 拒絕 stale／busy，無新 DB table、fingerprint 或 migration。
 - 設定檔的明確值優先於環境初值。容量／等待時間於後續操作重新讀取，即時生效；公開 LINE 經既有私人 HTTPS／獨立機器認證讀取同一限制，不掛載或寫入管理設定檔。`0` 僅停用應用層檔案計時，外層仍可能中斷。
 - 儲存結果不明時不得宣稱失敗或盲目重送，UI 保留錯誤並要求重新 Query；版本衝突顯示 typed 409。舊版合法大檔的讀取容量保留於內部設定 metadata，降低新上傳容量不因此封鎖既有檔案。
 
@@ -316,13 +318,35 @@ UI 不能：
 │       ├── 預設選單底圖_{發布日期}.png
 │       └── 月嫂專用選單底圖_{發布日期}.png
 │
-├── 05_資料庫冷備份 (db_backups)/              # NAS DSM 排程專用（唯讀保護）
+├── 05_資料庫冷備份 (db_backups)/              # Windows 每日／人工 SQL 快照；NAS ACL 保護
 │   └── {YYYY-MM}/                             # 依月份歸檔
 │       ├── union_db_{YYYYMMDD_HHMMSS}.sql.gz
 │       └── union_db_{YYYYMMDD_HHMMSS}.sql.gz.sha256
 │
 └── _staging/                                  # 系統上傳驗證暫存區（超過24小時由GC自動清理）
 ```
+
+**單一根目錄與自動建立（2026-10-30 後續人工定案）**：
+- Windows 正式環境只設定 `.env` 的 `CONTROLLED_FILE_STORAGE_ROOT` 為 NAS 共用根目錄；合約歸檔、模板目錄、
+  受控附件、LINE 媒體與資料庫備份共用此根。正式環境不再採用 `CONTRACT_DOCUMENT_ARCHIVE_ROOT`／
+  `MEDIA_STORAGE_ROOT`，即使舊值仍存在也不得覆寫新根；未設定根目錄不得回存專案或本機預設位置。
+- 共用 root 由 NAS 管理者準備。第一次寫入時自動建立 01～05、`_staging` 與 `04_LINE選單資源 (media)/rich_menus`，
+  繼承 NAS ACL，不建立缺失的 share／root、不更改 Windows／NAS ACL。正式唯讀 Query、建構 storage adapter 及 dry run 不建立資料夾。
+- 案件合約沿用案件編號及既有版本／storage key，archive component 位於 `01_案件合約 (orders)`；模板技術材料仍位於該分類的
+  `template-catalog`。新註冊的最終／未簽 PDF 依案件編號、文件版本及 digest 歸檔；不改既有文件 identity 或 completion writer。
+- 照護照片使用 Scheduling 已驗證的 case／service date／kind／sequence／digest 形成 `02_照護日誌 (scheduling)/{案件編號}/{日期}/`
+  與可讀檔名，canonical object key、opaque file_id、reference、日誌與交易規則不變。
+- 月嫂附件使用當次 Staff facts 的 `union_no`、`name` 形成 `03_月嫂檔案與資格 (staff)/{編號}_{姓名}/`；未填公會編號時標示
+  `ID{staff.id}`，不虛構公會編號。依目的寫入 `resume`／`certificates`／`health_and_police`，並自動建立三個子目錄。
+  此名稱為註冊當時的實體顯示快照；後續更名不搬移或覆寫舊檔。Windows 不合法路徑字元轉為底線，不讓資料欄位逸出根目錄。
+- 上傳及系統產製的 Rich Menu 圖片共用 `04_LINE選單資源 (media)/rich_menus`，發布 reader 使用相同位置。
+  尚未綁定業務附件的 LINE 原始媒體位於 `_staging/line_media`；保留原媒體 owner／retention，不因所在目錄而旁路引用與清理契約。
+- 新正式受控附件在原 outer transaction 內保存既有 finalize intent，commit 後由既有 durable cycle 的 bounded finalize runner 驗證並歸檔。
+  照護照片維持 Scheduling attachment writer 建立 reference 與 finalize intent，不重複排程。新 runner 只選取 01～04 新 locator，
+  不掃描／搬移舊 locator；registered staging identity、下載、digest、CAS、lease、失敗對帳與無 hidden commit 契約不變。
+- 開發環境既有明確合約／媒體路徑保留；本次不改任何現存 `.env`、不搬移／刪除資料、不執行 migration。
+  新 staging 使用 `_staging`；舊 `.controlled-file-staging` 僅保留必要的讀取與同 idempotency key 重播，不自動改寫舊 bytes／metadata。
+  同一 staging ID 在兩處出現時停止核對，不猜測正本；新 NAS finalize cycle 在 development／test 不執行。
 
 **實體檔案命名規範**：
 - 規則：`[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`
@@ -331,6 +355,29 @@ UI 不能：
 **連線與部署中立性**：
 - 具體實體路徑連線格式由環境與部署變數（`.env`）靈活配置，本規格保持技術中立抽象儲存邊界，不硬性綁定特定 IP 或特定磁碟代號。
 - 實體儲存空間必須透過 `FileSystemControlledFileStorage.readiness()` 進行健康檢查，連線中斷或未授權時一律遵循 Fail-Closed 原則，阻擋寫入並報錯，不以本機隨意暫存破壞資料與 NAS 的一致性。
+
+2026-10-30 備份存放對齊（依後續人工修正方案）：Windows 共用根目錄只由原 `.env` 的
+`CONTROLLED_FILE_STORAGE_ROOT` 設定，正式備份須為 NAS UNC；備份位置固定衍生為該根目錄下的
+`05_資料庫冷備份 (db_backups)`，移除獨立 `NAS_BACKUP_DIR`，不讀取舊值作為覆寫或退路。
+不設定本機預設或故障回存位置；不存在的 share／共用 root 不自動建立。依後續人工核准，程式可在已存在、
+可存取且非連結的 NAS 共用 root 下透過共用 layout 建立 01～05 與 `_staging` 子目錄，繼承 NAS ACL；無法建立時於 DB 操作前停止。
+唯讀狀態查詢及 dry run 不建立資料夾。既有三個 Windows 操作入口與 18:00 預設保留，
+不改成 DSM 03:00、SSH 或每日停機。DSM 舊 SQL／實體冷卷工具仍有獨立管理者 consumer，不因 Windows 排程
+而自動啟用。NAS 管理者一次準備共用根目錄及可建立子目錄的 ACL；程式不把 Windows SID／本機 ACL 套在 NAS 共用上。
+
+`05_資料庫冷備份 (db_backups)/YYYY-MM/` 只發布上述 `.sql.gz`／`.sha256` 配對；月份與檔名時間使用
+台灣時間，檔名前綴 `union_db` 為此系統的業務識別，實際 source schema／server identity 保存在驗證紀錄。
+Global migration 在同一備份區使用 `_partial/` 保留未完成輸出、`_receipts/YYYY-MM/` 保存配對成功紀錄、
+`_maintenance/` 保存必要升級／復原 journal 與 canonical runner 所需的技術 artifacts；不套用業務 staging GC。
+匯出 exit、gzip 完整解壓、schema 穩定、SHA-256 及發布後讀回全部通過，才發布成功紀錄；缺少成功紀錄的
+檔案配對不得進入復原清單或顯示成功。既有備份與失敗材料不自動搬移、刪除或覆寫。
+
+備份 artifact／restore receipt 仍由 Global migration 擁有，不為登記備份而回寫正在備份的 source database，
+也不註冊為可透過一般業務附件下載的檔案。共用根目錄時，一般受控檔案 adapter 必須排除備份專區的探索與直接讀取，
+包含其成功紀錄與 maintenance 技術材料；Windows 大小寫與尾端空白／句點等價路徑不得繞過此限制。
+實體儲存檢查沿用受控儲存 readiness，另對所需 write／rename／readback
+執行非敏感 probe。只有排程設定及去敏執行狀態可留在 Windows 本機，SQL 不回存本機。頁面區分設定完成、
+NAS 目前可讀與備份結果；這些訊號不得替代 §9 的隔離性及正式 restore drill，不宣稱完整 disaster readiness。
 
 
 ## 14. Current implementation／acceptance 邊界

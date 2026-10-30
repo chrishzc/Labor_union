@@ -14,6 +14,7 @@ admin actor、typed errors、opaque projections、digest/readback 與 download r
 - transfer settings: `infrastructure/runtime/file_transfer_settings.py` — photo/resume byte limits, file timeout and atomic settings JSON; no business DB authority. Public LINE reads private HTTPS policy rather than the management configuration file.
 - `GET /api/v1/storage/transfer-settings` — authenticated runtime projection for resume UI; other controlled-document capacities retain their existing behavior.
 - settings API: `api/routes/file_settings.py` — root-only `GET/PUT /api/v1/storage/settings`; versioned atomic JSON config for size/timeout only, no DB schema. Container storage path is projected read-only from runtime configuration; path writes are rejected.
+- Default production settings use `.file-settings.json` inside the shared NAS root; writes prepare the existing root's children and never create a missing root. Development settings keep their prior location and explicit FILE_SETTINGS_PATH remains supported.
 - settings UI: `ui_react/src/pages/FileSettingsPage.tsx`, `ui_react/src/pages/FileSettingsPage.css`, `ui_react/src/api/system/file_settings_client.ts` — real read/preview/save/readback for size/timeout, current container path shown as read-only text, no path note or file-category explanation surface.
 
 ## Contracts

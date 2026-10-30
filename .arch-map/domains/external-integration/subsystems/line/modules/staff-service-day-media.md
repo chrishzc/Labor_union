@@ -21,6 +21,7 @@
 - `subsystems/line/liff_media_upload.py` 接收 transport 提供的容量，保留格式驗證，未新增餐食內容辨識。
 - LIFF 同頁提供所選照片預覽、已提交附件預覽／下載與錯誤提示；未知 Apply 結果保留同 key 重試，不另建命令。
 - owning mutation: Scheduling service-day-log workflow registers the controlled object and attachment.
+- media storage adapter: `infrastructure/line/media_adapters.py` — unassociated media uses shared-root `_staging/line_media`; Rich Menu image uploads route to `04_LINE選單資源 (media)/rich_menus` for the publisher's reader. Write-time shared layout readiness, no constructor writes; canonical metadata/owner and existing explicit development roots remain unchanged.
 
 ## Verification
 - test_root: `tests/domains/external-integration/subsystems/line/modules/staff-service-day-media/`

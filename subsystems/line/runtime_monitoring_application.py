@@ -136,6 +136,8 @@ def _redis_observation(now: datetime) -> RuntimeHealthObservation:
 
 def _media_storage_observation(now: datetime) -> RuntimeHealthObservation:
     root = _media_storage_root()
+    if root is None:
+        return _unknown_observation("media_storage", "Media storage", "尚未設定 NAS 根目錄", now)
     try:
         usage = shutil.disk_usage(root)
     except OSError as error:
@@ -159,7 +161,10 @@ def _media_storage_observation(now: datetime) -> RuntimeHealthObservation:
     )
 
 
-def _media_storage_root() -> Path:
+def _media_storage_root() -> Path | None:
+    if os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
+        configured_root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
+        return Path(configured_root) if configured_root else None
     configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
     path = Path(configured)
     return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path

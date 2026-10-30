@@ -48,14 +48,20 @@ class MediaAssetNotFoundError(LookupError):
     pass
 
 
+def _unconfigured_storage_root() -> Path:
+    raise RuntimeError("LINE media storage root is not configured")
+
+
+def _unconfigured_storage_write() -> None:
+    raise RuntimeError("LINE media storage writer is not configured")
+
+
+storage_root_provider: Callable[[], Path] = _unconfigured_storage_root
+prepare_storage_write: Callable[[], None] = _unconfigured_storage_write
+
+
 def media_storage_root() -> Path:
-    configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
-    root = Path(configured)
-    if not root.is_absolute():
-        root = PROJECT_ROOT / root
-    root = root.resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return storage_root_provider()
 
 
 def normalize_uploaded_rich_menu_image(
@@ -104,14 +110,17 @@ def _save_asset(
     connection_factory: Callable[[], Any] | None = None,
     unit_of_work_factory: Callable[[Any], Any] | None = None,
 ) -> dict[str, Any]:
-    storage_key = f"rich_menu/{menu_id}/{uuid.uuid4().hex}.jpg"
+    storage_key = f"rich_menus/{menu_id}/{uuid.uuid4().hex}.jpg"
     target = _safe_storage_path(storage_key)
+    prepare_storage_write()
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".tmp")
     temporary.write_bytes(content)
     os.replace(temporary, target)
     digest = hashlib.sha256(content).hexdigest()
     provider = os.getenv("MEDIA_STORAGE_PROVIDER", "local").strip().lower()
+    if os.getenv("APP_ENV", "development").strip().lower() not in {"development", "dev", "test", "testing"}:
+        provider = "nas"
     if provider not in {"local", "nas"}:
         provider = "local"
 

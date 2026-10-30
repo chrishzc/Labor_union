@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from api.dependencies.contract_templates import get_contract_template_catalog
 from datetime import datetime, timezone
-import os
 from pathlib import Path
+from infrastructure.file.storage_layout import ORDERS_DIRECTORY, component_storage_root
 
 from infrastructure.mysql.contract_signing_document_query_repository import (
     MySqlContractSigningDocumentQueryRepository,
@@ -88,8 +88,8 @@ def get_contract_signing_document_query_application():
 
 
 def _archive_root() -> Path:
-    configured = os.getenv("CONTRACT_DOCUMENT_ARCHIVE_ROOT", "").strip()
-    return Path(configured) if configured else PROJECT_ROOT / "runtime_data" / "contracts"
+    return component_storage_root(ORDERS_DIRECTORY, legacy_variable="CONTRACT_DOCUMENT_ARCHIVE_ROOT",
+                                  development_default=PROJECT_ROOT / "runtime_data" / "contracts")
 
 
 class _JoinedTransaction:

@@ -11,6 +11,10 @@ import hashlib
 import json
 from typing import Any
 import uuid
+from infrastructure.file.storage_layout import (
+    ORDERS_DIRECTORY, SCHEDULING_DIRECTORY, STAFF_DIRECTORY, MEDIA_DIRECTORY,
+    safe_filename_component, unified_storage_enabled,
+)
 
 from domains.controlled_files.reference_finalize import canonical_scheduling_storage_locator
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -216,7 +220,13 @@ class MySqlControlledFileWorkflowRepository:
             version = 1 if predecessor is None else int(predecessor["version_number"]) + 1
             file_id = f"cf_{uuid.uuid4().hex}"
             applied_at_utc = _mysql_utc(applied_at)
-            storage_locator = _storage_locator_for(candidate, staging)
+            staff_record = None
+            if unified_storage_enabled() and candidate.owner is ControlledFileOwner.STAFF:
+                cursor.execute("SELECT id,union_no,name FROM staff WHERE id=%s", (candidate.subject_reference,))
+                staff_record = cursor.fetchone()
+                if not isinstance(staff_record, Mapping):
+                    raise RuntimeError("controlled_file_staff_storage_subject_missing")
+            storage_locator = _storage_locator_for(candidate, staging, version=version, staff_record=staff_record)
             cursor.execute(
                 _OBJECT_INSERT_SQL,
                 (
@@ -241,6 +251,7 @@ class MySqlControlledFileWorkflowRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("controlled_file_registration_insert_failed")
+        self._enqueue_nas_finalize(candidate, file_id, applied_at)
         return _candidate_readback(candidate, file_id, version, applied_at)
 
     def mark_staging_registered(
@@ -253,6 +264,22 @@ class MySqlControlledFileWorkflowRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("controlled_file_staging_state_conflict")
+
+    def _enqueue_nas_finalize(self, candidate, file_id, applied_at) -> None:
+        # Existing development objects retain their original locations. New
+        # production objects use the existing committed finalize queue.
+        # Scheduling already queues its own finalize intent together with the
+        # authoritative service-day attachment reference. Do not duplicate it.
+        if not unified_storage_enabled() or (candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {
+            ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
+        }):
+            return
+        from domains.controlled_files.reference_finalize import ControlledFileFinalizeIntent
+        from infrastructure.db.controlled_file_reference_finalize_repository import MySqlControlledFileReferenceFinalizeRepository
+        MySqlControlledFileReferenceFinalizeRepository(self._connection).create_finalize_intent(
+            ControlledFileFinalizeIntent(finalize_id="cff_" + uuid.uuid4().hex,
+                staging_id=candidate.staging_id, controlled_file_object_id=file_id,
+                expected_sha256=candidate.sha256_digest, created_at=applied_at))
 
     def save_receipt(
         self,
@@ -658,7 +685,41 @@ def _preview_fingerprint_from_context(row: Mapping[str, object]) -> PreviewFinge
     )
 
 
-def _storage_locator_for(candidate, staging) -> str:
+def _storage_locator_for(candidate, staging, *, version=1, staff_record=None) -> str:
+    if unified_storage_enabled():
+        subject = safe_filename_component(candidate.subject_reference)
+        digest = candidate.sha256_digest[:6]
+        extension = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png",
+                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}.get(candidate.mime_type, ".bin")
+        if candidate.owner is ControlledFileOwner.SCHEDULING and candidate.purpose in {ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO}:
+            # Canonical key is still owned by Scheduling; only its physical
+            # presentation changes, using facts already validated by that owner.
+            canonical_scheduling_storage_locator(object_key=candidate.object_key, mime_type=candidate.mime_type)
+            parts = candidate.object_key.split("/")
+            service_date, sequence = parts[4], parts[6]
+            kind = "餐點" if candidate.purpose is ControlledFilePurpose.MEAL_PHOTO else "寶寶"
+            return f"{SCHEDULING_DIRECTORY}/{subject}/{service_date}/照護照片_{service_date}_{kind}_{sequence}_{digest}{extension}"
+        if candidate.owner is ControlledFileOwner.STAFF:
+            if staff_record is None:
+                raise RuntimeError("controlled_file_staff_storage_subject_missing")
+            number = safe_filename_component(staff_record.get("union_no") or f"ID{staff_record['id']}")
+            name = safe_filename_component(staff_record["name"])
+            section, label = {
+                ControlledFilePurpose.STAFF_RESUME: ("resume", "月嫂履歷"),
+                ControlledFilePurpose.STAFF_CERTIFICATE: ("certificates", "證照"),
+                ControlledFilePurpose.STAFF_HEALTH_EXAM: ("health_and_police", "體檢報告"),
+            }[candidate.purpose]
+            return f"{STAFF_DIRECTORY}/{number}_{name}/{section}/{label}_{number}_{name}_v{version}_{digest}{extension}"
+        if candidate.owner is ControlledFileOwner.LINE_INTEGRATION:
+            return f"{MEDIA_DIRECTORY}/rich_menus/選單底圖_{subject}_v{version}_{digest}{extension}"
+        if candidate.owner is ControlledFileOwner.CONTRACT_SIGNING:
+            label = "客戶合約" if "client" in candidate.object_key else "月嫂承攬協議" if "staff" in candidate.object_key else "案件合約"
+            status = "已簽署" if candidate.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT else "未簽署"
+            return f"{ORDERS_DIRECTORY}/{subject}/{label}_{subject}_v{version}_{status}_{digest}{extension}"
+        if candidate.owner is ControlledFileOwner.SCHEDULING:
+            return f"{SCHEDULING_DIRECTORY}/{subject}/服務確認_{subject}_v{version}_{digest}{extension}"
+        return f"{ORDERS_DIRECTORY}/{subject}/文件_{subject}_v{version}_{digest}{extension}"
     if (
         candidate.owner is ControlledFileOwner.SCHEDULING
         and candidate.purpose

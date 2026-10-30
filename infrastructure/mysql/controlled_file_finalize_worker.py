@@ -29,6 +29,7 @@ class MySqlControlledFileFinalizeRunner:
         now: Callable[[], datetime],
         *,
         limit: int = 100,
+        layout_only: bool = False,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("controlled file finalize worker identity is required")
@@ -39,6 +40,7 @@ class MySqlControlledFileFinalizeRunner:
         self._worker_id = worker_id
         self._now = now
         self._limit = limit
+        self._layout_only = layout_only
 
     def run_once(self) -> int:
         observed_at = self._now()
@@ -47,8 +49,7 @@ class MySqlControlledFileFinalizeRunner:
         connection = self._connection_factory()
         try:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    """
+                statement = """
                     SELECT finalize_id
                     FROM controlled_file_finalize_intents
                     WHERE finalize_state IN ('pending','reconciliation_required')
@@ -56,12 +57,18 @@ class MySqlControlledFileFinalizeRunner:
                            AND claimed_at_utc < %s)
                     ORDER BY id
                     LIMIT %s
-                    """,
-                    (
-                        (observed_at - timedelta(hours=24)).astimezone(timezone.utc).replace(tzinfo=None),
-                        self._limit,
-                    ),
-                )
+                    """
+                parameters = ((observed_at - timedelta(hours=24)).astimezone(timezone.utc).replace(tzinfo=None), self._limit)
+                if self._layout_only:
+                    from infrastructure.file.storage_layout import BUSINESS_DIRECTORIES
+                    statement = """SELECT intent.finalize_id FROM controlled_file_finalize_intents intent
+                        JOIN controlled_file_objects object ON object.id=intent.controlled_file_object_id
+                        WHERE (intent.finalize_state IN ('pending','reconciliation_required')
+                            OR (intent.finalize_state='processing' AND intent.claimed_at_utc < %s))
+                        AND SUBSTRING_INDEX(object.storage_locator,'/',1) IN (%s,%s,%s,%s)
+                        ORDER BY intent.id LIMIT %s"""
+                    parameters = (parameters[0], *BUSINESS_DIRECTORIES[:4], self._limit)
+                cursor.execute(statement, parameters)
                 rows = cursor.fetchall() or ()
             finalize_ids = tuple(str(row["finalize_id"]) for row in rows)
         finally:

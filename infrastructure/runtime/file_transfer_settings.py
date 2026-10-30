@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from infrastructure.file.storage_layout import StorageLayoutError, ensure_storage_layout, unified_storage_enabled, configured_storage_root, is_development_environment
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,14 @@ class FileSettingsError(RuntimeError):
 def file_settings_path() -> Path:
     explicit = os.getenv("FILE_SETTINGS_PATH", "").strip()
     root = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
+    if not explicit and not is_development_environment():
+        try:
+            configured = configured_storage_root()
+        except StorageLayoutError:
+            raise FileSettingsError("file_settings_unavailable") from None
+        if configured is None:
+            raise FileSettingsError("file_settings_unavailable")
+        return configured / ".file-settings.json"
     return Path(explicit) if explicit else (Path(root).parent / "file-settings.json" if root else Path("data/runtime/file-settings.json"))
 
 
@@ -91,6 +100,8 @@ def file_settings_view() -> dict:
 
 @contextmanager
 def _settings_lock(path: Path):
+    if unified_storage_enabled() and not os.getenv("FILE_SETTINGS_PATH", "").strip():
+        ensure_storage_layout(path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(path.suffix + ".lock").open("a+b") as stream:
         if os.name == "nt":
@@ -140,5 +151,5 @@ def save_file_settings(*, expected_version: int, photo_max_bytes: int, resume_ma
             finally:
                 Path(temporary).unlink(missing_ok=True)
             return file_settings_view()
-    except (OSError, PermissionError) as error:
+    except (OSError, PermissionError, StorageLayoutError) as error:
         raise FileSettingsError("file_settings_unavailable") from error

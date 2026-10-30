@@ -4,6 +4,7 @@ import { sessionClient } from './auth/session_client';
 
 const statusSchema = z.object({
   configured: z.boolean(), enabled: z.boolean(), time: z.string(), version: z.number().int(),
+  storage_ready: z.boolean(), storage_message: z.string(), disaster_recovery_ready: z.boolean(),
   last_backup: z.string().nullable(),
   last_result: z.object({ status: z.enum(['passed', 'failed']), time: z.string(), message: z.string().nullable().optional() }).nullable(),
 });

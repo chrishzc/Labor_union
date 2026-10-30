@@ -15,6 +15,7 @@
 - `infrastructure/file/contract_template_workbook.py`
 - `infrastructure/file/contract_template_images.py` — 原 XLSX raster anchor、尺寸與內嵌 bytes，供管理及 PDF renderer 共用。
 - `api/dependencies/contract_templates.py`
+- Production archive/template roots derive from the single NAS root's `01_案件合約 (orders)` via shared storage_layout; writes inherit the NAS layout and reads do not create directories. Existing explicit development archive roots stay unchanged.
 - `api/routes/contract_templates.py`
 - `api/schemas/contract_templates.py`
 - `ui_react/src/pages/ContractTemplatesPage.tsx`

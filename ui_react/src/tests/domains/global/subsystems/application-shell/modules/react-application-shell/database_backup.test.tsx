@@ -7,6 +7,7 @@ import { NAV_ITEMS, PAGE_SECTION_MAP } from '../../../../../../../components/Mas
 
 vi.mock('../../../../../../../api/database_backup_client', () => ({ databaseBackupClient: { read: vi.fn(), save: vi.fn() } }));
 const initial = { configured: true, enabled: true, time: '18:00', version: 3,
+  storage_ready: true, storage_message: 'NAS 備份區目前可讀取；備份時會再驗證寫入。', disaster_recovery_ready: false,
   last_backup: '2026-10-30T10:00:00Z', last_result: { status: 'passed' as const, time: '2026-10-30T10:00:00Z' } };
 const show = () => render(<UnsavedChangesProvider><DatabaseBackupPage /></UnsavedChangesProvider>);
 
@@ -40,5 +41,14 @@ describe('資料庫備份時間', () => {
     await waitFor(() => expect(screen.getByText(/備份時間已由其他人修改/)).toBeInTheDocument());
     expect(client.save).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/已設定每天/)).not.toBeInTheDocument();
+  });
+  it('NAS離線時停止啟用，顯示不回存本機與待復原演練狀態', async () => {
+    vi.mocked(client.read).mockResolvedValue({ ...initial, enabled: false, storage_ready: false,
+      storage_message: 'NAS 備份區目前無法使用，備份不會改存本機。' });
+    show();
+    expect(await screen.findByRole('button', { name: '啟用每日備份' })).toBeDisabled();
+    expect(screen.getByText('NAS 備份區目前無法使用，備份不會改存本機。')).toBeInTheDocument();
+    expect(screen.getByText('正式復原演練與備份隔離性仍待維護人員驗收。')).toBeInTheDocument();
+    expect(client.save).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import requests
 
-from domains.line.media import LineMediaMetadata
+from domains.line.media import LineMediaCategory, LineMediaMetadata
 from subsystems.line.media_contracts import LineMediaDownload
 
 _CONTENT_ENDPOINT = "https://api-data.line.me/v2/bot/message/{media_id}/content"
@@ -44,17 +44,22 @@ class LineMediaApiAdapter:
 
 class FileSystemLineMediaObjectStore:
     def __init__(self, storage_root: str | Path) -> None:
-        self._storage_root = Path(storage_root).resolve()
-        self._storage_root.mkdir(parents=True, exist_ok=True)
+        self._configured_root = Path(storage_root)
 
     def put(self, metadata: LineMediaMetadata, content: bytes) -> str:
         if hashlib.sha256(content).hexdigest() != metadata.content_sha256:
             raise ValueError("LINE media content hash does not match metadata")
         if len(content) != metadata.size_bytes:
             raise ValueError("LINE media content size does not match metadata")
+        from infrastructure.file.storage_layout import MEDIA_DIRECTORY, STAGING_DIRECTORY, prepare_component_write
+        root = self._configured_root
+        if metadata.category is LineMediaCategory.RICH_MENU_IMAGE and root.name == "line_media" and root.parent.name == STAGING_DIRECTORY:
+            root = root.parent.parent / MEDIA_DIRECTORY
+        prepare_component_write(root)
+        resolved_root = root.resolve()
         relative_path = _relative_media_path(metadata)
-        target = (self._storage_root / relative_path).resolve()
-        if self._storage_root not in target.parents:
+        target = (resolved_root / relative_path).resolve()
+        if resolved_root not in target.parents:
             raise ValueError("LINE media storage path escaped configured root")
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
@@ -74,7 +79,8 @@ class FileSystemLineMediaObjectStore:
 def _relative_media_path(metadata: LineMediaMetadata) -> Path:
     digest = metadata.content_sha256
     extension = _CONTENT_TYPE_EXTENSIONS.get(metadata.content_type, ".bin")
-    return Path(metadata.category.value) / digest[:2] / f"{digest}{extension}"
+    directory = "rich_menus" if metadata.category is LineMediaCategory.RICH_MENU_IMAGE else metadata.category.value
+    return Path(directory) / digest[:2] / f"{digest}{extension}"
 
 
 _CONTENT_TYPE_EXTENSIONS = {

@@ -563,22 +563,17 @@ def _aware_utc(value: datetime) -> datetime:
 
 
 def _contract_archive_root():
-    configured = os.getenv("CONTRACT_DOCUMENT_ARCHIVE_ROOT", "").strip()
-    return (
-        Path(configured)
-        if configured
-        else Path(__file__).resolve().parents[2]
-        / "runtime_data"
-        / "contracts"
-    )
+    from infrastructure.file.storage_layout import ORDERS_DIRECTORY, component_storage_root
+    return component_storage_root(ORDERS_DIRECTORY, legacy_variable="CONTRACT_DOCUMENT_ARCHIVE_ROOT",
+                                  development_default=Path(__file__).resolve().parents[2] / "runtime_data" / "contracts")
 
 
 def _controlled_file_storage_root() -> Path | None:
-    configured = os.getenv("CONTROLLED_FILE_STORAGE_ROOT", "").strip()
-    if configured:
-        return Path(configured)
-    environment = os.getenv("APP_ENV", "development").strip().lower()
-    if environment in {"production", "prod"}:
+    from infrastructure.file.storage_layout import configured_storage_root, is_development_environment
+    configured = configured_storage_root()
+    if configured is not None:
+        return configured
+    if not is_development_environment():
         return None
     root = Path(__file__).resolve().parents[2] / "runtime_data" / "controlled-files"
     root.mkdir(parents=True, exist_ok=True)

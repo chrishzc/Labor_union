@@ -610,30 +610,48 @@ Windows 操作入口為 `backup_nas_database.bat`、`initialize_nas_schema.bat`�
 
 - Target／授權：獨立 `.env.nas-maintenance` 須明確啟用並固定 NAS host／port，與選定 runtime `.env` 一致。
   拒絕 loopback、本機開發庫及 process override 衝突。缺設定與 `--dry-run` 均零連線／DB 寫入／排程。
-  技術人員一次備妥原 runtime 帳號、不同的 backup-read 與 candidate-write 帳號、MySQL 8 原生 clients。
+  技術人員一次備妥原 runtime 帳號、備份與維護連線帳密、MySQL 8 原生 clients。
+  依後續人工核准，備份與維護可共用同一帳號（含 root），兩組帳密仍須明確填妥；備份 session 維持唯讀。
   不啟用 SSH、不修改 NAS 容器或全域 MySQL 設定、不放寬 TLS。
 - Backup：每日或手動使用原生 `mysqldump --single-transaction --quick` 匯出 InnoDB SQL、view、routine、
   trigger、event。期間禁止 DDL／TRUNCATE；不要求停止一般業務寫入。UTF-8、binary hex、成功 exit、完成尾註、
   前後 schema 定義／目標一致及 SHA-256 全部通過才由 partial 目錄發布成功備份。歷史與失敗 partial 保留，
   不自動覆蓋／刪除。SQL／credential 不進 console／API；備份位於專用私有目錄。
+  依人工核准的存放修正，共用根目錄僅從原 `.env` 的 `CONTROLLED_FILE_STORAGE_ROOT` 取得且只接受 NAS UNC，
+  固定使用其下 `05_資料庫冷備份 (db_backups)`；移除 `NAS_BACKUP_DIR`，不以舊值覆寫或作退路；不退回本機、
+  不建立缺失的 share／共用 root、不套用 Windows ACL。依後續人工核准，寫入前可於已存在、可讀且非連結的
+  NAS 共用 root 自動建立固定備份子目錄，繼承 NAS ACL；無建立權限即停止，唯讀查詢及 dry run 不建立。
+  重用 Controlled File Storage readonly readiness，寫入前驗
+  write／rename／readback probe，NAS ACL 由現場管理者準備。台灣時間按月輸出 `union_db_YYYYMMDD_HHMMSS.sql.gz`
+  與同名 `.sha256`；串流壓縮，不先把完整 SQL 寫到本機。gzip／SQL 尾註、schema 穩定、digest 與發布後讀回
+  均通過才在 `_receipts/YYYY-MM/` 建立成功 marker；跨配對中斷無 marker 不可復原或視為成功。
+  `_partial/` 保存未完成材料；必要 migration 技術 artifacts 在同一 NAS 的 `_maintenance/` 保存，既有保留契約不變。
 - Upgrade：人工先停止整套 Windows writer，明確確認後才執行。先 canonical 零寫入 plan，再完整備份；
   新建 `lu_nas_upgrade_*` schema，只於該副本重用原 restore／ordered schema／backfill／verify／fresh-read switch。
-  Source 全程不執行 DDL／DML／DROP。不同 read/write principal，TLS 與原生 client 選取由 connection transport 提供。
+  Source 全程不執行 DDL／DML／DROP。Read/write connection 各自限定用途，允許共用 principal；TLS 與原生 client 選取由 connection transport 提供。
   remote candidate 的補助 policy 使用原 hash-checked library rules，receipt 仍由 canonical runner 驗證；
   Twins Payroll 沿原 CLI。未知 backfill 預檢停止，不跳過或假設完成；不改既有 hash-bound artifact／business semantics。
   新建且未曝光給 runtime 的 NAS 副本，已 exact／允許 retired-absent 的 parts 可沿用入場完整快照，
   避免逐項重讀全部 metadata；pending／partial 保留每步 fresh-read，最後完整 metadata／row／switch fresh-read 不省略。
 - Runtime／backup access：僅將目前兩個帳號既有的 source schema 層級權限等量授予新副本，實際原 credential
-  連線成功後才可切換；不改密碼、全域權限或原庫 grants。角色／細粒度等無法證明等價的配置停止，
+  連線成功後才可切換；已有完整全域管理權且無部分撤權者不新增授權，仍驗原 credential 的副本連線。
+  不改密碼、全域權限或原庫 grants。角色／細粒度等無法證明等價的配置停止，
   留原 permission owner 處理，不自動改成 broad policy。
 - Restore：人工選一份已完成且 hash 相符的備份，先匯入全新 `lu_nas_restore_*`，不清空／覆寫原庫；
-  只執行已放入專用受保護備份目錄的 SQL，不直接執行外部下載路徑或符號連結。
+  預設讀取由共用根目錄衍生的備份專區；預設位置無法讀取或沒有完整成功備份時，自動開啟 Windows 原生
+  檔案選擇視窗，單選 `.sql.gz`，不要求非技術人員輸入路徑。視窗取消在 DB 連線前停止；互動等待不設 30 秒逾時。
+  技術 CLI `--backup-file` 保留，視窗失敗不退回路徑輸入。依後續人工核准，手動來源可在其他 NAS 或本機既存副本；仍須保留 v2 月份、校驗檔及
+  成功紀錄，且整條來源路徑不含 symlink／junction。任意 SQL、缺失／損壞材料不執行；來源完整性先於 DB 連線驗證。
+  手動來源只供本次唯讀復原，不修改日常備份位置；maintenance journal 仍寫入已設定 NAS 備份專區，該共用根目錄須可寫。
   原庫缺失或損壞不阻止建立副本。保留 charset／collation，比對完整 object definitions／inventory，逐表 CHECK，
   目前程式的 readonly current gate 通過並驗原 credential 後，才原子修改 `.env` 唯一 DB_DATABASE。
   未改綁而仍參照原庫的 object definitions 停止切換；含 SQL events 且 server event_scheduler 開啟時，
   在匯入前停止並交維護人員隔離處理，不自動修改全域排程設定。
   備份版本不相容時保留副本、停止切換；不猜測資料轉換或自動回復。MySQL server 必須可連線；
   SQL 不含照片／附件實體檔、Windows 設定、MySQL 帳號／GRANT、MFA／其他加密 key，這些須另作災難備份。
+  canonical dump validation／restore transport 同時支援 native SQL 與 gzip；Windows 三入口只發布及選取 v2
+  壓縮配對與對應成功紀錄。復原前完整驗 checksum、gzip CRC、解壓後 digest；匯入時串流解壓給 MySQL，
+  不把壓縮 bytes 當 SQL，也不落本機完整 SQL。CLI 明確檔案選擇為 `--backup-file`，舊測試材料不自動轉換或刪除。
 - Switch／failure：預覽／操作期間的原設定 digest 改變即 typed safe stop；持久化切換 before／after hash 後才
   原子改設定，不寫含秘密的完整 `.env` receipt。失敗保留原庫、備份、副本與紀錄，不 retry／DROP／自動 rollback。
   Windows 換檔前先把原 `.env` 存取規則複製到空白暫存檔，成功才寫內容；權限與最後 config digest 核對失敗不切換。

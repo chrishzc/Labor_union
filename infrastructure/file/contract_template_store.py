@@ -129,6 +129,8 @@ class FileContractTemplateStore:
 
     @contextmanager
     def _lock(self, key: str):
+        from infrastructure.file.storage_layout import prepare_component_write
+        prepare_component_write(self.root.parent)
         directory = self._directory(key)
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / '.catalog.lock').open('a+b') as handle:

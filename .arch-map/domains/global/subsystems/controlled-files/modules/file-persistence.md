@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `infrastructure/db/controlled_file_repository.py`
+- Production-only physical locators use current case/date/kind/sequence or Staff number/name display facts and immutable version/digest; opaque IDs and canonical business object keys remain unchanged. New non-photo registrations enqueue the existing finalize intent in the caller's transaction; Scheduling photos retain their attachment-owned enqueue. No legacy locator rewrite or hidden commit.
 
 ## Dependencies
 - inbound: `subsystems/controlled_files/workflow.py` — typed facts、claims、receipts 與 caller-owned transaction。
@@ -19,6 +20,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `tests/test_controlled_file_repository.py`
+- test_root: `tests/domains/global/subsystems/controlled-files/modules/file-persistence/`
 - provenance: Existing maintained repository tests cover SQL mapping, lock/CAS, command identity and zero hidden commit; no test relocation.
 
 ## Change triggers

@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import hashlib
+import gzip
 import json
 import os
 from pathlib import Path
@@ -4929,7 +4930,9 @@ def validate_dump(
     path = dump_path.expanduser().resolve()
     if not path.is_file() or path.stat().st_size <= 0:
         raise UpgradeBlocked("source dump is missing or empty")
-    head = path.read_bytes()[: 1024 * 1024]
+    opener = gzip.open if path.suffix == ".gz" else Path.open
+    with opener(path, "rb") as stream:
+        head = stream.read(1024 * 1024)
     if MYSQL_DUMP_MARKER not in head:
         raise UpgradeBlocked("source backup is not a mysqldump artifact")
     markers = (
@@ -5021,6 +5024,39 @@ def create_source_dump(
     return receipt
 
 
+def restore_sql_dump(command, dump_path, environment):
+    """Import native SQL or stream a gzip archive without a plaintext disk copy."""
+    path = Path(dump_path).expanduser().resolve()
+    if path.suffix != ".gz":
+        with path.open("rb") as stream:
+            return subprocess.run(command, stdin=stream, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env=environment, check=False)
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, env=environment)
+    from threading import Timer
+    deadline = Timer(7200, process.kill)
+    deadline.daemon = True
+    deadline.start()
+    try:
+        with gzip.open(path, "rb") as stream:
+            while chunk := stream.read(65536):
+                process.stdin.write(chunk)
+        process.stdin.close()
+        return subprocess.CompletedProcess(command, process.wait(timeout=7200))
+    except (OSError, EOFError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(command, 2)
+    finally:
+        deadline.cancel()
+        if not process.stdin.closed:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+
+
 def restore_candidate(
     config: DatabaseConfig | SeparateDatabaseConfig,
     source: str,
@@ -5057,13 +5093,7 @@ def restore_candidate(
     command = _mysql_base(
         candidate_config, mysql, container=mysql_container
     ) + [candidate]
-    with dump_path.expanduser().resolve().open("rb") as source_handle:
-        completed = subprocess.run(
-            command, stdin=source_handle, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=_client_environment(candidate_config),
-            check=False,
-        )
+    completed = restore_sql_dump(command, dump_path, _client_environment(candidate_config))
     if completed.returncode != 0:
         prepared.update(
             status="partial", failed_phase="restore",

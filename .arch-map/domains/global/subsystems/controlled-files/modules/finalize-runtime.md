@@ -13,6 +13,7 @@ reports availability without digest-verified storage bytes.
 - domain contracts: `domains/controlled_files/reference_finalize.py`
 - workflow: `subsystems/controlled_files/reference_finalize.py`
 - MySQL runner: `infrastructure/mysql/controlled_file_finalize_worker.py`
+- Shared-root production transport can set `layout_only=True`; its bounded selection includes only new 01–04 locators, preserving all pending legacy objects. Existing default runner behavior remains available to its original consumers.
 
 ## Verification
 - integration_root: `tests/domains/global/subsystems/controlled-files/integration/`

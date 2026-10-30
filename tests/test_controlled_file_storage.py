@@ -232,7 +232,7 @@ def test_finalize_moves_registered_staging_to_durable_case_locator(tmp_path: Pat
     assert (tmp_path / object_reference).read_bytes() == content
     staging_payload = (
         tmp_path
-        / ".controlled-file-staging"
+        / "_staging"
         / "objects"
         / "cf"
         / staged.staging_id

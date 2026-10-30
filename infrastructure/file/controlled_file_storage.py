@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+from infrastructure.file.storage_layout import DATABASE_BACKUP_DIRECTORY, STAGING_DIRECTORY, StorageLayoutError, ensure_storage_layout
 
 from subsystems.controlled_files.contracts import (
     ControlledFileContent,
@@ -35,7 +36,8 @@ _MAX_DISCOVERY_LIMIT = 100
 _DEFAULT_MAX_READ_BYTES = 20 * 1024 * 1024
 _DEFAULT_MAX_STAGING_BYTES = 20 * 1024 * 1024
 _STAGING_TTL = timedelta(hours=24)
-_STAGING_DIRECTORY = ".controlled-file-staging"
+_STAGING_DIRECTORY = STAGING_DIRECTORY
+_LEGACY_STAGING_DIRECTORY = ".controlled-file-staging"
 _STAGING_ID_PREFIX = "cfs_"
 
 
@@ -227,6 +229,11 @@ class FileSystemControlledFileStorage:
         )
         idempotency_digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         index_path = staging_root / "idempotency" / f"{idempotency_digest}.json"
+        legacy_index = root / _LEGACY_STAGING_DIRECTORY / "idempotency" / index_path.name
+        if not index_path.exists() and legacy_index.is_file():
+            if any(path.is_symlink() or path.is_junction() for path in _path_chain(root, legacy_index)):
+                raise ControlledFileStorageError("controlled_file_staging_locator_invalid", "staging 儲存邊界無效", retryable=False)
+            index_path = legacy_index
         staging_id = f"{_STAGING_ID_PREFIX}{uuid.uuid4().hex}"
         object_directory = self._create_staging_object_directory(staging_root, staging_id)
         now = datetime.fromtimestamp(self._clock(), timezone.utc)
@@ -367,7 +374,7 @@ class FileSystemControlledFileStorage:
             )
 
         reference = _validate_object_reference(object_reference)
-        if reference.parts[0] == _STAGING_DIRECTORY:
+        if reference.parts[0] in {_STAGING_DIRECTORY, _LEGACY_STAGING_DIRECTORY}:
             raise ControlledFileStorageError(
                 "controlled_file_reference_invalid",
                 "正式檔案位置不可位於 staging 目錄",
@@ -403,7 +410,7 @@ class FileSystemControlledFileStorage:
             )
 
         target = root.joinpath(*reference.parts)
-        if any(path.is_symlink() for path in _path_chain(root, target)):
+        if any(path.is_symlink() or path.is_junction() for path in _path_chain(root, target)):
             raise ControlledFileStorageError(
                 "controlled_file_reference_invalid",
                 "檔案識別超出受控儲存範圍",
@@ -469,7 +476,14 @@ class FileSystemControlledFileStorage:
         )
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            if any(path.is_symlink() for path in _path_chain(root, target)):
+            from infrastructure.file.storage_layout import STAFF_DIRECTORY
+            if reference.parts[0] == STAFF_DIRECTORY and len(reference.parts) >= 4:
+                for section in ("resume", "certificates", "health_and_police"):
+                    sibling = root / reference.parts[0] / reference.parts[1] / section
+                    if sibling.is_symlink() or sibling.is_junction():
+                        raise ControlledFileStorageError("controlled_file_reference_invalid", "檔案識別超出受控儲存範圍", retryable=False)
+                    sibling.mkdir(exist_ok=True)
+            if any(path.is_symlink() or path.is_junction() for path in _path_chain(root, target)):
                 raise ControlledFileStorageError(
                     "controlled_file_reference_invalid",
                     "檔案識別超出受控儲存範圍",
@@ -558,6 +572,7 @@ class FileSystemControlledFileStorage:
     def _ensure_staging_layout(self, root: Path) -> Path:
         staging_root = root / _STAGING_DIRECTORY
         try:
+            ensure_storage_layout(root)
             for directory in (staging_root, staging_root / "objects", staging_root / "idempotency"):
                 if directory.is_symlink():
                     raise ControlledFileStorageError(
@@ -569,7 +584,7 @@ class FileSystemControlledFileStorage:
             staging_root.resolve(strict=True).relative_to(root)
         except ControlledFileStorageError:
             raise
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, StorageLayoutError) as error:
             raise ControlledFileStorageError(
                 "controlled_file_staging_write_failed",
                 "staging 檔案目前無法寫入",
@@ -604,13 +619,16 @@ class FileSystemControlledFileStorage:
         identity = _validate_staging_id(staging_id)
         staging_root = root / _STAGING_DIRECTORY
         candidate = staging_root / "objects" / identity[:2] / identity
-        if any(path.is_symlink() for path in _path_chain(root, candidate)):
+        legacy = root / _LEGACY_STAGING_DIRECTORY / "objects" / identity[:2] / identity
+        if any(path.is_symlink() or path.is_junction() for target in (candidate, legacy) for path in _path_chain(root, target)):
             raise ControlledFileStorageError(
                 "controlled_file_staging_locator_invalid",
                 "staging 儲存邊界無效",
                 retryable=False,
             )
-        return candidate
+        if candidate.exists() and legacy.exists():
+            raise ControlledFileStorageError("controlled_file_staging_locator_invalid", "staging 識別存在重複位置，需要核對。", retryable=False)
+        return legacy if not candidate.exists() and legacy.exists() else candidate
 
     def _read_staging_record(
         self,
@@ -758,6 +776,7 @@ class FileSystemControlledFileStorage:
                     name
                     for name in directory_names
                     if not name.startswith(".") and not (current / name).is_symlink()
+                    and not (current == root and name.rstrip(" .").casefold() in {DATABASE_BACKUP_DIRECTORY.casefold(), STAGING_DIRECTORY.casefold()})
                 )
                 for filename in sorted(filenames):
                     target = current / filename
@@ -794,7 +813,7 @@ class FileSystemControlledFileStorage:
     @staticmethod
     def _resolve_target(root: Path, reference: PurePosixPath) -> Path:
         candidate = root.joinpath(*reference.parts)
-        if any(path.is_symlink() for path in _path_chain(root, candidate)):
+        if any(path.is_symlink() or path.is_junction() for path in _path_chain(root, candidate)):
             raise ControlledFileStorageError(
                 "controlled_file_reference_invalid",
                 "檔案識別超出受控儲存範圍",
@@ -832,7 +851,8 @@ def _validate_object_reference(value: str) -> PurePosixPath:
             retryable=False,
         )
     reference = PurePosixPath(value)
-    if reference.is_absolute() or any(part in {"", ".", ".."} for part in reference.parts):
+    if (reference.is_absolute() or any(part in {"", ".", ".."} for part in reference.parts)
+            or (reference.parts and reference.parts[0].rstrip(" .").casefold() in {DATABASE_BACKUP_DIRECTORY.casefold(), STAGING_DIRECTORY.casefold(), _LEGACY_STAGING_DIRECTORY.casefold()})):
         raise ControlledFileStorageError(
             "controlled_file_reference_invalid",
             "檔案識別格式無效",

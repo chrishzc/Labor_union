@@ -1,6 +1,6 @@
 """Compose Contract Signing's immutable template catalog under its archive root."""
-import os
 from pathlib import Path
+from infrastructure.file.storage_layout import ORDERS_DIRECTORY, component_storage_root
 
 from infrastructure.file.contract_template_store import FileContractTemplateStore
 from infrastructure.file.contract_template_workbook import OpenpyxlContractTemplateWorkbook
@@ -8,8 +8,8 @@ from subsystems.contract_signing.template_management import ContractTemplateMana
 
 
 def get_contract_template_catalog() -> FileContractTemplateStore:
-    configured = os.getenv('CONTRACT_DOCUMENT_ARCHIVE_ROOT', '').strip()
-    root = Path(configured) if configured else Path(__file__).resolve().parents[2] / 'runtime_data' / 'contracts'
+    root = component_storage_root(ORDERS_DIRECTORY, legacy_variable="CONTRACT_DOCUMENT_ARCHIVE_ROOT",
+                                  development_default=Path(__file__).resolve().parents[2] / "runtime_data" / "contracts")
     return FileContractTemplateStore(root / 'template-catalog')
 
 

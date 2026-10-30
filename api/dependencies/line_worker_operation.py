@@ -133,7 +133,7 @@ def _canonical_runtime(
         now,
     )
     event_consumer = _event_consumer(worker_identity, now, delivery_worker.run_new_reply_tasks)
-    rich_menu_images = FileSystemRichMenuImageStore(_media_storage_root())
+    rich_menu_images = FileSystemRichMenuImageStore(_rich_menu_storage_root())
     rich_menu_provider = LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load)
     return CanonicalLineWorkerRuntime(
         event_consumer,
@@ -204,7 +204,9 @@ def _event_consumer(worker_identity: str, now, on_new_reply_tasks=None) -> LineW
 
 def _additional_workers(worker_identity: str, now, images, provider) -> dict[str, object]:
     from api.dependencies.line_deposit import get_deposit_notifications
+    from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationWorker
     return {
+        "payment_reminder_notifications": PaymentReminderNotificationWorker(open_line_unit_of_work,now,get_deposit_notifications()),
         "deposit_settlement_notifications": get_deposit_notifications(),
         "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
         "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),
@@ -352,6 +354,14 @@ def _configured_public_base_url() -> str:
 
 
 def _media_storage_root() -> Path:
-    configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
-    path = Path(configured)
+    from infrastructure.file.storage_layout import STAGING_DIRECTORY, component_storage_root
+    path = component_storage_root(f"{STAGING_DIRECTORY}/line_media", legacy_variable="MEDIA_STORAGE_ROOT",
+                                  development_default=PROJECT_ROOT / ".local_media")
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def _rich_menu_storage_root() -> Path:
+    from infrastructure.file.storage_layout import MEDIA_DIRECTORY, component_storage_root
+    path = component_storage_root(MEDIA_DIRECTORY, legacy_variable="MEDIA_STORAGE_ROOT",
+                                  development_default=PROJECT_ROOT / ".local_media")
     return path if path.is_absolute() else PROJECT_ROOT / path

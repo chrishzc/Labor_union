@@ -21,6 +21,9 @@ class LastBackupResult(BaseModel):
 
 class BackupStatus(BaseModel):
     configured: bool
+    storage_ready: bool
+    storage_message: str
+    disaster_recovery_ready: bool
     enabled: bool
     time: str
     version: int

@@ -71,16 +71,21 @@ def test_sql_backup_restore_and_canonical_upgrade_keep_source_accounts_and_neigh
         runtime = tmp_path / ".env.fixture"
         runtime.write_text(f"DB_HOST=127.0.0.1\nDB_PORT={port}\nDB_DATABASE={source_db}\nDB_USER=fixture_app\nDB_PASSWORD={app_password}\n", encoding="utf-8")
         settings = {"host": "127.0.0.1", "port": port, "database": source_db, "tls": {}, "tls_files": {}, "ssl_mode": "DISABLED",
-                    "environment_file": runtime, "backup_root": tmp_path / "backups", "runtime": dotenv_values(runtime),
+                    "environment_file": runtime, "backup_root": tmp_path / nas.BACKUP_FOLDER, "runtime": dotenv_values(runtime),
                     "values": {"NAS_BACKUP_USER": "fixture_reader", "NAS_BACKUP_PASSWORD": read_password,
                                "NAS_MAINTENANCE_USER": "root", "NAS_MAINTENANCE_PASSWORD": root_password}}
         monkeypatch.setattr(nas, "private_directory", lambda p: (Path(p).mkdir(parents=True, exist_ok=True) or Path(p)))
+        settings["backup_root"].mkdir()
+        monkeypatch.setattr(nas, "is_nas_destination", lambda _: True)
         monkeypatch.setattr(nas.ConnectionConfig, "client_prefix", lambda *_: ["docker"])
         def client_command(config, executable, **_):
             return ["docker", "exec", "-i", "-e", "MYSQL_PWD", name, executable, "--protocol=SOCKET", "--user", config.user,
                     "--default-character-set=utf8mb4"]
         monkeypatch.setattr(nas.migration, "_mysql_base", client_command)
         backup = nas.backup(settings)
+        assert backup.suffixes == [".sql", ".gz"]
+        assert backup.with_suffix(".gz.sha256").is_file()
+        assert not list(settings["backup_root"].glob("????-??/*.sql"))
         source_before = nas.migration._table_evidence(nas.reader(settings), source_db)
         nas.restore(settings, backup)
         restored = dotenv_values(runtime)["DB_DATABASE"]

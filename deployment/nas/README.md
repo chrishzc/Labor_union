@@ -4,8 +4,12 @@
 
 Windows 非技術人員日常維護改用 [三個資料庫腳本與操作說明](../../scripts/launchers/README.md#nas-正式資料庫備份升級復原)：
 `backup_nas_database.bat`、`initialize_nas_schema.bat`（現為安全升級）、`restore_nas_database.bat`。
-這條路只使用 MySQL，無需 SSH；每日預設 18:00，由工會電腦執行，可於「稽核與系統 → 資料庫備份」修改。
+資料庫操作使用 MySQL，備份檔經正式 Windows 帳號已獲授權的 NAS 共用路徑寫入，無需 SSH；每日預設 18:00，由工會電腦執行，可於「稽核與系統 → 資料庫備份」修改。正式 Windows `.env` 的 `CONTROLLED_FILE_STORAGE_ROOT` 填 NAS UNC 共用根目錄，備份自動使用其下 `05_資料庫冷備份 (db_backups)`，不另設 `NAS_BACKUP_DIR`；按台灣月份保存 `.sql.gz`／`.sha256`，NAS 離線時不改存本機。
 本目錄的 DSM 03:00 SQL／冷卷維護是另一條管理者工具，不會因啟用 Windows 備份而自動安裝。
+
+正式 Windows 的合約、照護日誌照片、月嫂附件、LINE 選單與備份只使用同一個 `CONTROLLED_FILE_STORAGE_ROOT`。
+NAS 管理者準備可讀寫及可新增子目錄的共用根目錄後，程式在首次寫入自動建立規格 01～05 與 `_staging`；
+`MEDIA_STORAGE_ROOT`／`CONTRACT_DOCUMENT_ARCHIVE_ROOT` 不再是正式環境設定。此程式更新不搬移舊檔，亦不修改開發環境 `.env` 或資料。
 
 正式架構已定案為：
 

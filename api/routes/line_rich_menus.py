@@ -6,6 +6,8 @@ Description: 提供 Rich Menu 零寫入發布預覽、媒體與既有發布相�
 from __future__ import annotations
 
 import json
+from pathlib import Path as FileSystemPath
+from infrastructure.file.storage_layout import MEDIA_DIRECTORY, component_storage_root, prepare_component_write
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile, status
@@ -92,7 +94,15 @@ from subsystems.line import rich_menu_publication_workflow as _rich_menu_workflo
 
 
 # The API composition root supplies concrete adapters to the subsystem.
+def _menu_media_storage_root():
+    project = FileSystemPath(__file__).resolve().parents[2]
+    root = component_storage_root(MEDIA_DIRECTORY, legacy_variable="MEDIA_STORAGE_ROOT", development_default=project / ".local_media")
+    return root if root.is_absolute() else project / root
+
+
 _media_archive.get_connection = get_connection
+_media_archive.storage_root_provider = _menu_media_storage_root
+_media_archive.prepare_storage_write = lambda: prepare_component_write(_menu_media_storage_root())
 _media_archive.encode_line_jpeg = encode_line_jpeg
 _media_archive.render_rich_menu_image = render_rich_menu_image
 _rich_menu_workflow.get_connection = get_connection

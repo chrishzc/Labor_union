@@ -20,8 +20,8 @@ ALLOWED_RICH_MENU_SIZES = {(2500, 843), (2500, 1686)}
 
 class FileSystemRichMenuImageStore:
     def __init__(self, storage_root: str | Path) -> None:
+        self._configured_root = Path(storage_root)
         self._root = Path(storage_root).resolve()
-        self._root.mkdir(parents=True, exist_ok=True)
 
     def materialize(
         self,
@@ -37,8 +37,10 @@ class FileSystemRichMenuImageStore:
             self.load(reference)
             return reference
         content = render_rich_menu_image(menu)
+        from infrastructure.file.storage_layout import prepare_component_write
+        prepare_component_write(self._configured_root)
         digest = hashlib.sha256(content).hexdigest()
-        reference = f"rich_menu/{digest[:2]}/{digest}.jpg"
+        reference = f"rich_menus/{digest[:2]}/{digest}.jpg"
         target = self._target(reference)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():

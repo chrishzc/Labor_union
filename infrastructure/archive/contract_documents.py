@@ -31,6 +31,8 @@ def archive_contract_document(
     if not content:
         raise ValueError("contract document content must not be empty")
     target = _safe_target(storage_root, storage_key)
+    from infrastructure.file.storage_layout import prepare_component_write
+    prepare_component_write(storage_root)
     digest = _sha256(content)
     if target.exists():
         existing_content = target.read_bytes()

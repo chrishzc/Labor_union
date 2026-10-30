@@ -17,6 +17,7 @@ workflow／repository／storage port 保護。
   `infrastructure/mysql/controlled_file_finalize_worker.py`
 - repository: `infrastructure/db/controlled_file_repository.py`
 - storage port adapter: `infrastructure/file/controlled_file_storage.py`
+- Shared NAS root: runtime `CONTROLLED_FILE_STORAGE_ROOT`; `DATABASE_BACKUP_DIRECTORY` identifies the reserved `05_資料庫冷備份 (db_backups)` child used by Global migration. Business-file discovery and direct reads exclude that subtree, including case/trailing-dot/space aliases. SQL archives and maintenance metadata remain outside business attachment access.
 
 ## Modules
 - `api-composition` — authenticated public route and typed projection composition；path:
@@ -25,6 +26,8 @@ workflow／repository／storage port 保護。
   `modules/finalize-runtime.md`
 - `file-persistence` — staging/object/receipt SQL mapping and per-file command claims；path:
   `modules/file-persistence.md`
+- `file-storage` — filesystem readiness, discovery/read/staging and reserved SQL backup namespace；path:
+  `modules/file-storage.md`
 
 ## Contracts
 - `document/架構重整/01_規格基線/30_Controlled_File_Storage_NAS正式規格.md` §4–§13 — current formal
@@ -39,7 +42,7 @@ workflow／repository／storage port 保護。
 - module verification: `modules/api-composition.md`
 - workflow_tests: `tests/test_controlled_file_workflow.py`
 - repository verification: `modules/file-persistence.md`
-- storage_tests: `tests/test_controlled_file_storage.py`
+- storage verification: `modules/file-storage.md`
 - schema_tests: `tests/test_controlled_file_schema_contract.py`
 - finalize_tests: `tests/domains/global/subsystems/controlled-files/integration/test_controlled_file_finalize_runner.py`
 

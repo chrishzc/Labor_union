@@ -83,10 +83,23 @@ def run_durable_job_cycle(
             retry_delay_seconds,
         )
         processed = int(worker.recover_and_run_once())
+        processed += _finalize_new_nas_files(worker_id)
         _write_durable_job_heartbeat(connection, runtime_identity, processed)
         return processed
     finally:
         connection.close()
+
+
+def _finalize_new_nas_files(worker_id: str) -> int:
+    from infrastructure.file.storage_layout import configured_storage_root, unified_storage_enabled
+    if not unified_storage_enabled():
+        return 0
+    from infrastructure.file.controlled_file_storage import FileSystemControlledFileStorage
+    from infrastructure.mysql.controlled_file_finalize_worker import MySqlControlledFileFinalizeRunner
+    return MySqlControlledFileFinalizeRunner(
+        get_connection, FileSystemControlledFileStorage(configured_storage_root()),
+        worker_id, lambda: datetime.now(TAIPEI_TIME_ZONE), layout_only=True,
+    ).run_once()
 
 
 def _write_durable_job_heartbeat(
