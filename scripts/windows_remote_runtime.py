@@ -27,12 +27,67 @@ from infrastructure.runtime.react_admin_artifact import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-PREFIX = '/test'
-PUBLIC_ORIGIN = 'https://chrishzc.com'
+PREFIX = os.environ.get('WINDOWS_REMOTE_PREFIX', '/test')
 _HOP_HEADERS = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
     'te', 'trailer', 'transfer-encoding', 'upgrade',
 })
+
+
+def _read_env_file() -> dict[str, str]:
+    env_file = ROOT / '.env'
+    if not env_file.is_file():
+        return {}
+    results = {}
+    try:
+        for line in env_file.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, _, val = line.partition('=')
+            key = key.strip()
+            val = val.strip().strip("'\"")
+            results[key] = val
+    except Exception:
+        pass
+    return results
+
+
+def _configured_public_origins() -> set[str]:
+    origins = set()
+    file_env = _read_env_file()
+    env_public = os.environ.get('PUBLIC_ORIGIN') or file_env.get('PUBLIC_ORIGIN', '')
+    if env_public.strip():
+        origins.add(env_public.strip().rstrip('/'))
+    env_allowed = os.environ.get('ALLOWED_ORIGINS') or file_env.get('ALLOWED_ORIGINS', '')
+    if env_allowed.strip():
+        for item in env_allowed.split(','):
+            item = item.strip().rstrip('/')
+            if item:
+                origins.add(item)
+    origins.add('https://chrishzc.com')
+    return origins
+
+
+def _configured_allowed_hostnames() -> set[str]:
+    hostnames = {'127.0.0.1', 'localhost', 'chrishzc.com'}
+    for origin in _configured_public_origins():
+        try:
+            parsed = httpx.URL(origin)
+            if parsed.host:
+                hostnames.add(parsed.host.lower())
+        except Exception:
+            pass
+    file_env = _read_env_file()
+    line_url = os.environ.get('LINE_PUBLIC_BASE_URL') or file_env.get('LINE_PUBLIC_BASE_URL', '')
+    if line_url.strip():
+        try:
+            parsed = httpx.URL(line_url.strip())
+            if parsed.host:
+                hostnames.add(parsed.host.lower())
+        except Exception:
+            pass
+    return hostnames
 
 
 def _forward_headers(headers):
@@ -92,10 +147,16 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
     async def redirect(request):
         return RedirectResponse(PREFIX + '/', status_code=307)
 
+    async def root_redirect(request: Request):
+        if request.url.hostname in {'127.0.0.1', 'localhost', 'chrishzc.com'}:
+            return PlainTextResponse('Not Found', status_code=404)
+        return RedirectResponse('/admin/', status_code=307)
+
     static_app = ResponseCompressionMiddleware(
         ReactAdminStaticApplication(artifact), minimum_size=1024, compresslevel=5,
     )
-    app = Starlette(lifespan=lifespan, routes=[
+    routes = [
+        Route('/', root_redirect, methods=['GET', 'HEAD']),
         Route(PREFIX, redirect, methods=['GET', 'HEAD']),
         Route(PREFIX + '/api/{path:path}', proxy,
               methods=['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']),
@@ -104,20 +165,31 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         # /admin URL. Its absolute /test assets/API still use this same gateway.
         Route('/admin', lambda _: RedirectResponse('/admin/', status_code=307)),
         Mount('/admin', app=static_app),
-    ])
+    ]
+    app = Starlette(lifespan=lifespan, routes=routes)
 
     async def boundary(request: Request, call_next):
-        if request.url.hostname not in {'127.0.0.1', 'localhost', 'chrishzc.com'}:
+        allowed_hosts = _configured_allowed_hostnames()
+        if request.url.hostname not in allowed_hosts:
             return PlainTextResponse('Forbidden', status_code=403)
+        if request.url.hostname == 'chrishzc.com' and not request.url.path.startswith(PREFIX):
+            return PlainTextResponse('Not Found', status_code=404)
         if (request.url.path == '/admin' or request.url.path.startswith('/admin/')) and (
-            request.url.hostname not in {'127.0.0.1', 'localhost'}
+            request.url.hostname == 'chrishzc.com'
         ):
             return PlainTextResponse('Not Found', status_code=404)
         origin = request.headers.get('origin')
-        if origin and origin != PUBLIC_ORIGIN and origin not in {
-            f'http://127.0.0.1:{request.url.port}', f'http://localhost:{request.url.port}',
-        }:
-            return PlainTextResponse('Forbidden', status_code=403)
+        if origin:
+            allowed_origins = _configured_public_origins()
+            port = request.url.port
+            loopbacks = {
+                f'http://127.0.0.1:{port}',
+                f'http://localhost:{port}',
+                'http://127.0.0.1:5173',
+                'http://localhost:5173',
+            }
+            if origin not in allowed_origins and origin not in loopbacks:
+                return PlainTextResponse('Forbidden', status_code=403)
         return await call_next(request)
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=boundary)
@@ -147,7 +219,9 @@ def main() -> int:
     output = ROOT / 'scratch' / 'windows-remote' / ('artifact-' + uuid.uuid4().hex)
     build_artifact(output, run_frontend_build=True)
     args.output_file.write_text(str(output), encoding='utf-8')
-    print('Windows remote artifact ready: https://chrishzc.com/test/')
+    custom_origins = [o for o in _configured_public_origins() if 'chrishzc' not in o]
+    display_origin = custom_origins[0] if custom_origins else 'https://chrishzc.com'
+    print(f'Windows remote artifact ready: {display_origin.rstrip("/")}{PREFIX}/')
     return 0
 
 

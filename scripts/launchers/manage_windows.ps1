@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 [CmdletBinding()]
 param(
     [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore')]
@@ -145,7 +145,8 @@ function Start-ManagedRuntime {
         if (Test-Path -LiteralPath $statePath) {
             $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
             if ($state.supervisor_pid -eq $owner.Id -and $state.runtime_status -eq 'ready') {
-                Write-Host '[Ready] Local: http://localhost:5173/admin/'
+                $remoteUrl = Get-RemoteDisplayUrl
+                Write-Host "[Ready] Local: http://localhost:5173/admin/ | Remote: $remoteUrl"
                 if ($isServiceRunning) {
                     Write-Host '[Tunnel] Cloudflare Tunnel 透過 Windows 系統服務連線中'
                 } elseif (-not $LocalOnly) {
@@ -158,6 +159,25 @@ function Start-ManagedRuntime {
         Start-Sleep -Seconds 1
     }
     throw "Startup is still pending. Inspect status and $logPath; do not start a second host."
+}
+
+function Get-RemoteDisplayUrl {
+    $envPath = Join-Path $ProjectRoot '.env'
+    if (Test-Path -LiteralPath $envPath) {
+        $lines = Get-Content -LiteralPath $envPath -ErrorAction SilentlyContinue
+        foreach ($line in $lines) {
+            if ($line -match '^\s*ALLOWED_ORIGINS\s*=\s*(.+)$') {
+                $candidates = $matches[1].Trim() -split ','
+                $custom = $candidates | Where-Object { $_ -and $_ -notmatch 'localhost|127\.0\.0\.1' } | Select-Object -First 1
+                if ($custom) { return ($custom.Trim().TrimEnd('/') + '/') }
+            }
+            if ($line -match '^\s*PUBLIC_ORIGIN\s*=\s*(.+)$') {
+                $val = $matches[1].Trim()
+                if ($val) { return ($val.TrimEnd('/') + '/') }
+            }
+        }
+    }
+    return 'https://chrishzc.com/test/'
 }
 
 function Show-ManagedStatus {
@@ -175,7 +195,8 @@ function Show-ManagedStatus {
         $version = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
         Write-Host "Frontend: $($version.artifact_version)"
     }
-    Write-Host 'Local: http://localhost:5173/admin/ | Remote: https://chrishzc.com/test/'
+    $remoteUrl = Get-RemoteDisplayUrl
+    Write-Host "Local: http://localhost:5173/admin/ | Remote: $remoteUrl"
     Write-Host 'Tunnel process status does not prove external connectivity; check the Cloudflare dashboard.'
 }
 

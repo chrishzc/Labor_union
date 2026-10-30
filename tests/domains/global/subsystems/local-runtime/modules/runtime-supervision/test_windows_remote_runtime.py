@@ -124,3 +124,20 @@ def test_static_assets_above_threshold_are_gzip_compressed_across_test_and_admin
             assert int(response.headers['content-length']) < raw_size
             assert response.text == bundle_text
             assert response.headers['cache-control'] == 'public, max-age=31536000, immutable'
+
+
+def test_custom_allowed_origins_and_domain_routing(artifact, monkeypatch):
+    monkeypatch.setenv('ALLOWED_ORIGINS', 'https://admin.union-example.org.tw,http://localhost:5173')
+    app = remote.create_gateway(artifact, transport=httpx.MockTransport(lambda _: httpx.Response(401)))
+    with TestClient(app, base_url='https://admin.union-example.org.tw') as client:
+        # Custom domain can access /admin/ directly
+        admin_resp = client.get('/admin/')
+        assert admin_resp.status_code == 200
+        assert '<div id="root"></div>' in admin_resp.text
+        # Root redirects to /admin/ on custom domain
+        root_resp = client.get('/', follow_redirects=False)
+        assert root_resp.status_code == 307
+        assert root_resp.headers['location'] == '/admin/'
+        # Unauthorized foreign host is blocked with 403
+        unauthorized = client.get('/admin/', headers={'host': 'unauthorized.invalid'})
+        assert unauthorized.status_code == 403
