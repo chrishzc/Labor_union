@@ -211,13 +211,55 @@ function Invoke-ManagerAction {
             'prepare' { [void](New-ManagedArtifact) }
             'setup' {
                 if (Get-ManagedState) { throw 'Stop this installation before installing dependencies.' }
-                & py.exe -3.14 -m venv .venv
-                if ($LASTEXITCODE -ne 0) { throw 'Python 3.14 is required.' }
+                if (-not (Test-Path -LiteralPath $PythonPath)) {
+                    $created = $false
+                    if (Get-Command py.exe -ErrorAction SilentlyContinue) {
+                        foreach ($pyVer in @('-3.14', '-3.13', '-3.12', '-3.11', '-3')) {
+                            & py.exe $pyVer -m venv .venv 2>$null
+                            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $PythonPath)) {
+                                $created = $true
+                                break
+                            }
+                        }
+                    }
+                    if (-not $created -and (Get-Command python.exe -ErrorAction SilentlyContinue)) {
+                        & python.exe -m venv .venv
+                        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $PythonPath)) {
+                            $created = $true
+                        }
+                    }
+                    if (-not $created) {
+                        throw '未找到合適的 Python 執行檔建立 .venv。請確認系統已安裝 Python 3.11+ 並加入 PATH。'
+                    }
+                }
+                Write-Host '正在透過 .venv 安裝 Python 依賴套件 (pip install)...'
                 & $PythonPath -m pip install -r requirements.txt
                 if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
                 Push-Location ui_react
-                try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' } }
+                try {
+                    Write-Host '正在安裝前端依賴套件 (npm ci)...'
+                    if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
+                        & npm.cmd ci
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host 'npm ci 失敗，嘗試 npm install...'
+                            & npm.cmd install
+                            if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
+                        }
+                    }
+                    elseif (Get-Command npm -ErrorAction SilentlyContinue) {
+                        & npm ci
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host 'npm ci 失敗，嘗試 npm install...'
+                            & npm install
+                            if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
+                        }
+                    }
+                    else {
+                        throw '未找到 npm。請確認該主機已安裝 Node.js (含 npm) 並加入 PATH。'
+                    }
+                }
                 finally { Pop-Location }
+                Write-Host '正在安裝 Playwright Chromium...'
                 & $PythonPath -m playwright install chromium
                 if ($LASTEXITCODE -ne 0) { throw 'Browser dependency installation failed.' }
                 Write-Host '[Ready] Program dependencies installed. Prepare this host database, files and configuration separately.'

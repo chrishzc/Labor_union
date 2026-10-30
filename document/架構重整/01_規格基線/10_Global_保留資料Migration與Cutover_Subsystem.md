@@ -602,6 +602,12 @@ Windows 操作入口為 `backup_nas_database.bat`、`initialize_nas_schema.bat`�
 共用 `scripts/nas_database_maintenance.py`。本節取代 §9.2 的 Windows 雙擊 reset／create 行為；
 低階 fresh initializer 仍供技術人員與 disposable fixtures，DSM 冷備份工具維持獨立用途。
 
+同日後續人工要求：根目錄 `Windows管理.bat` 統一提供 6 備份、7 安全升級、8 復原備份，
+由既有 `manage_windows.ps1` 委派相同 maintenance module。備份可於 runtime 運作時執行；
+升級／復原偵測同一 installation 的 managed runtime 仍執行就停止並提示先選 2 停止全部，
+不自行停止／重啟，不代填原工具的人工作業確認，不改 NAS target／備份／candidate／switch 契約。
+「產生部署包」移出日常選單，既有 `-Action package` 與其 source handoff consumer 保留。
+
 - Target／授權：獨立 `.env.nas-maintenance` 須明確啟用並固定 NAS host／port，與選定 runtime `.env` 一致。
   拒絕 loopback、本機開發庫及 process override 衝突。缺設定與 `--dry-run` 均零連線／DB 寫入／排程。
   技術人員一次備妥原 runtime 帳號、不同的 backup-read 與 candidate-write 帳號、MySQL 8 原生 clients。
