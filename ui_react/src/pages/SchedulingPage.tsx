@@ -2491,7 +2491,7 @@ const SchedulingWorkbench: React.FC = () => {
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
-      <ServiceStartSubstituteWorkbench/>
+      <a className="scheduling-tab-btn" href="#scheduling?tab=coordination">開工、順延與代班待辦 →</a>
       {/* Page Header */}
       <header className="page-header-banner scheduling-page-header">
         <div>
@@ -3267,7 +3267,14 @@ export const SchedulingPage: React.FC = () => {
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  return new URLSearchParams(hash.split('?')[1] ?? '').get('tab') === 'handover'
+  const params=new URLSearchParams(hash.split('?')[1] ?? '');
+  if(params.get('tab')==='coordination') {
+    const raw=params.get('request');const id=raw===null?undefined:Number(raw);
+    const invalid=id!==undefined && (!Number.isSafeInteger(id) || id<=0);
+    return <div className="scheduling-gantt-page"><header className="page-header-banner"><h1>開工、順延與代班</h1><a href="#scheduling">返回排班月曆</a></header>
+      {invalid?<p role="alert">需求編號無效，請從通知事項重新開啟。</p>:<ServiceStartSubstituteWorkbench key={hash} requestId={id} caseNo={params.get('case_no') ?? undefined}/>}</div>;
+  }
+  return params.get('tab') === 'handover'
     ? <ServiceHandoverPage key={hash} /> : <SchedulingWorkbench />;
 };
 

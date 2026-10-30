@@ -11,7 +11,7 @@ const groupSchema = z.enum(['review','reminder','support']);
 const paymentSchema = z.object({case_no:z.string(),payment_stage:z.enum(['deposit','first','second']),obligation_identity:z.string(),
   projection_version:z.number().int(),obligation_event_id:z.number().int(),due_date:z.string(),remaining_amount_ntd:z.number().int()}).strict();
 const logSchema = z.object({case_no:z.string(),staff_id:z.number().int(),missing_from:z.string(),missing_through:z.string()}).strict();
-const informationSchema = z.object({question_id:z.number().int(),pool_id:z.number().int(),request_kind:z.enum(['information_question','condition_adjustment']),
+export const informationSchema = z.object({question_id:z.number().int(),pool_id:z.number().int(),request_kind:z.enum(['information_question','condition_adjustment']),
   customer_answer_event_id:z.number().int().nullable(),review_completed:z.boolean(),case_no:z.string(),staff_name:z.string(),
   issues:z.array(z.object({label:z.string(),detail:z.string()}).strict()),customer_answer:z.string().nullable(),customer_message:z.string().nullable(),
   customer_available:z.boolean()}).strict();

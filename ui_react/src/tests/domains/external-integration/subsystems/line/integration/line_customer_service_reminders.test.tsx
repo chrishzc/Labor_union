@@ -12,6 +12,14 @@ const detail = { ticket: { ticket_id:31,line_user_id:'U_SYNTHETIC',category:'oth
 const empty = {...page,items:[],total:0,summary:{waiting:0,handling:0}};
 function actionClient(){return {listReminders:vi.fn().mockResolvedValueOnce(page).mockResolvedValue(empty),getTicketDetail:vi.fn().mockResolvedValue(detail),previewUpdate:vi.fn().mockResolvedValue({preview_fingerprint:'a'.repeat(64)}),applyUpdate:vi.fn().mockResolvedValue({})};}
 describe('客服案件六欄清單',()=>{
+ it('通知待辦深連結帶入工單編號搜尋，開頁只讀客服清單',async()=>{
+  window.location.hash='#line-management?tab=tickets&ticket_q=31';
+  const client={listReminders:vi.fn().mockResolvedValue(page),getTicketDetail:vi.fn()};
+  render(<LineManagementPage customerService={client}/>);await screen.findByText('測試客戶');
+  expect(screen.getByRole('searchbox')).toHaveValue('31');
+  expect(client.listReminders).toHaveBeenCalledWith(expect.objectContaining({search:'31',status:'open',page:1}),expect.any(Object));
+  expect(client.getTicketDetail).not.toHaveBeenCalled();
+ });
  it('開頁只有查詢，六欄與完成按鈕，不顯示狀態、來源篩選或抽屜',async()=>{
   const client={listReminders:vi.fn().mockResolvedValue(page),getTicketDetail:vi.fn()};
   render(<LineManagementPage customerService={client}/>);await screen.findByText('測試客戶');

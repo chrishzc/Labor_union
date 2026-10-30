@@ -1,6 +1,7 @@
 import {act,render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {it,expect,vi,beforeEach,afterEach} from 'vitest';
 import {ServiceStartSubstituteWorkbench} from '../../../../../../../components/ServiceStartSubstituteWorkbench';
+import {SchedulingPage} from '../../../../../../../pages/SchedulingPage';
 import {serviceStartClient,type ServiceStartView} from '../../../../../../../api/scheduling/service_start_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
 import {ordersQueryClient} from '../../../../../../../api/orders/order_query_client';
@@ -10,6 +11,22 @@ beforeEach(()=>{
   assignments:[{assignment_id:7,candidate_key:null,staff_id:2,sequence:1,assigned_start_date:'2027-01-05',assigned_end_date:'2027-01-05',official_service_dates:['2027-01-05'],actual_hours:null,lineage_source_assignment_ids:[]}]}));
 });
 afterEach(()=>{sessionStorage.clear();vi.restoreAllMocks();});
+it('通知深連結在正式排班頁只讀指定需求，不受第一頁清單影響',async()=>{
+ window.location.hash='#scheduling?tab=coordination&case_no=CASE&request=8';
+ const detail=vi.spyOn(serviceStartClient,'detail').mockResolvedValue(item);
+ const todos=vi.spyOn(serviceStartClient,'todos');const command=vi.spyOn(serviceStartClient,'command');
+ vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});
+ render(<SchedulingPage/>);await screen.findByRole('button',{name:'儲存並更新排班'});
+ expect(detail).toHaveBeenCalledWith(8);expect(todos).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
+ window.history.replaceState(null,'','/');
+});
+it('指定需求屬於別案時停止呈現，不改開其他需求',async()=>{
+ vi.spyOn(serviceStartClient,'detail').mockResolvedValue({...item,case_no:'OTHER'});
+ const todos=vi.spyOn(serviceStartClient,'todos');const command=vi.spyOn(serviceStartClient,'command');
+ render(<ServiceStartSubstituteWorkbench caseNo="CASE" requestId={8}/>);
+ await screen.findByText('指定需求與案件不一致，請從通知事項重新開啟。');
+ expect(screen.queryByRole('button',{name:'儲存並更新排班'})).not.toBeInTheDocument();expect(todos).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
+});
 it('結果未明時重送相同操作識別，正式結果回讀後才解除凍結',async()=>{
  vi.spyOn(serviceStartClient,'todos').mockResolvedValue({items:[item],total:1,page:1,page_size:25});
  vi.spyOn(serviceStartClient,'options').mockResolvedValue({items:[]});

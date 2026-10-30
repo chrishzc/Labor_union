@@ -30,6 +30,7 @@ import { OrderCandidateContactStatusPanel } from './OrderCandidateContactStatusP
 import { OrderCandidateQueryPanel } from './OrderCandidateQueryPanel';
 import { OrderMultiCaregiverPlanPanel } from './OrderMultiCaregiverPlanPanel';
 import { defaultMatchingFilterPolicy, type MatchingFilterPolicy } from '../api/scheduling/matching_candidate_workflow_client';
+import { MatchingInformationWorkbench } from './MatchingInformationWorkbench';
 import { OrderFormalRecommendationPanel } from './OrderFormalRecommendationPanel';
 import { OrderIntakeRepairPanel } from './OrderIntakeRepairPanel';
 import { OrderAutomaticCompletionStatus } from './OrderAutomaticCompletionStatus';
@@ -162,7 +163,7 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [addingCandidates, setAddingCandidates] = useState(false);
   const [candidateAddState, setCandidateAddState] = useState({ dirty: false, busy: false });
   const [candidateContactState, setCandidateContactState] = useState({ dirty: false, busy: false });
-  const [matchingView, setMatchingView] = useState<'candidates' | 'multi'>('candidates');
+  const [matchingView, setMatchingView] = useState<'candidates' | 'multi' | 'information'>(()=>new URLSearchParams(window.location.hash.split('?')[1]).has('question')?'information':'candidates');
   const [multiOpened, setMultiOpened] = useState(false);
   const [multiBusy, setMultiBusy] = useState(false);
   const [multiFilters, setMultiFilters] = useState<MatchingFilterPolicy>(() => ({ ...defaultMatchingFilterPolicy }));
@@ -493,9 +494,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
               </div>}
               {(activeGroup === 'matching' || visitedGroups.includes('matching')) && <div hidden={activeGroup !== 'matching'}>
                 <nav className="order-case-subnav" aria-label="尋找月嫂方式">
-                  <button type="button" aria-pressed={matchingView === 'candidates'} disabled={navigationLocked} onClick={() => setMatchingView('candidates')}>候選月嫂</button>
-                  <button type="button" aria-pressed={matchingView === 'multi'} disabled={navigationLocked} onClick={() => { setMultiOpened(true); setMatchingView('multi'); }}>多月嫂分段</button>
+                  <button type="button" aria-pressed={matchingView === 'candidates'} disabled={navigationLocked} onClick={() => requestLeave(()=>setMatchingView('candidates'))}>候選月嫂</button>
+                  <button type="button" aria-pressed={matchingView === 'multi'} disabled={navigationLocked} onClick={() => requestLeave(() => { setMultiOpened(true); setMatchingView('multi'); })}>多月嫂分段</button>
+                  <button type="button" aria-pressed={matchingView === 'information'} disabled={navigationLocked} onClick={()=>requestLeave(()=>setMatchingView('information'))}>確認資訊與調整條件</button>
                 </nav>
+                {matchingView === 'information' && <MatchingInformationWorkbench key={caseNo} caseNo={caseNo} questionId={new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('question') ?? undefined}/>}
                 <div hidden={matchingView !== 'candidates'}>
                 <OrderCandidateContactStatusPanel caseNo={caseNo} revision={refreshRevision} onObserved={() => { setSelectedGroup('matching'); refreshFacts(); }}
                   presentation="workbench" focusedCandidateId={focusedCandidateId} onEditStateChange={setCandidateContactState} onAddCandidates={() => setAddingCandidates(true)}

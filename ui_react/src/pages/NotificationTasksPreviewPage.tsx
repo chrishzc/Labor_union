@@ -30,13 +30,15 @@ const PRIMARY:Record<NotificationSource,string> = {
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
   deposit:'發送繳費提醒',group:'查看建群指令',overdue:'發送提醒',log:'發送提醒',
-  customer_service:'查看並回覆客服案件',delivery:'查看寄送工作',runtime:'前往通知對象設定',
+  customer_service:'前往客服案件',delivery:'查看寄送工作',runtime:'前往通知對象設定',
   notification_failure:'處理通知建立異常',
 };
-type Row = NotificationItem & {caseLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger';delivery?:string};
+type Row = NotificationItem & {caseLabel:string;personLabel:string;primary:string;secondary?:string;tone?:'attention'|'danger';delivery?:string};
 function row(item:NotificationItem,record=false):Row {
+  const ticket = item.source==='customer_service' || (item.source==='recommendation' && !!item.reference_id);
   return {...item,caseLabel:item.case_no ?? (item.source==='staff_binding'?'月嫂資料':item.reference_id ? `申請／事項 #${item.reference_id}`:'系統事項'),
-    primary:item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
+    personLabel:ticket?'客服對象':'相關對象',person:ticket?(item.person || '未具名使用者'):item.person,
+    primary:ticket?'前往客服案件':item.source==='deposit' && item.tag==='已核銷待通知' ? '查看訂金資料' : PRIMARY[item.source],
     secondary:item.case_no && ['overdue','deposit'].includes(item.source)?'前往核對款項':item.unavailable_reason?'前往身分與群組設定':undefined,
     tone:item.unavailable_reason || item.source==='delivery' || item.source==='runtime'?'danger':item.source==='overdue'?'attention':undefined,
     delivery:record ? item.delivery_status ?? undefined : undefined};
@@ -186,7 +188,7 @@ export function NotificationTasksPage() {
           <div className="notification-preview-detail-heading"><span>事項詳細內容</span><span className={`np-tag ${selected.tone ?? ''}`}>{selected.tag}</span></div>
           <h2>{selected.title}</h2>
           <p className="notification-preview-detail-summary">{selected.summary}</p>
-          <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div><div><dt>相關對象</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></dl>
+          <dl className="notification-preview-facts"><div><dt>案件／申請</dt><dd>{selected.caseLabel}</dd></div><div><dt>{selected.personLabel}</dt><dd>{selected.person}</dd></div><div><dt>時間</dt><dd>{selected.time || '未提供'}</dd></div></dl>
           <section className="notification-preview-reason"><h3><FileText size={15} aria-hidden="true" />{selected.delivery ? '寄送狀況' : '為什麼需要處理'}</h3><p>{selected.reason}</p>{selected.delivery && <p className="notification-preview-delivery-state">目前狀態：{DELIVERY_LABELS[selected.delivery]}</p>}</section>
           {selected.recipient && <section className="notification-preview-message"><h3><MessageCircle size={15} aria-hidden="true" />{selected.source.endsWith('_binding')?'人工提醒內容':'提醒內容'}</h3><p className="notification-preview-recipient">{selected.source.endsWith('_binding')?'聯絡電話':selected.recipient.includes('群組') ? '案件群組' : '通知對象'}<ArrowRight size={12} aria-hidden="true" /><strong>{selected.recipient}</strong></p>
             <div className="notification-preview-message-bubble">{selected.message ?? '請在下方原流程查看通知內容與寄送結果。'}</div>

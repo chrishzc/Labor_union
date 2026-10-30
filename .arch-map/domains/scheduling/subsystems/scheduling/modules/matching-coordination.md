@@ -8,6 +8,7 @@
 維護 Scheduling-owned matching coordination 的 candidate/decision/plan/package lineage 與 typed Query／Preview／Apply contract，向 API 暴露可驗證的 current coordination state；React workbench 目前僅保留 isolated-tested、尚未接入 App route 的 transport/presentation。
 
 ## Implementation
+- `ui_react/src/components/MatchingInformationWorkbench.tsx`、`ui_react/src/components/MatchingInformationActions.tsx` — 同案媒合作業的資訊／條件工作面；`question` 深連結以案件＋問題 ID 單筆 Query，未找到不選取其他問題。發送／審核／重新詢問重用原 writer，重新核對保留草稿。後端 `query_staff_questions` 在原 eligibility SQL 內套用 case／question filter，再執行 count／分頁。
 - manual commute: `subsystems/scheduling/commute_query.py` — 單次人工觸發、Google 計費月、metadata-only 用量與人工全帳戶核對；既有 `background_jobs` 承接 committed inline claim，零新 schema、零自動 provider retry。
 - adapters: `infrastructure/http/google_routes.py`、`infrastructure/mysql/commute_query_repository.py` — 固定官方 TWO_WHEELER／TRAFFIC_AWARE_OPTIMAL transport（查詢當下路況）、Staff/Client 地址唯讀來源、用量 metadata；不保存地址或 Google 距離。
 - entrypoint: `api/routes/commute.py` — admin-only single caregiver POST、usage GET、manual billing reconciliation POST、case-scoped `GET /orders/{case_no}/commute-history`（最新 50 筆 metadata-only 紀錄）；由 `api/main.py` 組裝。

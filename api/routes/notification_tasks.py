@@ -219,8 +219,8 @@ def _read_source(source, cursor, principal):
     elif source == Source.CUSTOMER_SERVICE:
         result = CustomerServiceApplication(open_line_unit_of_work).reminders(CustomerServiceReminderQuery(page=page, page_size=SIZE))
         total = result.total
-        items = [_item(source, r.ticket_id, '客服／服務協助待處理', r.reason, '沿原客服案件查看留言、接手及回覆。',
-                       reference_id=r.ticket_id, case_no=r.case_no, person=r.client_name or '聯絡人', time=str(r.updated_at or '')) for r in result.items]
+        items = [_item(source, r.ticket_id, '客服／服務協助待處理', r.reason, '前往客服案件頁查看留言，處理後標記完成。',
+                       reference_id=r.ticket_id, case_no=r.case_no, person=r.client_name or '未具名使用者', time=str(r.updated_at or '')) for r in result.items]
     elif source == Source.DELIVERY:
         result = get_line_delivery_task_admin_application().list(LineDeliveryAdminQuery(
             statuses=(LineDeliveryStatus.FAILED, LineDeliveryStatus.RETRYABLE_FAILED), page=page, page_size=SIZE), actor)

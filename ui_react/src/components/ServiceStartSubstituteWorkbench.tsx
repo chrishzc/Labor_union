@@ -4,7 +4,7 @@ import { serviceStartClient, type ServiceStartView, type StartCommand, type Hand
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import './ServiceStartSubstituteWorkbench.css';
 
-interface Props {caseNo?:string;onCompleted?:()=>Promise<void>}
+interface Props {caseNo?:string;requestId?:number;onCompleted?:()=>Promise<void>}
 interface Pending {id:number;action:'inquire'|'invite'|'dates'|'defer';body:StartCommand;observeOnly?:boolean}
 const storageKey=(id:number)=>`service-start-command:${id}`;
 const willingness={pending:'等待月嫂回覆',willing:'願意代班',unwilling:'無法代班'};
@@ -71,16 +71,29 @@ export function ServiceHandoverWorkbench({caseNo,assignmentId}:{caseNo:string;as
   </section>;
 }
 
-export function ServiceStartSubstituteWorkbench({caseNo,onCompleted}:Props) {
+export function ServiceStartSubstituteWorkbench({caseNo,requestId,onCompleted}:Props) {
   const [page,setPage]=useState(1);
   const [total,setTotal]=useState(0);
   const [items,setItems]=useState<ServiceStartView[]>([]);
   const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);
   const [options,setOptions]=useState<{staff_id:number;name:string}[]>([]);
+  const generation=useRef(0);
   const refresh=useCallback(async()=>{
+    const current=++generation.current;
     setLoading(true);setError('');
-    try {const result=await serviceStartClient.todos(page,caseNo);
+    try {
+      if(requestId!==undefined) {
+        setItems([]);setTotal(0);
+        const item=await serviceStartClient.detail(requestId);
+        if(current!==generation.current)return;
+        if(item.request_id!==requestId || (caseNo && item.case_no!==caseNo))throw new Error('指定需求與案件不一致，請從通知事項重新開啟。');
+        setItems([item]);setTotal(1);
+        const staff=await serviceStartClient.options();if(current===generation.current)setOptions(staff.items);
+        return;
+      }
+      const result=await serviceStartClient.todos(page,caseNo);
+      if(current!==generation.current)return;
       const recovered:ServiceStartView[]=[];
       for(let i=0;i<sessionStorage.length;i++) {
         const key=sessionStorage.key(i);
@@ -88,21 +101,22 @@ export function ServiceStartSubstituteWorkbench({caseNo,onCompleted}:Props) {
         const id=Number(key.split(':')[1]);
         if(!Number.isSafeInteger(id) || result.items.some(item=>item.request_id===id)) continue;
         const item=await serviceStartClient.detail(id);
+        if(current!==generation.current)return;
         if(!caseNo || item.case_no===caseNo) recovered.push(item);
       }
       setItems([...result.items,...recovered]);setTotal(result.total);
       if(result.items.length===0 && page>1 && result.total>0) setPage(Math.max(1,Math.ceil(result.total/25)));
-      const staff=await serviceStartClient.options();setOptions(staff.items);
-    } catch(e) {setError(e instanceof Error?e.message:'代班待辦載入失敗。');}
-    finally {setLoading(false);}
-  },[page,caseNo]);
-  useEffect(()=>{void refresh();},[refresh]);
+      const staff=await serviceStartClient.options();if(current===generation.current)setOptions(staff.items);
+    } catch(e) {if(current===generation.current)setError(e instanceof Error?e.message:'代班待辦載入失敗。');}
+    finally {if(current===generation.current)setLoading(false);}
+  },[page,caseNo,requestId]);
+  useEffect(()=>{void refresh();return()=>{generation.current++;};},[refresh]);
   return <section className="service-start-workbench" aria-label="服務開始、請假與代班待辦">
     <header><h2>服務開始、請假與代班待辦</h2><span>{total} 件待處理</span><button type="button" disabled={loading} onClick={()=>void refresh()}>重新查詢代班待辦</button></header>
     {error && <p role="alert">{error}</p>}
     {loading && <p role="status">正在查詢…</p>}
     {!loading && !error && items.length===0 && <p>目前沒有需要工會處理的排程衝突或代班。</p>}
-    {items.map(item=><SubstituteCard key={item.request_id} initial={item} options={options} onCompleted={async()=>{setTotal((await serviceStartClient.todos(page,caseNo)).total);await onCompleted?.();}}/>)}
+    {items.map(item=><SubstituteCard key={item.request_id} initial={item} options={options} onCompleted={async()=>{if(requestId===undefined)setTotal((await serviceStartClient.todos(page,caseNo)).total);await onCompleted?.();}}/>)}
     {total>25 && <nav aria-label="代班待辦分頁"><button type="button" disabled={page===1 || loading} onClick={()=>setPage(p=>p-1)}>上一頁</button><span>{page} / {Math.ceil(total/25)}</span><button type="button" disabled={page*25>=total || loading} onClick={()=>setPage(p=>p+1)}>下一頁</button></nav>}
   </section>;
 }

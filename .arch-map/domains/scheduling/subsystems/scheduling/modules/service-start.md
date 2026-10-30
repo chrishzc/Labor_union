@@ -17,6 +17,7 @@
 - `api/schemas/service_start.py`
 - `ui_react/src/api/scheduling/service_start_client.ts`
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.tsx`
+  - `requestId` 深連結獨立查詢該筆需求並核對案件，不依賴待辦分頁、不改選其他事項；`#scheduling?tab=coordination&case_no=<case>&request=<id>` 由既有 SchedulingPage 薄組合，開頁不 mutation。
 - `ui_react/src/components/ServiceStartSubstituteWorkbench.css`
 - `line/static/staff_order_search.html`
 - `line/static/staff_schedule.html`

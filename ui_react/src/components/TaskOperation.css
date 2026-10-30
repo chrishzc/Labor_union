@@ -1,0 +1,19 @@
+.notification-task-operation { margin-top: 20px; border-top: 1px solid #eadcd1; padding-top: 18px; overflow-wrap: anywhere; }
+.notification-task-operation label { display: grid; gap: 6px; margin: 10px 0; font-size: .85rem; }
+.notification-task-operation input, .notification-task-operation select, .notification-task-operation textarea { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid #ddcec5; border-radius: 6px; }
+.notification-task-operation input[type=checkbox] { width: auto; }
+.notification-task-operation fieldset { min-width: 0; border: 1px solid #eadcd1; margin: 12px 0; padding: 12px; }
+.notification-terms-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.notification-terms-fields label { margin: 0; }
+.notification-task-operation [role=alert] { color: #a43a22; }
+@media(max-width:600px) { .notification-terms-fields { grid-template-columns: 1fr; } }
+.np-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 9px 15px; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 9px; background: #fff; color: var(--md-sys-color-on-surface-variant); font-size: .83rem; font-weight: 600; cursor: pointer; }
+.np-button:hover { background: #fff3ec; border-color: #e6b79e; color: var(--md-sys-color-primary); }
+.np-button.primary { background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: #fff; }
+.np-button.primary:hover { background: var(--md-sys-color-primary-hover); }
+.np-button:disabled { opacity: .5; cursor: not-allowed; }
+.task-operation-workspace { padding: 20px; border: 1px solid var(--md-sys-color-outline-variant); border-radius: 12px; background: var(--md-sys-color-surface, #fff); margin: 16px 0; }
+.task-operation-workspace header, .task-operation-selector { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.task-operation-selector button[aria-pressed=true] { border-color: var(--md-sys-color-primary); color: var(--md-sys-color-primary); }
+.task-operation-workspace a.np-button { text-decoration: none; }
+.task-operation-workspace .notification-preview-actions { display: flex; gap: 9px; flex-wrap: wrap; margin: 10px 0; }

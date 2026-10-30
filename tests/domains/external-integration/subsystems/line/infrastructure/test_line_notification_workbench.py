@@ -13,6 +13,32 @@ from subsystems.line.deposit_notifications import DepositNotificationConflict
 PRINCIPAL=AdminPrincipal(1,'synthetic-notifications','Synthetic','system_admin')
 
 
+def test_information_deep_link_queries_exact_owner_question_and_case(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda _:SimpleNamespace(
+        query_staff_questions=lambda **kwargs:(calls.append(kwargs) or {'items':[{'question_id':73,'case_no':'CASE'}]})))
+    result=actions.information_query(73,case_no='CASE',principal=PRINCIPAL)
+    assert result.data == {'question_id':73,'case_no':'CASE'}
+    assert calls == [{'question_id':73,'case_no':'CASE'}]
+
+
+def test_information_deep_link_returns_unavailable_instead_of_another_question(monkeypatch):
+    monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda _:SimpleNamespace(
+        query_staff_questions=lambda **kwargs:{'items':[]}))
+    with pytest.raises(HTTPException) as failure:actions.information_query(73,case_no='CASE',principal=PRINCIPAL)
+    assert failure.value.status_code == 404
+
+
+@pytest.mark.parametrize('name,expected', [('測試客戶','測試客戶'),(None,'未具名使用者')])
+def test_customer_service_notification_uses_owner_name_or_unnamed_label(monkeypatch,name,expected):
+    ticket=SimpleNamespace(ticket_id=7,reason='服務需求',case_no=None,client_name=name,updated_at=None)
+    monkeypatch.setattr(query,'CustomerServiceApplication',lambda _:SimpleNamespace(
+        reminders=lambda request:SimpleNamespace(items=(ticket,),total=1)))
+    result=query.query_source(NotificationSource.CUSTOMER_SERVICE,0,PRINCIPAL)
+    assert result.items[0].person==expected
+    assert result.items[0].reference_id==7
+
+
 def test_notification_failures_reuse_bounded_cursor_and_fresh_owner_without_writes(monkeypatch):
     from contextlib import nullcontext
     from datetime import datetime, UTC

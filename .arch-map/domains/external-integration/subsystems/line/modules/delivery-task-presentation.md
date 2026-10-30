@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/components/LineDeliveryTaskWorkbench.tsx`
+- `ui_react/src/components/LineDeliveryOperationsWorkbench.tsx`、`ui_react/src/components/LineDeliveryTaskActions.tsx`、`ui_react/src/components/LineNotificationFailureActions.tsx` — LINE 正式「寄送與異常」頁；`tab=delivery&task=<id>` 單筆讀取寄送工作，`tab=delivery&view=failures&issue=<key>` 單筆核對原異常。清單分頁不影響選定 ID，重試／取消／補送仍沿既有 writer；不以通知設定頁替代原工作。
 - transport: `api/routes/line_tasks.py` — 現行訂金、各期逾期、日誌、資訊問答與服務日期／代班來源映射到既有公開分類；list／detail 不回傳 raw recipient、payload 或 provider error。未知來源仍 fail closed。
 
 - client: `ui_react/src/api/line_delivery/line_delivery_query_client.ts` — category 審核／款項／客服篩選在伺服器分頁前套用，總數同一集合。
@@ -21,6 +22,7 @@
 ## Verification
 - layout_status: `custom_current`
 - test_root: `ui_react/src/tests/line_delivery_task_workbench.test.tsx`
+- integration_root: `ui_react/src/tests/domains/external-integration/subsystems/line/integration/line_delivery_operations_workbench.test.tsx`
 - routing: `.arch-map/tests/domains/external-integration/subsystems/line/modules/delivery-task-presentation.md`
 - integration_root: `tests/test_line_delivery_public_query_route.py`
 

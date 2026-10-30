@@ -68,6 +68,29 @@ class _Transaction(_Connection):
         self.closed = True
 
 
+def test_staff_question_focus_filters_case_and_identity_before_pagination_without_writes():
+    cursor = _TransactionCursor([{'total': 1}, None, None], all_reads=[(QUESTION,)])
+    connection = _Transaction(cursor)
+    result = application_module.CandidateContactResponseApplication(lambda: connection).query_staff_questions(
+        case_no='CASE-1',question_id=10)
+    assert [item['question_id'] for item in result['items']] == [10]
+    count_sql,count_params = cursor.executed[0]
+    list_sql,list_params = cursor.executed[1]
+    assert 'pool.case_no=%s' in count_sql and 'source_event.id=%s' in count_sql
+    assert count_params == ('CASE-1',10)
+    assert list_params == ('CASE-1',10,25,0)
+    assert list_sql.index('source_event.id=%s') < list_sql.index('LIMIT')
+    assert not connection.committed and not connection.rolled_back and connection.closed
+
+
+def test_staff_question_focus_does_not_select_another_question_when_unavailable():
+    cursor = _TransactionCursor([{'total': 0}], all_reads=[()])
+    connection = _Transaction(cursor)
+    assert application_module.CandidateContactResponseApplication(lambda: connection).query_staff_questions(
+        case_no='OTHER',question_id=10)['items'] == []
+    assert not connection.committed
+
+
 @pytest.fixture
 def deliveries(monkeypatch):
     requests = []
@@ -80,6 +103,7 @@ def deliveries(monkeypatch):
             return SimpleNamespace(task_id=SimpleNamespace(value=1))
 
     monkeypatch.setattr(application_module, "MySqlLineDeliveryTaskRepository", Repository)
+    monkeypatch.setattr(application_module, "configured_message_payload", lambda connection, code, default, variables: default)
     monkeypatch.setenv("LINE_LIFF_ID", "test-liff")
     return requests
 

@@ -5,6 +5,7 @@
 - subsystem: `client-profile`
 
 ## Implementation
+- `ui_react/src/components/ClientProfileRequestWorkbench.tsx`、`ui_react/src/components/ClientProfileRequestReview.tsx` — 待審核清單與獨立單筆 Query；核准／退回仍用原 Preview／Apply、版本及冪等識別。名冊 `tab=applications&registration=<id>` 開啟指定需求申請，`tab=profile-requests&request=<id>` 開啟資料異動；不依賴清單第一頁，通知頁不再提供審核操作。
 - `domains/clients/profile.py`
 - `subsystems/client_profile/`
 - `infrastructure/mysql/client_profile_repository.py`

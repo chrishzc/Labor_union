@@ -142,7 +142,8 @@ class CandidateContactResponseApplication:
         finally:
             connection.close()
 
-    def query_staff_questions(self, *, page: int = 1, page_size: int = 25) -> dict[str, object]:
+    def query_staff_questions(self, *, page: int = 1, page_size: int = 25,
+                             case_no: str | None = None, question_id: int | None = None) -> dict[str, object]:
         if type(page) is not int or page < 1 or type(page_size) is not int or not 1 <= page_size <= 50:
             raise CandidateContactResponseError("candidate_contact_page_invalid")
         connection = self._connection_factory()
@@ -157,11 +158,18 @@ class CandidateContactResponseApplication:
                     "('coordination_requested','no_interest','timed_out','information_answered','candidate_period_refreshed') "
                     "OR JSON_UNQUOTE(JSON_EXTRACT(newer.payload,'$.willingness')) IN ('pending','willing','unwilling'))) "
                 )
-                cursor.execute("SELECT COUNT(*) AS total FROM (" + source + ") questions", ())
+                params = []
+                if case_no is not None:
+                    source += " AND pool.case_no=%s"
+                    params.append(case_no)
+                if question_id is not None:
+                    source += " AND source_event.id=%s"
+                    params.append(question_id)
+                cursor.execute("SELECT COUNT(*) AS total FROM (" + source + ") questions", tuple(params))
                 total = int(cursor.fetchone()["total"])
                 cursor.execute(
                     source + " ORDER BY source_event.id LIMIT %s OFFSET %s",
-                    (page_size, (page - 1) * page_size),
+                    (*params, page_size, (page - 1) * page_size),
                 )
                 contexts = tuple(cursor.fetchall() or ())
                 items = []

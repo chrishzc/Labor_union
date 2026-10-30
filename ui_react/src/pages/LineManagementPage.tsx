@@ -99,6 +99,7 @@ import type {
 import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomerServiceReminderWorkbench';
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineNotificationWorkbench } from '../components/LineNotificationWorkbench';
+import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
 import { LineMessageFlow } from '../components/LineMessageFlow';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
@@ -119,7 +120,7 @@ import { LineRichMenuDraftSaveActions } from '../components/LineRichMenuDraftSav
 import './LineManagementPage.css';
 import './line_management/LineRichMenuWorkspace.css';
 
-type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'message_flow' | 'order_groups' | 'payment_overdue' | 'runtime';
+type LineTab = 'tickets' | 'richmenu' | 'binding' | 'push_queue' | 'delivery' | 'message_flow' | 'order_groups' | 'payment_overdue' | 'runtime';
 
 function currentHashParams(): URLSearchParams {
   return new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '');
@@ -213,6 +214,7 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
   ['push_queue', '通知與發送', 'line.tab.push-queue'],
+  ['delivery', '寄送與異常', 'line.tab.delivery'],
   ['message_flow', 'LINE 流程圖', 'line.tab.message-flow'],
   ['order_groups', '案件群組', 'line.tab.order-groups'],
 ];
@@ -305,7 +307,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   runtimeOnly = false,
 }) => {
   const initialHashParams = useRef(currentHashParams()).current;
-  const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'message_flow', 'order_groups', 'payment_overdue'], 'tickets'));
+  const [activeTab, setActiveTab] = useState<LineTab>(runtimeOnly ? 'runtime' : hashChoice<LineTab>(initialHashParams, 'tab', ['tickets', 'richmenu', 'binding', 'push_queue', 'delivery', 'message_flow', 'order_groups', 'payment_overdue'], 'tickets'));
   useEffect(() => { if (activeTab === 'payment_overdue') window.location.hash = '#finance?tab=receipts&view=overdue'; }, [activeTab]);
   const [notificationMessageId, setNotificationMessageId] = useState<string | null>(initialHashParams.get('message')?.slice(0, 191) || null);
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
@@ -757,6 +759,7 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
       </nav>}
 
       {activeTab === 'tickets' && <LineCustomerServiceReminderWorkbench client={customerService} />}
+      {activeTab === 'delivery' && <LineDeliveryOperationsWorkbench/>}
       {activeTab === 'payment_overdue' && <a href="#finance?tab=receipts&view=overdue">前往帳務作業的逾期提醒</a>}
 
       {activeTab === 'richmenu' && (() => {

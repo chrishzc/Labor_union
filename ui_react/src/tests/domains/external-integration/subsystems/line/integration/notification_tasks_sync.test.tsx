@@ -5,10 +5,6 @@ import {NotificationTasksPage} from '../../../../../../pages/NotificationTasksPr
 import {notificationTasksClient as client, type NotificationItem} from '../../../../../../api/line_notifications/notification_tasks_client';
 import {lineDeliveryQueryClient as delivery} from '../../../../../../api/line_delivery/line_delivery_query_client';
 import type {LineDeliveryItem} from '../../../../../../api/line_delivery/line_delivery_query_schemas';
-vi.mock('../../../../../../components/NotificationTaskActions',()=>({
- notificationHref:()=>null,
- NotificationTaskActions:({onCommitted}:{onCommitted:()=>Promise<void>})=><button onClick={()=>void onCommitted()}>原流程已提交</button>,
-}));
 const item=(source:NotificationItem['source']):NotificationItem=>({id:'customer_service:7',source,group:'support',title:'同一聯絡需求',case_no:'115000001',
  reference_id:7,person:'合成人物',summary:'待處理',reason:'原 owner 待辦',time:'',tag:'待處理',recipient:null,message:null,
  unavailable_reason:null,expected_version:null,delivery_status:null,payment:null,log:null,information:null});
@@ -20,14 +16,11 @@ beforeEach(()=>{
  vi.spyOn(delivery,'list').mockResolvedValue({items:[task],total:1,page:1,page_size:6,total_pages:1});
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
-it('完成共享客服事項後重查推薦及客服，不留下另一來源的舊項目',async()=>{
- let resolved=false;
- vi.mocked(client.catalog).mockResolvedValue([
-  {source:'recommendation',label:'推薦',group:'review'},{source:'customer_service',label:'客服',group:'support'}]);
- vi.mocked(client.list).mockImplementation(async source=>({items:resolved?[]:[item(source)],total:resolved?0:1,next_cursor:null}));
- render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'同一聯絡需求'});
- fireEvent.click(screen.getByRole('button',{name:'查看並回覆客服案件'}));resolved=true;
- fireEvent.click(screen.getByRole('button',{name:'原流程已提交'}));
+it('正式頁完成後返回通知，重新查詢共享推薦與客服來源',async()=>{
+ vi.mocked(client.catalog).mockResolvedValue([{source:'recommendation',label:'推薦',group:'review'},{source:'customer_service',label:'客服',group:'support'}]);
+ vi.mocked(client.list).mockImplementation(async source=>({items:[item(source)],total:1,next_cursor:null}));
+ const view=render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'同一聯絡需求'});view.unmount();
+ vi.mocked(client.list).mockResolvedValue({items:[],total:0,next_cursor:null});render(<NotificationTasksPage/>);
  await screen.findByRole('heading',{name:'目前沒有待辦事項'});
  expect(vi.mocked(client.list).mock.calls.filter(x=>x[0]==='recommendation')).toHaveLength(2);
  expect(vi.mocked(client.list).mock.calls.filter(x=>x[0]==='customer_service')).toHaveLength(2);
@@ -41,26 +34,12 @@ it('款項分類交給原寄送 API 全部資料分頁篩選，不只篩目前�
  expect(await screen.findByText('共 41 筆')).toBeVisible();
  expect(screen.getByRole('heading',{name:'LINE 寄送工作'})).toBeVisible();
 });
-it('寄送工作提交後重新讀取紀錄，以新狀態替換原失敗狀態',async()=>{
+it('寄送紀錄前往正式寄送工作，不在通知頁提供重試操作',async()=>{
  render(<NotificationTasksPage/>);fireEvent.click(screen.getByRole('button',{name:/寄送紀錄/}));
- await screen.findByRole('heading',{name:'LINE 寄送工作'});
- fireEvent.click(screen.getByRole('button',{name:'查看寄送工作'}));
- vi.mocked(delivery.list).mockResolvedValue({items:[{...task,status:'pending'}],total:1,page:1,page_size:6,total_pages:1});
- fireEvent.click(screen.getByRole('button',{name:'原流程已提交'}));
- await waitFor(()=>expect(delivery.list).toHaveBeenCalledTimes(2));
- await waitFor(()=>expect(within(screen.getByLabelText('通知事項清單')).queryByText('寄送失敗')).not.toBeInTheDocument());
- expect(within(screen.getByLabelText('通知事項清單')).getByText('待寄送')).toBeVisible();
+ await screen.findByRole('heading',{name:'LINE 寄送工作'});fireEvent.click(screen.getByRole('button',{name:'查看寄送工作'}));
+ expect(window.location.hash).toBe('#line-management?tab=delivery&task=1');
+ expect(screen.queryByRole('button',{name:'重試寄送工作'})).not.toBeInTheDocument();
 });
-it('條件審核仍有後續選擇月嫂操作時，更新待辦不關閉原協調面板',async()=>{
- vi.mocked(client.catalog).mockResolvedValue([{source:'information',label:'條件協調',group:'review'}]);
- vi.mocked(client.list).mockResolvedValue({items:[{...item('information'),id:'information:7',title:'調整條件待處理'}],total:1,next_cursor:null});
- render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'調整條件待處理'});
- fireEvent.click(screen.getByRole('button',{name:'處理確認與條件'}));
- fireEvent.click(screen.getByRole('button',{name:'原流程已提交'}));
- await waitFor(()=>expect(client.list).toHaveBeenCalledTimes(2));
- expect(screen.getByRole('button',{name:'原流程已提交'})).toBeVisible();
-});
-
 
 it('手機空候選頁不顯示已無事項，跨多個空頁後只計算實際卡片',async()=>{
  const source=readFileSync('../line/static/mobile_admin.html','utf8');

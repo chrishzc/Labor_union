@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { registrationApplicationsClient as client, type RegistrationApplication } from '../api/registration_applications/client';
 import type { RegistryEditState } from './ClientRegistryDetailEditor';
 import './RegistrationApplications.css';
@@ -16,6 +16,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const selection=useRef(0);
   useEffect(() => { onEditStateChange({ dirty: false, busy }); }, [busy, onEditStateChange]);
   const run = async (operation: () => Promise<void>) => {
     setBusy(true); setError(false); setMessage('');
@@ -24,9 +25,19 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     } finally { setBusy(false); }
   };
   const refresh = () => run(async () => { const next = await client.pending(); setItems(next); setHasMore(next.length === 50); });
+  const loadDetail=(id:number)=>{
+    const current=++selection.current;setSelected(null);setError(false);setMessage('');
+    if(!Number.isSafeInteger(id) || id<=0){setError(true);setMessage('申請編號無效，請從通知事項重新開啟。');return;}
+    setBusy(true);
+    void client.detail(id).then(detail=>{if(current===selection.current)setSelected(detail);})
+      .catch(failure=>{if(current===selection.current){setError(true);setMessage(failure instanceof Error?failure.message:'申請暫時無法讀取，請重新查詢。');}})
+      .finally(()=>{if(current===selection.current)setBusy(false);});
+  };
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
-    if (initialId && Number.isSafeInteger(initialId) && initialId > 0) void run(async () => setSelected(await client.detail(initialId)));
+    if(initialId===undefined)return;
+    loadDetail(initialId);
+    return()=>{selection.current++;};
   }, [initialId]);
   const approve = () => {
     if (!selected || busy || selected.approved) return;
@@ -48,7 +59,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     <div className="registration-applications__layout">
     <div className="registration-applications__queue">
       <ul className="registration-applications__list">{items.map(item => <li key={item.registration_id}>
-        <button type="button" className="registration-applications__item" aria-pressed={selected?.registration_id === item.registration_id} disabled={busy} onClick={() => void run(async () => setSelected(await client.detail(item.registration_id)))}>
+        <button type="button" className="registration-applications__item" aria-pressed={selected?.registration_id === item.registration_id} disabled={busy} onClick={() => loadDetail(item.registration_id)}>
           <span>申請 {item.registration_id}：{item.name}／{item.phone}{item.registration_kind === 'non_citizen' && '（非市民）'}</span>
           <small>查看申請 <span aria-hidden="true">→</span></small>
         </button>

@@ -12,7 +12,7 @@ from api.dependencies.line_deposit import get_deposit_notifications
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity import CanonicalLineReviewResponse
 from api.schemas.notification_tasks import NotificationFailureDetailView
-from api.schemas.line_candidate_contact import CandidateInformationStaffSendView
+from api.schemas.line_candidate_contact import CandidateInformationStaffSendView, CandidateInformationStaffItemView, CandidateInformationStaffPageView
 from api.routes.line_deposit_payment import DepositReminderReceipt
 from api.error_contracts import typed_http_error
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -136,6 +136,23 @@ def deposit_reminder(body: DepositReminder, principal=Depends(require_capability
         }
         raise typed_http_error(409, 'conflict', str(error), messages.get(str(error),
             '繳費資料或狀態已更新，請重新整理後再操作。'), 'notification-deposit') from error
+
+
+@router.get('/information', response_model=BaseResponse[CandidateInformationStaffPageView])
+def information_list(case_no: str = Query(min_length=1,max_length=50), page: int = Query(default=1,ge=1),
+                     principal=Depends(require_capability(LineCapability.MATCHING_READ))):
+    return BaseResponse(data=CandidateContactResponseApplication(get_connection).query_staff_questions(
+        case_no=case_no,page=page,page_size=25))
+
+
+@router.get('/information/{question_id}/query', response_model=BaseResponse[CandidateInformationStaffItemView])
+def information_query(question_id: Annotated[int,Path(gt=0)], case_no: str = Query(min_length=1,max_length=50),
+                      principal=Depends(require_capability(LineCapability.MATCHING_READ))):
+    result=CandidateContactResponseApplication(get_connection).query_staff_questions(case_no=case_no,question_id=question_id)
+    if not result['items']:
+        raise typed_http_error(404,'not_found','candidate_contact_question_unavailable',
+                               '這筆需求已處理、已更新或不屬於此案件，請重新查詢。','notification-information')
+    return BaseResponse(data=result['items'][0])
 
 
 @router.post('/information/{question_id}/send', response_model=BaseResponse[CandidateInformationStaffSendView])

@@ -5,7 +5,6 @@ import { notificationTasksClient as client, notificationFailure, type Notificati
 import { lineDeliveryQueryClient } from '../../../../../../api/line_delivery/line_delivery_query_client';
 import { ApiHttpError } from '../../../../../../api/shared/typed_errors';
 import { transport } from '../../../../../../api/shared/transport';
-import { sessionClient } from '../../../../../../api/auth/session_client';
 
 const item=(patch:Partial<NotificationItem>={}):NotificationItem=>({id:'overdue:deposit',source:'overdue',group:'reminder',title:'訂金逾期未清',case_no:'116000001',reference_id:null,
   person:'',summary:'本期未繳 NT$ 3,000',reason:'各期獨立判斷',time:'2026-10-24',tag:'待處理',recipient:'客戶私人聊天室',message:'目前訂金餘額',unavailable_reason:'客戶尚未綁定 LINE',expected_version:null,
@@ -18,32 +17,20 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();window.history.replaceState(null,'','/');});
 describe('通知事項實際接線',()=>{
-  it('建立前受阻的通知可核對與補送；排送中保留待辦，成功後由原來源移除',async()=>{
-    vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session');
-    const key='ci_'+'1'.repeat(64);
-    const failure=item({id:'notification_failure:'+key,source:'notification_failure',group:'support',title:'LINE 通知建立異常',
-      unavailable_reason:null,payment:null,failure:{issue_key:key,notification_reason:'recipient_unavailable',related_task_ids:[7]}});
-    vi.mocked(client.catalog).mockResolvedValue([{source:'notification_failure',label:'LINE 通知建立異常',group:'support'},{source:'delivery',label:'寄送異常',group:'support'}]);
-    let finished=false;
-    vi.mocked(client.list).mockImplementation(async source=>({items:finished?[]:source==='notification_failure'?[failure]:[item({id:'delivery:7',source:'delivery',reference_id:7,title:'已涵蓋的工作'})],total:finished?0:1,next_cursor:null}));
-    const details=(can:boolean,message:string|null)=>({data:{case_no:'116000001',notification_reason:'recipient_unavailable',related_task_ids:[7],sources:[{source_event_id:11,event_code:'client.second_payment_due',can_replay:can,unavailable_reason:message}]}});
-    vi.spyOn(lineDeliveryQueryClient,'detail').mockResolvedValue({task:{id:7,task_id:7,task_type:'finance',source_type:'finance',status:'failed',scheduled_at:'2026-10-26T00:00:00Z',created_at:'2026-10-26T00:00:00Z',updated_at:'2026-10-26T00:00:00Z',completed_attempts:1,max_attempts:3,next_retry_at:null,sent_at:null,failed_at:'2026-10-26T00:00:00Z'},attempts:[]});
-    const get=vi.spyOn(transport,'get').mockResolvedValue(details(false,'案件群組尚不可用。'));
-    const post=vi.spyOn(transport,'post').mockResolvedValue({data:{source_event_id:11,replayed_source_event_id:22}});
-    render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'LINE 通知建立異常'});
-    expect(screen.getByLabelText('通知事項清單').querySelectorAll('[data-notification-id]')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button',{name:'處理通知建立異常'}));
-    expect(await screen.findByRole('button',{name:'補送原通知 #11'})).toBeDisabled();expect(post).not.toHaveBeenCalled();
-    expect(await screen.findByRole('button',{name:'重試寄送工作'})).toBeEnabled();
-    expect(screen.getByRole('link',{name:'通知內容與規則設定'})).toHaveAttribute('href','#line-management?tab=push_queue');
-    get.mockResolvedValue(details(true,null));fireEvent.click(screen.getByRole('button',{name:'重新核對通知'}));
-    await waitFor(()=>expect(screen.getByRole('button',{name:'補送原通知 #11'})).toBeEnabled());
-    get.mockResolvedValue(details(false,'原補送工作尚未完成，請查看寄送狀況。'));
-    fireEvent.click(screen.getByRole('button',{name:'補送原通知 #11'}));
-    await screen.findByText('原補送工作尚未完成，請查看寄送狀況。');
-    expect(screen.getByRole('button',{name:'補送原通知 #11'})).toBeDisabled();expect(post).toHaveBeenCalledTimes(1);
-    finished=true;fireEvent.click(screen.getByRole('button',{name:'重新整理'}));
-    await screen.findByRole('heading',{name:'目前沒有待辦事項'});
+  it.each([
+    ['customer_service','測試客戶'],['customer_service','未具名使用者'],['recommendation','測試客戶'],
+  ] as const)('客服來源 %s 顯示對象 %s 並跳轉原客服頁，不開舊面板',async(source,person)=>{
+    vi.mocked(client.catalog).mockResolvedValue([{source,label:'客服需求',group:'support'}]);
+    vi.mocked(client.list).mockResolvedValue({items:[item({id:'customer_service:7',source,reference_id:7,title:'客服需求',person,payment:null,unavailable_reason:null})],total:1,next_cursor:null});
+    const get=vi.spyOn(transport,'get');const post=vi.spyOn(transport,'post');
+    render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'客服需求'});
+    expect(screen.getByText('客服對象').nextElementSibling).toHaveTextContent(person);
+    expect(screen.queryByText('相關對象')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'前往客服案件'}));
+    expect(window.location.hash).toBe('#line-management?tab=tickets&ticket_q=7');
+    expect(screen.queryByRole('region',{name:'客服案件處理'})).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('內部備註')).not.toBeInTheDocument();
+    expect(get).not.toHaveBeenCalled();expect(post).not.toHaveBeenCalled();
   });
   it.each(['customer_binding','staff_binding'] as const)('未綁定來源 %s 提供人工聯絡與複製，不建立 LINE 寄送工作',async source=>{
     const reminder=item({id:source+':7',source,group:'review',title:'人工提醒綁定 LINE',person:'合成姓名',
@@ -122,37 +109,6 @@ describe('通知事項實際接線',()=>{
   });
 });
 
-
-it('客戶未綁定時顯示原因與下一步，只擋客戶；重新核對保留文案且不寄送',async()=>{
- const information={question_id:7,pool_id:1,request_kind:'information_question' as const,customer_answer_event_id:null,review_completed:false,
-  case_no:'116000001',staff_name:'合成月嫂',issues:[],customer_answer:null,customer_message:null,customer_available:false};
- let bound=false;
- vi.mocked(client.catalog).mockResolvedValue([{source:'information',label:'確認資訊',group:'review'}]);
- vi.mocked(client.list).mockImplementation(async()=>({items:[item({id:'information:7',source:'information',group:'review',title:'確認資訊',reference_id:7,payment:null,
-  unavailable_reason:bound?null:'客戶尚未綁定 LINE',information:{...information,customer_available:bound}})],total:1,next_cursor:null}));
- const post=vi.spyOn(transport,'post');
- render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'確認資訊'});
- fireEvent.click(screen.getByRole('button',{name:'處理確認與條件'}));
- const panel=screen.getByLabelText('月嫂確認與條件協調');
- fireEvent.change(within(panel).getByLabelText('發送文案'),{target:{value:'尚未發送的草稿'}});
- expect(within(panel).getByRole('button',{name:'發送給客戶'})).toBeDisabled();
- expect(within(panel).getByRole('button',{name:'發送給月嫂'})).toBeEnabled();
- expect(within(panel).getByText(/這位客戶尚未綁定 LINE/)).toHaveTextContent('請先聯絡客戶完成綁定');
- expect(within(panel).getByRole('link',{name:'查看客戶綁定方式與狀態'})).toBeVisible();
- fireEvent.click(within(panel).getByRole('button',{name:'發送給客戶'}));expect(post).not.toHaveBeenCalled();
- bound=true;fireEvent.click(within(panel).getByRole('button',{name:'重新核對'}));
- await waitFor(()=>expect(within(panel).getByRole('button',{name:'發送給客戶'})).toBeEnabled());
- expect(within(panel).getByLabelText('發送文案')).toHaveValue('尚未發送的草稿');
- vi.mocked(client.list).mockRejectedValueOnce(new ApiHttpError(503,'notification_source_unavailable','這類事項暫時無法讀取，請重試。'));
- fireEvent.click(within(panel).getByRole('button',{name:'重新核對'}));
- await within(panel).findByText('目前無法核對這筆需求，暫時不能發送。請重新核對後再試。');
- expect(within(panel).getByRole('button',{name:'發送給客戶'})).toBeDisabled();
- expect(within(panel).getByRole('button',{name:'發送給月嫂'})).toBeDisabled();
- expect(within(panel).getByLabelText('發送文案')).toHaveValue('尚未發送的草稿');
- fireEvent.click(within(panel).getByRole('button',{name:'重新核對'}));
- await waitFor(()=>expect(within(panel).getByRole('button',{name:'發送給客戶'})).toBeEnabled());
- expect(post).not.toHaveBeenCalled();
-});
 
 it('全部來源失敗顯示無法確認待辦，重試成功後才顯示真正零筆',async()=>{
  vi.mocked(client.list).mockRejectedValue(new Error('synthetic unavailable'));
