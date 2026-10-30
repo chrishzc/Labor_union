@@ -46,7 +46,9 @@ def evaluate_notification_rules(
         if not isinstance(rule, dict) or rule.get("event_code") != event.event_code:
             continue
         rule_id = str(rule.get("id", ""))
-        if event.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
+        if event.event_code in {'deposit_confirmed','client.second_payment_settled'}:
+            decisions.append(NotificationDecision(rule_id,"suppressed","payment_receipt_requires_human_send"))
+        elif event.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
             decisions.append(NotificationDecision(rule_id, "suppressed", "line_admin_push_retired"))
         elif event.historical_silent:
             decisions.append(NotificationDecision(rule_id, "suppressed", "historical_source_silent"))

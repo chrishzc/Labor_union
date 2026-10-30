@@ -412,6 +412,8 @@ class MySqlLineNotificationRepository:
             row = cursor.fetchone()
         if not isinstance(row, dict):
             return None
+        if row.get('event_code') in {'deposit_confirmed','client.second_payment_settled'}:
+            return 'payment_receipt_requires_human_send'
         if row.get('event_code') in RETIRED_ADMIN_NOTIFICATION_EVENTS:
             return 'line_admin_push_retired'
         if row.get('source_domain', 'manual_replay') != 'manual_replay':
@@ -636,6 +638,8 @@ class MySqlLineNotificationRepository:
         occurred_at: datetime,
     ) -> None:
         from subsystems.line.notification_policy import RETIRED_ADMIN_NOTIFICATION_EVENTS
+        if source.event_code in {'deposit_confirmed','client.second_payment_settled'}:
+            raise LineNotificationManualReplayValidationError('payment_receipt_requires_human_send')
         if source.event_code in RETIRED_ADMIN_NOTIFICATION_EVENTS:
             raise LineNotificationManualReplayValidationError('line_admin_push_retired')
         if source.source_domain == "manual_replay":

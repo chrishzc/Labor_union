@@ -21,19 +21,23 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   taishin_incoming_not_government: '這筆存入款不符合政府補助的自動辨識條件。',
   unsupported_bank_direction: '這種銀行交易尚無適用的自動配對方式。',
   sinopac_staff_return_requires_matching: '這筆月嫂退回款需要確認對應的原付款。',
+  subsidy_advance_not_due: '補助退款尚未符合政府入款或工會代墊條件，暫時無法核銷。',
 };
 
 export function financeImportReviewReason(
   row: FinanceImportReviewPage['items'][number],
   preview?: FinanceImportBatchPreview['rows'][number],
+  postingStopped = false,
 ): string {
   if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
   if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
+  if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
+  if (postingStopped && preview?.disposition === 'create') return '此筆符合自動入帳條件，但本次匯入有錯誤，尚未執行入帳。';
   if (row.available_actions.includes('review_suspected_duplicate_business_match')) return REVIEW_REASON_LABELS.suspected_duplicate_business_match;
   const reasons = (preview?.evidence ?? []).flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);
   if (reasons.length) return [...new Set(reasons)].join(' ');
   if (row.disposition === 'business_pending') {
-    const target = row.classification_type === 'staff_payout' ? '月嫂及待付款項' : row.classification_type === 'client_refund' ? '案件及待退款項' : '案件及待收款項';
+    const target = ({ staff_payout: '月嫂及待付款項', client_refund: '案件及待退款項', government_subsidy: '政府補助待核銷款項', client_subsidy_return: '補助退款項', client_refund_return: '客戶退款退回款項' } as Record<string, string>)[row.classification_type] ?? '案件及待收款項';
     return `尚未確認可自動核銷的${target}，請人工選擇正確對象與款項後核對金額。`;
   }
   if (row.disposition === 'blocked') return '這筆交易未通過入帳檢查，請核對來源資料後重新查詢。';

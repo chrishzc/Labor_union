@@ -142,27 +142,8 @@ class DepositNotificationApplication:
             return result.task_id.value, result.status.value
 
     def run_once(self):
-        """Project only committed Finance events explicitly requesting LINE; no historical backfill."""
-        if not self._liff_id or self._liff_id == 'your_liff_id_here':
-            return 0
-        processed = 0
-        for _ in range(25):
-            with self._uow_factory() as uow:
-                intent = uow.deposit_notifications.next_settlement()
-                if intent is None:
-                    break
-                payment = uow.deposit_payments.get(intent.case_no, lock=True)
-                if payment is None or payment.settlement_identity != intent.settlement_identity:
-                    break
-                recipient = uow.deposit_notifications.customer_line_user_id(intent.case_no, lock=True)
-                if recipient is None:
-                    break
-                key = settlement_key(payment)
-                if uow.deposit_notifications.existing_delivery(key) is None:
-                    uow.delivery_tasks.enqueue(self._request(payment, recipient, SETTLED, key, uow))
-                uow.commit()
-                processed += 1
-        return processed
+        """Committed receipts remain human-send todos; scanning never authorizes delivery."""
+        return 0
 
     def _require_customer(self, uow, case_no, line_user_id):
         current = uow.deposit_notifications.customer_line_user_id(case_no)
@@ -190,7 +171,8 @@ def deposit_delivery_is_current(uow, task, now) -> bool:
     case_no = request.source_aggregate_identity.split(':', 1)[0]
     payment = uow.deposit_payments.get(case_no, lock=True)
     recipient = uow.deposit_notifications.customer_line_user_id(case_no, lock=True)
-    valid = (payment is not None and payment_source(payment) == request.source_aggregate_identity
+    valid = (request.source_aggregate_type != SETTLED
+             and payment is not None and payment_source(payment) == request.source_aggregate_identity
              and recipient == request.recipient.identity.value
              and payment.settled == (request.source_aggregate_type == SETTLED)
              and (request.source_aggregate_type != REMINDER

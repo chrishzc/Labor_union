@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from subsystems.line.service_completion_notifications import ServiceCompletionNotificationPort
     from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderPort
     from subsystems.line.payment_reminder_notifications import PaymentReminderNotificationPort
+    from subsystems.line.payment_receipt_notifications import PaymentReceiptPort
     from subsystems.line.service_start_day import ServiceStartDayRepositoryPort
 
 
@@ -1058,6 +1059,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     service_day_log_reminders: "ServiceDayLogReminderPort"
     payment_overdue_reminders: "PaymentOverdueReminderPort"
     payment_reminder_notifications: "PaymentReminderNotificationPort"
+    payment_receipt_notifications: "PaymentReceiptPort"
 
 
 __all__ = [

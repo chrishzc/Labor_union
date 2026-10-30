@@ -23,7 +23,7 @@ def test_start_day_group_rule_and_full_card(amount):
     assert payload['type']=='flex'
     text=payload['contents']['body']['contents'][0]['text']
     assert '今天是本案的服務開始日' in text and '測試月嫂，請問今天的服務是否順利？' in text
-    assert ('第一期款尚待繳納：24,000 元' in text)==(amount>0)
+    assert '第一期款尚待繳納' not in text
     assert '3 天後' not in text and '留言聯繫專員' not in text
     buttons=payload['contents']['footer']['contents']
     assert [b['action']['label'] for b in buttons]==['服務正常','需要協助']

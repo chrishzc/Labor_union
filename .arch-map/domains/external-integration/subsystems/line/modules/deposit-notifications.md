@@ -6,7 +6,7 @@
 
 ## Responsibility
 工會人員待辦主動建立訂金繳費提醒；讀取已提交且帶 LINE 通知標記的 Client Finance 核銷事件，
-依 settlement identity 去重建立成功通知。客戶 LIFF 只讀本人案件繳費資料；協助按鈕沿既有客服
+核銷事件僅保留待辦，成功通知改由 payment-overdue-reminders 的專用人員命令依 settlement identity 去重建立；worker 不自動寄送，舊自動工作在 provider 前取消。客戶 LIFF 只讀本人案件繳費資料；協助按鈕沿既有客服
 案件與聊天室留言流程。缺帳號／銀行代碼或客戶綁定時保留人員待辦。provider 前重驗來源與綁定。
 不擁有財務、入帳或案件狀態，不通知群組、不補發歷史核銷。
 未核銷訂金提醒的清單／總數、送出與 provider 前均須同案雙方簽約完成；以 Orders 目前契約識別及相符 `contract_completed` 事件唯讀判定，舊待寄提醒不符則取消。預先計價、合法核銷、已核銷成功通知與客戶繳費查詢不加此門檻。

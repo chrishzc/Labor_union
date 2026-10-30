@@ -120,7 +120,7 @@ const EVENT_LABELS: Record<string, string> = {
   'deposit_confirmed': '訂金確認',
   'order.service_start_day': '服務當天群組繳款與服務狀況',
   'client.second_payment_due': '第二期款到期當天原群組提醒',
-  'client.second_payment_settled': '第二期款核銷成功原群組通知',
+  'client.second_payment_settled': '第二期款入帳－人工通知客戶',
   'order.service_completed': '服務完工後原群組邀請填寫滿意度問卷',
 };
 

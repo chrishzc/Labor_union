@@ -110,6 +110,13 @@ class MySqlDepositNotificationRepository:
                         (SETTLED if payment.settled else REMINDER, payment_source(payment)),
                     )
                     delivery = cursor.fetchone()
+                if payment.settled:
+                    with self._connection.cursor() as cursor:
+                        cursor.execute("SELECT processing_status FROM line_delivery_tasks WHERE source_aggregate_type='manual_client_payment_receipt' "
+                            "AND source_aggregate_identity=%s AND correlation_id LIKE %s ORDER BY id DESC LIMIT 1",
+                            ('deposit:'+payment.settlement_identity,payment.case_no+':%'))
+                        manual=cursor.fetchone()
+                    if manual: delivery=manual
                 if not payment.settled:
                     with self._connection.cursor() as cursor:
                         cursor.execute('SELECT processing_status FROM line_delivery_tasks WHERE source_aggregate_identity=%s '

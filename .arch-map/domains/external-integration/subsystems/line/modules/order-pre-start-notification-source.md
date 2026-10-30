@@ -5,7 +5,7 @@
 
 ## Responsibility
 Owns the read-only scan and immutable LINE notification source-event projection
-for formal start-day group caregiver-status inquiries and committed second-payment settlement notices. Financial reminder text is excluded from the group inquiry; initial/due payment reminders now use the private payment schedule worker. The
+for formal start-day group caregiver-status inquiries. Committed second-payment settlement notices now require the explicit human receipt command in payment-overdue-reminders; this scanner does not project them. Financial reminder text is excluded from the group inquiry; initial/due payment reminders now use the private payment schedule worker. The
 worker also projects explicitly marked committed normal service completions into one original-case-group survey invitation. The
 worker owns its outer unit of work only when new source events are persisted;
 it does not mutate Orders or Client Finance facts and does not call the LINE

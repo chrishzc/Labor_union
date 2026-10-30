@@ -1890,7 +1890,7 @@ async function loadDepositPayments() {
     const deliveryLabels={pending:"已排入寄送",processing:"寄送處理中",retryable_failed:"等待重試",sent:"已送出",failed:"寄送失敗，請至寄送工作處理",cancelled:"寄送已取消，請確認案件及綁定"};
     if (!item.line_bound) status.textContent=item.settled ? "客戶未綁定 LINE，請人工通知已入帳。" : "客戶未綁定 LINE，請人工通知繳費。";
     else if (item.delivery_status) status.textContent=deliveryLabels[item.delivery_status] || "請確認寄送工作狀態。";
-    else if (item.settled) status.textContent="核銷成功通知待系統排入寄送。";
+    else if (item.settled) status.textContent="已入帳，待人員到帳務頁面確認並發送通知。";
     else if (!item.ready) status.textContent="繳費資料待確認，尚不能發送提醒。";
     else {
       const button=document.createElement("button");button.type="button";button.textContent="發送訂金繳費提醒";

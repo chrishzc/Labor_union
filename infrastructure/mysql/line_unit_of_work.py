@@ -114,6 +114,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.deposit_payments = MySqlDepositPaymentQueryRepository(connection)
         self.deposit_notifications = MySqlDepositNotificationRepository(connection)
+        from infrastructure.mysql.payment_receipt_notification_repository import MySqlPaymentReceiptNotificationRepository
+        self.payment_receipt_notifications = MySqlPaymentReceiptNotificationRepository(connection)
         self.notification_rules = MySqlLineNotificationRepository(connection)
         self.anomaly_rechecks = MySqlCurrentIssueRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)

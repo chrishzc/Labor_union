@@ -12,7 +12,7 @@
 ## Implementation
 - primary:
   - `infrastructure/mysql/finance_import_repository.py`
-  - `subsystems/finance_import/query.py` — manifest count and review list use the same owner-ledger predicate: retain matched client receipts and unposted staff payouts/customer refunds for review, exclude posted rows.
+  - `subsystems/finance_import/query.py` — manifest count and review list cover all unresolved canonical bank facts (manual review, business pending, blocked and unposted create), including unmatched cases; formal owner postings, reconciliation receipts and successful dispatches exclude processed rows.
   - `infrastructure/mysql/finance_import_owning_domain_composite.py` — 補助退款只委派 Client Finance owner；代墊判斷與人工核銷共用 owner funding facts，不在 importer 重算。
   - `ui_react/src/api/finance_import/finance_import_correction_client.ts`
   - `ui_react/src/components/FinanceImportCorrectionForm.tsx`

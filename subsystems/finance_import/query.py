@@ -14,68 +14,32 @@ from domains.finance_import.statement_archive import bank_import_type
 
 
 _MAXIMUM_PAGE_SIZE = 100
-_REVIEW_DISPOSITIONS = ("manual_review", "business_pending", "blocked")
-_CLIENT_VIRTUAL_ACCOUNT_SQL = """
-CASE
-    WHEN finance_row.format_id='sinopac' THEN
-        CASE WHEN TRIM(JSON_UNQUOTE(JSON_EXTRACT(
-            finance_row.bank_references, '$."銷帳編號"'
-        ))) REGEXP '^99781699[0-9]{6}([[:space:]]*[[:alpha:]][^[:digit:]]*)?$'
-        THEN LEFT(TRIM(JSON_UNQUOTE(JSON_EXTRACT(
-            finance_row.bank_references, '$."銷帳編號"'
-        ))),14) END
-    WHEN finance_row.format_id='legacy' THEN
-        CASE WHEN TRIM(finance_row.cancellation_code)
-            REGEXP '^99781699[0-9]{6}([[:space:]]*[[:alpha:]][^[:digit:]]*)?$'
-        THEN LEFT(TRIM(finance_row.cancellation_code),14) END
-    WHEN finance_row.cancellation_code REGEXP '^99781699[0-9]{6}$'
-        THEN finance_row.cancellation_code
-END
-"""
-_MATCHED_CLIENT_RECEIPT_PREDICATE = f"""
-event.classification_type='client_receipt'
+_REVIEW_DISPOSITIONS = ("manual_review", "business_pending", "blocked", "create")
+# Every unresolved canonical bank fact is visible, including unmatched and
+# blocked rows. Formal owner postings take precedence over stale classifications.
+_REVIEW_ROW_PREDICATE = """
+NOT EXISTS (
+    SELECT 1 FROM client_ledger_entries posted_client
+    WHERE posted_client.finance_import_row_id=finance_row.id
+)
 AND NOT EXISTS (
-    SELECT 1 FROM client_ledger_entries posted_receipt
+    SELECT 1 FROM staff_payout_events posted_payout
+    WHERE posted_payout.finance_import_row_id=finance_row.id
+)
+AND NOT EXISTS (
+    SELECT 1 FROM finance_import_reconciliation_receipts posted_receipt
     WHERE posted_receipt.finance_import_row_id=finance_row.id
-      AND posted_receipt.entry_type='receipt'
 )
-AND (
-    EXISTS (
-        SELECT 1
-        FROM client_legacy_virtual_accounts legacy_account
-        JOIN orders legacy_order ON legacy_order.case_no=legacy_account.case_no
-        WHERE legacy_account.virtual_account=({_CLIENT_VIRTUAL_ACCOUNT_SQL})
-            COLLATE utf8mb4_unicode_ci
-    )
-    OR EXISTS (
-        SELECT 1
-        FROM orders current_order
-        WHERE ({_CLIENT_VIRTUAL_ACCOUNT_SQL}) IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM client_legacy_virtual_accounts mapped_account
-              WHERE mapped_account.virtual_account=({_CLIENT_VIRTUAL_ACCOUNT_SQL})
-                  COLLATE utf8mb4_unicode_ci
-          )
-          AND current_order.case_no=CONCAT(
-              SUBSTRING(({_CLIENT_VIRTUAL_ACCOUNT_SQL}), 9, 3),
-              LPAD(CAST(CAST(SUBSTRING(({_CLIENT_VIRTUAL_ACCOUNT_SQL}), 12, 3)
-                  AS UNSIGNED) AS CHAR), 6, '0')
-          ) COLLATE utf8mb4_unicode_ci
-    )
+AND NOT EXISTS (
+    SELECT 1 FROM government_subsidy_period_entries posted_period
+    WHERE posted_period.finance_import_row_id=finance_row.id
+)
+AND NOT EXISTS (
+    SELECT 1 FROM finance_import_dispatch_events posted_dispatch
+    WHERE posted_dispatch.finance_import_row_id=finance_row.id
+      AND posted_dispatch.outcome IN ('reconciled','existing')
 )
 """
-_REVIEW_ROW_PREDICATE = f"""
-(({_MATCHED_CLIENT_RECEIPT_PREDICATE}) OR (
-    event.classification_type='staff_payout'
-    AND NOT EXISTS (SELECT 1 FROM staff_payout_events posted_payout
-                    WHERE posted_payout.finance_import_row_id=finance_row.id)
-) OR (
-    event.classification_type='client_refund'
-    AND NOT EXISTS (SELECT 1 FROM client_ledger_entries posted_refund
-                    WHERE posted_refund.finance_import_row_id=finance_row.id)
-))
-"""
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,7 +316,7 @@ class FinanceImportQueryService:
                             ON finance_row.id=event.finance_import_row_id
                          WHERE event.batch_id=batch.id
                            AND event.disposition IN (
-                               'manual_review','business_pending','blocked'
+                               'manual_review','business_pending','blocked','create'
                            )
                            AND {_REVIEW_ROW_PREDICATE}
                            AND event.classification_version=(
@@ -424,7 +388,7 @@ class FinanceImportQueryService:
                   )
                 WHERE contract.batch_identity=%s
                   AND (%s IS NULL OR finance_row.id>%s)
-                  AND event.disposition IN (%s,%s,%s)
+                  AND event.disposition IN (%s,%s,%s,%s)
                   AND {_REVIEW_ROW_PREDICATE}
                 ORDER BY finance_row.id ASC
                 LIMIT %s

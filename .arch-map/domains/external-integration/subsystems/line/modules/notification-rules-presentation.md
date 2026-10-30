@@ -5,7 +5,7 @@
 - subsystem: `line`
 
 ## Responsibility
-2026-10-30 最新人工確認：原「通知與發送」完整內容工作台改由帳務警示內的「提醒內容」組裝；既有 LINE push_queue 深連結與流程選取導向相同帳務內容，保留文案、卡片、公版預覽、revision／writer 與草稿。帳務組裝入口由 payment-overdue-reminders module 擁有，本 module 繼續擁有既有通知內容編輯及預覽。
+2026-10-30 最新人工補充：原「通知與發送」完整工作台維持 LINE push_queue；訂金首次提醒、第一期繳款提醒／結清問候、第二期到期提醒與三期逾期提醒以及訂金／第二期入帳通知共九則，獨立由帳務警示「提醒內容」組裝。共用編輯元件以封閉 scope 分離目錄，帳務不查其他通知規則或歡迎訊息；沿用原文案、公版預覽、revision／writer 與草稿。只有這些款項內容的 LINE 深連結與流程選取導向帳務，其餘仍在 LINE。帳務組裝入口由 payment-overdue-reminders module 擁有，本 module 繼續擁有既有通知內容編輯及預覽。
 統一歡迎訊息與LINE-owned通知內容維護，直接編輯各則文字並預覽；既有規則欄位收在發送設定，依 Global §2.4 一次點擊送出、原因選填，內部仍沿用zero-write Preview與同一候選的Save／Delete及closed結果，不設人工再次確認。卡片說明文字由新通知組裝時讀取目前訊息設定，案件欄位／回覆操作仍由原流程決定。一般畫面不得顯示typed error code、raw backend／provider detail；不得改寫revision、fingerprint、idempotency、已提交通知或工作快照。
 
 「通知與發送」採清單、inline 編輯與手機預覽整合工作台。依 2026-10-22 最新人工裁決，工作台改用明確標示的公版範例，以無業務 DB 能力的 typed sample port 重用原純組裝函式；欄位表列出中文名稱、變數／路徑與帶入值。移除真實案件／月嫂選取與資格限制，不建立投遞任務、操作憑證、異動稽核或 provider effect。既有 record API 保留原 readonly 契約，工作台不再呼叫。

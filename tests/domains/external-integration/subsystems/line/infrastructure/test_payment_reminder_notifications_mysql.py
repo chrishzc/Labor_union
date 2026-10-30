@@ -41,7 +41,8 @@ NOW=datetime(2026,11,5,1,tzinfo=timezone.utc)
 TABLES=('clients','orders','order_contract_flow_events','client_finance_accounts','client_obligations','client_obligation_events',
     'client_payment_terms','line_platform_users','line_identity_role_bindings','line_delivery_tasks','line_delivery_attempt_events',
     'line_domain_audit_events','line_inbox_events','line_command_receipts','line_configuration_current','line_configuration_revisions',
-    'client_deposit_settlement_projection','client_ledger_entries','client_legacy_virtual_accounts')
+    'client_deposit_settlement_projection','client_ledger_entries','client_legacy_virtual_accounts',
+    'client_finance_outbox','client_ledger_obligation_allocations','line_notification_source_events')
 
 
 @pytest.fixture(scope='module')

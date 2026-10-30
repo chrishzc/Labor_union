@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+import sqlite3
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_review_row_query_uses_a_non_reserved_table_alias() -> None:
     cursor = _Cursor([])
 
     FinanceImportQueryService(_Connection(cursor))._fetch_review_rows(
-        ("batch-1", None, None, "manual_review", "business_pending", "blocked", 10)
+        ("batch-1", None, None, "manual_review", "business_pending", "blocked", "create", 10)
     )
 
     statement = cursor.calls[0][0]
@@ -89,36 +90,104 @@ def test_review_row_query_uses_a_non_reserved_table_alias() -> None:
     assert " row.id" not in statement
 
 
-def test_review_rows_only_project_client_receipts_whose_virtual_account_matches_an_order() -> None:
+def test_review_rows_and_manifest_share_the_complete_unposted_scope() -> None:
     cursor = _Cursor([])
-
-    FinanceImportQueryService(_Connection(cursor))._fetch_review_rows(
-        ("batch-1", None, None, "manual_review", "business_pending", "blocked", 10)
+    service = FinanceImportQueryService(_Connection(cursor))
+    service._fetch_review_rows(
+        ("batch-1", None, None, "manual_review", "business_pending", "blocked", "create", 10)
     )
-
-    statement = cursor.calls[0][0]
-    assert "event.classification_type='client_receipt'" in statement
-    assert "FROM client_legacy_virtual_accounts legacy_account" in statement
-    assert "JOIN orders legacy_order" in statement
-    assert "FROM orders current_order" in statement
-    assert "WHEN finance_row.format_id='sinopac'" in statement
-    assert "WHEN finance_row.format_id='legacy'" in statement
-    assert "LEFT(TRIM(finance_row.cancellation_code),14)" in statement
-    assert "LEFT(TRIM(JSON_UNQUOTE(JSON_EXTRACT(" in statement
-    assert "FROM client_legacy_virtual_accounts mapped_account" in statement
-    assert "finance_import_source_reviews" not in statement
+    service._fetch_manifest("batch-1")
+    for statement, _ in cursor.calls:
+        assert "client_legacy_virtual_accounts" not in statement
+        assert "JOIN orders" not in statement
+        assert "finance_import_source_review_occurrences" not in statement
+        for owner in ("client_ledger_entries", "staff_payout_events",
+                      "finance_import_reconciliation_receipts",
+                      "government_subsidy_period_entries", "finance_import_dispatch_events"):
+            assert owner in statement
 
 
-def test_manifest_review_count_uses_the_same_matched_order_scope() -> None:
-    cursor = _Cursor([])
+def test_unmatched_and_blocked_rows_remain_visible_until_formal_posting() -> None:
+    database = sqlite3.connect(':memory:')
+    database.row_factory = sqlite3.Row
+    database.executescript("""
+        CREATE TABLE finance_import_batches (
+            id INTEGER PRIMARY KEY, format_id TEXT, source_file TEXT, sheet_name TEXT,
+            header_row INTEGER, row_count INTEGER, status TEXT, created_at TEXT, completed_at TEXT
+        );
+        CREATE TABLE finance_import_batch_contracts (
+            batch_id INTEGER, batch_identity TEXT, batch_version INTEGER,
+            source_content_digest TEXT, classifier_version TEXT, fingerprint_version TEXT
+        );
+        CREATE TABLE finance_import_rows (
+            id INTEGER PRIMARY KEY, transaction_date TEXT, direction TEXT, format_id TEXT,
+            debit INTEGER, credit INTEGER, reconciliation_status TEXT, created_at TEXT
+        );
+        CREATE TABLE finance_import_classification_events (
+            id INTEGER PRIMARY KEY, batch_id INTEGER, finance_import_row_id INTEGER,
+            classification_version INTEGER, classification_type TEXT, disposition TEXT,
+            available_actions TEXT
+        );
+        CREATE TABLE finance_import_occurrences (
+            id INTEGER PRIMARY KEY, batch_id INTEGER, finance_import_row_id INTEGER,
+            sheet_name TEXT, source_row INTEGER
+        );
+        CREATE TABLE client_ledger_entries (finance_import_row_id INTEGER);
+        CREATE TABLE staff_payout_events (finance_import_row_id INTEGER);
+        CREATE TABLE finance_import_reconciliation_receipts (id INTEGER PRIMARY KEY, finance_import_row_id INTEGER);
+        CREATE TABLE government_subsidy_period_entries (finance_import_row_id INTEGER);
+        CREATE TABLE finance_import_dispatch_events (batch_id INTEGER, finance_import_row_id INTEGER, outcome TEXT);
+        INSERT INTO finance_import_batches VALUES (1,'legacy','test.xlsx','來源',1,10,'previewed','2026-10-30',NULL);
+        INSERT INTO finance_import_batch_contracts VALUES (1,'batch-1',1,'digest','v1','v1');
+    """)
+    for identity in range(1, 11):
+        classification = 'non_business_review' if identity == 1 else 'staff_payout' if identity == 10 else 'client_receipt'
+        disposition = 'manual_review' if identity == 1 else 'blocked' if identity == 3 else 'create' if identity == 9 else 'business_pending'
+        database.execute("INSERT INTO finance_import_rows VALUES (?,'2026-10-30','incoming','legacy',NULL,100,'unmatched','2026-10-30')", (identity,))
+        database.execute('INSERT INTO finance_import_classification_events VALUES (?,1,?,0,?,?,?)', (identity, identity, classification, disposition, '[]'))
+        database.execute("INSERT INTO finance_import_occurrences VALUES (?,1,?,'來源',?)", (identity, identity, identity + 1))
+    database.executescript("""
+        INSERT INTO client_ledger_entries VALUES (4);
+        INSERT INTO staff_payout_events VALUES (5);
+        INSERT INTO finance_import_reconciliation_receipts VALUES (1,6);
+        INSERT INTO government_subsidy_period_entries VALUES (7);
+        INSERT INTO finance_import_dispatch_events VALUES (1,8,'reconciled');
+    """)
 
-    FinanceImportQueryService(_Connection(cursor))._fetch_manifest("batch-1")
+    class Cursor:
+        def __enter__(self):
+            self.cursor = database.cursor()
+            return self
 
-    statement = cursor.calls[0][0]
-    assert "event.classification_type='client_receipt'" in statement
-    assert "FROM client_legacy_virtual_accounts legacy_account" in statement
-    assert "FROM orders current_order" in statement
-    assert "finance_import_source_review_occurrences" not in statement
+        def __exit__(self, *_arguments):
+            self.cursor.close()
+
+        def execute(self, statement, parameters):
+            self.cursor.execute(statement.replace('%s', '?'), parameters)
+
+        def fetchall(self):
+            return [dict(row) for row in self.cursor.fetchall()]
+
+        def fetchone(self):
+            row = self.cursor.fetchone()
+            return None if row is None else dict(row)
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    try:
+        service = FinanceImportQueryService(Connection())
+        rows = service.list_review_rows('batch-1', limit=100)
+        assert [row.row_id for row in rows] == [1, 2, 3, 9, 10]
+        assert {row.disposition for row in rows} == {'manual_review', 'business_pending', 'blocked', 'create'}
+        assert service.get_manifest('batch-1').review_count == len(rows)
+        assert [row.row_id for row in service.list_review_rows('batch-1', limit=2, after_row_id=2)] == [3, 9]
+        database.execute('INSERT INTO client_ledger_entries VALUES (2)')
+        assert service.get_manifest('batch-1').review_count == 4
+        assert [row.row_id for row in service.list_review_rows('batch-1', limit=100)] == [1, 3, 9, 10]
+    finally:
+        database.close()
 
 
 def test_query_rejects_missing_formal_batch() -> None:

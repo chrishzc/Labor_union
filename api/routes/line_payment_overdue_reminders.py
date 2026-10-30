@@ -15,6 +15,8 @@ from subsystems.line.payment_overdue_reminders import PaymentOverdueReminderConf
 router = APIRouter(prefix='/api/v1/line/payment-overdue-reminders',tags=['LINE Payment Overdue Reminders'])
 from api.routes.line_payment_reminder_settings import router as settings_router
 router.include_router(settings_router)
+from api.routes.line_payment_receipt_notifications import router as receipt_router
+router.include_router(receipt_router)
 
 
 class PaymentSnapshot(BaseModel):

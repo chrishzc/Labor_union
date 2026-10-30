@@ -154,6 +154,14 @@ def application(db, **kwargs):
     return DepositNotificationApplication(lambda: Uow(db), lambda: NOW, liff_id='synthetic-liff', bank_code=kwargs.get('bank_code', '807'))
 
 
+def queue_legacy_receipt(db):
+    from subsystems.line.deposit_notifications import SETTLED,settlement_key
+    with Uow(db) as unit:
+        payment=unit.deposit_payments.get(CASE)
+        unit.delivery_tasks.enqueue(application(db)._request(payment,USER,SETTLED,settlement_key(payment),unit))
+        unit.commit()
+
+
 def complete_contract(db, case_no=CASE):
     identity = case_no + ':signed'
     db.execute('UPDATE orders SET contract_identity=? WHERE case_no=?', (identity, case_no))
@@ -274,28 +282,15 @@ def test_reminder_blocks_changed_missing_or_unauthorized_facts_without_job(db, c
     assert not rows(db, 'line_delivery_tasks')
 
 
-def test_success_is_automatic_only_for_committed_formal_deposit_and_replay_is_unique(db):
-    # A legitimate receipt before signing still gets its receipt notification.
-    db.execute('DELETE FROM order_contract_flow_events')
-    db.execute('UPDATE orders SET contract_identity=NULL')
-    db.commit()
-    assert application(db).run_once() == 0
+def test_committed_formal_deposit_stays_a_human_todo_without_automatic_delivery(db):
+    db.execute('DELETE FROM order_contract_flow_events');db.execute('UPDATE orders SET contract_identity=NULL');db.commit()
     settle(db)
-    assert {row['intent_type'] for row in rows(db,'client_finance_outbox')} == {'orders_deposit_reconciled'}
-    assert json.loads(rows(db,'client_finance_outbox')[0]['payload_snapshot'])['line_deposit_notification'] is True
-    assert application(db).run_once() == 1
-    job, = rows(db, 'line_delivery_tasks')
-    payload = json.loads(job['payload_snapshot'])
-    assert payload['altText'] == '案件〈115000157〉訂金 NT$12,000已確認入帳，謝謝您。'
-    assert payload['contents']['footer']['contents'][0]['action']['label'] == '查看繳費狀態'
-    payment = application(db).query_customer(CASE, USER)
-    assert str(payment.received_on) == '2026-10-20'
-    assert application(db).run_once() == 0
+    assert application(db).run_once()==0
+    assert application(db).query_customer(CASE,USER).settled
+    assert len(Uow(db).deposit_notifications.followups(settled=True).items)==1
     db.execute("UPDATE client_finance_outbox SET status='delivered'");db.commit()
-    assert application(db).run_once() == 0
-    assert len(rows(db, 'line_delivery_tasks')) == 1
-    orders_intent = next(row for row in rows(db,'client_finance_outbox') if row['intent_type']=='orders_deposit_reconciled')
-    assert orders_intent['status'] == 'delivered'
+    assert application(db).run_once()==0
+    assert not rows(db,'line_delivery_tasks')
 
 
 def test_finance_rollback_leaves_neither_notification_intent_nor_success_job(db):
@@ -317,18 +312,12 @@ def test_historical_settlement_is_visible_without_automatic_backfill(db):
     assert Uow(db).deposit_notifications.followups().items == ()
 
 
-def test_queue_failure_rolls_back_notification_and_can_retry_same_settlement(db,monkeypatch):
+def test_settlement_scan_does_not_enter_the_delivery_writer(db,monkeypatch):
     settle(db)
-    original = MySqlLineDeliveryTaskRepository.enqueue
-    def fail_after_enqueue(self, request):
-        original(self,request)
-        raise RuntimeError('synthetic failure before commit')
-    monkeypatch.setattr(MySqlLineDeliveryTaskRepository,'enqueue',fail_after_enqueue)
-    with pytest.raises(RuntimeError,match='before commit'): application(db).run_once()
+    monkeypatch.setattr(MySqlLineDeliveryTaskRepository,'enqueue',lambda *_:pytest.fail('automatic receipt attempted'))
+    assert application(db).run_once()==0
     assert not rows(db,'line_delivery_tasks')
     assert application(db).query_customer(CASE,USER).settled
-    monkeypatch.setattr(MySqlLineDeliveryTaskRepository,'enqueue',original)
-    assert application(db).run_once()==1
 
 
 def test_noncanonical_case_without_unique_imported_account_stays_pending(db):
@@ -354,13 +343,14 @@ def test_unbound_success_is_staff_todo_not_fake_sent_then_binding_can_resume(db)
     db.execute("UPDATE line_identity_role_bindings SET binding_status='bound'")
     db.commit()
     application(db).run_once()
-    assert len(rows(db,'line_delivery_tasks')) == 1
+    assert not rows(db,'line_delivery_tasks')
+    assert Uow(db).deposit_notifications.followups().items[0].line_bound
 
 
 @pytest.mark.parametrize('change', ['settled','rebind','version','cancelled','reversed','unsigned'])
 def test_provider_guard_cancels_outdated_tasks_and_never_calls_provider(db, change):
     if change == 'reversed':
-        settle(db);application(db).run_once()
+        settle(db);queue_legacy_receipt(db)
         db.execute("UPDATE client_deposit_settlement_projection SET settlement_state='unsettled'")
     else:
         application(db).send_reminder(CASE,2,IdempotencyKey('one'),ACTOR)
@@ -514,7 +504,7 @@ def test_settlement_filters_keep_the_same_pending_total_and_completed_notice_lea
                "'receivable_from_client','open',1,1000,'2026-11-01')")
     db.commit()
     settle(db)
-    application(db).run_once()  # Memory-only queue; no provider exists in this test.
+    queue_legacy_receipt(db)  # Explicit pre-change task fixture; no provider exists.
     repository = Uow(db).deposit_notifications
     unpaid = repository.followups(settled=False)
     settled = repository.followups(settled=True)
@@ -534,7 +524,7 @@ def test_same_case_focus_filters_before_paging_and_exits_after_notice_sent(db):
     complete_contract(db, 'PUBLIC-OTHER')
     db.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,status,projection_version,amount_due_ntd,due_date) VALUES ('deposit-other','PUBLIC-OTHER','deposit',"
                "'receivable_from_client','open',1,1000,'2026-11-01')")
-    db.commit();settle(db);application(db).run_once()
+    db.commit();settle(db);queue_legacy_receipt(db)
     repository=Uow(db).deposit_notifications
     selected=repository.followups(case_no=CASE,settled=True,page_size=1)
     assert selected.page_total==selected.total==1 and selected.items[0].payment.case_no==CASE

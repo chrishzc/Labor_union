@@ -2,7 +2,7 @@
  * File: finance_source_review_list.test.tsx
  * Description: 驗證 Finance Import Preview 的人工確認 KPI、清單與 batch identity 共用 owner readback。
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { financeImportMutationClient, type FinanceImportBatchPreview } from '../api/finance_import/finance_import_mutation_client';
@@ -12,6 +12,9 @@ import { readFileSync } from 'node:fs';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { FinancePage } from '../pages/FinancePage';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
+import { paymentReceiptClient } from '../api/line_order_groups/payment_receipt_notification_client';
+import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_query_client';
+import { financeImportCorrectionClient } from '../api/finance_import/finance_import_correction_client';
 
 const BATCH = 'BATCH-REVIEW-222';
 const PREVIEW: FinanceImportBatchPreview = {
@@ -86,10 +89,16 @@ async function showPreview() {
   fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
   fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
   fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-  await screen.findByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
+  await screen.findByText(/^未入帳明細 \d+ 筆$/);
 }
 function reviewCount() {
-  return screen.getByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' }).textContent?.match(/需人工處理 (\d+)/)?.[1];
+  return screen.getByText(/^未入帳明細 \d+ 筆$/).textContent?.match(/未入帳明細 (\d+)/)?.[1];
+}
+
+function previewRow(row: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'][number], evidence: string[]): FinanceImportBatchPreview['rows'][number] {
+  return { row_identity: row.row_identity, canonical_fact_version: 0, amount_ntd: row.amount_ntd,
+    classification_type: row.classification_type, disposition: row.disposition, target_identities: [], evidence,
+    available_actions: row.available_actions, integrity_violations: [], fingerprint_collision: false, formal_reference_conflict: false };
 }
 
 describe('Finance source-review owner readback', () => {
@@ -101,6 +110,9 @@ describe('Finance source-review owner readback', () => {
       display_name: 'Finance Review',
       role: 'admin',
     });
+    window.location.hash = '#finance?tab=bank';
+    vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({ items: [], next_cursor: null });
+    vi.spyOn(paymentReceiptClient, 'list').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue({
       batch_identity: BATCH,
@@ -122,6 +134,7 @@ describe('Finance source-review owner readback', () => {
   afterEach(() => {
     cleanup();
     sessionClient.clearSession();
+    window.location.hash = '';
     vi.restoreAllMocks();
   });
 
@@ -133,17 +146,15 @@ describe('Finance source-review owner readback', () => {
     fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
 
-    expect(await screen.findByText(BATCH)).toBeInTheDocument();
-    const manualReviewSummary = screen.getByText(/^可自動入帳 \d/, { selector: '.finance-scope-note' });
-    expect(manualReviewSummary).toHaveTextContent('需人工處理 1');
-    expect(screen.getByText(/批次/).parentElement).toHaveTextContent(BATCH);
+    const manualReviewSummary = await screen.findByText('未入帳明細 1 筆');
+    expect(screen.getByLabelText('匯入結果')).toHaveTextContent('本次入帳 0 筆｜已存在略過 0 筆');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢人工確認' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢未入帳明細' }));
     await waitFor(() => expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(2));
     expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2);
-    expect(manualReviewSummary).toHaveTextContent('需人工處理 1');
+    expect(manualReviewSummary).toHaveTextContent('未入帳明細 1 筆');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
   });
 
@@ -224,11 +235,103 @@ describe('Finance source-review owner readback', () => {
   it('automatically refreshes owner review after terminal Apply', async () => {
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
     await showPreview();
-    await screen.findByText('匯入完成：核銷 1、既有 0、待處理 1');
-    await waitFor(() => expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2));
+    await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆');
+    await waitFor(() => expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledOnce());
     expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
     expect(reviewCount()).toBe('1');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
+  });
+
+  it('posts eligible rows without waiting for manual matching and shows only receipt counts plus remaining reasons', async () => {
+    const manual = { ...REVIEW_PAGE.items[0], classification_type: 'non_business_review', available_actions: ['preview_manual_correction'] };
+    const pending = { ...REVIEW_PAGE.items[0], row_id: 302, row_identity: 'ROW-302', source_row: 4, disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] };
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW,
+      counts: { ...PREVIEW.counts, ready_dispatch: 2, existing: 3, manual_review: 1, business_pending: 1 },
+      rows: [previewRow(manual, ['counterparty_account_no_match']), previewRow(pending, ['sinopac_valid_virtual_account'])] });
+    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 2 });
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [manual, pending] });
+    let finish!: (value: Awaited<ReturnType<typeof financeImportMutationClient.queryBatchOutcome>>) => void;
+    vi.mocked(financeImportMutationClient.queryBatchOutcome).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    render(<FinancePage />);
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['mixed'], 'mixed.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    await waitFor(() => expect(financeImportMutationClient.queryBatchOutcome).toHaveBeenCalledOnce());
+    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
+    expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('匯入結果')).not.toBeInTheDocument();
+    await act(async () => finish({ job_id: 'review-job', status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'batch', receipt: { batch_identity: BATCH, resulting_batch_version: 8, preview_fingerprint: PREVIEW.preview_fingerprint, reconciled_count: 1, existing_count: 4, pending_count: 2 } }));
+    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 4 筆')).toBeInTheDocument();
+    expect(await screen.findByText('未入帳明細 2 筆')).toBeInTheDocument();
+    expect(screen.getByText('交易帳號找不到對應的收付款對象。')).toBeInTheDocument();
+    expect(screen.getByText(/銷帳編號格式可辨識/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '指定正確訂單' })).toHaveLength(2);
+    expect(screen.queryByText(/可自動入帳|待業務配對|需人工處理 \d/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('skips existing rows without creating a new Apply', async () => {
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, existing: 3 } });
+    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 0 });
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [] });
+    await showPreview();
+    expect(await screen.findByText('本次入帳 0 筆｜已存在略過 3 筆')).toBeInTheDocument();
+    expect(screen.getByText('目前沒有未入帳資料。')).toBeInTheDocument();
+    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  });
+
+  it('lists a blocked transaction and its cause while reporting that automatic posting did not run', async () => {
+    const blocked = { ...REVIEW_PAGE.items[0], disposition: 'business_pending', available_actions: ['resolve_owning_domain_target'] };
+    const ready = { ...REVIEW_PAGE.items[0], row_id: 302, row_identity: 'ROW-302', source_row: 4, disposition: 'create' };
+    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 2 });
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [blocked, ready] });
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, apply_allowed: false, blocking_codes: ['fingerprint_collision'], counts: { ...PREVIEW.counts, ready_dispatch: 1, blocked: 1 }, rows: [{ ...previewRow(blocked, []), disposition: 'blocked', fingerprint_collision: true }, previewRow(ready, [])] });
+    await showPreview();
+    expect(await screen.findByText('本次入帳 0 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('自動入帳未執行：存在可能重複的銀行交易');
+    const row = within(screen.getByText('Sheet1#3').closest('tr')!);
+    expect(row.getByText('存在可能重複的銀行交易，需先核對原始資料。')).toBeInTheDocument();
+    expect(row.getByText('5000')).toBeInTheDocument();
+    expect(row.queryByRole('button', { name: '指定正確訂單' })).not.toBeInTheDocument();
+    expect(screen.getByText('未入帳明細 2 筆')).toBeInTheDocument();
+    expect(within(screen.getByText('Sheet1#4').closest('tr')!).getByText('此筆符合自動入帳條件，但本次匯入有錯誤，尚未執行入帳。')).toBeInTheDocument();
+    expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
+  });
+
+  it('keeps the confirmed posting result when reading the remaining list fails, and retries only that query', async () => {
+    vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
+    vi.mocked(financeImportQueryClient.listReviewRows).mockRejectedValueOnce(new Error('read unavailable')).mockResolvedValue(REVIEW_PAGE);
+    render(<FinancePage />);
+    fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['mixed'], 'mixed.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
+    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('未入帳明細載入失敗');
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢未入帳明細' }));
+    await screen.findByText('未入帳明細 1 筆');
+    expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
+  });
+
+  it('updates the posted count and removes the row after successful manual correction', async () => {
+    vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValueOnce({ ...REVIEW_PAGE, items: [{ ...REVIEW_PAGE.items[0], available_actions: ['preview_manual_correction'] }] }).mockResolvedValue({ ...REVIEW_PAGE, items: [] });
+    vi.mocked(financeImportQueryClient.getManifest).mockResolvedValueOnce(MANIFEST).mockResolvedValue({ ...MANIFEST, review_count: 0 });
+    vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({ items: [{ case_no: '115000701', client_name: '測試客戶' }], next_cursor: null, etag: 'c'.repeat(64) } as never);
+    vi.spyOn(clientReceiptQueryClient, 'query').mockResolvedValue({ case_no: '115000701', obligations: [{ obligation_identity: 'obligation:1', payment_stage: 'deposit', amount_due_ntd: 5000 }] } as never);
+    vi.spyOn(financeImportCorrectionClient, 'preview').mockResolvedValue({ candidate: { row_identity: REVIEW_PAGE.items[0].row_identity, batch_identity: BATCH, classification_type: 'client_receipt', bank_amount_ntd: 5000, allocations: [{ obligation_identity: 'obligation:1', amount_ntd: 5000 }] }, preview_fingerprint: 'a'.repeat(64) } as never);
+    vi.spyOn(financeImportCorrectionClient, 'apply').mockResolvedValue({ job_id: 'correction-job' } as never);
+    vi.spyOn(financeImportCorrectionClient, 'queryOutcome').mockResolvedValue({ status: 'succeeded', receipt: { row_identity: REVIEW_PAGE.items[0].row_identity, batch_identity: BATCH, preview_fingerprint: 'a'.repeat(64) } } as never);
+    await showPreview();
+    fireEvent.click(screen.getByRole('button', { name: '指定正確訂單' }));
+    await screen.findByRole('option', { name: '115000701｜測試客戶' });
+    fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: '115000701' } });
+    fireEvent.click(screen.getByRole('button', { name: '查詢待核銷款項' }));
+    const obligation = await screen.findByRole('checkbox', { name: '115000701 · 訂金 · NT$ 5,000' });
+    await waitFor(() => expect(obligation).toBeEnabled());
+    fireEvent.click(obligation);
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
+    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(await screen.findByText('未入帳明細 0 筆')).toBeInTheDocument();
+    expect(screen.queryByText('Sheet1#3')).not.toBeInTheDocument();
+    expect(financeImportCorrectionClient.apply).toHaveBeenCalledOnce();
   });
 
   it('locks file selection while checking and discards a late response after unmount', async () => {
@@ -255,6 +358,7 @@ describe('Finance source-review owner readback', () => {
     const sourceReview = raw.source_audit as { source_sheet: string; source_row: number; issue_codes: string[] };
     expect(raw.reviews.data.source_reviews).toEqual([]);
     vi.restoreAllMocks();
+    vi.spyOn(paymentReceiptClient, 'list').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [], next_cursor: null, etag: 'c'.repeat(64) });
     vi.spyOn(financeImportMutationClient, 'ingest').mockResolvedValue(raw.ingestion.data);
     vi.spyOn(financeImportMutationClient, 'preview').mockResolvedValue(raw.preview.data);
@@ -269,7 +373,7 @@ describe('Finance source-review owner readback', () => {
 
     await showPreview();
     await waitFor(() => expect(reviewCount()).toBe('1'));
-    expect(screen.getByText(batch)).toBeInTheDocument();
+    expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledWith(batch, expect.anything());
     expect(screen.getByText(`${matchedRow.source_sheet}#${matchedRow.source_row}`)).toBeInTheDocument();
     expect(screen.queryByText(`${sourceReview.source_sheet}#${sourceReview.source_row}`)).not.toBeInTheDocument();
     expect(screen.queryByText(sourceReview.issue_codes[0])).not.toBeInTheDocument();

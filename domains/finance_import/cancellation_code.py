@@ -3,19 +3,27 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
 _VALID_CANCELLATION_CODE = re.compile(r"99781699[0-9]{6}")
 _SINOPAC_ACCOUNT_REFERENCE = re.compile(r"([0-9]+)(?:\s*[^\W\d_][^\d]*)?")
 _MEMO_CASE_SUFFIX = re.compile(r"(?<!\d)[0-9]{6}(?!\d)")
+_MEMO_PREFIXED_SUFFIX = re.compile(r"(?:99781699|[A-Za-z]{1,3})([0-9]{6})(?!\d)")
 
 
 def extract_sinopac_memo_case_suffix(value: object) -> str | None:
     """Read one distinct six-digit case reference from the memo only."""
     if not isinstance(value, str):
         return None
-    candidates = set(_MEMO_CASE_SUFFIX.findall(value))
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    if not normalized:
+        return None
+    prefixed = set(_MEMO_PREFIXED_SUFFIX.findall(normalized))
+    if len(prefixed) == 1:
+        return next(iter(prefixed))
+    candidates = set(_MEMO_CASE_SUFFIX.findall(normalized))
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 

@@ -100,6 +100,7 @@ import { LineCustomerServiceReminderWorkbench } from '../components/LineCustomer
 import { LineIdentityWorkbench } from '../components/LineIdentityWorkbench';
 import { LineDeliveryOperationsWorkbench } from '../components/LineDeliveryOperationsWorkbench';
 import { LineMessageFlow } from '../components/LineMessageFlow';
+import { LineNotificationWorkbench, PAYMENT_REMINDER_MESSAGE_IDS } from '../components/LineNotificationWorkbench';
 import type { LineNotificationTemplateClient } from '../api/line_notification_rules/line_notification_template_client';
 import type { LineOnboardingClient } from '../api/line_onboarding/line_onboarding_client';
 import { LineRichMenuPublicationActions } from '../components/LineRichMenuPublicationActions';
@@ -212,6 +213,7 @@ const TABS: ReadonlyArray<readonly [LineTab, string, string]> = [
   ['tickets', '客服案件', 'line.tab.tickets'],
   ['richmenu', '圖文選單', 'line.tab.richmenu'],
   ['binding', '身分與授權', 'line.tab.binding'],
+  ['push_queue', '通知與發送', 'line.tab.push-queue'],
   ['delivery', '寄送與異常', 'line.tab.delivery'],
   ['message_flow', 'LINE 流程圖', 'line.tab.message-flow'],
   ['order_groups', '案件群組', 'line.tab.order-groups'],
@@ -294,6 +296,8 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   customerService = customerServiceClient,
   lineIdentity = lineIdentityClient,
   lineConfiguration = lineConfigurationQueryClient,
+  notificationTemplateClient,
+  onboardingClient,
   richMenuDraft = lineRichMenuDraftClient,
   richMenuPublication = lineRichMenuPublicationClient,
   richMenuPublicationPollIntervalMs = 1500,
@@ -309,13 +313,11 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
   const [notificationRuleSearch, setNotificationRuleSearch] = useState(initialHashParams.get('rule_q') ?? '');
   const [notificationRuleEnabled, setNotificationRuleEnabled] = useState<'all' | 'enabled' | 'disabled'>(hashChoice<'all' | 'enabled' | 'disabled'>(initialHashParams, 'rule_state', ['all', 'enabled', 'disabled'], 'all'));
   useEffect(() => {
-    if (activeTab !== 'push_queue') return;
+    if (activeTab !== 'push_queue' || !notificationMessageId || !PAYMENT_REMINDER_MESSAGE_IDS.includes(notificationMessageId)) return;
     const query = new URLSearchParams({tab:'accounting-warnings',view:'reminder-content'});
     if(notificationMessageId)query.set('message',notificationMessageId);
-    if(notificationRuleSearch)query.set('rule_q',notificationRuleSearch);
-    query.set('rule_state',notificationRuleEnabled);
     window.location.hash='#finance?'+query.toString();
-  }, [activeTab,notificationMessageId,notificationRuleSearch,notificationRuleEnabled]);
+  }, [activeTab,notificationMessageId]);
 
   const [orderGroupPageNumber, setOrderGroupPageNumber] = useState(hashPage(initialHashParams, 'group_page'));
   const [orderGroupSearch, setOrderGroupSearch] = useState((initialHashParams.get('group_q') ?? '').slice(0, 50));
@@ -1222,7 +1224,12 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         setActiveTab('push_queue');
       })} />}
 
-      {activeTab === 'push_queue' && <p role="status">正在開啟帳務頁面的提醒內容…</p>}
+      {activeTab === 'push_queue' && (notificationMessageId && PAYMENT_REMINDER_MESSAGE_IDS.includes(notificationMessageId)
+        ? <p role="status">正在開啟帳務警示的提醒內容…</p>
+        : <LineNotificationWorkbench configuration={lineConfiguration} templates={notificationTemplateClient} onboarding={onboardingClient}
+          search={notificationRuleSearch} enabled={notificationRuleEnabled} onSearchChange={setNotificationRuleSearch} onEnabledChange={setNotificationRuleEnabled}
+          selectedEntryId={notificationMessageId} onSelectedEntryChange={setNotificationMessageId} onReturnToFlow={() => setActiveTab('message_flow')}
+          onOpenPaymentMessage={id=>{window.location.hash='#finance?'+new URLSearchParams({tab:'accounting-warnings',view:'reminder-content',message:id});}} />)}
 
       {activeTab === 'order_groups' && <><ServiceDayLogReminderWorkbench /><LineOrderGroupWorkbench
         page={orderGroupPageNumber}

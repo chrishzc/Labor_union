@@ -303,79 +303,19 @@ def test_existing_exact_manual_replay_is_idempotent_without_revalidation_or_writ
     assert all(not sql.startswith("INSERT") for sql, _ in cursor.executed)
 
 
-def test_provider_send_validation_reads_current_binding_and_rejects_changed_recipient() -> None:
-    facts = json.dumps({"case_no": "CASE-006"})
-    replay_task = {
-        "source_event_identity": "manual-replay:11:retry-1",
-        "event_code": "deposit_confirmed",
-        "source_aggregate_type": "order",
-        "source_aggregate_identity": "CASE-006",
-        "source_version": 3,
-        "facts_snapshot": facts,
-        "rule_id": "rule-a",
-        "recipient_type": "group",
-        "recipient_identity": "G-old",
-        "template_id": "deposit",
-        "task_recipient_type": "group",
-        "task_recipient_identity": "G-old",
-    }
-    original = {
-        "source_domain": "orders",
-        "event_code": "deposit_confirmed",
-        "source_event_identity": "orders:11",
-        "source_aggregate_type": "order",
-        "source_aggregate_identity": "CASE-006",
-        "source_version": 3,
-        "historical_silent": 0,
-        "facts_snapshot": facts,
-        "occurred_at_utc": datetime(2026, 8, 31, tzinfo=UTC),
-    }
-    rules = {
-        "revision_id": 7,
-        "definition_snapshot": json.dumps({
-            "rules": [{
-                "id": "rule-a",
-                "event_code": "deposit_confirmed",
-                "enabled": True,
-                "recipient_selector": "case_group",
-                "template_id": "deposit",
-                "predicates": [],
-            }]
-        }),
-    }
-    templates = {
-        "revision_id": 8,
-        "definition_snapshot": json.dumps({
-            "templates": [{
-                "id": "deposit",
-                "message_type": "text",
-                "content": "received",
-                "variables": [],
-            }]
-        }),
-    }
-    cursor = _Cursor(one_rows=(
-        replay_task,
-        original,
-        None,
-        rules,
-        templates,
-        {"group_id": "G-new"},
-    ))
-
-    failure = MySqlLineNotificationRepository(
-        _Connection(cursor)
-    ).manual_replay_delivery_validation_failure(51)
-
-    assert failure == "recipient_binding_changed"
-    assert any("line_order_group_bindings" in sql for sql, _ in cursor.executed)
+@pytest.mark.parametrize('event_code',['deposit_confirmed','client.second_payment_settled'])
+def test_provider_rejects_old_receipt_replay_before_any_binding_or_provider_effect(event_code):
+    cursor=_Cursor(one_rows=({'event_code':event_code,'source_domain':'manual_replay'},))
+    failure=MySqlLineNotificationRepository(_Connection(cursor)).manual_replay_delivery_validation_failure(51)
+    assert failure=='payment_receipt_requires_human_send'
+    assert not any('line_order_group_bindings' in sql for sql,_ in cursor.executed)
 
 
 @pytest.mark.parametrize('remaining,required,configuration_valid,expected', [
-    (10000,10000,True,True), (0,10000,True,False),
-    (0,0,True,False), (10000,10000,False,True),
+    (10000,10000,True,False), (0,10000,True,False),
+    (0,0,True,False), (10000,10000,False,False),
 ])
-def test_failed_second_payment_reuses_current_finance_but_does_not_hide_broken_settings(
+def test_retired_group_payment_failures_do_not_restore_an_automatic_source(
     remaining,required,configuration_valid,expected,
 ):
     from datetime import date
@@ -396,7 +336,7 @@ def test_failed_second_payment_reuses_current_finance_but_does_not_hide_broken_s
         {'group_id':'C-synthetic','aggregate_version':0},None))
     readback = MySqlLineNotificationRepository(_Connection(cursor)).current_failure_fact(QUERY)
     assert readback.authoritative_complete and readback.predicate_active is expected
-    assert any('client_finance_accounts' in sql for sql,_ in cursor.executed)
+    assert not any('client_finance_accounts' in sql for sql,_ in cursor.executed)
     assert all(sql.lstrip().startswith('SELECT') for sql,_ in cursor.executed)
 
 

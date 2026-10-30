@@ -17,7 +17,7 @@ import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_quer
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { financeImportBlockerMessage, financeImportDispositionLabel, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
+import { financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
@@ -31,6 +31,7 @@ import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
 import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
 import { FinanceWarningWorkspace } from '../components/FinanceWarningWorkspace';
+import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 import { FinanceStatementArchive } from '../components/FinanceStatementArchive';
 
 type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination' | 'case-accounting' | 'accounting-warnings';
@@ -48,8 +49,10 @@ const FINANCE_CORRECTION_ACTIONS = new Set([
   'review_suspected_duplicate_business_match',
 ]);
 
-function canCorrectFinanceImportRow(row: FinanceImportReviewSnapshot['items'][number]): boolean {
-  return ['client_receipt', 'staff_payout', 'client_refund'].includes(row.classification_type)
+function canCorrectFinanceImportRow(row: FinanceImportReviewSnapshot['items'][number], preview?: FinanceImportBatchPreview['rows'][number]): boolean {
+  return row.disposition !== 'blocked' && preview?.disposition !== 'blocked'
+    && !preview?.fingerprint_collision && !preview?.formal_reference_conflict && !preview?.integrity_violations.length
+    && ['client_receipt', 'staff_payout', 'client_refund', 'non_business_review'].includes(row.classification_type)
     && row.available_actions.some((action) => FINANCE_CORRECTION_ACTIONS.has(action));
 }
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
@@ -122,6 +125,7 @@ export const FinancePage: React.FC = () => {
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
   const [correctionRow, setCorrectionRow] = useState<FinanceImportReviewSnapshot['items'][number] | null>(null);
   const [correctionBusy, setCorrectionBusy] = useState(false);
+  const [manuallyPostedRows, setManuallyPostedRows] = useState<ReadonlySet<string>>(new Set());
   const [applyReason, setApplyReason] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
@@ -135,6 +139,8 @@ export const FinancePage: React.FC = () => {
     ? financeApplyCommandByPreview.current.get(batchPreview.data.preview_fingerprint)
     : undefined;
   const displayedApplyReason = submittedFinanceCommand?.reason ?? applyReason;
+  const confirmedImportReceipt = batchOutcome.kind === 'ready' && batchOutcome.data.status === 'succeeded' ? batchOutcome.data.receipt : null;
+  const postingStopped = (batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed) || (batchOutcome.kind === 'ready' && batchOutcome.data.status !== 'succeeded');
 
   useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), []);
 
@@ -290,7 +296,7 @@ export const FinancePage: React.FC = () => {
         items.push(...page.items);
       }
       if (items.length !== manifest.review_count) {
-        setSourceReview({ kind: 'error', message: '人工確認清單與批次統計不一致，請重新查詢。' });
+        setSourceReview({ kind: 'error', message: '未入帳明細與統計不一致，請重新查詢。' });
         return;
       }
       setSourceReview({
@@ -300,7 +306,7 @@ export const FinancePage: React.FC = () => {
       setCorrectionRow((currentRow) => currentRow && items.some((row) => row.row_identity === currentRow.row_identity) ? currentRow : null);
     } catch (error) {
       if (current('source-review', request.sequence, request.controller)) {
-        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '人工確認清單載入失敗，請重新查詢。') });
+        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '未入帳明細載入失敗，請重新查詢。') });
       }
     }
   };
@@ -326,9 +332,8 @@ export const FinancePage: React.FC = () => {
       const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
-      await loadSourceReview(preview.batch_identity);
-      if (!current('batch-preview', request.sequence, request.controller)) return;
-      await applyImportedBatch(preview);
+      if (preview.apply_allowed && preview.counts.ready_dispatch > 0) await applyImportedBatch(preview);
+      else await loadSourceReview(preview.batch_identity);
     }
     catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') }); }
   };
@@ -395,6 +400,7 @@ export const FinancePage: React.FC = () => {
         <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收款、付款與銀行對帳，依工作集中處理。</p></div>
         <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => { if (('payment-destination') !== activeTab) requestLeave(() => setActiveTab('payment-destination')); }}>帳務設定</button>
       </header>
+      <PaymentReceiptNoticeWorkbench revision={reload} expanded={activeTab==='accounting-warnings'}/>
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
         {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳'], ['case-accounting', '案件帳務'], ['accounting-warnings', '帳務警示']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
       </nav>
@@ -628,31 +634,6 @@ export const FinancePage: React.FC = () => {
             </div>
           </div>
 
-          {/* 匯入時自動上傳、核對與完成正式入帳。 */}
-          <div className="finance-stepper">
-            <div className={`finance-step-item ${ingestion.kind === 'loading' || financeWorkbook ? 'active' : ''}`}>
-              <div className="finance-step-num">1</div>
-              <div>
-                <div className="finance-step-title">上傳檔案</div>
-                <div className="finance-step-desc">選擇銀行交易明細工作簿</div>
-              </div>
-            </div>
-            <div className={`finance-step-item ${batchPreview.kind === 'ready' || batchPreview.kind === 'loading' ? 'active' : ''}`}>
-              <div className="finance-step-num">2</div>
-              <div>
-                <div className="finance-step-title">自動核對</div>
-                <div className="finance-step-desc">系統核對配對結果與待處理問題</div>
-              </div>
-            </div>
-            <div className={`finance-step-item ${applyJob.kind === 'ready' || applyJob.kind === 'loading' || batchOutcome.kind === 'ready' ? 'active' : ''}`}>
-              <div className="finance-step-num">3</div>
-              <div>
-                <div className="finance-step-title">匯入完成</div>
-                <div className="finance-step-desc">系統自動確認正式結果</div>
-              </div>
-            </div>
-          </div>
-
           <section className="finance-detail-block finance-dropzone" data-surface-id="finance.finance-import.workflow">
             <div style={{ fontSize: '2rem' }}>📥</div>
             <h3>選擇銀行交易明細工作簿</h3>
@@ -675,6 +656,7 @@ export const FinancePage: React.FC = () => {
                   setBatchPreview({ kind: 'idle' });
                   setSourceReview({ kind: 'idle' });
                   setCorrectionRow(null);
+                  setManuallyPostedRows(new Set());
                   setApplyJob({ kind: 'idle' });
                   setBatchOutcome({ kind: 'idle' });
                 }}
@@ -690,51 +672,33 @@ export const FinancePage: React.FC = () => {
               </button>
             </div>
 
-            <StateMessage state={ingestion} empty="" />
-
-            {ingestion.kind === 'ready' && (
-              <div className="finance-meta" style={{ marginTop: '14px', textAlign: 'left' }}>
-                <span>
-                  {ingestion.data.replayed ? '同一工作簿已上傳過，將沿用原上傳結果。' : '檔案上傳完成；是否入帳以下方處理結果為準。'}
-                  {' '}共讀取 {ingestion.data.source_row_count} 列，其中 {ingestion.data.canonical_created_count} 列已建立待處理資料。
-                </span>
-              </div>
-            )}
-
-            <StateMessage state={batchPreview} empty="" />
+            {ingestion.kind === 'error' && <StateMessage state={ingestion} empty="" />}
+            {batchPreview.kind === 'error' && <StateMessage state={batchPreview} empty="" />}
 
             {batchPreview.kind === 'ready' && (
               <div style={{ marginTop: '14px', padding: '16px', background: '#fffaf7', border: '1px solid #fed9b8', borderRadius: '12px', textAlign: 'left' }}>
-                <div className="finance-scope-note">
-                  可自動入帳 {batchPreview.data.counts.ready_dispatch}｜已存在 {batchPreview.data.counts.existing}｜需人工處理 {sourceReview.kind === 'ready' ? sourceReview.data.reviewCount : '讀取中'}｜待業務配對 {batchPreview.data.counts.business_pending}｜阻擋 {batchPreview.data.counts.blocked}。
-                  {batchPreview.data.apply_allowed && batchPreview.data.counts.ready_dispatch > 0
-                    ? '系統將依檢查結果提交可入帳款項；實際進度以下方結果為準。'
-                    : batchPreview.data.apply_allowed
-                      ? batchPreview.data.counts.existing > 0 && batchPreview.data.counts.manual_review === 0 && batchPreview.data.counts.business_pending === 0
-                        ? '本批次款項已處理，沒有新增入帳。'
-                        : '目前沒有可自動入帳的款項；請核對檔案內容及待處理資訊。'
-                    : `目前不可匯入：${financeImportBlockerMessage(batchPreview.data.blocking_codes)}`}
-                </div>
-
-                {batchPreview.data.rows.some(row => row.evidence.includes('subsidy_advance_not_due')) && (
-                  <p role="status">補助退款尚未符合政府入款或工會代墊條件，已保留待處理。</p>
+                {(confirmedImportReceipt || (!importBusy && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch === 0))) && (
+                  <div className="finance-meta" aria-label="匯入結果">
+                    <span>本次入帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜已存在略過 {confirmedImportReceipt?.existing_count ?? batchPreview.data.counts.existing} 筆</span>
+                  </div>
                 )}
+                {!batchPreview.data.apply_allowed && <p role="alert">自動入帳未執行：{financeImportBlockerMessage(batchPreview.data.blocking_codes)}。請查看未入帳明細與原因。</p>}
 
-                <StateMessage state={sourceReview} empty="目前沒有待人工確認資料。" />
+                <StateMessage state={sourceReview} empty="目前沒有未入帳資料。" />
                 {sourceReview.kind === 'ready' && (
                   <div id="finance-import-review" className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
                     <div className="finance-meta">
-                      <span>批次 <code>{sourceReview.data.batchIdentity}</code>｜待處理 {sourceReview.data.items.length + sourceReview.data.sourceReviews.length} 筆</span>
+                      <span>未入帳明細 {sourceReview.data.items.length + sourceReview.data.sourceReviews.length} 筆</span>
                       <button
                         className="finance-btn-secondary"
                         data-control-id="finance.finance-import.review-reload"
                         onClick={() => void loadSourceReview(sourceReview.data.batchIdentity)}
                       >
-                        重新查詢人工確認
+                        重新查詢未入帳明細
                       </button>
                     </div>
                     {sourceReview.data.items.length + sourceReview.data.sourceReviews.length === 0 ? (
-                      <div className="finance-state">目前沒有待人工確認資料。</div>
+                      <div className="finance-state">目前沒有未入帳資料。</div>
                     ) : (
                       <div className="finance-table-container">
                         <table className="finance-table">
@@ -745,7 +709,7 @@ export const FinancePage: React.FC = () => {
                               <th>方向</th>
                               <th>金額</th>
                               <th>分類</th>
-                              <th>需人工處理原因</th>
+                              <th>未入帳原因</th>
                               <th>處置</th>
                             </tr>
                           </thead>
@@ -763,11 +727,11 @@ export const FinancePage: React.FC = () => {
                               <tr key={row.row_id}>
                                 <td><code>{row.source_sheet}#{row.source_row}</code></td>
                                 <td>{row.transaction_date ?? '—'}</td>
-                                <td>{row.direction}</td>
+                                <td>{{ incoming: '存入', credit: '存入', outgoing: '支出', debit: '支出' }[row.direction] ?? '待確認'}</td>
                                 <td><strong>{row.amount_ntd}</strong></td>
                                 <td>{{ receivable: '應收', payable: '應付', government_subsidy: '政府補助', subsidy_return: '補助退款', review: '待核對', legacy: '歷史格式' }[row.bank_type ?? 'legacy']}</td>
-                                <td className="finance-review-reason">{financeImportReviewReason(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity))}</td>
-                                <td><span className="finance-secondary">{financeImportDispositionLabel(row.disposition)}</span>{canCorrectFinanceImportRow(row) && <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button>}</td>
+                                <td className="finance-review-reason">{financeImportReviewReason(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity), postingStopped)}</td>
+                                <td>{row.disposition === 'blocked' || batchPreview.data.rows.find(item => item.row_identity === row.row_identity)?.disposition === 'blocked' ? <span>入帳受阻</span> : canCorrectFinanceImportRow(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity)) ? <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button> : '—'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -778,9 +742,9 @@ export const FinancePage: React.FC = () => {
                       <div className="finance-scope-note">
                         <strong>{correctionRow.source_sheet}#{correctionRow.source_row}</strong>
                         <p>{correctionRow.transaction_date ?? '日期未提供'}｜{['incoming', 'credit'].includes(correctionRow.direction) ? '存入' : '支出'} NT$ {correctionRow.amount_ntd.toLocaleString()}</p>
-                        <p><strong>需人工處理原因：</strong>{financeImportReviewReason(correctionRow, batchPreview.data.rows.find(item => item.row_identity === correctionRow.row_identity))}</p>
+                        <p><strong>未入帳原因：</strong>{financeImportReviewReason(correctionRow, batchPreview.data.rows.find(item => item.row_identity === correctionRow.row_identity), postingStopped)}</p>
                       </div>
-                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onBusyChange={setCorrectionBusy} onPosted={() => { setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
+                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onBusyChange={setCorrectionBusy} onPosted={() => { setManuallyPostedRows(rows => new Set([...rows, correctionRow.row_identity])); setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
                     </Drawer>}
                   </div>
                 )}
@@ -792,7 +756,7 @@ export const FinancePage: React.FC = () => {
                     data-control-id="finance.finance-import.review-reload"
                     onClick={() => void loadSourceReview(batchPreview.data.batch_identity)}
                   >
-                    重新查詢人工確認
+                    重新查詢未入帳明細
                   </button>
                 )}
 
@@ -802,40 +766,12 @@ export const FinancePage: React.FC = () => {
               </div>
             )}
 
-            <StateMessage state={applyJob} empty="" />
-
-            {applyJob.kind === 'ready' && (
-              <div className="finance-meta" style={{ marginTop: '12px' }}>
-                <span>{applyJob.data.replayed ? '同一匯入已受理；正在查回原結果。' : '正在完成匯入，系統會自動顯示正式結果。'}</span>
-                {batchOutcome.kind === 'error' && (
-                  <button
-                    className="finance-btn-secondary"
-                    data-control-id="finance.finance-import.receipt"
-                    onClick={() => void observeApplyOutcome(applyJob.data.job_id, batchPreview.kind === 'ready' ? {
-                      batchIdentity: batchPreview.data.batch_identity,
-                      previewFingerprint: batchPreview.data.preview_fingerprint,
-                    } : undefined)}
-                  >
-                    重新查詢匯入結果
-                  </button>
-                )}
-              </div>
+            {applyJob.kind === 'error' && <StateMessage state={applyJob} empty="" />}
+            {batchOutcome.kind === 'error' && <StateMessage state={batchOutcome} empty="" />}
+            {applyJob.kind === 'ready' && batchOutcome.kind === 'error' && (
+              <button type="button" className="finance-btn-secondary" data-control-id="finance.finance-import.receipt" onClick={() => void observeApplyOutcome(applyJob.data.job_id, batchPreview.kind === 'ready' ? { batchIdentity: batchPreview.data.batch_identity, previewFingerprint: batchPreview.data.preview_fingerprint } : undefined)}>重新查詢匯入結果</button>
             )}
-
-            <StateMessage state={batchOutcome} empty="" />
-
-            {batchOutcome.kind === 'ready' && (
-              <div className="finance-meta" style={{ marginTop: '12px', background: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                <span>
-                  {batchOutcome.data.receipt
-                    ? `匯入完成：核銷 ${batchOutcome.data.receipt.reconciled_count}、既有 ${batchOutcome.data.receipt.existing_count}、待處理 ${batchOutcome.data.receipt.pending_count}`
-                    : '未完成正式入帳；請查看本頁人工核對清單，確認原因後重新選檔匯入。'}
-                </span>
-                {batchOutcome.data.receipt && batchOutcome.data.receipt.pending_count > 0 && (
-                  <a href="#finance-import-review" className="finance-btn-secondary">查看人工核對清單</a>
-                )}
-              </div>
-            )}
+            {batchOutcome.kind === 'ready' && batchOutcome.data.status !== 'succeeded' && <p role="alert">未完成入帳，請查看未入帳明細與原因。</p>}
           </section>
 
         </section>

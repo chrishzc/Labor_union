@@ -50,7 +50,7 @@ def test_projector_runs_scan_and_projects_due_candidates() -> None:
     assert event2.facts["first_payment_notice"] == ""
 
 
-def test_projector_uses_today_for_second_payment_and_projects_committed_success():
+def test_projector_does_not_automatically_project_payment_or_receipt_notices():
     from subsystems.line.second_payment_notifications import SecondPaymentNotification
     today=date(2026,9,10)
     due=SecondPaymentNotification('CASE-201','second:201',3,5,today,35000,35000,'C_ORIGINAL')
@@ -62,7 +62,7 @@ def test_projector_uses_today_for_second_payment_and_projects_committed_success(
         def find_second_payment_settlement_candidates(self):return (paid,)
     class Registry:
         def register_and_project(self,event):events.append(event);return len(events)
-    assert OrderPreStartNotificationSourceProjector(Scanner(),Registry()).run_once(datetime(2026,9,9,17,tzinfo=timezone.utc))==1
+    assert OrderPreStartNotificationSourceProjector(Scanner(),Registry()).run_once(datetime(2026,9,9,17,tzinfo=timezone.utc))==0
     assert scanned==[]  # Reminders now belong to the private payment schedule worker.
-    assert [e.event_code for e in events]==['client.second_payment_settled']
+    assert events==[]
     assert all(e.facts['group_id']=='C_ORIGINAL' and 'line_user_id' not in e.facts for e in events)

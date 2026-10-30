@@ -1,0 +1,7 @@
+.receipt-notice-workspace{margin:16px 0;padding:16px;border:1px solid var(--color-border,#e4c4b9);border-radius:12px;background:var(--color-surface,#fff)}
+.receipt-notice-dialog{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(850px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;border:1px solid #d5a794;border-radius:16px;padding:24px;color:#392b23;background:#fff8f5}
+.receipt-notice-dialog::backdrop{background:#21170e66}
+.receipt-notice-scroll{max-width:100%;overflow-x:auto}.receipt-notice-dialog button{margin:6px}.receipt-notice-dialog td p{max-width:300px}
+.receipt-notice-dialog button,.receipt-notice-workspace button{font:inherit;border:1px solid #d5a794;border-radius:8px;background:#fff;padding:9px 12px;cursor:pointer}
+.receipt-notice-dialog td button,.receipt-notice-workspace td button{background:#c2410c;color:#fff;border-color:#c2410c}
+.receipt-notice-dialog button:disabled,.receipt-notice-workspace button:disabled{opacity:.55;cursor:default}

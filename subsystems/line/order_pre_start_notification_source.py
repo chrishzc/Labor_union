@@ -65,11 +65,7 @@ class OrderPreStartNotificationSourceProjector:
 
         # Second-payment reminders belong to the private payment schedule worker.
 
-        find_settlements = getattr(self._scanner, 'find_second_payment_settlement_candidates', None)
-        if callable(find_settlements):
-            for settlement in find_settlements():
-                self._registry.register_and_project(settlement.event(now))
-                processed += 1
+        # Receipt notifications are human-authorized from the finance todo list.
 
         find_completions = getattr(self._scanner, 'find_service_completion_candidates', None)
         if callable(find_completions):
