@@ -48,6 +48,8 @@ from subsystems.contract_signing.external_signing_workflow import (
     SendExternalSigningReminders,
     ExternalSigningReminderReceipt,
     StoredExternalSigningReminderReceipt,
+    SigningReminderContext,
+    SigningReminderStaffTarget,
 )
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
@@ -64,6 +66,21 @@ class MySqlContractExternalSigningRepository:
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def load_reminder_context(self, case_no: str, *, for_update: bool) -> SigningReminderContext | None:
+        suffix = _lock_suffix(for_update)
+        order = self._one("SELECT client_id FROM orders WHERE case_no=%s" + suffix, (case_no,))
+        if order is None:
+            return None
+        plan = self._one(_CURRENT_ACCEPTED_PLAN_SQL + suffix, (case_no,))
+        if plan is None:
+            return None
+        segments = self._all(_SEGMENTS_SELECT_SQL + suffix, (plan['id'],))
+        if not segments:
+            return None
+        return SigningReminderContext(case_no, str(order['client_id']), tuple(
+            SigningReminderStaffTarget(int(row['segment_id']), str(row['staff_id'])) for row in segments
+        ), int(plan['id']))
 
     def load_session(
         self, session_id: str, *, for_update: bool
@@ -299,12 +316,12 @@ class MySqlContractExternalSigningRepository:
         receipt = self.load_handoff_notification_facts(case_no, session_id)
         return () if receipt is None else receipt.manual_notification_targets
 
-    def load_handoff_notification_facts(self, case_no: str, session_id: str) -> ExternalSigningHandoffReceipt | None:
+    def load_handoff_notification_facts(self, case_no: str, session_id: str | None) -> ExternalSigningHandoffReceipt | None:
         row = self._one(
             "SELECT command_kind,command_fingerprint,result_snapshot FROM contract_signing_command_receipts "
             "WHERE case_no=%s AND command_kind='record_external_signing_handoff' "
             "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.session_id'))=%s "
-            "ORDER BY id DESC LIMIT 1", (case_no, session_id),
+            "ORDER BY id DESC LIMIT 1", (case_no, session_id if session_id is not None else 'null'),
         )
         if row is None:
             return None
@@ -317,12 +334,12 @@ class MySqlContractExternalSigningRepository:
         row = self._one(_HANDOFF_RECEIPT_BY_KEY_SQL + _lock_suffix(for_update), (_reminder_storage_key(key),))
         return None if row is None else _stored_reminder_receipt(row, expected_idempotency_key=key.value)
 
-    def load_latest_reminder_receipt(self, case_no: str, session_id: str) -> ExternalSigningReminderReceipt | None:
+    def load_latest_reminder_receipt(self, case_no: str, session_id: str | None) -> ExternalSigningReminderReceipt | None:
         row = self._one(
             "SELECT command_kind,command_fingerprint,result_snapshot FROM contract_signing_command_receipts "
             "WHERE case_no=%s AND command_kind='send_external_signing_reminders' "
             "AND JSON_UNQUOTE(JSON_EXTRACT(result_snapshot,'$.session_id'))=%s "
-            "ORDER BY id DESC LIMIT 1", (case_no, session_id),
+            "ORDER BY id DESC LIMIT 1", (case_no, session_id if session_id is not None else 'null'),
         )
         return None if row is None else _stored_reminder_receipt(row).receipt
 
@@ -330,6 +347,7 @@ class MySqlContractExternalSigningRepository:
         receipt = stored.receipt
         snapshot = {"idempotency_key": key.value, "receipt_id": receipt.receipt_id,
                     "session_id": receipt.session_id, "status_version": receipt.status_version,
+                    "matching_plan_id": receipt.matching_plan_id,
                     "actor_ref": command.actor.actor_id,
                     "manual_notification_targets": [{"scope": target.scope.value, "subject_reference": target.subject_reference} for target in receipt.manual_notification_targets]}
         self._insert(_HANDOFF_RECEIPT_INSERT_SQL, (
@@ -770,13 +788,16 @@ def _stored_handoff_receipt(
     if snapshot is None:
         raise _stored_fact_error("external_signing_handoff_receipt_snapshot_invalid")
     session_id = snapshot.get("session_id")
+    matching_plan_id = snapshot.get('matching_plan_id')
     resulting_status_version = snapshot.get("resulting_status_version")
     stored_idempotency_key = snapshot.get("idempotency_key")
     if (
-        not isinstance(session_id, str)
-        or not session_id
+        'session_id' not in snapshot
+        or (session_id is not None and (not isinstance(session_id, str) or not session_id))
         or type(resulting_status_version) is not int
-        or resulting_status_version < 1
+        or resulting_status_version < (0 if session_id is None else 1)
+        or (session_id is None and resulting_status_version != 0)
+        or (session_id is None and (type(matching_plan_id) is not int or matching_plan_id <= 0))
         or not isinstance(stored_idempotency_key, str)
         or stored_idempotency_key != expected_idempotency_key
     ):
@@ -790,6 +811,7 @@ def _stored_handoff_receipt(
             ExternalSigningHandoffReceipt(
                 session_id, resulting_status_version, False, _manual_notification_targets(snapshot),
                 snapshot.get("handoff_included_reminders", True),
+                matching_plan_id,
             ),
         )
     except (KeyError, TypeError, ValueError):
@@ -806,9 +828,12 @@ def _stored_reminder_receipt(row: Mapping[str, object], *, expected_idempotency_
         raise _stored_fact_error("external_signing_reminder_receipt_invalid")
     try:
         receipt_id, session_id, version = snapshot["receipt_id"], snapshot["session_id"], snapshot["status_version"]
-        if not isinstance(receipt_id, str) or not receipt_id.startswith("cesr_") or not isinstance(session_id, str) or not session_id.startswith("ces_") or type(version) is not int or version < 1:
+        matching_plan_id = snapshot.get('matching_plan_id')
+        if session_id is None and (type(matching_plan_id) is not int or matching_plan_id <= 0):
+            raise ValueError('case reminder requires its accepted plan')
+        if not isinstance(receipt_id, str) or not receipt_id.startswith("cesr_") or (session_id is not None and (not isinstance(session_id, str) or not session_id.startswith("ces_"))) or type(version) is not int or version < 0 or (session_id is None and version != 0):
             raise ValueError("invalid reminder receipt")
-        return StoredExternalSigningReminderReceipt(PreviewFingerprint(row["command_fingerprint"]), ExternalSigningReminderReceipt(receipt_id, session_id, version, _manual_notification_targets(snapshot)))
+        return StoredExternalSigningReminderReceipt(PreviewFingerprint(row["command_fingerprint"]), ExternalSigningReminderReceipt(receipt_id, session_id, version, _manual_notification_targets(snapshot), matching_plan_id=snapshot.get('matching_plan_id')))
     except (KeyError, TypeError, ValueError):
         raise _stored_fact_error("external_signing_reminder_receipt_invalid") from None
 
@@ -1056,6 +1081,7 @@ def _handoff_receipt_snapshot(
     receipt: ExternalSigningHandoffReceipt, key: IdempotencyKey
 ) -> dict[str, object]:
     return {
+        **({'matching_plan_id': receipt.matching_plan_id} if receipt.matching_plan_id is not None else {}),
         "idempotency_key": key.value,
         "resulting_status_version": receipt.resulting_status_version,
         "session_id": receipt.session_id,

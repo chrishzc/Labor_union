@@ -63,7 +63,8 @@ def reader_factory():
 
 
 def app(configuration=None, factory=reader_factory):
-    return LineMessagePreviewApplication(configuration or Configuration(variables=("case_no",)), factory)
+    from infrastructure.line.table_image_renderer import render_table_image
+    return LineMessagePreviewApplication(configuration or Configuration(variables=("case_no",)), factory, render_table_image)
 
 
 def client(monkeypatch, application=None):
@@ -218,6 +219,8 @@ def test_catalog_includes_formal_sources_without_retired_or_unowned_test_templat
             "service-menu", "order-update-menu", "service-contact", "service-resolved", "identity-bound-customer", "identity-bound-staff", "identity-bound-admin",
             "template-register_success", "template-staff_verification_requested"} <= ids
     assert not {"retired", "template-new_user_d1", "template-new_user_d2", "template-new_user_d3", "template-v"} & ids
+    assert {entry.id for entry in catalog if entry.format == 'flex' and entry.name.startswith('正式媒合－')} == {'card-customer-confirmation'}
+    assert not {'card-caregiver-information', 'card-caregiver-information-2', 'card-customer-profiles'} & ids
 
 
 def test_start_day_group_card_public_preview_has_copy_and_inert_buttons_only():
@@ -299,8 +302,8 @@ def test_confirmation_uses_read_only_owner_projection_without_generating_resume_
         def __init__(self, _): pass
         def customer_confirmation_package(self, *_): pytest.fail("locked Apply projection is forbidden")
         def customer_confirmation_preview(self, *_):
-            return {"blockers": (), "order_information_1": ({"text": "正式資訊一"},),
-                "order_information_2": ({"text": "正式資訊二"},), "weekly_service_rows": (),
+            return {"blockers": (), "order_information_1": ({"text": "正式資訊一", 'line_sections': ({'title': '服務', 'rows': (('時段', '正式資訊一'),)},)},),
+                "order_information_2": ({"text": "正式資訊二", 'line_sections': ({'title': '需求', 'rows': (('餐點', '正式資訊二'),)},)},), "weekly_service_rows": (),
                 "caregiver_resumes": ({"staff_id": 7},)}
         def customer_profile_facts(self, *_): return (asdict(Reader().staff(7)),)
     monkeypatch.setattr("infrastructure.mysql.matching_notification_repository.MySqlMatchingNotificationRepository", Repository)
@@ -371,8 +374,7 @@ def test_http_public_sample_ignores_subjects_and_never_opens_record_reader(monke
 def test_public_cards_keep_canonical_information_fields_and_disclose_their_values():
     result = app().render("card-candidate-information-2", None, None, None, actor(), sample=True)
     display = json.dumps([asdict(bubble) for bubble in result.bubbles], ensure_ascii=False)
-    assert "飲食與照護需求" in display and "公版" in result.note
-    assert "清淡飲食（範例）" in display
+    assert 'data:image/png;base64,' in display and "公版" in result.note
     assert any(fact.label == "清淡飲食（範例）" for fact in result.facts)
     two = app().render("card-caregiver-information-2", None, None, None, actor(), sample=True)
     assert any(fact.id == "服務縣市（city）" and fact.label == "新竹市" for fact in two.facts)
@@ -469,6 +471,9 @@ def test_all_current_builtin_messages_have_editable_copy_and_genesis_is_not_muta
     original = {"templates": []}
     effective = effective_copy_definition(original)
     for entry in app().catalog(actor()):
+        if entry.id == 'card-candidate-information-3':
+            assert entry.id not in defaults
+            continue
         if entry.builtin and entry.template_id is None:
             assert entry.id in defaults, entry.id
     effective["templates"][0]["content"] = "只修改候選設定"
@@ -567,3 +572,66 @@ def test_progress_without_owner_context_does_not_invent_case_facts_from_copy_def
     result = LineServiceHelpApplication(lambda: None)._progress_payload(None, unit, SimpleNamespace(value="U-copy-test"))
     assert result == _progress_payload(None)
     assert "最新案件" not in result["text"]
+
+
+def test_every_builtin_card_supports_free_paragraphs_without_changing_provider_actions():
+    from subsystems.line.message_copy_catalog import _card_defaults, default_copy_templates, render_copy_payload
+    def actions(node):
+        if isinstance(node, dict):
+            if 'action' in node:
+                yield node['action']
+            for value in node.values():
+                yield from actions(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from actions(value)
+    for key, template in default_copy_templates().items():
+        if not template.get('copy_fields'):
+            continue
+        bodies = [field for field in template['copy_fields'] if field['kind'] == 'body']
+        assert bodies, key
+        assert any(field['kind'] == 'title' for field in template['copy_fields']), key
+        values = json.loads(template['content'])
+        for field in bodies:
+            values[field['id']] = '第一段自訂說明。\n\n另外增加的提醒段落。'
+        payload = _card_defaults()[key]
+        variables = {v['name']: 'DEMO-001' for v in template['variables']}
+        result = render_copy_payload({'templates': []}, key, payload, variables, json.dumps(values))
+        assert '另外增加的提醒段落。' in json.dumps(result, ensure_ascii=False), key
+        assert list(actions(result)) == list(actions(payload)), key
+
+
+def test_new_customer_description_is_only_added_to_the_final_decision_with_multiple_profiles():
+    from subsystems.line.message_copy_catalog import default_copy_templates, render_copy_payload
+    from subsystems.scheduling.matching_line_cards import customer_confirmation_card
+    profiles = tuple({'id': index, 'name': f'月嫂{index}'} for index in range(1, 5))
+    payload = json.loads(customer_confirmation_card('CASE-7', profiles, (), (), (), {}, 'real-token', '本案說明'))
+    template = default_copy_templates()['card-customer-confirmation']
+    values = json.loads(template['content'])
+    body = next(field for field in template['copy_fields'] if field['kind'] == 'body')
+    values[body['id']] = '請確認 {case_no}\n\n可自行加上其他說明。'
+    title = next(field for field in template['copy_fields'] if field['kind'] == 'title')
+    values[title['id']] = '我修改的確認標題'
+    result = render_copy_payload({'templates': []}, 'card-customer-confirmation', payload, {'case_no': 'CASE-7'}, json.dumps(values))
+    before, after = payload['contents']['contents'], result['contents']['contents']
+    assert after[:-1] == before[:-1]
+    assert after[-1]['footer'] == before[-1]['footer']
+    assert after[-1]['body']['contents'][-1]['text'] == '請確認 CASE-7\n\n可自行加上其他說明。'
+    assert after[-1]['body']['contents'][0]['text'] == '我修改的確認標題'
+
+
+def test_old_card_copy_preserves_its_saved_title_while_the_new_description_is_empty():
+    from subsystems.line.message_copy_catalog import default_copy_templates, effective_copy_definition
+    from copy import deepcopy
+    template = default_copy_templates()['card-customer-confirmation']
+    values = {field['id']: field['content'] for field in template['copy_fields'] if 'append_to' not in field}
+    title = next(field['id'] for field in template['copy_fields'] if field['kind'] == 'title')
+    values[title] = '先前維護過的標題'
+    original = {'templates': [{**template, 'content': json.dumps(values)}]}
+    before = deepcopy(original)
+    result = effective_copy_definition(original)
+    current = json.loads(result['templates'][0]['content'])
+    assert current[title] == '先前維護過的標題'
+    body = next(field['id'] for field in template['copy_fields'] if field['kind'] == 'body')
+    assert current[body] == ''
+    assert original == before

@@ -583,6 +583,7 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.6 Controlled Reopen
 
+- 人工重開備註依 Global §2.4 選填，空白原樣保存於重開事件與命令比對；資料庫仍驗證操作識別、actor 與 correlation。解除取消控制屬系統稽核事件，人工備註空白時記錄「系統記錄受控重開訂單」，不回填或改寫人工原文。
 - 只有尚未產生取消相關正式退款、reversal 或 settlement 才可受理。
 - 取消時未初始化的 Finance／Payroll root 可保持不存在；Preview／Apply 版本以明確 `NULL` 表示並做 fresh presence
   比較。若取消 receipt 無 Payroll version，仍查閱取消後的薪資支付歷史，不得把缺版本解讀為可略過金融資格驗證。

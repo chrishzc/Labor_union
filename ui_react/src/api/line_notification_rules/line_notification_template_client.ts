@@ -17,7 +17,8 @@ const LineNotificationTemplateSchema = z.strictObject({
   revision: z.number().int().nonnegative(),
   variables: z.array(z.string()),
   sample_preview: z.string(),
-  fields: z.array(z.strictObject({ id: z.string(), label: z.string(), content: z.string(), max_length: z.number().int().positive() })).optional(),
+  fields: z.array(z.strictObject({ id: z.string(), label: z.string(), content: z.string(), max_length: z.number().int().positive(),
+    kind: z.enum(['title', 'body', 'button', 'summary', 'label']).optional(), optional: z.boolean().optional() })).optional(),
 });
 
 const LineNotificationTemplateEnvelopeSchema = z.object({

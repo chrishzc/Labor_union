@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "912b36f96769554b3259323456567fb80f60e185a940b7245359f8880e3f11eb",
+  "active_artifacts_sha256": "e90201031c71fd64100c064f426c5e27680be64540b73bf81a1d9ab25d79fde2",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -190,7 +190,8 @@
     "db/schema_parts/236_client_refund_overage_receipt.sql",
     "db/schema_parts/237_non_citizen_case_sequences.sql",
     "db/schema_parts/238_registry_case_deletion_guards.sql",
-    "db/schema_parts/239_matching_manual_reason_optional.sql"
+    "db/schema_parts/239_matching_manual_reason_optional.sql",
+    "db/schema_parts/240_order_reopen_reason_optional.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -227,7 +228,8 @@
     "db/schema_parts/1058_client_refund_overage_receipt.sql": "migration-only",
     "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only",
     "db/schema_parts/1060_registry_case_deletion_guards.sql": "migration-only",
-    "db/schema_parts/1061_matching_manual_reason_optional.sql": "migration-only"
+    "db/schema_parts/1061_matching_manual_reason_optional.sql": "migration-only",
+    "db/schema_parts/1062_order_reopen_reason_optional.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -535,6 +537,15 @@
       "replay": "absent CHECK plus exact reason metadata is exact; the known predecessor is pending",
       "rollback": "discard unpromoted candidate; retain valid empty reasons after apply, never invent historical text",
       "unresolved_policy": "unknown CHECK expression, missing parent or changed reason metadata fail closed"
+    },
+    "db/schema_parts/1062_order_reopen_reason_optional.sql": {
+      "source_object": "order_reopen_events legacy nonempty human reason CHECK",
+      "successor": "db/schema_parts/240_order_reopen_reason_optional.sql",
+      "terminal_schema_evidence": "fresh and preserved schemas retain nonempty command/actor/correlation checks and allow an empty human note",
+      "data_effect": "schema-only; no event rewrite, deletion or backfill",
+      "replay": "exact predecessor is pending; exact successor is current",
+      "rollback": "discard unpromoted candidate; preserve all recorded notes after apply",
+      "unresolved_policy": "unknown CHECK, enforcement or parent-column drift fails closed"
     }
   }
 }

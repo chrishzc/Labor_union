@@ -7,6 +7,7 @@
 處理 LINE webhook、identity binding/review、LIFF/self-service transport、rich menu／message delivery與committed delivery worker composition；擁有 identity root／owner projections／current-fact interpretation，business mutation回owning Subsystem。
 
 ## Modules
+- `table-image-delivery` — 初步候選與正式推薦的唯讀快照圖片、opaque URL 及私人媒體轉送；path: `modules/table-image-delivery.md`
 - `liff-configuration` — database-owned LIFF page/theme read/write/history/rollback; path: `modules/liff-configuration.md`
 - `payment-overdue-reminders` — 各期獨立的繳款逾期待辦、人工提醒及寄送前複核；path: `modules/payment-overdue-reminders.md`
 - `deposit-notifications` — 訂金繳費提醒、正式核銷成功通知及本人繳費 LIFF；path: `modules/deposit-notifications.md`
@@ -54,6 +55,14 @@
 - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md` — identity contract
 - `document/架構重整/01_規格基線/26_LINE四大模組Eraser流程圖轉錄與驗收基線.md` — required direct-flow acceptance；source存在或局部測試通過不取代流程驗收。
 - `document/架構重整/01_規格基線/29_LINE服務說明、客服互動與選單角色正式規格.md` §4.1、§10.14 — 加好友只保留即時歡迎的 current contract 與驗收；三日引導不再是需求或 implementation gap。
+
+### 第一批資訊回覆（2026-10-30 人工核准）
+
+歡迎／綁定入口、服務導覽說明查詢、選單說明、停用及群組錯誤提示的新工作使用 `line_webhook_reply`；由原 committed delivery worker 讀取同事件、同聊天室的短效 Reply 機會，失敗不補 Push、不自動重試。`delivery_contracts.py` 定義來源標記，`ports.py`／`infrastructure/mysql/line_delivery_task_repository.py` 的 Reply 查詢可核對原收件者。`infrastructure/mysql/line_notification_repository.py` 的近期導覽回覆 Query 同時辨識新舊來源並保留原收件者隔離。業務結果確認仍 Push，既有排隊工作不轉換／取消。正式語意由規格 20 §3.2A 擁有。
+
+`infrastructure/mysql/line_delivery_task_repository.py::new_reply_task_ids` 只回傳本次 UoW 新 insert 的資訊工作，排除重複 enqueue 回讀的既有工作。`webhook_event_consumer.py` 在 commit 後交由 `delivery_worker.py::run_new_reply_tasks` 逐筆取得新租約並投遞；`api/dependencies/line_worker_operation.py` 負責接線。快速路徑最多使用每輪 batch 的一半，其餘保留原佇列與原排序，總量及 heartbeat 計數仍沿原上限。資訊 Token 查詢支援 user follow 與 user／group／room message／postback，舊 Knowledge 查詢條件不變。
+
+- integration_test: `tests/domains/external-integration/subsystems/line/integration/test_informational_reply_only.py` — 新舊工作分流、保留業務確認、實際 SQL 事件／來源條件、Token／聊天室核對、commit 後快速投遞與原佇列預算及失敗零 Push。
 
 ### 加好友歡迎（2026-09-16 使用者裁決）
 

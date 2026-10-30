@@ -1,0 +1,43 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-order-reopen-reason-optional-2026-10-29-v1",
+  "descriptors": {
+    "1062_order_reopen_reason_optional.sql": {
+      "tables": {},
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {
+        "order_reopen_events.chk_order_reopen_event_text": "and(atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(correlation_id))>0))"
+      },
+      "triggers": [],
+      "parent_columns": {
+        "order_reopen_events": {
+          "idempotency_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "correlation_id": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      }
+    }
+  }
+}

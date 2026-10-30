@@ -338,6 +338,8 @@ app.include_router(assignment_schedule_rest_dates.router)
 
 
 app.include_router(matches.router)
+from api.routes.line_table_images import router as line_table_images_router
+app.include_router(line_table_images_router)
 app.include_router(candidate_contact_pool.router)
 app.include_router(match_records.router)
 

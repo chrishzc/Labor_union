@@ -137,8 +137,8 @@ const ManualNotificationTargetsSchema = z.array(z.strictObject({
 
 export const SigningReminderReceiptSchema = z.strictObject({
   receipt_id: ReceiptIdSchema,
-  session_id: SessionIdSchema,
-  status_version: z.number().int().positive(),
+  session_id: SessionIdSchema.nullable(),
+  status_version: z.number().int().nonnegative(),
   replayed: z.boolean(),
   manual_notification_targets: ManualNotificationTargetsSchema,
 });
@@ -150,6 +150,7 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
   state: ExternalSigningStateSchema,
   status_version: z.number().int().nonnegative(),
   handoff_recorded: z.boolean(),
+  handoff_logged: z.boolean().optional(),
   signing_blockers: z.array(z.string()).optional(),
   handoff_included_reminders: z.boolean().optional(),
   signing_reminder: SigningReminderReceiptSchema.nullable().optional(),
@@ -177,6 +178,9 @@ export const ContractExternalSigningQuerySchema = z.strictObject({
 export const ContractPreparationQuerySchema = z.strictObject({
   case_no: z.string().min(1).max(50),
   state: z.literal('preparing'),
+  handoff_logged: z.boolean().optional(),
+  signing_reminder: SigningReminderReceiptSchema.nullable().optional(),
+  signing_blockers: z.array(z.string()).optional(),
   staff_segments: z.array(z.strictObject({
     segment_id: z.number().int().positive(),
     staff_id: z.number().int().positive(),
@@ -272,8 +276,8 @@ const SignedDocumentReadbackSchema = z.strictObject({
 }).superRefine(validateSignedTarget);
 
 const HandoffReceiptSchema = z.strictObject({
-  session_id: SessionIdSchema,
-  resulting_status_version: z.number().int().positive(),
+  session_id: SessionIdSchema.nullable(),
+  resulting_status_version: z.number().int().nonnegative(),
   replayed: z.boolean(),
   handoff_included_reminders: z.boolean().optional(),
   manual_notification_targets: ManualNotificationTargetsSchema.optional(),
@@ -492,8 +496,8 @@ export const contractExternalSigningClient = {
     return value;
   },
 
-  async sendSigningReminders(caseNo: string, input: { session_id: string; expected_status_version: number }, identity: ExternalSigningCommandIdentity): Promise<SigningReminderReceipt> {
-    SessionIdSchema.parse(input.session_id);
+  async sendSigningReminders(caseNo: string, input: { session_id: string | null; expected_status_version: number }, identity: ExternalSigningCommandIdentity): Promise<SigningReminderReceipt> {
+    SessionIdSchema.nullable().parse(input.session_id);
     const value = decodePayload(envelope(SigningReminderReceiptSchema), await transport.post(
       `${basePath(caseNo)}/reminders`, input, commandOptions(identity),
     )).data;

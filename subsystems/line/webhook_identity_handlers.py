@@ -28,6 +28,7 @@ from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.line.navigation_catalog import CATALOG_REVISION
 from subsystems.line.message_copy_catalog import configured_payload
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
@@ -367,7 +368,7 @@ def _identity_link_delivery(
         scheduled_at,
         IdempotencyKey(f"identity-link:{purpose.value}:{event_identity}"),
         correlation_id,
-        "line_webhook_event",
+        REPLY_ONLY_WEBHOOK_SOURCE,
         event_identity,
     )
 

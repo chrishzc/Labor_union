@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-order-reopen-reason-optional-2026-10-29-v1",
+  "release_metadata": {
+    "release_name": "Preserve optional human notes in controlled reopening",
+    "application_version": "order-reopen-reason-optional-v1",
+    "published_at": "2026-10-29",
+    "description": "Allow empty human notes; preserve event rows, identity, actor, correlation, version, status, fingerprint and append-only checks."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-matching-manual-reason-optional-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1062_order_reopen_reason_optional.sql",
+      "relative_path": "db/schema_parts/1062_order_reopen_reason_optional.sql",
+      "sha256": "cc247a3ef270fd028306cedaf6cdc192fa04b09980a33eb602905a947a04555e",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-owned-candidate-before-switch; retain-optional-reasons-after-apply; never-rewrite-events",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "order-reopen-reason-optional-exact",
+      "phase": "post-schema",
+      "policy": "Exact CHECK predecessor and successor only; preserve rows and all unrelated guards",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "order-reopen-reason-optional-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "order-reopen-reason-optional-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_10_29_order_reopen_reason_optional_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_10_29_order_reopen_reason_optional_v1.descriptors.json",
+    "sha256": "8eb39079bd71e503b71ad5e8118f041fc5da279363cb3fb8ca44d73f43da48db",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -23,10 +23,12 @@ def management_app():
     from api.main import app
     from api.routes.nas_setup import attach_setup
     from api.routes.private_line_media import router as private_line_media_router
+    from api.routes.line_table_images import private_router as private_table_images_router
     from api.routes.nas_line_operations import private_router as private_line_operations_router
     app.router.lifespan_context = _management_lifespan
     if not getattr(app.state, "private_line_media_attached", False):
         app.include_router(private_line_media_router)
+        app.include_router(private_table_images_router)
         app.state.private_line_media_attached = True
     if not getattr(app.state, "private_line_operations_attached", False):
         app.include_router(private_line_operations_router)
@@ -48,6 +50,7 @@ async def _line_lifespan(_):
 
 
 def line_app():
+    from api.routes.line_table_images import proxy_router as table_images_proxy_router
     from api.line_webhook_boundary import canonical_line_webhook
     from api.routes import (
         line_identity, line_order_change, line_staff_self_service,
@@ -56,6 +59,7 @@ def line_app():
     from api.routes.nas_line_operations import public_router as line_operations_router
     app = FastAPI(title="LINE public service", docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=_line_lifespan)
+    app.include_router(table_images_proxy_router)
     app.add_middleware(ResponseCompressionMiddleware, minimum_size=1024, compresslevel=5)
     app.add_api_route("/webhook/line", canonical_line_webhook, methods=["POST"])
     app.include_router(line_identity.page_router)

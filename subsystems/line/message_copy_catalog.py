@@ -121,6 +121,8 @@ def default_copy_templates():
     for key, content in _text_defaults().items():
         result[key] = _template(copy_template_id(key), key, content)
     for key, payload in _card_defaults().items():
+        if key == 'card-candidate-information-3':
+            continue  # The weekly picture contains owner data, not editable copy.
         fields = copy_fields(payload)
         if key.startswith("card-"):
             # Owner-projected rows, profile values and authored questions are
@@ -128,6 +130,12 @@ def default_copy_templates():
             fields = [f for f in fields if "{business_value}" not in f["content"]
                       and not (key in {"card-customer-profiles", "card-customer-confirmation"} and f["id"].endswith("/contents/1/text"))
                       and f["content"] not in {"目前無法產生每周服務中說明。", "目前無法產生資料。"}]
+            if key == 'card-customer-confirmation':
+                fields = [field for field in fields if field['id'].startswith('contents/contents/4/')]
+            elif key in {'card-candidate-information-1', 'card-candidate-information-2'}:
+                fields = [field for field in fields if field['id'].startswith('contents/footer/')
+                    or field['id'] == 'contents/body/contents/0/text'
+                    or field['content'] == '請確認檔期與條件後回覆是否願意承接。']
             if key in {"card-customer-profiles", "card-customer-confirmation"}:
                 for field in fields:
                     parts = field["id"].split("/")
@@ -135,6 +143,10 @@ def default_copy_templates():
                         parts[2] = "*"
                         field["path"] = "/".join(parts)
                         field["match"] = field["content"]
+                        if 'append_to' in field:
+                            target = field['append_to'].split('/')
+                            target[2] = '*'
+                            field['append_to'] = '/'.join(target)
             elif key.startswith("card-candidate-information-"):
                 for field in fields:
                     parts = field["id"].split("/")
@@ -144,6 +156,8 @@ def default_copy_templates():
                         field["match"] = field["content"]
         content = json.dumps({field["id"]: field["content"] for field in fields}, ensure_ascii=False)
         template = _template(copy_template_id(key), key, content)
+        if key.startswith('card-') and 'case_no' not in {v['name'] for v in template['variables']}:
+            template['variables'].append({'name': 'case_no', 'required': False})
         template["copy_fields"] = fields
         result[key] = template
     for role, template_id in IDENTITY_SUCCESS_TEMPLATES.items():
@@ -163,7 +177,21 @@ def effective_copy_definition(definition):
     specs = {t["id"]: t for t in default_copy_templates().values() if t.get("copy_fields")}
     for template in result.get("templates", []):
         if template["id"] in specs:
+            key = template['id'].removeprefix('LINE-COPY-')
+            if key in {'card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'}:
+                # Preserve saved action wording while retiring image-body copy.
+                current = json.loads(template['content'])
+                legacy_ids = {field['id'] for field in copy_fields(_card_defaults()[key])}
+                if isinstance(current, dict) and set(current) <= legacy_ids:
+                    selected = json.loads(specs[template['id']]['content'])
+                    selected.update({field: value for field, value in current.items() if field in selected})
+                    template['content'] = json.dumps(selected, ensure_ascii=False)
+            current = json.loads(template['content'])
+            defaults = json.loads(specs[template['id']]['content'])
+            if isinstance(current, dict) and set(current) <= set(defaults):
+                template['content'] = json.dumps({**defaults, **current}, ensure_ascii=False)
             template["copy_fields"] = deepcopy(specs[template["id"]]["copy_fields"])
+            template['variables'] = deepcopy(specs[template['id']]['variables'])
     existing = {t["id"] for t in result.get("templates", [])}
     for template in default_copy_templates().values():
         if template["id"] not in existing:
@@ -187,6 +215,7 @@ def render_copy_payload(definition, key, payload, variables=None, content=None):
     defaults = default_copy_templates().get(key)
     if defaults is None:
         return payload
+    definition = effective_copy_definition(definition)
     template = next((t for t in definition.get("templates", []) if t["id"] == defaults["id"]), None)
     if template is None and content is None:
         return payload

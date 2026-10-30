@@ -11,9 +11,7 @@ import {
   ClipboardList,
   Database,
   FileBarChart,
-  FolderOpen,
   FileSpreadsheet,
-  HardDrive,
   HeartHandshake,
   History,
   KeyRound,
@@ -53,8 +51,6 @@ export type PageType =
   | 'accounting-parameters'
   | 'historical-service-accounting'
   | 'account-management'
-  | 'storage-management'
-  | 'file-settings'
   | 'contract-templates';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
@@ -77,8 +73,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'historical-service-accounting': 'finance',
 
   'account-management': 'audit',
-  'storage-management': 'audit',
-  'file-settings': 'audit',
   'contract-templates': 'audit',
 };
 
@@ -102,7 +96,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'line-management', icon: ClipboardList, label: '客服與營運', section: 'line' },
   { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },
   { id: 'line-llm-settings', icon: KeyRound, label: 'AI 模型設定', section: 'line' },
-  { id: 'line-liff-studio', icon: PanelTop, label: '表單與卡片', section: 'line' },
+  { id: 'line-liff-studio', icon: PanelTop, label: '表單', section: 'line' },
   { id: 'line-security', icon: ShieldCheck, label: '管理員通知對象', section: 'line' },
 
   // Finance Section
@@ -112,8 +106,6 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Audit & System Section
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },
-  { id: 'storage-management', icon: HardDrive, label: '儲存空間管理', section: 'audit' },
-  { id: 'file-settings', icon: FolderOpen, label: '檔案設定', section: 'audit' },
   { id: 'contract-templates', icon: FileSpreadsheet, label: '契約模板', section: 'audit' },
 ];
 

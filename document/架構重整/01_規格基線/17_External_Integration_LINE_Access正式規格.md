@@ -31,7 +31,7 @@
 4. ingress 先保存不含敏感 raw payload 的 request-level security receipt；authenticity
    失敗只進 security quarantine／burst metric，不是可信事件。signature 與基本 envelope
    通過後才建立 canonical durable inbox event，再由獨立 consumer 呼叫 typed Domain Command。
-5. 每個 egress 由已提交 outbox／durable task 執行；render／HTTP request 不直接發送。
+5. 業務 egress 由已提交 outbox／durable task 執行；render／HTTP request 不直接發送。專員申請的即時受理回覆依規格 20 §3.2，僅使用當次 Reply API；失敗不回退 Push，客服需求仍由原 consumer 保存。
 6. provider event 與 downstream Domain command 使用不同的 idempotency identity。
 7. 相同 event key＋相同 canonical payload 為 exact replay；相同 key＋不同 payload 為 conflict，
    必須 quarantine。
@@ -1280,7 +1280,15 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 ### 通知文案全面維護（2026-10-29 人工裁決）
 
 - LINE-COPY-01：本次工作包依人工要求開放「通知與發送」目前目錄全部通知文字，以及卡片摘要、固定標題、說明及按鈕名稱；不以原為固定文案或沒有通知規則而拒絕編輯。公版資料及動態 owner 欄位仍由原流程提供；按鈕的 URI、postback、識別、資格及動作不屬文案維護。
+- LINE-COPY-TABLE-01（2026-10-30 最新人工裁決）：初步候選聯絡與正式媒合推薦包的訂單資訊一、資訊二、每週服務安排各產生一張乾淨緊湊的表格圖片；資料由現有 owner projection 帶入，初步候選維持原去識別界線。圖片不以長段純文字替代。兩個流程最後的「是否願意承接」或「是否接受月嫂推薦」互動卡片獨立保留，只維護這些確認卡片的標題、說明及按鈕名稱；兩邊設定互不共用。每週圖片沒有可編輯文案，也不新增操作按鈕。
+- LINE-TABLE-IMAGE-01：圖片顯示資料沿同一 outer UoW 保存於原 durable delivery snapshot，無新圖片 schema／檔案 writer／發送工作。provider 只收到三張圖片的 bounded HTTPS reference 及原互動卡片；內部顯示資料不得穿透 provider。已排入／寄出的圖片不重新讀取目前案件或文案，重播仍由原 key／receipt 收斂。歷史純文字 payload 不改寫。
+- LINE-TABLE-IMAGE-02：`GET /api/v1/line/table-images/{token}` 僅接受 purpose-bound opaque reference，驗證後才唯讀取得 committed snapshot，PNG 於記憶體產生，無暫存圖片檔案。連結實作沿用既有確認附件的七日短效存取及 secret 設定；無效／過期／不存在回 closed 404，配置或渲染暫時不可用回 closed 503，不輸出內部資料。回應 private no-store、nosniff、no-referrer。NAS 公開入口只經既有 `line-media-proxy` 機器身分轉送到 private API 的專用圖片讀取；此用途以圖片 reference 授權，不代用 LIFF 身分，也不擴充任意路徑／檔案讀取。
+- LINE-TABLE-IMAGE-03：後台 sample／record 預覽重用同一 PNG renderer，只回傳 display-only PNG data，不回傳 delivery URL／token，不建立 task、憑證、檔案或 provider effect。縮圖可開啟完整圖片。執行端須有中文字型；Windows 沿系統微軟正黑體，其他環境使用 `LINE_TABLE_IMAGE_FONT` 或已安裝的 Noto／文泉驛字型，不以缺字圖片冒充成功。
+- LINE-TABLE-IMAGE-04（2026-10-30 薪資受眾補充）：月嫂收到的資訊一顯示「薪資單價、預估總薪資、預計付款日」，由 Payroll 及 Orders owner 提供唯讀預估，不含客戶訂金、分期與客戶應付；客戶版資訊一顯示客戶費用及繳款約定，不含月嫂薪資。兩邊圖片標題明確區分月嫂薪資與客戶費用，只共用表格樣式。預估依規格 03，不建立正式薪資義務。圖片連結在所有環境均須使用已設定的確認附件 secret，不使用已知 development／範例值；網址或取用金鑰設定不足時停止排入並回 closed 503；中文字型等渲染設定缺失時，圖片讀取與預覽回 closed 503。不退回純文字或不安全連結。capability 不得進入 access／proxy／provider error 日誌或管理端投遞明細。
 - LINE-COPY-02：沿既有 MESSAGE_TEMPLATES 版本化 owner 及 notification-rules/{id}/message-template Query／PUT，額外解析目錄中的 standalone template 與內建訊息 ID。文字維持原欄位；卡片回傳具中文標籤及字數上限的 closed display fields，PUT 只接受同一已知欄位集合的文字。不得將完整 provider payload 或動作送入編輯器。沿原 read/manage 授權、revision CAS、typed 409、驗證與稽核；不新增資料表或通知規則。
+- LINE-COPY-EDITOR-01（2026-10-30 最新人工裁決）：所有現行卡片式訊息使用整張文案編輯，集中顯示標題、自由換行／增加段落的說明內容及按鈕名稱；說明欄固定 504px，標題／按鈕為精簡輸入，其他既有標籤及摘要收合。不得要求逐欄切換。原卡片缺少標題或說明節點時，可在已知 body 位置新增純顯示節點；只處理已知 closed 文案欄位，不接受自訂 provider 結構、URI、postback 或資格。卡片 Query 額外回傳欄位用途及是否允許空白；舊文案設定唯讀承接，新可選說明預設留空，不遺失原有內容。
+- LINE-COPY-EDITOR-02：客戶、月嫂及不同流程使用各自原 template ID，編輯一方不更新另一方。插入資料只列可用的顯示變數，不列 action-only token；Preview 與新訊息共用組裝器，保留 action 及動態資料。多張推薦包預設預覽最後的可編輯確認卡，圖片內容保持唯讀；自訂說明只加入對應卡片，不能錯置到月嫂個人資料、其他圖片或其他流程。沿用原 revision CAS、驗證及零寫入預覽，已建立的工作不改寫。
+- LINE-COPY-CATALOG-01（2026-10-30 最新人工裁決）：通知與發送及流程導覽的正式媒合卡片僅列「正式媒合－客戶完整推薦確認包」，不再將月嫂案件資訊卡（一）／（二）及月嫂資料與客戶確認卡列成獨立訊息；原三項編輯連結導向完整推薦包。初步候選聯絡項目與不同身分／流程的獨立文案設定保留。此為目錄呈現收斂，不刪除已存文案、歷史工作、既有唯讀單卡 preview 或發送 API，也不更動實際寄送流程。
 - LINE-COPY-03：客戶、月嫂及工會人員的成功通知分別使用 identity_bound_customer、identity_bound_staff、identity_bound_admin，預設分別提醒查看服務進度、確認月嫂資料／檔期及開啟工會待辦；每份可獨立儲存。即時完成及人工審核通過均按實際 subject_type 選用，不再發送共用成功文案。舊客戶或月嫂曾自行維護的文案只承接至對應身分，不複製到其他身分。既有 template-bind_success_new_order 與 template-staff_switch_success 深連結及文案 API ID 分別解析到客戶、月嫂的新設定，不再編輯無實際消費者的舊副本。
 - LINE-COPY-04：未保存的新設定以原純組裝函式及明列的身分預設提供 genesis，Query／公版 Preview 零寫入。每次新訊息在原交易內讀取設定並凍結 payload；重試沿原工作快照，不重組已排程或已寄訊息。即時客服回覆與背景受理沿同一份設定。工會逐案自行輸入的詢問／回覆仍由案件流程決定，共用卡片的標題及按鈕文案可維護。
 - LINE-COPY-05：本包 write set 限 LINE 文案目錄、既有設定 API／schema／React 編輯器、原訊息建立者的設定讀取、直接測試及對應架構 leaf。驗收為全部現行目錄能讀取並儲存、三身分成功及下一步互不覆寫、卡片動態欄位及 action 保留、多月嫂／變動區塊不錯置、stale 409、無效欄位／變數 422、預覽與新工作一致、既有工作不變、實際畫面及 build。副作用上限為本機檔案與 focused tests；不操作正式設定、LINE provider、production data 或選單發布。最終結果於對話交付，不另建逐步 receipt。

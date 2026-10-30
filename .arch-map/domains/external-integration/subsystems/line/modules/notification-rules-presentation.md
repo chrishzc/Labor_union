@@ -13,8 +13,15 @@
 
 依 2026-10-29 人工裁決，目前目錄全部訊息開放文案維護；卡片摘要、固定標題、說明與按鈕名稱採分欄編輯及同一 revision 儲存，多欄卡片使用單一大欄位切換。動態 owner 欄位及 action 不屬文案。客戶、月嫂及工會人員各有獨立綁定成功設定，直接完成與審核通過按實際身分選用；舊客戶／月嫂成功訊息 ID 分別解析到對應身分設定。只在建立新訊息時讀取設定，不改已提交的 payload；重複綁定沿原 key 查既有工作，避免重新以新文案入列。
 
+2026-10-30 最新人工裁決取代單欄切換：所有可編輯卡片集中顯示標題、504px 自由說明與按鈕名稱，其他標籤／摘要收合；原本沒有說明節點的卡片也可新增段落，支援插入已知的顯示資料變數。正式客戶確認與初步候選月嫂承接各用原獨立 template ID 儲存，保留版本化 CAS 與草稿離頁保護；預覽預設顯示目前編輯的最後確認卡。動態資料及 action 保持原 owner，圖片唯讀。
+
+2026-10-30 正式媒合目錄收斂：正式媒合的卡片僅列「正式媒合－客戶完整推薦確認包」，不再單列月嫂案件資訊卡（一）／（二）與月嫂資料及客戶確認卡；原三項編輯深連結導向完整推薦包。初步候選各項與不同身分／流程的文案仍獨立；既有唯讀單卡 preview、設定與發送操作未退役。
+
 ## Implementation
+
+依 2026-10-30 人工裁決，初步候選與正式媒合推薦包的資訊一／二及每週安排改用系統資料表格圖片；預覽支援逐張選擇及放大。這些流程只維護最後確認卡的文字與按鈕名稱，每週安排唯讀。圖片資料與取用由 `table-image-delivery` module 擁有；此處只投影封閉 PNG 預覽節點，不回傳實際發送連結。
 - primary: `ui_react/src/components/LineNotificationWorkbench.tsx`
+  - `ui_react/src/components/LineCardCopyEditor.tsx` — 整張卡片標題／自由說明／按鈕集中編輯、插入顯示資料及同次儲存，不接收 provider actions。
   - `ui_react/src/components/LineMessageFlow.tsx`、`ui_react/src/components/LineMessageFlow.css` — 同一 LINE 專區的精簡流程導覽；只讀正式目錄與規則，點選步驟才展開訊息，返回時保留步驟並重新查詢狀態。
   - `ui_react/src/adapters/line_configuration/line_message_flow_adapter.ts` — 流程分類引用正式 descriptor／template，解析 current ID 與 enabled／流程控制呈現；不保存文案或業務 gate。
   - `ui_react/src/components/LineMessagePreviewWorkspace.tsx` — 公版欄位值表、abort／generation 與 display-only Flex／carousel renderer。

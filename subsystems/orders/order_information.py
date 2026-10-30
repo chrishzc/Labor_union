@@ -15,7 +15,7 @@ from enum import StrEnum
 import hashlib
 import json
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text, require_positive_integer
@@ -242,6 +242,7 @@ def build_candidate_information(case_no, candidate_id, info_type, facts, field_i
     text, blockers = build_order_information_message(
         info_type, facts, field_issues,
         "初步接案意願詢問；日期為預計期間，未確認需求請再與工會確認。",
+        audience='staff',
     )
     if "order_information_template_invalid" in blockers:
         raise ValueError("order_information_template_invalid")
@@ -262,6 +263,9 @@ def _candidate_line_sections(
     info_type: int,
     facts: Mapping[str, object],
     field_issues: Mapping[str, str],
+    *,
+    include_contact_details: bool = False,
+    audience: Literal['staff', 'customer'] = 'staff',
 ) -> tuple[CandidateInformationSection, ...]:
     template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
     fields, blockers, _warnings = _project_fields(template, facts, field_issues)
@@ -295,7 +299,9 @@ def _candidate_line_sections(
         "f_122_cm": "客戶應付總額",
     }
     for item in fields:
-        if item.field_id in excluded:
+        if item.field_id in excluded and not include_contact_details:
+            continue
+        if info_type == 1 and audience == 'staff' and item.field_id in info_one_payments:
             continue
         section = (
             (
@@ -309,6 +315,14 @@ def _candidate_line_sections(
         grouped.setdefault(section, []).append(
             (labels.get(item.field_id, item.label.rstrip("：")), _candidate_field_value(item))
         )
+    if info_type == 1 and audience == 'staff':
+        unit = facts.get('staff_salary_unit')
+        grouped['月嫂薪資'] = [
+            ('薪資單價', f'NT$ {unit:,}／時' if isinstance(unit, int) else str(unit or '待確認')),
+            ('預估總薪資', str(facts.get('staff_salary_total') or '待確認')),
+            ('預計付款日', str(facts.get('staff_salary_due') or '待確認')),
+            ('預估說明', '依目前約定天數與時數預估；未確認的雙薪、加價及調整不列為已確定薪資。'),
+        ]
     return tuple(
         CandidateInformationSection(title, tuple(rows))
         for title, rows in grouped.items()
@@ -330,22 +344,39 @@ def _candidate_field_value(item: OrderInformationFieldView) -> str:
     return str(_fingerprint_value(item.value))
 
 
+def build_formal_information_sections(info_type, facts, field_issues):
+    """Full customer sheet projection; candidate cards keep their redaction."""
+    if info_type not in (1, 2):
+        raise ValueError("info_type_invalid")
+    return _candidate_line_sections(info_type, facts, field_issues, include_contact_details=True, audience='customer')
+
+
 def build_order_information_message(
     info_type: int,
     facts: Mapping[str, object],
     field_issues: Mapping[str, str],
     introduction: str,
+    *,
+    audience: Literal['staff', 'customer'] = 'customer',
 ) -> tuple[str, tuple[str, ...]]:
     """Render the canonical sheet fields for any bounded recipient workflow.
 
-    Candidate contact and formal matching differ only in audience wording and
-    their authoritative segment source; both use this one field formatter.
+    Candidate staff sheets show Payroll estimates; customer sheets show Client
+    Finance payment terms. Their financial sections are never interchangeable.
     """
     if info_type not in (1, 2):
         raise ValueError("info_type_invalid")
     template = OrderInformationTemplate.INFO_01 if info_type == 1 else OrderInformationTemplate.INFO_02
     fields, blockers, _warnings = _project_fields(template, facts, field_issues)
     lines = [f"訂單資訊－{info_type}", introduction]
+    if info_type == 1 and audience == 'staff':
+        labels = {'預計服務開始日': '預計服務開始日期', '預計服務結束日': '預計服務結束日期'}
+        lines.extend(f"{labels.get(label, label)}：{value}" for section in _candidate_line_sections(info_type, facts, field_issues)
+                     for label, value in section.rows)
+        text = '\n'.join(lines)
+        if len(text.encode('utf-16-le')) // 2 > 5000:
+            raise ValueError('candidate_information_message_too_long')
+        return text, blockers
     labels = {"f_104_c4": "預計服務開始日期", "f_105_c5": "預計服務結束日期", "f_106_c6": "每日服務時數"}
     for item in fields:
         lines.append(f"{labels.get(item.field_id, item.label)}：{_candidate_field_value(item)}")

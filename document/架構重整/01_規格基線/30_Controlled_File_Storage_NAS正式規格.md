@@ -1,11 +1,14 @@
 # Controlled File Storage／NAS 正式規格
 
+2026-10-30 儲存標的精簡與 NAS 目錄架構裁決：依人工明確指示，NAS 儲存標的精簡為正式簽約本（客戶正式合約、月嫂承攬協議）、照護照片（寶寶、餐點）、月嫂資格主檔（履歷、證照、體檢與良民證）、LINE 選單底圖與資料庫每日冷備份；待簽約草案合約書改為動態產製不落地永久儲存，紙本簽到工作單、服務日期確認書、排班行事曆圖卡與客服對話截圖移出永久儲存清單。NAS 實體目錄依人員查核習慣劃分直覺編號結構，實體檔案命名規範中文業務標記與防竄改雜湊。實體路徑連線格式由環境與部署變數配置，本規格維持技術中立抽象儲存邊界。
+
 2026-10-21 管理端互動裁決：依 `00_Global_共同契約.md` §2.4，檔案容量／等待時間設定及營運清理改為一次點擊送出、人工原因選填。保留受控根目錄、候選合法性、權限、版本／digest、正式執行與 readback 邊界，不以查看預覽或核對勾選作為前置條件。
 
 ## 1. 文件狀態與 Authority
 
 - 狀態：`consolidated-current-baseline`
 - 收斂日期：2026-09-09
+- 最新修訂日期：2026-10-30
 - Owner：Controlled File Storage / Infrastructure boundary
 - 上位共同契約：`00_Global_共同契約.md`
 - 關聯規格：各 owning Domain 的文件產生、送出、核銷、簽署、報表與附件契約
@@ -26,14 +29,21 @@
 
 ## 3. FILE_PURPOSE_REGISTRY
 
-系統必須維護唯一的 `FILE_PURPOSE_REGISTRY`。至少涵蓋：
+系統必須維護唯一的 `FILE_PURPOSE_REGISTRY`。現行正式收斂之長期受控儲存標的如下：
 
-- `final_signed_contract`
-- `client_receipt`
-- `case_report`
-- `government_subsidy_application`
-- `service_date_confirmation`
-- `rich_menu_background`
+- `final_signed_contract`：客戶正式簽約完成本（PDF / Excel，客戶線上簽署或紙本簽署回傳）
+- `signed_staff_agreement`：已簽約的月嫂承攬協議書（PDF / Excel，月嫂接案承攬確認與報酬結算簽署正本）
+- `staff_resume`：月嫂正式履歷書（PDF，月嫂主檔完備之個人履歷正本）
+- `staff_certificate`：月嫂專業證照（PDF / JPG，保母人員技術士證、急救證照等專業資格）
+- `staff_health_exam`：月嫂體檢合格證明與良民證（PDF / JPG，法定必備之年度健康檢查與警察刑事紀錄）
+- `baby_log_photo`：寶寶照護日誌照片（JPG / PNG，月嫂每日到府照護打卡上傳之佐證相片）
+- `meal_photo`：每日月子餐點照片（JPG / PNG，月嫂每日到府備餐上傳之佐證相片）
+- `rich_menu_background`：LINE 圖文選單底圖（PNG，官方帳號發布圖文選單之圖片資源）
+- `database_backup`：資料庫每日冷備份（SQL.GZ + SHA256，NAS DSM 每日 03:00 自動匯出之資料庫快照）
+
+**明確排除與非永久儲存規範**：
+1. `unsigned_contract`（待簽約草案）：需要時由系統依即時事實動態產製供即時下載，不於 NAS 落地永久儲存。
+2. 紙本簽到工作單、服務日期確認書、排班行事曆圖卡、LINE 客服對話截圖與附件，依 2026-10-30 人工指示移出 NAS 永久儲存清單。
 
 每個 purpose 至少定義：
 
@@ -272,6 +282,55 @@ UI 不能：
 - `FILE_SETTINGS_PATH` 指向部署者配置的持久化 JSON 設定檔；未指定時，使用受控根目錄的父層 `file-settings.json`，無根目錄的本機開發則使用 `data/runtime/file-settings.json`。原子替換與程序間鎖保護同一設定檔；`expected_version` CAS 拒絕 stale／busy，無新 DB table、fingerprint 或 migration。
 - 設定檔的明確值優先於環境初值。容量／等待時間於後續操作重新讀取，即時生效；公開 LINE 經既有私人 HTTPS／獨立機器認證讀取同一限制，不掛載或寫入管理設定檔。`0` 僅停用應用層檔案計時，外層仍可能中斷。
 - 儲存結果不明時不得宣稱失敗或盲目重送，UI 保留錯誤並要求重新 Query；版本衝突顯示 typed 409。舊版合法大檔的讀取容量保留於內部設定 metadata，降低新上傳容量不因此封鎖既有檔案。
+
+### 13B. NAS 實體目錄架構與檔案命名規範（2026-10-30 人工定案）
+
+為方便工會秘書與管理人員在日常營運、稽核查帳或客戶爭議時，能直接透過檔案總管或 Synology DSM File Station 快速查核，實體檔案依業務主軸劃分直覺編號架構：
+
+```text
+{NAS共用資料夾}/
+│
+├── 01_案件合約 (orders)/
+│   └── {案件編號}/                            # 例：2026-A001
+│       ├── 客戶合約_{案件編號}_v1_已簽署_{短Hash}.pdf
+│       └── 月嫂承攬協議_{案件編號}_{月嫂編號}_已簽署_{短Hash}.pdf
+│
+├── 02_照護日誌 (scheduling)/
+│   └── {案件編號}/                            # 例：2026-A001
+│       └── {服務日期_YYYY-MM-DD}/              # 例：2026-11-01
+│           ├── 照護照片_{服務日期}_寶寶_{序號}_{短Hash}.jpg
+│           └── 照護照片_{服務日期}_餐點_{序號}_{短Hash}.jpg
+│
+├── 03_月嫂檔案與資格 (staff)/
+│   └── {月嫂編號}_{姓名}/                     # 例：ST012_張美月
+│       ├── resume/                            # 履歷
+│       │   └── 月嫂履歷_{月嫂編號}_{月嫂姓名}_v{版本號}_{短Hash}.pdf
+│       ├── certificates/                      # 專業證照
+│       │   └── 證照_{月嫂編號}_{證照名稱}_{短Hash}.pdf
+│       └── health_and_police/                 # 體檢與良民證
+│           ├── 體檢報告_{月嫂編號}_{年份}_{短Hash}.pdf
+│           └── 良民證_{月嫂編號}_{年份}_{短Hash}.pdf
+│
+├── 04_LINE選單資源 (media)/
+│   └── rich_menus/                            # LINE 圖文選單圖片
+│       ├── 預設選單底圖_{發布日期}.png
+│       └── 月嫂專用選單底圖_{發布日期}.png
+│
+├── 05_資料庫冷備份 (db_backups)/              # NAS DSM 排程專用（唯讀保護）
+│   └── {YYYY-MM}/                             # 依月份歸檔
+│       ├── union_db_{YYYYMMDD_HHMMSS}.sql.gz
+│       └── union_db_{YYYYMMDD_HHMMSS}.sql.gz.sha256
+│
+└── _staging/                                  # 系統上傳驗證暫存區（超過24小時由GC自動清理）
+```
+
+**實體檔案命名規範**：
+- 規則：`[中文業務類別]_[業務識別]_[時間/版本]_[檔案雜湊前6碼].[副檔名]`
+- 兼具人員高可讀性與防篡改雜湊驗證能力。
+
+**連線與部署中立性**：
+- 具體實體路徑連線格式由環境與部署變數（`.env`）靈活配置，本規格保持技術中立抽象儲存邊界，不硬性綁定特定 IP 或特定磁碟代號。
+- 實體儲存空間必須透過 `FileSystemControlledFileStorage.readiness()` 進行健康檢查，連線中斷或未授權時一律遵循 Fail-Closed 原則，阻擋寫入並報錯，不以本機隨意暫存破壞資料與 NAS 的一致性。
 
 
 ## 14. Current implementation／acceptance 邊界

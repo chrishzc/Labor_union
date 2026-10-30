@@ -5974,7 +5974,7 @@ CREATE TABLE `order_reopen_events` (
   CONSTRAINT `fk_order_reopen_event_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_order_reopen_event_fingerprint` CHECK (regexp_like(`preview_fingerprint`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_order_reopen_event_status` CHECK (((`before_status` = _utf8mb4'訂單取消') and (`after_status` in (_utf8mb4'洽談中',_utf8mb4'訂單成立',_utf8mb4'服務中')))),
-  CONSTRAINT `chk_order_reopen_event_text` CHECK (((char_length(trim(`idempotency_key`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`reason`)) > 0) and (char_length(trim(`correlation_id`)) > 0))),
+  CONSTRAINT `chk_order_reopen_event_text` CHECK (((char_length(trim(`idempotency_key`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`correlation_id`)) > 0))),
   CONSTRAINT `chk_order_reopen_event_version` CHECK ((`resulting_order_version` = (`expected_order_version` + 1)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

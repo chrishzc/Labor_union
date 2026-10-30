@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from datetime import date, datetime
 from decimal import Decimal, ROUND_CEILING
@@ -445,12 +446,18 @@ def _common_facts(
     # Case Import owns normalization of the legacy payload.  Contract Signing
     # receives only this named projection, never the raw survey mapping.
     case_import = project_order_information(case.get("survey_details"))
+    virtual_account = (
+        build_client_virtual_account(case.get("case_no"))
+        if client_virtual_account is _UNSET_VIRTUAL_ACCOUNT
+        else client_virtual_account
+    )
+    bank_code = os.getenv("CLIENT_DEPOSIT_BANK_CODE", "").strip()
     return {
         "case_no": case.get("case_no"),
         "client_virtual_account": (
-            build_client_virtual_account(case.get("case_no"))
-            if client_virtual_account is _UNSET_VIRTUAL_ACCOUNT
-            else client_virtual_account
+            f"({bank_code}) {virtual_account}"
+            if bank_code and virtual_account
+            else virtual_account
         ),
         "client_name": case.get("client_name"),
         "phone": case.get("client_phone"),

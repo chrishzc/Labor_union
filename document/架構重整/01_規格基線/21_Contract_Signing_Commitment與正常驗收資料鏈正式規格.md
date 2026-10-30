@@ -533,6 +533,7 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 - D36 固定顯示本案專屬虛擬帳號。帳號以 Client Finance／Finance Import 共用的案件編號規則產生，
   後續銀行核銷以同一帳號解析回唯一案件；不得改用全域工會／代收付帳戶、月嫂帳戶、環境變數或
   Excel placeholder。案件編號無法產生合法虛擬帳號時不得列印。
+  2026-10-30 人工補充：契約此欄以「`(銀行代碼) 本案虛擬帳號`」呈現；銀行代碼讀取 `.env` 的 `CLIENT_DEPOSIT_BANK_CODE`（目前 `807`）。模板示範套值同步顯示設定的銀行代碼及明示的虛構帳號。此為契約顯示格式，不改寫帳務核銷使用的原始虛擬帳號；已保存文件保持原版本。
 
 ### 2026-10-14 管理端契約下載與分開簽回人工裁決
 
@@ -566,6 +567,12 @@ fingerprint、blockers、preview fingerprint與PDF result。正式document persi
 - 本次執行範圍限該 API／composition gate、final-document workflow、typed client、既有管理端元件與對應 current tests／map。驗收包括本機能力 gate、正式環境拒絕、stale 零 staging、完整 target 占位文件、明確確認、零 partial business write、同模式重播與完成回讀；使用合成資料，不對目前畫面案件執行 Apply。
 
 ### 2026-10-15 管理端獨立簽署提醒與歷史修復區塊移除
+
+2026-10-30 人工澄清：本次只解除「系統內必須存有未簽 PDF 才可記錄交接／建立簽署提醒」的前置條件。使用瀏覽器列印不會建立系統 PDF，不能因此使送交按鈕永久停用。既有有效且已接受方案、正確對象、檔期／服務日期檢查，以及提醒必須先有交接、已完成／被取代 session 不可提醒等業務條件保留；沒有 session 的 preparing Query 也須在點擊前投影相同方案／檔期 blockers，Apply 在原 UoW fresh-read 再驗證。
+
+- 範圍：沿既有 handoff／reminders API、command receipts、committed LINE delivery tasks 與各自原 outer UoW；不新增 schema、不修改既存文件或歷史 receipt。只有系統 PDF／session 尚未建立而其他條件通過時，交接保存目前已接受方案的案件層級 receipt（`session_id=null`、版本 `0`、真實 `matching_plan_id`），不得虛構 PDF、session、Commitment 或簽約完成。
+- 案件層級提醒須先讀回相同目前方案的交接紀錄，再 fresh-read 檔期／日期與通知對象；方案改變須重新交接。未綁定者保留人工通知名單，身分錯配及版本衝突維持 typed 拒絕；原命令重播不重送。提醒不自動交接，不推進簽約；簽回文件集合、正式完成、Orders／Finance 與 Scheduling 最終條件不變。
+- 驗收：合法方案使用瀏覽器列印後，未存 PDF 仍能記錄交接，交接後才能建立提醒；未接受方案、檔期／日期衝突、未交接提醒、已完成／被取代的提醒仍應阻擋，且不得部分提交。實測不呼叫 LINE provider。
 
 依使用者確認的 UI 預覽與明確施工授權，本節覆蓋 2026-09-29「交接同時建立提醒」的行為；保留既有 owner、文件完成條件與本機測試跳過功能。
 

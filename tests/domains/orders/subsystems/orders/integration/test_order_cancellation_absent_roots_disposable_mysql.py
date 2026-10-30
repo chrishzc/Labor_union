@@ -21,11 +21,12 @@ DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
 pytestmark = pytest.mark.skipif(not DATABASE, reason="requires an explicitly configured disposable lu_test_* MySQL database")
 
 
-def test_date_only_unassigned_case_cancels_and_reopens_without_downstream_roots():
+@pytest.mark.parametrize('reopen_reason', ['確認重新受理', ''])
+def test_date_only_unassigned_case_cancels_and_reopens_without_downstream_roots(reopen_reason):
     host = os.environ["LABOR_UNION_TEST_MYSQL_HOST"]
     assert host in {"localhost", "127.0.0.1"}
     assert os.getenv("APP_ENV", "development") == "development"
-    database = f"{DATABASE}_cancel_absent"
+    database = f"{DATABASE}_cancel_absent_{'empty' if not reopen_reason else 'note'}"
     arguments = Namespace(host=host, port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]), user=os.environ["LABOR_UNION_TEST_MYSQL_USER"], password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"], database=database, confirm_database=database)
     bootstrap(arguments)  # The canonical helper refuses an already-existing database.
     connection = pymysql.connect(host=host, port=arguments.port, user=arguments.user, password=arguments.password, database=database, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor, autocommit=False)
@@ -50,10 +51,14 @@ def test_date_only_unassigned_case_cancels_and_reopens_without_downstream_roots(
         assert repository.load_for_preview(case_no, ()).lifecycle.current_status.value == "訂單取消"
         reopen = OrderReopenWorkflow(MySqlOrderReopenRepository(connection), lambda: MySqlUnitOfWork(connection), clock)
         reopen_preview = reopen.preview(case_no)
-        reopened = reopen.apply(OrderReopenApplyRequest(case_no, ExpectedVersion(2), None, None, reopen_preview.fingerprint, IdempotencyKey("reopen-absent-engine"), ActorContext("engine-test"), "確認重新受理", CorrelationId("reopen-absent-engine")))
+        reopened = reopen.apply(OrderReopenApplyRequest(case_no, ExpectedVersion(2), None, None, reopen_preview.fingerprint, IdempotencyKey("reopen-absent-engine"), ActorContext("engine-test"), reopen_reason, CorrelationId("reopen-absent-engine")))
         assert reopened.lifecycle_status.value == "洽談中"
         assert reopened.requires_fresh_scheduling_preview
         with connection.cursor() as cursor:
+            cursor.execute('SELECT reason FROM order_reopen_events WHERE case_no=%s', (case_no,))
+            assert cursor.fetchone()['reason'] == reopen_reason
+            cursor.execute("SELECT reason FROM order_lifecycle_control_events WHERE case_no=%s AND action='clear'", (case_no,))
+            assert cursor.fetchone()['reason'] == (reopen_reason or '系統記錄受控重開訂單')
             for table in ("scheduling_aggregates", "client_finance_accounts", "payroll_case_accounts", "client_obligations", "staff_obligations"):
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table} WHERE case_no=%s", (case_no,))
                 assert cursor.fetchone()["total"] == 0

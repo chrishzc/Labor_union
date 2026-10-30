@@ -333,7 +333,7 @@ def test_query_returns_only_react_contract_fields() -> None:
     data = response.json()["data"]
     assert set(data) == {
         "case_no", "session_id", "state", "status_version", "matching_plan_id",
-        "handoff_recorded", "commitment_id", "unsigned_document", "unsigned_documents", "staff_targets", "client_target",
+        "handoff_recorded", "handoff_logged", "commitment_id", "unsigned_document", "unsigned_documents", "staff_targets", "client_target",
         "manual_notification_targets", "testing_skip_allowed", "signing_reminder", "handoff_included_reminders", "signing_blockers",
     }
     serialized = response.text.lower()
@@ -347,11 +347,14 @@ def _preparing_application(status):
     return ContractExternalSigningApplication(
         connection=SimpleNamespace(commit=must_not_mutate, rollback=must_not_mutate),
         repository=SimpleNamespace(
+            load_reminder_context=lambda *_args, **_kwargs: SimpleNamespace(matching_plan_id=17),
+            load_handoff_notification_facts=lambda *_args: None,
+            load_latest_reminder_receipt=lambda *_args: None,
             load_active_session_by_case=lambda *_args, **_kwargs: None,
             derive_current_session=lambda *_args, **_kwargs: None,
         ),
         unsigned_repository=None,
-        reports=SimpleNamespace(query_case=must_not_mutate),
+        reports=SimpleNamespace(query_case=must_not_mutate, signing_blockers=lambda *_args: ()),
         controlled_files=None, final_documents=None, unsigned_documents=None,
         full_preview=None, staff_documents=None, unsigned_persistence=None,
         document_query=ContractSigningDocumentQueryApplication(
@@ -376,8 +379,34 @@ def test_existing_case_without_ready_signing_facts_returns_zero_write_preparatio
     assert response.status_code == 200
     assert response.json()["data"] == {
         "case_no": CASE_NO, "state": "preparing",
+        "handoff_logged": False, "signing_reminder": None,
+        "signing_blockers": [],
         "staff_segments": [{"segment_id": 71, "staff_id": 9}], "documents": [],
     }
+
+
+def test_preparation_query_reads_back_case_level_handoff_and_reminder_without_a_session():
+    application = _preparing_application(_preparing_status())
+    application.repository.load_handoff_notification_facts = lambda *_args: SimpleNamespace(matching_plan_id=17)
+    application.repository.load_latest_reminder_receipt = lambda *_args: SimpleNamespace(
+        receipt_id=RECEIPT_ID, session_id=None, status_version=0, replayed=False, manual_notification_targets=(), matching_plan_id=17)
+    response = _client(application).get(f'/api/v1/orders/{CASE_NO}/contract-external-signing')
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['state'] == 'preparing' and data['handoff_logged'] is True
+    assert data['signing_reminder']['session_id'] is None
+    assert data['signing_reminder']['status_version'] == 0
+
+
+def test_reminder_api_accepts_case_level_action_without_a_signing_session():
+    application = FakeApplication()
+    response = _client(application).post(f'/api/v1/orders/{CASE_NO}/contract-external-signing/reminders',
+        headers={'Idempotency-Key': 'contract-external.signing-reminders:'+UUID,
+                 'X-Correlation-ID': 'corr-reminder', 'X-Receipt-ID': RECEIPT_ID},
+        json={'session_id': None, 'expected_status_version': 0})
+    assert response.status_code == 200
+    assert application.reports.command.session_id is None
+    assert response.json()['data']['session_id'] is None
 
 
 def test_preparation_query_reads_generated_client_pdf_before_all_staff_documents_exist():

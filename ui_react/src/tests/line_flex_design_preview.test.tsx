@@ -1,9 +1,9 @@
 /**
  * File: line_flex_design_preview.test.tsx
- * Description: 驗證 4 個 Flex 設計預覽皆去敏、零寫入，並如實區分正式資料是否已接通。
+ * Description: 驗證 LINE 表單入口、篩選及唯讀預覽，訊息卡片統一由通知與發送維護。
  */
 import React from 'react';
-import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LINE_FLEX_DESIGN_SOURCES } from '../adapters/line_flex_design/line_flex_design_adapter';
 import type {
@@ -11,7 +11,7 @@ import type {
   LineIdentityRuntimeConfigClient,
 } from '../api/line_identity/line_identity_runtime_config_client';
 import { LineFlexDesignPreview } from '../components/LineFlexDesignPreview';
-import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
+import { lineMessagePreviewClient } from '../api/line_notification_rules/line_message_preview_client';
 import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 describe('LINE studio public preview', () => {
@@ -20,40 +20,27 @@ describe('LINE studio public preview', () => {
     vi.spyOn(lineMessagePreviewClient, 'catalog').mockResolvedValue([]);
   });
 
-  it('四個項目重用公版查詢與對話預覽，按鈕僅顯示說明且不查真實案件', async () => {
-    const ids = ['card-candidate-information-1', 'service-start-result', 'LU96-M4-SAFE-ALERT-RULE-V1', 'card-union-question'];
-    const previewClient: LineMessagePreviewClient = {
-      catalog: vi.fn().mockResolvedValue(ids.map(id => ({id,template_id:null,name:id,format:'flex',requires_case:false,requires_staff:false,builtin:true,allows_draft:false} satisfies PreviewDescriptor))),
-      subjects: vi.fn(),
-      render: vi.fn().mockImplementation(async ({id}) => ({status:'ready',note:'',format:'flex',text:'',facts:[],bubbles:[{kind:'button',text:id,bold:false,size:'sm',layout:'vertical',primary:false,action_description:'只顯示動作說明',children:[]}]})),
-    };
-    const runtimeConfigClient: LineIdentityRuntimeConfigClient = {get:vi.fn().mockResolvedValue({liff_id:'test'})};
-    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} previewClient={previewClient} />);
-    fireEvent.click(screen.getByRole('button', {name:'訊息卡片 (4)'}));
-    for (const [index,title] of ['接案意願詢問','服務日期表','重大異常通知','媒合條件協調'].entries()) {
-      fireEvent.click(screen.getByRole('button', {name:new RegExp(title)}));
-      const action = await screen.findByRole('button', {name:ids[index]});
-      fireEvent.click(action);
-      expect(screen.getByText(`${ids[index]}：只顯示動作說明`)).toBeInTheDocument();
-      expect(previewClient.render).toHaveBeenLastCalledWith({id:ids[index],data_source:'sample'},expect.anything());
-    }
-    expect(previewClient.subjects).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText('正式資料狀態')).not.toBeInTheDocument();
-    expect(screen.getByText('僅預覽，不發送')).toBeInTheDocument();
+  it('僅保留表單與正式預覽，不再查詢訊息卡片公版', async () => {
+    const runtimeConfigClient: LineIdentityRuntimeConfigClient = { get: vi.fn().mockResolvedValue({ liff_id: 'test' }) };
+    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
+    expect(screen.getByRole('heading', { name: 'LINE 表單' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /訊息卡片/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /接案意願詢問|服務日期表|重大異常通知/ })).not.toBeInTheDocument();
+    expect(screen.getByText('18 個項目')).toBeInTheDocument();
+    await screen.findByRole('link', { name: '在預覽中開啟正式 LIFF 入口' });
+    expect(lineMessagePreviewClient.catalog).not.toHaveBeenCalled();
   });
 
-  it('公版清單失敗可重試；圖例移除客戶日期修改與日誌預覽', async () => {
-    const previewClient: LineMessagePreviewClient = {catalog:vi.fn().mockRejectedValueOnce(new Error('internal')).mockResolvedValue([]),subjects:vi.fn(),render:vi.fn()};
-    const runtimeConfigClient: LineIdentityRuntimeConfigClient = {get:vi.fn().mockResolvedValue({liff_id:'test'})};
-    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} previewClient={previewClient} />);
-    fireEvent.click(screen.getByRole('button', {name:'訊息卡片 (4)'}));
-    fireEvent.click(await screen.findByRole('button', {name:'重新載入公版'}));
-    await waitFor(() => expect(previewClient.catalog).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole('button', {name:'全部 (22)'}));
-    fireEvent.click(screen.getByRole('button', {name:/申請訂單異動 提出/}));
+  it('舊卡片深連結回到表單，表單圖例保留原本的操作限制', () => {
+    window.history.replaceState(null, '', '/#line-liff-studio?type=flex_card&asset=flex_dispatch');
+    const runtimeConfigClient: LineIdentityRuntimeConfigClient = { get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)) };
+    render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
+    expect(screen.getByRole('button', { name: /服務申請入口 確認/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(window.location.hash).toBe('#line-liff-studio');
+    fireEvent.click(screen.getByRole('button', { name: /申請訂單異動 提出/ }));
     expect(screen.queryByText('服務日期／天數')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', {name:/寶寶日誌與餐食照片 依服務日/}));
-    expect(screen.getByRole('button', {name:'送出日誌'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /寶寶日誌與餐食照片 依服務日/ }));
+    expect(screen.getByRole('button', { name: '送出日誌' })).toBeDisabled();
     expect(screen.queryByText('預覽寶寶日誌')).not.toBeInTheDocument();
   });
 
@@ -99,12 +86,11 @@ describe('LINE studio public preview', () => {
       get: vi.fn(() => new Promise<LineIdentityRuntimeConfig>(() => undefined)),
     };
     render(<LiffCardStudio runtimeConfigClient={runtimeConfigClient} />);
-    fireEvent.click(screen.getByRole('button', { name: '訊息卡片 (4)' }));
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'customer' } });
-    expect(screen.getByText('2 個項目')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(2);
+    expect(screen.getByText('6 個項目')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(1);
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單與卡片' }), { target: { value: '找不到的服務' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單' }), { target: { value: '找不到的服務' } });
     expect(screen.getByText('0 個項目')).toBeInTheDocument();
     expect(screen.getByText('找不到符合條件的內容')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '放大預覽' })).not.toBeInTheDocument();
@@ -112,8 +98,8 @@ describe('LINE studio public preview', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
-    expect(screen.getByText('22 個項目')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單與卡片' }), { target: { value: 'register.html' } });
+    expect(screen.getByText('18 個項目')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '搜尋表單' }), { target: { value: 'register.html' } });
     expect(screen.getByText('1 個項目')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /需求調查 填寫基本資料/ })).toHaveAttribute('aria-pressed', 'true');
   });

@@ -1177,7 +1177,7 @@ _RECENT_ROUTER_REPLIES_SQL = (
     "JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_contract_id')) AS source_identity,"
     "CAST(JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_revision')) AS UNSIGNED) AS source_revision "
     "FROM line_notification_source_events source "
-    "JOIN line_delivery_tasks task ON task.source_aggregate_type='line_webhook_event' "
+    "JOIN line_delivery_tasks task ON task.source_aggregate_type IN ('line_webhook_event','line_webhook_reply') "
     "AND task.source_aggregate_identity=JSON_UNQUOTE(JSON_EXTRACT(source.facts_snapshot,'$.source_event_id')) "
     "AND task.recipient_type='user' AND task.recipient_identity=%s "
     "WHERE source.source_domain='line_router' "

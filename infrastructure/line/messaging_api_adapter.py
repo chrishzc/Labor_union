@@ -143,7 +143,8 @@ class LineMessagingApiAdapter:
 
 
 def _request_body(request: LineDeliveryRequest) -> str:
-    message = json.loads(request.payload_json)
+    from subsystems.line.table_image_messages import provider_message
+    message = provider_message(json.loads(request.payload_json))
     payload = {"messages": [message], "to": request.recipient.identity.value}
     return json.dumps(
         payload,
@@ -154,11 +155,12 @@ def _request_body(request: LineDeliveryRequest) -> str:
 
 
 def _failure_outcome(response: object) -> LineProviderOutcome:
+    from infrastructure.line.table_image_logging import redact_table_image_links
     failure = response_failure(response)
     return LineProviderOutcome(
         LineProviderOutcomeType(failure.category),
         error_code=failure.code,
-        error_message=failure.message,
+        error_message=redact_table_image_links(failure.message),
         retry_after_seconds=failure.retry_after_seconds,
     )
 

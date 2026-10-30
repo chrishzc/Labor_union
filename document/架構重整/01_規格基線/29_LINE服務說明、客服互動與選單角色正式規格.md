@@ -190,7 +190,7 @@ Current menu content 與 action 由 MySQL versioned LINE configuration 及 curre
 
 Ticket 狀態至少為 `waiting → handling → resolved`。resolved 後同一 requester 的新訊息可依 current policy reopen 或建立新的幂等 ticket；不得靜默遺失。Claim、handling、reply 與 resolve 必須保留 actor、version、reason、event 與 receipt。
 
-使用者明確呼叫後，首次回覆固定為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」。後續留言加入同一客服案件，由專員處理；不顯示 AI 暫停、繼續使用 AI 或恢復 AI 的訊息與按鈕。客服人員正式結案時解除對話 hold；依規格 20「React 客服案件清單」完成案件時不發通知，其他既有結案流程通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊 AI 操作只回覆功能停用提示，不得結束既有案件或解除 hold。
+使用者明確呼叫後，專員申請受理回覆依規格 20 §3.2 限定當次 Reply API；失敗或缺 Token 時不補送 Push，工單仍正常保存。預設文案為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」。後續留言加入同一客服案件，由專員處理；不顯示 AI 暫停、繼續使用 AI 或恢復 AI 的訊息與按鈕。客服人員正式結案時解除對話 hold；依規格 20「React 客服案件清單」完成案件時不發通知，其他既有結案流程通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊 AI 操作只回覆功能停用提示，不得結束既有案件或解除 hold。
 
 客服回覆仍由 committed durable delivery task 外送。外送失敗不回滾已提交的 ticket 狀態，但不得把未送達顯示成已送達。含個人案件內容的訊息只可送給經 binding 與 authorization 確認的 recipient；群組或公開回答不得洩漏個案資料。
 

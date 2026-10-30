@@ -119,8 +119,14 @@ class ContractExternalSigningApplication:
         return facts or self.repository.derive_current_session(case_no, for_update=False)
 
     def query_case(self, case_no: str) -> dict[str, object]:
+        case_handoff = self.repository.load_handoff_notification_facts(case_no, None)
+        case_reminder = self.repository.load_latest_reminder_receipt(case_no, None)
         active = self.repository.load_active_session_by_case(case_no, for_update=False)
         facts = active or self.repository.derive_current_session(case_no, for_update=False)
+        context = facts or self.repository.load_reminder_context(case_no, for_update=False)
+        case_handoff_current = case_handoff is not None and context is not None and case_handoff.matching_plan_id == context.matching_plan_id
+        if case_reminder is not None and (context is None or case_reminder.matching_plan_id != context.matching_plan_id):
+            case_reminder = None
         if facts is None:
             current = self.document_query.query_status(case_no)
             if current is None:
@@ -131,6 +137,9 @@ class ContractExternalSigningApplication:
             return {
                 "case_no": current.case_no,
                 "state": "preparing",
+                "handoff_logged": case_handoff_current,
+                "signing_reminder": case_reminder,
+                "signing_blockers": ['signing_accepted_plan_required'] if context is None else list(self.reports.signing_blockers(context)),
                 "staff_segments": [
                     {"segment_id": row.segment_id, "staff_id": row.staff_id}
                     for row in current.staff_segments
@@ -154,13 +163,14 @@ class ContractExternalSigningApplication:
             "state": facts.state.value,
             "status_version": facts.status_version,
             "handoff_recorded": active is not None,
+            "handoff_logged": case_handoff_current,
             "signing_blockers": list(self.reports.signing_blockers(facts)),
             "manual_notification_targets": [
                 {"scope": target.scope.value, "subject_reference": target.subject_reference}
                 for target in (() if handoff is None else handoff.manual_notification_targets)
             ] if active is not None else [],
             "handoff_included_reminders": handoff.handoff_included_reminders if handoff is not None else False,
-            "signing_reminder": self.repository.load_latest_reminder_receipt(case_no, facts.session_id) if active is not None else None,
+            "signing_reminder": self.repository.load_latest_reminder_receipt(case_no, facts.session_id) or case_reminder,
             "matching_plan_id": facts.matching_plan_id,
             "commitment_id": facts.commitment_id,
             "unsigned_document": document,

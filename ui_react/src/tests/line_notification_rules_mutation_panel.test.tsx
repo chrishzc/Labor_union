@@ -194,7 +194,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
   it('預設顯示完整七個步驟；展開後使用目前目錄名稱，選定多則中的正確訊息', async () => {
     const { configuration, previews } = flowWorkbench(); const onOpen = vi.fn();
     render(<LineMessageFlow configuration={configuration} previews={previews} onOpenMessage={onOpen} />);
-    const first = await screen.findByRole('button', { name: '1 詢問月嫂 3 則訊息' });
+    const first = await screen.findByRole('button', { name: '1 初步候選聯絡 3 則訊息' });
     expect(screen.queryByRole('button', { name: /目前訂單資訊/ })).not.toBeInTheDocument();
     expect(document.querySelectorAll('.line-flow-step')).toHaveLength(7);
     fireEvent.click(first);
@@ -238,7 +238,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     expect(document.body).not.toHaveTextContent('raw mysql');
     expect(document.querySelector('.line-flow-step')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '重新載入流程訊息' }));
-    await screen.findByRole('button', { name: '1 詢問月嫂 3 則訊息' });
+    await screen.findByRole('button', { name: '1 初步候選聯絡 3 則訊息' });
   });
 
   it('人工日誌提醒跳到共用公版，顯示工會決定及流程控制，不提供儲存或啟用開關', async () => {
@@ -508,6 +508,21 @@ function contentWorkbench(catalog: LineNotificationRulesCatalog = CATALOG) {
 }
 
 describe('通知內容統一工作區', () => {
+  it('每週安排圖片自動帶入，沒有文案編輯或儲存操作', async () => {
+    const { Harness, previews, templates } = contentWorkbench();
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'card-candidate-information-3', template_id: null, name: '初步候選聯絡－每週服務說明', format: 'flex', requires_case: true, requires_staff: true, builtin: true, allows_draft: false }]);
+    const picture: PreviewNode = { kind: 'image', text: '每週服務安排', image_data: 'data:image/png;base64,iVBORw0KGgo=', bold: false, size: 'sm', layout: 'vertical', primary: false, action_description: '', children: [] };
+    vi.mocked(previews.render).mockResolvedValue({ status: 'ready', note: '公版範例', format: 'flex', text: '', bubbles: [picture], facts: [] });
+    render(<Harness />);
+    const entry = await screen.findByRole('button', { name: '查看初步候選聯絡－每週服務說明內容' });
+    const reads = vi.mocked(templates.get).mock.calls.length;
+    fireEvent.click(entry);
+    expect(await screen.findByRole('img', { name: '每週服務安排' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '儲存內容' })).not.toBeInTheDocument();
+    expect(templates.get).toHaveBeenCalledTimes(reads);
+    expect(templates.update).not.toHaveBeenCalled();
+  });
   it('訊息清單每頁六則，搜尋後顯示符合項目並維持目前訊息定位', async () => {
     const { Harness, previews } = contentWorkbench();
     vi.mocked(previews.catalog).mockResolvedValue(Array.from({ length: 14 }, (_, index) => ({ id: `fixed-${index + 1}`, template_id: null, name: `固定公告${index + 1}`, format: 'text' as const, requires_case: false, requires_staff: false, builtin: true, allows_draft: false })));
@@ -523,19 +538,31 @@ describe('通知內容統一工作區', () => {
     expect(await screen.findByRole('button', { name: '編輯固定公告14內容' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('多張卡片逐張預覽，切換卡片不重建訊息或發送', async () => {
+  it('完整推薦包在手機內依名稱選擇五張卡片，切換不重建訊息或發送', async () => {
     const { Harness, previews, templates } = contentWorkbench();
     const node = (text: string): PreviewNode => ({ kind: 'text', text, bold: false, size: 'sm', layout: 'vertical', primary: false, action_description: '', children: [] });
-    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'card-customer-profiles', template_id: null, name: '月嫂資料與確認卡', format: 'flex', requires_case: true, requires_staff: true, builtin: true, allows_draft: false }]);
-    vi.mocked(previews.render).mockResolvedValue({ status: 'ready', note: '公版範例', format: 'flex', text: '', bubbles: [node('第一張月嫂資料'), node('第二張確認資料')], facts: [] });
+    const titles = ['陳月嫂（範例）', '訂單資訊－1', '訂單資訊－2', '每周服務中說明', '確認本次推薦'];
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'card-customer-confirmation', template_id: null, name: '正式媒合－客戶完整推薦確認包', format: 'flex', requires_case: true, requires_staff: true, builtin: true, allows_draft: false }]);
+    vi.mocked(previews.render).mockResolvedValue({ status: 'ready', note: '公版範例', format: 'flex', text: '', bubbles: titles.map(title => ({ ...node(''), kind: 'box' as const, children: [node(title)] })), facts: [] });
     render(<Harness />);
-    fireEvent.click(await screen.findByRole('button', { name: '查看月嫂資料與確認卡內容' }));
-    await screen.findByText('第一張月嫂資料');
-    expect(screen.queryByText('第二張確認資料')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '查看正式媒合－客戶完整推薦確認包內容' }));
+    const picker = await screen.findByRole('combobox', { name: '選擇預覽卡片' });
+    expect(picker.closest('.notification-phone')).not.toBeNull();
+    expect(within(picker).getAllByRole('option')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: '下一張卡片' })).toBeDisabled();
+    const card = () => document.querySelector('.notification-real-flex-bubble');
+    expect(card()).toHaveTextContent(titles[4]);
     const requests = vi.mocked(previews.render).mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: '下一張卡片' }));
-    expect(screen.getByText('第二張確認資料')).toBeInTheDocument();
-    expect(screen.queryByText('第一張月嫂資料')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '上一張卡片' }));
+    expect(card()).toHaveTextContent(titles[3]);
+    for (let index = 0; index < titles.length; index++) {
+      fireEvent.change(picker, { target: { value: String(index) } });
+      expect(card()).toHaveTextContent(titles[index]);
+      expect(screen.getByText(`第 ${index + 1} / 5 張`)).toBeInTheDocument();
+    }
+    expect(screen.getByRole('button', { name: '下一張卡片' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '上一張卡片' }));
+    expect(card()).toHaveTextContent(titles[3]);
     expect(previews.render).toHaveBeenCalledTimes(requests);
     expect(templates.update).not.toHaveBeenCalled();
   });
@@ -548,6 +575,19 @@ describe('通知內容統一工作區', () => {
     expect(screen.getByRole('heading', { name: '客戶綁定成功' })).toBeInTheDocument();
     expect(onSelectedEntryChange).toHaveBeenCalledWith('identity-bound-customer');
     expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
+  });
+  it.each(['card-caregiver-information', 'card-caregiver-information-2', 'card-customer-profiles'])('原正式媒合單張卡片入口 %s 統一開啟完整推薦包', async previous => {
+    const { previews, templates, configuration, onboarding } = contentWorkbench();
+    const onSelectedEntryChange = vi.fn();
+    vi.mocked(previews.catalog).mockResolvedValue([{ id: 'card-customer-confirmation', template_id: null, name: '正式媒合－客戶完整推薦確認包', format: 'flex', requires_case: true, requires_staff: true, builtin: true, allows_draft: false }]);
+    render(<UnsavedChangesProvider><LineNotificationWorkbench configuration={configuration} onboarding={onboarding} templates={templates} previews={previews} search="" enabled="all" onSearchChange={vi.fn()} onEnabledChange={vi.fn()} selectedEntryId={previous} onSelectedEntryChange={onSelectedEntryChange} /></UnsavedChangesProvider>);
+    await screen.findByRole('textbox', { name: '通知內容' });
+    expect(screen.getByRole('heading', { name: '正式媒合－客戶完整推薦確認包' })).toBeInTheDocument();
+    expect(onSelectedEntryChange).toHaveBeenCalledWith('card-customer-confirmation');
+    expect(templates.get).toHaveBeenCalledWith('card-customer-confirmation', expect.any(Object));
+    expect(vi.mocked(templates.get).mock.calls.some(([id]) => id === previous)).toBe(false);
+    expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
+    expect(templates.update).not.toHaveBeenCalled();
   });
   it('內建文案讀取完成前不提供會被晚到設定覆寫的編輯欄位', async () => {
     const { Harness, previews, templates } = contentWorkbench();
@@ -610,20 +650,21 @@ describe('通知內容統一工作區', () => {
     expect(onboarding.update).not.toHaveBeenCalled();
   });
 
-  it('固定訊息可儲存，卡片標題與按鈕名稱可分欄編輯並預覽', async () => {
+  it('整張卡片同時編輯標題、自由說明與按鈕，插入資料後一次儲存', async () => {
     const { Harness, previews, templates, onboarding } = contentWorkbench();
     const originalGet = vi.mocked(templates.get).getMockImplementation()!;
     const fields = [
       { id: 'altText', label: '訊息摘要', content: '原始摘要', max_length: 400 },
       { id: 'contents/body/contents/0/text', label: '卡片標題', content: '工會詢問', max_length: 5000 },
       { id: 'contents/footer/contents/0/action/label', label: '按鈕名稱', content: '回答問題', max_length: 20 },
+      { id: 'contents/body/contents/$description', label: '說明內容', content: '', max_length: 5000, kind: 'body' as const, optional: true },
     ];
     vi.mocked(templates.get).mockImplementation(async (id, options) => id === 'card-union-question'
-      ? { rule_id: id, template_id: 'LINE-COPY-card-union-question', name: '工會詢問客戶卡', revision: 7, variables: [], sample_preview: '', fields, content: JSON.stringify(Object.fromEntries(fields.map(field => [field.id, field.content]))) }
+      ? { rule_id: id, template_id: 'LINE-COPY-card-union-question', name: '初步候選聯絡－工會詢問客戶卡', revision: 7, variables: ['case_no'], sample_preview: '', fields, content: JSON.stringify(Object.fromEntries(fields.map(field => [field.id, field.content]))) }
       : originalGet(id, options));
     vi.mocked(previews.catalog).mockResolvedValue([
       { id: 'service-contact', template_id: null, name: '呼叫專員－需求受理', format: 'text', requires_case: false, requires_staff: false, builtin: true, allows_draft: false },
-      { id: 'card-union-question', template_id: null, name: '工會詢問客戶卡', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
+      { id: 'card-union-question', template_id: null, name: '初步候選聯絡－工會詢問客戶卡', format: 'flex', requires_case: true, requires_staff: false, builtin: true, allows_draft: true },
     ]);
     render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: '查看呼叫專員－需求受理內容' }));
@@ -631,17 +672,22 @@ describe('通知內容統一工作區', () => {
     fireEvent.change(fixedText, { target: { value: '請留下需要協助的內容。' } });
     expect(screen.getByRole('button', { name: '儲存內容' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '還原內容' }));
-    fireEvent.click(screen.getByRole('button', { name: '查看工會詢問客戶卡內容' }));
-    fireEvent.change(await screen.findByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[1].id } });
-    fireEvent.change(screen.getByRole('textbox', { name: '卡片標題' }), { target: { value: '請確認服務條件' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[2].id } });
-    fireEvent.change(screen.getByRole('textbox', { name: '按鈕名稱' }), { target: { value: '填寫回覆' } });
-    expect(screen.getAllByRole('textbox')).toHaveLength(1);
-    fireEvent.change(screen.getByRole('combobox', { name: '編輯欄位' }), { target: { value: fields[1].id } });
+    fireEvent.click(screen.getByRole('button', { name: '查看初步候選聯絡－工會詢問客戶卡內容' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: '卡片標題' }), { target: { value: '請確認服務條件' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '主要按鈕' }), { target: { value: '填寫回覆' } });
+    const body = screen.getByRole('textbox', { name: '說明內容' });
+    fireEvent.change(body, { target: { value: '第一段說明\n\n自行增加的第二段提醒。' } });
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新增段落' }));
+    await waitFor(() => expect(body).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: '＋ 案件編號' }));
+    expect(body).toHaveValue('第一段說明\n\n自行增加的第二段提醒。\n\n{case_no}');
+    expect(screen.queryByRole('combobox', { name: '編輯欄位' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一個欄位' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '卡片標題' })).toHaveValue('請確認服務條件');
     await waitFor(() => expect(previews.render).toHaveBeenLastCalledWith({ id: 'card-union-question', content: expect.stringContaining('填寫回覆'), data_source: 'sample' }, expect.any(Object)));
     fireEvent.click(screen.getByRole('button', { name: '儲存內容' }));
     await waitFor(() => expect(templates.update).toHaveBeenCalledWith('card-union-question', { content: expect.stringContaining('請確認服務條件'), expected_revision: 7 }, expect.any(Object)));
+    expect(JSON.parse(vi.mocked(templates.update).mock.calls[0][1].content)[fields[3].id]).toBe('第一段說明\n\n自行增加的第二段提醒。\n\n{case_no}');
     expect(onboarding.update).not.toHaveBeenCalled();
   });
 

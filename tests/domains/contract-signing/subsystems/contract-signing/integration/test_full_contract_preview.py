@@ -1097,12 +1097,36 @@ def test_case_import_named_projection_is_the_only_multi_birth_source():
     assert "survey_details" not in facts
 
 
-def test_common_facts_projects_the_same_per_case_virtual_account_used_by_reconciliation():
+@pytest.mark.parametrize('bank_code', ['807', '812'])
+def test_common_facts_projects_the_same_per_case_virtual_account_used_by_reconciliation(monkeypatch, bank_code, tmp_path):
     from infrastructure.mysql.contract_full_preview_repository import _common_facts
+    from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account
 
+    monkeypatch.setenv('CLIENT_DEPOSIT_BANK_CODE', bank_code)
     facts = _common_facts({"case_no": "115000157", "survey_details": None})
 
-    assert facts["client_virtual_account"] == "99781699115157"
+    account = build_client_virtual_account('115000157')
+    assert facts["client_virtual_account"] == f'({bank_code}) {account}'
+    mapping, template = _approved_mapping(tmp_path)
+    mapping.write_text(json.dumps({'id': 'contract_client_copy', 'param_mappings': {
+        'D36': {'db_key': 'client_virtual_account', 'requiredness': 'required'}}}), encoding='utf-8')
+    monkeypatch.setattr('subsystems.contract_signing.full_contract_preview.load_approved_template',
+        lambda key: SimpleNamespace(template_key=key, mapping_sha256='b'*64, template_sha256='c'*64,
+            template_filename=template.name, mapping_path=mapping, template_path=template))
+    projection = FullContractOwnerProjection('115000157', ContractPreviewScope.CLIENT, None,
+        facts, {'client_finance': 'a'*64})
+    result = FullContractPreviewApplication(_Repository(projection)).preview_client('115000157')
+    assert result.field_values['D36'] == f'({bank_code}) {account}'
+    book = load_workbook(BytesIO(result.workbook_content))
+    assert book.active['D36'].value == result.field_values['D36']
+    book.close()
+
+
+def test_contract_bank_code_does_not_create_a_missing_virtual_account(monkeypatch):
+    from infrastructure.mysql.contract_full_preview_repository import _common_facts
+
+    monkeypatch.setenv('CLIENT_DEPOSIT_BANK_CODE', '807')
+    assert _common_facts({'case_no': '115000157', 'survey_details': None}, None)['client_virtual_account'] is None
 
 
 def test_staff_preview_requires_exact_assignment_and_uses_no_client_fallback():

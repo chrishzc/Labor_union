@@ -128,6 +128,8 @@ class MySqlLineMessagePreviewReader:
 
         repository = MySqlMatchingNotificationRepository(self._connection)
         if kind == "card-customer-confirmation":
+            from dataclasses import asdict
+            from subsystems.line.table_image_contracts import information_document, weekly_document
             plan = self._one(
                 "SELECT p.id FROM caregiver_matching_plans p JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "
                 "WHERE p.case_no=%s AND p.is_active=1 AND s.staff_id=%s ORDER BY p.id DESC LIMIT 1", (case_no, staff_id))
@@ -139,8 +141,12 @@ class MySqlLineMessagePreviewReader:
             profiles = repository.customer_profile_facts(int(plan["id"]))
             # Only show the download action when an actual current resume exists; never issue a download token.
             resumes = {int(item["staff_id"]): "https://preview.invalid/resume" for item in projection["caregiver_resumes"]}
+            documents = (information_document('訂單資訊－1｜客戶費用', case_no, projection['order_information_1'], info_type=1),
+                information_document('訂單資訊－2', case_no, projection['order_information_2'], info_type=2),
+                weekly_document(case_no, projection['weekly_service_rows']))
             return PreviewCardSource(customer_confirmation_card(case_no, profiles, projection["order_information_1"],
-                projection["order_information_2"], projection["weekly_service_rows"], resumes, "preview-only", ""))
+                projection["order_information_2"], projection["weekly_service_rows"], resumes, "preview-only", ""),
+                json.dumps([asdict(item) for item in documents], ensure_ascii=False))
 
         entry = self._one(
             "SELECT e.id FROM caregiver_candidate_contact_entries e JOIN caregiver_candidate_contact_pools p ON p.id=e.pool_id "
@@ -152,9 +158,13 @@ class MySqlLineMessagePreviewReader:
             preview = MySqlOrderInformationRepository(self._connection).preview_candidate_information(case_no, int(entry["id"]), info_type)
         except (LookupError, ValueError):
             return None
+        from dataclasses import asdict
+        from subsystems.line.table_image_contracts import information_document
+        document = information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[info_type - 1], case_no,
+            ({'line_sections': tuple({'title': section.title, 'rows': section.rows} for section in preview.line_sections)},), info_type=info_type)
         return PreviewCardSource(candidate_contact_information_card(case_no, info_type,
             tuple((section.title, section.rows) for section in preview.line_sections), "preview-only",
-            None if info_type == 3 else "https://preview.invalid/candidate"))
+            None if info_type == 3 else "https://preview.invalid/candidate"), json.dumps([asdict(document)], ensure_ascii=False))
 
 
 def _text(value):

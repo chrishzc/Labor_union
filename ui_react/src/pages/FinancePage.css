@@ -741,3 +741,5 @@ td.finance-row-actions button + button { margin-left: 14px; }
 [data-surface-id="finance.page"] input[type="file"]:disabled::file-selector-button { background: var(--md-sys-color-disabled-container); color: var(--md-sys-color-disabled); border-color: var(--md-sys-color-outline); cursor: not-allowed; }
 
 .finance-receipt-views button[aria-pressed="true"] { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border-color: var(--md-sys-color-primary); }
+.finance-receipt-views button[aria-pressed="false"] { background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface-variant); border-color: var(--md-sys-color-outline); }
+.finance-receipt-views button[aria-pressed="false"]:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); border-color: var(--md-sys-color-primary); }

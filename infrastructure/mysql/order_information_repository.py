@@ -24,6 +24,7 @@ from subsystems.orders.order_information import (
     projection_fingerprint,
     build_candidate_information,
     build_order_information_message,
+    build_formal_information_sections,
     build_case_information,
     bind_weekly_information,
 )
@@ -101,6 +102,8 @@ class MySqlOrderInformationRepository:
         facts, issues = _facts(case, {"assigned_start_date": case.get("planned_start_date"),
                                    "assigned_end_date": case.get("planned_end_date")})
         _merge_contract_payment_facts(self._connection, case_no, facts, use_current_order_payments=True)
+        if info_type == 1:
+            _merge_caregiver_estimate(case, facts)
         return build_case_information(case_no, info_type, facts, issues)
 
     def preview_candidate_information(
@@ -140,6 +143,8 @@ class MySqlOrderInformationRepository:
         }
         facts, issues = _facts(case, candidate)
         _merge_contract_payment_facts(self._connection, case_no, facts, use_current_order_payments=True)
+        if info_type == 1:
+            _merge_caregiver_estimate(case, facts)
         if info_type == 3:
             from infrastructure.mysql.matching_notification_repository import MySqlMatchingNotificationRepository
             from subsystems.orders.order_information import build_weekly_information
@@ -181,6 +186,8 @@ class MySqlOrderInformationRepository:
                 "staff_id": int(segment["staff_id"]),
                 "staff_name": str(segment["staff_name"]),
                 "text": text,
+                "line_sections": tuple({"title": section.title, "rows": section.rows}
+                    for section in build_formal_information_sections(info_type, facts, issues)),
             })
         return tuple(result)
 
@@ -259,6 +266,39 @@ def _apply_explicit_rate_correction(cursor, case, case_no):
         result.update(_pricing=pricing, client_hourly_rate_ntd=pricing.client.covered,
             payroll_hourly_rate_ntd=pricing.payroll.covered)
     return result
+
+
+def _merge_caregiver_estimate(case, facts):
+    """Use the case's Payroll policy, never its customer price, for staff offers."""
+    from domains.payroll.estimate import estimate_service_pay
+    from domains.payroll.tiered_rates import TieredPayrollRate
+    from infrastructure.mysql.payroll_installments import hourly_rate_projection, payment_date_projection
+    from infrastructure.mysql.pricing_configuration_repository import payroll_tiers
+
+    pricing = case.get('_pricing')
+    hourly = _positive_integer(case.get('payroll_hourly_rate_ntd'))
+    facts['staff_salary_unit'] = hourly_rate_projection(pricing) if pricing is not None else hourly
+    days = _positive_integer(case.get('service_days'))
+    hours = _positive_half_hour(case.get('service_hours_per_day'))
+    floor = case.get('floor_fee')
+    if days is None or hours is None or floor is None or (pricing is None and hourly is None):
+        return
+    end = facts.get('assigned_end_date')
+    end = _required_date(end) if end is not None else None
+    rate = payroll_tiers(pricing) if pricing is not None else TieredPayrollRate(hourly, hourly, Decimal(0), False)
+    estimate = estimate_service_pay(rate, days, Decimal(str(hours)),
+        MoneyNTD(_whole_ntd(Decimal(str(floor)), 'estimated_floor_fee_not_whole_ntd')), end)
+    facts['staff_salary_total'] = f'預估 NT$ {estimate.total.amount:,}'
+    if pricing is not None:
+        due = payment_date_projection(tuple((item.funding_kind, item.amount, item.due_date) for item in estimate.installments))
+    else:
+        due = case.get('staff_payment_due_date')
+        payable = facts.get('total_employer_self_pay_payable')
+        full_subsidy = str(case.get('client_identity_status') or '').strip() == '社福' and days * Decimal(str(hours)) <= 120
+        if due is None and end is not None and payable is not None and (Decimal(str(payable)) > 0 or full_subsidy):
+            due = calculate_staff_payment_due_date(end, payable, full_subsidy)
+    if due is not None:
+        facts['staff_salary_due'] = f"預估 {due.isoformat() if isinstance(due, date) else due}"
 
 
 def _matching_plan_payroll_estimates(

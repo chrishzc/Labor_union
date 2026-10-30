@@ -84,7 +84,7 @@ class MySqlOrderReopenRepository:
                 CancellationControlCommand(
                     "clear",
                     request.actor.actor_id,
-                    request.reason,
+                    request.reason or "系統記錄受控重開訂單",
                     request.expected_order_version.value,
                     request.idempotency_key.value,
                 ),

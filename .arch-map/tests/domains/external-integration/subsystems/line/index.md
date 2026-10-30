@@ -7,6 +7,7 @@ fixtures_root: tests/fixtures/
 ui_integration_root: ui_react/src/tests/domains/external-integration/subsystems/line/integration/
 
 # Routing notes
+三張系統表格圖片、opaque link、immutable snapshot 與 provider metadata boundary 由 `modules/table-image-delivery.md` 定位。
 訂金提醒與核銷通知的跨 Finance／LINE integration oracle 見 `modules/deposit-notifications.md`。
 三方服務群組與管理端唯讀工作區由 `modules/order-group-coordination.md` 定位；舊綁定／邀請與 compatibility Query oracle 維持原位。
 Customer Service reminder query 與 React reminder presentation 由 `modules/customer-service-reminders.md` 對應的 source leaf 定位；backend test root 為 `tests/domains/external-integration/subsystems/line/modules/customer-service-reminders/`，UI 為本 integration root 的 `line_customer_service_reminders.test.tsx`。

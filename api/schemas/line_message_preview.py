@@ -39,7 +39,7 @@ class RenderPreviewRequest(BaseModel):
 
 class PreviewNodeView(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["text", "box", "button", "separator"]
+    kind: Literal["text", "box", "button", "separator", "image"]
     text: str
     bold: bool
     size: str
@@ -47,6 +47,7 @@ class PreviewNodeView(BaseModel):
     primary: bool
     action_description: str
     children: list["PreviewNodeView"]
+    image_data: str = ''
 
 
 class RenderPreviewView(BaseModel):

@@ -1,6 +1,6 @@
 """
 File: webhook_immediate_reply.py
-Description: 在 Webhook 進入點即時呼叫 LINE Reply API 回應專人服務請求，實現 0 額度消耗與零延遲體感。
+Description: 在 Webhook 進入點以 Reply API 回應專人服務請求；失敗不回退 Push，工單由背景流程保存。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ class LineReplyPort(Protocol):
 
 
 class LineWebhookImmediateReplyService:
-    """即時以 LINE Reply API 回應客服手動專員呼叫，達成 0 額度消耗與零延遲反饋。"""
+    """以 Reply API 受理專員呼叫；不可使用時略過回覆，不影響工單保存。"""
 
     def __init__(self, reply_adapter: LineReplyPort, copy_reader=None) -> None:
         self._reply_adapter = reply_adapter
@@ -69,7 +69,8 @@ class LineWebhookImmediateReplyService:
                 return True
         except Exception as error:
             print(
-                f"[LINE Immediate Reply] Reply API call failed, falling back to background enqueue: {error}"
+                "[LINE Immediate Reply] Acknowledgement skipped; Push fallback disabled "
+                f"({type(error).__name__})"
             )
         return False
 

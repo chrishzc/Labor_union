@@ -16,6 +16,7 @@ from shared_kernel.identities import ExpectedVersion
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 NOW = datetime(2026, 9, 12, tzinfo=timezone.utc)
 USER = LineUserId("U-friend-feedback-regression")
@@ -309,7 +310,7 @@ class CanonicalWelcomeRegressionTests(unittest.TestCase):
                          "目前的歡迎訊息：https://example.test/identity")
         self.assertEqual(delivery.recipient.identity, USER)
         self.assertEqual(delivery.idempotency_key.value, f"identity-link:customer_binding:{event_id}")
-        self.assertEqual(delivery.source_aggregate_type, "line_webhook_event")
+        self.assertEqual(delivery.source_aggregate_type, REPLY_ONLY_WEBHOOK_SOURCE)
         unit.configurations.get.assert_called_once_with(LineConfigurationKind.MESSAGE_TEMPLATES)
 
     def test_canonical_welcome_does_not_install_retired_scheduler(self):

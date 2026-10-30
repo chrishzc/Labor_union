@@ -14,7 +14,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 另承接明確呼叫專員與 active conversation hold：呼叫文字或 typed postback 直接建立去敏 ticket、hold、masked alert intent 與簡短受理回覆；一般留言不啟動聊天室 AI 或自動轉人工。「問題／其他問題／5／6」只開自助導覽，active hold 內仍附加原案件。專員正式結案時解除 hold 並通知完成。舊回答錯誤／繼續／恢復 AI 入口只提示停用，不開單、不得結案或解除 hold。LINE 不擁有客服、Payroll 或 assignment root。
 
 ## Implementation
-  - `subsystems/line/webhook_immediate_reply.py` — 專人服務即時受理回覆；由 runtime 注入與背景受理相同的文案 reader，讀取結束後仍沿既有 Reply adapter。
+  - `subsystems/line/webhook_immediate_reply.py` — 專人服務受理僅使用當次 Reply API；由 runtime 注入既有文案 reader，缺 Token／設定或 Reply 失敗不建立背景受理 Push，工單保存獨立。
 
 - `subsystems/line/runtime_human_escalation_source.py`
 - `subsystems/line/service_help_application.py`
@@ -24,7 +24,7 @@ escalation 的 caller-owned UoW；例如「我要客訴：服務態度很差，�
 - `infrastructure/mysql/customer_service_escalation_repository.py`
 - `subsystems/line/human_escalation_delivery.py`
 - 客訴／runtime critical 新告警組裝時讀取既有訊息設定的說明文字；去敏摘要、目標快照與管理入口仍沿原流程。一般轉真人通知不套用客訴文案，既有 delivery task 不重寫。
-- `subsystems/line/delivery_worker.py`
+- `subsystems/line/delivery_worker.py` — 新 `line_webhook_reply` 資訊工作僅 Reply、失敗不補 Push；既有排隊受理工作依最新人工確認保留原投遞契約，不再套用受理工作取消規則。
 - `infrastructure/mysql/line_delivery_task_repository.py`
 - `api/routes/customer_service.py`
 - `ui_react/src/pages/LineManagementPage.tsx`

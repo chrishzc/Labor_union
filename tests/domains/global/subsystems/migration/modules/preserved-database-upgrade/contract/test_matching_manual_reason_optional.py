@@ -26,7 +26,7 @@ def test_optional_reason_release_fresh_alias_and_parent_descriptor_are_bound():
     fresh = ROOT / 'db/schema_parts/239_matching_manual_reason_optional.sql'
     assert fresh.read_bytes() == (ROOT / 'db/schema_parts' / ARTIFACT).read_bytes()
     assert fresh in load_schema_assembly().active_artifact_paths
-    assert migration._local_ordered_upgrade_entries()[-1]['artifact']['name'] == ARTIFACT
+    assert any(entry['artifact']['name'] == ARTIFACT for entry in migration._local_ordered_upgrade_entries())
     statements = migration.split_sql(fresh.read_text(encoding='utf-8'))
     assert len(statements) == 1
     assert migration._local_classify_statement(statements[0]) == 'alter_add_only'

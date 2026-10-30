@@ -1,0 +1,87 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "work_package": "ACCEPTANCE-REOPEN-OPTIONAL-NOTE-20261030",
+  "release_id": "labor-union-order-reopen-reason-optional-2026-10-29-v1",
+  "release_fingerprint": "cc2c9154ccbe19d35f3070e26f7a7311dc5e63390d67ad5618a3b517f48a1e55",
+  "published_manifest_sha256": "a1f0276cbdfeb98b1b4419f49d1b4a37bde427f67d39983e647d7f7dd57b21c8",
+  "manifest_artifact_inventory": [
+    {
+      "name": "1062_order_reopen_reason_optional.sql",
+      "sha256": "cc247a3ef270fd028306cedaf6cdc192fa04b09980a33eb602905a947a04555e",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "artifact": {
+    "name": "1062_order_reopen_reason_optional.sql",
+    "sql_sha256": "cc247a3ef270fd028306cedaf6cdc192fa04b09980a33eb602905a947a04555e",
+    "descriptor_sha256": "8eb39079bd71e503b71ad5e8118f041fc5da279363cb3fb8ca44d73f43da48db",
+    "data_effect": "schema_only",
+    "dependencies": []
+  },
+  "metadata_backup": {
+    "status": "verified",
+    "schema_sha256": "747d274189cd6062743d8aa01c462f01c910bc84ae1d0b88eef088cc12ab978f",
+    "backup_dump_sha256": "27ce8ce60ca69c98548c96a4cb13a01d5227ec39b24d80af8628ba0494db1ce9",
+    "data_row_counts": {
+      "order_reopen_events": 1
+    },
+    "data_fingerprints": {
+      "order_reopen_events": "0e1154f67ee1ac87a7055e4e378b061835c114e9f76114ea0fdcca52eeaae1f2"
+    },
+    "data_fingerprint_sha256": "10a0a7430d8e784312c9b2b7d8e29727b04a8bf2e3bf2e0cb1763fd6488ac442"
+  },
+  "fresh_bootstrap": {
+    "status": "verified",
+    "schema_fingerprint": "ae3321d876632092cb091298a4873e9c543b1af4fe964331b84ee58e7e7deafc",
+    "data_rows_written": 0,
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1"
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "source_schema_fingerprint": "747d274189cd6062743d8aa01c462f01c910bc84ae1d0b88eef088cc12ab978f",
+    "candidate_schema_fingerprint": "f46ea70060dd1062456c02d697f7273205aabc87c1e1596ac7dcd73a8e637388",
+    "source_dump_sha256": "27ce8ce60ca69c98548c96a4cb13a01d5227ec39b24d80af8628ba0494db1ce9",
+    "candidate_dump_sha256": "d555deaf4eb67e684a8fca96145f052c1352e56d38843d850648c36ef5f13b96",
+    "data_row_counts": {
+      "order_reopen_events": 1
+    },
+    "data_fingerprints": {
+      "order_reopen_events": "0e1154f67ee1ac87a7055e4e378b061835c114e9f76114ea0fdcca52eeaae1f2"
+    },
+    "candidate_data_row_counts": {
+      "order_reopen_events": 1
+    },
+    "candidate_data_fingerprints": {
+      "order_reopen_events": "0e1154f67ee1ac87a7055e4e378b061835c114e9f76114ea0fdcca52eeaae1f2"
+    },
+    "target_descriptor_state": "exact",
+    "target_projection_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1"
+  },
+  "target_projection": {
+    "contract": "local-additive-target-projection/v1",
+    "artifact_name": "1062_order_reopen_reason_optional.sql",
+    "descriptor_sha256": "8eb39079bd71e503b71ad5e8118f041fc5da279363cb3fb8ca44d73f43da48db",
+    "fresh_state": "exact",
+    "preserve_candidate_state": "exact",
+    "fresh_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1",
+    "preserve_candidate_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1"
+  },
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "ae3321d876632092cb091298a4873e9c543b1af4fe964331b84ee58e7e7deafc",
+    "preserve_source_schema_fingerprint": "747d274189cd6062743d8aa01c462f01c910bc84ae1d0b88eef088cc12ab978f",
+    "preserve_candidate_schema_fingerprint": "f46ea70060dd1062456c02d697f7273205aabc87c1e1596ac7dcd73a8e637388",
+    "source_dump_sha256": "27ce8ce60ca69c98548c96a4cb13a01d5227ec39b24d80af8628ba0494db1ce9",
+    "candidate_dump_sha256": "d555deaf4eb67e684a8fca96145f052c1352e56d38843d850648c36ef5f13b96",
+    "fresh_target_projection_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1",
+    "preserve_candidate_target_projection_fingerprint": "641e0df615f05bcba4a4cf95b2a4fbacd0899f2ad1e36926c4426c26b6a0e1b1"
+  },
+  "policy": {
+    "local_in_place_eligible": true,
+    "seed": 0,
+    "backfill": 0,
+    "destructive": 0
+  },
+  "payload_digest": "1b61e1c2390a261240d31face069b47a46346df928e5a3251c57e712b8232ef8"
+}

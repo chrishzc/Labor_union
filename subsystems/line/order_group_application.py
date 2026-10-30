@@ -5,6 +5,8 @@ Description: 協調 LINE 訂單群組綁定、邀請、事件與唯讀 numbered 
 
 from __future__ import annotations
 
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
+
 import json
 import re
 from datetime import datetime
@@ -238,7 +240,7 @@ class LineOrderGroupApplication:
                 inbox.event.occurred_at,
                 IdempotencyKey(f"group-reply:{event_identity}:{suffix}"),
                 CorrelationId(f"line-event:{event_identity}"),
-                "line_webhook_event",
+                REPLY_ONLY_WEBHOOK_SOURCE if suffix == "error" else "line_webhook_event",
                 event_identity,
             )
         )

@@ -1,21 +1,18 @@
 /**
  * File: LiffCardStudio.tsx
- * Description: 依用途分組呈現 LIFF 與 Flex 預覽，保留既有正式入口與身分驗證流程。
+ * Description: 依用途分組呈現 LIFF 表單預覽，保留既有正式入口與身分驗證流程。
  */
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { CheckSquare, ChevronRight, FileText, Maximize2, MessageSquare, PanelTop, Search, Smartphone, X } from 'lucide-react';
+import { CheckSquare, ChevronRight, FileText, Maximize2, PanelTop, Search, Smartphone, X } from 'lucide-react';
 import {
   lineIdentityRuntimeConfigClient,
   type LineIdentityRuntimeConfigClient,
 } from '../../api/line_identity/line_identity_runtime_config_client';
-import { LineMessagePreviewWorkspace } from '../../components/LineMessagePreviewWorkspace';
-import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../../api/line_notification_rules/line_message_preview_client';
-import '../../components/LineNotificationWorkbench.css';
 import '../LineManagementPage.css';
 import './LiffCardStudio.css';
 import { NonCitizenLiffSettingsPanel } from './NonCitizenLiffSettingsPanel';
 
-export type LiffAssetType = 'liff' | 'flex_card';
+export type LiffAssetType = 'liff';
 export type LiffAudienceRole = 'visitor' | 'customer' | 'staff' | 'union_staff';
 
 export interface LiffAssetItem {
@@ -35,7 +32,6 @@ export interface LiffAssetItem {
   description: string;
   apiMapping: string;
   audienceRoles: LiffAudienceRole[];
-  previewId?: string;
 }
 
 const ASSET_ITEMS: LiffAssetItem[] = [
@@ -323,70 +319,6 @@ const ASSET_ITEMS: LiffAssetItem[] = [
     description: '依 Asia／Taipei 業務週顯示本週六項營運統計、期間與產生時間。',
     apiMapping: 'operations-report.v3 本週 bounded summary query 流程示意',
     audienceRoles: ['union_staff'],
-  },
-  {
-    id: 'flex_dispatch',
-    displayTitle: '接案意願詢問',
-    purpose: '邀請月嫂查看案件並回覆意願。',
-    group: '訊息卡片',
-    type: 'flex_card',
-    title: '接案意願詢問',
-    subtitle: '公版預覽',
-    badge: '公版預覽',
-    endpointUrl: '',
-    authLevel: '公版範例',
-    description: '邀請月嫂查看案件並回覆意願。',
-    apiMapping: '重用既有訊息公版預覽',
-    audienceRoles: ['staff'],
-    previewId: 'card-candidate-information-1',
-  },
-  {
-    id: 'flex_leave_confirm',
-    displayTitle: '服務日期表',
-    purpose: '記錄已確定的服務日期與排班，無再次確認按鈕。',
-    group: '訊息卡片',
-    type: 'flex_card',
-    title: '服務日期表',
-    subtitle: '公版預覽',
-    badge: '公版預覽',
-    endpointUrl: '',
-    authLevel: '公版範例',
-    description: '記錄已確定的服務日期與排班，無再次確認按鈕。',
-    apiMapping: '重用既有訊息公版預覽',
-    audienceRoles: ['customer', 'staff'],
-    previewId: 'service-start-result',
-  },
-  {
-    id: 'flex_alert_critical',
-    displayTitle: '重大異常通知',
-    purpose: '通知設定中的工會人員私人聊天室。',
-    group: '訊息卡片',
-    type: 'flex_card',
-    title: '重大異常通知',
-    subtitle: '公版預覽',
-    badge: '公版預覽',
-    endpointUrl: '',
-    authLevel: '公版範例',
-    description: '通知設定中的工會人員私人聊天室。',
-    apiMapping: '重用既有訊息公版預覽',
-    audienceRoles: ['union_staff'],
-    previewId: 'LU96-M4-SAFE-ALERT-RULE-V1',
-  },
-  {
-    id: 'flex_negotiation',
-    displayTitle: '媒合條件協調',
-    purpose: '由人員輸入詢問文案，客戶回答更新後的條件。',
-    group: '訊息卡片',
-    type: 'flex_card',
-    title: '媒合條件協調',
-    subtitle: '公版預覽',
-    badge: '公版預覽',
-    endpointUrl: '',
-    authLevel: '公版範例',
-    description: '由人員輸入詢問文案，客戶回答更新後的條件。',
-    apiMapping: '重用既有訊息公版預覽',
-    audienceRoles: ['customer'],
-    previewId: 'card-union-question',
   },
 
 ];
@@ -684,7 +616,6 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
 
 export interface LiffCardStudioProps {
   runtimeConfigClient?: LineIdentityRuntimeConfigClient;
-  previewClient?: LineMessagePreviewClient;
 }
 
 type RuntimeConfigState =
@@ -694,15 +625,10 @@ type RuntimeConfigState =
 
 export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   runtimeConfigClient = lineIdentityRuntimeConfigClient,
-  previewClient = lineMessagePreviewClient,
 }) => {
   const [selectedId, setSelectedId] = useState<string>(() => {
     const requested = liffHashParams().get('asset');
     return requested && ASSET_ITEMS.some((item) => item.id === requested) ? requested : 'gateway';
-  });
-  const [filterType, setFilterType] = useState<'all' | 'liff' | 'flex_card'>(() => {
-    const requested = liffHashParams().get('type');
-    return requested === 'liff' || requested === 'flex_card' ? requested : 'all';
   });
   const [filterRole, setFilterRole] = useState<'all' | LiffAudienceRole>(() => {
     const requested = liffHashParams().get('role');
@@ -713,16 +639,6 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   const [searchQuery, setSearchQuery] = useState(() => liffHashParams().get('q') ?? '');
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigState>({ status: 'loading' });
   const [expanded, setExpanded] = useState(false);
-  const [catalog, setCatalog] = useState<PreviewDescriptor[]>([]);
-  const [catalogError, setCatalogError] = useState(false);
-  const [catalogRetry, setCatalogRetry] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    setCatalogError(false);
-    setCatalog([]);
-    void previewClient.catalog({ signal: controller.signal }).then(result => { if (!controller.signal.aborted) setCatalog(result); }).catch(() => { if (!controller.signal.aborted) setCatalogError(true); });
-    return () => controller.abort();
-  }, [previewClient, catalogRetry]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const dialogTitleId = useId();
 
@@ -748,16 +664,13 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
 
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase('zh-TW');
   const filteredItems = ASSET_ITEMS.filter((item) => (
-    (filterType === 'all' || item.type === filterType)
-    && (filterRole === 'all' || item.audienceRoles.includes(filterRole))
+    (filterRole === 'all' || item.audienceRoles.includes(filterRole))
     && (!normalizedSearch || [item.title, item.subtitle, item.displayTitle, item.purpose, item.group, item.description, item.badge]
       .some((value) => value.toLocaleLowerCase('zh-TW').includes(normalizedSearch)))
   ));
-  const liffCount = ASSET_ITEMS.filter((item) => item.type === 'liff').length;
-  const flexCount = ASSET_ITEMS.filter((item) => item.type === 'flex_card').length;
   const selectedItem = filteredItems.find((item) => item.id === selectedId) ?? filteredItems[0];
-  const hasFilters = filterType !== 'all' || filterRole !== 'all' || searchQuery !== '';
-  const clearFilters = () => { setSearchQuery(''); setFilterType('all'); setFilterRole('all'); };
+  const hasFilters = filterRole !== 'all' || searchQuery !== '';
+  const clearFilters = () => { setSearchQuery(''); setFilterRole('all'); };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -786,7 +699,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
       else params.set(key, value);
     };
     setParam('asset', selectedId, 'gateway');
-    setParam('type', filterType, 'all');
+    params.delete('type');
     setParam('role', filterRole, 'all');
     setParam('q', searchQuery, '');
     const query = params.toString();
@@ -794,31 +707,20 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
     if (window.location.hash !== nextHash) {
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${nextHash}`);
     }
-  }, [filterRole, filterType, searchQuery, selectedId]);
+  }, [filterRole, searchQuery, selectedId]);
 
-  const visualPreview = selectedItem && (selectedItem.type === 'flex_card' ? (
-    <div className="liff-studio-public-preview">
-      {catalogError && <p role="alert">公版清單載入失敗。<button type="button" onClick={() => setCatalogRetry(v => v + 1)}>重新載入公版</button></p>}
-      <LineMessagePreviewWorkspace descriptor={catalog.find(item => item.id === selectedItem.previewId)}
-        entryId={selectedItem.previewId!} client={previewClient}
-        editor={<p>{selectedItem.purpose}</p>} footer={null} />
-    </div>
-  ) : (
+  const visualPreview = selectedItem && (
     <div className="liff-studio-device" key={selectedItem.id}>
-      <div className="liff-studio-device-brand">
-        {selectedItem.type === 'liff' ? '新竹市到宅月子工會' : 'LINE 訊息卡片'}
-      </div>
+      <div className="liff-studio-device-brand">新竹市到宅月子工會</div>
       <div className="liff-studio-device-content">
-        {selectedItem.type === 'liff' ? (
-          <div className="mock-liff-body">
-            <h3 className="mock-liff-title">{selectedItem.displayTitle}</h3>
-            <p className="mock-liff-desc">{selectedItem.purpose}</p>
-            <LiffVisualPreview item={selectedItem} />
-          </div>
-        ) : null}
+        <div className="mock-liff-body">
+          <h3 className="mock-liff-title">{selectedItem.displayTitle}</h3>
+          <p className="mock-liff-desc">{selectedItem.purpose}</p>
+          <LiffVisualPreview item={selectedItem} />
+        </div>
       </div>
     </div>
-  ));
+  );
 
   return (
     <div className="liff-studio-container liff-studio-clean">
@@ -827,28 +729,23 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           <span className="line-hub-page-icon" aria-hidden="true"><PanelTop /></span>
           <div>
             <p className="line-hub-eyebrow">LINE 專區</p>
-            <h1>LINE 表單與訊息卡片</h1>
+            <h1>LINE 表單</h1>
             <p>找到需要的功能，查看 LINE 上的使用畫面。</p>
           </div>
         </div>
       </header>
       <div className="liff-studio-workspace">
-        <section className="liff-studio-sidebar" aria-label="表單與卡片清單">
+        <section className="liff-studio-sidebar" aria-label="表單清單">
           <div className="liff-sidebar-header">
             <label className="liff-search-field">
-              <span className="sr-only">搜尋表單與卡片</span>
+              <span className="sr-only">搜尋表單</span>
               <Search aria-hidden="true" />
               <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="搜尋名稱或用途" />
             </label>
-            <div className="liff-filter-pills">
-              <button type="button" aria-pressed={filterType === 'all'} className={filterType === 'all' ? 'active' : ''} onClick={() => setFilterType('all')}>全部 ({ASSET_ITEMS.length})</button>
-              <button type="button" aria-pressed={filterType === 'liff'} className={filterType === 'liff' ? 'active' : ''} onClick={() => setFilterType('liff')}>表單 ({liffCount})</button>
-              <button type="button" aria-pressed={filterType === 'flex_card'} className={filterType === 'flex_card' ? 'active' : ''} onClick={() => setFilterType('flex_card')}>訊息卡片 ({flexCount})</button>
-            </div>
             <label className="line-filter-field liff-role-filter">
               <span>使用對象</span>
               <select
-                aria-label="依適用角色篩選表單與卡片"
+                aria-label="依適用角色篩選表單"
                 value={filterRole}
                 onChange={(event) => setFilterRole(event.target.value as 'all' | LiffAudienceRole)}
               >
@@ -867,11 +764,11 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
           <div className="liff-asset-list">
             {filteredItems.length === 0 && (
               <div className="line-empty-state compact" role="status">
-                <strong>找不到符合條件的表單或卡片</strong>
+                <strong>找不到符合條件的表單</strong>
                 <button type="button" className="line-secondary-btn" onClick={clearFilters}>清除條件</button>
               </div>
             )}
-            {['身分與服務入口', '客戶服務', '月嫂服務', '工會工作', '訊息卡片'].map((group) => {
+            {['身分與服務入口', '客戶服務', '月嫂服務', '工會工作'].map((group) => {
               const items = filteredItems.filter((item) => item.group === group);
               return items.length > 0 && (
                 <div key={group} className="liff-studio-group">
@@ -884,7 +781,7 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                         aria-pressed={item.id === selectedItem?.id}
                         onClick={() => setSelectedId(item.id)}
                       >
-                        <span className="liff-studio-row-icon" aria-hidden="true">{item.type === 'liff' ? <FileText /> : <MessageSquare />}</span>
+                        <span className="liff-studio-row-icon" aria-hidden="true"><FileText /></span>
                         <span className="liff-studio-row-copy"><strong>{item.displayTitle}</strong><span>{item.purpose}</span></span>
                         <ChevronRight className="liff-studio-row-arrow" aria-hidden="true" />
                       </button>
@@ -907,8 +804,8 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
                   <p>{selectedItem.purpose}</p>
                 </div>
                 <div className="liff-studio-detail-actions">
-                  <button type="button" className={selectedItem.type === 'liff' ? 'line-secondary-btn' : 'line-primary-btn'} onClick={() => setExpanded(true)}><Maximize2 aria-hidden="true" />放大預覽</button>
-                  {selectedItem.type === 'liff' && selectedItem.launchPath && runtimeConfig.status === 'ready' && (
+                  <button type="button" className="line-secondary-btn" onClick={() => setExpanded(true)}><Maximize2 aria-hidden="true" />放大預覽</button>
+                  {selectedItem.launchPath && runtimeConfig.status === 'ready' && (
                     <a
                       className="line-primary-btn"
                       href={canonicalLiffUrl(selectedItem.previewPath ?? selectedItem.launchPath, runtimeConfig.origin)}
@@ -921,17 +818,17 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
               </div>
               <div className="liff-studio-preview-stage">
                 <div className="liff-studio-stage-caption">
-                  <span>{selectedItem.type === 'liff' ? <Smartphone aria-hidden="true" /> : <MessageSquare aria-hidden="true" />}{selectedItem.type === 'liff' ? 'LINE 服務畫面' : '訊息卡片'}</span>
+                  <span><Smartphone aria-hidden="true" />LINE 服務畫面</span>
                   <span>流程示意</span>
                 </div>
-                {selectedItem.type === 'liff' && selectedItem.launchPath && runtimeConfig.status !== 'ready' && (
+                {selectedItem.launchPath && runtimeConfig.status !== 'ready' && (
                   <div className="line-warning liff-preview-warning" role="status">
                     {runtimeConfig.status === 'loading'
                       ? '正在取得正式 LIFF 測試網址…'
                       : '目前無法取得服務入口，請稍後再試。'}
                   </div>
                 )}
-                {selectedItem.type === 'liff' && !selectedItem.launchPath && (
+                {!selectedItem.launchPath && (
                   <div className="line-warning liff-preview-warning" role="status">
                     {selectedItem.launchNote ?? '入口與正式服務尚待建立；設計與功能需求保留，不導向不存在的頁面。'}
                   </div>

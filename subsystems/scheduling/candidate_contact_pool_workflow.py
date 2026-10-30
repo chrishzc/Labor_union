@@ -1026,6 +1026,12 @@ def _send_information_in_transaction(
             ),
         )
         message = canonical_line_payload_json(configured_message_payload(connection, "card-candidate-information-" + str(info_type), json.loads(message), {"case_no": case_no}))
+        from subsystems.line.table_image_contracts import information_document
+        from subsystems.line.table_image_messages import with_table_images
+        document = information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[info_type - 1], case_no,
+            ({'line_sections': tuple({'title': section.title, 'rows': section.rows} for section in preview.line_sections)},), info_type=info_type)
+        message = canonical_line_payload_json(with_table_images(json.loads(message), (document,),
+            event_key, datetime.now(timezone.utc), candidate=True))
         delivery = MySqlLineDeliveryTaskRepository(connection).enqueue(
             LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, LineUserId(recipient.strip())),

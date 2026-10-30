@@ -296,6 +296,12 @@ class SigningSessionVersionBody(BaseModel):
     expected_status_version: int = Field(ge=1)
 
 
+class SigningReminderBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str | None = Field(default=None, pattern=_SESSION)
+    expected_status_version: int = Field(default=0, ge=0)
+
+
 class UnsignedDocumentView(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -359,8 +365,8 @@ class ManualSigningNotificationTargetView(BaseModel):
 class SigningReminderView(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
     receipt_id: str = Field(pattern=_RECEIPT)
-    session_id: str = Field(pattern=_SESSION)
-    status_version: int = Field(ge=1)
+    session_id: str | None = Field(pattern=_SESSION)
+    status_version: int = Field(ge=0)
     replayed: bool
     manual_notification_targets: list[ManualSigningNotificationTargetView]
 
@@ -384,6 +390,7 @@ class ExternalSigningQueryView(BaseModel):
     ]
     status_version: int = Field(ge=0)
     handoff_recorded: bool
+    handoff_logged: bool = False
     signing_blockers: list[str] = Field(default_factory=list)
     handoff_included_reminders: bool = False
     testing_skip_allowed: bool = False
@@ -423,6 +430,9 @@ class ContractPreparationQueryView(BaseModel):
     state: Literal["preparing"]
     staff_segments: list[ContractPreparationSegmentView]
     documents: list[ContractPreparationDocumentView]
+    handoff_logged: bool = False
+    signing_reminder: SigningReminderView | None = None
+    signing_blockers: list[str] = Field(default_factory=list)
 
 
 class ExternalSigningReceiptView(BaseModel):
@@ -533,7 +543,7 @@ def record_external_signing_handoff(
 
 @router.post("/{case_no}/contract-external-signing/reminders")
 def send_signing_reminders(
-    body: SigningSessionVersionBody,
+    body: SigningReminderBody,
     case_no: str = ApiPath(pattern=_CASE),
     idempotency_key: str = Header(alias="Idempotency-Key", pattern=_IDEMPOTENCY),
     receipt_id: str = Header(alias="X-Receipt-ID", pattern=_RECEIPT),
@@ -1157,10 +1167,11 @@ def _require_facts(application, case_no):
 
 
 def _public_query(value: Mapping[str, Any]) -> dict[str, Any]:
+    reminder = value.get("signing_reminder")
+    value = {**value, "signing_reminder": None if reminder is None else _public_reminder(reminder)}
     if value.get("state") == "preparing":
         return ContractPreparationQueryView.model_validate(value).model_dump(mode="json")
-    reminder = value.get("signing_reminder")
-    return ExternalSigningQueryView.model_validate({**value, "signing_reminder": None if reminder is None else _public_reminder(reminder), "testing_skip_allowed": testing_signing_skip_allowed()}).model_dump(mode="json")
+    return ExternalSigningQueryView.model_validate({**value, "testing_skip_allowed": testing_signing_skip_allowed()}).model_dump(mode="json")
 
 
 def _public_reminder(receipt):

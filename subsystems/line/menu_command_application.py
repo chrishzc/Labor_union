@@ -13,12 +13,14 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identity_binding import LineBindingSubjectType, LineIdentityBindingStatus
+from domains.line.identities import LineSourceType
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.identity_management_application import LineIdentityManagementApplication
 from subsystems.line.identity_management_contracts import SelectLineIdentityRoleCommand
 from shared_kernel.ports import OutboxIntent
 from subsystems.line.ports import LineAuditIntent
 from subsystems.line.rich_menu_binding import RICH_MENU_BINDING_INTENT
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 
 _CUSTOMER_MENU_COMMANDS = {"客戶選單", "客戶專區", "切換客戶"}
@@ -125,6 +127,11 @@ class LineMenuCommandApplication:
         ):
             return False
         event_id = inbox.event.event_id.value
+        source = getattr(inbox.event, "source", None)
+        same_private_chat = (
+            getattr(source, "source_type", None) is LineSourceType.USER
+            and getattr(source, "user_id", None) == line_user_id
+        )
         unit_of_work.delivery_tasks.enqueue(
             LineDeliveryRequest(
                 LineRecipient(LineRecipientType.USER, line_user_id),
@@ -145,7 +152,7 @@ class LineMenuCommandApplication:
                 getattr(inbox, "received_at", None) or inbox.event.occurred_at,
                 IdempotencyKey(f"line-menu-help:{event_id}"),
                 CorrelationId(f"line-event:{event_id}"),
-                "line_webhook_event",
+                REPLY_ONLY_WEBHOOK_SOURCE if same_private_chat else "line_webhook_event",
                 event_id,
             )
         )

@@ -1,19 +1,27 @@
 """
 File: test_webhook_immediate_reply.py
-Description: 驗證 LINE 客服手動呼叫的 Webhook 即時回傳（方案 2：0 額度消耗、零延遲反饋）與後端排隊非同步處理。
+Description: 驗證專員申請僅用即時 Reply、失敗仍保存工單、零受理 Push，以及既有排隊受理工作保留原發送方式。
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from domains.customer_service.ticket import CustomerServiceCategory
 from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryLease, LineDeliveryRequest, LineDeliveryStatus,
+    LineDeliveryTaskSnapshot, LineMessageKind, LineRecipient, LineRecipientType,
+)
 from domains.line.identities import (
+    LineDeliveryTaskId,
+    LineProviderMessageId,
     LineDestinationId,
     LineSourceIdentity,
     LineSourceType,
@@ -27,7 +35,9 @@ from domains.line.webhook import (
     build_line_webhook_event,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
-from shared_kernel.identities import ExpectedVersion, IdempotencyKey
+from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.line.delivery_contracts import LineProviderOutcome, LineProviderOutcomeType
+from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.message_copy import CONTACT_RECEIVED
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_immediate_reply import (
@@ -269,29 +279,83 @@ def test_service_help_skips_enqueue_when_immediate_reply_already_sent():
     assert len(uow.delivery_tasks.requests) == 0
 
 
-def test_service_help_fallbacks_to_enqueue_when_immediate_reply_not_sent():
+@pytest.mark.parametrize("event_kind", ["message", "postback"])
+@pytest.mark.parametrize("failure", ["missing_token", "unconfigured", "rejected", "timeout", "rate_limited", "unavailable", "exception", "copy_unavailable"])
+def test_failed_or_missing_reply_still_saves_ticket_without_push(event_kind, failure):
     uow = _MockUnitOfWork()
-    app = LineServiceHelpApplication(lambda: datetime(2026, 10, 29, tzinfo=timezone.utc))
-
+    created = []
+    gateway = SimpleNamespace(hold_guard=lambda *args: None, create_for_ticket=lambda *args: created.append(args))
+    app = LineServiceHelpApplication(lambda: datetime(2026, 10, 29, tzinfo=timezone.utc), escalation_gateway=gateway)
     raw_event = {
-        "type": "postback",
+        "type": event_kind,
+        "replyToken": "synthetic-reply-token",
         "postback": {"data": "customer-service:handoff:confirm"},
-        # 未標記 immediate_reply_sent (例如 fallback 重試或無 replyToken)
+        "message": {"type": "text", "text": "呼叫專員"},
     }
-    inbox = _make_inbox(raw_event, event_id="evt-fallback-2")
+    adapter = Mock()
+    adapter.reply.return_value = SimpleNamespace(outcome_type=SimpleNamespace(value=failure))
+    if failure == "exception":
+        adapter.reply.side_effect = RuntimeError("synthetic provider exception")
+    if failure == "missing_token":
+        raw_event.pop("replyToken")
+    copy_reader = Mock(side_effect=RuntimeError("copy unavailable")) if failure == "copy_unavailable" else None
+    if failure != "unconfigured":
+        assert LineWebhookImmediateReplyService(adapter, copy_reader).try_immediate_reply(raw_event) is False
+    inbox = _make_inbox(raw_event, event_id="evt-reply-only")
 
-    handled = app.handle_postback(
-        inbox,
-        uow,
-        LineUserId("U123456789"),
-        "customer-service:handoff:confirm",
-    )
+    if event_kind == "message":
+        handled = app.handle(inbox, uow, LineUserId("U123456789"), "呼叫專員")
+    else:
+        handled = app.handle_postback(inbox, uow, LineUserId("U123456789"), "customer-service:handoff:confirm")
 
     assert handled is True
-    # 後端工單正常建立
     assert len(uow.customer_service.messages) == 1
-    # 保底：因未在 Webhook 階段即時 reply，背景 Worker 正常 enqueue 推播任務
-    assert len(uow.delivery_tasks.requests) == 1
-    delivery_request = uow.delivery_tasks.requests[0]
-    payload = json.loads(delivery_request.payload_json)
-    assert payload["text"] == CONTACT_RECEIVED
+    assert len(created) == 1 and created[0][2] is uow
+    assert len(uow.audit.intents) == 1
+    assert uow.delivery_tasks.requests == []
+    adapter.send.assert_not_called()
+
+
+def test_already_queued_legacy_ack_and_other_webhook_deliveries_keep_push():
+    now = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    def task(index, suffix):
+        request = LineDeliveryRequest(
+            LineRecipient(LineRecipientType.USER, LineUserId("U-synthetic")), LineMessageKind.TEXT,
+            canonical_line_payload_json({"type": "text", "text": "synthetic configured copy"}), now,
+            IdempotencyKey(f"service-help:{suffix}:event-{index}"), CorrelationId(f"line-event:event-{index}"),
+            "line_webhook_event", f"event-{index}",
+        )
+        return LineDeliveryTaskSnapshot(LineDeliveryTaskId(index), request, LineDeliveryStatus.PENDING, 0, None)
+
+    class Deliveries:
+        def __init__(self):
+            self.tasks = {1: task(1, "ticket"), 2: task(2, "menu")}
+            self.cancelled = []
+        def claim(self, query):
+            for identifier, current in self.tasks.items():
+                if current.status is LineDeliveryStatus.PENDING:
+                    lease = LineDeliveryLease(current.task_id, query.lease_owner, now, now + timedelta(seconds=60))
+                    self.tasks[identifier] = replace(current, status=LineDeliveryStatus.PROCESSING, lease=lease)
+                    return (self.tasks[identifier],)
+            return ()
+        def get(self, task_id):
+            return self.tasks[task_id.value]
+        def cancel(self, command):
+            self.cancelled.append(command)
+            current = self.tasks[command.task_id.value]
+            self.tasks[command.task_id.value] = replace(current, status=LineDeliveryStatus.CANCELLED, lease=None)
+        def record_attempt(self, command):
+            self.tasks[command.task.task_id.value] = replace(command.task, status=LineDeliveryStatus.SENT, lease=None)
+
+    uow = _MockUnitOfWork()
+    deliveries = Deliveries()
+    uow.delivery_tasks = deliveries
+    provider = Mock()
+    provider.send.return_value = LineProviderOutcome(LineProviderOutcomeType.SUCCESS, provider_message_id=LineProviderMessageId("synthetic-message-id"))
+    worker = LineDeliveryWorker(lambda: uow, provider, "worker:reply-only", lambda: now)
+    assert worker.run_once() == 2
+    assert deliveries.tasks[1].status is LineDeliveryStatus.SENT
+    assert deliveries.cancelled == [] and uow.committed
+    assert deliveries.tasks[2].status is LineDeliveryStatus.SENT
+    assert [call.args[0] for call in provider.send.call_args_list] == [deliveries.tasks[1].request, deliveries.tasks[2].request]
+    provider.reply.assert_not_called()

@@ -83,6 +83,7 @@ from subsystems.scheduling.matching_notification_contracts import (
     RequestCustomerProfilesCommand,
 )
 from subsystems.scheduling.customer_confirmation_download import verify_resume_download_token
+from subsystems.line.table_image_contracts import TableImageUnavailable
 from api.dependencies.controlled_files import get_controlled_file_workflow
 from subsystems.controlled_files.workflow import (
     ControlledFileOwner, ControlledFilePurpose, ControlledFileWorkflow,
@@ -421,6 +422,8 @@ def send_matching_plan_customer_confirmation_route(
             ),
             message="已建立客戶確認資訊的可靠發送任務",
         )
+    except TableImageUnavailable:
+        raise typed_http_error(503, 'unavailable', 'line_table_image_unavailable', '圖片服務目前無法使用，請確認服務設定後再寄送。', 'customer-confirmation') from None
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

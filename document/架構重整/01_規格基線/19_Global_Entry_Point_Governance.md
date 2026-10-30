@@ -27,13 +27,16 @@
 - `line-liff-studio`
 - `line-security`
 - `finance`
+- `accounting-parameters`
 - `historical-service-accounting`
 - `account-management`
-- `storage-management`
+- `contract-templates`
 
 依 `33_案件與月嫂整合名冊正式規格.md` 的名冊裁決，`data-browser` 相容深連結顯示客戶名冊，不再開啟 `DataImportPage` 的六來源分頁。现行 `databrowser` 與 `client-roster` aliases 亦映射至 `clients`，使用同一個 `ClientRegistryPage`；此為頁面解析，不要求網址立即改寫。
 
 `order-tracker`、`orders` 與獨立 `system-status` 已不在上述正式導航及 render branches。系統狀態的既有 snapshot Query 與 shell 指示器仍保留，不因獨立頁面退出而刪除。
+
+2026-10-30 人工裁決退役稽核與系統之「儲存空間管理」(`storage-management`) 與「檔案設定」(`file-settings`) 兩處 UI 頁面入口與導航項目。既有後端 30 天自動排程清理 (`run_automatic_retention_cycle`)、檔案傳輸安全預設限制（照片 10MB、履歷 20MB）及 API 保持運作，但不再於管理端側欄呈現維護畫面。舊 `#storage-management` 與 `#file-settings` 沿用 App 既有未知 hash 規則導向待辦看板。
 
 ## 3. Removed Streamlit surface
 

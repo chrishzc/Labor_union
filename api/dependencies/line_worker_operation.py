@@ -126,13 +126,13 @@ def _canonical_runtime(
     runtime_identity: WorkerRuntimeIdentity,
 ) -> CanonicalLineWorkerRuntime:
     now = lambda: datetime.now(timezone.utc)
-    event_consumer = _event_consumer(worker_identity, now)
     delivery_worker = LineDeliveryWorker(
         open_line_unit_of_work,
         LineMessagingApiAdapter(_required_access_token()),
         worker_identity,
         now,
     )
+    event_consumer = _event_consumer(worker_identity, now, delivery_worker.run_new_reply_tasks)
     rich_menu_images = FileSystemRichMenuImageStore(_media_storage_root())
     rich_menu_provider = LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load)
     return CanonicalLineWorkerRuntime(
@@ -149,7 +149,7 @@ def _canonical_runtime(
     )
 
 
-def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
+def _event_consumer(worker_identity: str, now, on_new_reply_tasks=None) -> LineWebhookEventConsumer:
     leave_coordination = StaffLeaveCustomerCoordinationApplication(
         get_connection,
         open_line_unit_of_work,
@@ -198,6 +198,7 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
         LineEventDispatcher(handlers),
         worker_identity,
         now,
+        on_new_reply_tasks=on_new_reply_tasks,
     )
 
 

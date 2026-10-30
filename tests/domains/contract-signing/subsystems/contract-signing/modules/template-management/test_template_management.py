@@ -16,6 +16,15 @@ from subsystems.contract_signing.template_catalog import load_approved_template
 KEY = 'contract_client_copy'
 
 
+@pytest.mark.parametrize('bank_code', ['807', '812'])
+def test_virtual_account_sample_reads_configured_bank_code(monkeypatch, bank_code):
+    from subsystems.contract_signing.template_management import sample_value
+
+    monkeypatch.setenv('CLIENT_DEPOSIT_BANK_CODE', bank_code)
+    field = next(item for item in template_fields(KEY) if item.key == 'client_virtual_account')
+    assert sample_value(field) == f'({bank_code}) 示範虛擬帳號'
+
+
 def source():
     book = Workbook()
     sheet = book.active

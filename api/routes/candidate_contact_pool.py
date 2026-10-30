@@ -3,6 +3,8 @@ Description: 提供候選聯繫池 API 路由與 typed schema 邊界。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from api.error_contracts import typed_http_error
+from subsystems.line.table_image_contracts import TableImageUnavailable
 
 from api.dependencies.admin_auth import (
     require_line_matching_override,
@@ -221,6 +223,8 @@ def send_candidate_information(case_no: str, candidate_id: int, req: SendCandida
             data=SendCandidateInformationResult.model_validate(result),
             message=f"候選月嫂的訂單資訊-{req.info_type} 已建立可靠發送任務",
         )
+    except TableImageUnavailable:
+        raise typed_http_error(503, 'unavailable', 'line_table_image_unavailable', '圖片服務目前無法使用，請確認服務設定後再寄送。', 'candidate-information') from None
     except ValueError as error:
         raise _information_error(error) from error
 

@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, TypedDict
 import json
+import os
 from pathlib import PurePath
 
 from domains.contract_signing.template_management import (
@@ -100,6 +101,9 @@ def template_fields(template_key: str) -> tuple[TemplateField, ...]:
 
 
 def sample_value(field: TemplateField) -> str:
+    if field.key == 'client_virtual_account':
+        bank_code = os.getenv('CLIENT_DEPOSIT_BANK_CODE', '').strip()
+        return f'({bank_code}) 示範虛擬帳號' if bank_code else '示範虛擬帳號'
     known = {'case_no': 'DEMO-001', 'client_name': '範例客戶', 'staff_name': '範例月嫂',
              'service_time': '09:00–17:00', 'service_type': '每週日休假', 'service_days': '26',
              'assignment_service_days': '26', 'identity_status': '一般市民', 'city': '臺北市',

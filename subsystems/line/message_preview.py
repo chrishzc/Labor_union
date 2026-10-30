@@ -60,6 +60,7 @@ class PreviewLeave:
 @dataclass(frozen=True)
 class PreviewCardSource:
     payload_json: str
+    table_documents_json: str = ''
 
 
 class MessagePreviewReader(Protocol):
@@ -86,7 +87,7 @@ class PreviewDescriptor:
 
 @dataclass(frozen=True)
 class PreviewNode:
-    kind: Literal["text", "box", "button", "separator"]
+    kind: Literal["text", "box", "button", "separator", "image"]
     text: str = ""
     bold: bool = False
     size: str = "sm"
@@ -94,6 +95,7 @@ class PreviewNode:
     primary: bool = False
     action_description: str = ""
     children: tuple[PreviewNode, ...] = ()
+    image_data: str = ''
 
 
 @dataclass(frozen=True)
@@ -160,11 +162,11 @@ _CURRENT_FLOW_PREVIEWS = (
     ("group-format-split", "群組指令－網址被拆開", "text"),
     ("group-format-invalid-case", "群組指令－案件編號格式錯誤", "text"),
     ("group-format-invalid-url", "群組指令－邀請網址格式錯誤", "text"),
-    ("candidate-willing-received", "候選月嫂－願意承接受理", "text"),
+    ("candidate-willing-received", "初步候選聯絡－月嫂意願受理", "text"),
     ("matching-willing-received", "正式媒合－月嫂意願受理", "text"),
-    ("matching-customer-accepted", "客戶推薦－接受配對回覆", "text"),
-    ("matching-customer-assistance", "客戶推薦－專人協助回覆", "text"),
-    ("matching-customer-response", "客戶推薦－選擇受理回覆", "text"),
+    ("matching-customer-accepted", "正式媒合－客戶接受配對回覆", "text"),
+    ("matching-customer-assistance", "正式媒合－客戶專人協助回覆", "text"),
+    ("matching-customer-response", "正式媒合－客戶選擇受理回覆", "text"),
     ("service-progress", "服務進度查詢結果", "text"),
     ("service-progress-unbound", "服務進度－未綁定提示", "text"),
     ("service-registration", "服務登記入口訊息", "text"),
@@ -174,16 +176,17 @@ _CURRENT_FLOW_PREVIEWS = (
     ("runtime-system-health", "系統健康異常－管理員通知", "text"),
 )
 _CURRENT_FLOW_IDS = {row[0] for row in _CURRENT_FLOW_PREVIEWS}
+_UNLISTED_FORMAL_CARDS = {'card-caregiver-information', 'card-caregiver-information-2', 'card-customer-profiles'}
 _BUILTINS = (
-    ("card-caregiver-information", "月嫂案件資訊卡（一）", "flex", True, True, False),
-    ("card-caregiver-information-2", "月嫂案件資訊卡（二）", "flex", True, True, False),
-    ("card-customer-profiles", "月嫂資料與確認卡", "flex", True, True, False),
-    ("card-customer-confirmation", "客戶完整推薦確認包", "flex", True, True, False),
-    ("card-candidate-information-1", "候選聯絡－訂單資訊一", "flex", True, True, False),
-    ("card-candidate-information-2", "候選聯絡－訂單資訊二", "flex", True, True, False),
-    ("card-candidate-information-3", "候選聯絡－每週服務說明", "flex", True, True, False),
-    ("card-union-question", "工會詢問客戶卡", "flex", True, False, True),
-    ("card-union-answer", "工會回覆月嫂卡", "flex", True, True, True),
+    ("card-caregiver-information", "正式媒合－月嫂案件資訊卡（一）", "flex", True, True, False),
+    ("card-caregiver-information-2", "正式媒合－月嫂案件資訊卡（二）", "flex", True, True, False),
+    ("card-customer-profiles", "正式媒合－月嫂資料與客戶確認卡", "flex", True, True, False),
+    ("card-customer-confirmation", "正式媒合－客戶完整推薦確認包", "flex", True, True, False),
+    ("card-candidate-information-1", "初步候選聯絡－訂單資訊一", "flex", True, True, False),
+    ("card-candidate-information-2", "初步候選聯絡－訂單資訊二", "flex", True, True, False),
+    ("card-candidate-information-3", "初步候選聯絡－每週服務說明", "flex", True, True, False),
+    ("card-union-question", "初步候選聯絡－工會詢問客戶卡", "flex", True, False, True),
+    ("card-union-answer", "初步候選聯絡－工會回覆月嫂卡", "flex", True, True, True),
     ("service-menu", "服務與問答導覽卡", "flex", False, False, False),
     ("order-update-menu", "修改訂單資訊導覽卡", "flex", False, False, False),
     ("service-contact", "呼叫專員－需求受理", "text", False, False, False),
@@ -201,9 +204,10 @@ _BUILTINS = (
 
 
 class LineMessagePreviewApplication:
-    def __init__(self, configuration, reader_factory: Callable[[], ContextManager[MessagePreviewReader]]):
+    def __init__(self, configuration, reader_factory: Callable[[], ContextManager[MessagePreviewReader]], image_renderer=None):
         self._configuration = configuration
         self._reader_factory = reader_factory
+        self._image_renderer = image_renderer
 
     def _definitions(self, actor):
         require_line_capability(actor, LineCapability.CONFIG_READ)
@@ -221,7 +225,7 @@ class LineMessagePreviewApplication:
         return self._catalog(templates, rules)
 
     @staticmethod
-    def _catalog(templates, rules):
+    def _catalog(templates, rules, *, include_unlisted=False):
         by_id = {t["id"]: t for t in templates.get("templates", [])}
         references = [("welcome", "customer_onboarding_welcome")]
         references += [(r["id"], r["template_id"]) for r in rules.get("rules", [])
@@ -242,7 +246,8 @@ class LineMessagePreviewApplication:
                 key.startswith("template-"),
             ))
         descriptors.extend(PreviewDescriptor(key, None, name, fmt, case, staff, True, draft)
-                           for key, name, fmt, case, staff, draft in _BUILTINS)
+                           for key, name, fmt, case, staff, draft in _BUILTINS
+                           if include_unlisted or key not in _UNLISTED_FORMAL_CARDS)
         descriptors.extend(PreviewDescriptor(key, None, name, fmt, False, False, True)
                            for key, name, fmt in _CURRENT_FLOW_PREVIEWS)
         return tuple(descriptors)
@@ -256,7 +261,9 @@ class LineMessagePreviewApplication:
                staff_id: int | None, actor: ActorContext, *, sample: bool = False) -> PreviewResult:
         key = {"template-bind_success_new_order": "identity-bound-customer", "template-staff_switch_success": "identity-bound-staff"}.get(key, key)
         templates, rules = self._definitions(actor)
-        descriptor = next((d for d in self._catalog(templates, rules) if d.id == key), None)
+        # The library lists the bundled delivery. Existing direct preview callers
+        # keep their readonly contract; no send operation or saved copy is retired.
+        descriptor = next((d for d in self._catalog(templates, rules, include_unlisted=True) if d.id == key), None)
         if descriptor is None:
             raise MessagePreviewNotFound("message")
         if descriptor.template_id in {'LINE-ORDER-SERVICE-START-DAY-CARD-V1',
@@ -325,7 +332,10 @@ class LineMessagePreviewApplication:
             if content is not None:
                 if template["message_type"] == "flex":
                     from subsystems.line.message_copy import copy_fields, apply_copy_payload
-                    candidate["content"] = apply_copy_payload(template["content"], content, copy_fields(template["content"]), {v: "{" + v + "}" for v in declared})
+                    fields = copy_fields(template['content'])
+                    import re
+                    displayed = set(re.findall(r'\{([A-Za-z][A-Za-z0-9_]*)\}', ' '.join(field['content'] for field in fields)))
+                    candidate["content"] = apply_copy_payload(template["content"], content, fields, {v: "{" + v + "}" for v in declared & displayed})
                 else:
                     candidate["content"] = content
             rendered_payload = json.loads(render_message_template({"templates": [candidate]}, template["id"],
@@ -410,15 +420,29 @@ class LineMessagePreviewApplication:
             facts = flow_facts if flow_facts is not None else sample_bindings(descriptor, template, binding_content, rendered_payload.get("text", "") if rendered_payload else "")
         if payload.get("type") == "text":
             return PreviewResult("ready", "公版範例資料，非真實案件或月嫂；不會儲存或發送。" if sample else "使用資料庫資訊預覽；不會實際發送。", "text", str(payload["text"]), facts=tuple(facts))
+        documents = {}
+        if card_source and card_source.table_documents_json:
+            from subsystems.line.table_image_contracts import TableDocument
+            from subsystems.line.table_image_messages import with_table_images, DOCUMENTS_KEY
+            models = tuple(TableDocument.from_mapping(item) for item in json.loads(card_source.table_documents_json))
+            payload = with_table_images(payload, models, candidate=key.startswith('card-candidate-information-'))
+            documents = {item['url']: TableDocument.from_mapping(item['document']) for item in payload[DOCUMENTS_KEY]}
         container = payload["contents"]
         bubbles = container["contents"] if container["type"] == "carousel" else [container]
         return PreviewResult("ready", "公版範例資料，使用正式卡片組裝；按鈕只供預覽，不會執行。" if sample else "使用正式卡片組裝邏輯；按鈕僅展示動作，不會送出。", "flex",
-                             bubbles=tuple(_project_node(b) for b in bubbles), facts=tuple(facts))
+                             bubbles=tuple(_project_node(b, documents, self._image_renderer) for b in bubbles), facts=tuple(facts))
 
 
-def _project_node(node) -> PreviewNode:
+def _project_node(node, documents=None, image_renderer=None) -> PreviewNode:
     """Project display-only nodes; never expose postbacks, tokens, URLs or provider identities."""
     kind = node["type"]
+    if kind == 'image':
+        import base64
+        document = (documents or {}).get(node.get('url'))
+        if document is None or image_renderer is None:
+            raise ValueError('table image preview renderer is unavailable')
+        return PreviewNode('image', text=document.title,
+            image_data='data:image/png;base64,' + base64.b64encode(image_renderer(document)).decode('ascii'))
     if kind == "text":
         return PreviewNode("text", text=str(node.get("text", "")), bold=node.get("weight") == "bold",
                            size=str(node.get("size", "sm")))
@@ -433,4 +457,4 @@ def _project_node(node) -> PreviewNode:
     if kind not in {"bubble", "box"}:
         raise ValueError("unsupported preview component")
     return PreviewNode("box", layout="horizontal" if node.get("layout") in {"horizontal", "baseline"} else "vertical",
-                       children=tuple(_project_node(child) for child in children))
+                       children=tuple(_project_node(child, documents, image_renderer) for child in children))

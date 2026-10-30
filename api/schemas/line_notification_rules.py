@@ -209,6 +209,8 @@ class LineMessageCopyField(_ClosedModel):
     label: StrictStr
     content: StrictStr
     max_length: StrictInt
+    kind: Literal['title', 'body', 'button', 'summary', 'label'] = 'label'
+    optional: StrictBool = False
 
 
 class LineNotificationMessageTemplateView(_ClosedModel):

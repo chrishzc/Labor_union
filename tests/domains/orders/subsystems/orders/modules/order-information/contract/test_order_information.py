@@ -27,11 +27,11 @@ def test_candidate_information_works_without_assignment_or_beclass_and_binds_con
     first = build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-a")
     second = build_candidate_information("INQUIRY-1", 9, 2, facts, {}, "recipient-a")
     assert "預計服務開始日期：2026-10-01" in first.text
-    assert "總薪資" not in first.text
+    assert "預估總薪資：待確認" in first.text
     assert "預計發薪日" not in first.text
     assert "每日服務時數：8" in first.text
-    assert "服務是否需要下廚：不需要下廚" in first.text
-    assert "樓層費：NT$ 0" in first.text
+    assert "下廚需求：不需要下廚" in first.text
+    assert "訂金金額" not in first.text
     assert "食材準備參考" in second.text
     sections = {section.title: dict(section.rows) for section in first.line_sections}
     first_rows = sections["服務約定"]
@@ -47,17 +47,15 @@ def test_candidate_information_works_without_assignment_or_beclass_and_binds_con
     ]
     assert first_rows["每日服務時數"] == "8"
     assert first_rows["下廚需求"] == "不需要下廚"
-    assert sections["客戶付款約定"]["訂金金額"] == "NT$ 12,000"
-    assert sections["客戶付款約定"]["預計訂金繳款日"] == "2026-09-20"
-    assert sections["客戶付款約定"]["第一期金額"] == "NT$ 36,000"
-    assert sections["客戶付款約定"]["預計第一期繳款日"] == "2026-10-01"
-    assert sections["客戶付款約定"]["第二期金額"] == "NT$ 0"
-    assert sections["客戶付款約定"]["預計第二期繳款日"] == "不適用"
+    assert '客戶付款約定' not in sections
+    assert sections['月嫂薪資']['薪資單價'] == '待確認'
+    assert sections['月嫂薪資']['預估總薪資'] == '待確認'
     assert all(label not in {"客戶名稱", "聯絡電話", "服務地址"} for section in second.line_sections for label, _ in section.rows)
     assert first.preview_fingerprint != second.preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 10, 1, facts, {}, "recipient-a").preview_fingerprint
     assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, facts, {}, "recipient-b").preview_fingerprint
     assert first.preview_fingerprint == build_candidate_information("INQUIRY-1", 9, 1, {**facts, "total_salary": 48000}, {}, "recipient-a").preview_fingerprint
+    assert first.preview_fingerprint != build_candidate_information("INQUIRY-1", 9, 1, {**facts, "staff_salary_total": "預估 NT$ 48,000"}, {}, "recipient-a").preview_fingerprint
 from infrastructure.mysql.order_information_repository import (
     MySqlOrderInformationRepository,
 )
@@ -374,14 +372,33 @@ def test_formal_plan_information_one_excludes_staff_payroll_terms(monkeypatch):
     assert "預計訂金繳款日：2026-09-20" in rows[0]["text"]
 
 
-def test_candidate_information_one_excludes_staff_payroll_terms():
+def test_candidate_information_one_displays_staff_salary_and_never_client_payment_terms():
     preview = MySqlOrderInformationRepository(_Connection()).preview_candidate_information(
         "CASE-1", 91, 1
     )
 
-    assert all(section.title != "月嫂報酬" for section in preview.line_sections)
-    assert "總薪資" not in preview.text
-    assert "預計發薪日" not in preview.text
+    assert any(section.title == '月嫂薪資' for section in preview.line_sections)
+    assert '預估總薪資' in preview.text and '薪資單價' in preview.text
+    assert '客戶付款約定' not in preview.text and '訂金金額' not in preview.text
+
+
+def test_staff_estimate_uses_payroll_rate_independently_of_client_money(monkeypatch):
+    from types import SimpleNamespace
+    from infrastructure.mysql import order_information_repository as adapter
+    original_execute = _Cursor.execute
+    def staff_rate(cursor, statement, params):
+        original_execute(cursor, statement, params)
+        if 'FROM orders' in statement and cursor.rows:
+            cursor.rows[0].update(payroll_hourly_rate_ntd=450, client_hourly_rate_ntd=999)
+    monkeypatch.setattr(_Cursor, 'execute', staff_rate)
+    monkeypatch.setattr(adapter.MySqlFullContractProjectionRepository, 'load_client_projection',
+        lambda *args, **kwargs: SimpleNamespace(facts={'total_employer_self_pay_payable': 999999}))
+    preview = MySqlOrderInformationRepository(_Connection()).preview_candidate_information('CASE-1', 91, 1)
+    salary = dict(next(section.rows for section in preview.line_sections if section.title == '月嫂薪資'))
+    assert salary['薪資單價'] == 'NT$ 450／時'
+    assert salary['預估總薪資'] == '預估 NT$ 90,000'
+    assert salary['預計付款日'] == '預估 2026-10-15'
+    assert '999,999' not in preview.text and '訂金金額' not in preview.text
 
 
 @pytest.mark.parametrize("start,end", [

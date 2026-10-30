@@ -5,14 +5,16 @@ import { transport } from '../shared/transport';
 import { decodePayload } from '../shared/runtime_decoder';
 
 export interface PreviewNode {
-  kind: 'text' | 'box' | 'button' | 'separator';
+  kind: 'text' | 'box' | 'button' | 'separator' | 'image';
   text: string; bold: boolean; size: string; layout: 'horizontal' | 'vertical';
   primary: boolean; action_description: string; children: PreviewNode[];
+  image_data?: string;
 }
 const NodeSchema: z.ZodType<PreviewNode> = z.lazy(() => z.strictObject({
-  kind: z.enum(['text', 'box', 'button', 'separator']), text: z.string(), bold: z.boolean(),
+  kind: z.enum(['text', 'box', 'button', 'separator', 'image']), text: z.string(), bold: z.boolean(),
   size: z.string(), layout: z.enum(['horizontal', 'vertical']), primary: z.boolean(),
   action_description: z.string(), children: z.array(NodeSchema),
+  image_data: z.string().regex(/^(?:data:image\/png;base64,[A-Za-z0-9+/=]+)?$/).default(''),
 }));
 const DescriptorSchema = z.strictObject({ id: z.string(), template_id: z.string().nullable(), name: z.string(),
   format: z.enum(['text', 'flex']), requires_case: z.boolean(), requires_staff: z.boolean(), builtin: z.boolean(), allows_draft: z.boolean().default(false) });

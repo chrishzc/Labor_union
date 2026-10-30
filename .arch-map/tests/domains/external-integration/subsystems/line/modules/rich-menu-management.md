@@ -14,5 +14,5 @@ test_root: ui_react/src/tests/domains/external-integration/subsystems/line/integ
 # Owned verification
 - Draft action and appearance editors cover controlled shared fields, a single button-name editor, processing and published-to-next-draft behavior. Appearance tests also cover the shared save confirmation and fresh readback mismatch.
 - Publication actions cover Preview, explicit confirmation, queue receipt and retry.
-- LIFF Flex design preview covers redacted asset rendering and current formal-data connection status.
+- LIFF form preview covers form-only navigation, search/audience filters, legacy card links, readonly previews and absence of card catalog queries; standalone Flex diagrams retain redacted rendering checks.
 - Management page integration covers role selection, adjacent save/publication actions, removal of history navigation and list queries, state-driven controls and background/name persistence after save and remount.

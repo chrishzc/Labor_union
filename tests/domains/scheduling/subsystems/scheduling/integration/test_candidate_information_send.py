@@ -14,6 +14,8 @@ from subsystems.scheduling import candidate_contact_pool_workflow as workflow
 def default_message_configuration(monkeypatch):
     from domains.line.configuration import LineConfigurationSnapshot
     from domains.line.identities import LineConfigurationRevision
+    monkeypatch.setenv('LINE_PUBLIC_BASE_URL', 'https://pictures.example.invalid')
+    monkeypatch.setenv('MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET', 'candidate-picture-test-key')
     monkeypatch.setattr("infrastructure.mysql.line_message_copy.MySqlLineConfigurationRepository", lambda connection: SimpleNamespace(get=lambda kind: LineConfigurationSnapshot(kind, LineConfigurationRevision(1), '{"templates":[]}')))
 
 
@@ -96,15 +98,15 @@ def test_sender_enqueues_exact_preview_and_no_provider(monkeypatch, kind):
     payload = json.loads(queued[0].payload_json)
     assert queued[0].message_kind.value == "flex"
     assert payload["type"] == "flex"
-    table = payload["contents"]["body"]["contents"][1]
-    assert table["layout"] == "vertical"
-    assert table["contents"][0]["text"] == ("契約重點" if kind == 1 else "飲食與照護需求")
-    assert table["contents"][1]["contents"][0]["text"] == "總薪資"
-    assert table["contents"][1]["contents"][1]["text"] == "待確認"
+    pictures, confirmation = payload['contents']['contents']
+    assert pictures['hero']['type'] == 'image'
+    table = payload['_table_documents'][0]['document']['sections'][0]
+    assert table['title'] == ("契約重點" if kind == 1 else "飲食與照護需求")
+    assert table['rows'] == [['總薪資', '待確認']]
     assert preview.text not in queued[0].payload_json
-    assert payload["contents"]["body"]["contents"][0]["text"] == "訂單編號：CASE-1"
+    assert confirmation['body']['contents'][0]['text'] == '訂單編號：CASE-1'
     assert payload["altText"] == "訂單編號：CASE-1"
-    actions = payload["contents"]["footer"]["contents"]
+    actions = confirmation['footer']['contents']
     assert [item["action"]["label"] for item in actions] == ["願意承接", "提出疑問或無法承接"]
     assert actions[0]["action"]["data"] == (
         f"candidate-contact:{hashlib.sha256(b'request-1').hexdigest()}:willing"

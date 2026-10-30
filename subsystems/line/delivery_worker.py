@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Callable
 
 from domains.line.delivery import LineDeliveryStatus, LineDeliveryTaskSnapshot
+from domains.line.identities import LineDeliveryTaskId
 from shared_kernel.identities import IdempotencyKey
 from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
@@ -17,6 +18,7 @@ from subsystems.line.delivery_contracts import (
     LineProviderOutcome,
     LineProviderOutcomeType,
     LineReplyOpportunity,
+    REPLY_ONLY_WEBHOOK_SOURCE,
     RecordLineDeliveryAttemptCommand,
 )
 from shared_kernel.identities import ActorContext
@@ -63,34 +65,63 @@ class LineDeliveryWorker:
         self._worker_identity = worker_identity
         self._now = now
         self._batch_size = batch_size
+        self._new_replies_processed = 0
+
+    def run_new_reply_tasks(self, task_ids: tuple[LineDeliveryTaskId, ...]) -> None:
+        """Expedite only newly inserted, committed informational replies.
+
+        Reserve at least half the normal cycle for the original queue so Push
+        and historical work cannot be starved by ongoing user interactions.
+        """
+        budget = ClaimLineDeliveryTasksQuery(self._worker_identity, self._now(), self._batch_size)
+        limit = budget.batch_size // 2
+        for task_id in task_ids:
+            if self._new_replies_processed >= limit:
+                break
+            with self._unit_of_work_factory() as unit_of_work:
+                task = unit_of_work.delivery_tasks.get(task_id)
+                if (task is None or task.request.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE
+                        or task.status is not LineDeliveryStatus.PENDING or task.completed_attempts != 0):
+                    continue
+                task = unit_of_work.delivery_tasks.claim_specific(
+                    task_id, ClaimLineDeliveryTasksQuery(self._worker_identity, self._now(), 1)
+                )
+                unit_of_work.commit()
+            if task is not None:
+                self._new_replies_processed += 1
+                self._deliver_claimed(task)
 
     def run_once(self) -> int:
         # Preserve the existing claim contract's bounds for each cycle.
         budget = ClaimLineDeliveryTasksQuery(
             self._worker_identity, self._now(), self._batch_size
         )
-        processed = 0
+        processed = self._new_replies_processed
+        self._new_replies_processed = 0
         # Do not spend later tasks' leases waiting for earlier provider calls.
-        for _ in range(budget.batch_size):
+        for _ in range(budget.batch_size - processed):
             claimed = self._claim()
             if not claimed:
                 break
             task, = claimed
             processed += 1
-            validation_failure = self._manual_replay_validation_failure(task)
-            if not self._still_sendable(task):
-                continue
-            outcome = (
-                LineProviderOutcome(
-                    LineProviderOutcomeType.REJECTED,
-                    error_code=validation_failure,
-                    error_message="manual replay fresh validation failed",
-                )
-                if validation_failure is not None
-                else self._send(task)
-            )
-            self._record(task, outcome)
+            self._deliver_claimed(task)
         return processed
+
+    def _deliver_claimed(self, task: LineDeliveryTaskSnapshot) -> None:
+        validation_failure = self._manual_replay_validation_failure(task)
+        if not self._still_sendable(task):
+            return
+        outcome = (
+            LineProviderOutcome(
+                LineProviderOutcomeType.REJECTED,
+                error_code=validation_failure,
+                error_message="manual replay fresh validation failed",
+            )
+            if validation_failure is not None
+            else self._send(task)
+        )
+        self._record(task, outcome)
 
     def _claim(self):
         query = ClaimLineDeliveryTasksQuery(
@@ -107,6 +138,12 @@ class LineDeliveryWorker:
         reply = self._reply_opportunity(task)
         if reply is not None and self._now() < reply.expires_at:
             return self._reply(task, reply)
+        if task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE:
+            return LineProviderOutcome(
+                LineProviderOutcomeType.REJECTED,
+                error_code="line_reply_token_unavailable",
+                error_message="Reply opportunity unavailable; Push fallback disabled",
+            )
         try:
             return self._provider.send(task.request)
         except Exception as error:
@@ -121,17 +158,20 @@ class LineDeliveryWorker:
         task: LineDeliveryTaskSnapshot,
     ) -> LineReplyOpportunity | None:
         if (
-            task.request.source_aggregate_type != "knowledge_answer_request"
+            task.request.source_aggregate_type not in {"knowledge_answer_request", REPLY_ONLY_WEBHOOK_SOURCE}
             or task.completed_attempts != 0
         ):
             return None
+        reply_only = task.request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE
+        if reply_only and task.request.correlation_id.value != f"line-event:{task.request.source_aggregate_identity}":
+            return None
         with self._unit_of_work_factory() as unit_of_work:
             resolver = getattr(unit_of_work.delivery_tasks, "reply_opportunity", None)
-            return (
-                resolver(task.request.correlation_id)
-                if callable(resolver)
-                else None
-            )
+            if not callable(resolver):
+                return None
+            if reply_only:
+                return resolver(task.request.correlation_id, recipient=task.request.recipient)
+            return resolver(task.request.correlation_id)
 
     def _reply(
         self,
@@ -153,7 +193,8 @@ class LineDeliveryWorker:
                 error_code="line_reply_outcome_uncertain",
                 error_message=str(error)[:500] or "LINE reply outcome is uncertain",
             )
-        if outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED:
+        if (outcome.outcome_type is LineProviderOutcomeType.RATE_LIMITED
+                and task.request.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE):
             return self._send_push(task)
         # A 5xx response can follow an accepted reply.  A push retry key cannot
         # deduplicate that separate reply request, so do not fall back to push.
@@ -235,7 +276,8 @@ class LineDeliveryWorker:
             self._now(),
             _attempt_key(task),
             task.request.correlation_id,
-            retry_allowed=outcome.error_code != "line_reply_outcome_uncertain",
+            retry_allowed=(task.request.source_aggregate_type != REPLY_ONLY_WEBHOOK_SOURCE
+                           and outcome.error_code != "line_reply_outcome_uncertain"),
         )
         with self._unit_of_work_factory() as unit_of_work:
             result = unit_of_work.delivery_tasks.record_attempt(command)

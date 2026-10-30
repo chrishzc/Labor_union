@@ -369,6 +369,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_29_non_citizen_cases_v1.json",
     "labor_union_2026_10_29_registry_case_deletion_guards_v1.json",
     "labor_union_2026_10_29_matching_manual_reason_optional_v1.json",
+    "labor_union_2026_10_29_order_reopen_reason_optional_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2558,6 +2559,23 @@ def _metadata_state_for_artifact(
                 and _normalize_check_contract(matches[0].get("check_clause", "")) == _normalize_check_contract(old):
             return "absent"
         return "drift"
+    if artifact == "1062_order_reopen_reason_optional.sql":
+        parent = {**descriptor, "checks": {}}
+        parent_state = _artifact_metadata_state(snapshot, parent, artifact, defer_missing_triggers=defer_missing_triggers)
+        if parent_state != "exact":
+            return "partial" if parent_state == "absent" else parent_state
+        key = ("order_reopen_events", "chk_order_reopen_event_text")
+        matches = [row for row in snapshot.get("constraints", ())
+                   if (row["table_name"], row["constraint_name"]) == key]
+        if not matches:
+            return "partial"
+        if len(matches) != 1 or matches[0].get("constraint_type") != "CHECK" or matches[0].get("enforced") != "YES":
+            return "drift"
+        actual = _normalize_check_contract(matches[0].get("check_clause", ""))
+        if actual == _normalize_check_contract(descriptor["checks"][key]):
+            return "exact"
+        predecessor = _canonical_artifact_descriptor("123_order_reopen_workflow.sql")["checks"][key]
+        return "absent" if actual == _normalize_check_contract(predecessor) else "drift"
     # Current fresh databases omit retired structures; deployed historical
     # structures may remain. Neither case schedules DDL or weakens contracts
     # for any retained owner object.
@@ -3869,6 +3887,9 @@ def _local_classify_statement(statement: str) -> str:
         return "create_trigger"
     if normalized.startswith("alter table"):
         if normalized.rstrip(';') == "alter table matching_response_events drop check chk_matching_response_manual_reason":
+            return "alter_add_only"
+        reopen_optional = ROOT / "db/schema_parts/1062_order_reopen_reason_optional.sql"
+        if normalized.startswith("alter table order_reopen_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reopen_optional.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
         canonical_1008 = re.sub(
             r"\s+",
@@ -5680,6 +5701,16 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["matching_response_events"] = {
             "reason": _column_contract("varchar(500)", "YES"),
         }
+    if part_name == "1062_order_reopen_reason_optional.sql":
+        descriptor["parent_columns"]["order_reopen_events"] = {
+            "idempotency_key": _column_contract("varchar(191)", "NO"),
+            "actor": _column_contract("varchar(100)", "NO"),
+            "reason": _column_contract("varchar(500)", "NO"),
+            "correlation_id": _column_contract("varchar(191)", "NO"),
+        }
+        opening = re.search(r"ADD\s+CONSTRAINT\s+chk_order_reopen_event_text\s+CHECK\s*\(", sql, re.I).end() - 1
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][("order_reopen_events", "chk_order_reopen_event_text")] = _normalize_sql_contract(clause)
     trigger_pattern = re.compile(
         r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+"
         r"(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+"
@@ -7629,6 +7660,9 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == "123_order_reopen_workflow.sql" and any(path.name == "1062_order_reopen_reason_optional.sql" for path in SCHEMA_PARTS):
+        successor = _canonical_artifact_descriptor("1062_order_reopen_reason_optional.sql")
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "111_client_finance_ledger.sql":
         successor = _canonical_artifact_descriptor(
             "1046_client_zero_obligation_establishment.sql"

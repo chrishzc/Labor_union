@@ -19,7 +19,7 @@
 - composed page: `ui_react/src/pages/ClientRosterPage.tsx`
 - primary: `ui_react/vite.config.ts`
 - presentation transport: `ui_react/src/api/shared/application_fetch.ts` — optional build-time `/test` public prefix applied by shared transport and direct fetch consumers; no auth／body／business rule changes. `VITE_PUBLIC_PATH_PREFIX` defaults empty, keeping local `/admin/` and root API paths.
-- composed page: `ui_react/src/pages/FileSettingsPage.tsx` — `#file-settings` in 稽核與系統; the controlled-files owner enforces root permission and owns settings, not the shell.
+- retired page: `ui_react/src/pages/FileSettingsPage.tsx` — 2026-10-30 退役，不再於稽核與系統導航或 App render branches 中掛載。
 
 ## Contracts
 - `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。建置以 `manualChunks` 切分穩定第三方套件（`vendor-react`、`vendor-icons`、`vendor-utils`），並由 `ui_react/src/App.tsx` 對次要／低頻管理頁面採 `React.lazy`＋`Suspense` 動態分塊載入，保留每日核心工作台同步載入。

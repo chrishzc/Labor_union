@@ -23,7 +23,8 @@ router = APIRouter(prefix="/api/v1/line/message-previews", tags=["LINE Message P
 
 @lru_cache(maxsize=1)
 def get_message_preview_application():
-    return LineMessagePreviewApplication(get_line_configuration_application(), open_message_preview_reader)
+    from infrastructure.line.table_image_renderer import render_table_image
+    return LineMessagePreviewApplication(get_line_configuration_application(), open_message_preview_reader, render_table_image)
 
 
 def _query(call):

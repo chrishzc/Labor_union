@@ -11,6 +11,7 @@ from domains.line.identities import LineDeliveryTaskId, LineGroupId, LineSourceT
 from domains.line.order_group import LineOrderGroupBindingSnapshot, LineOrderGroupBindingStatus
 from shared_kernel.identities import ExpectedVersion
 from subsystems.line.delivery_worker import LineDeliveryWorker
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 from subsystems.line.order_group_application import LineOrderGroupApplication
 from subsystems.line.order_group_contracts import LineOrderGroupInvitationSettings, OrderLineAudience
 
@@ -97,7 +98,7 @@ def command(uow, text, event_id='event-1'):
 
 def replies(uow):
     return [json.loads(r.payload_json)['text'] for r in uow.delivery_tasks.requests.values()
-            if r.source_aggregate_type == 'line_webhook_event']
+            if r.source_aggregate_type in {'line_webhook_event', REPLY_ONLY_WEBHOOK_SOURCE}]
 
 
 def invitations(uow):

@@ -19,4 +19,6 @@ test_root: ui_react/src/tests/line_notification_rules_mutation_panel.test.tsx
 
 test_root: tests/domains/external-integration/subsystems/line/subsystems/test_line_onboarding_api.py
 
-- 同一 React oracle 保護訊息清單六則分頁與搜尋定位、單欄編輯的跨欄草稿保留、範例展開，以及多卡逐張切換不重建／發送訊息；實際畫面檢查固定 504px 與移除清單／編輯外框／預覽內層捲動。
+- 同一 React oracle 保護訊息清單六則分頁與搜尋定位、整張卡片同時編輯標題／自由段落／按鈕及插入系統資料、範例展開，以及多卡逐張切換不重建／發送訊息；實際畫面檢查說明固定 504px 與移除清單／編輯外框／預覽內層捲動。確認包預設顯示最後的確認卡。
+- 同一 API／preview roots 保護沒有舊說明節點仍可增加段落、舊標題文案承接、所有內建卡片可編輯正文、客戶與月嫂及不同流程各自儲存，以及多月嫂 carousel 的說明只進入最後確認卡；圖片 root 同時保護清空說明不將 owner 表格誤放入互動卡。
+- 同一 catalog／React oracle 保護正式媒合只列完整推薦確認包、初步候選項目保留，三個原單卡編輯入口導向完整包；原唯讀單卡 preview 仍沿既有測試驗證。

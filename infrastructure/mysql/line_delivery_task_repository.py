@@ -18,6 +18,7 @@ from domains.line.delivery import (
     LineDeliveryStatus,
     LineDeliveryTaskSnapshot,
     LineMessageKind,
+    LineRecipient,
     LineRetryPolicy,
     plan_delivery_attempt,
     transition_delivery_status,
@@ -39,6 +40,7 @@ from subsystems.line.delivery_contracts import (
     EnqueueLineDeliveryResult,
     LineDeliveryCommandOutcome,
     LineReplyOpportunity,
+    REPLY_ONLY_WEBHOOK_SOURCE,
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
     provider_attempt_outcome,
@@ -64,6 +66,7 @@ class MySqlLineDeliveryTaskRepository:
         self._lease_duration = timedelta(seconds=lease_duration_seconds)
         self._retry_base_delay = retry_base_delay_seconds
         self._retry_maximum_delay = retry_maximum_delay_seconds
+        self._new_reply_task_ids: list[LineDeliveryTaskId] = []
 
     def enqueue(self, request: LineDeliveryRequest) -> EnqueueLineDeliveryResult:
         try:
@@ -72,11 +75,17 @@ class MySqlLineDeliveryTaskRepository:
             if mysql_error_code(error) != 1062:
                 raise
             return self._existing_enqueue(request)
+        if request.source_aggregate_type == REPLY_ONLY_WEBHOOK_SOURCE:
+            self._new_reply_task_ids.append(LineDeliveryTaskId(task_id))
         return EnqueueLineDeliveryResult(
             LineDeliveryCommandOutcome.CREATED,
             LineDeliveryTaskId(task_id),
             LineDeliveryStatus.PENDING,
         )
+
+    def new_reply_task_ids(self) -> tuple[LineDeliveryTaskId, ...]:
+        """Only inserts made by this UoW; duplicate/previously queued tasks are excluded."""
+        return tuple(self._new_reply_task_ids)
 
     def exists_for_key(self, key: IdempotencyKey) -> bool:
         with self._connection.cursor() as cursor:
@@ -89,15 +98,32 @@ class MySqlLineDeliveryTaskRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _snapshot(row)
 
+    def table_image_document(self, key: str, index: int):
+        from subsystems.line.table_image_contracts import TableDocument
+        from subsystems.line.table_image_messages import DOCUMENTS_KEY
+        with self._connection.cursor() as cursor:
+            cursor.execute('SELECT payload_snapshot FROM line_delivery_tasks WHERE idempotency_key=%s', (key,))
+            row = cursor.fetchone()
+        if row is None:
+            raise LookupError('table image not found')
+        payload = json.loads(canonical_json_value(row['payload_snapshot']))
+        try:
+            return TableDocument.from_mapping(payload[DOCUMENTS_KEY][index]['document'])
+        except (KeyError, IndexError, TypeError) as error:
+            raise LookupError('table image not found') from error
+
     def reply_opportunity(
         self,
         correlation_id: CorrelationId,
+        *,
+        recipient: LineRecipient | None = None,
     ) -> LineReplyOpportunity | None:
         event_identity = _line_event_identity(correlation_id)
         if event_identity is None:
             return None
         with self._connection.cursor() as cursor:
-            cursor.execute(_REPLY_OPPORTUNITY_SQL, (event_identity,))
+            sql = _INFORMATION_REPLY_OPPORTUNITY_SQL if recipient is not None else _REPLY_OPPORTUNITY_SQL
+            cursor.execute(sql, (event_identity,))
             row = optional_row(cursor.fetchone())
         if row is None:
             return None
@@ -110,6 +136,15 @@ class MySqlLineDeliveryTaskRepository:
             return None
         if payload.get("mode") == "standby":
             return None
+        if recipient is not None:
+            source = payload.get("source")
+            source_type = recipient.recipient_type.value
+            identity_key = {"user": "userId", "group": "groupId", "room": "roomId"}[source_type]
+            if (payload.get("immediate_reply_sent") is True
+                    or not isinstance(source, dict)
+                    or source.get("type") != source_type
+                    or source.get(identity_key) != recipient.identity.value):
+                return None
         return LineReplyOpportunity(
             reply_token.strip(),
             aware_utc(row["received_at_utc"]) + timedelta(seconds=45),
@@ -602,6 +637,8 @@ def _admin_record(row: object) -> LineDeliveryAdminRecord:
         row = dict(row)
     _require_row_shape(row, _ADMIN_ROW_KEYS)
     payload = canonical_json_value(row["payload_snapshot"])
+    from subsystems.line.table_image_messages import admin_picture_payload
+    payload = admin_picture_payload(payload)
     if str(row["source_aggregate_type"]) in {"line_order_group_invitation", "service_start_invitation"}:
         payload = _redact_invitation_payload(payload)
     return LineDeliveryAdminRecord(
@@ -725,6 +762,12 @@ _SELECT_BY_KEY_SQL = (
 _REPLY_OPPORTUNITY_SQL = (
     "SELECT payload_snapshot,received_at_utc FROM line_inbox_events "
     "WHERE event_identity=%s AND event_type='message' AND source_type='user'"
+)
+_INFORMATION_REPLY_OPPORTUNITY_SQL = (
+    "SELECT payload_snapshot,received_at_utc FROM line_inbox_events "
+    "WHERE event_identity=%s AND ((event_type IN ('message','postback') "
+    "AND source_type IN ('user','group','room')) "
+    "OR (event_type='follow' AND source_type='user'))"
 )
 _CLAIM_CANDIDATES_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE "

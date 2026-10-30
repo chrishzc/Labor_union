@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Callable
 
 from domains.line.webhook import LineWebhookProcessingStatus
+from domains.line.identities import LineDeliveryTaskId
 from subsystems.line.event_dispatcher import (
     LineEventDispatchStatus,
     LineEventDispatcher,
@@ -36,12 +37,15 @@ class LineWebhookEventConsumer:
         worker_identity: str,
         now: Callable[[], datetime],
         batch_size: int = 25,
+        *,
+        on_new_reply_tasks: Callable[[tuple[LineDeliveryTaskId, ...]], None] | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._dispatcher = dispatcher
         self._worker_identity = worker_identity
         self._now = now
         self._batch_size = batch_size
+        self._on_new_reply_tasks = on_new_reply_tasks
 
     def run_once(self) -> int:
         claimed = self._claim()
@@ -74,11 +78,21 @@ class LineWebhookEventConsumer:
                 unit_of_work.webhook_inbox.complete(
                     _completion(event, self._now(), status)
                 )
+                reply_task_ids = (
+                    unit_of_work.delivery_tasks.new_reply_task_ids()
+                    if self._on_new_reply_tasks is not None else ()
+                )
                 unit_of_work.commit()
         except TerminalLineEventError as error:
             self._record_failure(event, "terminal_failed", error)
+            return
         except Exception as error:
             self._record_failure(event, "retryable_failed", error)
+            return
+        # This callback uses fresh leases after commit. Delivery failures cannot
+        # roll back/retry an already committed business event.
+        if reply_task_ids and self._on_new_reply_tasks is not None:
+            self._on_new_reply_tasks(reply_task_ids)
 
     def _record_failure(self, event, status: str, error: Exception) -> None:
         """Persist only failure completion after the business UoW has rolled back."""

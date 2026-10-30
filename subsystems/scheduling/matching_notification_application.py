@@ -511,6 +511,14 @@ class MatchingNotificationApplication:
         import json
         key = ("card-customer-confirmation" if snapshot.get("package_type") == "customer_confirmation" else "card-customer-profiles") if kind is MatchingNotificationKind.CUSTOMER_PROFILES else "card-caregiver-information" + ("-2" if kind is MatchingNotificationKind.CAREGIVER_INFO_2 else "")
         payload_json = canonical_line_payload_json(configured_payload(unit_of_work, key, json.loads(payload_json), {"case_no": command.plan.case_no}))
+        if snapshot.get('package_type') == 'customer_confirmation':
+            from subsystems.line.table_image_contracts import information_document, weekly_document
+            from subsystems.line.table_image_messages import with_table_images
+            documents = (information_document('訂單資訊－1｜客戶費用', command.plan.case_no, snapshot['order_information_1'], info_type=1),
+                         information_document('訂單資訊－2', command.plan.case_no, snapshot['order_information_2'], info_type=2),
+                         weekly_document(command.plan.case_no, snapshot['weekly_service_rows']))
+            payload_json = canonical_line_payload_json(with_table_images(json.loads(payload_json), documents,
+                f'matching-delivery:{command.idempotency_key.value}', self._now()))
         intent_id = repository.append_notification_intent(
             plan=command.plan,
             segment_id=segment_id,

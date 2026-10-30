@@ -5,9 +5,8 @@ Description: 將客服文字路由為 durable LINE 回覆，並以同一 UoW 建
 
 from __future__ import annotations
 
-from subsystems.line.message_copy import CONTACT_RECEIVED
 from subsystems.line.message_copy_catalog import configured_payload
-from subsystems.line.webhook_immediate_reply import is_immediate_reply_sent
+from subsystems.line.delivery_contracts import REPLY_ONLY_WEBHOOK_SOURCE
 
 from datetime import datetime, timedelta
 import os
@@ -18,6 +17,7 @@ from domains.customer_service.escalation import EscalationContext, TriggerCode, 
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identity_flow import LineIdentityFlowPurpose
+from domains.line.identities import LineSourceType
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.customer_service.escalation_contracts import (
@@ -60,6 +60,10 @@ _RESUME_AI_ALIASES = {
     "恢復機器人回答",
     "繼續讓機器人回答",
 }
+_REPLY_ONLY_SUFFIXES = frozenset({
+    "menu", "order-update-menu", "registration", "clarification", "unavailable",
+    "retired-ai-action", "service_flow", "payment_subsidy", "service_progress", "other",
+})
 
 
 def _normalized_resume_command(text: str) -> str:
@@ -305,16 +309,8 @@ class LineServiceHelpApplication:
             command = _escalation_command(inbox, line_user_id, referral)
             self._escalation_gateway.create_for_ticket(command, ticket, unit_of_work)
         unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        if not is_immediate_reply_sent(inbox):
-            self._reply_or_enqueue(
-                inbox,
-                unit_of_work,
-                line_user_id,
-                _handoff_active_payload(
-                    CONTACT_RECEIVED
-                ),
-                "ticket",
-            )
+        # The webhook may acknowledge via Reply API. A missing or failed Reply
+        # never creates a Push task; ticket persistence remains independent.
         return int(ticket.ticket_id)
 
     def _retired_ai_action(self, inbox, unit_of_work, line_user_id) -> None:
@@ -397,6 +393,11 @@ class LineServiceHelpApplication:
 
     def _enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix, *, reason_code=None):
         event_id = inbox.event.event_id.value
+        source = getattr(inbox.event, "source", None)
+        same_private_chat = (
+            getattr(source, "source_type", None) is LineSourceType.USER
+            and getattr(source, "user_id", None) == line_user_id
+        )
         copy_key = {"menu": "service-menu", "order-update-menu": "order-update-menu", "ticket": "service-contact",
                     "service_flow": "service-flow", "payment_subsidy": "service-payment", "profile_update": "service-profile-update", "order-update": "service-order-update", "other": "service-other"}.get(suffix)
         if copy_key:
@@ -406,7 +407,8 @@ class LineServiceHelpApplication:
                 LineMessageKind.FLEX if payload.get("type") == "flex" else LineMessageKind.TEXT,
                 canonical_line_payload_json(payload), self._now(),
                 IdempotencyKey(f"service-help:{suffix}:{event_id}"),
-                CorrelationId(f"line-event:{event_id}"), "line_webhook_event", event_id,
+                CorrelationId(f"line-event:{event_id}"),
+                REPLY_ONLY_WEBHOOK_SOURCE if same_private_chat and suffix in _REPLY_ONLY_SUFFIXES else "line_webhook_event", event_id,
             )
         delivery = unit_of_work.delivery_tasks.enqueue(request)
         notification_rules = getattr(unit_of_work, "notification_rules", None)

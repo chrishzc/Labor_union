@@ -22,6 +22,7 @@ from subsystems.contract_signing.external_signing_contracts import (
 from subsystems.contract_signing.external_signing_workflow import (
     ManualSigningNotificationTarget,
     SendExternalSigningReminders,
+    SigningReminderContext,
 )
 from subsystems.contract_signing.line_delivery import (
     ContractLineBinding,
@@ -39,15 +40,9 @@ class MySqlExternalSigningHandoffNotificationPort:
         self._unsigned_repository = unsigned_repository
         self._delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
 
-    def _targets(self, facts: ExternalSigningSessionFacts):
+    def _targets(self, facts: ExternalSigningSessionFacts | SigningReminderContext):
         client_document_id = facts.client_document_version_id
-        if client_document_id is None:
-            raise self._blocked(
-                "contract_unsigned_pdf_missing",
-                "客戶未簽契約 PDF 尚未備妥。",
-            )
-
-        targets: list[tuple[str, str, int, int | None]] = [
+        targets: list[tuple[str, str, int | None, int | None]] = [
             (
                 "customer",
                 facts.client_subject_reference,
@@ -73,10 +68,8 @@ class MySqlExternalSigningHandoffNotificationPort:
                 raise self._blocked("contract_unsigned_pdf_missing", f"{label}未簽契約 PDF 尚未備妥。")
 
     def enqueue_notifications(
-        self, command: SendExternalSigningReminders, facts: ExternalSigningSessionFacts,
+        self, command: SendExternalSigningReminders, facts: ExternalSigningSessionFacts | SigningReminderContext,
     ) -> tuple[ManualSigningNotificationTarget, ...]:
-        self.validate_documents(facts)
-
         prepared = []
         manual_targets = []
         for subject_type, subject_reference, document_id, segment_id in self._targets(facts):

@@ -14,11 +14,26 @@ function previewError(error: unknown): string {
   return '預覽載入失敗，請重新查詢。';
 }
 
+function TablePicture({ node }: { node: PreviewNode }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  return <><button type="button" className="notification-table-picture" aria-label={`放大${node.text}`} onClick={() => dialog.current?.showModal()}><img className="notification-table-image" src={node.image_data} alt={node.text} /></button><dialog ref={dialog} className="notification-picture-dialog" aria-label={`${node.text}完整圖片`}><button type="button" className="notification-button" onClick={() => dialog.current?.close()}>關閉圖片</button><img src={node.image_data} alt={`${node.text}完整圖片`} /></dialog></>;
+}
+
 function FlexNode({ node, onAction }: { node: PreviewNode; onAction(value: string): void }) {
+  if (node.kind === 'image') return <TablePicture node={node} />;
   if (node.kind === 'text') return <p className={`notification-flex-text ${node.bold ? 'bold' : ''} ${['md', 'lg', 'xl', 'xxl'].includes(node.size) ? 'large' : ''}`}>{node.text}</p>;
   if (node.kind === 'separator') return <hr />;
   if (node.kind === 'button') return <button type="button" className={`notification-flex-action ${node.primary ? 'primary' : ''}`} onClick={() => onAction(`${node.text}：${node.action_description}`)}>{node.text}</button>;
   return <div className={`notification-flex-box ${node.layout}`}>{node.children.map((child, index) => <FlexNode key={index} node={child} onAction={onAction} />)}</div>;
+}
+
+function cardTitle(node: PreviewNode): string {
+  if (node.kind === 'text' || node.kind === 'image') return node.text.trim();
+  for (const child of node.children) {
+    const title = cardTitle(child);
+    if (title) return title;
+  }
+  return '';
 }
 
 export function LineMessagePreviewWorkspace({ descriptor, entryId, content, client, editor, footer, showSources = true }: {
@@ -28,13 +43,15 @@ export function LineMessagePreviewWorkspace({ descriptor, entryId, content, clie
   const [state, setState] = useState<{ key: string; result?: MessagePreviewResult; error?: string } | null>(null);
   const [action, setAction] = useState('');
   const [retry, setRetry] = useState(0);
-  const [bubbleIndex, setBubbleIndex] = useState(0);
+  const [bubbleIndex, setBubbleIndex] = useState<number | 'last'>(0);
   const generation = useRef(0);
   const key = JSON.stringify([entryId, content, retry]);
   const result = state?.key === key ? state.result : undefined;
   const failed = state?.key === key && state.error;
-  const visibleBubble = Math.min(bubbleIndex, Math.max(0, (result?.bubbles.length ?? 1) - 1));
-  useEffect(() => { setBubbleIndex(0); }, [entryId]);
+  const lastBubble = Math.max(0, (result?.bubbles.length ?? 1) - 1);
+  const visibleBubble = bubbleIndex === 'last' ? lastBubble : Math.min(bubbleIndex, lastBubble);
+  const selectBubble = (index: number) => { setBubbleIndex(index); setAction(''); };
+  useEffect(() => { setBubbleIndex(['card-customer-confirmation', 'card-customer-profiles', 'card-candidate-information-1', 'card-candidate-information-2'].includes(entryId) ? 'last' : 0); }, [entryId]);
   useEffect(() => {
     if (!descriptor) return;
     const controller = new AbortController(), request = ++generation.current;
@@ -58,8 +75,12 @@ export function LineMessagePreviewWorkspace({ descriptor, entryId, content, clie
     <aside className="notification-phone-pane" aria-label="LINE 對話預覽">
       <div className="notification-phone-heading"><strong>用戶看到的樣子</strong><span><ShieldCheck />僅預覽，不發送</span></div>
       <p className="notification-device-label">一般手機 · 完整訊息預覽</p>
-      {result?.format === 'flex' && result.bubbles.length > 1 && <nav className="notification-preview-pagination" aria-label="卡片預覽切換"><button type="button" className="notification-button" aria-label="上一張卡片" disabled={visibleBubble === 0} onClick={() => setBubbleIndex(visibleBubble - 1)}>上一張</button><span aria-live="polite">第 {visibleBubble + 1} / {result.bubbles.length} 張</span><button type="button" className="notification-button" aria-label="下一張卡片" disabled={visibleBubble === result.bubbles.length - 1} onClick={() => setBubbleIndex(visibleBubble + 1)}>下一張</button></nav>}
-      <div className="notification-phone"><div className="notification-phone-screen"><div className="notification-phone-clock">9:41 <Smartphone /></div><div className="notification-phone-nav"><ChevronLeft /><strong>新竹市月子工會</strong><Search /></div><div className="notification-phone-chat">
+      <div className="notification-phone"><div className="notification-phone-screen"><div className="notification-phone-clock">9:41 <Smartphone /></div><div className="notification-phone-nav"><ChevronLeft /><strong>新竹市月子工會</strong><Search /></div>
+      {result?.status === 'ready' && result.format === 'flex' && result.bubbles.length > 1 && <nav className="notification-preview-pagination" aria-label="卡片預覽切換">
+        <label>預覽卡片<select aria-label="選擇預覽卡片" value={visibleBubble} onChange={event => selectBubble(Number(event.target.value))}>{result.bubbles.map((bubble, index) => <option key={index} value={index}>{index + 1}. {cardTitle(bubble) || '訊息卡片'}</option>)}</select></label>
+        <button type="button" className="notification-button" aria-label="上一張卡片" disabled={visibleBubble === 0} onClick={() => selectBubble(visibleBubble - 1)}>上一張</button><span aria-live="polite">第 {visibleBubble + 1} / {result.bubbles.length} 張</span><button type="button" className="notification-button" aria-label="下一張卡片" disabled={visibleBubble === result.bubbles.length - 1} onClick={() => selectBubble(visibleBubble + 1)}>下一張</button>
+      </nav>}
+      <div className="notification-phone-chat">
         <span className="notification-chat-today">今天</span><p className="notification-chat-sender">新竹市月子工會</p>
         {!descriptor ? <p className="notification-preview-state" role="status">此訊息的預覽來源尚未載入，請重新整理。</p> : failed ? <div className="notification-preview-state" role="alert">{failed}<button type="button" className="notification-text-button" onClick={() => setRetry(v => v + 1)}>重新查詢預覽</button></div> : !result ? <p className="notification-preview-state" role="status">正在產生預覽…</p> : result.status !== 'ready' ? <p className="notification-preview-state" role="status">{result.note}</p> : result.format === 'text' ? <div className="notification-bubble">{result.text}</div> : <div className="notification-flex-carousel">{result.bubbles[visibleBubble] ? <article className="notification-real-flex-bubble"><FlexNode node={result.bubbles[visibleBubble]} onAction={setAction} /></article> : <p className="notification-preview-state" role="status">此訊息目前沒有可顯示的卡片。</p>}</div>}
       </div><div className="notification-phone-composer">＋ <span>輸入訊息</span> ☺</div></div></div>

@@ -29,6 +29,7 @@ from domains.line.configuration import (
 from domains.line.delivery import (
     LineDeliveryRequest,
     LineDeliveryTaskSnapshot,
+    LineRecipient,
 )
 from domains.line.identities import (
     LineConfigurationRevision,
@@ -94,6 +95,7 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
 )
+from subsystems.line.table_image_contracts import TableDocument
 from subsystems.line.delivery_admin_contracts import (
     LineDeliveryAdminPage,
     LineDeliveryAdminQuery,
@@ -576,15 +578,20 @@ class LineIdentityReviewRepositoryPort(Protocol):
 
 
 class LineDeliveryTaskRepositoryPort(Protocol):
+    def table_image_document(self, key: str, index: int) -> TableDocument: ...
     def exists_for_key(self, key: IdempotencyKey) -> bool: ...
 
     def enqueue(self, request: LineDeliveryRequest) -> EnqueueLineDeliveryResult: ...
+
+    def new_reply_task_ids(self) -> tuple[LineDeliveryTaskId, ...]: ...
 
     def get(self, task_id: LineDeliveryTaskId) -> LineDeliveryTaskSnapshot | None: ...
 
     def reply_opportunity(
         self,
         correlation_id: CorrelationId,
+        *,
+        recipient: LineRecipient | None = None,
     ) -> LineReplyOpportunity | None: ...
 
     def claim(

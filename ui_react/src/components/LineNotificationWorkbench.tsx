@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { ArrowLeft, LayoutPanelTop, MessageSquare, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { FLOW_MANAGED_NOTIFICATION_EVENTS as FLOW_MANAGED_EVENTS, messageFlowStatus } from '../adapters/line_configuration/line_message_flow_adapter';
 import { LineMessagePreviewWorkspace } from './LineMessagePreviewWorkspace';
+import { LineCardCopyEditor, cardCopyFieldId, type CardCopyField } from './LineCardCopyEditor';
 import { lineMessagePreviewClient, type LineMessagePreviewClient, type PreviewDescriptor } from '../api/line_notification_rules/line_message_preview_client';
 import { LineNotificationRulesMutationPanel } from './LineNotificationRulesMutationPanel';
 import {
@@ -39,16 +40,19 @@ interface NotificationContent {
   content: string;
   revision: number;
   variables: string[];
-  fields?: { id: string; label: string; content: string; max_length: number }[];
+  fields?: CardCopyField[];
 }
 
 const LIBRARY_PAGE_SIZE = 6;
 
-function copyFieldLabel(fields: NonNullable<NotificationContent['fields']>, index: number): string {
-  const field = fields[index];
-  const count = fields.filter(item => item.label === field.label).length;
-  return count > 1 ? `${field.label} ${fields.slice(0, index + 1).filter(item => item.label === field.label).length}` : field.label;
-}
+const CARD_RECIPIENTS: Record<string, string> = {
+  'card-customer-confirmation': '客戶私人聊天室', 'card-customer-profiles': '客戶私人聊天室',
+  'card-candidate-information-1': '候選月嫂私人聊天室', 'card-candidate-information-2': '候選月嫂私人聊天室',
+  'card-candidate-information-3': '候選月嫂私人聊天室', 'card-caregiver-information': '正式媒合月嫂私人聊天室',
+  'card-caregiver-information-2': '正式媒合月嫂私人聊天室',
+  'card-union-question': '客戶私人聊天室', 'card-union-answer': '月嫂私人聊天室',
+  'group-invitation-customer': '客戶私人聊天室', 'group-invitation-staff': '月嫂私人聊天室',
+};
 
 interface NotificationEntry {
   id: string;
@@ -112,7 +116,6 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   const [targetUnavailable, setTargetUnavailable] = useState(false);
   const [formatFilter, setFormatFilter] = useState<'all' | 'text' | 'flex'>('all');
   const [libraryPage, setLibraryPage] = useState(1);
-  const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const [deliveryTab, setDeliveryTab] = useState(false);
   const [catalog, setCatalog] = useState<LineNotificationRulesCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,7 +201,7 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   useEffect(() => { setBuiltinContents({}); }, [reload]);
 
   useEffect(() => {
-    if (!selected || selected.kind !== 'card' || builtinContents[selected.id]) return;
+    if (!selected || selected.kind !== 'card' || selected.id === 'card-candidate-information-3' || builtinContents[selected.id]) return;
     const controller = new AbortController();
     const id = selected.id;
     void templates.get(id, { signal: controller.signal }).then(data => {
@@ -265,10 +268,14 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     if (!saveValidation.validate([{ value: content, label: '通知內容', ref: saveFieldRef }])) return;
     if (selected.data.fields?.length) {
       const values = JSON.parse(content) as Record<string, string>;
-      const invalid = selected.data.fields.find(field => !values[field.id]?.trim() || values[field.id].length > field.max_length);
+      const invalid = selected.data.fields.find(field => (!field.optional && !values[field.id]?.trim()) || (values[field.id]?.length ?? 0) > field.max_length);
       if (invalid) {
-        setActiveFieldId(invalid.id);
-        window.requestAnimationFrame(() => saveFieldRef.current?.focus());
+        window.requestAnimationFrame(() => {
+          const element = document.getElementById(cardCopyFieldId(invalid.id));
+          const details = element?.closest('details');
+          if (details) details.open = true;
+          element?.focus();
+        });
         setSaveError('請填寫完整文案，並確認各欄位的字數限制。');
         return;
       }
@@ -298,13 +305,15 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
   };
 
   const allEntries: NotificationEntry[] = [...entries, ...descriptors.filter(item => item.builtin).map(item => ({
-    id: item.id, name: item.name, recipient: item.id.startsWith('identity-bound-') ? ({ 'identity-bound-customer': '客戶私人聊天室', 'identity-bound-staff': '月嫂私人聊天室', 'identity-bound-admin': '工會人員私人聊天室' }[item.id] ?? '') : MANUAL_FLOW_DETAILS[item.id]?.recipient ?? (item.requires_case || item.requires_staff ? '公版案件與月嫂範例' : '依正式流程對象'), kind: 'card' as const, data: builtinContents[item.id]?.data ?? null, error: builtinContents[item.id]?.error ?? null,
+    id: item.id, name: item.name, recipient: CARD_RECIPIENTS[item.id] ?? (item.id.startsWith('identity-bound-') ? ({ 'identity-bound-customer': '客戶私人聊天室', 'identity-bound-staff': '月嫂私人聊天室', 'identity-bound-admin': '工會人員私人聊天室' }[item.id] ?? '') : MANUAL_FLOW_DETAILS[item.id]?.recipient ?? (item.requires_case || item.requires_staff ? '公版案件與月嫂範例' : '依正式流程對象')), kind: 'card' as const, data: builtinContents[item.id]?.data ?? null, error: builtinContents[item.id]?.error ?? null,
   }))];
   // Parent navigation has already passed the shared unsaved-draft guard.
   // Wait for both queries: a builtin target may arrive after the rules list.
   useEffect(() => {
     if (!selectedEntryId || loading || previewCatalogLoading) return;
-    const resolvedId = ({ 'template-bind_success_new_order': 'identity-bound-customer', 'template-staff_switch_success': 'identity-bound-staff' } as Record<string, string>)[selectedEntryId] ?? selectedEntryId;
+    const resolvedId = ({ 'template-bind_success_new_order': 'identity-bound-customer', 'template-staff_switch_success': 'identity-bound-staff',
+      'card-caregiver-information': 'card-customer-confirmation', 'card-caregiver-information-2': 'card-customer-confirmation', 'card-customer-profiles': 'card-customer-confirmation',
+    } as Record<string, string>)[selectedEntryId] ?? selectedEntryId;
     const entry = allEntries.find(item => item.id === resolvedId);
     setTargetUnavailable(!entry);
     if (!entry) { setSelected(null); return; }
@@ -316,7 +325,6 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     setFormatFilter('all'); onSearchChange(''); onEnabledChange('all');
   }, [selectedEntryId, entries, descriptors, builtinContents, loading, previewCatalogLoading]);
 
-  useEffect(() => { setActiveFieldId(null); }, [selected?.id]);
   const query = search.trim().toLowerCase();
   const formatOf = (entry: NotificationEntry) => descriptors.find(item => item.id === entry.id)?.format ?? 'text';
   const statusOf = (entry: NotificationEntry) => messageFlowStatus({ id: entry.id, builtin: entry.kind === 'card' }, entry.rule);
@@ -332,21 +340,22 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
     if (selectedIndex >= 0) setLibraryPage(Math.floor(selectedIndex / LIBRARY_PAGE_SIZE) + 1);
   }, [selected?.id, selectedIndex, search, enabled, formatFilter]);
   const fields = selected?.data?.fields ?? [];
-  const requestedFieldIndex = fields.findIndex(field => field.id === activeFieldId);
-  const defaultFieldIndex = fields.reduce((best, field, index) => field.label === '卡片文字' && (fields[best]?.label !== '卡片文字' || field.content.length > fields[best].content.length) ? index : best, 0);
-  const fieldIndex = requestedFieldIndex >= 0 ? requestedFieldIndex : defaultFieldIndex;
-  const activeField = fields[fieldIndex];
   const managed = selected?.rule ? FLOW_MANAGED_EVENTS.has(selected.rule.eventCode) : false;
   const flowControlled = selected ? statusOf(selected) === 'flow' : false;
   const manualFlow = selected ? MANUAL_FLOW_DETAILS[selected.id] : undefined;
   const descriptor = descriptors.find(item => item.id === selected?.id);
-  const contentLoading = selected?.kind === 'card' && !builtinContents[selected.id];
+  const automaticImage = selected?.id === 'card-candidate-information-3';
+  const contentLoading = selected?.kind === 'card' && !automaticImage && !builtinContents[selected.id];
+  const confirmationFlows = ['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected?.id ?? '') ? [
+    { id: 'card-customer-confirmation', label: '正式媒合 · 客戶確認' },
+    { id: selected?.id === 'card-candidate-information-2' ? selected.id : 'card-candidate-information-1', label: '初步候選 · 月嫂承接' },
+  ] : [];
 
   return (
     <section className="notification-workspace" aria-label="通知內容設定">
       {onReturnToFlow && selectedEntryId && <button type="button" className="notification-text-button" disabled={updating} onClick={() => requestLeave(onReturnToFlow)}><ArrowLeft aria-hidden="true" />返回 LINE 流程圖</button>}
       <div className="notification-page-heading">
-        <div><h2>通知與發送</h2><p>選擇訊息與欄位，修改後預覽並儲存。</p></div>
+        <div><h2>通知與發送</h2><p>選擇訊息，自由編寫內容並即時預覽。</p></div>
         <div className="notification-heading-actions"><span className="notification-safe-badge"><ShieldCheck />預覽不會實際發送</span><button type="button" className="notification-button" disabled={loading || updating} onClick={() => requestLeave(() => { setSelected(null); setNotice(null); setReload(value => value + 1); })}><RefreshCw aria-hidden="true" />重新整理</button></div>
       </div>
       {notice && <p className="notification-feedback" role="status">{notice}</p>}
@@ -379,9 +388,15 @@ export const LineNotificationWorkbench: FC<LineNotificationWorkbenchProps> = ({
             </section> : <>
               {selected.error && !(selected.textEditingUnsupported && formatOf(selected) === 'flex') && <p className="notification-feedback error" role="alert">{selected.error}</p>}
               {selected.textEditingUnsupported && formatOf(selected) === 'flex' && <p className="notification-help">此卡片使用結構化內容，請查看右側預覽；可在「發送設定」調整啟用狀態。</p>}
-              {contentLoading && <p className="notification-feedback" role="status">正在載入訊息內容…</p>}{selected.data && !contentLoading ? <>{activeField ? <><div className="notification-field-switcher"><label htmlFor="notification-active-field">編輯欄位<select id="notification-active-field" value={activeField.id} disabled={saving} onChange={event => setActiveFieldId(event.target.value)}>{fields.map((field, index) => <option key={field.id} value={field.id}>{copyFieldLabel(fields, index)} · {field.content.replace(/\s+/g, ' ').slice(0, 22)}</option>)}</select></label><div className="notification-field-navigation"><button type="button" className="notification-button" aria-label="上一個欄位" disabled={saving || fieldIndex === 0} onClick={() => setActiveFieldId(fields[fieldIndex - 1].id)}>上一欄</button><span aria-live="polite">{fieldIndex + 1} / {fields.length}</span><button type="button" className="notification-button" aria-label="下一個欄位" disabled={saving || fieldIndex === fields.length - 1} onClick={() => setActiveFieldId(fields[fieldIndex + 1].id)}>下一欄</button></div></div><label className="notification-content-field notification-copy-field" htmlFor="notification-copy-content">{copyFieldLabel(fields, fieldIndex)}<textarea key={activeField.id} ref={saveFieldRef} id="notification-copy-content" aria-required="true" rows={16} maxLength={activeField.max_length} value={(JSON.parse(content) as Record<string, string>)[activeField.id] ?? ''} disabled={saving} onChange={event => { setContent(JSON.stringify({ ...JSON.parse(content), [activeField.id]: event.target.value })); setSaveError(null); }} /></label><p className="notification-help">切換欄位會保留修改；按「儲存內容」一次儲存這則訊息。</p></> : <label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>}{saveValidation.feedback}
+              {['card-customer-confirmation', 'card-candidate-information-1', 'card-candidate-information-2'].includes(selected.id) && <p className="notification-help">表格圖片由系統資料自動產生；這裡只編輯最後確認卡片的文案與按鈕名稱。</p>}
+              {automaticImage && <p className="notification-help">每週服務安排圖片由系統資料自動產生，無需編輯文案。</p>}
+              {confirmationFlows.length > 0 && <nav className="notification-card-flow-tabs" aria-label="確認卡流程">{confirmationFlows.map(flow => {
+                const entry = allEntries.find(item => item.id === flow.id);
+                return entry && <button key={flow.id} type="button" aria-pressed={selected.id === flow.id} disabled={updating} onClick={event => open(entry, event.currentTarget)}>{flow.label}</button>;
+              })}<span>不同流程的文案各自儲存</span></nav>}
+              {contentLoading && <p className="notification-feedback" role="status">正在載入訊息內容…</p>}{selected.data && !contentLoading ? <>{fields.length > 0 ? <LineCardCopyEditor fields={fields} content={content} variables={selected.data.variables} disabled={saving} bodyRef={saveFieldRef} onChange={value => { setContent(value); setSaveError(null); }} /> : <label className="notification-content-field" htmlFor="notification-message-content">{managed ? '通知說明文字' : '通知內容'}<textarea ref={saveFieldRef} aria-required="true" id="notification-message-content" rows={16} value={content} maxLength={5000} disabled={saving} onChange={event => { setContent(event.target.value); setSaveError(null); }} /></label>}{saveValidation.feedback}
                 {managed && <p className="notification-help">說明文字用於新建立的通知；案件資料、互動按鈕與發送流程由系統帶入。</p>}
-                {selected.data.variables.length > 0 ? <p className="notification-help">預覽變數使用下方公版範例值；實際發送由正式流程帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p> : <p className="notification-help">此段文案沒有需要手動填寫的變數。</p>}
+                {fields.length === 0 && (selected.data.variables.length > 0 ? <p className="notification-help">預覽變數使用下方公版範例值；實際發送由正式流程帶入：{selected.data.variables.map(variable => <code key={variable}>{`{${variable}}`}</code>)}</p> : <p className="notification-help">此段文案沒有需要手動填寫的變數。</p>)}
               </> : selected.kind === 'card' && !contentLoading && !selected.error && <p className="notification-help">使用正式訊息與卡片組裝方式，以下方公版範例資料展示內容。</p>}
               {saveError && <p className="notification-feedback error" role="alert">{saveError}</p>}
             </>}

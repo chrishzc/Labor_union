@@ -10,6 +10,7 @@
 ## Implementation
 - primary:
   - `subsystems/line/worker_runtime.py`
+  - `subsystems/line/webhook_event_consumer.py` — 逐事件業務提交／失敗隔離；只在 commit 後將本次新建的資訊回覆 ID 交由既有 delivery worker 快速投遞，投遞失敗不得重試已提交業務。
   - `subsystems/line/runtime_monitoring_application.py`
   - `subsystems/line/runtime_alert_application.py` — heartbeat／health observation 持久化與 RuntimeLineAlertProjector；2026-10-22 群組告警退役後跳過所有 group target，個人通知沿既有 committed delivery。
 - persistence adapter: `infrastructure/mysql/runtime_monitor_repository.py`

@@ -17,12 +17,13 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
   'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio', 'line-security',
-  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'storage-management', 'file-settings',
+  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'contract-templates',
 ] as const;
 
-// Explicit test oracle: presentation names map to the same 17 canonical LIFF assets.
+// Explicit test oracle: presentation names map to the same 18 canonical LIFF assets.
 const LIFF_ASSETS = [
   ['gateway.html', '服務申請入口'], ['register.html', '需求調查'],
+  ['非市民服務申請', '非市民服務申請'],
   ['bind.html', '連結客戶資料'], ['profile_guard.html', '修改資料前的身分確認'],
   ['profile_update.html', '修改個人資料'], ['order_update.html', '申請訂單異動'],
   ['candidate_contact_customer.html', '媒合條件協調'], ['staff_order_search.html', '我的案件'],
@@ -99,7 +100,7 @@ describe('React entrypoint registry', () => {
 
 
 
-  it('LIFF 視覺頁保留 17 個正式 LIFF 與 4 個 Flex，且只產生 canonical 測試連結', async () => {
+  it('LIFF 視覺頁保留 18 個正式表單，且只產生 canonical 測試連結', async () => {
     const runtimeConfigClient = {
       get: vi.fn(async () => ({
         liff_id: 'test-liff-id',
@@ -107,13 +108,14 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    expect(screen.getByRole('button', { name: '表單 (17)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '訊息卡片 (4)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'LINE 表單' })).toBeInTheDocument();
+    expect(NAV_ITEMS.find(item => item.id === 'line-liff-studio')?.label).toBe('表單');
+    expect(screen.queryByRole('button', { name: /訊息卡片/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '表單 (17)' }));
     expect(visibleLiffNames()).toEqual([
         'gateway.html',
         'register.html',
+        '非市民服務申請',
         'bind.html',
         'profile_guard.html',
         'profile_update.html',
@@ -235,8 +237,7 @@ describe('React entrypoint registry', () => {
       })),
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
-    fireEvent.click(screen.getByRole('button', { name: '表單 (17)' }));
-    const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選表單與卡片' });
+    const roleFilter = screen.getByRole('combobox', { name: '依適用角色篩選表單' });
 
     fireEvent.change(roleFilter, { target: { value: 'union_staff' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
@@ -250,12 +251,12 @@ describe('React entrypoint registry', () => {
 
     fireEvent.change(roleFilter, { target: { value: 'visitor' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'gateway.html', 'register.html', 'bind.html', 'identity.html',
+      'gateway.html', 'register.html', 'bind.html', 'identity.html', '非市民服務申請',
     ].sort()));
 
     fireEvent.change(roleFilter, { target: { value: 'customer' } });
     await waitFor(() => expect(visibleLiffNames()).toEqual([
-      'profile_guard.html', 'profile_update.html', 'order_update.html', 'candidate_contact_customer.html', 'identity.html',
+      'profile_guard.html', 'profile_update.html', 'order_update.html', 'candidate_contact_customer.html', 'identity.html', '非市民服務申請',
     ].sort()));
 
     fireEvent.change(roleFilter, { target: { value: 'staff' } });

@@ -158,7 +158,7 @@ def update_notification_rule_message_template(
     try:
         if template.get("message_type") == "flex":
             template["content"] = apply_copy_payload(template["content"], payload.content, copy_fields(template["content"]),
-                {variable["name"]: "{" + variable["name"] + "}" for variable in template.get("variables", [])})
+                {name: '{' + name + '}' for name in view.variables})
         elif template.get("copy_fields"):
             validate_copy_content(payload.content, template["copy_fields"])
             template["content"] = payload.content
@@ -466,6 +466,10 @@ def _message_template_view(
         if isinstance(item, dict) and isinstance(item.get("name"), str)
     ]
     fields = copy_fields(template["content"]) if template.get("message_type") == "flex" else template.get("copy_fields", [])
+    if fields:
+        # Action-only credentials are not insertion options in the copy editor.
+        used = set(_TEMPLATE_VARIABLE.findall(' '.join(field['content'] for field in fields)))
+        variables = [name for name in variables if name in used or (template.get('copy_fields') and name == 'case_no')]
     content = json.dumps({field["id"]: field["content"] for field in fields}, ensure_ascii=False) if template.get("message_type") == "flex" else str(template["content"])
     if fields:
         content = json.dumps(json.loads(content), ensure_ascii=False, separators=(",", ":"))
@@ -481,7 +485,8 @@ def _message_template_view(
         revision=revision,
         variables=variables,
         sample_preview=sample_preview,
-        fields=[{k: (json.loads(content)[field["id"]] if k == "content" else field[k]) for k in ("id", "label", "content", "max_length")} for field in fields],
+        fields=[{**{k: (json.loads(content)[field['id']] if k == 'content' else field[k]) for k in ('id', 'label', 'content', 'max_length')},
+                 'kind': field.get('kind', 'label'), 'optional': field.get('optional', False)} for field in fields],
     )
 
 

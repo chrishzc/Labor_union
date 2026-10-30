@@ -22,12 +22,12 @@ interface FlowJourneyDefinition { id: string; name: string; summary?: string; st
 
 export const LINE_MESSAGE_FLOWS: readonly FlowJourneyDefinition[] = [
   { id: 'matching', name: '媒合到服務', summary: '簽約與訂金付款可先後交錯；訂金正式核銷後即可建立案件群組，不必等簽約完成。正式日期與排班仍由既有前置條件檢查。', stages: [
-    { title: '詢問月嫂', nodes: [
+    { title: '初步候選聯絡', nodes: [
       { id: 'candidate-info', title: '寄送案件資訊', ids: ['card-candidate-information-1', 'card-candidate-information-2', 'card-candidate-information-3'] },
       { id: 'coordination', title: '人工協調問題與回覆', ids: ['card-union-question', 'card-union-answer'] },
       { id: 'candidate-response', title: '月嫂意願受理', ids: ['candidate-willing-received'] },
     ] },
-    { title: '客戶確認', nodes: [
+    { title: '正式媒合與客戶確認', nodes: [
       { id: 'recommendation', title: '寄送完整推薦確認包', ids: ['card-customer-confirmation'] },
       { id: 'customer-response', title: '接受配對／專人協助', ids: ['matching-customer-accepted', 'matching-customer-assistance'] },
     ] },

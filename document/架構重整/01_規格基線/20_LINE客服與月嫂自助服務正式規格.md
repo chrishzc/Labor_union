@@ -17,8 +17,8 @@
 
 ## 2. Global 不變量
 
-1. LINE webhook 只保存 canonical inbox event；業務處理由 consumer 執行。
-2. 所有 LINE 回覆皆建立 durable delivery task，不在 webhook 或管理 UI 直接呼叫 LINE。
+1. LINE webhook 保存 canonical inbox event；業務處理由 consumer 執行。專員申請的即時受理 Reply 例外依 §3.2。
+2. 業務回覆建立 durable delivery task，不在 webhook 或管理 UI 直接呼叫 LINE；專員申請的受理回覆限定 webhook 當次 Reply，不建立 Push 補送工作。
 3. LIFF 正式身分只信任 server-side 驗證後的 ID token 與正式 binding；query string userId 不是身分證明。
 4. LINE Integration 不擁有 Orders、Scheduling、Customer Service 或客戶主檔狀態。
 5. Rich Menu 圖面與文字可沿用 merge，但 definition、revision、publication 與 per-user binding 仍以 wen DB 為 SSOT。
@@ -49,13 +49,27 @@ waiting → handling → resolved
 
 不允許跳過狀態驗證或以 UI 字串決定 transition。管理 command 必須帶 expected version；stale command 回 conflict。
 
-官方帳號以自助服務為主。聊天室一般留言不啟動 AI 問答，也不因未知輸入、回答錯誤或未取得答案自動轉人工。使用者點選「聯絡專人服務」、輸入「聯絡專人服務」或既有「呼叫專員」，或明確要求真人協助時，直接建立或沿用同一使用者＋同一 category 的未完成 ticket，無需再次確認。既有「轉真人客服」「轉接真人客服」「專人客服」入口導向相同流程。成功只回覆「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」；收到需求不代表專員已即時上線。
+官方帳號以自助服務為主。聊天室一般留言不啟動 AI 問答，也不因未知輸入、回答錯誤或未取得答案自動轉人工。使用者點選「聯絡專人服務」、輸入「聯絡專人服務」或既有「呼叫專員」，或明確要求真人協助時，直接建立或沿用同一使用者＋同一 category 的未完成 ticket，無需再次確認。既有「轉真人客服」「轉接真人客服」「專人客服」入口導向相同流程。專員申請的受理文案為「已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。」（允許沿既有訊息設定調整），僅由 webhook 使用當次 Reply Token 回覆。缺 Token／設定、Token 無效或逾期、拒絕、限流、逾時、不確定結果與例外均略過受理回覆，不回退 Push、不建立背景受理 delivery task；工單、hold 與原稽核仍由背景 consumer 正常保存。受理回覆不代表工單已提交或專員已即時上線。2026-10-30 人工裁決維持既有分類合併及結案後重開規則；依同日最新人工確認，既有已排隊受理工作保留原投遞方式，不批次取消、轉換或重送。
 
 呼叫後的後續留言加入同一客服案件，由工會專員回覆。既有 active hold 只用於維持人工處理的對話歸屬，不向使用者呈現 AI 暫停／恢復狀態；客服人員正式結案時依 owner version／lock 解除 hold；本節 React 清單「處理完成」不發完成通知，其他既有結案流程通知「您的客服案件已處理完成。如仍有問題，請再次呼叫專員。」。舊「繼續使用 AI」「恢復 AI」按鈕與文字指令只提示入口停用，不得結案、解除 hold 或宣稱聊天室 AI 已啟用。
 
+### 3.2A 第一批資訊類 Reply-only（2026-10-30 人工核准）
+
+只將新產生的歡迎／綁定及登記入口、服務與訂單修改導覽、服務流程／收費補助說明、服務進度查詢、問題釐清、不可用／停用提示、身分切換說明及群組指令錯誤改成 Reply-only。原文案、卡片、按鈕、原聊天室及原流程的防重複規則維持；群組設定成功、邀請排入、服務當天回覆均不屬本批錯誤提示。
+
+資料／訂單修改申請、客訴／回饋／訂金協助受理、月嫂意願及客戶媒合選擇等業務結果確認保留 Push；LIFF 表單及人工審核結果、排程、主動或跨收件者通知也不改。原專員呼叫受理仍依 §3.2 僅 Reply；不啟用或更改停用中的聊天室 AI 投遞政策。
+
+新資訊回覆沿原 consumer／outer UoW 建立已提交的 durable task，以 `line_webhook_reply` 來源及原 webhook event identity 與舊 `line_webhook_event` 工作區分，無 schema migration。worker 只對該新來源讀取同事件、同一 user／group／room 的未使用 Reply 機會；standby、已即時 Reply、錯誤聊天室或錯誤事件不得借用 Token。沿用既有短效窗口，最多嘗試一次；缺 Token、過期、拒絕、429、逾時及例外均不回退 Push、不自動重試，結果如實保留失敗，不記為已送達。
+
+本批僅影響新產生的資訊回覆；既有已排隊工作保留 payload、識別、狀態及原發送政策，不批次取消、轉換或重送。驗收須同時證明資訊回覆只呼叫 Reply、業務結果與舊工作仍走原 Push、同聊天室核對、失敗零 Push，以及原業務資料與操作語意未變。
+
+2026-10-30 第二批人工核准修正：資訊回覆的原事件查詢涵蓋 user 的 follow，以及 user／group／room 的 message／postback；仍須同事件、同聊天室與未使用 Token，其他事件不得借用。既有 Knowledge 查詢限制維持。驗收須實際執行 adapter 的 SQL 條件，不能只以固定回傳資料的替身證明。
+
+為縮短等待，consumer 只把本次 UoW 真正新建且已提交的資訊工作 ID 交回原 delivery worker，於下一個事件前沿既有逐筆租約、發送前複核與 attempt writer 處理。重複 enqueue 回讀的舊工作及業務確認不進此快速路徑；不更改既有佇列排序或任務內容。每輪資訊快速路徑最多使用 batch 上限的一半（向下取整），其餘沿原佇列處理；合計仍受原每輪預設25筆上限約束。提交失敗不發送；提交後的投遞失敗不得反向重試已完成的業務事件。流程不新增 Push fallback、重試、schema 或外部效果。
+
 ### 3.3 交易、冪等與 retry
 
-- inbound event：ticket create/append、狀態事件、ack delivery task 同一 LINE Unit of Work commit。
+- inbound event：ticket create/append、狀態事件與需要的業務 delivery task 同一 LINE Unit of Work commit；專員申請的受理回覆依 §3.2，不建立 ack delivery task。
 - canonical webhook dispatch 任一業務處理失敗時，該 business Unit of Work 必須整筆 rollback；rollback完成後
   才可另開新的 Unit of Work，只保存`retryable_failed`／`terminal_failed` inbox completion。禁止把部分ticket、
   binding、outbox或其他業務 mutation與failure completion一起commit。

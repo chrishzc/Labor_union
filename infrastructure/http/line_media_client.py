@@ -62,6 +62,16 @@ class LineMediaClient:
         self._timeout_seconds = value
         return result
 
+    async def table_image(self, token):
+        if not re.fullmatch(r'lti_[A-Za-z0-9_-]{40,1400}', token):
+            raise LineMediaError('table_image_not_found', 404)
+        response = await self._request('/table-images/' + token, json={})
+        if response.status_code == 404:
+            raise LineMediaError('table_image_not_found', 404)
+        if response.status_code != 200 or response.headers.get('content-type', '').split(';')[0] != 'image/png':
+            raise LineMediaError('table_image_unavailable')
+        return LineMediaPhoto(response.content, 'image/png')
+
     async def preview(self, body):
         return await self._send("/service-day-logs/preview", json=body)
 

@@ -18,7 +18,10 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from starlette.routing import Mount, Route
 
-from api.middleware.compression import ResponseCompressionMiddleware
+try:
+    from api.middleware.compression import ResponseCompressionMiddleware
+except ImportError:
+    from starlette.middleware.gzip import GZipMiddleware as ResponseCompressionMiddleware
 from infrastructure.runtime.react_admin_artifact import (
     ReactAdminStaticApplication, validate_react_admin_artifact,
 )

@@ -265,14 +265,14 @@ export interface RecommendationReplacementFlowState {
 /** Handoff recovery retains the original authenticated operator and full POST identity in memory per case. */
 export interface ExternalSigningHandoffCommand {
   caseNo: string;
-  sessionId: string;
+  sessionId: string | null;
   expectedStatusVersion: number;
   actor: string;
   identity: ExternalSigningCommandIdentity;
 }
 
 export interface ExternalSigningHandoffReceipt {
-  session_id: string;
+  session_id: string | null;
   resulting_status_version: number;
   replayed: boolean;
   handoff_included_reminders?: boolean;

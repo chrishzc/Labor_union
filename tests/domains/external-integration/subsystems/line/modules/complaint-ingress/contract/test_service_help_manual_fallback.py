@@ -98,8 +98,7 @@ def test_human_request_directly_creates_ticket_without_confirmation(message_text
     assert application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), message_text) is True
     assert len(unit_of_work.customer_service.messages) == 1
     assert len(gateway.create_calls) == 1
-    payload = json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
-    assert payload == {"type": "text", "text": "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。"}
+    assert unit_of_work.delivery_tasks.requests == []  # acknowledgement is Reply-only
 
 
 def test_unscoped_subsidy_amount_asks_which_program_the_customer_means() -> None:
@@ -311,7 +310,8 @@ def test_wrong_answer_with_explicit_human_request_directly_creates_escalation() 
     )
     application.handle(_inbox("event-wrong"), unit_of_work, LineUserId("U123456789"), "答錯，我要找客服")
     assert len(gateway.create_calls) == 1
-    assert "quickReply" not in json.loads(unit_of_work.delivery_tasks.requests[0].payload_json)
+    assert len(unit_of_work.customer_service.messages) == 1
+    assert unit_of_work.delivery_tasks.requests == []
 
 
 @pytest.mark.parametrize('postback', [
@@ -335,7 +335,7 @@ def test_old_continue_ai_postback_does_not_resume_or_close_ticket(postback) -> N
     assert payload == {"type": "text", "text": "此功能已停用。如需協助，請輸入「呼叫專員」。"}
 
 
-def test_call_postback_directly_creates_ticket_with_short_acknowledgement() -> None:
+def test_call_postback_creates_ticket_without_background_acknowledgement() -> None:
     unit_of_work = _unit_of_work()
     gateway = _EscalationGateway()
     application = LineServiceHelpApplication(
@@ -346,9 +346,8 @@ def test_call_postback_directly_creates_ticket_with_short_acknowledgement() -> N
         "customer-service:handoff:confirm",
     ) is True
     assert len(gateway.create_calls) == 1
-    assert json.loads(unit_of_work.delivery_tasks.requests[0].payload_json) == {
-        "type": "text", "text": "已收到您的聯絡需求，請留言說明問題，專員將盡快回覆。",
-    }
+    assert len(unit_of_work.customer_service.messages) == 1
+    assert unit_of_work.delivery_tasks.requests == []
 
 
 def test_old_resume_postback_preserves_active_ticket() -> None:

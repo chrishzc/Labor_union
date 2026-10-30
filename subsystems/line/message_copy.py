@@ -53,12 +53,16 @@ def copy_template_id(key):
 
 def copy_fields(payload):
     """Only display text is editable. Provider actions and business data stay outside."""
-    fields = []
+    fields, bodies = [], []
     def walk(node, path):
         if isinstance(node, list):
             for index, item in enumerate(node):
                 walk(item, (*path, str(index)))
         elif isinstance(node, dict):
+            if node.get('type') == 'bubble' and isinstance(node.get('body'), dict):
+                body = node['body'].get('contents')
+                if isinstance(body, list):
+                    bodies.append(('/'.join((*path, 'body', 'contents')), body))
             for key, value in node.items():
                 current = (*path, key)
                 editable = key == "altText" or (key == "text" and node.get("type") == "text") or (key == "label" and "type" in node)
@@ -70,16 +74,51 @@ def copy_fields(payload):
                 elif key == "action" and isinstance(value, dict) and isinstance(value.get("label"), str):
                     fields.append({"id": "/".join((*current, "label")), "label": "按鈕名稱", "content": value["label"], "max_length": 20})
     walk(payload, ())
+    for field in fields:
+        field['kind'] = 'button' if field['label'] == '按鈕名稱' else 'summary' if field['label'] == '訊息摘要' else 'label'
+    for path, nodes in bodies:
+        # Profile names and other owner values are never reusable copy.
+        if nodes and '{business_value}' in str(nodes[0].get('text', '')):
+            continue
+        direct = {f['id']: f for f in fields}
+        titles, paragraphs = [], []
+        for index, node in enumerate(nodes):
+            field = direct.get(f'{path}/{index}/text')
+            if field is None or '{business_value}' in field['content']:
+                continue
+            (titles if node.get('weight') == 'bold' else paragraphs).append(field)
+        if titles:
+            titles[0]['kind'] = 'title'
+        else:
+            header_path = path.rsplit('/', 2)[0] + '/header/contents/'
+            header = next((f for f in fields if f['id'].startswith(header_path) and f['id'].endswith('/text')), None)
+            if header is not None:
+                header['kind'] = 'title'
+            else:
+                fields.append({'id': path + '/$title', 'label': '卡片標題', 'content': '',
+                    'max_length': 100, 'kind': 'title', 'optional': True,
+                    'append_to': path, 'position': 'start'})
+        description = max(paragraphs, key=lambda f: len(f['content']), default=None)
+        if description is not None:
+            description.update(kind='body', optional=len(nodes) > 1, label='說明內容')
+        else:
+            fields.append({'id': path + '/$description', 'label': '說明內容', 'content': '',
+                'max_length': 5000, 'kind': 'body', 'optional': True,
+                'append_to': path, 'position': 'end',
+                'anchor': nodes[0].get('text') if nodes else None})
     return fields
 
 
 def validate_copy_content(content, fields):
     values = json.loads(content)
-    if not isinstance(values, dict) or set(values) != {f["id"] for f in fields}:
+    known = {f['id'] for f in fields}
+    optional = {f['id'] for f in fields if f.get('optional')}
+    if not isinstance(values, dict) or set(values) - known or known - set(values) - optional:
         raise ValueError("卡片文案欄位已變更，請重新載入。")
+    values = {**{f['id']: f['content'] for f in fields if f.get('optional')}, **values}
     for field in fields:
         value = values[field["id"]]
-        if not isinstance(value, str) or not value.strip() or len(value) > field["max_length"]:
+        if not isinstance(value, str) or (not value.strip() and not field.get('optional')) or len(value) > field["max_length"]:
             raise ValueError("請填寫完整文案，並確認各欄位的字數限制。")
     return values
 
@@ -108,9 +147,55 @@ def apply_copy_payload(payload, content, fields, variables=None):
             yield from targets(node[int(part)], rest)
         elif isinstance(node, dict) and part in node:
             yield from targets(node[part], rest)
+    additions = []
+    removals = []
+    # Resolve insertion anchors before editable titles are replaced.
     for field in fields:
+        if 'append_to' not in field:
+            continue
+        parts = field['append_to'].split('/')
+        def lists(node, remaining):
+            if not remaining:
+                if isinstance(node, list):
+                    yield node
+                return
+            part, rest = remaining[0], remaining[1:]
+            if part == '*' and isinstance(node, list):
+                for child in node:
+                    yield from lists(child, rest)
+            elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
+                yield from lists(node[int(part)], rest)
+            elif isinstance(node, dict) and part in node:
+                yield from lists(node[part], rest)
+        for nodes in lists(result, parts):
+            anchor = field.get('anchor')
+            if anchor is not None and (not nodes or nodes[0].get('text') != render(anchor)):
+                continue
+            value = render(values[field['id']])
+            if value.strip():
+                additions.append((nodes, field['position'], {'type': 'text', 'text': value,
+                    'wrap': True, **({'weight': 'bold', 'size': 'lg'} if field['kind'] == 'title' else {'size': 'sm', 'margin': 'md'})}))
+    for field in fields:
+        if 'append_to' in field:
+            continue
         for target, leaf in targets(result, field.get("path", field["id"]).split("/")):
             if "match" in field and target[leaf] != render(field["match"]):
                 continue
             target[leaf] = render(values[field["id"]])
+            if field.get('kind') == 'body':
+                target['wrap'] = True
+            if field.get('optional') and not target[leaf].strip():
+                removals.append(target)
+    def remove_empty(node):
+        if isinstance(node, list):
+            node[:] = [child for child in node if not any(child is item for item in removals)]
+            for child in node:
+                remove_empty(child)
+        elif isinstance(node, dict):
+            for child in node.values():
+                remove_empty(child)
+    for nodes, position, node in additions:
+        nodes.insert(0, node) if position == 'start' else nodes.append(node)
+    if removals:
+        remove_empty(result)
     return result

@@ -27,6 +27,10 @@ _PROVIDER_ERROR_MAXIMUM_LENGTH = 500
 _REPLY_TOKEN_MAXIMUM_LENGTH = 512
 _MAXIMUM_CLAIM_BATCH_SIZE = 100
 
+# New informational replies have a distinct source; historical queued tasks
+# retain their original delivery policy.
+REPLY_ONLY_WEBHOOK_SOURCE = "line_webhook_reply"
+
 
 class LineDeliveryCommandOutcome(StrEnum):
     CREATED = "created"
@@ -191,6 +195,7 @@ def _require_aware_datetime(value: object) -> datetime:
 
 
 __all__ = [
+    "REPLY_ONLY_WEBHOOK_SOURCE",
     "CancelLineDeliveryTaskCommand",
     "ClaimLineDeliveryTasksQuery",
     "EnqueueLineDeliveryCommand",

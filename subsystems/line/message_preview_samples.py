@@ -48,6 +48,7 @@ ORDER_FACTS = {
     "service_days": 20, "address": "新竹市範例路（公版地址）", "phone": "［公版聯絡電話］", "requires_cooking": True,
     "deposit_amount": 6000, "deposit_due_date": "2026-10-25", "first_payment_amount": 12000,
     "second_payment_amount": 24000, "floor_fee": 0, "total_employer_self_pay_payable": 42000,
+    "staff_salary_unit": 350, "staff_salary_total": "預估 NT$ 56,000", "staff_salary_due": "預估 2026-12-15",
     "special_holidays": "週末休息（範例）", "notes": "公版服務注意事項",
     "dietary_habits": "葷食，可接受中藥（範例）", "vegetarian_preference": "可接受蛋奶素（範例）",
     "alcohol_ratio": "不加酒（範例）", "cooking_oil_type": "橄欖油（範例）", "maternal_allergy": "無（範例）",
@@ -78,17 +79,25 @@ class PublicPreviewReader:
         from subsystems.scheduling.matching_line_cards import candidate_contact_information_card, customer_confirmation_card
 
         if kind == "card-customer-confirmation":
-            from subsystems.orders.order_information import build_order_information_message
+            from subsystems.orders.order_information import build_order_information_message, build_formal_information_sections
+            from subsystems.line.table_image_contracts import information_document, weekly_document
             def information(number):
                 text, _ = build_order_information_message(number, ORDER_FACTS, {}, "公版範例；實際內容由正式方案帶入。")
-                return ({"text": text},)
+                return ({"text": text, 'line_sections': tuple({'title': section.title, 'rows': section.rows}
+                    for section in build_formal_information_sections(number, ORDER_FACTS, {}))},)
             payload = customer_confirmation_card(CASE.case_no, (asdict(STAFF),), information(1), information(2),
                 ({key: VALUES[key] for key in WEEKLY},), {STAFF.id: "https://preview.invalid/resume"}, "preview-only", "")
+            documents = (information_document('訂單資訊－1｜客戶費用', CASE.case_no, information(1), info_type=1),
+                information_document('訂單資訊－2', CASE.case_no, information(2), info_type=2),
+                weekly_document(CASE.case_no, ({key: VALUES[key] for key in WEEKLY},)))
         else:
             number = int(kind.rsplit("-", 1)[1])
             payload = candidate_contact_information_card(CASE.case_no, number, _sections(number),
                 "preview-only", None if number == 3 else "https://preview.invalid/candidate")
-        return PreviewCardSource(payload)
+            from subsystems.line.table_image_contracts import information_document
+            documents = (information_document(('訂單資訊－1｜月嫂薪資', '訂單資訊－2', '每週服務安排')[number - 1], CASE.case_no,
+                ({'line_sections': tuple({'title': title, 'rows': rows} for title, rows in _sections(number))},), info_type=number),)
+        return PreviewCardSource(payload, json.dumps([asdict(item) for item in documents], ensure_ascii=False))
 
 
 @contextmanager

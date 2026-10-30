@@ -413,6 +413,23 @@ describe('contractExternalSigningClient', () => {
     }
   });
 
+  it('transports case-level handoff and reminder receipts without a signing session', async () => {
+    const identity = createExternalSigningCommandIdentity('signing-reminders');
+    const handoff = { session_id: null, resulting_status_version: 0, replayed: false, handoff_included_reminders: false };
+    const reminder = { receipt_id: identity.receiptId, session_id: null, status_version: 0,
+      replayed: false, manual_notification_targets: [] };
+    vi.spyOn(transport, 'post').mockResolvedValueOnce(envelope(handoff)).mockResolvedValueOnce(envelope(reminder));
+    await expect(contractExternalSigningClient.recordHandoff('CASE-001', 0, identity)).resolves.toEqual(handoff);
+    await expect(contractExternalSigningClient.sendSigningReminders('CASE-001', {
+      session_id: null, expected_status_version: 0,
+    }, identity)).resolves.toEqual(reminder);
+    vi.spyOn(transport, 'get').mockResolvedValueOnce(envelope({ case_no: 'CASE-001', state: 'preparing',
+      handoff_logged: true, signing_reminder: reminder, staff_segments: [], documents: [] }));
+    await expect(contractExternalSigningClient.query('CASE-001')).resolves.toMatchObject({
+      state: 'preparing', handoff_logged: true, signing_reminder: reminder,
+    });
+  });
+
   it('queries a known receipt and final readback without raw cursor or path inputs', async () => {
     const readback = {
       case_no: 'CASE-001',

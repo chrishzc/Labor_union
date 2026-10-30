@@ -77,9 +77,9 @@ def build_external_platform_reminder_request(
     recipient: LineRecipient,
     *,
     case_no: str,
-    session_id: str,
+    session_id: str | None,
     matching_segment_id: int,
-    document_version_id: int,
+    document_version_id: int | None,
     scheduled_at: datetime,
     idempotency_key: IdempotencyKey,
     correlation_id: CorrelationId,
@@ -94,8 +94,8 @@ def build_external_platform_reminder_request(
         scheduled_at,
         idempotency_key,
         correlation_id,
-        "contract_external_signing_session",
-        f"{session_id}:staff:{matching_segment_id}:{document_version_id}",
+        "contract_external_signing_session" if session_id is not None else "contract_signing_case",
+        f"{session_id}:staff:{matching_segment_id}:{document_version_id}" if session_id is not None else f"{case_no}:staff:{matching_segment_id}",
     )
 
 
@@ -103,8 +103,8 @@ def build_external_platform_client_reminder_request(
     recipient: LineRecipient,
     *,
     case_no: str,
-    session_id: str,
-    document_version_id: int,
+    session_id: str | None,
+    document_version_id: int | None,
     scheduled_at: datetime,
     idempotency_key: IdempotencyKey,
     correlation_id: CorrelationId,
@@ -119,8 +119,8 @@ def build_external_platform_client_reminder_request(
         scheduled_at,
         idempotency_key,
         correlation_id,
-        "contract_external_signing_session",
-        f"{session_id}:client:{document_version_id}",
+        "contract_external_signing_session" if session_id is not None else "contract_signing_case",
+        f"{session_id}:client:{document_version_id}" if session_id is not None else f"{case_no}:client",
     )
 
 

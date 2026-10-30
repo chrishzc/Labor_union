@@ -60,6 +60,9 @@ def test_every_current_catalog_entry_can_read_and_save_its_editable_content(monk
         if entry.id == "welcome":
             continue
         response = client.get(f"/api/v1/line/notification-rules/{entry.id}/message-template")
+        if entry.id == 'card-candidate-information-3':
+            assert response.status_code == 404  # System-generated picture has no editable copy.
+            continue
         assert response.status_code == 200, (entry.id, response.text)
         view = response.json()["data"]
         assert view["content"]
@@ -111,6 +114,14 @@ def test_existing_flex_template_edits_text_without_replacing_dynamic_actions(mon
     path = f'/api/v1/line/notification-rules/{rule["id"]}/message-template'
     view = client.get(path).json()["data"]
     values = json.loads(view["content"])
+    assert 'response_token' not in view['variables']
+    body = next(f for f in view['fields'] if f['kind'] == 'body')
+    title = next(f for f in view['fields'] if f['kind'] == 'title')
+    invalid = {**values, body['id']: '不允許顯示 action-only 的 {response_token}'}
+    assert client.put(path, json={'content': json.dumps(invalid), 'expected_revision': view['revision']}).status_code == 422
+    assert application.revision == view['revision']
+    values[body['id']] = '第一段說明：{case_no}\n\n另外加入的服務提醒。'
+    values[title['id']] = '新的服務狀況詢問標題'
     button = next(f for f in view["fields"] if f["label"] == "按鈕名稱")
     values[button["id"]] = "需要協助處理"
     assert client.put(path, json={"content": json.dumps(values, ensure_ascii=False), "expected_revision": view["revision"]}).status_code == 200
@@ -126,6 +137,40 @@ def test_existing_flex_template_edits_text_without_replacing_dynamic_actions(mon
                 yield from actions(value)
     assert list(actions(before)) == list(actions(after))
     assert any(f["content"] == "需要協助處理" for f in copy_fields(after))
+    assert any(f['content'] == '第一段說明：{case_no}\n\n另外加入的服務提醒。' for f in copy_fields(after))
+    assert after['contents']['body']['contents'][0]['text'] == '新的服務狀況詢問標題'
+    # Read back after inserting a previously absent title, then save again.
+    current = client.get(path).json()['data']
+    assert client.put(path, json={'content': current['content'], 'expected_revision': current['revision']}).status_code == 200
+
+
+def test_customer_and_caregiver_card_bodies_are_stored_independently_across_flows(monkeypatch):
+    import json
+    from dataclasses import asdict
+    from subsystems.line.message_preview import LineMessagePreviewApplication
+    from infrastructure.line.table_image_renderer import render_table_image
+    from api.dependencies.admin_auth import admin_actor_context
+    client, application = _copy_client(monkeypatch)
+    root = '/api/v1/line/notification-rules/'
+    messages = {'card-customer-confirmation': '客戶：請確認推薦方案。\n\n確認後由工會協助簽約。',
+        'card-candidate-information-1': '月嫂：請確認薪資與檔期。\n\n若有問題請先聯繫工會。',
+        'card-candidate-information-2': '月嫂：請核對照護與餐食需求。'}
+    for key, text in messages.items():
+        view = client.get(root + key + '/message-template').json()['data']
+        values = json.loads(view['content'])
+        field = next(field for field in view['fields'] if field['kind'] == 'body')
+        values[field['id']] = text
+        response = client.put(root + key + '/message-template', json={'content': json.dumps(values, ensure_ascii=False), 'expected_revision': view['revision']})
+        assert response.status_code == 200, response.text
+    preview = LineMessagePreviewApplication(application, lambda: None, render_table_image)
+    for key, text in messages.items():
+        view = client.get(root + key + '/message-template').json()['data']
+        field = next(field for field in view['fields'] if field['kind'] == 'body')
+        assert json.loads(view['content'])[field['id']] == text
+        result = preview.render(key, None, None, None, admin_actor_context(_principal()), sample=True)
+        visible = json.dumps(asdict(result), ensure_ascii=False)
+        assert text.split('\n')[0] in visible
+        assert all(other.split('\n')[0] not in visible for other in messages.values() if other != text)
 
 
 def test_previous_audience_specific_success_ids_update_the_corresponding_current_role(monkeypatch):

@@ -240,7 +240,108 @@ def test_missing_handoff_pdfs_do_not_prevent_recording() -> None:
     assert uows.instances[0].commits == 1
 
 
-def test_known_occupancy_conflict_blocks_handoff_before_any_contract_or_notification_write():
+def test_handoff_with_accepted_plan_but_no_pdfs_saves_a_replayable_case_receipt():
+    from infrastructure.db.contract_external_signing_repository import _stored_handoff_receipt
+    repository = FakeRepository(None)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), uows)
+    command = RecordExternalSigningHandoff('CASE-001', ExpectedVersion(0), ActorContext('admin:17'),
+        IdempotencyKey('handoff:no-documents'), CorrelationId('handoff:no-documents'))
+    receipt = workflow.record_handoff(command)
+    assert receipt.session_id is None and receipt.resulting_status_version == 0
+    stored = repository.handoff_receipts[command.idempotency_key.value]
+    repository.handoff_receipts[command.idempotency_key.value] = _stored_handoff_receipt({
+        'command_kind': 'record_external_signing_handoff', 'command_fingerprint': stored.command_fingerprint.value,
+        'result_snapshot': {'idempotency_key': command.idempotency_key.value, 'session_id': None,
+            'resulting_status_version': 0, 'handoff_included_reminders': False, 'matching_plan_id': 9},
+    }, expected_idempotency_key=command.idempotency_key.value)
+    assert workflow.record_handoff(command).replayed is True
+    assert repository.writes == ['handoff_receipt']
+    assert repository.facts is None
+
+
+@pytest.mark.parametrize('case_level', [True, False])
+def test_reminders_after_handoff_do_not_require_stored_pdfs(case_level):
+    from infrastructure.db.contract_external_signing_repository import _stored_reminder_receipt
+    facts = replace(_virtual_facts(), client_document_version_id=None, status_version=1)
+    repository = FakeRepository(None if case_level else facts)
+    port = MySqlExternalSigningHandoffNotificationPort(FakeBindingConnection({
+        ('customer', '301'): 'U-client', ('staff', '501'): 'U-staff-501', ('staff', '502'): 'U-staff-502',
+    }), FakeUnsignedRepository(set()))
+    deliveries = FakeDeliveryTasks()
+    port._delivery_tasks = deliveries
+    workflow = ExternalSigningWorkflow(repository, FakeCompletionPort(), FakeUowFactory(), port)
+    if case_level:
+        workflow.record_handoff(RecordExternalSigningHandoff('CASE-001', ExpectedVersion(0), ActorContext('admin:17'),
+            IdempotencyKey('handoff:browser-print'), CorrelationId('handoff:browser-print')))
+    command = SendExternalSigningReminders(facts.case_no, None if case_level else facts.session_id,
+        ExpectedVersion(0 if case_level else facts.status_version), ActorContext('admin:17'),
+        IdempotencyKey('reminder:browser-print'), CorrelationId('reminder:browser-print'), 'cesr_'+'5'*32)
+    receipt = workflow.send_signing_reminders(command)
+    stored = repository.reminder_receipts[command.idempotency_key.value]
+    repository.reminder_receipts[command.idempotency_key.value] = _stored_reminder_receipt({
+        'command_kind': 'send_external_signing_reminders', 'command_fingerprint': stored.command_fingerprint.value,
+        'result_snapshot': {'idempotency_key': command.idempotency_key.value, 'receipt_id': command.receipt_id,
+            'session_id': command.session_id, 'status_version': receipt.status_version,
+            'matching_plan_id': receipt.matching_plan_id},
+    }, expected_idempotency_key=command.idempotency_key.value)
+    assert len(deliveries.requests) == (2 if case_level else 3)
+    assert all(json.loads(request.payload_json)['type'] == 'text' for request in deliveries.requests)
+    assert workflow.send_signing_reminders(command).replayed is True
+    assert repository.writes == (['handoff_receipt', 'reminder_receipt'] if case_level else ['reminder_receipt'])
+    assert receipt.session_id == command.session_id
+
+
+@pytest.mark.parametrize('condition, expected', [
+    ('unaccepted', 'signing_accepted_plan_required'),
+    ('dates', 'signing_service_dates_unavailable'),
+    ('occupancy', 'signing_staff_occupancy_conflict'),
+])
+def test_browser_print_handoff_keeps_original_business_guards(condition, expected):
+    repository = FakeRepository(None)
+    port = FakeCompletionPort()
+    if condition == 'unaccepted':
+        repository.load_reminder_context = lambda *args, **kwargs: None
+    else:
+        port.signing_blockers = lambda *args, **kwargs: (expected,)
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, port, uows)
+    command = RecordExternalSigningHandoff('CASE-001', ExpectedVersion(0), ActorContext('admin:17'),
+        IdempotencyKey('handoff:business-guard'), CorrelationId('handoff:business-guard'))
+    with pytest.raises(ExternalSigningTypedError) as error:
+        workflow.record_handoff(command)
+    assert error.value.code == expected
+    assert repository.writes == [] and uows.instances[0].commits == 0
+
+
+@pytest.mark.parametrize('condition, expected', [
+    ('no_handoff', 'external_signing_handoff_required'),
+    ('plan_changed', 'external_signing_handoff_required'),
+    ('occupancy', 'signing_staff_occupancy_conflict'),
+])
+def test_browser_print_reminder_requires_current_plan_handoff_and_available_dates(condition, expected):
+    repository = FakeRepository(None)
+    port = FakeCompletionPort()
+    notifications = FakeHandoffNotificationPort()
+    uows = FakeUowFactory()
+    workflow = ExternalSigningWorkflow(repository, port, uows, notifications)
+    if condition != 'no_handoff':
+        workflow.record_handoff(RecordExternalSigningHandoff('CASE-001', ExpectedVersion(0), ActorContext('admin:17'),
+            IdempotencyKey('handoff:business-guard'), CorrelationId('handoff:business-guard')))
+    if condition == 'plan_changed':
+        previous = repository.load_reminder_context('CASE-001', for_update=False)
+        repository.load_reminder_context = lambda *args, **kwargs: replace(previous, matching_plan_id=10)
+    elif condition == 'occupancy':
+        port.signing_blockers = lambda *args, **kwargs: (expected,)
+    before = list(repository.writes)
+    with pytest.raises(ExternalSigningTypedError) as error:
+        workflow.send_signing_reminders(SendExternalSigningReminders('CASE-001', None, ExpectedVersion(0),
+            ActorContext('admin:17'), IdempotencyKey('reminder:business-guard'), CorrelationId('reminder:business-guard'), 'cesr_'+'6'*32))
+    assert error.value.code == expected
+    assert repository.writes == before and notifications.calls == [] and uows.instances[-1].commits == 0
+
+
+def test_known_occupancy_conflict_blocks_handoff_before_any_write():
     virtual = _virtual_facts()
     repository = FakeRepository(None, virtual=virtual)
     port = FakeCompletionPort()
@@ -251,7 +352,7 @@ def test_known_occupancy_conflict_blocks_handoff_before_any_contract_or_notifica
         IdempotencyKey("handoff:conflict"), CorrelationId("handoff:conflict"))
     with pytest.raises(ExternalSigningTypedError) as caught:
         workflow.record_handoff(command)
-    assert caught.value.code == "signing_staff_occupancy_conflict"
+    assert caught.value.code == 'signing_staff_occupancy_conflict'
     assert repository.writes == port.calls == []
     assert uows.instances[0].commits == 0
 
@@ -399,6 +500,14 @@ class FakeRepository:
     def lock_case(self, case_no):
         self.handoff_operations.append(("case_lock", case_no))
         return self.case_exists
+
+    def load_reminder_context(self, case_no, *, for_update):
+        from subsystems.contract_signing.external_signing_workflow import SigningReminderContext, SigningReminderStaffTarget
+        return SigningReminderContext(case_no, '301', (SigningReminderStaffTarget(11, '501'),), 9)
+
+    def load_handoff_notification_facts(self, case_no, session_id):
+        return next((stored.receipt for stored in reversed(list(self.handoff_receipts.values()))
+                     if stored.receipt.session_id == session_id), None)
 
     def load_active_session_by_case(self, case_no, *, for_update):
         return (
@@ -575,7 +684,7 @@ class FakeHandoffNotificationPort:
     ("completed", "external_signing_reminders_closed"),
     ("missing_case", "external_signing_session_not_found"),
 ])
-def test_reminder_requires_current_open_handoff_before_any_write(scenario, expected_code):
+def test_reminder_rejects_stale_or_wrong_session_and_missing_case_before_any_write(scenario, expected_code):
     facts = replace(_virtual_facts(), status_version=1)
     if scenario == "completed":
         facts = replace(facts, state=ExternalSigningState.COMPLETED, commitment_id=44)

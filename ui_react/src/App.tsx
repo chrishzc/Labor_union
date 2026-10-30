@@ -64,12 +64,6 @@ const HistoricalServiceAccountingPage = lazy(() =>
 const AccountManagementPage = lazy(() =>
   import('./pages/AccountManagementPage').then((m) => ({ default: m.AccountManagementPage }))
 );
-const StorageManagementPage = lazy(() =>
-  import('./pages/StorageManagementPage').then((m) => ({ default: m.StorageManagementPage }))
-);
-const FileSettingsPage = lazy(() =>
-  import('./pages/FileSettingsPage').then((m) => ({ default: m.FileSettingsPage }))
-);
 const ContractTemplatesPage = lazy(() =>
   import('./pages/ContractTemplatesPage').then((m) => ({ default: m.ContractTemplatesPage }))
 );
@@ -228,8 +222,6 @@ const AppContent: React.FC = () => {
 
         {/* Audit & System Section */}
         {currentPage === 'account-management' && <AccountManagementPage />}
-        {currentPage === 'storage-management' && <StorageManagementPage />}
-        {currentPage === 'file-settings' && <FileSettingsPage />}
         {currentPage === 'contract-templates' && <ContractTemplatesPage />}
         </Suspense>
         </StaffIdentityProvider>
