@@ -80,7 +80,6 @@ Write-Output 'PASS'
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout
 
-
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows database admission')
 def test_database_delegate_requires_stop_for_upgrade_restore_and_propagates_failure():
     script = r'''
@@ -118,7 +117,6 @@ Write-Output 'PASS'
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout
 
-
 @pytest.mark.skipif(os.name != 'nt', reason='Native Windows manager')
 def test_update_builds_before_stop_and_preserves_full_group_on_build_failure(tmp_path):
     script = r'''
@@ -149,7 +147,6 @@ Write-Output 'PASS'
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout
 
-
 @pytest.mark.skipif(os.name != 'nt', reason='Windows orphan admission')
 @pytest.mark.parametrize('candidate', ['registered', 'unknown', 'worker', 'connector'])
 def test_dead_supervisor_never_allows_start_over_live_or_unknown_children(candidate):
@@ -174,6 +171,63 @@ Write-Output 'PASS'
 '''
     result = subprocess.run([str(POWERSHELL), '-NoProfile', '-Command', script],
                             env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER), 'ORPHAN_TEST': candidate},
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS' in result.stdout
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows manager')
+def test_status_with_inaccessible_or_null_process_start_time_does_not_crash(tmp_path):
+    script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+$ProjectRoot = 'C:\project\root'
+$runtimeDirectory = $env:MANAGER_TEST_DIRECTORY
+$statePath = Join-Path $runtimeDirectory 'state.json'
+[void][IO.Directory]::CreateDirectory($runtimeDirectory)
+
+# Mock Get-Process to return a process whose StartTime is $null (like System PID 4 or access denied)
+function Get-Process {
+    param($Id,$ErrorAction)
+    return [pscustomobject]@{ Id = $Id; StartTime = $null }
+}
+
+# 1. State from another installation with inaccessible process
+$foreignState = @{
+    contract = 'windows-frontend-control/v1'
+    project_root = 'C:\other\installation'
+    supervisor_pid = 4
+    supervisor_start_time = '2026-01-01T00:00:00Z'
+    api_port = 8000
+    react_port = 5173
+} | ConvertTo-Json
+Set-Content -LiteralPath $statePath -Value $foreignState -Encoding utf8
+$state = Get-ManagedState
+if ($null -ne $state) { throw 'Foreign stale state was not cleaned up' }
+if (Test-Path -LiteralPath $statePath) { throw 'Foreign stale state file was not removed' }
+
+# 2. Status output with inaccessible root processes
+$matchingState = @{
+    contract = 'windows-frontend-control/v1'
+    project_root = 'C:\project\root'
+    supervisor_pid = 123
+    supervisor_start_time = '2026-01-01T00:00:00Z'
+    api_port = 8000
+    react_port = 5173
+    roots = @(
+        @{ label = 'FastAPI'; pid = 4; start_time = '2026-01-01T00:00:00Z' }
+    )
+} | ConvertTo-Json
+Set-Content -LiteralPath $statePath -Value $matchingState -Encoding utf8
+function Get-RemoteDisplayUrl { return 'http://localhost/' }
+Show-ManagedStatus
+
+Write-Output 'PASS'
+'''
+    result = subprocess.run([str(POWERSHELL), '-NoProfile', '-Command', script],
+                            env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER),
+                                 'MANAGER_TEST_DIRECTORY': str(tmp_path)},
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout

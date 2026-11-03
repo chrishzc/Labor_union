@@ -22,12 +22,28 @@ Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 
+function Test-ProcessMatchesStartTime {
+    param($Process, $ExpectedStartTime)
+    if (-not $Process -or -not $ExpectedStartTime) { return $false }
+    try {
+        $pTime = $Process.StartTime
+        if (-not $pTime) { return $false }
+        $expected = [datetime]$ExpectedStartTime
+        return ($pTime.ToUniversalTime().Ticks -eq $expected.ToUniversalTime().Ticks)
+    } catch {
+        return $false
+    }
+}
+
 function Assert-NoRemainingRuntime {
     param($State)
-    foreach ($root in $State.roots) {
-        $child = Get-Process -Id ([int]$root.pid) -ErrorAction SilentlyContinue
-        if ($child -and $child.StartTime.ToUniversalTime().Ticks -eq ([datetime]$root.start_time).ToUniversalTime().Ticks) {
-            throw 'A registered runtime child is still alive; no process was stopped.'
+    if ($State -and $State.roots) {
+        foreach ($root in $State.roots) {
+            if (-not $root -or -not $root.pid) { continue }
+            $child = Get-Process -Id ([int]$root.pid) -ErrorAction SilentlyContinue
+            if (Test-ProcessMatchesStartTime $child $root.start_time) {
+                throw 'A registered runtime child is still alive; no process was stopped.'
+            }
         }
     }
     # A dead launcher can leave an orphaned Python child. Do not infer that a
@@ -64,21 +80,28 @@ function Get-ManagedState {
         Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
         return $null
     }
+    if (-not $state) {
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
+        return $null
+    }
     if ($state.contract -ne 'windows-frontend-control/v1' -or $state.project_root -ne $ProjectRoot -or
         $state.api_port -ne 8000 -or $state.react_port -ne 5173) {
         $owner = $null
         if ($state.supervisor_pid) {
             $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
         }
-        $alive = $owner -and $owner.StartTime.ToUniversalTime().Ticks -eq ([datetime]$state.supervisor_start_time).ToUniversalTime().Ticks
+        $alive = Test-ProcessMatchesStartTime $owner $state.supervisor_start_time
         if (-not $alive) {
             Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
             return $null
         }
         throw 'Runtime state belongs to another installation.'
     }
-    $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
-    $alive = $owner -and $owner.StartTime.ToUniversalTime().Ticks -eq ([datetime]$state.supervisor_start_time).ToUniversalTime().Ticks
+    $owner = $null
+    if ($state.supervisor_pid) {
+        $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
+    }
+    $alive = Test-ProcessMatchesStartTime $owner $state.supervisor_start_time
     if (-not $alive) {
         if ($state.cleanup_confirmed -eq $true) { return $null }
         Assert-NoRemainingRuntime $state
@@ -207,15 +230,22 @@ function Show-ManagedStatus {
     if (-not $state) { Write-Host '[Stopped]'; return }
     $phase = if ($state.runtime_status) { $state.runtime_status } else { 'legacy-ready' }
     Write-Host "Runtime: $phase"
-    foreach ($root in $state.roots) {
-        $process = Get-Process -Id ([int]$root.pid) -ErrorAction SilentlyContinue
-        $alive = $process -and $process.StartTime.ToUniversalTime().Ticks -eq ([datetime]$root.start_time).ToUniversalTime().Ticks
-        Write-Host ('{0}: {1}' -f $root.label, $(if ($alive) {'running'} else {'unavailable'}))
+    if ($state.roots) {
+        foreach ($root in $state.roots) {
+            if (-not $root -or -not $root.pid) { continue }
+            $process = Get-Process -Id ([int]$root.pid) -ErrorAction SilentlyContinue
+            $alive = Test-ProcessMatchesStartTime $process $root.start_time
+            Write-Host ('{0}: {1}' -f $root.label, $(if ($alive) {'running'} else {'unavailable'}))
+        }
     }
-    $manifest = Join-Path $state.artifact_path 'artifact-manifest.json'
-    if (Test-Path -LiteralPath $manifest) {
-        $version = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
-        Write-Host "Frontend: $($version.artifact_version)"
+    if ($state.artifact_path) {
+        $manifest = Join-Path $state.artifact_path 'artifact-manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            $version = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
+            if ($version -and $version.artifact_version) {
+                Write-Host "Frontend: $($version.artifact_version)"
+            }
+        }
     }
     $remoteUrl = Get-RemoteDisplayUrl
     Write-Host "Local: http://localhost:5173/admin/ | Remote: $remoteUrl"
