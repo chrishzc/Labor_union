@@ -14,6 +14,266 @@ MANAGER = ROOT / 'scripts/launchers/manage_windows.ps1'
 POWERSHELL = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
 
 
+def run_manager_functions(script, directory, **environment):
+    load = r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Manager syntax error'}
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+$ProjectRoot=$env:MANAGER_TEST_DIRECTORY
+$runtimeDirectory=Join-Path $ProjectRoot 'scratch\windows-remote'
+$statePath=Join-Path $runtimeDirectory 'frontend-control\state.json'
+'''
+    return subprocess.run(
+        [str(POWERSHELL), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', load + script],
+        env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER),
+             'MANAGER_TEST_DIRECTORY': str(directory), **environment},
+        capture_output=True, text=True, encoding='utf-8', timeout=30,
+    )
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows UTF-8 control channel')
+@pytest.mark.parametrize('action', ['stop', 'frontend', 'status'])
+def test_bomless_state_preserves_chinese_and_quoted_paths(tmp_path, action):
+    root = tmp_path / "獅子 [管理] & O'Brien" / 'Labor union'
+    root.mkdir(parents=True)
+    supervisor = root / 'supervisor.ps1'
+    supervisor.write_text(r'''
+param($ProjectRoot,$PythonPath,[switch]$StopRuntime,$FrontendArtifact)
+$ErrorActionPreference='Stop'
+[void][IO.Directory]::CreateDirectory((Join-Path $ProjectRoot 'control-reached'))
+[IO.File]::WriteAllText((Join-Path $ProjectRoot 'received-root.txt'),$ProjectRoot)
+''', encoding='utf-8')
+    result = run_manager_functions(r'''
+. $env:CONTROL_TEST_PATH
+# Emulate a non-UTF-8 Windows default, even on machines with UTF-8 ACP enabled.
+$PSDefaultParameterValues['Get-Content:Encoding']='Ascii'
+[void][IO.Directory]::CreateDirectory((Split-Path -Parent $statePath))
+Write-FrontendControlJson $statePath @{
+    contract='windows-frontend-control/v1';project_root=$ProjectRoot
+    supervisor_pid=$PID;supervisor_start_time=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+    api_port=8000;react_port=5173;runtime_status='ready';roots=@()
+}
+$state=Get-ManagedState
+if($state.project_root -cne $ProjectRoot){throw 'UTF-8 project root was corrupted'}
+$supervisorPath=Join-Path $ProjectRoot 'supervisor.ps1'
+$PythonPath='unused-python'
+function Set-RuntimeEnvironment {}
+function New-ManagedArtifact {return (Join-Path $ProjectRoot 'artifact')}
+function Get-RemoteDisplayUrl {return 'https://example.invalid/'}
+Invoke-ManagerAction $env:ACTION_TEST
+''', root, ACTION_TEST=action,
+        CONTROL_TEST_PATH=str(ROOT / 'scripts/launchers/windows_frontend_control.ps1'))
+    assert result.returncode == 0, result.stdout + result.stderr
+    if action != 'status':
+        assert (root / 'received-root.txt').read_text(encoding='utf-8-sig') == str(root)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows UTF-8 request channel')
+def test_supervisor_reads_utf8_state_and_frontend_request_with_legacy_default(tmp_path):
+    root = tmp_path / '獅子 管理'
+    root.mkdir()
+    result = run_manager_functions(r'''
+. $env:CONTROL_TEST_PATH
+$PSDefaultParameterValues['Get-Content:Encoding']='Ascii'
+$ApiPort=8000;$ReactPort=5173;$script:RunId='utf8-test'
+$script:Owned=@();$script:CleanupSucceeded=$false
+function Get-ProcessSnapshot {
+    param($ProcessId)
+    return [pscustomobject]@{State='alive';StartTime=(Get-Process -Id $PID).StartTime.ToUniversalTime()}
+}
+function Test-SameProcessIdentity {
+    param($Entry,$Snapshot)
+    return $Entry.StartTime.ToUniversalTime().Ticks -eq $Snapshot.StartTime.ToUniversalTime().Ticks
+}
+function Write-RuntimeEvent {}
+Publish-FrontendControlState
+$state=Get-FrontendUpdateSupervisor
+if($state.project_root -cne $ProjectRoot){throw 'Supervisor read corrupted installation root'}
+$artifact=Join-Path $ProjectRoot 'scratch\windows-remote\artifact-candidate'
+function Invoke-RemoteFrontendRestart {
+    param($ArtifactPath)
+    if($ArtifactPath -cne $artifact){throw 'Supervisor read corrupted artifact path'}
+    return @{status='updated'}
+}
+$id='a'*32
+Write-FrontendControlJson (Join-Path (Get-FrontendControlDirectory) 'request.json') @{
+    id=$id;run_id=$script:RunId;operation='restart_frontend';artifact_path=$artifact
+}
+Receive-FrontendControlRequest
+$response=[IO.File]::ReadAllText((Join-Path (Get-FrontendControlDirectory) ($id+'.response.json')))|ConvertFrom-Json
+if($response.status -ne 'updated'){throw ('Request rejected: '+$response.error)}
+''', root, CONTROL_TEST_PATH=str(ROOT / 'scripts/launchers/windows_frontend_control.ps1'))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows installation binding')
+def test_live_foreign_state_is_rejected_even_inside_current_state_directory(tmp_path):
+    result = run_manager_functions(r'''
+[void][IO.Directory]::CreateDirectory((Split-Path -Parent $statePath))
+[IO.File]::WriteAllText($statePath,(@{
+    contract='windows-frontend-control/v1';project_root='C:\another-installation'
+    supervisor_pid=$PID;supervisor_start_time=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+    api_port=8000;react_port=5173
+}|ConvertTo-Json))
+$rejected=$false
+try{Get-ManagedState|Out-Null}catch{$rejected=$true}
+if(-not $rejected){throw 'Foreign live installation was accepted'}
+''', tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows batch menu')
+def test_batch_menu_dispatches_every_option_and_continues_after_error(tmp_path):
+    root = tmp_path / '獅子 管理'
+    launcher = root / 'scripts/launchers/manage_windows.ps1'
+    launcher.parent.mkdir(parents=True)
+    record = r'''
+function Invoke-ManagerAction {
+    param($Selected)
+    [IO.File]::AppendAllText((Join-Path $ProjectRoot 'actions.txt'),$Selected+"`n")
+    if($Selected -eq 'stop'){throw 'synthetic stop failure'}
+}
+'''
+    launcher.write_text(MANAGER.read_text(encoding='utf-8-sig').replace(
+        "if ($Action -ne 'menu') {", record + "\nif ($Action -ne 'menu') {"), encoding='utf-8-sig')
+    entry = root / 'Windows管理.bat'
+    entry.write_bytes((ROOT / entry.name).read_bytes())
+    result = subprocess.run(['cmd.exe', '/d', '/c', 'call', str(entry)],
+                            input='invalid\n' + '\n'.join(map(str, range(1, 11))) + '\n0\n',
+                            capture_output=True, encoding='utf-8', errors='replace', timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / 'actions.txt').read_text(encoding='utf-8').splitlines() == [
+        'start', 'stop', 'update', 'frontend', 'status', 'database-backup',
+        'database-upgrade', 'database-restore', 'setup', 'check',
+    ]
+    assert '[Error] synthetic stop failure' in result.stdout
+    failed = subprocess.run(['cmd.exe', '/d', '/c', 'call', str(entry), '-Action', 'stop'],
+                            input='\n', capture_output=True, encoding='utf-8', errors='replace', timeout=30)
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows startup ordering')
+@pytest.mark.parametrize('failure', ['', 'build', 'database', 'redis', 'supervisor'])
+def test_start_checks_build_database_and_redis_before_launching(tmp_path, failure):
+    result = run_manager_functions(r'''
+$LocalOnly=$true
+$PythonPath='Invoke-TestPython'
+$supervisorPath='unused-supervisor'
+$script:calls=[System.Collections.Generic.List[string]]::new()
+function Get-ManagedState {return $null}
+function Assert-ProgramEnvironment {}
+function Set-RuntimeEnvironment {}
+function Get-Service {param($Name,$ErrorAction);return $null}
+function Get-RemoteDisplayUrl {return 'https://example.invalid/'}
+function New-ManagedArtifact {
+    $script:calls.Add('build')
+    if($env:FAIL_AT -eq 'build'){throw 'build failed'}
+    return (Join-Path $ProjectRoot 'artifact')
+}
+function Invoke-TestPython {
+    if(($args -join '|') -ne '-m|scripts.check_runtime_database'){throw 'Unexpected Python invocation'}
+    $script:calls.Add('database');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'database')
+}
+function docker.exe {
+    if(($args -join '|') -ne 'compose|up|-d|redis'){throw 'Unexpected container operation'}
+    $script:calls.Add('redis');$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'redis')
+}
+function Start-Process {
+    param($FilePath,$ArgumentList,$WorkingDirectory,$WindowStyle,$RedirectStandardOutput,$RedirectStandardError,[switch]$PassThru)
+    if($WindowStyle -ne 'Hidden' -or $WorkingDirectory -ne $ProjectRoot){throw 'Wrong supervisor launch'}
+    $script:calls.Add('supervisor')
+    return [pscustomobject]@{Id=777;HasExited=($env:FAIL_AT -eq 'supervisor')}
+}
+[void][IO.Directory]::CreateDirectory((Split-Path -Parent $statePath))
+[IO.File]::WriteAllText($statePath,'{"supervisor_pid":777,"runtime_status":"ready"}')
+$rejected=$false
+try{Invoke-ManagerAction start}catch{$rejected=$true}
+if($rejected -ne [bool]$env:FAIL_AT){throw 'Startup failure was hidden or startup failed'}
+$expected=@('build','database','redis','supervisor')
+if($env:FAIL_AT){$expected=$expected[0..([array]::IndexOf($expected,$env:FAIL_AT))]}
+if(($script:calls -join ',') -ne ($expected -join ',')){throw ('Unexpected startup effects: '+($script:calls -join ','))}
+''', tmp_path, FAIL_AT=failure)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows setup failure propagation')
+@pytest.mark.parametrize('failure', ['', 'pip', 'npm', 'browser'])
+def test_setup_checks_each_dependency_step_and_stops_on_failure(tmp_path, failure):
+    (tmp_path / 'ui_react').mkdir()
+    result = run_manager_functions(r'''
+Set-Location -LiteralPath $ProjectRoot
+$PythonPath='Invoke-TestPython'
+$script:calls=[System.Collections.Generic.List[string]]::new()
+function Get-ManagedState {return $null}
+function Test-Path {param($LiteralPath);return $true}
+function Get-Command {param($Name,$ErrorAction);return [pscustomobject]@{Name=$Name}}
+function Invoke-TestPython {
+    $step=if($args[1] -eq 'pip'){'pip'}elseif(($args -join '|') -eq '-m|playwright|install|chromium'){'browser'}else{throw 'Unexpected dependency command'}
+    $script:calls.Add($step);$global:LASTEXITCODE=[int]($env:FAIL_AT -eq $step)
+}
+function npm.cmd {
+    $script:calls.Add('npm:'+$args[0]);$global:LASTEXITCODE=[int]($env:FAIL_AT -eq 'npm')
+}
+$rejected=$false
+try{Invoke-ManagerAction setup}catch{$rejected=$true}
+if($rejected -ne [bool]$env:FAIL_AT){throw 'Dependency failure was hidden or setup failed'}
+$expected=switch($env:FAIL_AT){
+    'pip' {'pip'}
+    'npm' {'pip,npm:ci,npm:install'}
+    default {'pip,npm:ci,browser'}
+}
+if(($script:calls -join ',') -ne $expected){throw ('Unexpected dependency effects: '+($script:calls -join ','))}
+if((Get-Location).Path -ne $ProjectRoot){throw 'Setup failed to restore the working directory'}
+''', tmp_path, FAIL_AT=failure)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows stop failure propagation')
+def test_update_never_restarts_when_supervisor_rejects_stop(tmp_path):
+    result = run_manager_functions(r'''
+$script:starts=0
+function Set-RuntimeEnvironment {}
+function New-ManagedArtifact {return 'validated-artifact'}
+function Get-ManagedState {return [pscustomobject]@{project_root=$ProjectRoot}}
+function powershell.exe {$global:LASTEXITCODE=7}
+function Start-ManagedRuntime {$script:starts++}
+$rejected=$false
+try{Invoke-ManagerAction update}catch{$rejected=$true}
+if(-not $rejected -or $script:starts -ne 0){throw 'Restarted after failed stop'}
+''', tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows environment check')
+@pytest.mark.parametrize('missing', ['', 'python', 'vite', 'docker', 'npm'])
+def test_environment_check_reports_missing_requirements_without_external_calls(tmp_path, missing):
+    result = run_manager_functions(r'''
+$PythonPath=Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+function Test-Path {
+    param($LiteralPath)
+    return -not (($env:MISSING_TEST -eq 'python' -and $LiteralPath -eq $PythonPath) -or
+        ($env:MISSING_TEST -eq 'vite' -and $LiteralPath -like '*vite.js'))
+}
+function Get-Command {
+    param($Name,$ErrorAction)
+    if(($env:MISSING_TEST -eq 'docker' -and $Name -eq 'docker.exe') -or
+        ($env:MISSING_TEST -eq 'npm' -and $Name -like 'npm*')){return $null}
+    return [pscustomobject]@{Name=$Name}
+}
+function Get-Service {param($Name,$ErrorAction);return $null}
+function Invoke-DatabaseMaintenance {throw 'Environment check reached database'}
+function docker.exe {throw 'Environment check ran Docker'}
+function npm.cmd {throw 'Environment check installed dependencies'}
+$rejected=$false
+try{Invoke-ManagerAction check}catch{$rejected=$true}
+if($rejected -ne [bool]$env:MISSING_TEST){throw 'Wrong environment check result'}
+''', tmp_path, MISSING_TEST=missing)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_deployment_archive_never_opens_excluded_settings_or_runtime_data(tmp_path, monkeypatch):
     subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
     program = {'Windows管理.bat', 'scripts/launchers/manage_windows.ps1',
@@ -276,7 +536,7 @@ function powershell.exe {
     $global:LASTEXITCODE = 0
 }
 Stop-ManagedRuntime
-if ($script:stopInvokedWithRoot -ne 'C:\project\root\') { throw 'Stop was not forwarded with target root' }
+if ($script:stopInvokedWithRoot -ne 'C:\project\root') { throw 'Stop was not forwarded with canonical root' }
 
 Write-Output 'PASS'
 '''

@@ -86,7 +86,7 @@ function Start-RemoteFrontendChild {
         '--host', '127.0.0.1', '--port', "$ReactPort", '--no-proxy-headers'
     )
     Wait-HttpReady -Url "http://127.0.0.1:$ReactPort/test/" -Label 'Remote React' -RequireHtmlRoot -OwnedEntry $entry
-    $expected = Get-Content -Raw -LiteralPath (Join-Path $ArtifactPath 'artifact-manifest.json') | ConvertFrom-Json
+    $expected = Get-Content -Raw -LiteralPath (Join-Path $ArtifactPath 'artifact-manifest.json') -Encoding UTF8 | ConvertFrom-Json
     $actual = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort/test/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
     if ($actual.artifact_digest -ne $expected.artifact_digest) { throw 'Frontend readback did not match the requested artifact.' }
     return $entry
@@ -126,7 +126,7 @@ function Receive-FrontendControlRequest {
     $directory = Get-FrontendControlDirectory
     $path = Join-Path $directory 'request.json'
     if (-not (Test-Path -LiteralPath $path)) { return }
-    try { $request = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json } catch { return }
+    try { $request = Get-Content -Raw -LiteralPath $path -Encoding UTF8 | ConvertFrom-Json } catch { return }
     if ($request.id -notmatch '^[0-9a-f]{32}$' -or $request.id -eq $script:LastFrontendRequest) { return }
     $script:LastFrontendRequest = $request.id
     try {
@@ -161,7 +161,7 @@ function Submit-RuntimeStop {
             id=[guid]::NewGuid().ToString('N');run_id=$state.run_id;operation='stop_runtime'
         }
         if (-not $owner.Process.WaitForExit(180000)) { throw 'Runtime stop is still pending; do not start another host.' }
-        $finished = Get-Content -Raw -LiteralPath (Join-Path $directory 'state.json') | ConvertFrom-Json
+        $finished = Get-Content -Raw -LiteralPath (Join-Path $directory 'state.json') -Encoding UTF8 | ConvertFrom-Json
         if ($finished.run_id -ne $state.run_id -or $finished.runtime_status -ne 'stopped') {
             throw 'Runtime cleanup was not confirmed; do not start another host.'
         }
@@ -193,7 +193,7 @@ function Initialize-AdoptedRemoteRuntime {
     param([string]$StatePath)
     # Until the legacy supervisor exits, failure must never clean up its children.
     $script:SkipRuntimeCleanup = $true
-    $state = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
+    $state = Get-Content -Raw -LiteralPath $StatePath -Encoding UTF8 | ConvertFrom-Json
     if ($state.contract -ne 'windows-frontend-adoption/v1' -or $state.project_root -ne $ProjectRoot -or
         $state.api_port -ne $ApiPort -or $state.react_port -ne $ReactPort) { throw 'Adoption binding mismatch.' }
     [void](Assert-FrontendArtifact $state.artifact_path)
@@ -220,7 +220,7 @@ function Get-FrontendUpdateSupervisor {
     $directory = Get-FrontendControlDirectory
     $statePath = Join-Path $directory 'state.json'
     if (Test-Path -LiteralPath $statePath) {
-        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
         $snapshot = Get-ProcessSnapshot ([int]$state.supervisor_pid)
         if ($state.contract -eq 'windows-frontend-control/v1' -and $state.project_root -eq $ProjectRoot -and
             $state.api_port -eq $ApiPort -and $state.react_port -eq $ReactPort -and
@@ -259,7 +259,7 @@ function Get-FrontendUpdateSupervisor {
     $current = (Invoke-WebRequest -Uri "http://127.0.0.1:$ReactPort/test/artifact-manifest.json" -UseBasicParsing -TimeoutSec 5).Content | ConvertFrom-Json
     $artifact = @(Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'scratch\windows-remote') -Directory -Filter 'artifact-*' | Where-Object {
         $manifest = Join-Path $_.FullName 'artifact-manifest.json'
-        (Test-Path -LiteralPath $manifest) -and (Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json).artifact_digest -eq $current.artifact_digest
+        (Test-Path -LiteralPath $manifest) -and (Get-Content -Raw -LiteralPath $manifest -Encoding UTF8 | ConvertFrom-Json).artifact_digest -eq $current.artifact_digest
     } | Select-Object -First 1)
     if ($artifact.Count -ne 1) { throw 'The current rollback artifact was not found.' }
     $legacySnapshot = Get-ProcessSnapshot ([int]$legacy.ProcessId)
@@ -288,7 +288,7 @@ function Get-FrontendUpdateSupervisor {
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path -LiteralPath $readyPath)) { throw 'Replacement supervisor did not become ready; current runtime was retained.' }
-    $ready = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
+    $ready = Get-Content -Raw -LiteralPath $readyPath -Encoding UTF8 | ConvertFrom-Json
     if ($ready.pid -ne $replacement.Id -or ([datetime]$ready.start_time).ToUniversalTime().Ticks -ne $replacement.StartTime.ToUniversalTime().Ticks) { throw 'Replacement supervisor identity mismatch.' }
     $verified = Get-ProcessSnapshot ([int]$legacy.ProcessId)
     if ($verified.State -ne 'alive' -or -not (Test-SameProcessIdentity ([pscustomobject]@{StartTime=$legacySnapshot.StartTime}) $verified)) { throw 'Legacy supervisor changed before handoff.' }
@@ -298,7 +298,7 @@ function Get-FrontendUpdateSupervisor {
     [void]$verified.Process.WaitForExit(5000)
     for ($attempt=0; $attempt -lt 120; $attempt++) {
         if (Test-Path -LiteralPath $statePath) {
-            $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+            $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
             if ($state.supervisor_pid -eq $replacement.Id) { return $state }
         }
         if ($replacement.HasExited) { throw "Supervisor handoff needs recovery from $adoptionPath; preserved children were not intentionally stopped." }
@@ -320,7 +320,7 @@ function Submit-FrontendUpdate {
         $responsePath = Join-Path $directory ($id + '.response.json')
         for ($attempt=0; $attempt -lt 480; $attempt++) {
             if (Test-Path -LiteralPath $responsePath) {
-                $response = Get-Content -Raw -LiteralPath $responsePath | ConvertFrom-Json
+                $response = Get-Content -Raw -LiteralPath $responsePath -Encoding UTF8 | ConvertFrom-Json
                 if ($response.id -ne $id) { throw 'Frontend response identity mismatch.' }
                 if ($response.status -ne 'updated') { throw "Frontend update $($response.status): $($response.error)" }
                 Write-Host "[Ready] Frontend updated on 127.0.0.1:$ReactPort; API, workers and Tunnel were not restarted."

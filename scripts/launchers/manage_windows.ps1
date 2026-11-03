@@ -100,7 +100,7 @@ function Assert-NoRemainingRuntime {
 function Get-ManagedState {
     if (-not (Test-Path -LiteralPath $statePath)) { return $null }
     try {
-        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
     } catch {
         Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
         return $null
@@ -123,14 +123,6 @@ function Get-ManagedState {
 
     # 2. Check if this state belongs to current project installation.
     $isSameProject = Test-IsSamePath $state.project_root $ProjectRoot
-    if (-not $isSameProject) {
-        $actualStateFullPath = [IO.Path]::GetFullPath($statePath)
-        $expectedRootPrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-        if ($actualStateFullPath.StartsWith($expectedRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            $isSameProject = $true
-        }
-    }
-
     if ($state.contract -ne 'windows-frontend-control/v1' -or (-not $isSameProject) -or
         $state.api_port -ne 8000 -or $state.react_port -ne 5173) {
         throw 'Runtime state belongs to another installation.'
@@ -176,9 +168,8 @@ function New-ManagedArtifact {
 function Stop-ManagedRuntime {
     $state = Get-ManagedState
     if (-not $state) { Write-Host '[Stopped] No managed runtime is running.'; return }
-    $targetRoot = if ($state -and $state.project_root) { $state.project_root } else { $ProjectRoot }
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath `
-        -ProjectRoot $targetRoot -PythonPath $PythonPath -StopRuntime
+        -ProjectRoot $ProjectRoot -PythonPath $PythonPath -StopRuntime
     if ($LASTEXITCODE -ne 0) { throw 'Stop failed; do not start another host.' }
 }
 
@@ -217,7 +208,7 @@ function Start-ManagedRuntime {
     for ($attempt = 0; $attempt -lt 180; $attempt++) {
         if ($owner.HasExited) { throw "Startup failed. See $logPath and $errorPath" }
         if (Test-Path -LiteralPath $statePath) {
-            $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+            $state = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8 | ConvertFrom-Json
             if ($state.supervisor_pid -eq $owner.Id -and $state.runtime_status -eq 'ready') {
                 $remoteUrl = Get-RemoteDisplayUrl
                 Write-Host "[Ready] Local: http://localhost:5173/admin/ | Remote: $remoteUrl"
@@ -238,7 +229,7 @@ function Start-ManagedRuntime {
 function Get-RemoteDisplayUrl {
     $envPath = Join-Path $ProjectRoot '.env'
     if (Test-Path -LiteralPath $envPath) {
-        $lines = Get-Content -LiteralPath $envPath -ErrorAction SilentlyContinue
+        $lines = Get-Content -LiteralPath $envPath -Encoding UTF8 -ErrorAction SilentlyContinue
         foreach ($line in $lines) {
             if ($line -match '^\s*ALLOWED_ORIGINS\s*=\s*(.+)$') {
                 $candidates = $matches[1].Trim() -split ','
@@ -270,7 +261,7 @@ function Show-ManagedStatus {
     if ($state.artifact_path) {
         $manifest = Join-Path $state.artifact_path 'artifact-manifest.json'
         if (Test-Path -LiteralPath $manifest) {
-            $version = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
+            $version = Get-Content -Raw -LiteralPath $manifest -Encoding UTF8 | ConvertFrom-Json
             if ($version -and $version.artifact_version) {
                 Write-Host "Frontend: $($version.artifact_version)"
             }
@@ -329,10 +320,9 @@ function Invoke-ManagerAction {
             'frontend' {
                 Set-RuntimeEnvironment
                 $artifact = New-ManagedArtifact
-                $state = Get-ManagedState
-                $targetRoot = if ($state -and $state.project_root) { $state.project_root } else { $ProjectRoot }
+                [void](Get-ManagedState)
                 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath `
-                    -ProjectRoot $targetRoot -PythonPath $PythonPath -FrontendArtifact $artifact
+                    -ProjectRoot $ProjectRoot -PythonPath $PythonPath -FrontendArtifact $artifact
                 if ($LASTEXITCODE -ne 0) { throw 'Frontend update did not succeed.' }
             }
             'prepare' { [void](New-ManagedArtifact) }
