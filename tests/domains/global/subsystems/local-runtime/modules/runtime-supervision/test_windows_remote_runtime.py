@@ -141,3 +141,24 @@ def test_custom_allowed_origins_and_domain_routing(artifact, monkeypatch):
         # Unauthorized foreign host is blocked with 403
         unauthorized = client.get('/admin/', headers={'host': 'unauthorized.invalid'})
         assert unauthorized.status_code == 403
+
+
+def test_root_setup_preserves_validated_origin_and_replaces_forwarded_input(artifact):
+    calls = []
+    def api(request):
+        if request.url.path.endswith('/auth/me'):
+            return httpx.Response(401)
+        calls.append(request)
+        return httpx.Response(200, headers={'content-type': 'application/json'},
+                              stream=httpx.ByteStream(b'{"required":true}'))
+    app = remote.create_gateway(artifact, transport=httpx.MockTransport(api))
+    with TestClient(app, base_url='https://chrishzc.com') as client:
+        response = client.get('/test/api/v1/admin/setup', headers={
+            'origin': 'https://chrishzc.com', 'x-forwarded-proto': 'http',
+            'x-forwarded-host': 'attacker.example',
+        })
+        assert response.json() == {'required': True}
+    assert calls[0].headers['host'] == 'chrishzc.com'
+    assert calls[0].headers['origin'] == 'https://chrishzc.com'
+    assert calls[0].headers['x-forwarded-proto'] == 'https'
+    assert 'x-forwarded-host' not in calls[0].headers

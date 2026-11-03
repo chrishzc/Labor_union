@@ -629,13 +629,14 @@ Modules：
 - password challenge 必須綁定 user、credential version、active factor identity、account access-control version、source-risk subject 與 absolute
   expiry；不得在 browser storage、log、audit detail 或 URL 保存 password、TOTP 或原 challenge token。
 
-#### 4.3.1 NAS 首次安裝的網頁 bootstrap（2026-10-16 使用者修正範圍）
+#### 4.3.1 管理端首次安裝的統一網頁 bootstrap（2026-11-03 使用者裁決）
 
-- 使用者明確要求 NAS 映像開啟管理介面後，直接以網頁建立第一個 root，免除 SSH／容器終端機。此入口只掛載於 NAS 管理測試 factory，不加入標準 `api.main`；部署邊界與驗收見 `deployment/nas-test/README.web-setup.md`。
-- `GET /setup` 與 `GET /api/v1/admin/setup` 提供首次安裝畫面／是否需要設定；`POST /api/v1/admin/setup` 保留 HTTPS 與尚未存在 root 的 fresh fact，提交來源需與目前請求的 HTTPS 入口一致。不要求部署啟用碼或預填固定網站網址。使用者已要求移除額外啟用碼與網址設定；它們先前由實作者選定，不視為原始人工需求。
-- 使用者明確決定先保留既有 HTTPS 限制；NAS 已確認支援 HTTPS，但網站憑證、專案入口與反向代理仍待確認，不包含於本輪變更，不以本輪打包代表 NAS 網頁已可直接存取。
+- 所有管理入口（標準 `api.main`、NAS management factory、本機及 Windows 遠端管理端）共用一個網頁建帳流程，以 MySQL `admin_root_account` 是否已有 root designation 判斷首次設定，與主機身分、帳號名稱或環境變數是否存在無關。停用並移除啟動時依 `DEV_ROOT_USERNAME`／`DEV_ROOT_PASSWORD` 自動建立 root 的分支，不保留兩套初始化模式。
+- React 在掛載管理應用及處理既有登入狀態前，以 `GET /api/v1/admin/setup` 確認是否需要設定；無 root 時顯示首次設定表單，已有 root 時進入既有登入／session 流程。`POST /api/v1/admin/setup` 是唯一網頁首次建帳入口；舊 `GET /setup` 僅導向共用管理介面，不再提供另一個安裝表單。不要求部署啟用碼或預填固定網址。
+- 建帳要求 HTTPS；僅當 request Host 與實際 client 同為 loopback 時允許本機 HTTP。提交 Origin 必須與目前管理入口同源。Vite 保留原 Host；Windows gateway 只對 setup API 傳入已驗證的 Host 及由自身 request 決定的 scheme，捨棄外來 forwarded headers，API 僅信任既有 loopback proxy。LINE public factory 不掛載此入口。
+- 空資料庫須先完成既有 schema 初始化。資料庫連線失敗或缺少資料表時回 typed unavailable，介面顯示錯誤並提供人工重查，不當作無 root，也不自動 bootstrap schema 或資料。
 - 寫入只能委派既有 `bootstrap_root_admin`，使用原本唯一 root designation 與 outer transaction／audit。root 已存在時拒絕建立或覆寫；concurrent bootstrap 只能有一個成功，競爭／deadlock 回 typed 409，不做 blind retry。不新增 table、root owner 或 reset／recovery HTTP endpoint。
-- NAS 安裝表單沿用共用 10 字元最低密碼政策，傳輸上限仍為 256 字元。成功建立不簽發 session、不替使用者啟用 factor；後續仍走既有兩段登入與 MFA enrollment。
+- 統一安裝表單沿用共用 10 字元最低密碼政策，傳輸上限仍為 256 字元，並要求再次輸入密碼確認。成功建立不簽發 session、不替使用者啟用 factor；後續仍走既有兩段登入與 MFA enrollment。
 - password 不得出現在 validation error、browser storage、URL、log 或 audit detail。root designation 存在後關閉建立入口，重新啟動／重新下載映像不重開設定，也不變更帳號或 MFA。
 
 ### 4.4 Subsystem：Account／Session Administration

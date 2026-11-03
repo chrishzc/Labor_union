@@ -1,16 +1,15 @@
 """
-File: nas_setup.py
-Description: 提供初次最高管理員 HTTPS 同源建立路由與中介層保護。
+File: admin_setup.py
+Description: 所有管理入口共用 MySQL root 狀態與同源首次建帳流程。
 """
 from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 import pymysql
 
@@ -19,7 +18,6 @@ from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from subsystems.access.authentication_session import bootstrap_root_admin, has_root_admin
 
 router = APIRouter(include_in_schema=False)
-ASSETS = Path("/opt/nas/setup")
 HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
@@ -46,9 +44,12 @@ def _error(status: int, code: str, message: str) -> HTTPException:
     return HTTPException(status, {"error": error.model_dump(mode="json")}, headers=HEADERS)
 
 
-def _require_https(request: Request) -> None:
-    if request.url.scheme != "https":
-        raise _error(426, "https_required", "請從 NAS 的 HTTPS 網址開啟設定頁面。")
+def _require_secure_transport(request: Request) -> None:
+    loopbacks = {"127.0.0.1", "localhost", "::1"}
+    local = (request.url.hostname in loopbacks and request.client is not None
+             and request.client.host in loopbacks)
+    if request.url.scheme != "https" and not local:
+        raise _error(426, "https_required", "請使用 HTTPS 網址開啟管理介面後設定帳號。")
 
 
 def _required() -> bool:
@@ -60,34 +61,21 @@ def _required() -> bool:
 
 @router.get("/setup")
 async def setup_page(request: Request):
-    _require_https(request)
-    if not await asyncio.to_thread(_required):
-        return RedirectResponse("/admin/", status_code=303, headers=HEADERS)
-    return FileResponse(ASSETS / "index.html", headers=HEADERS)
-
-
-@router.get("/setup/style.css")
-async def setup_css():
-    return FileResponse(ASSETS / "style.css", headers=HEADERS)
-
-
-@router.get("/setup/setup.js")
-async def setup_script():
-    return FileResponse(ASSETS / "setup.js", headers=HEADERS)
+    return RedirectResponse("/admin/", status_code=303, headers=HEADERS)
 
 
 @router.get("/api/v1/admin/setup")
 async def setup_status(request: Request):
-    _require_https(request)
     return JSONResponse({"required": await asyncio.to_thread(_required)}, headers=HEADERS)
 
 
 @router.post("/api/v1/admin/setup")
 async def create_first_root(request: Request):
-    _require_https(request)
-    # Use this request's HTTPS endpoint; no deployment URL or extra secret.
-    origin = request.headers.get("origin", "").lower().removesuffix(":443")
-    expected_origin = str(request.base_url).rstrip("/").lower().removesuffix(":443")
+    _require_secure_transport(request)
+    # Compare the browser's origin with the current management endpoint.
+    default_port = ":443" if request.url.scheme == "https" else ":80"
+    origin = request.headers.get("origin", "").lower().removesuffix(default_port)
+    expected_origin = f"{request.url.scheme}://{request.url.netloc}".lower().removesuffix(default_port)
     if origin != expected_origin:
         raise _error(403, "setup_origin_rejected", "請從設定的管理介面網址重新開啟。")
     if not await asyncio.to_thread(_required):
@@ -118,16 +106,3 @@ async def create_first_root(request: Request):
             raise _error(409, "setup_conflict", "其他設定正在進行，請重新開啟頁面確認。") from None
         raise _error(503, "setup_unavailable", "設定服務暫時無法使用，請稍後再試。") from None
     return JSONResponse({"created": True, "next": "/admin/"}, status_code=201, headers=HEADERS)
-
-
-def attach_setup(app):
-    """Share the first-root boundary with the complete internal NAS application."""
-    app.include_router(router)
-
-    @app.middleware("http")
-    async def first_visit(request: Request, call_next):
-        if request.url.path in {"/admin", "/admin/"} and await asyncio.to_thread(_required):
-            return RedirectResponse("/setup", status_code=303, headers=HEADERS)
-        return await call_next(request)
-
-    return app

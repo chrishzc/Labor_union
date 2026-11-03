@@ -91,7 +91,8 @@ def ensure_builtin_knowledge_catalog() -> None:
     finally:
         connection.close()
     if row is None:
-        raise RuntimeError("knowledge_builtin_admin_missing")
+        # A fresh installation must reach the shared root-setup page first.
+        return
     import_builtin_knowledge_catalog(
         ActorContext(str(row["id"])),
         "builtin-line-common-qa-v1",

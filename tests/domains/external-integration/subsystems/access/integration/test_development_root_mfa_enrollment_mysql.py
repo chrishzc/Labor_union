@@ -1,4 +1,4 @@
-"""Verify development root bootstrap and MFA enrollment on a fresh disposable MySQL DB."""
+"""Verify shared web root bootstrap and MFA enrollment on a fresh disposable MySQL DB."""
 
 from __future__ import annotations
 
@@ -51,8 +51,11 @@ def _require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def test_development_root_requires_enrollment_and_preserves_existing_factor(monkeypatch):
-    from api.dependencies import admin_auth
+def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkeypatch):
+    import asyncio
+    import httpx
+    from fastapi import FastAPI
+    from api.routes import admin_setup
     from subsystems.access import authentication_session as auth
     from subsystems.access.totp import _totp_code, totp_step
 
@@ -64,11 +67,22 @@ def test_development_root_requires_enrollment_and_preserves_existing_factor(monk
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "v1")
     username = "issue358-root-" + secrets.token_hex(6)
     password = secrets.token_urlsafe(24)
-    monkeypatch.setenv("DEV_ROOT_USERNAME", username)
-    monkeypatch.setenv("DEV_ROOT_PASSWORD", password)
-    monkeypatch.setattr(admin_auth, "get_connection", _connection)
+    monkeypatch.setattr(admin_setup, "get_access_control_connection_factory", lambda: _connection)
+    app = FastAPI()
+    app.include_router(admin_setup.router)
 
-    admin_auth.ensure_development_root_admin()
+    def setup_request(method="POST"):
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="https://admin.example.test") as client:
+                return await client.request(method, "/api/v1/admin/setup",
+                    headers={"Origin": "https://admin.example.test"},
+                    json={"username": username, "display_name": "Test root", "password": password}
+                         if method == "POST" else None)
+        return asyncio.run(run())
+
+    _require(setup_request("GET").json() == {"required": True}, "fresh database must require setup")
+    _require(setup_request().status_code == 201, "web setup must create the root")
     _require(len(_rows("SELECT id FROM admin_users")) == 1, "bootstrap must create one account")
     _require(len(_rows("SELECT admin_user_id FROM admin_root_account")) == 1, "bootstrap must establish root")
     _require(not _rows("SELECT id FROM admin_totp_factors"), "bootstrap must not provision a factor")
@@ -117,19 +131,7 @@ def test_development_root_requires_enrollment_and_preserves_existing_factor(monk
 
     accounts_before = _rows("SELECT * FROM admin_users")
     factors_before = _rows("SELECT * FROM admin_totp_factors")
-    monkeypatch.setenv("DEV_ROOT_PASSWORD", secrets.token_urlsafe(24))
-    admin_auth.ensure_development_root_admin()
-    _require(_rows("SELECT * FROM admin_users") == accounts_before, "restart must preserve existing account")
-    _require(_rows("SELECT * FROM admin_totp_factors") == factors_before, "restart must preserve existing factor")
-
-    for app_env, configured_username, configured_password in (
-        ("production", "issue358-uncreated", password),
-        ("development", "", password),
-        ("development", "issue358-uncreated", ""),
-    ):
-        monkeypatch.setenv("APP_ENV", app_env)
-        monkeypatch.setenv("DEV_ROOT_USERNAME", configured_username)
-        monkeypatch.setenv("DEV_ROOT_PASSWORD", configured_password)
-        admin_auth.ensure_development_root_admin()
-    _require(_rows("SELECT * FROM admin_users") == accounts_before, "disallowed bootstrap must not alter accounts")
-    _require(_rows("SELECT * FROM admin_totp_factors") == factors_before, "disallowed bootstrap must not alter factors")
+    _require(setup_request("GET").json() == {"required": False}, "existing database must close setup")
+    _require(setup_request().status_code == 410, "existing root must reject recreation")
+    _require(_rows("SELECT * FROM admin_users") == accounts_before, "setup replay must preserve existing account")
+    _require(_rows("SELECT * FROM admin_totp_factors") == factors_before, "setup replay must preserve existing factor")

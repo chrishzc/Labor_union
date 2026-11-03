@@ -26,6 +26,7 @@ from api.routes import (
     database_backup,
     admin_audit,
     admin_auth,
+    admin_setup,
     admin_entry_targets,
     account_center,
     registration_applications,
@@ -163,7 +164,6 @@ from api.schemas.base import BaseResponse
 from api.schemas.runtime_health import ApiHealthView
 from api.dependencies.admin_auth import (
     ensure_development_line_configuration,
-    ensure_development_root_admin,
     get_access_control_connection_factory,
 )
 from api.dependencies.line_runtime import line_webhook_runtime_mode
@@ -216,7 +216,6 @@ async def lifespan(_: FastAPI):
             _conn.close()
     except Exception:
         pass
-    ensure_development_root_admin()
     from api.dependencies.knowledge_retrieval import ensure_builtin_knowledge_catalog
     ensure_builtin_knowledge_catalog()
     ensure_development_line_configuration()
@@ -275,6 +274,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
 app.include_router(admin_auth.router)
+app.include_router(admin_setup.router)
 app.include_router(account_center.router)
 app.include_router(registration_applications.router)
 app.include_router(admin_audit.router)

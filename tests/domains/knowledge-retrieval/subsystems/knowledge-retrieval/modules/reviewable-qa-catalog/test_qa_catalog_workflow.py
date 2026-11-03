@@ -205,6 +205,25 @@ def test_non_development_startup_does_not_seed_catalog(monkeypatch) -> None:
     knowledge_dependencies.ensure_builtin_knowledge_catalog()
 
 
+def test_fresh_install_without_legacy_admin_skips_catalog_and_releases_connection(monkeypatch) -> None:
+    class MissingAdminCursor(_AdminCursor):
+        def fetchone(self): return None
+
+    class FreshConnection(_AdminConnection):
+        def cursor(self): return MissingAdminCursor()
+
+    connection = FreshConnection()
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DEV_ROOT_USERNAME", "ROOT-ADMIN")
+    monkeypatch.setattr(knowledge_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(knowledge_dependencies, "import_builtin_knowledge_catalog",
+        lambda *_: (_ for _ in ()).throw(AssertionError("no actor exists before root setup")))
+
+    knowledge_dependencies.ensure_builtin_knowledge_catalog()
+
+    assert connection.closed is True
+
+
 def test_builtin_catalog_route_uses_authenticated_actor_and_request_identity(
     monkeypatch,
 ) -> None:

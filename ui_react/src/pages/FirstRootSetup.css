@@ -1,0 +1,6 @@
+.first-root-setup fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.first-root-setup .login-text-input { box-sizing: border-box; }
+.first-root-error { color: #9f1239; background: #ffe4e6; padding: 12px; border-radius: 10px; }
+@media (max-width: 480px) {
+  .first-root-setup .login-card-container { padding: 28px 24px; }
+}

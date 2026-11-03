@@ -1,11 +1,11 @@
-"""One-time NAS root setup: same-origin HTTPS, shared password policy and closure."""
+"""Shared first-root setup: transport, MySQL availability, closure and composition."""
 import asyncio
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from api.routes import nas_setup
+from api.routes import admin_setup
 from api.exception_handlers import install_typed_error_handlers
 
 ORIGIN = "https://nas.example.test:18443"
@@ -17,25 +17,26 @@ def setup_app(monkeypatch):
     state = {"root": False, "writes": 0}
     monkeypatch.delenv("NAS_SETUP_KEY", raising=False)
     monkeypatch.delenv("NAS_PUBLIC_ORIGIN", raising=False)
-    monkeypatch.setattr(nas_setup, "get_access_control_connection_factory", lambda: object())
-    monkeypatch.setattr(nas_setup, "has_root_admin", lambda **_: state["root"])
+    monkeypatch.setattr(admin_setup, "get_access_control_connection_factory", lambda: object())
+    monkeypatch.setattr(admin_setup, "has_root_admin", lambda **_: state["root"])
     def bootstrap(**kwargs):
         assert kwargs["password"] == PASSWORD
         if state["root"]:
             raise ValueError("root exists")
         state["root"] = True
         state["writes"] += 1
-    monkeypatch.setattr(nas_setup, "bootstrap_root_admin", bootstrap)
+    monkeypatch.setattr(admin_setup, "bootstrap_root_admin", bootstrap)
     app = FastAPI()
     install_typed_error_handlers(app)
-    app.include_router(nas_setup.router)
+    app.include_router(admin_setup.router)
     return app, state
 
 
-def request(app, method="POST", *, base=ORIGIN, headers=None, content=None, payload=None):
+def request(app, method="POST", *, base=ORIGIN, headers=None, content=None, payload=None,
+            peer="127.0.0.1", path="/api/v1/admin/setup"):
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=base) as client:
-            return await client.request(method, "/api/v1/admin/setup", headers=headers,
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=(peer, 12345)), base_url=base) as client:
+            return await client.request(method, path, headers=headers,
                                         content=content, json=payload)
     return asyncio.run(run())
 
@@ -89,7 +90,7 @@ def test_bootstrap_race_is_typed_conflict_without_retry(setup_app, monkeypatch):
     def race(**_):
         calls.append(True)
         raise pymysql.err.OperationalError(1213, "synthetic deadlock")
-    monkeypatch.setattr(nas_setup, "bootstrap_root_admin", race)
+    monkeypatch.setattr(admin_setup, "bootstrap_root_admin", race)
     response = request(app, headers=headers(), payload=payload())
     assert response.status_code == 409
     assert response.json()["detail"]["error"]["code"] == "setup_conflict"
@@ -104,3 +105,47 @@ def test_current_https_address_needs_no_installation_key_or_fixed_url(setup_app,
     app, state = setup_app
     response = request(app, base=base, headers={"Origin": origin}, payload=payload())
     assert response.status_code == 201 and state["writes"] == 1
+
+
+@pytest.mark.parametrize("base", ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"])
+def test_loopback_browser_uses_the_same_setup_without_environment_credentials(setup_app, base):
+    app, state = setup_app
+    assert request(app, "GET", base=base).json() == {"required": True}
+    assert request(app, base=base, headers={"Origin": base}, payload=payload()).status_code == 201
+    assert state["writes"] == 1
+
+
+def test_remote_peer_cannot_use_loopback_host_to_bypass_https(setup_app):
+    app, state = setup_app
+    response = request(app, base="http://localhost:5173", peer="203.0.113.5",
+                       headers={"Origin": "http://localhost:5173"}, payload=payload())
+    assert response.status_code == 426 and state["writes"] == 0
+
+
+@pytest.mark.parametrize("error_code", [1146, 2003])
+def test_missing_schema_or_database_connection_is_not_a_fresh_install(setup_app, monkeypatch, error_code):
+    import pymysql
+    app, state = setup_app
+    def unavailable(**_):
+        raise pymysql.err.OperationalError(error_code, "synthetic database failure")
+    monkeypatch.setattr(admin_setup, "has_root_admin", unavailable)
+    for method in ("GET", "POST"):
+        response = request(app, method, headers=headers(), payload=payload() if method == "POST" else None)
+        assert response.status_code == 503
+        assert response.json()["detail"]["error"]["code"] == "setup_unavailable"
+        assert "synthetic database failure" not in response.text
+    assert state["writes"] == 0
+
+
+def test_standard_and_nas_management_entries_share_one_setup_router(setup_app, monkeypatch):
+    from api import main, nas_apps
+    original_lifespan = main.app.router.lifespan_context
+    monkeypatch.setattr(main.app.router, "lifespan_context", original_lifespan)
+    for app in (main.app, nas_apps.management_app()):
+        assert request(app, "GET").json() == {"required": True}
+        response = request(app, "GET", path="/setup")
+        assert response.status_code == 303 and response.headers["location"] == "/admin/"
+    assert request(nas_apps.management_app(), headers=headers(), payload=payload()).status_code == 201
+    assert request(main.app, "GET").json() == {"required": False}
+    assert request(main.app, headers=headers(), payload=payload()).status_code == 410
+    assert request(nas_apps.line_app(), "GET").status_code == 404

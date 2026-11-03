@@ -22,7 +22,8 @@
 - Compose: `docker-compose.yml` — 工會電腦本機只管理 Redis；MySQL 由 `.env`／process environment 指定的外部／NAS 服務提供。
 - local-bypass Docker transport: `scripts/launchers/local_react_gateway.py`
 - LINE worker check: `scripts/run_line_worker.py` 的 `--check` 只執行 Private API 認證握手，不進入任何 work cycle。
-- Isolated API composition & setup surface: `api/nas_apps.py`、`api/routes/nas_setup.py:attach_setup` — 管理與對外 LINE API 分離組成，保留受驗證 LIFF 申請／日誌／照片入口與 canonical knowledge catalog startup，並於公開 `line_app()` 掛載 `ResponseCompressionMiddleware`（排除 XLSX 封裝）與排空連線池。
+- Isolated API composition & setup surface: `api/nas_apps.py` — 管理與對外 LINE API 分離組成；management 沿用 `api.main` 掛載的 Access-owned `api/routes/admin_setup.py`，不另掛安裝模式。保留受驗證 LIFF 申請／日誌／照片入口與 canonical knowledge catalog startup，並於公開 `line_app()` 掛載 `ResponseCompressionMiddleware`（排除 XLSX 封裝）與排空連線池。
+- Windows setup proxy: `scripts/windows_remote_runtime.py` — setup API 使用已驗證的 Host 與 request scheme 供 API 同源檢查，外來 forwarded headers 仍剔除；不擁有 root 狀態或建帳 writer。
 - Machine auth: `infrastructure/runtime/worker_credentials.py`、`api/dependencies/internal_service_auth.py`、`infrastructure/http/private_operations_client.py`；逐 Worker token、API 只有 verifier、HTTPS／CA、憑證決定 service（`test_nas_worker_credentials.py`）。`scripts/run_service_monitor.py` 的內部探測使用相同私人 CA。
 - LIFF operation bridge: `api/routes/nas_line_operations.py`、`infrastructure/http/line_operations_client.py` 與 `api/nas_apps.py` 明確組合接案回覆、訂金、服務說明／回饋、手機工會管理及其既有子路由。公開端只轉送原 JSON 契約，管理端私人入口 `/internal/v1/line-operations` 以 `line-operations-proxy` 獨立機器憑證保護，仍執行原 LINE 憑證／綁定／能力／本人範圍／版本與冪等驗證。測試 `test_nas_line_operations.py` 位於本 Module root。
 - NAS MySQL DB deployment: `deployment/nas/compose.yaml`、`deployment/nas/.env.example`、`deployment/nas/README.md`、`deployment/nas/mysql-client.cnf` — 2026-10-29 定案 NAS 僅部署純 MySQL 8.0 服務（`db` 容器、`mysql-data` 資料卷、UTF-8 設定與 `/run/mysql-secrets/` 密碼檔掛載，限區網供工會電腦連線，不對外網公開 3306）；`test_nas_test_bundle.py` 驗證純 DB Compose 契約與來源封裝秘密過濾。

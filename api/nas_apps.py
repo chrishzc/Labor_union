@@ -31,7 +31,6 @@ async def _management_lifespan(_):
 
 def management_app():
     from api.main import app
-    from api.routes.nas_setup import attach_setup
     from api.routes.private_line_media import router as private_line_media_router
     from api.routes.line_table_images import private_router as private_table_images_router
     from api.routes.nas_line_operations import private_router as private_line_operations_router
@@ -43,7 +42,7 @@ def management_app():
     if not getattr(app.state, "private_line_operations_attached", False):
         app.include_router(private_line_operations_router)
         app.state.private_line_operations_attached = True
-    return attach_setup(app)
+    return app
 
 
 @asynccontextmanager

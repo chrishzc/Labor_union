@@ -12,7 +12,6 @@ def test_api_lifespan_runs_bounded_seeds_then_validates_runtime_without_workers(
     from api.dependencies import knowledge_retrieval
 
     calls: list[str] = []
-    monkeypatch.setattr(main, "ensure_development_root_admin", lambda: calls.append("root_seed"))
     monkeypatch.setattr(knowledge_retrieval, "ensure_builtin_knowledge_catalog", lambda: calls.append("knowledge_seed"))
     monkeypatch.setattr(main, "ensure_development_line_configuration", lambda: calls.append("line_seed"))
     monkeypatch.setattr(main, "line_webhook_runtime_mode", lambda: calls.append("validated"))
@@ -23,7 +22,7 @@ def test_api_lifespan_runs_bounded_seeds_then_validates_runtime_without_workers(
 
     asyncio.run(exercise_lifespan())
 
-    assert calls == ["root_seed", "knowledge_seed", "line_seed", "validated", "running"]
+    assert calls == ["knowledge_seed", "line_seed", "validated", "running"]
 
 
 def test_api_main_has_no_embedded_worker_startup() -> None:

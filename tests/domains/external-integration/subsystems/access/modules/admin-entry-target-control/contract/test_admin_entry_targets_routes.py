@@ -21,7 +21,6 @@ from subsystems.access.authentication_session import AdminPrincipal
 def isolate_unrelated_startup_seeds(monkeypatch):
     from api.dependencies import knowledge_retrieval
 
-    monkeypatch.setattr(main_module, "ensure_development_root_admin", lambda: None)
     monkeypatch.setattr(main_module, "ensure_development_line_configuration", lambda: None)
     monkeypatch.setattr(knowledge_retrieval, "ensure_builtin_knowledge_catalog", lambda: None)
 

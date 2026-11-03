@@ -126,9 +126,15 @@ def create_gateway(artifact, *, api_port: int = 8000, transport=None) -> Starlet
         query = request.scope.get('query_string', b'').decode('ascii')
         url = httpx.URL(path, query=query.encode('ascii'))
         client = request.app.state.api_client
+        upstream_headers = _forward_headers(request.headers)
+        if path == '/api/v1/admin/setup':
+            # The gateway already validated Host and Origin. Replace forwarded
+            # input with this endpoint's facts for the loopback API's origin check.
+            upstream_headers['host'] = request.headers['host']
+            upstream_headers['x-forwarded-proto'] = request.url.scheme
         try:
             upstream = client.build_request(
-                request.method, url, headers=_forward_headers(request.headers),
+                request.method, url, headers=upstream_headers,
                 content=request.stream(),
             )
             response = await client.send(upstream, stream=True)

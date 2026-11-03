@@ -11,6 +11,7 @@
 - composed page: `ui_react/src/pages/DatabaseBackupPage.tsx` — `#database-backup` in 稽核與系統；backup execution/time/version/status belong to Global migration §9.5. Shell owns navigation only.
 - composed page: `ui_react/src/pages/ContractTemplatesPage.tsx` — `#contract-templates` in 稽核與系統；模板保存、啟用及檔案驗證歸 Contract Signing。
 - primary: `ui_react/src/App.tsx`
+- entry: `ui_react/src/main.tsx` — mounts the Access-owned `FirstRootSetupGate` before `App`, including cached-session and development-bypass composition; root status and bootstrap belong to Access authentication-session.
 - primary: `ui_react/src/components/ErrorBoundary.tsx`
 - shared presentation: `ui_react/src/components/useSaveValidation.tsx` — 儲存前必填檢查、紅字警告與欄位定位；不擁有業務規則或送出操作。
 - shared presentation: `ui_react/src/components/UnsavedChanges.tsx`、`ui_react/src/components/UnsavedChanges.css` — 管理端表單提供草稿差異與原儲存狀態，shell 在切頁／Hash／登出前攔截，Drawer 與各 local navigation 在卸載前共用差異提示；儲存依 Global §2.4 單擊送出，內部使用既有 owner Preview／Apply，不要求人工預覽／核對。
