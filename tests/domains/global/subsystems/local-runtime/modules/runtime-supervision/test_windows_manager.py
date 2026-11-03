@@ -231,3 +231,58 @@ Write-Output 'PASS'
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'PASS' in result.stdout
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Native Windows manager')
+def test_stop_and_status_accepts_normalized_project_root_variations(tmp_path):
+    script = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($env:MANAGER_TEST_PATH,[ref]$tokens,[ref]$errors)
+foreach($fn in $ast.FindAll({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
+$ProjectRoot = 'C:\project\root'
+$runtimeDirectory = $env:MANAGER_TEST_DIRECTORY
+$statePath = Join-Path $runtimeDirectory 'state.json'
+[void][IO.Directory]::CreateDirectory($runtimeDirectory)
+
+$simulatedStartTime = (Get-Date).ToUniversalTime().ToString('o')
+function Get-Process {
+    param($Id,$ErrorAction)
+    return [pscustomobject]@{ Id = $Id; StartTime = [datetime]$simulatedStartTime }
+}
+
+# 1. State with trailing slash in project_root and live supervisor
+$stateWithSlash = @{
+    contract = 'windows-frontend-control/v1'
+    project_root = 'C:\project\root\'
+    supervisor_pid = 999
+    supervisor_start_time = $simulatedStartTime
+    api_port = 8000
+    react_port = 5173
+} | ConvertTo-Json
+Set-Content -LiteralPath $statePath -Value $stateWithSlash -Encoding utf8
+
+$state = Get-ManagedState
+if ($null -eq $state) { throw 'State with trailing slash was rejected' }
+if ($state.project_root -ne 'C:\project\root\') { throw 'State was mutated incorrectly' }
+
+# 2. Stop-ManagedRuntime does not throw another installation error
+$script:stopInvokedWithRoot = $null
+$supervisorPath = 'fake_supervisor.ps1'
+function powershell.exe {
+    param([Parameter(ValueFromRemainingArguments=$true)]$AllArgs)
+    $idx = [array]::IndexOf($AllArgs, '-ProjectRoot')
+    if ($idx -ge 0) { $script:stopInvokedWithRoot = $AllArgs[$idx + 1] }
+    $global:LASTEXITCODE = 0
+}
+Stop-ManagedRuntime
+if ($script:stopInvokedWithRoot -ne 'C:\project\root\') { throw 'Stop was not forwarded with target root' }
+
+Write-Output 'PASS'
+'''
+    result = subprocess.run([str(POWERSHELL), '-NoProfile', '-Command', script],
+                            env={**os.environ, 'MANAGER_TEST_PATH': str(MANAGER),
+                                 'MANAGER_TEST_DIRECTORY': str(tmp_path)},
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'PASS' in result.stdout

@@ -22,6 +22,31 @@ Set-Location -LiteralPath $ProjectRoot
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 
+function Test-IsSamePath {
+    param([string]$Path1, [string]$Path2)
+    if (-not $Path1 -or -not $Path2) { return $false }
+    $clean1 = $Path1.Trim().Trim('"', "'").TrimEnd('\', '/')
+    $clean2 = $Path2.Trim().Trim('"', "'").TrimEnd('\', '/')
+    if ([string]::Equals($clean1, $clean2, [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    try {
+        $full1 = [IO.Path]::GetFullPath($clean1).TrimEnd('\', '/')
+        $full2 = [IO.Path]::GetFullPath($clean2).TrimEnd('\', '/')
+        if ([string]::Equals($full1, $full2, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        if ((Test-Path -LiteralPath $full1) -and (Test-Path -LiteralPath $full2)) {
+            $item1 = (Get-Item -LiteralPath $full1).FullName.TrimEnd('\', '/')
+            $item2 = (Get-Item -LiteralPath $full2).FullName.TrimEnd('\', '/')
+            return [string]::Equals($item1, $item2, [StringComparison]::OrdinalIgnoreCase)
+        }
+    } catch {
+        return $false
+    }
+    return $false
+}
+
 function Test-ProcessMatchesStartTime {
     param($Process, $ExpectedStartTime)
     if (-not $Process -or -not $ExpectedStartTime) { return $false }
@@ -84,28 +109,31 @@ function Get-ManagedState {
         Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
         return $null
     }
-    if ($state.contract -ne 'windows-frontend-control/v1' -or $state.project_root -ne $ProjectRoot -or
-        $state.api_port -ne 8000 -or $state.react_port -ne 5173) {
-        $owner = $null
-        if ($state.supervisor_pid) {
-            $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
-        }
-        $alive = Test-ProcessMatchesStartTime $owner $state.supervisor_start_time
-        if (-not $alive) {
-            Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
-            return $null
-        }
-        throw 'Runtime state belongs to another installation.'
-    }
     $owner = $null
     if ($state.supervisor_pid) {
         $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
     }
     $alive = Test-ProcessMatchesStartTime $owner $state.supervisor_start_time
+
+    # 1. If supervisor is dead, this state is stale regardless of path; clean up immediately.
     if (-not $alive) {
-        if ($state.cleanup_confirmed -eq $true) { return $null }
-        Assert-NoRemainingRuntime $state
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
         return $null
+    }
+
+    # 2. Check if this state belongs to current project installation.
+    $isSameProject = Test-IsSamePath $state.project_root $ProjectRoot
+    if (-not $isSameProject) {
+        $actualStateFullPath = [IO.Path]::GetFullPath($statePath)
+        $expectedRootPrefix = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ($actualStateFullPath.StartsWith($expectedRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $isSameProject = $true
+        }
+    }
+
+    if ($state.contract -ne 'windows-frontend-control/v1' -or (-not $isSameProject) -or
+        $state.api_port -ne 8000 -or $state.react_port -ne 5173) {
+        throw 'Runtime state belongs to another installation.'
     }
     return $state
 }
@@ -148,8 +176,9 @@ function New-ManagedArtifact {
 function Stop-ManagedRuntime {
     $state = Get-ManagedState
     if (-not $state) { Write-Host '[Stopped] No managed runtime is running.'; return }
+    $targetRoot = if ($state -and $state.project_root) { $state.project_root } else { $ProjectRoot }
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath `
-        -ProjectRoot $ProjectRoot -PythonPath $PythonPath -StopRuntime
+        -ProjectRoot $targetRoot -PythonPath $PythonPath -StopRuntime
     if ($LASTEXITCODE -ne 0) { throw 'Stop failed; do not start another host.' }
 }
 
@@ -300,8 +329,10 @@ function Invoke-ManagerAction {
             'frontend' {
                 Set-RuntimeEnvironment
                 $artifact = New-ManagedArtifact
+                $state = Get-ManagedState
+                $targetRoot = if ($state -and $state.project_root) { $state.project_root } else { $ProjectRoot }
                 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $supervisorPath `
-                    -ProjectRoot $ProjectRoot -PythonPath $PythonPath -FrontendArtifact $artifact
+                    -ProjectRoot $targetRoot -PythonPath $PythonPath -FrontendArtifact $artifact
                 if ($LASTEXITCODE -ne 0) { throw 'Frontend update did not succeed.' }
             }
             'prepare' { [void](New-ManagedArtifact) }
