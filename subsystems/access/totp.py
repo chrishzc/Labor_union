@@ -85,8 +85,15 @@ class TotpSecretCipher:
 
 def totp_cipher_from_environment() -> TotpSecretCipher:
     """Load a versioned Fernet keyring and reject an absent or malformed setting."""
-    raw_keyring = os.getenv("ACCESS_CONTROL_TOTP_KEYRING", "").strip()
-    active_version = os.getenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "").strip()
+    return totp_cipher_from_settings(
+        os.getenv("ACCESS_CONTROL_TOTP_KEYRING", ""),
+        os.getenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", ""),
+    )
+
+
+def totp_cipher_from_settings(raw_keyring: str, active_version: str) -> TotpSecretCipher:
+    """Validate persisted settings without changing the process environment."""
+    raw_keyring, active_version = raw_keyring.strip(), active_version.strip()
     if not raw_keyring or not active_version:
         raise TotpError("TOTP encryption keyring is unavailable")
     keyring: dict[str, str] = {}

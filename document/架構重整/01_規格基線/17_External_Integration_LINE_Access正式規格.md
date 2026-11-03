@@ -639,6 +639,7 @@ Modules：
 - 唯一正常流程為「建立 root → 立即顯示 TOTP QR Code → 驗證綁定 → 保存復原碼 → 返回登入頁，重新輸入帳密與 TOTP」。POST setup 以 201 回傳 `created` 與既有 `mfa_enrollment` 型別的 `enrollment`，不再回傳直接前往登入的 `next`。沿用共用 10–256 字元密碼政策與再次輸入確認；建帳與綁定皆不簽發 session，僅使用者提交有效 TOTP 後啟用 factor，保存復原碼後清除設定中的機密資料與既有 session，再顯示登入。
 - 共用既有 LoginPage 的 enrollment UI，正常初始設定不先要求登入，不提供跳過綁定操作。初始 challenge 逾時即停止該次設定，提示以離線重置工具重新開始；不新增另一套帳密續綁定流程。provisioning URI、challenge token、TOTP 與復原碼僅留在記憶體，不以 browser storage／cookie／URL 保存來維持跨刷新狀態。
 - TOTP 金鑰無法使用與 session schema 缺失分別回傳安全的明確 unavailable code／訊息；不能以另一台主機的設定推定錯誤原因，也不得自動產生／覆寫已存在的加密金鑰。
+- 首次本機安裝缺少有效金鑰時，由操作者停止網站，明確執行 `scripts.configure_initial_totp_key --apply`（Windows 入口 `configure_initial_totp_key.bat`）。預設只讀預覽；確認 `INITIALIZE TOTP <database>` 前後均唯讀核對帳號、root designation、factor、復原碼、session 及 challenges 全空，才以密碼學隨機值原子更新本機 `.env` 的兩個 TOTP 設定，無 DB 寫入。有效金鑰保留；已有任一帳號／驗證資料、非 loopback development／local／test 的 `union_db`／`lu_test_*`、環境覆寫與檔案變更均拒絕。金鑰不得輸出或進 Git；不由網站啟動自動產生或輪替。此離線工具只協調本次設定，操作者須停止其他 writer，保存 `.env` 並完整重啟網站。
 - password 不得出現在 validation error、browser storage、URL、log 或 audit detail。root designation 存在後關閉建立入口，重新啟動／重新下載映像不重開設定，也不變更帳號或 MFA。
 
 #### 4.3.2 錯誤初始 root 的本機離線重置（2026-11-03 使用者明確授權）

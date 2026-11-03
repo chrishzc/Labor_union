@@ -9,7 +9,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pymysql
 import pytest
-from cryptography.fernet import Fernet
 
 
 pytestmark = pytest.mark.skipif(
@@ -51,19 +50,21 @@ def _require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkeypatch):
+def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkeypatch, tmp_path, capsys):
     import asyncio
     import httpx
     from fastapi import FastAPI
     from api.routes import admin_setup
     from subsystems.access import authentication_session as auth
     from subsystems.access.totp import _totp_code, totp_step
+    from scripts import configure_initial_totp_key as key_cli
+    from dotenv import dotenv_values
+    import json
 
     _require(not _rows("SELECT id FROM admin_users"), "requires a fresh account database")
     _require(not _rows("SELECT admin_user_id FROM admin_root_account"), "requires no existing root")
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
-    monkeypatch.setenv("ACCESS_CONTROL_TOTP_KEYRING", "v1:" + Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION", "v1")
     username = "issue358-root-" + secrets.token_hex(6)
     password = secrets.token_urlsafe(24)
@@ -89,7 +90,25 @@ def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkey
     _require(not _rows("SELECT id FROM admin_users"), "missing key must roll back account creation")
     _require(not _rows("SELECT admin_user_id FROM admin_root_account"), "missing key must roll back root designation")
     _require(not _rows("SELECT id FROM admin_totp_factors"), "missing key must not persist a pending factor")
-    monkeypatch.setenv("ACCESS_CONTROL_TOTP_KEYRING", "v1:" + Fernet.generate_key().decode("ascii"))
+    # The operator tool must repair the actual missing-key failure, persist the
+    # key locally, and leave the fresh database untouched before web creation.
+    env_file = tmp_path / ".env"
+    monkeypatch.setenv(key_cli.KEYRING, "v1:replace_with_fernet_key")
+    settings = {name: value for name, value in os.environ.items()
+                if name in {"APP_ENV", "DEPLOYMENT_PROFILE", key_cli.KEYRING, key_cli.ACTIVE}
+                or name.startswith("DB_")}
+    env_file.write_text("".join(f"{name}={json.dumps(value)}\n" for name, value in settings.items()), encoding="utf-8")
+    before_key_setup = {table: _rows(f"SELECT * FROM {table}") for table in (
+        "admin_users", "admin_root_account", "admin_totp_factors", "admin_sessions", "admin_audit_logs")}
+    _require(key_cli.main(["--apply"], env_file=env_file,
+        confirm=lambda _: "INITIALIZE TOTP " + os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"]) == 0,
+        "empty account database must permit explicit local key initialization")
+    _require(all(_rows(f"SELECT * FROM {table}") == rows for table, rows in before_key_setup.items()),
+        "key initialization must not write any account, session, factor or audit")
+    persisted = env_file.read_bytes()
+    saved = dotenv_values(env_file)
+    _require(saved[key_cli.KEYRING] not in capsys.readouterr().out, "key must not appear in operator output")
+    monkeypatch.setenv(key_cli.KEYRING, saved[key_cli.KEYRING])
     response = setup_request()
     _require(response.status_code == 201, "web setup must create the root and pending enrollment")
     first_payload = response.json()["enrollment"]
@@ -148,3 +167,47 @@ def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkey
     _require(setup_request().status_code == 410, "existing root must reject recreation")
     _require(_rows("SELECT * FROM admin_users") == accounts_before, "setup replay must preserve existing account")
     _require(_rows("SELECT * FROM admin_totp_factors") == factors_before, "setup replay must preserve existing factor")
+
+    # A fresh interpreter must recover the same persisted encryption settings;
+    # no process-local test key may be needed after restarting the website.
+    import subprocess
+    import sys
+    restarted = subprocess.run([sys.executable, "-c", """
+import os, sys
+from dotenv import dotenv_values
+os.environ.update({k: v for k, v in dotenv_values(sys.argv[1]).items() if v is not None})
+os.environ['PYTHON_DOTENV_DISABLED'] = '1'
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.access.authentication_session import has_root_admin
+from subsystems.access.totp import EncryptedTotpSecret, totp_cipher_from_environment
+if not has_root_admin(connection_factory=get_connection):
+    raise SystemExit(2)
+c = get_connection()
+try:
+    import pymysql
+    with c.cursor(pymysql.cursors.DictCursor) as cursor:
+        cursor.execute("SELECT seed_ciphertext, encryption_key_version FROM admin_totp_factors WHERE factor_state=%s", ("active",))
+        factor = cursor.fetchone()
+        totp_cipher_from_environment().decrypt(EncryptedTotpSecret(factor['seed_ciphertext'], factor['encryption_key_version']))
+finally:
+    c.close()
+""", str(env_file)], env={name: value for name, value in os.environ.items()
+                            if name not in {key_cli.KEYRING, key_cli.ACTIVE}},
+        capture_output=True, timeout=30)
+    _require(restarted.returncode == 0, "fresh process must preserve root status and decrypt the bound factor using persisted key")
+
+    _require(key_cli.main(["--apply"], env_file=env_file) == 0, "a valid persisted key must be preserved")
+    _require(env_file.read_bytes() == persisted, "rerun must not rotate the persisted encryption key")
+    # Simulate lost configuration on an already used installation. Never replace
+    # that key, even if the operator confirms the exact database.
+    monkeypatch.setenv(key_cli.KEYRING, "v1:replace_with_fernet_key")
+    invalid_file = persisted.replace(saved[key_cli.KEYRING].encode("ascii"), b"v1:replace_with_fernet_key")
+    env_file.write_bytes(invalid_file)
+    protected_before = {table: _rows(f"SELECT * FROM {table}") for table in (
+        "admin_users", "admin_root_account", "admin_totp_factors", "admin_totp_recovery_codes", "admin_sessions", "admin_audit_logs")}
+    _require(key_cli.main(["--apply"], env_file=env_file,
+        confirm=lambda _: "INITIALIZE TOTP " + os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"]) == 2,
+        "used accounts must reject replacement of a missing or invalid key")
+    _require(env_file.read_bytes() == invalid_file, "existing accounts must prevent configuration replacement")
+    _require(all(_rows(f"SELECT * FROM {table}") == rows for table, rows in protected_before.items()),
+        "refused initialization must preserve existing account, ciphertext, recovery codes, sessions and audits")

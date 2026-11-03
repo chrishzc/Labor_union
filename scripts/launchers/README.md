@@ -71,6 +71,17 @@ Windows 免登入入口不要求主機安裝 Node.js：有 `npm.cmd` 時直接�
 
 Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only readiness 後清理。一般入口才會啟動 monitor 與 workers。
 
+## 首次建帳出現 TOTP 加密設定缺失或無效
+
+先停止網站，再雙擊 `scripts\launchers\configure_initial_totp_key.bat`。
+依畫面輸入 `INITIALIZE TOTP union_db`（若為測試庫，以畫面指定名稱為準）。
+顯示 `passed` 後完整重啟網站，即可建立 root、掃描 QR Code、驗證綁定、保存復原碼，再返回登入。
+
+工具將隨機金鑰保存於本機 `.env`，不顯示金鑰，也不寫入 MySQL。
+有效金鑰會原樣保留；僅本機 development／local／test 且帳號、TOTP、session 及 challenge 資料全空時，才允許建立金鑰。
+若已有帳號或驗證資料，會拒絕替換，應恢復原金鑰。請妥善保管 `.env`，不要貼出或提交 Git。
+預覽可執行 `python -m scripts.configure_initial_totp_key`，不加 `--apply` 不會寫檔。
+
 ## 重置錯誤建立、尚未完成 TOTP 的初始 root
 
 先停止網站服務，再雙擊 `scripts\launchers\reset_incomplete_root.bat`。
