@@ -60,14 +60,21 @@ const DATABASE_ERROR_MESSAGES: Record<string, string> = {
   historical_order_database_query_invalid: '資料庫指令語法錯誤；請系統人員檢查程式與資料庫相容性。',
   historical_order_database_data_rejected: '資料超過資料庫欄位長度；請核對來源資料與欄位設定。',
   historical_order_database_constraint_rejected: '資料庫唯一性或關聯限制拒絕寫入；請查核既有資料與匯入規則。',
+  historical_order_database_check_rejected: '資料庫檢查條件拒絕寫入；尚無可辨識的規則名稱，請系統人員核對資料庫檢查條件。',
+  historical_order_database_mysql_3819: '資料庫檢查條件拒絕寫入；舊回應未提供規則名稱，請同步更新後端後取得詳細檢查代碼。',
+  historical_order_database_check_chk_order_lifecycle_state_event_after_status: '訂單狀態異動紀錄的變更後狀態未通過允許值檢查；請系統人員核對狀態定義與資料庫版本。',
+  historical_order_database_check_chk_historical_order_adoption_shape: '歷史訂單匯入收據的結果、版本與狀態紀錄不一致；請系統人員核對收據規則與資料庫版本。',
+  historical_order_database_check_chk_historical_order_pairing_assignment_shape: '歷史月嫂配對結果與服務指派關聯不符合資料庫規則；請系統人員核對配對紀錄與指派規則。',
   historical_order_database_upgrade_required: '歷史訂單資料庫結構尚未升級；請由系統管理員完成資料庫更新後，再確認匯入結果。',
   historical_order_database_unknown_error: '資料庫未提供可辨識的錯誤號碼；請系統人員查核該次錯誤紀錄。',
   historical_order_import_database_unavailable: '歷史訂單的資料庫操作失敗；請由系統管理員檢查資料庫連線與權限，並查核該次資料庫錯誤紀錄，再確認匯入結果。',
 };
 
 function databaseErrorMessage(error: ApiHttpError): string | undefined {
-  const message = DATABASE_ERROR_MESSAGES[error.code] ?? (/^historical_order_database_mysql_\d{1,5}$/.test(error.code)
-    ? '資料庫回報未分類錯誤；請系統人員依錯誤代碼查核。' : undefined);
+  const message = DATABASE_ERROR_MESSAGES[error.code] ?? (/^historical_order_database_check_[a-z_][a-z0-9_]{0,63}$/.test(error.code)
+    ? '資料庫檢查條件拒絕寫入；請系統人員依錯誤碼中的規則名稱核對資料與資料庫版本。'
+    : /^historical_order_database_mysql_\d{1,5}$/.test(error.code)
+      ? '資料庫回報未分類錯誤；請系統人員依錯誤代碼查核。' : undefined);
   if (!message) return undefined;
   // Only preserve the backend's numeric diagnostic, never SQL, names or provider text.
   const diagnostic = error.message.match(/（MySQL ([1-9]\d{0,4})）/)?.[1];

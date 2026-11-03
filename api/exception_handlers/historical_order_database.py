@@ -1,6 +1,7 @@
 """Closed, privacy-safe database diagnostics for historical workbook HTTP boundaries."""
 
 import logging
+import re
 
 from fastapi import HTTPException
 from pymysql import MySQLError
@@ -8,6 +9,15 @@ from pymysql.constants import CR, ER
 
 
 logger = logging.getLogger(__name__)
+_CHECK_CONSTRAINT = re.compile(
+    r"\bCheck constraint ['`](?:[A-Za-z_][A-Za-z0-9_]{0,63}\.)?([A-Za-z_][A-Za-z0-9_]{0,63})['`] is violated\b",
+    re.IGNORECASE,
+)
+_CHECK_MESSAGES = {
+    "chk_order_lifecycle_state_event_after_status": "訂單狀態異動紀錄的變更後狀態未通過允許值檢查；請核對狀態定義與資料庫版本",
+    "chk_historical_order_adoption_shape": "歷史訂單匯入收據的結果、版本與狀態紀錄不符合一致性規則；請核對收據規則與資料庫版本",
+    "chk_historical_order_pairing_assignment_shape": "歷史月嫂配對結果與服務指派關聯不符合資料庫規則；請核對配對紀錄與指派規則",
+}
 _DATABASE_ERRORS = {
     CR.CR_CONNECTION_ERROR: ("connect_failed", "無法連接資料庫；請檢查資料庫服務與連線設定", True),
     CR.CR_CONN_HOST_ERROR: ("connect_failed", "無法連接資料庫；請檢查主機、連接埠與網路", True),
@@ -30,6 +40,7 @@ _DATABASE_ERRORS = {
        for code in (ER.CON_COUNT_ERROR, ER.TOO_MANY_USER_CONNECTIONS, ER.USER_LIMIT_REACHED)},
     ER.PARSE_ERROR: ("query_invalid", "資料庫指令語法錯誤；請系統人員檢查程式與資料庫相容性", False),
     ER.DATA_TOO_LONG: ("data_rejected", "資料超過資料庫欄位長度；請核對來源資料與欄位設定", False),
+    3819: ("check_rejected", "資料庫檢查條件拒絕寫入，但未提供可安全辨識的規則名稱；請系統人員核對資料庫檢查條件", False),
     **{code: ("constraint_rejected", "資料庫唯一性或關聯限制拒絕寫入；請查核既有資料與匯入規則", False)
        for code in (ER.DUP_ENTRY, ER.NO_REFERENCED_ROW_2, ER.ROW_IS_REFERENCED_2)},
 }
@@ -44,6 +55,12 @@ def historical_database_http_error(error: MySQLError, correlation_id: str) -> HT
         number == 3819 and "chk_order_lifecycle_state_event_before_status" in raw_message
     ):
         suffix, message, retryable = "upgrade_required", "資料庫結構尚未升級；請完成資料庫更新後再確認匯入結果", False
+    elif number == 3819 and (check := _CHECK_CONSTRAINT.search(raw_message)):
+        # The bounded schema identifier is diagnostic metadata; discard schema and all row values.
+        name = check.group(1).lower()
+        suffix = f"check_{name}"
+        message = _CHECK_MESSAGES.get(name, "資料庫檢查條件拒絕寫入；請系統人員依錯誤碼中的規則名稱核對資料與資料庫版本")
+        retryable = False
     else:
         suffix, message, retryable = _DATABASE_ERRORS.get(number, (
             f"mysql_{number}" if number else "unknown_error",

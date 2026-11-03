@@ -593,6 +593,10 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.7 Historical Order Adoption
 
+2026-11-03 沿用指派 CHECK 修復範圍（本次人工授權的 bounded package）：只修正 `historical_order_pairing_evidence.chk_historical_order_pairing_assignment_shape`，使 `assignment_candidate` 與 `assignment_reused` 都要求非空 `assignment_id`／`staff_id`，其他 resolution 仍要求 `assignment_id IS NULL`。屬 schema-only、零 system seed／business-row backfill／刪表／資料覆寫；保留既有 enum、外鍵與 append-only guards，沿用既有 writer／outer UoW。交付 fresh part、保留資料 successor、hash-bound manifest／descriptor、canonical chain／assembly／compact 及 focused metadata／真 MySQL fresh／preserve 驗證；未知 CHECK drift／缺件拒絕升級。既有 release bytes 不改寫，已採納 reused evidence 後採 forward-only recovery，不將新資料硬套回舊 CHECK。本次不包含既有 union_db、另一台電腦或 NAS 的 migration Apply。
+
+2026-11-03 MySQL 3819 診斷補充：一般 CHECK 拒絕寫入使用 `historical_order_database_check_<constraint>`，從標準錯誤句型只取長度不超過 64 的 ASCII 資料庫規則識別碼、移除 schema 前綴並轉小寫；不回傳原始 SQL、來源值或完整 exception。無可安全辨識名稱時回 `historical_order_database_check_rejected`，不再歸為未分類 MySQL 錯誤。對歷史收據 shape、變更後狀態、歷史配對 assignment shape 提供封閉說明；規則名稱本身不足以判定需要升級或修改來源資料，不得自行移除 CHECK 或重寫歷史資料。既有已確認 before-status 舊結構診斷保留原 `upgrade_required` 相容碼。規則識別可隨分類碼進診斷日誌，仍不得帶 schema 名稱或原始 provider 文字。
+
 2026-11-03 歷史工作簿錯誤診斷裁決：資料庫建連與 Preview／Apply 執行期間的 MySQL 失敗共用去敏 HTTP 503 typed error；錯誤碼以 `historical_order_database_` 加精確原因，不再將已知原因全歸為 `historical_order_import_database_unavailable`。連線原因為 `connect_failed`、`host_not_found`、`connection_lost`、`tls_failed`、`connection_limit_reached`；設定／權限為 `authentication_failed`、`permission_denied`；結構為 `not_found`、`table_missing`、`column_missing`、`routine_missing`，既有兩項已確認舊結構問題保留 `upgrade_required`。資料鎖與死結為 `lock_wait_exceeded`、`deadlock`；指令／資料限制為 `query_invalid`、`data_rejected`、`constraint_rejected`。未知但有數字代碼時用 `mysql_<errno>`，無代碼用 `unknown_error`。
 說明可含 MySQL 數字錯誤碼，回應與日誌不得帶原始 SQL、完整 provider exception 或來源值；日誌只保存分類、數字與 correlation。前端 Preview／Apply 都顯示封閉原因與數字；Apply 仍保留結果未確認及原命令查詢，不因資料鎖／死結碼自動重送。只有連線暫時失敗／中斷、連線額滿、資料鎖等待及死結標示 backend retryable，設定／結構／資料限制須人工修復；此旗標不授權 blind retry，也不代表整份未寫入。
 

@@ -26,6 +26,7 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
 - entrypoints:
   - `scripts/launchers/reset_DB.bat`
 - config:
+  - `db/releases/labor_union_validation_schema_reused_pairing_check_v1.sql` — v59 fresh source，與 243 reused pairing CHECK successor／compact current 一致。
   - `db/fresh_schema/labor_union_fresh_current.sql`
   - `db/fresh_schema/labor_union_fresh_current.json`
   - `db/schema_assembly/labor_union_fresh_table_retirements_v1.json`

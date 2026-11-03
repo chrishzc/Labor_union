@@ -373,6 +373,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_29_order_reopen_reason_optional_v1.json",
     "labor_union_2026_11_02_finance_case_accounting_v1.json",
     "labor_union_2026_11_02_accounting_differences_v1.json",
+    "labor_union_2026_11_03_historical_order_reused_pairing_check_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2562,12 +2563,12 @@ def _metadata_state_for_artifact(
                 and _normalize_check_contract(matches[0].get("check_clause", "")) == _normalize_check_contract(old):
             return "absent"
         return "drift"
-    if artifact == "1062_order_reopen_reason_optional.sql":
+    if artifact in {"1062_order_reopen_reason_optional.sql", "1065_historical_order_reused_pairing_check.sql"}:
         parent = {**descriptor, "checks": {}}
         parent_state = _artifact_metadata_state(snapshot, parent, artifact, defer_missing_triggers=defer_missing_triggers)
         if parent_state != "exact":
             return "partial" if parent_state == "absent" else parent_state
-        key = ("order_reopen_events", "chk_order_reopen_event_text")
+        key = next(iter(descriptor["checks"]))
         matches = [row for row in snapshot.get("constraints", ())
                    if (row["table_name"], row["constraint_name"]) == key]
         if not matches:
@@ -2577,7 +2578,9 @@ def _metadata_state_for_artifact(
         actual = _normalize_check_contract(matches[0].get("check_clause", ""))
         if actual == _normalize_check_contract(descriptor["checks"][key]):
             return "exact"
-        predecessor = _canonical_artifact_descriptor("123_order_reopen_workflow.sql")["checks"][key]
+        predecessor_part = ("123_order_reopen_workflow.sql" if artifact == "1062_order_reopen_reason_optional.sql"
+                            else "194_historical_order_adoption.sql")
+        predecessor = _canonical_artifact_descriptor(predecessor_part)["checks"][key]
         return "absent" if actual == _normalize_check_contract(predecessor) else "drift"
     # Current fresh databases omit retired structures; deployed historical
     # structures may remain. Neither case schedules DDL or weakens contracts
@@ -3889,6 +3892,9 @@ def _local_classify_statement(statement: str) -> str:
             raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
         return "create_trigger"
     if normalized.startswith("alter table"):
+        reused_pairing = ROOT / "db/schema_parts/1065_historical_order_reused_pairing_check.sql"
+        if normalized.startswith("alter table historical_order_pairing_evidence ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reused_pairing.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
+            return "alter_add_only"
         if normalized.rstrip(';') == "alter table matching_response_events drop check chk_matching_response_manual_reason":
             return "alter_add_only"
         reopen_optional = ROOT / "db/schema_parts/1062_order_reopen_reason_optional.sql"
@@ -5613,6 +5619,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             # contracts; selecting its descriptor does not select a writer.
             path = ROOT / "db/schema_parts/109_scheduling_generations.sql"
     if path is None:
+        if part_name == "194_historical_order_adoption.sql" and any(
+            item.name == "1065_historical_order_reused_pairing_check.sql" for item in SCHEMA_PARTS
+        ):
+            path = ROOT / "db/schema_parts/194_historical_order_adoption.sql"
+    if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
@@ -5746,6 +5757,15 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         opening = re.search(r"ADD\s+CONSTRAINT\s+chk_order_reopen_event_text\s+CHECK\s*\(", sql, re.I).end() - 1
         clause, _ = _extract_parenthesized(sql, opening)
         descriptor["checks"][("order_reopen_events", "chk_order_reopen_event_text")] = _normalize_sql_contract(clause)
+    if part_name == "1065_historical_order_reused_pairing_check.sql":
+        descriptor["parent_columns"]["historical_order_pairing_evidence"] = {
+            "resolution": _column_contract("enum('blank','staff_missing','staff_ambiguous','evidence_only','assignment_candidate','assignment_reused','assignment_conflict')", "NO"),
+            "staff_id": _column_contract("int", "YES"),
+            "assignment_id": _column_contract("bigint", "YES"),
+        }
+        opening = re.search(r"ADD\s+CONSTRAINT\s+chk_historical_order_pairing_assignment_shape\s+CHECK\s*\(", sql, re.I).end() - 1
+        clause, _ = _extract_parenthesized(sql, opening)
+        descriptor["checks"][("historical_order_pairing_evidence", "chk_historical_order_pairing_assignment_shape")] = _normalize_sql_contract(clause)
     trigger_pattern = re.compile(
         r"CREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?\s+"
         r"(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+"
@@ -6621,6 +6641,7 @@ def _release_descriptor_metadata_state(
         "1052_nas_registration_approval.sql",
         "1053_line_order_group_invitation_url.sql",
         "1058_client_refund_overage_receipt.sql",
+        "1065_historical_order_reused_pairing_check.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -6698,6 +6719,8 @@ def _release_descriptor_metadata_state(
             canonical,
             defer_missing_triggers=defer_missing_triggers,
         )
+    if part_name == "1065_historical_order_reused_pairing_check.sql":
+        return _metadata_state_for_artifact(snapshot, canonical, part_name, defer_missing_triggers=defer_missing_triggers)
     predecessor_state = _modified_parent_predecessor_absent_state(
         snapshot,
         canonical,
@@ -7695,6 +7718,9 @@ def _allowed_later_artifact_checks(
     part_name: str,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     """Return checks whose exact shape is owned by a declared successor."""
+    if part_name == "194_historical_order_adoption.sql" and any(path.name == "1065_historical_order_reused_pairing_check.sql" for path in SCHEMA_PARTS):
+        successor = _canonical_artifact_descriptor("1065_historical_order_reused_pairing_check.sql")
+        return {key: (clause,) for key, clause in successor["checks"].items()}
     if part_name == "123_order_reopen_workflow.sql" and any(path.name == "1062_order_reopen_reason_optional.sql" for path in SCHEMA_PARTS):
         successor = _canonical_artifact_descriptor("1062_order_reopen_reason_optional.sql")
         return {key: (clause,) for key, clause in successor["checks"].items()}

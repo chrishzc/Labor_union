@@ -32,6 +32,7 @@ function isOutcomeUnknown(error: unknown): boolean {
 function canConfirmAutomatically(error: unknown): boolean {
   if (!isOutcomeUnknown(error) || typeof error !== 'object' || error === null || !('code' in error)) return false;
   const code = String(error.code);
+  if (code.startsWith('historical_order_database_')) return false;
   return code.endsWith('_lock_timeout') || code.endsWith('_apply_timeout') || code.endsWith('_apply_network_error')
     || ('status' in error && (error.status === 502 || error.status === 504));
 }

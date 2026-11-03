@@ -17,6 +17,7 @@
 - outbound: `global/application-shell/module:data-import-composition` — 提供 Data Import page 可組成的 typed client／adapter 與 review reference。
 
 ## Contracts
+- CHECK 3819 提供狀態、收據一致性、配對關聯的封閉說明與安全規則代碼；保留原命令人工查詢，不自動重送。
 - Preview／Apply 顯示 `historical_order_database_*` 的封閉原因與 MySQL 數字，保留舊通用錯誤碼支援；Apply 維持同命令結果未確認與人工查詢，資料庫資料鎖／死結不自動重送。
 - Optional receipt `import_counts` projects the owner-produced imported／duplicate-skipped／not-imported partition; legacy mixed-replay receipts retain unavailable counters rather than guessing overlaps。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption。

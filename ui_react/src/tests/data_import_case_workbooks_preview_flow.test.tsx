@@ -127,6 +127,9 @@ describe('Data Import simple result flows', () => {
     ['historical_order_database_deadlock', '死結'],
     ['historical_order_database_permission_denied', '操作權限不足'],
     ['historical_order_database_column_missing', '缺少必要資料欄位'],
+    ['historical_order_database_check_chk_historical_order_adoption_shape', '收據的結果、版本與狀態紀錄不一致'],
+    ['historical_order_database_check_chk_synthetic_lock_timeout', '規則名稱'],
+    ['historical_order_database_mysql_3819', '舊回應未提供規則名稱'],
     ['503', '匯入服務暫時無法回覆'],
   ])('historical HTTP 503 %s shows the actual cause and allows leaving without blind retries', async (code, guidance) => {
     vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockRejectedValueOnce(

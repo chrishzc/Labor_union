@@ -150,6 +150,7 @@ def test_database_dependency_unavailable_is_typed(monkeypatch, number, suffix):
     (ProgrammingError, 1064, "query_invalid", False),
     (DataError, 1406, "data_rejected", False),
     (IntegrityError, 1062, "constraint_rejected", False),
+    (OperationalError, 3819, "check_rejected", False),
     (OperationalError, 9999, "mysql_9999", False),
     (InterfaceError, 0, "unknown_error", False),
 ])
@@ -201,6 +202,39 @@ def test_apply_reports_pending_status_constraint_as_database_upgrade_required():
     assert response.json()["detail"]["error"]["code"] == (
         "historical_order_database_upgrade_required"
     )
+
+
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+@pytest.mark.parametrize("identifier,expected_name", [
+    ("chk_order_lifecycle_state_event_after_status", "chk_order_lifecycle_state_event_after_status"),
+    ("chk_historical_order_adoption_shape", "chk_historical_order_adoption_shape"),
+    ("chk_historical_order_pairing_assignment_shape", "chk_historical_order_pairing_assignment_shape"),
+    ("orders_chk_1", "orders_chk_1"),
+    ("SYNTHETIC_PRIVATE_SCHEMA.orders_chk_1", "orders_chk_1"),
+    ("not-a-safe-identifier", None),
+])
+def test_check_constraint_failure_preserves_only_safe_rule_identifier(operation, identifier, expected_name, caplog):
+    service = _Service()
+
+    def fail(path, *_args):
+        service.paths.append(Path(path))
+        raise OperationalError(3819, f"Check constraint '{identifier}' is violated. SYNTHETIC_PRIVATE_SQL_AND_VALUES")
+
+    setattr(service, operation, fail)
+    response = _production_client(service).post(
+        f"/api/v1/orders/historical-adoption/workbooks/{operation}",
+        headers=_headers(), data={"preview_fingerprint": "2" * 64}, files=_file(),
+    )
+    error = response.json()["detail"]["error"]
+    suffix = f"check_{expected_name}" if expected_name else "check_rejected"
+    assert error["code"] == f"historical_order_database_{suffix}"
+    assert error["retryable"] is False
+    assert "MySQL 3819" in error["message"]
+    assert "未分類" not in error["message"]
+    assert "SYNTHETIC_PRIVATE_SQL_AND_VALUES" not in response.text + caplog.text
+    assert "SYNTHETIC_PRIVATE_SCHEMA" not in response.text + caplog.text
+    assert "not-a-safe-identifier" not in response.text + caplog.text
+    assert all(not path.exists() for path in service.paths)
 
 
 def test_apply_reports_pairing_resolution_enum_drift_as_database_upgrade_required():

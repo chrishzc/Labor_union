@@ -3869,7 +3869,7 @@ CREATE TABLE `historical_order_pairing_evidence` (
   CONSTRAINT `fk_historical_order_pairing_assignment` FOREIGN KEY (`assignment_id`) REFERENCES `case_staff_assignments` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_historical_order_pairing_receipt` FOREIGN KEY (`receipt_id`) REFERENCES `historical_order_adoption_receipts` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_historical_order_pairing_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_historical_order_pairing_assignment_shape` CHECK ((((`resolution` = _utf8mb4'assignment_candidate') and (`assignment_id` is not null) and (`staff_id` is not null)) or ((`resolution` <> _utf8mb4'assignment_candidate') and (`assignment_id` is null)))),
+  CONSTRAINT `chk_historical_order_pairing_assignment_shape` CHECK ((((`resolution` in (_utf8mb4'assignment_candidate',_utf8mb4'assignment_reused')) and (`assignment_id` is not null) and (`staff_id` is not null)) or ((`resolution` not in (_utf8mb4'assignment_candidate',_utf8mb4'assignment_reused')) and (`assignment_id` is null)))),
   CONSTRAINT `chk_historical_order_pairing_issues` CHECK ((json_type(`issue_codes`) = _utf8mb4'ARRAY')),
   CONSTRAINT `chk_historical_order_pairing_ordinal` CHECK ((`caregiver_ordinal` > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

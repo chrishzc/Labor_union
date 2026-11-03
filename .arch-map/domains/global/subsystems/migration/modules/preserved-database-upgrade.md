@@ -154,6 +154,10 @@
 
 ## Contracts
 
+- 歷史訂單 reused pairing CHECK release：`db/schema_parts/1065_historical_order_reused_pairing_check.sql` 與 fresh `243_historical_order_reused_pairing_check.sql`、`db/migration_releases/labor_union_2026_11_03_historical_order_reused_pairing_check_v1.json` 及 descriptors；只允許精確舊 CHECK → 精確新 CHECK，schema-only、零業務資料改寫，較早 owning table descriptor 僅接受此宣告的精確 successor。
+- 對應 release／descriptor／實際 MySQL CHECK 條件測試：`tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_historical_order_reused_pairing_check.py`。
+- `validation/receipts/PROV-HISTORICAL-REUSED-PAIRING-CHECK-local-additive-qualification-20261103.json` — 真 MySQL fresh／保留資料資格；現場 Apply 仍須自己的備份及執行收據。
+
 - Cancellation optional downstream receipt release：`db/schema_parts/1048_order_cancellation_optional_downstream.sql`、fresh successor `db/schema_parts/229_order_cancellation_optional_downstream.sql`、`db/migration_releases/labor_union_2026_09_29_order_cancellation_optional_downstream_v1.json` 及其 descriptors。
 - 對應 schema-only nullability／predecessor／drift contract：`tests/domains/global/subsystems/migration/modules/preserved-database-upgrade/contract/test_order_cancellation_optional_downstream_schema.py`。
 - Source read-only、candidate identity、release classification、backup／journal／resume及

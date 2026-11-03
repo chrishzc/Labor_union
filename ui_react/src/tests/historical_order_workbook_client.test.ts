@@ -25,6 +25,12 @@ describe('Historical Orders workbook Preview client', () => {
     ['connection_limit_reached', 1040, '連線已達上限'], ['query_invalid', 1064, '指令語法錯誤'],
     ['data_rejected', 1406, '欄位長度'], ['constraint_rejected', 1062, '唯一性或關聯限制'],
     ['mysql_9999', 9999, '未分類錯誤'],
+    ['check_rejected', 3819, '檢查條件拒絕寫入'],
+    ['mysql_3819', 3819, '舊回應未提供規則名稱'],
+    ['check_chk_order_lifecycle_state_event_after_status', 3819, '變更後狀態'],
+    ['check_chk_historical_order_adoption_shape', 3819, '收據的結果、版本與狀態紀錄不一致'],
+    ['check_chk_historical_order_pairing_assignment_shape', 3819, '配對結果與服務指派關聯'],
+    ['check_orders_chk_1', 3819, '規則名稱'],
   ])('preserves precise %s diagnostics for Preview and Apply without raw provider messages', (suffix, number, guidance) => {
     const code = `historical_order_database_${suffix}`;
     const source = new ApiHttpError(503, code, `SYNTHETIC_PRIVATE_SQL_AND_VALUES（MySQL ${number}）`, false);

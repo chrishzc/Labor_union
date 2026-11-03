@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-historical-order-reused-pairing-check-2026-11-03-v1",
+  "release_metadata": {
+    "release_name": "Historical-order reused pairing CHECK repair",
+    "application_version": "historical-order-reused-pairing-check-v1",
+    "published_at": "2026-11-03",
+    "description": "Allow candidate and reused assignment references; preserve all rows and unrelated guards."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-accounting-differences-2026-11-02-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1065_historical_order_reused_pairing_check.sql",
+      "relative_path": "db/schema_parts/1065_historical_order_reused_pairing_check.sql",
+      "sha256": "e587a4f51fbf84fe0ff3ee0c64879a04bf6eecc622e394d6fb61fb5a457426ab",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-preserve-all-historical-pairing-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "historical-order-reused-pairing-check-exact",
+      "phase": "post-schema",
+      "policy": "Exact predecessor/successor CHECK; reject missing or drift; preserve every row and unrelated guard",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "orders-historical-adoption-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "historical-order-reused-pairing-check-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_03_historical_order_reused_pairing_check_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_03_historical_order_reused_pairing_check_v1.descriptors.json",
+    "sha256": "eeb4392e82622d97b4981bdd305edf91a50f7a3bfb067ca87e97b8201da8a641",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

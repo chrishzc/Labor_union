@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "4ce99ded4ce0322f2c4a2758a351798f332679179a2e512522acf9cdab1506c0",
+  "active_artifacts_sha256": "7b96d5b9024d959167d6d9aa7976026b61700a7f026542ce795fb16447303461",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -193,7 +193,8 @@
     "db/schema_parts/239_matching_manual_reason_optional.sql",
     "db/schema_parts/240_order_reopen_reason_optional.sql",
     "db/schema_parts/241_finance_case_accounting_markers.sql",
-    "db/schema_parts/242_accounting_difference_resolution.sql"
+    "db/schema_parts/242_accounting_difference_resolution.sql",
+    "db/schema_parts/243_historical_order_reused_pairing_check.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -233,7 +234,8 @@
     "db/schema_parts/1061_matching_manual_reason_optional.sql": "migration-only",
     "db/schema_parts/1062_order_reopen_reason_optional.sql": "migration-only",
     "db/schema_parts/1063_finance_case_accounting_markers.sql": "migration-only",
-    "db/schema_parts/1064_accounting_difference_resolution.sql": "migration-only"
+    "db/schema_parts/1064_accounting_difference_resolution.sql": "migration-only",
+    "db/schema_parts/1065_historical_order_reused_pairing_check.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -568,6 +570,15 @@
       "replay": "exact metadata is current; rows preserved",
       "rollback": "retain data and immutable events; disable new entry points",
       "unresolved_policy": "partial or drift metadata blocks apply"
+    },
+    "db/schema_parts/1065_historical_order_reused_pairing_check.sql": {
+      "source_object": "historical pairing CHECK allowing only assignment_candidate to reference an assignment",
+      "successor": "db/schema_parts/243_historical_order_reused_pairing_check.sql",
+      "terminal_schema_evidence": "fresh 243 and preserve 1065 byte-identical; CHECK includes assignment_reused",
+      "data_effect": "schema-only; no row changes, seeds, backfill or table drops",
+      "replay": "exact successor is current; exact predecessor is pending",
+      "rollback": "forward-only after reused evidence; retain all rows and source backup",
+      "unresolved_policy": "missing, partial or drift CHECK metadata blocks apply"
     }
   }
 }

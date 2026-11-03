@@ -28,6 +28,9 @@
   - `api/schemas/historical_order_adoption.py`
   - `scripts/imports/adopt_historical_orders.py` — operational use remains subject to entry-point governance.
 - migrations:
+  - `db/schema_parts/243_historical_order_reused_pairing_check.sql` — fresh CHECK successor，candidate／reused 均要求 staff 與 assignment，其餘不得帶 assignment。
+  - `db/schema_parts/1065_historical_order_reused_pairing_check.sql` — 保留資料 CHECK successor；原紀錄、enum、FK 與 immutable guards 不變。
+  - `db/migration_releases/labor_union_2026_11_03_historical_order_reused_pairing_check_v1.json` — 與 descriptor／canonical chain 綁定。
   - `db/schema_parts/1008_historical_order_adoption_noop_constraint.sql`
   - `db/schema_parts/214_historical_order_pairing_resolution_reused.sql`
   - `db/schema_parts/1027_historical_order_pairing_resolution_reused.sql` — preserve-data successor.
@@ -42,6 +45,7 @@
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
+- MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。
 - 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.
 - `document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` — script/API entry lifecycle.

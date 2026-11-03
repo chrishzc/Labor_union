@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-11-02-v58",
+  "release_id": "labor-union-validation-schema-2026-11-03-v59",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,16 +8,16 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 187,
-    "ordered_digest_sha256": "4ce99ded4ce0322f2c4a2758a351798f332679179a2e512522acf9cdab1506c0",
-    "terminal_artifact": "242_accounting_difference_resolution.sql"
+    "expected_count": 188,
+    "ordered_digest_sha256": "7b96d5b9024d959167d6d9aa7976026b61700a7f026542ce795fb16447303461",
+    "terminal_artifact": "243_historical_order_reused_pairing_check.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "e3a1524031547b6324c501e0f14efb172fea33aaa48f8900678032368e6571ee"
+    "sha256": "f78d20f89c0e20b504391652473f5e13b9ce8c3b85c012dc194188ea985690b3"
   },
   "full_release": {
-    "path": "db/releases/labor_union_validation_schema_accounting_differences_v1.sql",
+    "path": "db/releases/labor_union_validation_schema_reused_pairing_check_v1.sql",
     "database_token": "__LU_TEST_DATABASE__",
     "generation": "base_schema_then_ordered_schema_parts"
   },
