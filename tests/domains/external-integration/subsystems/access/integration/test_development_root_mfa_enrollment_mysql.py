@@ -81,18 +81,28 @@ def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkey
                          if method == "POST" else None)
         return asyncio.run(run())
 
-    _require(setup_request("GET").json() == {"required": True}, "fresh database must require setup")
-    _require(setup_request().status_code == 201, "web setup must create the root")
+    _require(setup_request("GET").json() == {"required": True, "enrollment_required": False}, "fresh database must require setup")
+    monkeypatch.delenv("ACCESS_CONTROL_TOTP_KEYRING")
+    failure = setup_request()
+    _require(failure.status_code == 503, "missing encryption key must reject setup")
+    _require(failure.json()["detail"]["error"]["code"] == "mfa_configuration_unavailable", "missing key must have a specific error")
+    _require(not _rows("SELECT id FROM admin_users"), "missing key must roll back account creation")
+    _require(not _rows("SELECT admin_user_id FROM admin_root_account"), "missing key must roll back root designation")
+    _require(not _rows("SELECT id FROM admin_totp_factors"), "missing key must not persist a pending factor")
+    monkeypatch.setenv("ACCESS_CONTROL_TOTP_KEYRING", "v1:" + Fernet.generate_key().decode("ascii"))
+    response = setup_request()
+    _require(response.status_code == 201, "web setup must create the root and pending enrollment")
+    first_payload = response.json()["enrollment"]
+    _require(first_payload["challenge_type"] == "mfa_enrollment", "setup must immediately provide enrollment proof")
     _require(len(_rows("SELECT id FROM admin_users")) == 1, "bootstrap must create one account")
     _require(len(_rows("SELECT admin_user_id FROM admin_root_account")) == 1, "bootstrap must establish root")
-    _require(not _rows("SELECT id FROM admin_totp_factors"), "bootstrap must not provision a factor")
+    _require(_rows("SELECT factor_state FROM admin_totp_factors") == [{"factor_state": "enrollment_pending"}], "bootstrap must create only a pending factor")
     _require(not _rows("SELECT id FROM admin_sessions"), "bootstrap must not issue a session")
 
-    first = auth.issue_password_login_challenge(username, password, connection_factory=_connection)
-    _require(type(first) is auth.MfaEnrollmentChallenge, "first password login must require enrollment")
-    first_secret = parse_qs(urlparse(first.provisioning_uri).query)["secret"][0]
+    _require(setup_request("GET").json() == {"required": False, "enrollment_required": True}, "refresh must continue enrollment before login")
+    first_secret = parse_qs(urlparse(first_payload["provisioning_uri"]).query)["secret"][0]
     second = auth.issue_password_login_challenge(username, password, connection_factory=_connection)
-    _require(type(second) is auth.MfaEnrollmentChallenge, "unconfirmed login must still require enrollment")
+    _require(type(second) is auth.MfaEnrollmentChallenge, "identity confirmation must resume unfinished enrollment")
     second_secret = parse_qs(urlparse(second.provisioning_uri).query)["secret"][0]
     _require(first_secret != second_secret, "separate enrollments must have independent random seeds")
     _require(_rows("SELECT factor_state FROM admin_totp_factors") == [{"factor_state": "enrollment_pending"}], "factor must remain pending")
@@ -129,9 +139,12 @@ def test_web_root_setup_requires_enrollment_and_preserves_existing_factor(monkey
     principal = auth.get_admin_session(result[0], connection_factory=_connection)
     _require(principal is not None and principal.is_root, "verified session must belong to root")
 
+    # Recompose the HTTP application to prove status comes from committed MySQL facts.
+    app = FastAPI()
+    app.include_router(admin_setup.router)
     accounts_before = _rows("SELECT * FROM admin_users")
     factors_before = _rows("SELECT * FROM admin_totp_factors")
-    _require(setup_request("GET").json() == {"required": False}, "existing database must close setup")
+    _require(setup_request("GET").json() == {"required": False, "enrollment_required": False}, "enrolled root must close setup")
     _require(setup_request().status_code == 410, "existing root must reject recreation")
     _require(_rows("SELECT * FROM admin_users") == accounts_before, "setup replay must preserve existing account")
     _require(_rows("SELECT * FROM admin_totp_factors") == factors_before, "setup replay must preserve existing factor")

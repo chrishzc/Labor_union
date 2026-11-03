@@ -2,12 +2,15 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { setupClient } from '../api/auth/setup_client';
 import { sessionClient } from '../api/auth/session_client';
+import type { AdminPasswordChallengeResponse } from '../api/auth/two_step_auth_schemas';
+import { LoginPage } from './LoginPage';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import './LoginPage.css';
 import './FirstRootSetup.css';
 
 export function FirstRootSetupGate({ children }: { children: ReactNode }) {
   const [required, setRequired] = useState<boolean | null>(null);
+  const [enrollmentRequired, setEnrollmentRequired] = useState(false);
   const [checking, setChecking] = useState(true);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
@@ -16,12 +19,16 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [saving, setSaving] = useState(false);
-  const [created, setCreated] = useState(false);
+  const [enrollment, setEnrollment] = useState<AdminPasswordChallengeResponse | null>(null);
 
   useEffect(() => {
     let active = true;
     setupClient.status().then(status => {
-      if (active) setRequired(status.required);
+      if (active) {
+        setRequired(status.required);
+        setEnrollmentRequired(status.enrollment_required);
+        if (status.enrollment_required) sessionClient.clearSession();
+      }
     }).catch(() => {
       if (active) setError('無法讀取帳號設定狀態，請確認資料庫連線與初始化已完成後重試。');
     }).finally(() => { if (active) setChecking(false); });
@@ -45,9 +52,9 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
     }
     setSaving(true);
     try {
-      await setupClient.create({ username: username.trim(), display_name: displayName.trim(), password });
+      const result = await setupClient.create({ username: username.trim(), display_name: displayName.trim(), password });
       sessionClient.clearSession();
-      setCreated(true);
+      setEnrollment(result.enrollment);
     } catch (failure) {
       if (failure instanceof ApiHttpError && [409, 410].includes(failure.status)) {
         try {
@@ -55,6 +62,7 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
           if (!status.required) {
             sessionClient.clearSession();
             setRequired(false);
+            setEnrollmentRequired(status.enrollment_required);
             return;
           }
         } catch { /* Keep setup closed to the application until status is known. */ }
@@ -68,21 +76,23 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
     }
   }
 
+  if (enrollment || enrollmentRequired) return <LoginPage enrollmentOnly
+    initialEnrollment={enrollment ? { username: username.trim(), challenge: enrollment } : undefined}
+    onEnrollmentFinished={() => {
+      sessionClient.clearSession(); setEnrollment(null); setEnrollmentRequired(false); setRequired(false);
+    }} />;
   if (required === false) return children;
 
   return <main className="login-viewport first-root-setup">
     <div className="login-card-container">
-      <h1 className="login-main-title">{created ? '最高管理員已建立' : '首次設定最高管理員'}</h1>
+      <h1 className="login-main-title">首次設定最高管理員</h1>
       {checking ? <p role="status">正在確認帳號設定狀態…</p>
-        : created ? <>
-          <p className="login-desc-subtitle">接下來請使用剛建立的帳號登入，並依畫面指示綁定驗證器。</p>
-          <button className="login-submit-btn" onClick={() => setRequired(false)}>前往登入</button>
-        </> : <>
+        : <>
           {error && <p role="alert" className="first-root-error">{error}</p>}
           {required === null ? <button className="login-submit-btn" onClick={() => {
             setChecking(true); setError(''); setRetry(value => value + 1);
           }}>重新確認</button> : <>
-            <p className="login-desc-subtitle">目前尚未建立最高管理員。請設定帳號與密碼，完成後再登入並綁定驗證器。</p>
+            <p className="login-desc-subtitle">請設定帳號與密碼，接著立即綁定 TOTP 驗證器。完成綁定並保存復原碼後，再重新登入。</p>
             <form onSubmit={submit}>
               <fieldset disabled={saving}>
                 <div className="login-input-group">

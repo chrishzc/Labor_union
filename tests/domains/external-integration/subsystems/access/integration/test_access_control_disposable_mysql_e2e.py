@@ -180,12 +180,12 @@ def _bootstrap_and_enroll(username: str):
     from subsystems.access import authentication_session
 
     password = "Root-password-123"
-    root_id = authentication_session.bootstrap_root_admin(
+    root = authentication_session.bootstrap_root_admin(
         username=username, password=password, display_name="Root",
         connection_factory=_connection,
     )
     principal, secret, token = _enroll_and_login(username, password)
-    assert principal.id == root_id and principal.is_root
+    assert principal.id == root.admin_user_id and principal.is_root
     return principal, secret, token
 
 

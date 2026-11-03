@@ -191,6 +191,18 @@ class MfaEnrollmentChallenge:
     expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class RootBootstrapResult:
+    admin_user_id: int
+    enrollment: MfaEnrollmentChallenge
+
+
+@dataclass(frozen=True, slots=True)
+class RootSetupStatus:
+    required: bool
+    enrollment_required: bool
+
+
 @dataclass(frozen=True)
 class PasswordLoginChallenge:
     """Password proof that cannot itself authorize a business Session."""
@@ -368,11 +380,29 @@ def has_root_admin(*, connection_factory: ConnectionFactory) -> bool:
         conn.close()
 
 
+def get_root_setup_status(*, connection_factory: ConnectionFactory) -> RootSetupStatus:
+    """Read anonymous setup progress without exposing identity or enrollment proof."""
+    conn = connection_factory()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """SELECT r.admin_user_id,
+                          EXISTS(SELECT 1 FROM admin_totp_factors f
+                                 WHERE f.admin_user_id=r.admin_user_id AND f.factor_state='active') AS enrolled
+                   FROM admin_root_account r WHERE r.singleton_key=1"""
+            )
+            row = cursor.fetchone()
+            return RootSetupStatus(required=row is None,
+                                   enrollment_required=row is not None and not bool(row["enrolled"]))
+    finally:
+        conn.close()
+
+
 def bootstrap_root_admin(
     *, connection_factory: ConnectionFactory, username: str, password: str,
     display_name: str, linked_line_user_id: str | None = None
-) -> int:
-    """Controlled initial root bootstrap; it fails closed once a root fact exists."""
+) -> RootBootstrapResult:
+    """Commit the first root and pending enrollment together, without a Session."""
     normalized_username = username.strip().lower()
     normalized_name = display_name.strip()
     if not normalized_username or not normalized_name:
@@ -381,7 +411,8 @@ def bootstrap_root_admin(
     unit_of_work = AccessControlUnitOfWork(conn)
     try:
         unit_of_work.__enter__()
-        with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _require_admin_session_schema(cursor)
             cursor.execute("SELECT admin_user_id FROM admin_root_account WHERE singleton_key=1 FOR UPDATE")
             if cursor.fetchone() is not None:
                 raise ValueError("root 帳號已存在；不得以 bootstrap 覆寫")
@@ -400,8 +431,9 @@ def bootstrap_root_admin(
                 cursor, principal=None, action="admin.root.bootstrap", result_status=201,
                 details={"account_id": admin_id},
             )
+            enrollment = _issue_mfa_enrollment(cursor, {"id": admin_id, "username": normalized_username})
         unit_of_work.commit()
-        return admin_id
+        return RootBootstrapResult(admin_id, enrollment)
     except pymysql.err.IntegrityError as error:
         unit_of_work.rollback()
         raise ValueError("root bootstrap 衝突") from error

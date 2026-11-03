@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import './LoginPage.css';
 import { sessionClient } from '../api/auth/session_client';
+import type { AdminPasswordChallengeResponse } from '../api/auth/two_step_auth_schemas';
 import {
   ApiHttpError,
   ApiNetworkError,
@@ -16,10 +17,14 @@ import {
 
 export interface LoginPageProps {
   onLoginSuccess?: (username: string) => void;
+  initialEnrollment?: { username: string; challenge: AdminPasswordChallengeResponse };
+  enrollmentOnly?: boolean;
+  onEnrollmentFinished?: () => void;
 }
 
 function getStage1ErrorMessage(err: unknown): string {
   if (err instanceof ApiHttpError) {
+    if (['mfa_configuration_unavailable', 'admin_session_schema_not_ready'].includes(err.code)) return err.message;
     if (err.status === 403 || err.code === 'mfa_enrollment_required') {
       return '此帳號需先完成 MFA 綁定；React 綁定流程尚未啟用。';
     }
@@ -79,8 +84,10 @@ function getStage2ErrorMessage(
     return { message: '驗證階段已過期，請重新輸入帳號密碼', expired: true };
   }
   if (err instanceof ApiHttpError) {
+    if (err.code === 'mfa_secret_unavailable') return { message: err.message, expired: false };
     if (
       err.code === 'challenge_expired' ||
+      err.code === 'mfa_challenge_expired' ||
       err.message.includes('過期') ||
       err.message.includes('expired') ||
       err.message.includes('逾期')
@@ -168,15 +175,16 @@ function clearRememberedUsername(): void {
   }
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnrollment, enrollmentOnly = false, onEnrollmentFinished }) => {
   // Stage 1: Account Login, Stage 2: TOTP 2FA Verification
-  const [authStage, setAuthStage] = useState<'stage1' | 'stage2'>('stage1');
+  const [authStage, setAuthStage] = useState<'stage1' | 'stage2'>(initialEnrollment ? 'stage2' : 'stage1');
 
   const [rememberMe, setRememberMe] = useState<boolean>(() => {
     const saved = getRememberedUsername();
     return saved !== null && saved.length > 0;
   });
   const [username, setUsername] = useState<string>(() => {
+    if (initialEnrollment) return initialEnrollment.username;
     const saved = getRememberedUsername();
     return saved && saved.length > 0 ? saved : 'admin';
   });
@@ -186,11 +194,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
 
   // Stage 2 state
-  const [challengeId, setChallengeId] = useState<string | null>(null);
-  const [challengeToken, setChallengeToken] = useState<string | null>(null);
-  const [challengeExpiresAt, setChallengeExpiresAt] = useState<string | null>(null);
+  const [challengeId, setChallengeId] = useState<string | null>(initialEnrollment?.challenge.challenge_id ?? null);
+  const [challengeToken, setChallengeToken] = useState<string | null>(initialEnrollment?.challenge.challenge_token ?? null);
+  const [challengeExpiresAt, setChallengeExpiresAt] = useState<string | null>(initialEnrollment?.challenge.expires_at ?? null);
   const [totpCode, setTotpCode] = useState('');
-  const [provisioningUri, setProvisioningUri] = useState<string | null>(null);
+  const [provisioningUri, setProvisioningUri] = useState<string | null>(initialEnrollment?.challenge.provisioning_uri ?? null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   const handleStage1Submit = async (e: React.FormEvent) => {
@@ -210,15 +218,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
 
     // Persist or clear remembered username in cookie
-    if (rememberMe) {
+    if (!enrollmentOnly && rememberMe) {
       setRememberedUsername(trimmedUser);
-    } else {
+    } else if (!enrollmentOnly) {
       clearRememberedUsername();
     }
 
     setIsLoading(true);
     try {
       const challenge = await sessionClient.issuePasswordChallenge(trimmedUser, password);
+      if (enrollmentOnly && challenge.challenge_type !== 'mfa_enrollment') {
+        setPassword('');
+        onEnrollmentFinished?.();
+        return;
+      }
       setChallengeId(challenge.challenge_id);
       setChallengeToken(challenge.challenge_token);
       setChallengeExpiresAt(challenge.expires_at);
@@ -262,8 +275,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setChallengeId(null);
       setChallengeToken(null);
       setChallengeExpiresAt(null);
+      setProvisioningUri(null);
       setAuthStage('stage1');
-      setErrorMessage('驗證階段已過期，請重新輸入帳號密碼');
+      setErrorMessage(enrollmentOnly ? '綁定資料已逾時，請確認帳號密碼後繼續綁定驗證器。' : '驗證階段已過期，請重新輸入帳號密碼');
       return;
     }
 
@@ -291,7 +305,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setChallengeExpiresAt(null);
       setTotpCode('');
 
-      if (onLoginSuccess) {
+      if (!enrollmentOnly && onLoginSuccess) {
         onLoginSuccess(username.trim());
       }
     } catch (err) {
@@ -303,6 +317,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         setChallengeId(null);
         setChallengeToken(null);
         setChallengeExpiresAt(null);
+        setProvisioningUri(null);
         setAuthStage('stage1');
       }
       setErrorMessage(message);
@@ -312,6 +327,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   };
 
   const handleBackToStage1 = () => {
+    const completedEnrollment = recoveryCodes.length > 0;
     setProvisioningUri(null);
     setRecoveryCodes([]);
     setErrorMessage(null);
@@ -320,6 +336,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setChallengeExpiresAt(null);
     setTotpCode('');
     setAuthStage('stage1');
+    if (completedEnrollment) onEnrollmentFinished?.();
   };
 
   return (
@@ -331,8 +348,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         {authStage === 'stage1' && (
           <>
             <div className="login-brand-badge">🤱</div>
-            <h1 className="login-main-title">月子工會管理系統</h1>
-            <p className="login-desc-subtitle">請輸入您的帳號密碼以登入後台</p>
+            <h1 className="login-main-title">{enrollmentOnly ? '繼續綁定 TOTP 驗證器' : '月子工會管理系統'}</h1>
+            <p className="login-desc-subtitle">{enrollmentOnly
+              ? '請確認帳號密碼以繼續設定驗證器，此步驟不會登入系統。'
+              : '請輸入您的帳號密碼以登入後台'}</p>
 
             {errorMessage && (
               <div
@@ -394,7 +413,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
-              <div className="login-options-row">
+              {!enrollmentOnly && <div className="login-options-row">
                 <label className="login-remember-me">
                   <input
                     type="checkbox"
@@ -404,10 +423,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   />
                   <span>記住帳號 (Remember Me)</span>
                 </label>
-              </div>
+              </div>}
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>
-                {isLoading ? '處理中...' : '下一步：進行雙重驗證 ➔ (Next: 2FA)'}
+                {isLoading ? '處理中...' : enrollmentOnly ? '確認帳密並繼續綁定' : '下一步：進行雙重驗證 ➔ (Next: 2FA)'}
               </button>
             </form>
           </>
@@ -418,6 +437,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <section aria-label="保存復原碼">
             <h1 className="login-main-title">驗證器綁定完成</h1>
             <p>請將以下一次性復原碼保存到安全位置，離開後不再顯示。不要分享給他人。</p>
+            <p>返回登入時，請使用驗證器更新後的新動態碼。</p>
             <ul>{recoveryCodes.map(code => <li key={code}><code>{code}</code></li>)}</ul>
             <button className="login-submit-btn" onClick={handleBackToStage1}>已保存復原碼，返回登入</button>
           </section>
@@ -498,14 +518,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 {isLoading ? '驗證中...' : provisioningUri ? '確認綁定驗證器' : '驗證並登入系統 (Verify & Login)'}
               </button>
 
-              <button
+              {!enrollmentOnly && <button
                 type="button"
                 className="back-to-stage1-btn"
                 disabled={isLoading}
                 onClick={handleBackToStage1}
               >
                 ← 返回重新輸入帳密
-              </button>
+              </button>}
             </form>
           </>
         )}

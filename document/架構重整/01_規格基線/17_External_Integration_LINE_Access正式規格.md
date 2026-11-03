@@ -632,11 +632,13 @@ Modules：
 #### 4.3.1 管理端首次安裝的統一網頁 bootstrap（2026-11-03 使用者裁決）
 
 - 所有管理入口（標準 `api.main`、NAS management factory、本機及 Windows 遠端管理端）共用一個網頁建帳流程，以 MySQL `admin_root_account` 是否已有 root designation 判斷首次設定，與主機身分、帳號名稱或環境變數是否存在無關。停用並移除啟動時依 `DEV_ROOT_USERNAME`／`DEV_ROOT_PASSWORD` 自動建立 root 的分支，不保留兩套初始化模式。
-- React 在掛載管理應用及處理既有登入狀態前，以 `GET /api/v1/admin/setup` 確認是否需要設定；無 root 時顯示首次設定表單，已有 root 時進入既有登入／session 流程。`POST /api/v1/admin/setup` 是唯一網頁首次建帳入口；舊 `GET /setup` 僅導向共用管理介面，不再提供另一個安裝表單。不要求部署啟用碼或預填固定網址。
+- React 在掛載管理應用及處理既有登入狀態前，以 `GET /api/v1/admin/setup` 的 `required`／`enrollment_required` 確認設定進度；無 root 時顯示建帳表單，root 尚無 active TOTP 時繼續綁定，已綁定才進入既有登入／session 流程。`POST /api/v1/admin/setup` 是唯一網頁首次建帳入口；舊 `GET /setup` 僅導向共用管理介面。不要求部署啟用碼或預填固定網址。
 - 建帳要求 HTTPS；僅當 request Host 與實際 client 同為 loopback 時允許本機 HTTP。提交 Origin 必須與目前管理入口同源。Vite 保留原 Host；Windows gateway 只對 setup API 傳入已驗證的 Host 及由自身 request 決定的 scheme，捨棄外來 forwarded headers，API 僅信任既有 loopback proxy。LINE public factory 不掛載此入口。
 - 空資料庫須先完成既有 schema 初始化。資料庫連線失敗或缺少資料表時回 typed unavailable，介面顯示錯誤並提供人工重查，不當作無 root，也不自動 bootstrap schema 或資料。
-- 寫入只能委派既有 `bootstrap_root_admin`，使用原本唯一 root designation 與 outer transaction／audit。root 已存在時拒絕建立或覆寫；concurrent bootstrap 只能有一個成功，競爭／deadlock 回 typed 409，不做 blind retry。不新增 table、root owner 或 reset／recovery HTTP endpoint。
-- 統一安裝表單沿用共用 10 字元最低密碼政策，傳輸上限仍為 256 字元，並要求再次輸入密碼確認。成功建立不簽發 session、不替使用者啟用 factor；後續仍走既有兩段登入與 MFA enrollment。
+- 寫入只能委派既有 `bootstrap_root_admin`；2026-11-03 後續人工裁決要求於同一 outer transaction／audit 內建立唯一 root designation 與 `enrollment_pending` factor／短效 enrollment challenge。金鑰缺失、schema／寫入失敗全部回滾，不留下僅有 root 的新安裝。root 已存在時拒絕建立或覆寫；concurrent bootstrap 只能有一個成功，競爭／deadlock 回 typed 409，不做 blind retry。不新增 table、root owner 或 reset／recovery HTTP endpoint。
+- 唯一正常流程為「建立 root → 立即顯示 TOTP QR Code → 驗證綁定 → 保存復原碼 → 返回登入頁，重新輸入帳密與 TOTP」。POST setup 以 201 回傳 `created` 與既有 `mfa_enrollment` 型別的 `enrollment`，不再回傳直接前往登入的 `next`。沿用共用 10–256 字元密碼政策與再次輸入確認；建帳與綁定皆不簽發 session，僅使用者提交有效 TOTP 後啟用 factor，保存復原碼後清除設定中的機密資料與既有 session，再顯示登入。
+- 綁定中重新整理或 challenge 逾時，只能透過既有帳密 challenge 確認身分並繼續綁定，不是正式登入、不簽發 session、不重建 root。共用既有 LoginPage 的 enrollment UI，續綁定畫面須明確命名，不提供登入或跳過綁定操作。provisioning URI、challenge token、TOTP 與復原碼僅留在記憶體，不以 browser storage／cookie／URL 保存來維持跨刷新狀態。
+- TOTP 金鑰無法使用與 session schema 缺失分別回傳安全的明確 unavailable code／訊息；不能以另一台主機的設定推定錯誤原因，也不得自動產生／覆寫已存在的加密金鑰。
 - password 不得出現在 validation error、browser storage、URL、log 或 audit detail。root designation 存在後關閉建立入口，重新啟動／重新下載映像不重開設定，也不變更帳號或 MFA。
 
 ### 4.4 Subsystem：Account／Session Administration

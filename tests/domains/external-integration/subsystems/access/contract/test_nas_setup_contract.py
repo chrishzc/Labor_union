@@ -1,14 +1,17 @@
 """Shared first-root setup: transport, MySQL availability, closure and composition."""
 import asyncio
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
 from api.routes import admin_setup
+from subsystems.access.authentication_session import RootBootstrapResult, RootSetupStatus, MfaEnrollmentChallenge
 from api.exception_handlers import install_typed_error_handlers
 
 ORIGIN = "https://nas.example.test:18443"
+ENROLLMENT = MfaEnrollmentChallenge("test-enrollment", "m" * 32, "otpauth://totp/test?secret=JBSWY3DPEHPK3PXP", datetime(2099, 1, 1))
 PASSWORD = "test-root1"  # Synthetic ten-character password; never a deployment credential.
 
 
@@ -18,13 +21,14 @@ def setup_app(monkeypatch):
     monkeypatch.delenv("NAS_SETUP_KEY", raising=False)
     monkeypatch.delenv("NAS_PUBLIC_ORIGIN", raising=False)
     monkeypatch.setattr(admin_setup, "get_access_control_connection_factory", lambda: object())
-    monkeypatch.setattr(admin_setup, "has_root_admin", lambda **_: state["root"])
+    monkeypatch.setattr(admin_setup, "get_root_setup_status", lambda **_: RootSetupStatus(not state["root"], state["root"]))
     def bootstrap(**kwargs):
         assert kwargs["password"] == PASSWORD
         if state["root"]:
             raise ValueError("root exists")
         state["root"] = True
         state["writes"] += 1
+        return RootBootstrapResult(1, ENROLLMENT)
     monkeypatch.setattr(admin_setup, "bootstrap_root_admin", bootstrap)
     app = FastAPI()
     install_typed_error_handlers(app)
@@ -53,12 +57,17 @@ def test_first_root_created_once_without_session_or_secret_projection(setup_app)
     app, state = setup_app
     response = request(app, headers=headers(), payload=payload())
     assert response.status_code == 201
-    assert response.json() == {"created": True, "next": "/admin/"}
+    body = response.json()
+    assert set(body) == {"created", "enrollment"} and body["created"] is True
+    assert body["enrollment"]["challenge_type"] == "mfa_enrollment"
+    assert body["enrollment"]["challenge_token"] == ENROLLMENT.challenge_token
+    assert body["enrollment"]["provisioning_uri"] == ENROLLMENT.provisioning_uri
+    assert datetime.fromisoformat(body["enrollment"]["expires_at"]).tzinfo == timezone.utc
     assert response.headers["cache-control"] == "no-store"
     assert len(PASSWORD) == 10 and PASSWORD not in response.text
     assert request(app, headers=headers(), payload=payload()).status_code == 410
     assert state["writes"] == 1
-    assert request(app, "GET").json() == {"required": False}
+    assert request(app, "GET").json() == {"required": False, "enrollment_required": True}
 
 
 @pytest.mark.parametrize("case,status", [("http", 426), ("origin", 403), ("missing_origin", 403),
@@ -110,7 +119,7 @@ def test_current_https_address_needs_no_installation_key_or_fixed_url(setup_app,
 @pytest.mark.parametrize("base", ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"])
 def test_loopback_browser_uses_the_same_setup_without_environment_credentials(setup_app, base):
     app, state = setup_app
-    assert request(app, "GET", base=base).json() == {"required": True}
+    assert request(app, "GET", base=base).json() == {"required": True, "enrollment_required": False}
     assert request(app, base=base, headers={"Origin": base}, payload=payload()).status_code == 201
     assert state["writes"] == 1
 
@@ -128,7 +137,7 @@ def test_missing_schema_or_database_connection_is_not_a_fresh_install(setup_app,
     app, state = setup_app
     def unavailable(**_):
         raise pymysql.err.OperationalError(error_code, "synthetic database failure")
-    monkeypatch.setattr(admin_setup, "has_root_admin", unavailable)
+    monkeypatch.setattr(admin_setup, "get_root_setup_status", unavailable)
     for method in ("GET", "POST"):
         response = request(app, method, headers=headers(), payload=payload() if method == "POST" else None)
         assert response.status_code == 503
@@ -142,10 +151,49 @@ def test_standard_and_nas_management_entries_share_one_setup_router(setup_app, m
     original_lifespan = main.app.router.lifespan_context
     monkeypatch.setattr(main.app.router, "lifespan_context", original_lifespan)
     for app in (main.app, nas_apps.management_app()):
-        assert request(app, "GET").json() == {"required": True}
+        assert request(app, "GET").json() == {"required": True, "enrollment_required": False}
         response = request(app, "GET", path="/setup")
         assert response.status_code == 303 and response.headers["location"] == "/admin/"
     assert request(nas_apps.management_app(), headers=headers(), payload=payload()).status_code == 201
-    assert request(main.app, "GET").json() == {"required": False}
+    assert request(main.app, "GET").json() == {"required": False, "enrollment_required": True}
     assert request(main.app, headers=headers(), payload=payload()).status_code == 410
     assert request(nas_apps.line_app(), "GET").status_code == 404
+
+
+@pytest.mark.parametrize("error_type,code", [
+    ("AdminMfaConfigurationError", "mfa_configuration_unavailable"),
+    ("AdminSessionSchemaError", "admin_session_schema_not_ready"),
+])
+def test_setup_configuration_failures_are_specific_and_never_disclose_secrets(setup_app, monkeypatch, error_type, code):
+    from subsystems.access import authentication_session as auth
+    app, state = setup_app
+    def fail(**_):
+        raise getattr(auth, error_type)("synthetic-private-configuration")
+    monkeypatch.setattr(admin_setup, "bootstrap_root_admin", fail)
+    response = request(app, headers=headers(), payload=payload())
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["code"] == code
+    assert "synthetic-private-configuration" not in response.text
+    assert ENROLLMENT.challenge_token not in response.text
+    assert ENROLLMENT.provisioning_uri not in response.text
+    assert state["writes"] == 0
+
+
+@pytest.mark.parametrize("error_type,code", [
+    ("AdminMfaConfigurationError", "mfa_configuration_unavailable"),
+    ("AdminSessionSchemaError", "admin_session_schema_not_ready"),
+])
+def test_resuming_enrollment_reports_safe_configuration_errors(monkeypatch, error_type, code):
+    from api.routes import admin_auth
+    from subsystems.access import authentication_session as auth
+    app = FastAPI()
+    app.include_router(admin_auth.router)
+    app.dependency_overrides[admin_auth.get_access_control_connection_factory] = lambda: object()
+    def fail(*_, **__):
+        raise getattr(auth, error_type)("private-configuration-data")
+    monkeypatch.setattr(admin_auth, "issue_password_login_challenge", fail)
+    response = request(app, headers=headers(), payload={"username": "root-test", "password": PASSWORD},
+                       path="/api/v1/admin/auth/login/challenges")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == code
+    assert "private-configuration-data" not in response.text

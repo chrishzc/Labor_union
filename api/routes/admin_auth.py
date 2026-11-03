@@ -94,7 +94,13 @@ async def issue_login_challenge(
         result = await asyncio.to_thread(issue_password_login_challenge, payload.username, payload.password, connection_factory=connection_factory, source_identifier=_client_ip(request) or "unknown")
     except AdminLoginRateLimitedError as error:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail={"code": "login_rate_limited", "message": "登入嘗試過於頻繁，請稍後再試", "retryable": True}) from error
-    except (AdminSessionSchemaError, AdminSessionStorageError, AdminMfaConfigurationError) as error:
+    except AdminMfaConfigurationError:
+        raise _login_unavailable("mfa_configuration_unavailable",
+            "此主機的 TOTP 加密設定缺失或無法使用，請確認金鑰設定並重新啟動服務。") from None
+    except AdminSessionSchemaError:
+        raise _login_unavailable("admin_session_schema_not_ready",
+            "帳號驗證資料庫結構尚未完成，請完成資料庫初始化或更新後重試。") from None
+    except AdminSessionStorageError as error:
         raise _login_unavailable("admin_auth_unavailable", str(error)) from error
     if isinstance(result, MfaEnrollmentChallenge):
         return BaseResponse(
@@ -247,7 +253,8 @@ async def verify_enrollment_challenge(
             detail={"code": code, "message": "MFA 綁定已失效或驗證碼錯誤", "retryable": False},
         ) from error
     except AdminMfaConfigurationError as error:
-        raise _login_unavailable("mfa_secret_unavailable", str(error)) from error
+        raise _login_unavailable("mfa_secret_unavailable",
+            "此主機無法使用 TOTP 加密金鑰，請確認使用原有有效金鑰並重新啟動服務。") from error
     return BaseResponse(
         data=MfaEnrollmentVerificationResponse(recovery_codes=list(recovery_codes)),
         message="MFA 已完成綁定；請保存 recovery codes 後重新登入",
