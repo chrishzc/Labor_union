@@ -123,6 +123,10 @@ describe('Data Import simple result flows', () => {
   it.each([
     ['historical_order_database_upgrade_required', '資料庫結構尚未升級'],
     ['historical_order_import_database_unavailable', '檢查資料庫連線與權限'],
+    ['historical_order_database_lock_wait_exceeded', '資料鎖逾時'],
+    ['historical_order_database_deadlock', '死結'],
+    ['historical_order_database_permission_denied', '操作權限不足'],
+    ['historical_order_database_column_missing', '缺少必要資料欄位'],
     ['503', '匯入服務暫時無法回覆'],
   ])('historical HTTP 503 %s shows the actual cause and allows leaving without blind retries', async (code, guidance) => {
     vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockRejectedValueOnce(

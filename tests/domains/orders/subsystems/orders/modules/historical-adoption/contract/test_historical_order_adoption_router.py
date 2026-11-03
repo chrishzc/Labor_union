@@ -11,10 +11,12 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
-from pymysql.err import DataError, OperationalError
+from pymysql.err import DataError, IntegrityError, InterfaceError, OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
@@ -107,19 +109,75 @@ def test_apply_stale_preview_is_a_conflict_not_a_validation_error():
     assert response.json()["detail"]["error"]["code"] == "historical_order_preview_stale"
 
 
-def test_database_dependency_unavailable_is_typed(monkeypatch):
+@pytest.mark.parametrize("number,suffix", [(2003, "connect_failed"), (1045, "authentication_failed"), (1049, "not_found"), (1142, "permission_denied")])
+def test_database_dependency_unavailable_is_typed(monkeypatch, number, suffix):
     import api.dependencies.historical_order_adoption as dependency
     import pymysql
 
-    monkeypatch.setattr(dependency, "get_connection", lambda: (_ for _ in ()).throw(pymysql.OperationalError(2003, "offline")))
+    monkeypatch.setattr(dependency, "get_connection", lambda: (_ for _ in ()).throw(pymysql.OperationalError(number, "SYNTHETIC_PRIVATE_CONNECTION_DETAIL")))
     application = FastAPI()
     application.include_router(router)
+    application.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(application)
     application.dependency_overrides[require_admin] = lambda: SimpleNamespace(username="test-admin")
 
-    response = TestClient(application).post("/api/v1/orders/historical-adoption/workbooks/preview", files=_file())
+    response = TestClient(application).post("/api/v1/orders/historical-adoption/workbooks/preview", headers=_headers(), files=_file())
 
     assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "historical_order_import_database_unavailable"
+    error = response.json()["detail"]["error"]
+    assert error["code"] == f"historical_order_database_{suffix}"
+    assert f"MySQL {number}" in error["message"]
+    assert error["correlation_id"] == "historical-order-router-test"
+    assert "SYNTHETIC_PRIVATE_CONNECTION_DETAIL" not in response.text
+
+
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+@pytest.mark.parametrize("error_type,number,suffix,retryable", [
+    (OperationalError, 2003, "connect_failed", True),
+    (OperationalError, 2005, "host_not_found", False),
+    (OperationalError, 2006, "connection_lost", True),
+    (OperationalError, 2026, "tls_failed", False),
+    (OperationalError, 1045, "authentication_failed", False),
+    (OperationalError, 1142, "permission_denied", False),
+    (OperationalError, 1370, "permission_denied", False),
+    (OperationalError, 1049, "not_found", False),
+    (ProgrammingError, 1146, "table_missing", False),
+    (OperationalError, 1054, "column_missing", False),
+    (OperationalError, 1305, "routine_missing", False),
+    (OperationalError, 1205, "lock_wait_exceeded", True),
+    (OperationalError, 1213, "deadlock", True),
+    (OperationalError, 1040, "connection_limit_reached", True),
+    (ProgrammingError, 1064, "query_invalid", False),
+    (DataError, 1406, "data_rejected", False),
+    (IntegrityError, 1062, "constraint_rejected", False),
+    (OperationalError, 9999, "mysql_9999", False),
+    (InterfaceError, 0, "unknown_error", False),
+])
+def test_database_errors_are_precise_safe_and_keep_correlation_and_cleanup(operation, error_type, number, suffix, retryable, caplog):
+    service = _Service()
+
+    def fail(path, *_args):
+        service.paths.append(Path(path))
+        raise error_type(number, "SYNTHETIC_PRIVATE_SQL_AND_VALUES")
+
+    setattr(service, operation, fail)
+    response = _production_client(service).post(
+        f"/api/v1/orders/historical-adoption/workbooks/{operation}",
+        headers=_headers(), data={"preview_fingerprint": "2" * 64}, files=_file(),
+    )
+
+    assert response.status_code == 503
+    error = response.json()["detail"]["error"]
+    assert error["code"] == f"historical_order_database_{suffix}"
+    assert error["retryable"] is retryable
+    assert error["correlation_id"] == "historical-order-router-test"
+    if number:
+        assert f"MySQL {number}" in error["message"]
+    assert "SYNTHETIC_PRIVATE_SQL_AND_VALUES" not in response.text
+    assert "SYNTHETIC_PRIVATE_SQL_AND_VALUES" not in caplog.text
+    assert f"mysql_errno={number}" in caplog.text
+    assert "correlation_id=historical-order-router-test" in caplog.text
+    assert all(not path.exists() for path in service.paths)
 
 
 def test_apply_reports_pending_status_constraint_as_database_upgrade_required():

@@ -20,7 +20,9 @@
   - `infrastructure/mysql/historical_order_adoption_cancellation_decorator.py`
   - `infrastructure/mysql/historical_actual_start_date_planner.py`
 - entrypoints:
+  - `api/exception_handlers/historical_order_database.py` — 建連與執行期間共用 MySQL errno 去敏分類、typed HTTP 503 與安全診斷日誌。
   - `api/routes/historical_order_adoption.py`
+  - `api/exception_handlers/historical_order_database.py` — 歷史工作簿連線與執行期的封閉資料庫錯誤轉譯；回傳代碼及追蹤編號，不輸出原始資料庫訊息。
   - `api/dependencies/historical_order_adoption.py`
   - `api/dependencies/historical_order_review_remediation.py`
   - `api/schemas/historical_order_adoption.py`
@@ -40,6 +42,7 @@
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
+- 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.
 - `document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md` — script/API entry lifecycle.
 

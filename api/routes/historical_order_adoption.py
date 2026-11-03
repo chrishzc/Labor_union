@@ -9,11 +9,12 @@ import tempfile
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from pymysql.err import DataError, OperationalError
+from pymysql import MySQLError
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.historical_order_adoption import get_historical_order_workbook_import_service
+from api.exception_handlers.historical_order_database import historical_database_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.historical_order_adoption import HistoricalOrderWorkbookPreviewView, HistoricalOrderWorkbookReceiptView
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -113,42 +114,8 @@ async def _with_workbook(
             _actual_start_error_status(error.error.category),
             _with_correlation(error.error, correlation),
         ) from error
-    except DataError as error:
-        code = int(error.args[0]) if error.args else 0
-        message = str(error.args[1]) if len(error.args) > 1 else ""
-        if code == 1265 and "resolution" in message:
-            raise _http_error(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                TypedError(
-                    ErrorCategory.UNAVAILABLE,
-                    "historical_order_database_upgrade_required",
-                    "歷史訂單資料庫結構尚未升級，請先完成資料庫更新。",
-                    correlation,
-                    retryable=False,
-                ),
-            ) from error
-        raise
-    except OperationalError as error:
-        code = int(error.args[0]) if error.args else 0
-        message = str(error.args[1]) if len(error.args) > 1 else ""
-        logger.exception("歷史訂單匯入 OperationalError code=%s message=%s", code, message)
-        if (
-            code == 3819
-            and "chk_order_lifecycle_state_event_before_status" in message
-        ):
-            detail_code = "historical_order_database_upgrade_required"
-        else:
-            detail_code = "historical_order_import_database_unavailable"
-        raise _http_error(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            TypedError(
-                ErrorCategory.UNAVAILABLE,
-                detail_code,
-                "歷史訂單工作簿服務暫時無法使用。",
-                correlation,
-                retryable=True,
-            ),
-        ) from error
+    except MySQLError as error:
+        raise historical_database_http_error(error, correlation.value) from error
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)

@@ -31,17 +31,16 @@ from subsystems.orders.historical_service_accounting_workflow import (
     HistoricalServiceAccountingWorkflow,
 )
 import pymysql
-from fastapi import HTTPException, status
+from fastapi import Request
+from api.exception_handlers.historical_order_database import historical_database_http_error
 
 
-def get_historical_order_workbook_import_service():
+def get_historical_order_workbook_import_service(request: Request):
     try:
         connection = get_connection()
     except pymysql.MySQLError as error:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "historical_order_import_database_unavailable"},
-        ) from error
+        correlation_id = getattr(request.state, "correlation_id", "historical-order-database-connection")
+        raise historical_database_http_error(error, correlation_id) from error
     try:
         workflow = HistoricalOrderAdoptionWorkflow(
             MySqlHistoricalOrderAdoptionCancellationDecorator(connection),

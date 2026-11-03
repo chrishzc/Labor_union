@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HISTORICAL_ORDER_WORKBOOK_TIMEOUT_MS, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
-import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError, mapHistoricalOrderWorkbookApplyError } from '../api/orders/historical_order_workbook/errors';
+import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookPreviewError, HistoricalOrderWorkbookUnauthenticatedError, mapHistoricalOrderWorkbookApplyError, mapHistoricalOrderWorkbookPreviewError } from '../api/orders/historical_order_workbook/errors';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { HistoricalOrderWorkbookPreviewSchema, HistoricalOrderWorkbookReceiptSchema } from '../api/orders/historical_order_workbook/schemas';
 import { adaptHistoricalOrderWorkbookPreview } from '../adapters/orders/historical_order_workbook_adapter';
@@ -15,6 +15,26 @@ function setSession(): void {
 }
 
 describe('Historical Orders workbook Preview client', () => {
+  it.each([
+    ['connect_failed', 2003, '無法連接資料庫'], ['host_not_found', 2005, '主機名稱'],
+    ['connection_lost', 2006, '連線在處理期間中斷'], ['tls_failed', 2026, '加密連線失敗'],
+    ['authentication_failed', 1045, '資料庫登入失敗'], ['permission_denied', 1142, '操作權限不足'],
+    ['not_found', 1049, '資料庫不存在'], ['table_missing', 1146, '資料表'],
+    ['column_missing', 1054, '資料欄位'], ['routine_missing', 1305, '資料庫程序'],
+    ['lock_wait_exceeded', 1205, '資料鎖逾時'], ['deadlock', 1213, '死結'],
+    ['connection_limit_reached', 1040, '連線已達上限'], ['query_invalid', 1064, '指令語法錯誤'],
+    ['data_rejected', 1406, '欄位長度'], ['constraint_rejected', 1062, '唯一性或關聯限制'],
+    ['mysql_9999', 9999, '未分類錯誤'],
+  ])('preserves precise %s diagnostics for Preview and Apply without raw provider messages', (suffix, number, guidance) => {
+    const code = `historical_order_database_${suffix}`;
+    const source = new ApiHttpError(503, code, `SYNTHETIC_PRIVATE_SQL_AND_VALUES（MySQL ${number}）`, false);
+    for (const error of [mapHistoricalOrderWorkbookPreviewError(source), mapHistoricalOrderWorkbookApplyError(source)]) {
+      expect(error).toMatchObject({ code, status: 503 });
+      expect(error.message).toContain(guidance);
+      expect(error.message).toContain(`MySQL ${number}`);
+      expect(error.message).not.toContain('SYNTHETIC_PRIVATE_SQL_AND_VALUES');
+    }
+  });
   it.each([
     ['historical_client_payment_terms_missing', '付款條款'],
     ['historical_payroll_rate_policy_missing', '薪資費率'],

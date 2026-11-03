@@ -593,6 +593,9 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.7 Historical Order Adoption
 
+2026-11-03 歷史工作簿錯誤診斷裁決：資料庫建連與 Preview／Apply 執行期間的 MySQL 失敗共用去敏 HTTP 503 typed error；錯誤碼以 `historical_order_database_` 加精確原因，不再將已知原因全歸為 `historical_order_import_database_unavailable`。連線原因為 `connect_failed`、`host_not_found`、`connection_lost`、`tls_failed`、`connection_limit_reached`；設定／權限為 `authentication_failed`、`permission_denied`；結構為 `not_found`、`table_missing`、`column_missing`、`routine_missing`，既有兩項已確認舊結構問題保留 `upgrade_required`。資料鎖與死結為 `lock_wait_exceeded`、`deadlock`；指令／資料限制為 `query_invalid`、`data_rejected`、`constraint_rejected`。未知但有數字代碼時用 `mysql_<errno>`，無代碼用 `unknown_error`。
+說明可含 MySQL 數字錯誤碼，回應與日誌不得帶原始 SQL、完整 provider exception 或來源值；日誌只保存分類、數字與 correlation。前端 Preview／Apply 都顯示封閉原因與數字；Apply 仍保留結果未確認及原命令查詢，不因資料鎖／死結碼自動重送。只有連線暫時失敗／中斷、連線額滿、資料鎖等待及死結標示 backend retryable，設定／結構／資料限制須人工修復；此旗標不授權 blind retry，也不代表整份未寫入。
+
 2026-10-16 匯入頁統計補充：terminal receipt 的 additive `import_counts` 由原 workbook
 outer UoW 依每列實際 receipt 計數；replayed row 只計入 `duplicate_skipped_count`，
 其餘 adopted row 計入 `imported_count`，其他 row 計入 `not_imported_count`，三項合計等於來源列數。
