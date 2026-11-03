@@ -20,6 +20,11 @@ WHERE t.finance_import_row_id IS NOT NULL AND t.transaction_status='succeeded'
 UNION
 SELECT entry.finance_import_row_id,member.case_no FROM government_subsidy_period_entries entry
 JOIN government_subsidy_period_members member ON member.receipt_id=COALESCE(entry.reversal_of_id,entry.id)
+UNION
+SELECT event.finance_import_row_id,o.case_no FROM staff_overpayment_recovery_events event
+JOIN staff_overpayment_recoveries recovery ON recovery.recovery_identity=event.recovery_identity
+JOIN staff_obligations o ON JSON_CONTAINS(recovery.source_obligation_identities,JSON_QUOTE(o.obligation_identity))
+WHERE event.event_type='cash_recovered' AND event.finance_import_row_id IS NOT NULL
 """
 
 

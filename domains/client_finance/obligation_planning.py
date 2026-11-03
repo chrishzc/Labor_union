@@ -770,7 +770,7 @@ def _stage_due_date(payment_terms, payment_stage, amount):
 def _build_stage_action(case_no, change_identity, stage_plan, existing):
     if existing is None:
         return _new_stage_action(case_no, stage_plan)
-    if not existing.formal_history_exists:
+    if not existing.formal_history_exists or existing.net_settled_amount.amount < existing.contracted_amount.amount:
         return _open_stage_action(stage_plan, existing)
     return _settled_stage_action(change_identity, stage_plan, existing)
 
@@ -1019,8 +1019,8 @@ def _validate_existing_stages(existing_obligations):
 
 
 def _validate_exact_history(existing):
-    if existing.net_settled_amount != existing.contracted_amount:
-        raise ValueError("formal client obligation history must be exactly settled")
+    if existing.net_settled_amount.amount > existing.contracted_amount.amount:
+        raise ValueError("formal client obligation history exceeds expected amount")
 
 
 def _stage_is_unchanged(stage_plan, existing):

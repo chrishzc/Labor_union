@@ -1,14 +1,15 @@
 /** Typed archive commands and case facts; never infer settlement in the browser. */
 import { z } from 'zod';
+import { historicalMarkerSchema } from './monthly_accounting_client';
 import { transport } from '../shared/transport';
 import { sessionClient } from '../auth/session_client';
 import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 import { decodePayload } from '../shared/runtime_decoder';
 
 const money = z.number().int();
-const item = z.strictObject({ identity: z.string(), direction: z.enum(['receivable', 'payable']), label: z.string(), party: z.string(), expected_ntd: money, actual_ntd: money, has_payment: z.boolean(), version: z.string(), due_date: z.string().nullable(), summary_included: z.boolean().optional(), unallocated_surplus_ntd: money.optional() });
+const item = z.strictObject({ identity: z.string(), direction: z.enum(['receivable', 'payable']), label: z.string(), party: z.string(), expected_ntd: money, actual_ntd: money, has_payment: z.boolean(), version: z.string(), due_date: z.string().nullable(), summary_included: z.boolean().optional(), unallocated_surplus_ntd: money.optional(), remaining_ntd: money.nullable().optional(), noncash_ntd: money.optional(), settled: z.boolean().optional(), recognized_ntd: money.optional() });
 const warning = z.strictObject({ item_identity: z.string(), kind: z.enum(['over_received', 'over_paid', 'under_paid']), expected_ntd: money, actual_ntd: money, difference_ntd: money, source_version: z.string(), dismissed: z.boolean(), dismissed_by: z.string().nullable(), dismissed_at: z.string().nullable() });
-const detail = z.strictObject({ case_no: z.string(), client_name: z.string(), receivable_ntd: money.nullable(), received_ntd: money.nullable(), payable_ntd: money.nullable(), paid_ntd: money.nullable(), pending_warning_count: z.number().int().nonnegative(), client_items: z.array(item), staff_items: z.array(item), transactions: z.array(z.strictObject({ identity: z.string(), item_identity: z.string(), occurred_on: z.string(), kind: z.string(), amount_ntd: money, bank: z.string().nullable() })), warnings: z.array(warning) });
+const detail = z.strictObject({ case_no: z.string(), client_name: z.string(), receivable_ntd: money.nullable(), received_ntd: money.nullable(), payable_ntd: money.nullable(), paid_ntd: money.nullable(), pending_warning_count: z.number().int().nonnegative(), client_items: z.array(item), staff_items: z.array(item), transactions: z.array(z.strictObject({ identity: z.string(), item_identity: z.string(), occurred_on: z.string(), kind: z.string(), amount_ntd: money, bank: z.string().nullable() })), warnings: z.array(warning), remaining_in_ntd: money.nullable().optional(), remaining_out_ntd: money.nullable().optional(), bank_facts: z.array(z.strictObject({ identity: z.string(), occurred_on: z.string(), direction: z.enum(['in', 'out']), amount_ntd: money.positive(), cases: z.array(z.string()) })).optional(), historical_marker: historicalMarkerSchema.nullable().optional() });
 const receipt = z.strictObject({ identity: z.string().nullable(), saved_count: money, excluded_count: money });
 const envelope = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: z.literal(true), message: z.string(), data, error: z.string().nullable().optional() });
 export type CaseAccounting = z.infer<typeof detail>;

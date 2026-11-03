@@ -1555,6 +1555,10 @@ async function openNotificationItem(item,cursor) {
     for(const field of view.fields)root.appendChild(notificationText('p',`${field.label}：${field.value}`));
     if(!view.approved)root.appendChild(notificationButton('核准並建立客戶',async()=>{await postJson(base+'/approve',{expected_version:view.version});if(current()){await loadReviewWorkbench();showStatus('需求申請已核准。');}}));
     else changed();
+  }else if(item.source==='payment_receipt') {
+    root.appendChild(notificationText('h3','帳款已入帳，待帳務確認'));
+    root.appendChild(notificationText('p',`案件 ${item.case_no}：請由人員登入帳務頁面，核對金額與客戶後手動發送收款通知。此事項會保留至通知送達。`));
+    root.appendChild(notificationButton('複製案件編號',async()=>{await navigator.clipboard.writeText(item.case_no||'');if(current())showStatus('已複製案件編號，請至帳務頁面確認。');}));
   }else if(item.source==='delivery') {
     await renderNotificationDelivery(root,item.reference_id,current);
   }else if(item.source==='notification_failure') await renderNotificationFailure(root,item,current);

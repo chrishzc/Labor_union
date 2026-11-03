@@ -34,6 +34,7 @@ from subsystems.line.delivery_admin_contracts import LineDeliveryAdminQuery
 from subsystems.line.payment_overdue_reminders import reminder_text as payment_text
 from subsystems.line.deposit_notifications import deposit_notification_payload, REMINDER, SETTLED
 from api.routes.line_deposit_payment import deposit_reminder_blocker
+from api.routes.line_payment_receipt_notifications import application as get_payment_receipt_notifications
 from subsystems.customer_service.application import CustomerServiceApplication
 from subsystems.customer_service.contracts import CustomerServiceReminderQuery
 
@@ -51,6 +52,7 @@ SOURCES = {
     Source.RECOMMENDATION: ('推薦確認與簽約', 'review', Cap.MATCHING_READ),
     Source.SERVICE_START: ('開工、順延與代班', 'review', Cap.MATCHING_OVERRIDE),
     Source.DEPOSIT: ('訂金通知待處理', 'reminder', Cap.TASK_READ),
+    Source.RECEIPT: ('帳款已入帳，待人員確認通知', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
     Source.GROUP: ('訂金已付尚未建群', 'reminder', Cap.ORDER_GROUP_READ),
     Source.OVERDUE: ('各期款項逾期', 'reminder', Cap.CUSTOMER_SERVICE_HANDLE),
     Source.LOG: ('連續缺漏日誌', 'reminder', Cap.ORDER_GROUP_READ),
@@ -179,7 +181,7 @@ def _read_source(source, cursor, principal):
     elif source == Source.DEPOSIT:
         application = get_deposit_notifications()
         with open_line_unit_of_work() as unit:
-            result = unit.deposit_notifications.followups(page=page, page_size=SIZE)
+            result = unit.deposit_notifications.followups(page=page, page_size=SIZE,settled=False)
         total = result.page_total
         for r in result.items:
             p = r.payment
@@ -190,6 +192,16 @@ def _read_source(source, cursor, principal):
                                case_no=p.case_no, expected_version=p.obligation_version, tag='已核銷待通知' if p.settled else '待提醒',
                                recipient='客戶私人聊天室', unavailable_reason=unavailable, delivery_status=r.delivery_status,
                                message=deposit_notification_payload(p.case_no,p.amount_ntd,p.due_date,SETTLED if p.settled else REMINDER,'')['altText'] if p.settled or p.due_date else None))
+    elif source == Source.RECEIPT:
+        rows,total=get_payment_receipt_notifications().list(page,SIZE)
+        labels={'deposit':'訂金','first':'第一期款','second':'第二期款'}
+        items=[_item(source,r.payment.payment_stage+':'+r.payment.settlement_identity,
+            labels[r.payment.payment_stage]+'已入帳，待確認通知',
+            f'本期 NT$ {r.payment.amount_ntd:,} 已正式核銷。',
+            '請前往帳務頁面核對案件、金額與收件對象，再手動發送收款通知；查看通知不會寄送客戶訊息。',
+            case_no=r.payment.case_no,tag='待帳務確認',recipient='客戶私人聊天室',
+            unavailable_reason=r.unavailable_reason,delivery_status=r.delivery_status,
+            receipt={'payment_stage':r.payment.payment_stage,'settlement_identity':r.payment.settlement_identity}) for r in rows]
     elif source == Source.GROUP:
         result = get_line_order_group_query_application().paid_uncreated_todos(actor, page=page, page_size=SIZE)
         total = result.total

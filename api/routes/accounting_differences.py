@@ -1,0 +1,93 @@
+"""Typed owner commands for noncash processing and system amount corrections."""
+from typing import Literal
+from fastapi import APIRouter,Depends
+from pydantic import BaseModel,ConfigDict,Field
+from pymysql.err import IntegrityError,OperationalError
+from api.dependencies.admin_auth import require_admin,require_system_admin,admin_actor_context
+from api.error_contracts import typed_http_error
+from api.schemas.base import BaseResponse
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.client_difference_repository import MySqlClientDifferenceRepository
+from infrastructure.mysql.payroll_amount_correction_repository import MySqlPayrollAmountRepository
+from infrastructure.mysql.staff_recovery_disposition_repository import MySqlStaffRecoveryDispositionRepository
+from subsystems.client_finance.difference_resolution import ClientDifferenceApplication,ClientDifferenceCommand,ClientDifferenceView
+from subsystems.payroll.amount_correction import PayrollAmountApplication,PayrollAmountCommand,PayrollAmountView
+from subsystems.staff_payables.recovery_disposition import StaffRecoveryDispositionApplication,StaffRecoveryDispositionCommand,StaffRecoveryDispositionView
+
+router=APIRouter(prefix='/api/v1/orders/{case_no}',tags=['Accounting Differences'])
+
+
+def get_client_application():
+    connection=get_connection()
+    try:
+        yield ClientDifferenceApplication(MySqlClientDifferenceRepository(connection),lambda:MySqlUnitOfWork(connection))
+    finally:
+        connection.close()
+
+
+def get_payroll_application():
+    connection=get_connection()
+    try:
+        yield PayrollAmountApplication(MySqlPayrollAmountRepository(connection),lambda:MySqlUnitOfWork(connection))
+    finally:
+        connection.close()
+
+
+def get_staff_application():
+    connection=get_connection()
+    try:
+        yield StaffRecoveryDispositionApplication(MySqlStaffRecoveryDispositionRepository(connection),lambda:MySqlUnitOfWork(connection))
+    finally:
+        connection.close()
+
+
+class DifferenceBody(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    identity:str=Field(min_length=1,max_length=191)
+    action:Literal['loss','reduce_service_fee','union_bank_fee','absorb_overpayment','close_refund','manual_amount','adopt_calculation']
+    amount_ntd:int|None=Field(default=None,ge=0,le=9999999999)
+    reason:str=Field(default='',max_length=500)
+    expected_version:int=Field(ge=0)
+    key:str=Field(min_length=1,max_length=191)
+
+
+def _call(action):
+    try:
+        return BaseResponse(data=action())
+    except ValueError as error:
+        raise typed_http_error(409,'conflict',str(error),'款項或計算資料已變動，或處理方式不適用。請重新查詢並核對金額與說明。','accounting-difference') from error
+    except (IntegrityError,OperationalError) as error:
+        if error.args and error.args[0] in (1062,1205,1213):
+            raise typed_http_error(409,'conflict','accounting_difference_write_conflict','資料已由其他操作更新，請重新查詢。','accounting-difference') from error
+        raise
+
+
+@router.get('/client-finance/differences',response_model=BaseResponse[ClientDifferenceView])
+def client_query(case_no:str,principal=Depends(require_admin),application=Depends(get_client_application)):
+    return _call(lambda:application.query(case_no))
+
+
+@router.post('/client-finance/differences',response_model=BaseResponse[ClientDifferenceView])
+def client_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_client_application)):
+    return _call(lambda:application.apply(ClientDifferenceCommand(case_no,body.identity,body.action,body.amount_ntd,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+
+
+@router.get('/payroll/amount-corrections',response_model=BaseResponse[PayrollAmountView])
+def payroll_query(case_no:str,principal=Depends(require_admin),application=Depends(get_payroll_application)):
+    return _call(lambda:application.query(case_no))
+
+
+@router.post('/payroll/amount-corrections',response_model=BaseResponse[PayrollAmountView])
+def payroll_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_payroll_application)):
+    return _call(lambda:application.apply(PayrollAmountCommand(case_no,body.identity,body.action,body.amount_ntd,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+
+
+@router.get('/staff-payables/recovery-dispositions',response_model=BaseResponse[StaffRecoveryDispositionView])
+def staff_query(case_no:str,principal=Depends(require_admin),application=Depends(get_staff_application)):
+    return _call(lambda:application.query(case_no))
+
+
+@router.post('/staff-payables/recovery-dispositions',response_model=BaseResponse[StaffRecoveryDispositionView])
+def staff_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_staff_application)):
+    return _call(lambda:application.apply(StaffRecoveryDispositionCommand(case_no,body.identity,body.action,body.amount_ntd or 0,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))

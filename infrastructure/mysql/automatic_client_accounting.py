@@ -13,6 +13,8 @@ from subsystems.orders.terms_workflow import ClientFinanceImpactPersistenceComma
 
 def synchronize_client_charges(cursor, case_no, *, actor, key, correlation_id, source_family, source_id):
     order = select_order(cursor, case_no, lock=True)
+    from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
+    synchronize_government_case_amount(cursor,case_no,key.value,actor.actor_id,'案件資料更新後重新計算政府補助')
     if str(order["status"]).startswith("歷史") or str(order["status"]) in ("訂單取消", "訂單完成"):
         # Historical/terminal amounts require their actual-service owner writer.
         cursor.execute("SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE", (case_no,))

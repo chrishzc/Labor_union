@@ -18,6 +18,11 @@ from domains.finance_import.cancellation_code import extract_sinopac_memo_case_s
     ("20261029", None),
     ("沒有案件尾碼", None),
     (None, None),
+    ("ＨＣ１１５００１服務人員", "115001"),
+    ("新竹市月子照顧服務人員職業工會 HC115001 轉帳時間 143022", "115001"),
+    ("客戶退款 虛擬帳號99781699115001轉出", "115001"),
+    ("115001月嫂薪資", "115001"),
+    ("轉入0007510007056900 115001", "115001"),
 ])
 def test_sinopac_memo_has_one_complete_six_digit_case_suffix(memo, expected):
     assert extract_sinopac_memo_case_suffix(memo) == expected
@@ -161,6 +166,29 @@ def test_taishin_incoming_only_classifies_government_keyword():
 
     assert government["classification_type"] == "government_subsidy"
     assert other["classification_type"] == "non_business_review"
+
+
+def test_taishin_government_return_is_available_for_human_period_selection():
+    row = _row(format_id="taishin", direction="outgoing", credit=None,
+               debit=Decimal("50"), memo="新竹市政府 多撥退回", counterparty_account=None)
+    before = dict(row)
+    result = classify_finance_transaction(row, {}, {})
+    assert result["classification_type"] == "government_subsidy"
+    assert result["matched_identity_ids"] == []
+    assert result["reason"] == "taishin_government_return_memo"
+    assert row == before
+
+
+@pytest.mark.parametrize("owner", ["client", "staff", "subsidy_return"])
+def test_taishin_government_memo_cannot_override_another_confirmed_recipient(owner):
+    row = _row(format_id="taishin", direction="outgoing", credit=None,
+               debit=Decimal("50"), memo="新竹市政府 多撥退回", counterparty_account="SYNTHETIC-001")
+    accounts = {"SYNTHETIC-001": [7]}
+    result = classify_finance_transaction(row,
+        accounts if owner == "client" else {}, accounts if owner == "staff" else {},
+        client_subsidy_return_accounts=accounts if owner == "subsidy_return" else {})
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "counterparty_identity_type_conflict"
 
 
 def test_taishin_outgoing_exactly_one_client_match_is_subsidy_return():
@@ -460,3 +488,103 @@ def test_unknown_direction_requires_review():
 
     assert result["classification_type"] == "non_business_review"
     assert result["reason"] == "direction_unknown"
+
+
+def test_sinopac_outgoing_memo_classifies_staff_salary():
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        debit=Decimal("12000"),
+        credit=None,
+        memo="新竹市月子照顧服務人員職業工會 HC115001 服務人員薪資 轉帳時間 143022",
+        bank_references={"交易參考編號": None},
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        staff_case_suffixes={"115001": [7]},
+        client_refund_case_suffixes={},
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [7]
+    assert result["reason"] == "sinopac_unique_staff_case_suffix_in_memo"
+
+
+def test_sinopac_outgoing_memo_classifies_client_refund():
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        debit=Decimal("3000"),
+        credit=None,
+        memo="客戶退款 虛擬帳號99781699115001轉出",
+        bank_references={"交易參考編號": None},
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        staff_case_suffixes={},
+        client_refund_case_suffixes={"115001": [4]},
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [4]
+    assert result["reason"] == "sinopac_unique_client_refund_case_suffix_in_memo"
+
+
+def test_sinopac_outgoing_memo_disambiguates_by_keywords():
+    row_staff = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        debit=Decimal("12000"),
+        credit=None,
+        memo="HC115001月嫂薪資",
+        bank_references={"交易參考編號": None},
+    )
+    res_staff = classify_finance_transaction(
+        row_staff,
+        client_refund_accounts={},
+        staff_accounts={},
+        staff_case_suffixes={"115001": [7]},
+        client_refund_case_suffixes={"115001": [4]},
+    )
+    assert res_staff["classification_type"] == "staff_salary"
+    assert res_staff["matched_identity_ids"] == [7]
+
+    row_refund = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        debit=Decimal("3000"),
+        credit=None,
+        memo="HC115001客戶退款",
+        bank_references={"交易參考編號": None},
+    )
+    res_refund = classify_finance_transaction(
+        row_refund,
+        client_refund_accounts={},
+        staff_accounts={},
+        staff_case_suffixes={"115001": [7]},
+        client_refund_case_suffixes={"115001": [4]},
+    )
+    assert res_refund["classification_type"] == "client_refund"
+    assert res_refund["matched_identity_ids"] == [4]
+
+
+def test_sinopac_outgoing_fullwidth_memo():
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        debit=Decimal("12000"),
+        credit=None,
+        memo="ＨＣ１１５００１服務人員薪資",
+        bank_references={"交易參考編號": None},
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        staff_case_suffixes={"115001": [7]},
+        client_refund_case_suffixes={},
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [7]

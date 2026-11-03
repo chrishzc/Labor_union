@@ -295,14 +295,14 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             "o.amount_due_ntd,o.projection_version,e.after_amount_ntd,"
             "COALESCE(a.aggregate_version,0) AS account_version,c.name AS client_name,"
             "h.confirmation_kind,h.amount_snapshot_ntd,"
-            "h.current_event_id AS historical_event "
+            "h.current_event_id AS historical_event,"
+            "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity),0) AS recognized_ntd "
             "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
             "JOIN orders r ON r.case_no=o.case_no JOIN clients c ON c.id=r.client_id "
             "LEFT JOIN client_finance_accounts a ON a.case_no=o.case_no "
             "LEFT JOIN historical_client_payment_projections h ON h.obligation_identity=o.obligation_identity "
             "AND h.amount_snapshot_ntd=o.amount_due_ntd AND h.obligation_projection_version=o.projection_version "
-            "WHERE o.case_no=%s AND o.status<>'cancelled' "
-            "AND o.obligation_type<>'subsidy_return' ORDER BY o.obligation_identity" + lock, (case_no,),
+            "WHERE o.case_no=%s AND o.status<>'cancelled' ORDER BY o.obligation_identity" + lock, (case_no,),
         )
         obligations = cursor.fetchall()
         cursor.execute(
@@ -332,15 +332,25 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             (case_no,),
         )
         refund_overages = cursor.fetchall()
+        cursor.execute('SELECT r.*,e.after_amount_ntd original,c.name client_name,COALESCE((SELECT SUM(x.before_amount_ntd-x.after_amount_ntd) FROM client_over_refund_recovery_events x WHERE x.recovery_identity=r.recovery_identity AND x.event_type=%s),0) collected,'
+            'COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n WHERE n.target_identity=r.recovery_identity),0) recognized '
+            'FROM client_over_refund_recoveries r JOIN client_over_refund_recovery_events e ON e.recovery_identity=r.recovery_identity AND e.event_type=%s '
+            'JOIN orders o ON o.case_no=r.case_no JOIN clients c ON c.id=o.client_id WHERE r.case_no=%s ORDER BY r.recovery_identity',('collected','established',case_no))
+        recovery_rows=cursor.fetchall()
+        cursor.execute('SELECT e.id,e.recovery_identity,e.before_amount_ntd-e.after_amount_ntd amount,l.occurred_on,b.format_id '
+            'FROM client_over_refund_recovery_events e JOIN client_over_refund_recoveries r ON r.recovery_identity=e.recovery_identity '
+            'JOIN client_ledger_entries l ON l.id=e.receipt_ledger_entry_id LEFT JOIN finance_import_rows b ON b.id=e.finance_import_row_id '
+            "WHERE r.case_no=%s AND e.event_type='collected' ORDER BY e.id",(case_no,))
+        recovery_transactions=cursor.fetchall()
     sums, transactions = {}, []
     for row in allocations:
         kind = row["entry_type"]
-        if kind not in {"receipt", "refund", "reversal"}:
+        if kind not in {"receipt", "refund", "subsidy_return", "subsidy_advance", "reversal", "subsidy_return_reversal"}:
             continue
-        if kind == "reversal" and row["reversed_type"] not in {"receipt", "refund"}:
+        if kind in {"reversal", "subsidy_return_reversal"} and row["reversed_type"] not in {"receipt", "refund", "subsidy_return", "subsidy_advance"}:
             continue
         identity = row["obligation_identity"]
-        amount = int(row["amount_ntd"]) * (-1 if kind == "reversal" else 1)
+        amount = int(row["amount_ntd"]) * (-1 if kind in {"reversal", "subsidy_return_reversal"} else 1)
         sums[identity] = sums.get(identity, 0) + amount
         transactions.append(ClientAccountingTransaction(
             f"client-entry:{row['id']}:{identity}", identity, str(row["occurred_on"]), kind,
@@ -350,14 +360,17 @@ def query_case_accounting(connection, case_no, *, for_update=False):
     for row in (*overages, *refund_overages):
         identity = row["receivable_obligation_identity"]
         sums[identity] = sums.get(identity, 0) + int(row["overage_amount_ntd"])
-    labels = {"deposit": "訂金", "first": "第一期", "second": "第二期", "refund": "客戶退款", "adjustment": "帳務調整"}
+    labels = {"deposit": "訂金", "first": "第一期", "second": "第二期", "refund": "客戶退款", "subsidy_return": "補助退款／工會代墊", "adjustment": "帳務調整"}
     items = []
     for row in obligations:
         identity = row["obligation_identity"]
         # Client obligations are remaining-balance projections, including after
         # date-only owner events. Nominal amount is remaining plus effective
         # allocated cash; explicit surplus is displayed only in actual cash.
-        expected = int(row["amount_due_ntd"]) + allocated.get(identity, 0)
+        recognized = int(row.get('recognized_ntd') or 0)
+        expected = int(row["amount_due_ntd"]) + allocated.get(identity, 0) + recognized
+        if row['status']=='settled':
+            expected = max(expected,int(row['after_amount_ntd']))
         paid = sums.get(identity, 0)
         if row["confirmation_kind"] == "paid":
             paid += int(row["amount_snapshot_ntd"])
@@ -367,6 +380,13 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             paid, identity in sums or row["confirmation_kind"] == "paid",
             f"{row['account_version']}:{row['projection_version']}:{row['historical_event'] or 0}",
             None if row["due_date"] is None else str(row["due_date"]),
+            settled=row["confirmation_kind"] == "settled" or row["status"] == "settled",
+            recognized_ntd=recognized,
         ))
     valid = {item.identity for item in items}
+    for row in recovery_rows:
+        items.append(ClientAccountingItem(row['recovery_identity'],'receivable','客戶退款超付追償',row['client_name'],int(row['original']),int(row['collected']),int(row['collected'])>0,
+            f"recovery:{row['projection_version']}",None,settled=row['status'] in ('recovered','adjusted','settled','cancelled'),recognized_ntd=int(row['recognized'])))
+    transactions.extend(ClientAccountingTransaction(f"client-recovery:{r['id']}",r['recovery_identity'],str(r['occurred_on']),'receipt',int(r['amount']),r['format_id']) for r in recovery_transactions)
+    valid.update(row['recovery_identity'] for row in recovery_rows)
     return tuple(items), tuple(row for row in transactions if row.item_identity in valid)

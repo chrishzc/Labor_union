@@ -1,5 +1,11 @@
 # Finance Import／Canonical Bank Facts Domain
 
+> 2026-11-02 差額認列、人工金額更正與政府整期差額的最新實作／驗證見 [規格22 §16.9.1](22_銀行流水匯入與帳務異常處理正式規格.md#accounting-differences-implementation-20261102)。本檔 2026-11-01 的「尚未實作／本次僅規格」為當時記錄，以該續作結果為目前狀態；bank／ledger／allocation 的不可變性與各 owner 歸屬不變。
+
+> 2026-11-01 差額最新裁決見 [`22` §16](22_銀行流水匯入與帳務異常處理正式規格.md#finance-differences-20261101)。人工更正只作用於各 Finance owner 的系統應收／應付結果；銀行原金額、日期、方向與原檔不可變，classification audit 不是銀行金額編輯器。不設退匯功能或獨立操作異常章節；本次未改分類器、API 或 ledger。
+
+人員確認後可追收、協調合繳或選其他適用處理，Finance Import 仍只提供 typed bank facts 並委派 owner。依最新 [`22` §16.5.2](22_銀行流水匯入與帳務異常處理正式規格.md#client-case-receipts-total-20261101)，已辨識同案的多筆入款先展示明細及合計；合計符合本次應收，人員可直接一起核銷，不因單筆金額不同、同案多筆或有多期待收另生報錯／強制期款確認。原全面攔截期款誤判提案撤回，不再列為必要新規則。原 return／reversal 歷史證據保留，沒有刪除 API、schema 或歷史分類的執行授權。
+
 > 2026-10-29 已確認的新需求與 U12 完整實作見 [`22` §15](22_銀行流水匯入與帳務異常處理正式規格.md#finance-20261029)。成功明細採正式入帳證據與原列的唯讀投影，人工明細／判重識別／警示解除為獨立 additive 記錄；案件頁只消費 typed owner 結果。U10 的備註六碼及銷帳來源規則保留，沒有 fingerprint 變更；本機驗收不表示 production 部署或既有資料重分類。
 
 ## 1. Domain 責任
@@ -179,9 +185,10 @@ Modules：
 3. 單一候選且證據不衝突時，可形成 business classification 與 typed dispatch intent；
    owning Domain 仍須用 fresh obligations／ledger 做 Preview／Apply，不得因 classifier
    命中就直接寫正式帳務。
-4. 零候選、多候選、跨 owner、證據衝突，或不同銀行列已命中同一義務時，改為
-   `review_required`。第二筆疑似重匯不得靜默略過或自動打平，必須保留 canonical row
-   並形成可處理的 anomaly。
+4. 零候選、多候選、跨 owner 或證據衝突時，依原 ownership 規則保留人工核對；
+   已確認同案的不同銀行列可為分次付款／自行補款，依 `22` §16.5.2 保留各筆並合計，
+   不能只因命中同案／同一義務或單筆金額不同就當成疑似重匯或 anomaly。合計正確可供
+   人員直接核銷；真正重複銀行來源的既有 identity 去重及已核銷來源不可重用規則保持原義。
 
 2026-10-29 非市民規格補充（尚未實作）：Client Finance `04` §8 已增加 A 開頭案件的正式帳號公式，Finance Import 必須消費同一 typed 解析結果並支援回傳 A 開頭 `case_no`。例如 `A115001` 的公式虛擬帳號為 `99781699115501`，尾六碼為 `115501`；不能以去掉 A 後的案件數字另推帳號。既有完整銷帳編號來源、匯入對照優先、備註六碼及唯一案件／款項條件保持，新增格式接線與回歸見 `22` §15.6.2。此規格同步不修改 classifier、fingerprint、歷史分類或帳務。
 

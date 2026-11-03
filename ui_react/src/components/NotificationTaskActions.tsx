@@ -9,6 +9,8 @@ export function notificationHref(item:NotificationItem):string | null {
     case 'information': return `#order-workbench-v2?case=${caseNo}&work=matching&question=${item.reference_id}`;
     case 'service_start': return `#scheduling?tab=coordination&case_no=${caseNo}&request=${item.reference_id}`;
     case 'delivery': return `#line-management?tab=delivery&task=${item.reference_id}`;
+    case 'payment_receipt': return '#finance?'+new URLSearchParams({tab:'accounting-warnings',case_no:item.case_no??'',
+      ...(item.receipt?{receipt_stage:item.receipt.payment_stage,settlement_identity:item.receipt.settlement_identity}:{})});
     case 'notification_failure': return `#line-management?tab=delivery&view=failures&issue=${encodeURIComponent(item.failure!.issue_key)}`;
     case 'identity': return `#line-management?tab=binding&identity=reviews&review=${item.reference_id}`;
     case 'runtime': return '/line-mobile-admin?target=staff_review';

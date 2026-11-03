@@ -37,6 +37,7 @@ const MANUAL_FLOW_DETAILS: Record<string, { recipient: string; trigger: string }
   'payment-overdue-second': { recipient: '客戶私人聊天室', trigger: '第二期款逾期且滿原提醒送出後 24 小時、未回覆時自動補寄一次；回覆後由人員提醒' },
   'payment-first-reminder': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天，依帳務提醒排程自動寄送' },
   'payment-first-greeting': { recipient: '客戶私人聊天室', trigger: '正式服務開始當天已結清，僅寄送服務問候' },
+  'payment-first-settled': { recipient: '客戶私人聊天室', trigger: '第一期正式核銷後，留下內部通知，由人員到帳務確認並發送' },
   'payment-second-reminder': { recipient: '客戶私人聊天室', trigger: '正式第二期到期當天仍有餘額，依帳務提醒排程自動寄送' },
   'service-day-log-reminder': { recipient: '案件群組', trigger: '由工會逐次決定，點「發送提醒」後建立寄送工作' },
 };
@@ -52,7 +53,7 @@ const LIBRARY_PAGE_SIZE = 6;
 export const PAYMENT_REMINDER_MESSAGE_IDS: readonly string[] = [
   'deposit-reminder', 'payment-first-reminder', 'payment-first-greeting', 'payment-second-reminder',
   'payment-overdue-deposit', 'payment-overdue-first', 'payment-overdue-second',
-  'deposit-settled',
+  'deposit-settled', 'payment-first-settled',
 ];
 const RECEIPT_TEMPLATE = 'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1';
 

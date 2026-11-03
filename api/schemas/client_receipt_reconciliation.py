@@ -15,7 +15,7 @@ class _StrictModel(BaseModel):
 
 
 class ClientReceiptPreviewBody(_StrictModel):
-    payment_stage: ReceiptStage
+    payment_stage: ReceiptStage | None = None
     finance_import_row_ids: list[int] = Field(min_length=1)
     obligation_identities: list[str] = Field(min_length=1)
 
@@ -58,8 +58,8 @@ class ClientReceiptAllocationView(_StrictModel):
 
 
 class ClientReceiptCandidateView(_StrictModel):
-    status: Literal["exact", "overage", "review_required"]
-    payment_stage: ReceiptStage
+    status: Literal["exact", "overage", "partial", "review_required"]
+    payment_stage: ReceiptStage | None
     bank_total: MoneyNTDView
     obligation_total: MoneyNTDView
     overage_amount: MoneyNTDView

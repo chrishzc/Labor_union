@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import partial
 from typing import Protocol
+from fastapi import Depends
 
 from infrastructure.mysql.finance_import_repository import (
     FinanceImportMySqlUnitOfWork,
@@ -214,14 +215,22 @@ def get_accounting_workspace():
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
     from infrastructure.mysql.client_payments_query_repository import query_case_accounting
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     connection = get_connection()
     try:
         yield AccountingWorkspace(
             MySqlAccountingWorkspaceState(connection), partial(query_case_accounting, connection),
             partial(query_case_staff_accounting, connection),
+            MySqlMonthlyAccountingSource(connection).case_bank_facts,
         )
     finally:
         connection.close()
+
+
+def get_monthly_accounting_query(application=Depends(get_accounting_workspace)):
+    from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+    from subsystems.finance_import.monthly_accounting import MonthlyAccountingQuery
+    return MonthlyAccountingQuery(MySqlMonthlyAccountingSource(application.state.connection), partial(application.query, include_sources=False))
 
 
 __all__ = [

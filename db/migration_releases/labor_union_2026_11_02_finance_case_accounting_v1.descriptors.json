@@ -1,0 +1,77 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-finance-case-accounting-2026-11-02-v1",
+  "descriptors": {
+    "1063_finance_case_accounting_markers.sql": {
+      "tables": {
+        "finance_case_accounting_markers": {
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "source_versions": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "accounting_snapshot": {
+            "column_type": "json",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "finance_case_accounting_markers.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "case_no"
+          ]
+        },
+        "finance_case_accounting_markers.uk_finance_case_marker_operation": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {
+        "finance_case_accounting_markers.chk_finance_case_marker_text": "and(atom(char_length(trim(reason))>0),atom(char_length(trim(actor))>0),atom(char_length(trim(operation_key))>0))",
+        "finance_case_accounting_markers.chk_finance_case_marker_versions": "atom(json_type(source_versions)='OBJECT')",
+        "finance_case_accounting_markers.chk_finance_case_marker_snapshot": "atom(json_type(accounting_snapshot)='OBJECT')"
+      },
+      "triggers": [],
+      "parent_columns": {},
+      "views": {}
+    }
+  }
+}

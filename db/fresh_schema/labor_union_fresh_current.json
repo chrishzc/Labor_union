@@ -1,17 +1,17 @@
 {
   "contract": "labor-union-compact-fresh-schema/v1",
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
-  "release_id": "labor-union-validation-schema-2026-10-29-v56",
+  "release_id": "labor-union-validation-schema-2026-11-02-v58",
   "source_bindings": {
-    "assembly_sha256": "f359ffdc4eaebd7d4bf35cbd24e8f052fa8bc35ddaecdc3916070ca72418efad",
-    "validation_manifest_sha256": "f54129ca24a50447bb37c28e0600d2f9c6498f0a28dfee4a7f0ca730da81400c",
-    "retirement_policy_sha256": "646929c1dbac5711ec58481a7d2f534714ac4129ecd1f16ba7fcaad7bf067da4"
+    "assembly_sha256": "9e173469b809e7aeb709593ed02dade555a61a730b9cfc76a7419256d6156ac8",
+    "validation_manifest_sha256": "96277dce0684c8a83a1cfd39f5fa06cb8d4af9a34203c3cb461d71fa548bf1be",
+    "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
-  "sql_sha256": "8c0214ae2266f43162ab5606dd9086e339de71f263ddd1460e14032513d418e4",
+  "sql_sha256": "839de494db23a59645f41b3b69fef9e511e9cf7dbb0fb2bba672afc018369689",
   "objects": {
-    "tables": 389,
+    "tables": 397,
     "views": 2,
-    "triggers": 377
+    "triggers": 385
   },
   "omitted_tables": [
     "access_control_apply_receipts",
@@ -24,6 +24,9 @@
     "anomaly_root_fact_snapshots",
     "client_hcm_correction_events",
     "client_hcm_correction_receipts",
+    "client_payment_destination_configuration_current",
+    "client_payment_destination_configuration_events",
+    "client_payment_destination_configuration_receipts",
     "finance_alert_events",
     "finance_alerts",
     "government_overpayment_return_excess_recoveries",
@@ -52,6 +55,6 @@
     "staff_leave_requests",
     "staff_matching_preference_migration_reviews"
   ],
-  "statement_count": 780,
+  "statement_count": 796,
   "system_seed_policy": "canonical_synthetic_source_only"
 }

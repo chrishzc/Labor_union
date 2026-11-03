@@ -722,14 +722,14 @@ def _extend_owner_facts(
         )
         if len(exact_obligations) == 1:
             obligation = exact_obligations[0]
-            facts["staff_payable_total"] = obligation.contracted_amount.amount
+            facts["staff_payable_total"] = obligation.contractual_amount.amount
             facts["staff_payable_due_date"] = obligation.due_date
             owners["staff_payables"] = projection_fingerprint(
                 {
                     "obligation_identity": obligation.obligation_identity,
                     "assignment_id": obligation.source_assignment_id,
                     "staff_id": obligation.staff_id,
-                    "contracted_amount": obligation.contracted_amount.amount,
+                    "contracted_amount": obligation.contractual_amount.amount,
                     "due_date": obligation.due_date,
                 }
             )

@@ -566,6 +566,7 @@ def test_registry_balance_uses_paid_adjustment_allocation(monkeypatch, status):
             {"case_no": "CASE-001", "status": status},
             {"received_total_ntd": 70000},
             (),
+            (),
             ({"virtual_account": "99781699114999"},),
         ]
     )
@@ -606,7 +607,7 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
         ), existing_obligations=(), identity_status="非市民",
     )
     connection = _SqlConnection([
-        {"case_no": "A115001"}, {"received_total_ntd": 0}, (), (),
+        {"case_no": "A115001"}, {"received_total_ntd": 0}, (), (), (),
     ])
     monkeypatch.setattr(
         "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
@@ -621,6 +622,36 @@ def test_registry_finance_prices_unassigned_non_citizen_planned_days(monkeypatch
     assert values["deposit_amount_ntd"] == values["first_payment_amount_ntd"] == 13200
     assert values["second_payment_amount_ntd"] == 0
     assert values["received_total_ntd"] == 0
+    assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
+
+
+@pytest.mark.parametrize("effective,received,remaining,reduction,charge", [
+    (15000, 0, 15000, 0, 15000), (15000, 1000, 14000, 0, 15000),
+    (16400, 1000, 15300, 0, 16400), (None, 0, 16100, 100, 16300),
+    (15000, 0, 14700, 100, 14900),
+])
+def test_registry_finance_preserves_effective_amount_and_stored_remaining(monkeypatch, effective, received, remaining, reduction, charge):
+    facts = ClientFinanceTermsFacts(
+        "CASE-MANUAL", 4, 8, MoneyNTD(0),
+        tuple(ClientChargeDay(date(2026, 10, day), False) for day in range(1, 6)),
+        ClientPaymentTerms(5, MoneyNTD(410), date(2026, 9, 20), date(2026, 10, 1), None), (),
+    )
+    connection = _SqlConnection([
+        {"case_no": "CASE-MANUAL", "status": "洽談中"},
+        {"received_total_ntd": received}, (),
+        ({"obligation_type": "deposit", "direction": "receivable_from_client",
+          "amount_due_ntd": remaining, "effective_ntd": effective, "service_reduction_ntd": reduction},),
+        (),
+    ])
+    monkeypatch.setattr(
+        "infrastructure.mysql.client_registry_query_repository.load_calculable_client_finance_facts",
+        lambda _cursor, _order, lock: (facts, None),
+    )
+    status, code, values = _finance_values(connection, "CASE-MANUAL")
+    assert (status, code) == ("ready", None)
+    assert values["customer_payable_total_ntd"] == values["deposit_amount_ntd"] == charge
+    assert values["customer_balance_ntd"] == remaining
+    assert values["received_total_ntd"] == received
     assert all(sql.startswith("SELECT ") for sql, _ in connection.cursor_instance.statements)
 
 
@@ -645,6 +676,7 @@ def test_registry_finance_handles_historical_order_with_zero_charge_days(monkeyp
         [
             {"case_no": "CASE-HIST-01", "status": "歷史訂單－服務完成", "service_days": 20, "service_hours_per_day": 10, "floor_fee": 0},
             {"received_total_ntd": 70000},
+            (),
             (),
             [
                 {
@@ -698,6 +730,7 @@ def test_registry_finance_handles_historical_unserved_order_projection(monkeypat
         [
             {"case_no": "CASE-HIST-02", "status": "歷史訂單－未服務", "service_days": 10, "service_hours_per_day": 8, "floor_fee": 0},
             {"received_total_ntd": 0},
+            (),
             (),
             [],
             None,

@@ -9,8 +9,8 @@ import { caseCategoriesClient, type FinanceCaseCategory, type FinanceCaseFilter 
 const types = { staff_payable: '月嫂薪資', client_refund: '客戶退款', client_subsidy_return: '補助退款' };
 const awaitsSubsidyData = (row: CashRequirementRow) => row.certainty === 'estimated' && row.payment_type === 'client_subsidy_return';
 const paymentLabels = { pending: '待付款', partially_paid: '部分付款', paid: '已付款', settled: '已結清' };
-type Props = { revision: number; targetMonth: string; onMonthChange: (value: string) => void; onOpenStaff: (staffId?: number) => void; onOpenCase: (caseNo: string) => void; onOpenSubsidy: (caseNo: string) => void; onOpenBank: () => void };
-export function FinancePaymentsWorkspace({ revision, targetMonth, onMonthChange, onOpenStaff, onOpenCase, onOpenSubsidy, onOpenBank }: Props) {
+type Props = { pendingOnly?: boolean; revision: number; targetMonth: string; onMonthChange: (value: string) => void; onOpenStaff: (staffId?: number) => void; onOpenCase: (caseNo: string) => void; onOpenSubsidy: (caseNo: string) => void; onOpenBank: () => void };
+export function FinancePaymentsWorkspace({pendingOnly=false, revision, targetMonth, onMonthChange, onOpenStaff, onOpenCase, onOpenSubsidy, onOpenBank }: Props) {
   const staffIdentity = useStaffIdentityLabels();
   const [rows, setRows] = useState<CashRequirementRow[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -37,7 +37,7 @@ export function FinancePaymentsWorkspace({ revision, targetMonth, onMonthChange,
   }, [revision, refresh]);
   useEffect(() => () => downloadController.current?.abort(), []);
   useEffect(() => { downloadController.current?.abort(); setDownloading(false); setDownload(''); }, [targetMonth]);
-  const filtered = rows.filter(row => (caseCategory==='all'||categories.get(row.case_no)===caseCategory) && (type === 'all' || row.payment_type === type)
+  const filtered = rows.filter(row => (!pendingOnly || row.certainty !== 'confirmed' || row.payment_date===null) && (caseCategory==='all'||categories.get(row.case_no)===caseCategory) && (type === 'all' || row.payment_type === type)
     && (status === 'all' || (status === 'data_pending' ? awaitsSubsidyData(row) : status === 'confirmed' ? row.certainty === 'confirmed' && row.payment_status === 'pending' : row.payment_status === status))
     && (!month || !row.payment_date || row.payment_date.startsWith(month))
     && `${row.case_no} ${row.payment_type === 'staff_payable' ? staffIdentity.label(row.staff_id, row.recipient_name) : row.recipient_name ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));

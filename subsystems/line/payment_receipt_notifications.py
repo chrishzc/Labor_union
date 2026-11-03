@@ -20,7 +20,7 @@ class PaymentReceiptConflict(ValueError): pass
 @dataclass(frozen=True, slots=True)
 class PaymentReceiptSnapshot:
     case_no: str
-    payment_stage: Literal['deposit','second']
+    payment_stage: Literal['deposit','first','second']
     settlement_identity: str
     amount_ntd: int
     source_version: int
@@ -39,7 +39,7 @@ class PaymentReceiptTodo:
 class PaymentReceiptCandidate:
     event_id: int
     case_no: str
-    stage: Literal['deposit','second']
+    stage: Literal['deposit','first','second']
     settlement_identity: str
 
 
@@ -76,11 +76,15 @@ def receipt_blocker(history, recipient):
     return None
 
 
+def first_receipt_message(case_no,amount_ntd):
+    return {'type':'text','text':f'案件 {case_no} 第一期款 {amount_ntd:,} 元已確認入帳，謝謝。'}
+
+
 class PaymentReceiptNotificationApplication:
     def __init__(self, units, now, deposit):
         self._units,self._now,self._deposit=units,now,deposit
 
-    def list(self,page=1,page_size=25):
+    def list(self,page=1,page_size=25,*,case_no=None,payment_stage=None,settlement_identity=None):
         result=[];total=0;after=0;seen=set()
         with self._units() as unit:
             repo=unit.payment_receipt_notifications
@@ -88,6 +92,8 @@ class PaymentReceiptNotificationApplication:
                 rows=repo.candidates(after,100)
                 if not rows: break
                 for event in rows:
+                    if (case_no and event.case_no!=case_no or payment_stage and event.stage!=payment_stage
+                            or settlement_identity and event.settlement_identity!=settlement_identity): continue
                     payment=repo.payment(event.case_no,event.stage,event.settlement_identity)
                     if payment is None: continue
                     snapshot=receipt_snapshot(payment,event.stage)
@@ -128,6 +134,10 @@ class PaymentReceiptNotificationApplication:
             if expected.payment_stage=='deposit':
                 original=self._deposit._request(payment,recipient,SETTLED,key,unit)
                 kind,payload=original.message_kind,original.payload_json
+            elif expected.payment_stage=='first':
+                kind=LineMessageKind.TEXT
+                payload=canonical_line_payload_json(configured_payload(unit,'payment-first-settled',first_receipt_message(expected.case_no,expected.amount_ntd),
+                    {'case_no':expected.case_no,'amount_ntd':f'{expected.amount_ntd:,}'}))
             else:
                 kind=LineMessageKind.TEXT
                 from subsystems.line.message_copy import message_definition

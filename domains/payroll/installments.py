@@ -14,8 +14,10 @@ class PayrollInstallment:
     due_date: date | None
 
 
-def payroll_installments(candidate: AssignmentPayrollCandidate, completed_on: date | None) -> tuple[PayrollInstallment, ...]:
-    total = candidate.total_payable.amount
+def payroll_installments(candidate: AssignmentPayrollCandidate, completed_on: date | None, *, effective_total: int | None = None) -> tuple[PayrollInstallment, ...]:
+    total = candidate.total_payable.amount if effective_total is None else effective_total
+    if not isinstance(total,int) or isinstance(total,bool) or total<0:
+        raise ValueError('payroll_installment_amount_invalid')
     subsidy = min(total, candidate.covered_salary) if candidate.directly_subsidized else 0
     client = total - subsidy
     return tuple(PayrollInstallment(kind, amount,

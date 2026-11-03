@@ -7,6 +7,17 @@ const todo:PaymentReceiptTodo={payment:{case_no:'DEMO-001',payment_stage:'deposi
 function client(item=todo):PaymentReceiptClient{return {list:vi.fn().mockResolvedValue({items:[item],total:1,page:1,page_size:25}),send:vi.fn().mockResolvedValue({task_id:1,status:'pending'})};}
 
 describe('入帳通知由人員發送',()=>{
+  it('從內部通知進入只查同案第一期，確認後才發送',async()=>{
+    const first={...todo,payment:{...todo.payment,payment_stage:'first' as const}};const api=client(first);
+    window.history.replaceState(null,'','#finance?tab=accounting-warnings&case_no=DEMO-001&receipt_stage=first&settlement_identity='+todo.payment.settlement_identity);
+    const view=render(<PaymentReceiptNoticeWorkbench revision={0} client={api}/>);
+    const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('第一期款');
+    expect(api.list).toHaveBeenCalledWith(1,expect.any(AbortSignal),{case_no:'DEMO-001',payment_stage:'first',settlement_identity:todo.payment.settlement_identity});
+    expect(api.send).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button',{name:'發送入帳通知'}));
+    await waitFor(()=>expect(api.send).toHaveBeenCalledExactlyOnceWith(first));
+    view.unmount();window.history.replaceState(null,'','/');
+  });
   it('收到帳款只跳提示，關閉後待辦保留，查詢與重新整理不送出',async()=>{
     const api=client();render(<PaymentReceiptNoticeWorkbench revision={0} expanded client={api}/>);
     const dialog=await screen.findByRole('dialog');expect(dialog).toHaveTextContent('DEMO-001');expect(api.send).not.toHaveBeenCalled();

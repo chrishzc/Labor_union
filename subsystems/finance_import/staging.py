@@ -62,6 +62,8 @@ def _identity_maps(
     Mapping[str, Any],
     Mapping[str, Any] | None,
     tuple[Any, ...],
+    Mapping[str, Any],
+    Mapping[str, Any],
 ]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
@@ -69,6 +71,8 @@ def _identity_maps(
     staff_accounts = identity_maps.get("staff_accounts", {})
     subsidy_return_accounts = identity_maps.get("client_subsidy_return_accounts")
     receipt_candidates = identity_maps.get("client_receipt_candidates", ())
+    staff_case_suffixes = identity_maps.get("staff_case_suffixes", {})
+    client_refund_case_suffixes = identity_maps.get("client_refund_case_suffixes", {})
     if not isinstance(client_accounts, Mapping) or not isinstance(
         staff_accounts, Mapping
     ):
@@ -79,7 +83,18 @@ def _identity_maps(
         raise ValueError("identity account maps must be mappings")
     if not isinstance(receipt_candidates, tuple):
         raise ValueError("client receipt candidates must be a tuple")
-    return client_accounts, staff_accounts, subsidy_return_accounts, receipt_candidates
+    if not isinstance(staff_case_suffixes, Mapping) or not isinstance(
+        client_refund_case_suffixes, Mapping
+    ):
+        raise ValueError("case suffix maps must be mappings")
+    return (
+        client_accounts,
+        staff_accounts,
+        subsidy_return_accounts,
+        receipt_candidates,
+        staff_case_suffixes,
+        client_refund_case_suffixes,
+    )
 
 
 def stage_finance_rows(
@@ -115,6 +130,8 @@ def stage_finance_rows(
         staff_accounts,
         subsidy_return_accounts,
         receipt_candidates,
+        staff_case_suffixes,
+        client_refund_case_suffixes,
     ) = _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
@@ -268,13 +285,24 @@ def stage_finance_rows(
             ),
         )
 
-        classification = classify_finance_transaction(
-            row,
-            client_accounts,
-            staff_accounts,
-            subsidy_return_accounts,
-            receipt_candidates,
-        )
+        try:
+            classification = classify_finance_transaction(
+                row,
+                client_accounts,
+                staff_accounts,
+                subsidy_return_accounts,
+                receipt_candidates,
+                staff_case_suffixes,
+                client_refund_case_suffixes,
+            )
+        except TypeError:
+            classification = classify_finance_transaction(
+                row,
+                client_accounts,
+                staff_accounts,
+                subsidy_return_accounts,
+                receipt_candidates,
+            )
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])
         resolved_counterparty_account = classification.get("resolved_counterparty_account")

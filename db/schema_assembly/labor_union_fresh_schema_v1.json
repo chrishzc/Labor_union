@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "e90201031c71fd64100c064f426c5e27680be64540b73bf81a1d9ab25d79fde2",
+  "active_artifacts_sha256": "3181441b2b2cb166cf953e2bb8fa9babdecb836fc17e66f034733a88e7c28c92",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -191,7 +191,9 @@
     "db/schema_parts/237_non_citizen_case_sequences.sql",
     "db/schema_parts/238_registry_case_deletion_guards.sql",
     "db/schema_parts/239_matching_manual_reason_optional.sql",
-    "db/schema_parts/240_order_reopen_reason_optional.sql"
+    "db/schema_parts/240_order_reopen_reason_optional.sql",
+    "db/schema_parts/241_finance_case_accounting_markers.sql",
+    "db/schema_parts/242_accounting_difference_resolution.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -229,7 +231,9 @@
     "db/schema_parts/1059_non_citizen_case_sequences.sql": "migration-only",
     "db/schema_parts/1060_registry_case_deletion_guards.sql": "migration-only",
     "db/schema_parts/1061_matching_manual_reason_optional.sql": "migration-only",
-    "db/schema_parts/1062_order_reopen_reason_optional.sql": "migration-only"
+    "db/schema_parts/1062_order_reopen_reason_optional.sql": "migration-only",
+    "db/schema_parts/1063_finance_case_accounting_markers.sql": "migration-only",
+    "db/schema_parts/1064_accounting_difference_resolution.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -546,6 +550,24 @@
       "replay": "exact predecessor is pending; exact successor is current",
       "rollback": "discard unpromoted candidate; preserve all recorded notes after apply",
       "unresolved_policy": "unknown CHECK, enforcement or parent-column drift fails closed"
+    },
+    "db/schema_parts/1063_finance_case_accounting_markers.sql": {
+      "source_object": "existing accounting case metadata without historical completion markers",
+      "successor": "db/schema_parts/241_finance_case_accounting_markers.sql",
+      "terminal_schema_evidence": "fresh 241 and preserve 1063 are byte-identical",
+      "data_effect": "schema-only; no seeds, business backfill or cash changes",
+      "replay": "exact metadata preserves all existing rows",
+      "rollback": "retain existing data; discard only a new disposable candidate",
+      "unresolved_policy": "partial or drift metadata blocks apply"
+    },
+    "db/schema_parts/1064_accounting_difference_resolution.sql": {
+      "source_object": "accounting owners without noncash/amount-mode/partial-period data",
+      "successor": "db/schema_parts/242_accounting_difference_resolution.sql",
+      "terminal_schema_evidence": "fresh 242 and preserve 1064 byte-identical",
+      "data_effect": "schema-only; zero seeds, business backfill or destructive changes",
+      "replay": "exact metadata is current; rows preserved",
+      "rollback": "retain data and immutable events; disable new entry points",
+      "unresolved_policy": "partial or drift metadata blocks apply"
     }
   }
 }

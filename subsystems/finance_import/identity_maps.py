@@ -6,6 +6,10 @@ from collections.abc import Mapping
 import unicodedata
 from typing import Any
 
+from subsystems.client_finance.virtual_account_resolution import (
+    build_client_virtual_account,
+)
+
 
 def _account(value: Any) -> str | None:
     """Normalize only Unicode representation and surrounding whitespace."""
@@ -98,6 +102,79 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         staff_id = _positive_id(row.get("staff_id"), "staff_id")
         staff_candidates.setdefault(account, set()).add(staff_id)
 
+    try:
+        cursor.execute(
+            """SELECT obligation.case_no, obligation.staff_id
+               FROM staff_obligations obligation
+               WHERE obligation.direction='payable_to_staff'
+                 AND obligation.status<>'cancelled'
+                 AND obligation.amount_due_ntd>0
+               ORDER BY obligation.staff_id, obligation.obligation_identity"""
+        )
+        staff_obligation_rows = cursor.fetchall()
+    except Exception:
+        staff_obligation_rows = ()
+
+    try:
+        cursor.execute(
+            """SELECT obligation.case_no, order_row.client_id
+               FROM client_obligations obligation
+               JOIN orders order_row ON order_row.case_no=obligation.case_no
+               WHERE obligation.direction='payable_to_client'
+                 AND obligation.status='open'
+                 AND obligation.amount_due_ntd>0
+                 AND obligation.obligation_type IN ('refund','adjustment')
+               ORDER BY order_row.client_id, obligation.obligation_identity"""
+        )
+        refund_obligation_rows = cursor.fetchall()
+    except Exception:
+        refund_obligation_rows = ()
+
+    all_cases = {
+        str(r["case_no"]) for r in staff_obligation_rows if isinstance(r, Mapping) and r.get("case_no")
+    } | {
+        str(r["case_no"]) for r in refund_obligation_rows if isinstance(r, Mapping) and r.get("case_no")
+    }
+    case_suffixes: dict[str, str] = {}
+    if all_cases:
+        try:
+            format_strings = ",".join("%s" for _ in all_cases)
+            cursor.execute(
+                f"SELECT case_no, virtual_account FROM client_legacy_virtual_accounts WHERE case_no IN ({format_strings})",
+                tuple(all_cases),
+            )
+            legacy_va = {
+                str(row["case_no"]): str(row["virtual_account"])
+                for row in cursor.fetchall()
+                if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account")
+            }
+        except Exception:
+            legacy_va = {}
+        for case_no in all_cases:
+            va = legacy_va.get(case_no) or build_client_virtual_account(case_no)
+            if va and len(va) >= 6:
+                case_suffixes[case_no] = va[-6:]
+
+    staff_case_candidates: dict[str, set[int]] = {}
+    for r in staff_obligation_rows:
+        if not isinstance(r, Mapping):
+            continue
+        c_no = str(r.get("case_no") or "")
+        suffix = case_suffixes.get(c_no)
+        if suffix:
+            s_id = _positive_id(r.get("staff_id"), "staff_id")
+            staff_case_candidates.setdefault(suffix, set()).add(s_id)
+
+    refund_case_candidates: dict[str, set[int]] = {}
+    for r in refund_obligation_rows:
+        if not isinstance(r, Mapping):
+            continue
+        c_no = str(r.get("case_no") or "")
+        suffix = case_suffixes.get(c_no)
+        if suffix:
+            c_id = _positive_id(r.get("client_id"), "client_id")
+            refund_case_candidates.setdefault(suffix, set()).add(c_id)
+
     return {
         "client_refund_accounts": _stable_map(refund_candidates),
         "client_subsidy_return_accounts": _stable_map(
@@ -105,6 +182,8 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         ),
         "staff_accounts": _stable_map(staff_candidates),
         "client_receipt_candidates": _client_receipt_candidates(cursor),
+        "staff_case_suffixes": _stable_map(staff_case_candidates),
+        "client_refund_case_suffixes": _stable_map(refund_case_candidates),
     }
 
 

@@ -57,6 +57,10 @@ class AccountingItemView(_StrictModel):
     due_date: str | None
     summary_included: bool = True
     unallocated_surplus_ntd: int = 0
+    remaining_ntd: int | None = None
+    noncash_ntd: int = 0
+    settled: bool = False
+    recognized_ntd: int = 0
 
 
 class AccountingTransactionView(_StrictModel):
@@ -66,6 +70,30 @@ class AccountingTransactionView(_StrictModel):
     kind: str
     amount_ntd: int
     bank: str | None
+
+
+class AccountingBankFactView(_StrictModel):
+    identity: str
+    occurred_on: str
+    direction: Literal["in", "out"]
+    amount_ntd: int
+    cases: list[str]
+
+
+class HistoricalAccountingAmountView(_StrictModel):
+    identity: str
+    direction: Literal["receivable", "payable"]
+    expected_ntd: int
+    actual_ntd: int
+    remaining_ntd: int
+
+
+class HistoricalAccountingMarkerView(_StrictModel):
+    case_no: str
+    reason: str
+    actor: str
+    created_at: str
+    amounts: list[HistoricalAccountingAmountView] = Field(default_factory=list)
 
 
 class CaseAccountingView(_StrictModel):
@@ -80,6 +108,10 @@ class CaseAccountingView(_StrictModel):
     staff_items: list[AccountingItemView]
     transactions: list[AccountingTransactionView]
     warnings: list[AccountingWarningView]
+    bank_facts: list[AccountingBankFactView] = Field(default_factory=list)
+    historical_marker: HistoricalAccountingMarkerView | None = None
+    remaining_in_ntd: int | None = None
+    remaining_out_ntd: int | None = None
 
 
 class FinanceImportBatchPreviewBody(_StrictModel):

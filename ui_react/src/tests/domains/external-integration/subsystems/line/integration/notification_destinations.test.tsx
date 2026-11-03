@@ -12,6 +12,17 @@ beforeEach(()=>{
  vi.spyOn(lineDeliveryQueryClient,'list').mockResolvedValue({items:[],total:0,page:1,page_size:6,total_pages:1});
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
+it.each(['deposit','first','second'] as const)('%s 入帳通知只引導到帳務確認，不從通知中心寄送',async stage=>{
+ const value={...item('payment_receipt'),receipt:{payment_stage:stage,settlement_identity:'a'.repeat(64)}};
+ vi.mocked(client.catalog).mockResolvedValue([{source:'payment_receipt',label:'入帳待確認',group:'reminder'}]);
+ vi.mocked(client.list).mockResolvedValue({items:[value],total:1,next_cursor:null});
+ const post=vi.spyOn(transport,'post');render(<NotificationTasksPage/>);await screen.findByRole('heading',{name:'指定事項'});
+ fireEvent.click(screen.getByRole('button',{name:'前往帳務確認'}));
+ const query=new URLSearchParams(window.location.hash.split('?')[1]);
+ expect(window.location.hash).toContain('#finance?');expect(query.get('tab')).toBe('accounting-warnings');
+ expect(query.get('case_no')).toBe('116000001');expect(query.get('receipt_stage')).toBe(stage);
+ expect(query.get('settlement_identity')).toBe('a'.repeat(64));expect(post).not.toHaveBeenCalled();
+});
 it.each([
  ['registration','查看申請','#clients?tab=applications&registration=73'],
  ['profile','審核資料異動','#clients?tab=profile-requests&request=73'],

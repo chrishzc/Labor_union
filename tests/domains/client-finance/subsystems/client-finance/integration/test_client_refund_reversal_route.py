@@ -1,6 +1,7 @@
 """Route-level regressions for distinct Client Finance refund operations."""
 
 from types import SimpleNamespace
+import pytest
 
 from api.routes.client_refund_reversal import (
     apply_subsidy_return,
@@ -38,7 +39,8 @@ def test_subsidy_return_apply_uses_the_dedicated_purpose_and_executes_workflow()
     assert requests[0].selection.correction_type.value == "refund"
 
 
-def test_settlement_remediation_query_returns_only_current_overdue_owner_facts():
+@pytest.mark.parametrize('include_not_due', [False, True])
+def test_settlement_remediation_query_returns_only_current_overdue_owner_facts(include_not_due):
     class RefundApplication:
         def query(self, case_no):
             assert case_no == "CASE-2"
@@ -56,6 +58,12 @@ def test_settlement_remediation_query_returns_only_current_overdue_owner_facts()
                         "obligation_type": "refund",
                         "amount_due_ntd": 800,
                         "due_date": __import__("datetime").date(2099, 1, 1),
+                    },
+                    {
+                        "obligation_identity": "refund:undated",
+                        "obligation_type": "refund",
+                        "amount_due_ntd": 1000,
+                        "due_date": None,
                     },
                 ],
                 "subsidy_return_obligations": [],
@@ -81,16 +89,15 @@ def test_settlement_remediation_query_returns_only_current_overdue_owner_facts()
 
     response = query_settlement_remediation(
         case_no="CASE-2",
-        include_not_due=False,
+        include_not_due=include_not_due,
         principal=SimpleNamespace(username="test-admin"),
         refund_application=RefundApplication(),
         receipt_application=ReceiptApplication(),
     )
 
     assert response.data["account_version"] == 5
-    assert [item["obligation_identity"] for item in response.data["refund_obligations"]] == [
-        "refund:old"
-    ]
+    assert [item["obligation_identity"] for item in response.data["refund_obligations"]] == (
+        ["refund:old", "refund:future", "refund:undated"] if include_not_due else ["refund:old"])
     assert [item["obligation_identity"] for item in response.data["receivable_obligations"]] == [
         "receipt:old"
     ]

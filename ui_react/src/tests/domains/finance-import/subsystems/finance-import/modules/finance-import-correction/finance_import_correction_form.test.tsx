@@ -130,3 +130,32 @@ it('offers a partial customer refund from the original bank row, including not-y
   expect(screen.getByRole('checkbox', { name: /待退 NT\$ 1,800/ })).toBeInTheDocument();
   expect(corrections.apply).toHaveBeenCalledOnce();
 });
+
+it('requires an explicit overage choice to delegate excess refund cash to recovery', async () => {
+  vi.mocked(clientSettlementRemediationClient.query)
+    .mockResolvedValueOnce({case_no:'CASE-1', refund_obligations:[{obligation_identity:'refund:1', amount_due_ntd:1000}]} as never)
+    .mockResolvedValue({case_no:'CASE-1', refund_obligations:[]} as never);
+  vi.mocked(corrections.preview).mockResolvedValue({candidate:{
+    row_identity:'row:1', batch_identity:'batch:1', classification_type:'client_refund',
+    bank_amount_ntd:1200, allocations:[{obligation_identity:'refund:1',amount_ntd:1000}],
+    allow_refund_overage_recovery:true,
+  }, preview_fingerprint:'a'.repeat(64)} as never);
+  vi.mocked(corrections.queryOutcome).mockResolvedValue({status:'succeeded',receipt:{
+    row_identity:'row:1',batch_identity:'batch:1',preview_fingerprint:'a'.repeat(64),
+  }} as never);
+  render(<FinanceImportCorrectionForm rowIdentity="row:1" sourceLabel="synthetic bank row" staff={[]} initialKind="client_refund" />);
+  await screen.findByRole('option',{name:'CASE-1｜測試客戶一'});
+  fireEvent.change(screen.getByLabelText('案件編號'),{target:{value:'CASE-1'}});
+  fireEvent.click(screen.getByText('查詢待核銷款項'));
+  fireEvent.click(await screen.findByRole('checkbox'));
+  expect(screen.getByLabelText('退款核銷方式')).toHaveValue('exact');
+  expect(corrections.preview).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('退款核銷方式'),{target:{value:'overage'}});
+  fireEvent.click(screen.getByText('儲存更正並核銷'));
+  await screen.findByText('退款核銷完成；超退金額已另列待追回款，請至案件帳務查看。');
+  expect(corrections.preview).toHaveBeenCalledWith(expect.objectContaining({
+    classification_type:'client_refund',target_obligation_identities:['refund:1'],
+    allow_refund_overage_recovery:true,allow_partial_refund_recovery:false,
+  }));
+  expect(corrections.apply).toHaveBeenCalledOnce();
+});

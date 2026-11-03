@@ -16,8 +16,14 @@ from subsystems.orders.terms_workflow import (
 
 
 def persist_client_finance_terms_impact(cursor, command) -> None:
-    _persist_payment_terms(cursor, command)
+    terms_changed=bool(_persist_payment_terms(cursor, command))
+    from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
+    results={stage.payment_stage:persist_controlled_client_amount(cursor,command,stage.payment_stage.value,stage.amount.amount,stage.due_date) for stage in command.candidate.stage_plans}
+    controlled={stage for stage,result in results.items() if result[0]}
+    controlled_changed=any(result[1] for result in results.values())
     for ordinal, action in enumerate(command.candidate.actions, start=1):
+        if action.payment_stage in controlled:
+            continue
         if action.action is ClientObligationActionKind.UNCHANGED:
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
@@ -25,15 +31,14 @@ def persist_client_finance_terms_impact(cursor, command) -> None:
     changed = False
     if getattr(command.candidate, "subsidy_return_plan", None) is not None:
         changed = persist_subsidy_return_plan(cursor, command)
-    if (
-        not command.candidate.actions
-        and command.candidate.payment_terms is None
-        and not changed
-        and command.candidate.resulting_account_version == command.candidate.expected_account_version
-    ):
+    # Terminal subsidy replay has no stage/terms mutation. An already-current
+    # controlled result must not emit the same outbox intent again.
+    if not command.candidate.actions and not (controlled_changed or terms_changed or changed):
         return
     _advance_account_version(cursor, command)
     _append_outbox(cursor, command)
+    from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
+    synchronize_government_case_amount(cursor,command.candidate.case_no,command.idempotency_key.value,command.actor.actor_id,command.reason)
 
 
 def _persist_payment_terms(cursor, command):
@@ -84,6 +89,7 @@ def _persist_payment_terms(cursor, command):
     )
     if cursor.rowcount != 1:
         raise ValueError("client_finance_payment_terms_conflict")
+    return True
 
 
 def _append_obligation_event(cursor, command, action, ordinal):
@@ -93,6 +99,10 @@ def _append_obligation_event(cursor, command, action, ordinal):
 
 def persist_subsidy_return_plan(cursor, command):
     plan = command.candidate.subsidy_return_plan
+    from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
+    handled,changed=persist_controlled_client_amount(cursor,command,'subsidy_return',plan.amount.amount,plan.due_date)
+    if handled:
+        return changed
     cursor.execute('SELECT o.obligation_identity,o.amount_due_ntd,o.due_date,e.after_amount_ntd '
         'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
         "WHERE o.case_no=%s AND o.obligation_type='subsidy_return' ORDER BY o.obligation_identity FOR UPDATE",
@@ -278,11 +288,15 @@ def _insert_projection(cursor, command, action, event_id):
 
 
 def _update_projection(cursor, command, action, event_id):
-    status = "cancelled" if action.after_amount.is_zero else "open"
+    # Remaining projections exclude actual money already allocated. A source
+    # change following a partial receipt must never charge the paid part twice.
+    from infrastructure.mysql.client_difference_repository import _cash, _noncash
+    remaining = max(0, action.after_amount.amount - _cash(cursor, action.obligation_identity) - _noncash(cursor, action.obligation_identity))
+    status = "cancelled" if action.after_amount.is_zero else "open" if remaining else "settled"
     cursor.execute(
         _PROJECTION_UPDATE_SQL,
         (
-            action.after_amount.amount,
+            remaining,
             action.after_due_date,
             status,
             event_id,

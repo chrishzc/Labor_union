@@ -36,6 +36,8 @@ LINE binding不簽發或傳遞一般後台Admin Session，LIFF也不導向React 
 - payment overdue / log reminder tasks: `/payment-overdue-reminders[/send]`、`/log-reminders[/send]` 薄轉接既有 owner Query／Send，保留分頁、完整總數、capability、fresh check、同操作識別與寄送工作狀態；查詢不排送。
 - paid uncreated group tasks: `/order-group-todos`，只列正式已核銷、正常未結案且尚無群組綁定案件；Query 規則與測試歸同層 `order-group-coordination.md`，mobile 只提供複製綁定指令。
 
+通知中心 `payment_receipt` 來源只投影 LINE 入帳通知 owner 的已核銷待辦；桌面按「前往帳務確認」攜帶案號、期別及 settlement identity，帳務才可人員 Send。手機僅提供帳務處理指引與案號複製，不引導跨 Session 或直接寄送。訂金舊來源只列未核銷提醒，避免已核銷項目重複列入。
+
 ## Dependencies
 - outbound: `customer-service` — existing ticket Query／reply workflow only.
 - outbound: `clients/client-profile` — existing pending request Query與owner Preview／Apply；mobile只作presentation。

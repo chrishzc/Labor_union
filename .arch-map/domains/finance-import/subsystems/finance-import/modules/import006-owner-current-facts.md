@@ -13,6 +13,9 @@ reprocess與必要 owner validation／migration evidence，不再提供 anomaly 
 - `domains/finance_import/transaction_classifier.py` — 正常匯入的純分類與唯一 ownership 候選。
 - `domains/finance_import/transaction_fingerprint.py` — canonical identity 與非指紋銀行事實差異比較。
 - `subsystems/finance_import/ingestion.py`
+- `subsystems/finance_import/staging.py` — canonical row、occurrence 與初始分類，借用 caller transaction，無自行 commit。
+- `subsystems/finance_import/identity_maps.py` — 匯入分類使用的精確帳號候選唯讀投影。
+- `subsystems/finance_import/reprocessing.py` — 舊批次重新分類唯讀／rollback-only 診斷，historical Apply 已退役。
 - `infrastructure/mysql/finance_import_owning_domain_composite.py`
 - `api/routes/finance_import.py`
 

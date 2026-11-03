@@ -1,5 +1,13 @@
 # Staff Payables／Accounts Payable Export
 
+> 2026-11-02 差額認列、人工金額更正與政府整期差額的最新實作／驗證見 [規格22 §16.9.1](22_銀行流水匯入與帳務異常處理正式規格.md#accounting-differences-implementation-20261102)。本檔 2026-11-01 的「尚未實作／本次僅規格」為當時記錄，以該續作結果為目前狀態；bank／ledger／allocation 的不可變性與各 owner 歸屬不變。
+
+> 2026-11-01 最新差額流程見 [`22` §16](22_銀行流水匯入與帳務異常處理正式規格.md#finance-differences-20261101)、Payroll `03` §0 與 Client Finance `04` §0.2；本次只更新規格，不改程式或帳務。
+
+- 月嫂原應付有誤，由 Payroll 人工結果金額更正承接；不足額／超付仍保留實付與待付餘額／追償。Staff Payables 不旁路改 Payroll 金額或銀行事實。
+- 歷史原因已確認無法查明的案件人工核銷，只作案件標記並排除實際金額統計，不等同既有 `paid／settled` 付款事實或義務處分，不直接計工會損益。
+- 本次移除退匯功能；下述 return／reversal 根事實及淨實付計算保留歷史證據用途，不表示新增退匯操作。原 API／writer 實際移除未獲本次施工授權。
+
 ## 1. 分責
 
 `Staff Payables` 管理月嫂付款義務、銀行出款、退匯／reversal、核銷及 payable／partially_paid／completed／anomaly 投影。

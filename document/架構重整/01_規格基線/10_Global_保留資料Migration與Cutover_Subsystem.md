@@ -565,6 +565,12 @@ legacy read-only preservation 與 drift negative → launcher regression。無�
 效果為零。失敗保留 journal，不修改既有 DB、不自動重跑 partial；權限、schema dependency 或 oracle 不符就停止。
 這是單一 current spec 覆蓋的 PACKAGE_REUSED；generation／engine receipt 放 ignored scratch，不建立重複規格或任務文件。
 
+### 9.3.1 2026-11-02 舊全域收款帳戶退役
+
+最新人工 Authority 明確移除 Client Finance 舊帳戶的畫面、API、全部讀寫及資料。僅三張 `client_payment_destination_configuration_{current,events,receipts}` 表加入既有 fresh retirement register；其一般 `no_drop_no_data_change` 政策不會自動刪除任何既有資料庫。本段是這三表在 localhost development 的獨立 destructive schema retirement 授權，不改其他 37 張表的既有資料保留決策，也不修改已發布 1029／歷史 release。
+
+此 bounded package 與驗收沿用「帳務工作台實作工作包」的 retirement inventory。`scripts/retire_client_payment_destination.py` 為唯一此項 operator adapter；先唯讀 plan 綁 database、server、三表完整 metadata／row count、retirement policy 與 script bytes，Apply 要求相同 plan、明確 database confirmation、engine qualification 及完整 backup。外部 FK／trigger／view dependency、非 canonical metadata、plan drift 或非 localhost development 均阻擋。僅依 receipts→current→events 順序移除三表，table-owned triggers 一併移除；不 disable 全域 FK、不 reset、不切換資料庫。重跑缺席物件為已退役；其他業務表的 row hashes 與所有剩餘 metadata 必須保留。執行中 runtime monitor／LINE worker 持續更新的 `runtime_health_status`、`runtime_service_heartbeats`、`line_worker_heartbeats` 僅允許列明其觀測值差異，仍保留備份與結構，不能略過表消失或任何帳務／其他表變動；此為實際觀測到的背景更新邊界，不是一般忽略資料差異。已還原的候選庫先完成相同移除與 preservation 驗證，fresh compact 必須不含三表；通過後才更新本機 union_db。其他環境不自動執行，回復從保護備份還原至新的隔離 candidate 再另外裁決。不得將此 retirement 包裝成 additive schema qualification。
+
 ### 9.4 DSM 冷備份副本的受控升級入口（2026-10-27）
 
 人工 Authority：重用現有本機升級工具，交付 DSM 專用腳本；原 NAS 資料不動，之後納入 image 及整合包。

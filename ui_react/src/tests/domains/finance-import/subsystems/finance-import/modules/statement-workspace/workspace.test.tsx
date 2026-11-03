@@ -5,6 +5,13 @@ import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedC
 import { FinanceStatementArchive } from '../../../../../../../components/FinanceStatementArchive';
 import { financeAccountingClient, type CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
+import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
+import { ApiHttpError } from '../../../../../../../api/shared/typed_errors';
+import { differenceResolutionClient, type ClientDifferenceView } from '../../../../../../../api/client_finance/difference_resolution_client';
+import { clientReceiptReconciliationClient, type ReceiptPreview } from '../../../../../../../api/client_finance/client_receipt_reconciliation_client';
+vi.mock('../../../../../../../api/client_finance/client_receipt_reconciliation_client',()=>({clientReceiptReconciliationClient:{preview:vi.fn(),apply:vi.fn()}}));
+vi.mock('../../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),payroll:vi.fn(async(case_no:string)=>({case_no,version:0,items:[],events:[]})),staff:vi.fn(async(case_no:string)=>({case_no,items:[],events:[]}))}}));
+vi.mock('../../../../../../../api/client_finance/client_receipt_query_client',()=>({clientReceiptQueryClient:{query:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderSummaries: vi.fn() } }));
 
 vi.mock('../../../../../../../api/finance_import/finance_accounting_client', async importOriginal => ({ ...await importOriginal<typeof import('../../../../../../../api/finance_import/finance_accounting_client')>(), financeAccountingClient: { query: vi.fn(), warnings: vi.fn(), dismiss: vi.fn(), manual: vi.fn(), duplicate: vi.fn(), download: vi.fn() } }));
@@ -21,16 +28,62 @@ function orderPage(cases: string[], client_name = '測試客戶', next_cursor: s
   return { items: cases.map(case_no => ({ case_no, client_name, order_status: '訂單完成', staff_name: null, identity_status: null,
     start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null })), next_cursor, etag: 'a'.repeat(64) };
 }
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(orderPage([])); });
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(orderPage([])); vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({case_no:'115000701',account_version:0,bank_facts:[],obligations:[]}); });
 describe('案件帳務及成功明細', () => {
-  it('shows owner facts, fee reference, details and persistent dismissal', async () => {
+  it('refreshes the difference facts alongside the case balance after an inline partial receipt', async () => {
+    let received = 0;
+    vi.mocked(financeAccountingClient.query).mockImplementation(async () => ({
+      ...detail(), receivable_ntd:16000,received_ntd:received,payable_ntd:null,paid_ntd:null,pending_warning_count:0,
+      client_items:[{identity:'deposit',direction:'receivable',label:'訂金',party:'Synthetic',expected_ntd:16000,actual_ntd:received,has_payment:received>0,version:String(received),due_date:'2026-11-01'}],
+      staff_items:[],transactions:[],warnings:[],
+    }));
+    vi.mocked(differenceResolutionClient.client).mockImplementation(async case_no => ({
+      case_no,version:received?1:0,items:[{identity:'deposit',label:'訂金',kind:'deposit',direction:'receivable_from_client',expected_ntd:16000,actual_ntd:received,remaining_ntd:16000-received,noncash_ntd:0,mode:'automatic',computed_ntd:16000,effective_ntd:16000,status:'待處理',options:['loss']}],events:[],
+    } satisfies ClientDifferenceView));
+    vi.mocked(clientReceiptQueryClient.query).mockImplementation(async () => ({
+      case_no:'115000701',account_version:received?1:0,
+      bank_facts:received?[]:[{finance_import_row_id:7,amount_ntd:6000,transaction_date:'2026-11-03',dedup_fingerprint:'a'.repeat(64)}],
+      obligations:[{obligation_identity:'deposit',payment_stage:'deposit',amount_due_ntd:16000-received,due_date:'2026-11-01'}],
+    }));
+    const preview: ReceiptPreview = {account_version:0,preview_fingerprint:'b'.repeat(64),candidate:{status:'review_required',payment_stage:null,bank_total:{amount:6000},obligation_total:{amount:16000},overage_amount:{amount:0},allocations:[],blockers:['client_receipt_underpaid'],settlement_identity:'c'.repeat(64)}};
+    vi.mocked(clientReceiptReconciliationClient.preview).mockResolvedValueOnce(preview).mockResolvedValueOnce({...preview,candidate:{...preview.candidate,status:'partial',blockers:[]}});
+    vi.mocked(clientReceiptReconciliationClient.apply).mockImplementation(async () => {
+      received=6000;
+      return {case_no:'115000701',account_version:1,status:'partial',settlement_identity:'c'.repeat(64),ledger_entry_count:1,allocation_count:1,blockers:[]};
+    });
+    render(<FinanceCaseAccounting initialCase="115000701" />);
+    const panel=await screen.findByRole('region',{name:'差額處理與人工金額更正'});
+    await waitFor(()=>expect(within(panel).getByRole('row',{name:/訂金/}).children[2]).toHaveTextContent('NT$ 0'));
+    fireEvent.click(await screen.findByRole('button',{name:'核對本案入款'}));
+    fireEvent.change(await screen.findByRole('combobox',{name:'選擇差額處理'}),{target:{value:'partial'}});
+    fireEvent.click(await screen.findByRole('button',{name:'確認核銷本次收款'}));
+    await screen.findByText('已記錄實際收款，剩餘款項繼續待收。');
+    await waitFor(()=>{
+      const row=within(panel).getByRole('row',{name:/訂金/});
+      expect(row.children[2]).toHaveTextContent('NT$ 6,000');
+      expect(row.children[4]).toHaveTextContent('NT$ 10,000');
+    });
+  });
+  it.each([
+    [404, '找不到此案件，請確認案件編號。'],
+    [401, '登入已失效，請重新登入後查詢。'],
+    [403, '目前沒有查閱帳務的權限。'],
+    [503, '帳務資料暫時無法取得，請稍後重新查詢。'],
+  ])('distinguishes case lookup failure status %s', async (status, message) => {
+    vi.mocked(financeAccountingClient.query).mockRejectedValue(new ApiHttpError(Number(status), 'query_failed', 'synthetic'));
+    render(<FinanceCaseAccounting initialCase="115000701" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(String(message));
+  });
+  it('shows unified owner facts, details and persistent dismissal without inferring bank fees', async () => {
     vi.mocked(financeAccountingClient.query).mockResolvedValue(detail());
     const dismissed = detail(); dismissed.pending_warning_count = 0; dismissed.warnings[0] = { ...dismissed.warnings[0], dismissed: true, dismissed_by: 'operator', dismissed_at: '2026-10-29' };
     vi.mocked(financeAccountingClient.dismiss).mockResolvedValue(dismissed);
     render(<FinanceCaseAccounting initialCase="115000701" />);
-    expect(await screen.findByText('100 元內 · 手續費參考，請人工檢查')).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole('button', { name: '明細' })[1]);
+    expect(await screen.findByText('本案帳務明細')).toBeInTheDocument();
+    expect(screen.queryByText('100 元內 · 手續費參考，請人工檢查')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '展開明細' })[1]);
     expect(screen.getByRole('region', { name: '收付款明細' })).toHaveTextContent('永豐');
+    fireEvent.click(screen.getByText('金額警示與既有檢查紀錄'));
     fireEvent.click(screen.getByRole('button', { name: '解除警示' }));
     expect(await screen.findByText('帳務警示 · 待檢查 0')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('checkbox', { name: '顯示已解除' }));

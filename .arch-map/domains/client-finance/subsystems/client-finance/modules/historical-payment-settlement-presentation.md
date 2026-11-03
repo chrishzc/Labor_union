@@ -12,11 +12,11 @@
 - category client: `ui_react/src/api/client_finance/case_categories_client.ts` — strict 分類投影供收款／付款的補助（預設）、非市民、全部篩選；同一集合產生明細、件數及金額合計；來源不完整明示查詢失敗。
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
-- composition: `ui_react/src/pages/FinancePage.tsx` — 唯一三個主工作區：收款、付款、銀行對帳；舊深連結解析至對應工作區／同案明細，帳務設定獨立。
+- composition: `ui_react/src/pages/FinancePage.tsx` — 四個主工作區：收付款、案件帳務、銀行對帳、逾期提醒；月份統計與款項清單置於收付款，舊深連結解析至對應工作區／同案明細。歷史工具保留低頻入口；舊全域帳戶維護於 2026-11-02 依使用者指示完整退役。
 - workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
-- shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 收款／付款清單，沿用既有 owner 摘要、government projection、cash planning；正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
-- overdue reminder composition: `FinanceReceiptsWorkspace.tsx` 承接既有 LINE-owned `PaymentOverdueReminderWorkbench.tsx`；只移動入口，不改逾期資格、金額或寄送 writer。
+- shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 應收由 Finance Import workspace 組合 owner 月份款項 Query，政府整期及付款沿既有 owner projection／cash planning；未定應收另列待確認，正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
+- overdue reminder composition: 主入口轉至 `FinanceWarningWorkspace.tsx` 的逾期款項頁，原 `FinanceReceiptsWorkspace.tsx` overdue props 保留；只移動入口，不改逾期資格、金額或寄送 writer。
 - government receipt grouping: `ui_react/src/components/SubsidyPeriodWorkbench.tsx` — 月／季／年整期入款、同單位總額、季度涵蓋月份及防重，歸 Government Subsidy owner。
 - shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — exact-case 補助金額、整期涵蓋與目前應退／實付；不提供逐案銷帳。
 - immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。

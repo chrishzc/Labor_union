@@ -59,3 +59,65 @@ def require_exact_period_receipt(lines: tuple[SubsidyPeriodLine, ...], amount_nt
     if total <= 0 or amount_ntd != total:
         raise PeriodReconciliationConflict('subsidy_period_amount_mismatch')
     return total
+
+
+@dataclass(frozen=True)
+class GovernmentPeriodBalance:
+    identity: str
+    root_receipt_id: int
+    kind: str
+    case_no: str | None
+    direction: str
+    expected_ntd: int
+    received_ntd: int
+    recognized_ntd: int
+    returned_ntd: int
+
+    @property
+    def remaining_ntd(self):
+        return max(0,self.expected_ntd-self.received_ntd-self.recognized_ntd)
+
+    @property
+    def refund_due_ntd(self):
+        return max(0,self.received_ntd-self.expected_ntd-self.returned_ntd) if self.direction=='receivable' else 0
+
+    @property
+    def settled(self):
+        return not self.remaining_ntd and not self.refund_due_ntd
+
+    @property
+    def status(self):
+        if self.refund_due_ntd:
+            return '多撥待退回'
+        if self.remaining_ntd:
+            return '待補撥' if self.direction=='receivable' else '待退回'
+        return '已作損失處理' if self.recognized_ntd else '已結清'
+
+
+def require_government_initial_receipt(lines,amount,handling):
+    if not lines or any(line.amount_ntd is None for line in lines):
+        raise PeriodReconciliationConflict('subsidy_period_incomplete')
+    total=sum(line.amount_ntd for line in lines)
+    if total<=0 or amount<=0:
+        raise PeriodReconciliationConflict('subsidy_period_amount_invalid')
+    expected='exact' if amount==total else 'partial' if amount<total else 'refund_excess'
+    if handling!=expected:
+        raise PeriodReconciliationConflict('subsidy_period_handling_required')
+    return total
+
+
+def require_government_balance_action(balance,action,amount,reason):
+    if not isinstance(amount,int) or isinstance(amount,bool) or amount<=0:
+        raise PeriodReconciliationConflict('subsidy_period_amount_invalid')
+    if action=='loss':
+        if balance.direction!='receivable' or amount>balance.remaining_ntd or not reason.strip():
+            raise PeriodReconciliationConflict('subsidy_period_loss_invalid')
+    elif action=='refund':
+        limit=balance.refund_due_ntd if balance.direction=='receivable' else balance.remaining_ntd
+        if amount>limit:
+            raise PeriodReconciliationConflict('subsidy_period_refund_exceeded')
+    elif action=='receipt':
+        if balance.direction!='receivable':
+            raise PeriodReconciliationConflict('subsidy_period_receipt_invalid')
+    else:
+        raise PeriodReconciliationConflict('subsidy_period_action_invalid')

@@ -8,6 +8,8 @@
 月／季／年共用有效服務結束月份與補助公式，整期金額核對銀行事實；季度涵蓋月份、跨單位／移期防重、追加整期沖正。案件快照只作證據，不拆造逐案入款。工會代墊回收直接依同一期的既有實付與沖正紀錄彙總。
 
 ## Implementation
+- difference adapter: `infrastructure/mysql/government_period_difference_repository.py`; original receipt/member snapshot frozen at first partial payment, supplemental receipt/refund/loss and separate case corrections; amount controls consume canonical formula, never allocate government cash to cases.
+- schema: `db/schema_parts/242_accounting_difference_resolution.sql`, `db/schema_parts/1064_accounting_difference_resolution.sql` (shared release, owner-specific tables).
 - domain: `domains/government_subsidy/period_reconciliation.py`
 - application: `subsystems/government_subsidy/period_reconciliation.py`
 - adapter: `infrastructure/mysql/government_subsidy_period_repository.py`
@@ -24,6 +26,7 @@
 - Finance Import 政府流水保留待選期間；核銷後標為已消費，不能再人工更正到其他 owner。
 
 ## Verification
+- integration_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_period_differences_mysql.py`
 - layout_status: `custom_current`
 - layout_basis: Python rules use the canonical module root; the existing React Vitest discovery root mirrors the same owner path.
 - test_root: `tests/domains/government-subsidy/subsystems/government-subsidy/modules/period-reconciliation/`

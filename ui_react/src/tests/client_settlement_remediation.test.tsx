@@ -8,6 +8,7 @@ import { AnomalyDetailViewSchema } from '../api/anomalies/anomaly_detail_schemas
 import type { ClientSettlementRemediationClient } from '../api/client_finance/client_settlement_remediation_client';
 import { clientSettlementTarget } from '../adapters/anomalies/client_settlement_target';
 import { ClientSettlementRemediationWorkbench } from '../components/ClientSettlementRemediationWorkbench';
+import { ClientSettlementQuerySchema } from '../api/client_finance/client_settlement_remediation_schemas';
 
 const fingerprint = 'a'.repeat(64);
 const previewFingerprint = 'b'.repeat(64);
@@ -61,6 +62,14 @@ function owner(secondQuery: typeof firstQuery): ClientSettlementRemediationClien
 }
 
 describe('client settlement anomaly remediation', () => {
+  it('decodes a formal refund whose payment date has not been set', () => {
+    const query = ClientSettlementQuerySchema.parse({ ...firstQuery,
+      refund_obligations: [{ ...firstQuery.refund_obligations[0], due_date: null }],
+    });
+    expect(query.refund_obligations[0].due_date).toBeNull();
+    expect(query.refund_obligations[0].amount_due_ntd).toBe(500);
+  });
+
   it('routes only an exact bound Client Finance action', () => {
     expect(clientSettlementTarget(detail())).toEqual({ kind: 'refund', caseNo: 'CASE-1', accountVersion: 3 });
     const drifted = detail();

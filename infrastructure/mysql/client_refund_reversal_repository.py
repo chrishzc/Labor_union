@@ -500,6 +500,13 @@ def _refund_source_account(row):
     if row.get("format_id") == "sinopac":
         references = _json_object(row.get("bank_references"))
         return extract_sinopac_account_reference(references.get("交易參考編號"))
+    if row.get("format_id") == "legacy":
+        references = _json_object(row.get("bank_references"))
+        reference = extract_sinopac_account_reference(references.get("transaction_reference"))
+        account = row.get("resolved_counterparty_account")
+        if reference is not None and account not in (None, reference):
+            return None
+        return account or reference
     return row.get("resolved_counterparty_account")
 
 

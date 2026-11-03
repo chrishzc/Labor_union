@@ -1,4 +1,9 @@
-"""Only warning acknowledgements are written; accounting roots remain untouched."""
+"""Application acknowledgements and historical case markers; no money mutations."""
+import json
+from dataclasses import asdict
+from pymysql.err import IntegrityError
+
+from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker, HistoricalAccountingAmount, AccountingConflict
 
 
 class MySqlAccountingWorkspaceState:
@@ -12,6 +17,35 @@ class MySqlAccountingWorkspaceState:
         if row is None:
             raise LookupError("accounting_case_not_found")
         return str(row["name"])
+
+    def marker(self, case_no):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no,reason,actor,created_at,accounting_snapshot FROM finance_case_accounting_markers WHERE case_no=%s", (case_no,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        snapshot = row["accounting_snapshot"]
+        if isinstance(snapshot, str):
+            snapshot = json.loads(snapshot)
+        return HistoricalAccountingMarker(row["case_no"], row["reason"], row["actor"], str(row["created_at"]), tuple(HistoricalAccountingAmount(**item) for item in snapshot["amounts"]))
+
+    def marker_command(self, key):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no,reason,actor,source_versions FROM finance_case_accounting_markers WHERE operation_key=%s", (key,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        versions = row["source_versions"]
+        return row["case_no"], row["reason"], row["actor"], json.loads(versions) if isinstance(versions, str) else versions
+
+    def mark(self, case_no, reason, actor, versions, key, amounts):
+        with self.connection.cursor() as cursor:
+            try:
+                cursor.execute("INSERT INTO finance_case_accounting_markers(case_no,reason,actor,source_versions,operation_key,accounting_snapshot) VALUES (%s,%s,%s,%s,%s,%s)", (case_no, reason, actor, json.dumps(versions, sort_keys=True), key, json.dumps({"amounts": [asdict(item) for item in amounts]}, sort_keys=True)))
+            except IntegrityError as error:
+                if error.args[0] == 1062:
+                    raise AccountingConflict("historical_accounting_already_marked") from None
+                raise
 
     def dismissed(self, case_no, *, for_update=False):
         with self.connection.cursor() as cursor:

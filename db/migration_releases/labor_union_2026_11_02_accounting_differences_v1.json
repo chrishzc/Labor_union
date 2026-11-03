@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-accounting-differences-2026-11-02-v1",
+  "release_metadata": {
+    "release_name": "Owner accounting differences and amount modes",
+    "application_version": "accounting-differences-v1",
+    "published_at": "2026-11-02",
+    "description": "Add owner-specific noncash evidence, amount modes and frozen government period balances; no business backfill."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-finance-case-accounting-2026-11-02-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1064_accounting_difference_resolution.sql",
+      "relative_path": "db/schema_parts/1064_accounting_difference_resolution.sql",
+      "sha256": "5796e05346fdcea5d0ea089ee2de1923df9a2acdccbb0897fa7b0cf065e4f1de",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "retain owner evidence; disable new writes; no automatic delete",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "accounting-differences-exact",
+      "phase": "post-schema",
+      "policy": "Exact owner columns, keys, checks and immutable triggers; preserve existing source and bank records.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "accounting-differences-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "accounting-differences-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_02_accounting_differences_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_02_accounting_differences_v1.descriptors.json",
+    "sha256": "97d28e0fa6a86b8cf4941f169ddeac47e8bc9cd18f390b97159056160df67cb7",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

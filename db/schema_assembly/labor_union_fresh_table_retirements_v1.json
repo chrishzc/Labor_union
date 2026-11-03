@@ -460,6 +460,42 @@
         "188_matching_preferences_and_staff_availability.sql"
       ],
       "existing_database": "preserve_unchanged"
+    },
+    {
+      "table": "client_payment_destination_configuration_current",
+      "decision": "omit_fresh",
+      "owner": "Client Finance",
+      "reason": "2026-11-02 使用者明確退役舊全域收款帳戶的畫面、API、讀寫能力與資料；本案虛擬帳號已取代契約用途。",
+      "authority": "document/架構重整/01_規格基線/04_Client_Finance_Domain.md#8-客戶收款帳號2026-09-15-人工裁決",
+      "implementation_evidence": "scripts/retire_client_payment_destination.py",
+      "source_artifacts": [
+        "1029_client_payment_destination_configuration.sql"
+      ],
+      "existing_database": "explicit_local_retirement_only; no automatic drop from fresh policy"
+    },
+    {
+      "table": "client_payment_destination_configuration_events",
+      "decision": "omit_fresh",
+      "owner": "Client Finance",
+      "reason": "2026-11-02 使用者明確退役舊全域收款帳戶的畫面、API、讀寫能力與資料；本案虛擬帳號已取代契約用途。",
+      "authority": "document/架構重整/01_規格基線/04_Client_Finance_Domain.md#8-客戶收款帳號2026-09-15-人工裁決",
+      "implementation_evidence": "scripts/retire_client_payment_destination.py",
+      "source_artifacts": [
+        "1029_client_payment_destination_configuration.sql"
+      ],
+      "existing_database": "explicit_local_retirement_only; no automatic drop from fresh policy"
+    },
+    {
+      "table": "client_payment_destination_configuration_receipts",
+      "decision": "omit_fresh",
+      "owner": "Client Finance",
+      "reason": "2026-11-02 使用者明確退役舊全域收款帳戶的畫面、API、讀寫能力與資料；本案虛擬帳號已取代契約用途。",
+      "authority": "document/架構重整/01_規格基線/04_Client_Finance_Domain.md#8-客戶收款帳號2026-09-15-人工裁決",
+      "implementation_evidence": "scripts/retire_client_payment_destination.py",
+      "source_artifacts": [
+        "1029_client_payment_destination_configuration.sql"
+      ],
+      "existing_database": "explicit_local_retirement_only; no automatic drop from fresh policy"
     }
   ]
 }

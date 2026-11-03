@@ -384,6 +384,7 @@ class _Cursor:
     def fetchone(self):
         if ' paid ' in self.statements[-1][0]:return {'paid':0}
         if ' recovered ' in self.statements[-1][0]:return {'recovered':0}
+        if 'SELECT COALESCE(SUM(' in self.statements[-1][0]:return {'amount':0}
         return None
 
 
@@ -398,7 +399,9 @@ class _PaymentTermsCursor(_Cursor):
         }
 
     def fetchone(self):
-        return self.terms
+        if 'FROM client_payment_terms ' in self.statements[-1][0]:
+            return self.terms
+        return super().fetchone()
 
 
 @pytest.mark.parametrize("days,saved_due,expected,writes", [

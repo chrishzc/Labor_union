@@ -1,4 +1,5 @@
 """Compose typed owner queries; display warnings never change accounting facts."""
+from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -25,6 +26,15 @@ class AccountingWarning:
 
 
 @dataclass(frozen=True)
+class AccountingBankFact:
+    identity: str
+    occurred_on: str
+    direction: str
+    amount_ntd: int
+    cases: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class CaseAccounting:
     case_no: str
     client_name: str
@@ -37,6 +47,28 @@ class CaseAccounting:
     staff_items: tuple[StaffAccountingItem, ...]
     transactions: tuple[ClientAccountingTransaction | StaffAccountingTransaction, ...]
     warnings: tuple[AccountingWarning, ...]
+    bank_facts: tuple[AccountingBankFact, ...] = ()
+    historical_marker: HistoricalAccountingMarker | None = None
+    remaining_in_ntd: int | None = None
+    remaining_out_ntd: int | None = None
+
+
+@dataclass(frozen=True)
+class HistoricalAccountingAmount:
+    identity: str
+    direction: str
+    expected_ntd: int
+    actual_ntd: int
+    remaining_ntd: int
+
+
+@dataclass(frozen=True)
+class HistoricalAccountingMarker:
+    case_no: str
+    reason: str
+    actor: str
+    created_at: str
+    amounts: tuple[HistoricalAccountingAmount, ...] = ()
 
 
 class AccountingStatePort(Protocol):
@@ -47,6 +79,9 @@ class AccountingStatePort(Protocol):
     def commit(self): ...
     def rollback(self): ...
     def payment_cases(self) -> tuple[str, ...]: ...
+    def marker(self, case_no: str) -> HistoricalAccountingMarker | None: ...
+    def marker_command(self, key: str): ...
+    def mark(self, case_no: str, reason: str, actor: str, versions: dict[str, str], key: str, amounts: tuple[HistoricalAccountingAmount, ...]): ...
 
 
 class ClientAccountingPort(Protocol):
@@ -58,8 +93,38 @@ class StaffAccountingPort(Protocol):
 
 
 class AccountingWorkspace:
-    def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort):
+    def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort, bank=None):
         self.state, self.client, self.staff = state, client, staff
+        self.bank = bank
+
+    def mark_historical(self, case_no: str, reason: str, versions: dict[str, str], key: str, actor: str):
+        if not reason.strip() or not key.strip():
+            raise ValueError("historical_accounting_reason_required")
+        self.state.begin()
+        try:
+            previous = self.state.marker_command(key)
+            if previous:
+                if previous != (case_no, reason, actor, versions):
+                    raise AccountingConflict("historical_accounting_command_changed")
+                self.state.commit()
+                return self.state.marker(case_no)
+            current = self.query(case_no, for_update=True, include_sources=False)
+            if self.state.marker(case_no):
+                if self.state.marker_command(key) == (case_no, reason, actor, versions):
+                    self.state.commit()
+                    return self.state.marker(case_no)
+                raise AccountingConflict("historical_accounting_already_marked")
+            fresh = {item.identity: item.version for item in (*current.client_items, *current.staff_items)}
+            if fresh != versions:
+                raise AccountingConflict("historical_accounting_source_changed")
+            amounts = tuple(HistoricalAccountingAmount(item.identity, item.direction, item.expected_ntd, item.actual_ntd, item.remaining_ntd)
+                            for item in (*current.client_items, *current.staff_items) if getattr(item, "summary_included", True))
+            self.state.mark(case_no, reason, actor, versions, key, amounts)
+            self.state.commit()
+            return self.state.marker(case_no)
+        except Exception:
+            self.state.rollback()
+            raise
 
     def warnings(self):
         cases, seen = [], set()
@@ -75,7 +140,7 @@ class AccountingWorkspace:
                 cases.append(replace(case, warnings=tuple(warnings), pending_warning_count=sum(not row.dismissed for row in warnings)))
         return tuple(cases)
 
-    def query(self, case_no, *, for_update=False):
+    def query(self, case_no, *, for_update=False, include_sources=True):
         client_name = self.state.case_client(case_no)
         client_items, client_transactions = self.client(case_no, for_update=for_update)
         staff_items, staff_transactions = self.staff(case_no, for_update=for_update)
@@ -83,6 +148,8 @@ class AccountingWorkspace:
         warnings = []
         items = (*client_items, *staff_items)
         for item in items:
+            if item.settled and item.actual_ntd<=item.expected_ntd:
+                continue
             kind = accounting_warning(item.direction, item.expected_ntd, item.actual_ntd, item.has_payment)
             if kind is None:
                 continue
@@ -103,6 +170,10 @@ class AccountingWorkspace:
             sum(item.actual_ntd for item in outgoing) + unallocated if outgoing else None,
             sum(not warning.dismissed for warning in warnings), client_items, staff_items,
             (*client_transactions, *staff_transactions), tuple(warnings),
+            self.bank(case_no) if include_sources and self.bank is not None else (),
+            self.state.marker(case_no) if include_sources and self.bank is not None else None,
+            sum(item.remaining_ntd for item in incoming) if incoming else None,
+            sum(item.remaining_ntd for item in outgoing) if outgoing else None,
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

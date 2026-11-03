@@ -26,7 +26,7 @@ def application():
 class ReceiptPayment(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     case_no: str=Field(min_length=1,max_length=50,pattern=r'^[A-Za-z0-9_-]+$')
-    payment_stage: Literal['deposit','second']
+    payment_stage: Literal['deposit','first','second']
     settlement_identity: str=Field(min_length=1,max_length=128)
     amount_ntd: int=Field(gt=0)
     source_version: int=Field(ge=0)
@@ -54,9 +54,12 @@ class ReceiptResult(BaseModel):
 
 @router.get('/receipts',response_model=BaseResponse[ReceiptPage])
 def list_receipts(page:int=Query(1,ge=1),page_size:int=Query(25,ge=1,le=100),
+    case_no:str|None=Query(None,max_length=50,pattern=r'^[A-Za-z0-9_-]+$'),payment_stage:Literal['deposit','first','second']|None=None,
+    settlement_identity:str|None=Query(None,min_length=1,max_length=128),
     principal:AdminPrincipal=Depends(require_customer_service_handler),app=Depends(application)):
     try:
-        items,total=app.list(page,page_size)
+        focus={key:value for key,value in {'case_no':case_no,'payment_stage':payment_stage,'settlement_identity':settlement_identity}.items() if value is not None}
+        items,total=app.list(page,page_size,**focus)
         return BaseResponse(data={'items':[asdict(item) for item in items],'total':total,'page':page,'page_size':page_size})
     except OperationalError as error:
         raise typed_http_error(503,'unavailable','receipt_notice_unavailable','入帳通知待辦暫時無法取得，請稍後再試。','payment-receipt') from error

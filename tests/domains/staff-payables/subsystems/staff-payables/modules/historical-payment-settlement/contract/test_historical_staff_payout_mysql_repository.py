@@ -123,6 +123,34 @@ def test_load_fresh_locks_staff_owner_adoption_obligations_and_bank_candidates()
     statements = [item[0] for item in connection.cursor_instance.statements]
     assert statements[0].startswith("INSERT IGNORE INTO staff_payable_accounts")
     assert all("FOR UPDATE" in statement for statement in statements[1:])
+
+
+def test_query_omits_zero_amount_replaced_obligations_without_changing_the_original_record():
+    import sqlite3
+    database = sqlite3.connect(':memory:')
+    database.row_factory = sqlite3.Row
+    database.executescript('''CREATE TABLE staff_obligations(
+        obligation_identity TEXT,case_no TEXT,staff_id INTEGER,amount_due_ntd INTEGER,
+        payroll_version INTEGER,direction TEXT,status TEXT);
+        INSERT INTO staff_obligations VALUES('replaced','H-STAFF-1',9,0,1,'payable_to_staff','cancelled');
+        INSERT INTO staff_obligations VALUES('current','H-STAFF-1',9,17500,2,'payable_to_staff','open');''')
+    class Cursor(_Cursor):
+        def execute(self, statement, parameters=None):
+            super().execute(statement, parameters)
+            self.parameters = parameters
+        def fetchall(self):
+            if 'FROM staff_obligations' in self.statement:
+                return [dict(row) for row in database.execute(self.statement.replace('%s', '?'), self.parameters)]
+            return super().fetchall()
+    connection = _Connection()
+    connection.cursor_instance = Cursor()
+    try:
+        facts = MySqlHistoricalStaffPayoutRepository(connection).load('H-STAFF-1', 9, for_update=False)
+        assert [(item.identity, item.amount_due_ntd) for item in facts.obligations] == [('current', 17500)]
+        assert database.execute("SELECT amount_due_ntd FROM staff_obligations WHERE obligation_identity='replaced'").fetchone()[0] == 0
+        assert connection.committed is False
+    finally:
+        database.close()
     assert connection.committed is False
 
 

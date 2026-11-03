@@ -13,6 +13,23 @@ from subsystems.line.deposit_notifications import DepositNotificationConflict
 PRINCIPAL=AdminPrincipal(1,'synthetic-notifications','Synthetic','system_admin')
 
 
+def test_first_receipt_notification_is_a_stable_internal_todo_and_never_sends(monkeypatch):
+    from subsystems.line.payment_receipt_notifications import PaymentReceiptSnapshot,PaymentReceiptTodo
+    payment=PaymentReceiptSnapshot('CASE-FIRST','first','a'*64,12000,2,'source')
+    sent=[False];calls=[]
+    def pending(page,size):
+        calls.append((page,size));return ((),0) if sent[0] else ((PaymentReceiptTodo(payment,True,None,None),),1)
+    monkeypatch.setattr(query,'get_payment_receipt_notifications',lambda:SimpleNamespace(list=pending,send=lambda *_:pytest.fail('notification query must not send')))
+    first=query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL)
+    again=query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL)
+    assert first.items[0].id==again.items[0].id
+    assert first.items[0].title=='第一期款已入帳，待確認通知'
+    assert first.items[0].receipt.payment_stage=='first'
+    assert '前往帳務' in first.items[0].reason and first.items[0].case_no=='CASE-FIRST'
+    sent[0]=True
+    assert query.query_source(NotificationSource.RECEIPT,0,PRINCIPAL).items==[]
+
+
 def test_information_deep_link_queries_exact_owner_question_and_case(monkeypatch):
     calls=[]
     monkeypatch.setattr(actions,'CandidateContactResponseApplication',lambda _:SimpleNamespace(

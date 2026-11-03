@@ -1,0 +1,988 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-accounting-differences-2026-11-02-v1",
+  "descriptors": {
+    "1064_accounting_difference_resolution.sql": {
+      "tables": {
+        "client_finance_amount_controls": {
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_mode": {
+            "column_type": "enum('automatic','manual')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "effective_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "updated_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated on update current_timestamp"
+          }
+        },
+        "client_finance_amount_changes": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('manual_amount','adopt_calculation','source_update')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "payroll_amount_controls": {
+          "settlement_base_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_mode": {
+            "column_type": "enum('automatic','manual')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "effective_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "updated_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated on update current_timestamp"
+          }
+        },
+        "payroll_amount_changes": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "obligation_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('manual_amount','adopt_calculation','source_update')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "government_subsidy_amount_controls": {
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "period_year": {
+            "column_type": "smallint unsigned",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_mode": {
+            "column_type": "enum('automatic','manual')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "effective_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "updated_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated on update current_timestamp"
+          }
+        },
+        "government_subsidy_amount_changes": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('manual_amount','adopt_calculation','source_update')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "computed_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "client_finance_noncash_events": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "target_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "target_kind": {
+            "column_type": "enum('obligation','over_refund_recovery')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('loss','reduce_service_fee','union_bank_fee','absorb_overpayment')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "original_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_remaining_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_remaining_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "bank_fee_row_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "staff_recovery_noncash_events": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "recovery_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('loss','absorb_overpayment')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "before_remaining_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "after_remaining_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "government_subsidy_period_balances": {
+          "balance_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "root_receipt_id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "balance_kind": {
+            "column_type": "enum('original','correction')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "case_no": {
+            "column_type": "varchar(50)",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "direction": {
+            "column_type": "enum('receivable','payable')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "expected_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "received_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "recognized_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "returned_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": "0",
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        },
+        "government_subsidy_period_operations": {
+          "id": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": "auto_increment"
+          },
+          "balance_identity": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "action": {
+            "column_type": "enum('receipt','refund','loss','absorb_overpayment','correction')",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "amount_ntd": {
+            "column_type": "bigint",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "bank_entry_id": {
+            "column_type": "bigint",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          },
+          "operation_key": {
+            "column_type": "varchar(191)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "command_digest": {
+            "column_type": "char(64)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "actor": {
+            "column_type": "varchar(100)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "reason": {
+            "column_type": "varchar(500)",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "confirmed_on": {
+            "column_type": "date",
+            "is_nullable": "NO",
+            "column_default": null,
+            "extra": ""
+          },
+          "created_at": {
+            "column_type": "timestamp",
+            "is_nullable": "NO",
+            "column_default": "current_timestamp",
+            "extra": "default_generated"
+          }
+        }
+      },
+      "indexes": {
+        "client_finance_amount_controls.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "obligation_identity"
+          ]
+        },
+        "client_finance_amount_changes.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_finance_amount_changes.uq_client_finance_amount_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "client_finance_amount_changes.ix_client_finance_amount_history": {
+          "non_unique": 1,
+          "columns": [
+            "obligation_identity",
+            "id"
+          ]
+        },
+        "payroll_amount_controls.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "obligation_identity"
+          ]
+        },
+        "payroll_amount_changes.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "payroll_amount_changes.uq_payroll_amount_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "payroll_amount_changes.ix_payroll_amount_history": {
+          "non_unique": 1,
+          "columns": [
+            "obligation_identity",
+            "id"
+          ]
+        },
+        "government_subsidy_amount_controls.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "case_no"
+          ]
+        },
+        "government_subsidy_amount_changes.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "government_subsidy_amount_changes.uq_government_subsidy_amount_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "government_subsidy_amount_changes.ix_government_subsidy_amount_history": {
+          "non_unique": 1,
+          "columns": [
+            "case_no",
+            "id"
+          ]
+        },
+        "client_finance_noncash_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "client_finance_noncash_events.uq_client_noncash_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "client_finance_noncash_events.uq_client_noncash_bank_fee": {
+          "non_unique": 0,
+          "columns": [
+            "bank_fee_row_id"
+          ]
+        },
+        "client_finance_noncash_events.ix_client_noncash_target": {
+          "non_unique": 1,
+          "columns": [
+            "target_identity",
+            "id"
+          ]
+        },
+        "staff_recovery_noncash_events.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "staff_recovery_noncash_events.uq_staff_noncash_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "staff_recovery_noncash_events.ix_staff_noncash_recovery": {
+          "non_unique": 1,
+          "columns": [
+            "recovery_identity",
+            "id"
+          ]
+        },
+        "government_subsidy_period_balances.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "balance_identity"
+          ]
+        },
+        "government_subsidy_period_balances.ix_government_balance_kind": {
+          "non_unique": 1,
+          "columns": [
+            "root_receipt_id",
+            "balance_kind",
+            "case_no"
+          ]
+        },
+        "government_subsidy_period_operations.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "id"
+          ]
+        },
+        "government_subsidy_period_operations.uq_government_operation_key": {
+          "non_unique": 0,
+          "columns": [
+            "operation_key"
+          ]
+        },
+        "government_subsidy_period_operations.uq_government_operation_bank": {
+          "non_unique": 0,
+          "columns": [
+            "bank_entry_id"
+          ]
+        },
+        "government_subsidy_period_operations.ix_government_operation_balance": {
+          "non_unique": 1,
+          "columns": [
+            "balance_identity",
+            "id"
+          ]
+        }
+      },
+      "foreign_keys": {
+        "client_finance_amount_controls.fk_client_finance_amount_source": {
+          "columns": [
+            "obligation_identity"
+          ],
+          "referenced_table": "client_obligations",
+          "referenced_columns": [
+            "obligation_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "client_finance_amount_changes.fk_client_finance_amount_change_source": {
+          "columns": [
+            "obligation_identity"
+          ],
+          "referenced_table": "client_obligations",
+          "referenced_columns": [
+            "obligation_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "payroll_amount_controls.fk_payroll_amount_source": {
+          "columns": [
+            "obligation_identity"
+          ],
+          "referenced_table": "staff_obligations",
+          "referenced_columns": [
+            "obligation_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "payroll_amount_changes.fk_payroll_amount_change_source": {
+          "columns": [
+            "obligation_identity"
+          ],
+          "referenced_table": "staff_obligations",
+          "referenced_columns": [
+            "obligation_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_amount_controls.fk_government_subsidy_amount_source": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_amount_changes.fk_government_subsidy_amount_change_source": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "client_finance_noncash_events.fk_client_noncash_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "client_finance_noncash_events.fk_client_noncash_fee": {
+          "columns": [
+            "bank_fee_row_id"
+          ],
+          "referenced_table": "finance_import_rows",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "staff_recovery_noncash_events.fk_staff_noncash_recovery": {
+          "columns": [
+            "recovery_identity"
+          ],
+          "referenced_table": "staff_overpayment_recoveries",
+          "referenced_columns": [
+            "recovery_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_balances.fk_government_balance_receipt": {
+          "columns": [
+            "root_receipt_id"
+          ],
+          "referenced_table": "government_subsidy_period_entries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_balances.fk_government_balance_case": {
+          "columns": [
+            "case_no"
+          ],
+          "referenced_table": "orders",
+          "referenced_columns": [
+            "case_no"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_operations.fk_government_operation_balance": {
+          "columns": [
+            "balance_identity"
+          ],
+          "referenced_table": "government_subsidy_period_balances",
+          "referenced_columns": [
+            "balance_identity"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        },
+        "government_subsidy_period_operations.fk_government_operation_bank": {
+          "columns": [
+            "bank_entry_id"
+          ],
+          "referenced_table": "government_subsidy_period_entries",
+          "referenced_columns": [
+            "id"
+          ],
+          "update_rule": "RESTRICT",
+          "delete_rule": "RESTRICT"
+        }
+      },
+      "checks": {
+        "client_finance_amount_controls.chk_client_finance_amount_control": "and(atom(computed_ntd>=0),atom(effective_ntd>=0))",
+        "client_finance_amount_changes.chk_client_finance_amount_change": "and(atom(before_ntd>=0),atom(after_ntd>=0),atom(computed_ntd>=0))",
+        "payroll_amount_controls.chk_payroll_amount_control": "and(atom(computed_ntd>=0),atom(effective_ntd>=0))",
+        "payroll_amount_changes.chk_payroll_amount_change": "and(atom(before_ntd>=0),atom(after_ntd>=0),atom(computed_ntd>=0))",
+        "government_subsidy_amount_controls.chk_government_subsidy_amount_control": "and(atom(computed_ntd>=0),atom(effective_ntd>=0))",
+        "government_subsidy_amount_changes.chk_government_subsidy_amount_change": "and(atom(before_ntd>=0),atom(after_ntd>=0),atom(computed_ntd>=0))",
+        "client_finance_noncash_events.chk_client_noncash_amount": "and(atom(original_ntd>=0),atom(amount_ntd>0),atom(before_remaining_ntd>=amount_ntd),atom(after_remaining_ntd=before_remaining_ntd-amount_ntd))",
+        "client_finance_noncash_events.chk_client_noncash_reason": "atom(char_length(trim(reason))>0)",
+        "staff_recovery_noncash_events.chk_staff_noncash_amount": "and(atom(amount_ntd>0),atom(before_remaining_ntd>=amount_ntd),atom(after_remaining_ntd=before_remaining_ntd-amount_ntd))",
+        "staff_recovery_noncash_events.chk_staff_noncash_reason": "atom(char_length(trim(reason))>0)",
+        "government_subsidy_period_balances.chk_government_balance_amount": "and(atom(expected_ntd>=0),atom(received_ntd>=0),atom(recognized_ntd>=0),atom(returned_ntd>=0))",
+        "government_subsidy_period_operations.chk_government_operation_amount": "atom(amount_ntd>0)"
+      },
+      "triggers": [
+        "trg_client_finance_amount_changes_update",
+        "trg_client_finance_amount_changes_delete",
+        "trg_payroll_amount_changes_update",
+        "trg_payroll_amount_changes_delete",
+        "trg_government_subsidy_amount_changes_update",
+        "trg_government_subsidy_amount_changes_delete",
+        "trg_client_finance_noncash_events_update",
+        "trg_client_finance_noncash_events_delete",
+        "trg_staff_recovery_noncash_events_update",
+        "trg_staff_recovery_noncash_events_delete",
+        "trg_government_subsidy_period_operations_update",
+        "trg_government_subsidy_period_operations_delete"
+      ],
+      "parent_columns": {}
+    }
+  }
+}

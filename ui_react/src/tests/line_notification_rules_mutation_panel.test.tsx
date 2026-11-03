@@ -545,11 +545,12 @@ describe('通知內容統一工作區', () => {
     ['payment-overdue-first', '第一期款逾期提醒'],
     ['payment-overdue-second', '第二期款逾期提醒'],
     ['deposit-settled','訂金已確認入帳卡'],
+    ['payment-first-settled','第一期款已確認入帳通知'],
     ['current-payment-rule','第二期款已入帳通知'],
   ];
   const paymentDescriptors = paymentMessages.map(([id, name]) => ({ id, name, template_id: id==='current-payment-rule'?'LINE-SECOND-PAYMENT-SETTLED-TEXT-V1':null, format: id==='deposit-reminder' ? 'flex' as const : 'text' as const, requires_case: false, requires_staff: false, builtin: id!=='current-payment-rule', allows_draft: false }));
 
-  it.each(paymentMessages)('帳務包含提醒及入帳的九則內容，%s 沿原版本化 writer 儲存', async (id) => {
+  it.each(paymentMessages)('帳務包含提醒及入帳的十則內容，%s 沿原版本化 writer 儲存', async (id) => {
     const clients = flowWorkbench();
     vi.mocked(clients.templates.update).mockResolvedValue({rule_id:id,template_id:'LINE-COPY-'+id,name:'逾期提醒',content:'請協助確認本期款項 {case_no}',revision:20,variables:['case_no'],sample_preview:'公版範例'});
     financeContentClients(clients);
@@ -559,7 +560,7 @@ describe('通知內容統一工作區', () => {
     window.history.replaceState(null, '', '#finance?tab=accounting-warnings&view=reminder-content&message='+id);
     render(<UnsavedChangesProvider><FinanceWarningWorkspace onCase={()=>{}}/></UnsavedChangesProvider>);
     const field = await screen.findByRole('textbox', {name:'通知內容'});
-    expect(document.querySelectorAll('.notification-message-item')).toHaveLength(9);
+    expect(document.querySelectorAll('.notification-message-item')).toHaveLength(10);
     expect(screen.getByRole('heading',{name:'提醒內容'})).toBeInTheDocument();
     expect(screen.queryByRole('heading',{name:'通知與發送'})).not.toBeInTheDocument();
     expect(screen.queryByRole('button',{name:'發送設定'})).not.toBeInTheDocument();

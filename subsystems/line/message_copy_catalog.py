@@ -31,6 +31,7 @@ def _text_defaults():
         "deposit-assistance": ASSISTANCE_ACK,
         "payment-first-reminder": "案件 {case_no} 今天開始服務，祝服務順利！第一期款尚待確認入帳：{amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
         "payment-first-greeting": "案件 {case_no} 今天開始服務，祝服務順利！",
+        "payment-first-settled": "案件 {case_no} 第一期款 {amount_ntd} 元已確認入帳，謝謝。",
         "payment-second-reminder": "案件 {case_no} 第二期款尚待確認入帳 {amount_ntd} 元，請於今天完成繳款。若已匯款，請勿重複繳納，待工會核對入帳。",
         "service-day-log-reminder": log_reminder("{staff_name}"),
         "candidate-willing-received": CANDIDATE_WILLING_RECEIVED,

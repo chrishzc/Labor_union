@@ -270,8 +270,8 @@ class MySqlClientOverRefundRecoveryRepository:
                 "INSERT INTO client_ledger_entries (case_no,finance_import_row_id,entry_type,amount_ntd,occurred_on,"
                 "reconciliation_reference,reversal_of_entry_id,idempotency_key,actor,reason) "
                 "VALUES (%s,%s,'receipt',%s,%s,%s,NULL,%s,%s,%s)",
-                (candidate.case_no, row_id, candidate.fingerprint.value, candidate.amount_received.amount,
-                 _date_from_text(preview.candidate.bank_fact_identity, self._connection),
+                (candidate.case_no, row_id, candidate.amount_received.amount,
+                 _date_from_text(preview.candidate.bank_fact_identity, self._connection),candidate.fingerprint.value,
                  f"{request.idempotency_key.value}:ledger", request.actor.actor_id, request.reason),
             )
             ledger_id = int(cursor.lastrowid)

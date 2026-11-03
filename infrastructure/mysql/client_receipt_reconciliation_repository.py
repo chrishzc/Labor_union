@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import hashlib
@@ -79,6 +79,8 @@ class MySqlClientReceiptReconciliationRepository:
         self._bank_metadata: dict[str, _BankMetadata] = {}
         self._ledger_entry_ids: dict[str, int] = {}
         self._obligation_amounts: dict[str, int] = {}
+        self._obligation_stages: dict[str, PaymentStage] = {}
+        self._settled_stages: set[PaymentStage] = set()
         self._settlement_identity: str | None = None
 
     def query_unreceived_deposit(self, case_no: str) -> UnreceivedDepositConfirmation:
@@ -109,6 +111,8 @@ class MySqlClientReceiptReconciliationRepository:
         self._bank_metadata.clear()
         self._ledger_entry_ids.clear()
         self._obligation_amounts.clear()
+        self._obligation_stages.clear()
+        self._settled_stages.clear()
         self._settlement_identity = None
 
     # Kept cohesive so Apply follows account, bank-row, then obligation lock order.
@@ -189,29 +193,34 @@ class MySqlClientReceiptReconciliationRepository:
                 selection.obligation_identities,
                 settlement_identity,
             )
-            _validate_exact_zero(self._obligation_amounts, allocated)
-            _settle_selected_obligations(
-                cursor,
-                selection,
-                self._obligation_amounts,
-                resulting_version,
-            )
+            partial = selection.allow_partial_receipt and sum(allocated.values()) < sum(self._obligation_amounts.values())
+            if partial:
+                if sum(allocated.values()) != sum(row.amount_ntd for row in self._bank_metadata.values()):
+                    raise RuntimeError("client_receipt_partial_cash_not_conserved")
+                _apply_partial_allocations(cursor, selection, self._obligation_amounts, allocated, resulting_version)
+            else:
+                _validate_exact_zero(self._obligation_amounts, allocated)
+                _settle_selected_obligations(cursor, selection, self._obligation_amounts, resulting_version)
             _advance_account_version(cursor, request, resulting_version)
-            _upsert_deposit_settlement_projection(
-                cursor,
-                selection,
-                self._obligation_amounts,
-                self._ledger_entry_ids,
-                settlement_identity,
-                resulting_version,
-            )
-            _append_projection_outbox(
-                cursor,
-                request,
-                settlement_identity,
-                resulting_version,
-                self._obligation_amounts,
-            )
+            cash_totals = _effective_receipt_allocations(cursor, selection.obligation_identities)
+            self._settled_stages = {stage for stage in self._obligation_stages.values()
+                if all(allocated.get(identity, 0) == self._obligation_amounts[identity]
+                       for identity, value in self._obligation_stages.items() if value is stage)}
+            deposit_ids = tuple(identity for identity, stage in self._obligation_stages.items() if stage is PaymentStage.DEPOSIT)
+            if PaymentStage.DEPOSIT in self._settled_stages:
+                _upsert_deposit_settlement_projection(
+                    cursor, replace(selection, payment_stage=PaymentStage.DEPOSIT, obligation_identities=deposit_ids), self._obligation_amounts,
+                    self._ledger_entry_ids, settlement_identity, resulting_version,
+                    settled_amounts=cash_totals,
+                )
+            for stage in sorted(set(self._obligation_stages.values()), key=lambda value:value.value):
+                identities = tuple(identity for identity, value in self._obligation_stages.items() if value is stage)
+                stage_request = replace(request, selection=replace(selection, payment_stage=stage, obligation_identities=identities))
+                _append_projection_outbox(cursor, stage_request, settlement_identity, resulting_version,
+                    {identity:self._obligation_amounts[identity] for identity in identities},
+                    fully_settled=stage in self._settled_stages,
+                    receipt_amounts={identity:allocated.get(identity,0) for identity in identities},
+                    purpose='projection' if selection.payment_stage is not None else 'projection:'+stage.value)
             from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
             synchronize_terminal_subsidy_return(cursor, selection.case_no, actor=request.actor,
                 key=request.idempotency_key, correlation_id=request.correlation_id,
@@ -221,25 +230,37 @@ class MySqlClientReceiptReconciliationRepository:
         if candidate.status is not ReconciliationStatus.OVERAGE:
             return
         request = self._require_request()
-        if len(request.selection.obligation_identities) != 1:
-            raise RuntimeError("client_receipt_overage_requires_one_obligation")
-        if len(self._ledger_entry_ids) != 1:
-            raise RuntimeError("client_receipt_overage_requires_one_bank_fact")
-        obligation_identity = request.selection.obligation_identities[0]
-        receipt_ledger_entry_id = next(iter(self._ledger_entry_ids.values()))
-        refund_identity = _overage_refund_identity(candidate.settlement_identity.value)
-        source_identity = f"receipt-overage:{candidate.settlement_identity.value}"
+        allocated = {}
+        target = {}
+        for allocation in candidate.allocations:
+            allocated[allocation.bank_fact_identity] = allocated.get(allocation.bank_fact_identity, 0) + allocation.amount.amount
+            target[allocation.bank_fact_identity] = allocation.obligation_identity
+        for ordinal, identity in enumerate(sorted(self._bank_metadata), start=1):
+            surplus = self._bank_metadata[identity].amount_ntd - allocated.get(identity, 0)
+            if surplus <= 0:
+                continue
+            self._establish_source_overage(candidate, resulting_version, identity, surplus,
+                target.get(identity, candidate.allocations[-1].obligation_identity), ordinal)
+
+    def _establish_source_overage(self, candidate, resulting_version, bank_identity, surplus, obligation_identity, ordinal):
+        request = self._require_request()
+        receipt_ledger_entry_id = self._ledger_entry_ids[bank_identity]
+        seed = candidate.settlement_identity.value
+        if len(self._bank_metadata) > 1:
+            seed = hashlib.sha256((seed + ':' + bank_identity).encode()).hexdigest()
+        refund_identity = _overage_refund_identity(seed)
+        source_identity = f"receipt-overage:{seed}"
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
                 _OVERAGE_REFUND_EVENT_INSERT_SQL,
                 (
                     refund_identity,
                     request.selection.case_no,
-                    candidate.overage_amount.amount,
+                    surplus,
                     source_identity,
                     obligation_identity,
                     request.expected_account_version.value,
-                    _child_key(request, "overage-refund-event", 1),
+                    _child_key(request, "overage-refund-event", ordinal),
                     request.actor.actor_id,
                     request.reason,
                 ),
@@ -253,7 +274,7 @@ class MySqlClientReceiptReconciliationRepository:
                     refund_identity,
                     request.selection.case_no,
                     obligation_identity,
-                    candidate.overage_amount.amount,
+                    surplus,
                     event_id,
                     resulting_version,
                 ),
@@ -265,13 +286,13 @@ class MySqlClientReceiptReconciliationRepository:
                 _OVERAGE_DISPOSITION_INSERT_SQL,
                 (
                     request.selection.case_no,
-                    self._bank_metadata[request.selection.bank_fact_identities[0]].row_id,
+                    self._bank_metadata[bank_identity].row_id,
                     receipt_ledger_entry_id,
                     obligation_identity,
                     refund_identity,
-                    candidate.overage_amount.amount,
+                    surplus,
                     candidate.settlement_identity.value,
-                    _child_key(request, "overage-disposition", 1),
+                    _child_key(request, "overage-disposition", ordinal),
                     request.actor.actor_id,
                     request.reason,
                 ),
@@ -279,7 +300,9 @@ class MySqlClientReceiptReconciliationRepository:
 
     def append_orders_deposit_intent(self, candidate) -> None:
         request = self._require_request()
-        if request.selection.payment_stage is not PaymentStage.DEPOSIT:
+        if request.selection.payment_stage is None and PaymentStage.DEPOSIT not in self._settled_stages:
+            return
+        if request.selection.payment_stage is not None and request.selection.payment_stage is not PaymentStage.DEPOSIT:
             raise RuntimeError("orders deposit intent requires deposit stage")
         payload = {
             "case_no": request.selection.case_no,
@@ -299,7 +322,7 @@ class MySqlClientReceiptReconciliationRepository:
         request = self._require_request()
         payload = {
             "case_no": request.selection.case_no,
-            "payment_stage": request.selection.payment_stage.value,
+            "payment_stage": request.selection.payment_stage.value if request.selection.payment_stage is not None else None,
             "bank_fact_identities": request.selection.bank_fact_identities,
             "obligation_identities": request.selection.obligation_identities,
             "bank_total_ntd": candidate.bank_total.amount,
@@ -331,7 +354,11 @@ class MySqlClientReceiptReconciliationRepository:
         with _mysql_cursor(self._connection) as cursor:
             account_version = _read_account_version(cursor, case_no, lock=False)
             obligations = _query_obligations(cursor, case_no)
-            bank_rows = _query_candidate_bank_rows(cursor)
+            bank_rows = _query_candidate_bank_rows(cursor, case_no)
+            for row in bank_rows:
+                resolution = resolve_client_virtual_account(cursor, _cancellation_code(row))
+                row['resolved_virtual_account_case_no'] = resolution['case_no'] if resolution['result']=='resolved' else None
+                row['selected_case_obligation_identities'] = frozenset(item['obligation_identity'] for item in obligations)
         return {
             "case_no": case_no,
             "account_version": account_version,
@@ -353,6 +380,7 @@ class MySqlClientReceiptReconciliationRepository:
             str(row["obligation_identity"]): int(row["amount_due_ntd"])
             for row in obligation_rows
         }
+        self._obligation_stages = {str(row['obligation_identity']):PaymentStage(str(row['obligation_type'])) for row in obligation_rows}
 
     def _append_outbox(self, intent_type, purpose, payload) -> None:
         request = self._require_request()
@@ -437,6 +465,11 @@ def _load_selected_bank_rows(cursor, selection, *, lock):
         "fir.cancellation_code,fir.bank_references,"
         "fir.classification_type,"
         "classification.classification_type AS authoritative_classification_type,"
+        "classification.disposition AS authoritative_disposition,"
+        "EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=fir.id "
+        "AND issue.active=1 AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest "
+        "WHERE latest.batch_id=issue.batch_id AND latest.finance_import_row_id=issue.finance_import_row_id "
+        "AND latest.issue_code=issue.issue_code)) AS has_active_integrity,"
         "classification.target_identities AS authoritative_target_identities,"
         "classification.reason AS authoritative_reason,"
         "selected_order.client_id AS selected_client_id,"
@@ -466,7 +499,7 @@ def _load_selected_obligations(cursor, selection, *, lock):
     placeholders = _placeholders(selection.obligation_identities)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT obligation_identity,case_no,obligation_type,direction,"
+        "SELECT obligation_identity,case_no,obligation_type,direction,due_date,"
         "amount_due_ntd,status FROM client_obligations "
         f"WHERE obligation_identity IN ({placeholders}) "
         "AND case_no=%s AND direction='receivable_from_client' "
@@ -502,6 +535,7 @@ def _obligation_facts(rows):
             str(row["case_no"]),
             MoneyNTD(int(row["amount_due_ntd"])),
             PaymentStage(str(row["obligation_type"])),
+            row.get('due_date'),
         )
         for row in rows
         if str(row["obligation_type"]) in {
@@ -518,6 +552,8 @@ def _bank_row_is_eligible(row, selection) -> bool:
         and _is_zero_or_none(row.get("debit"))
         and _is_positive_integer_money(row.get("credit"))
         and _classification_type(row) == "client_receipt"
+        and row.get("authoritative_disposition") != "blocked"
+        and not row.get("has_active_integrity", False)
         and row.get("reconciliation_status") == "pending"
         and row.get("transaction_date") is not None
         and row.get("ledger_entry_id") is None
@@ -551,13 +587,17 @@ def _bank_row_matches_selection(row, selection) -> bool:
 def _matches_legacy_case_selection(row, case_no: str) -> bool:
     if _resolved_case_no(row) == case_no:
         return True
-    return _is_single_heuristic_client_candidate(row)
+    targets = _json_array(row.get('authoritative_target_identities'))
+    exact_case_targets = bool(targets) and set(targets) <= row.get('selected_case_obligation_identities', frozenset())
+    return _is_single_heuristic_client_candidate(row) or exact_case_targets
 
 
 def _has_exact_authoritative_targets(row, selection) -> bool:
     if _classification_type(row) != "client_receipt":
         return False
     targets = _json_array(row.get("authoritative_target_identities"))
+    if selection.payment_stage is None:
+        return bool(targets) and set(targets) <= set(selection.obligation_identities)
     return tuple(sorted(targets)) == selection.obligation_identities
 
 
@@ -718,6 +758,38 @@ def _validate_exact_zero(obligation_amounts, allocated_amounts) -> None:
         raise RuntimeError("Client Receipt selected obligations are not exactly zero")
 
 
+def _effective_receipt_allocations(cursor, identities):
+    cursor.execute(
+        "SELECT allocation.obligation_identity,SUM(CASE WHEN ledger.entry_type='receipt' THEN allocation.amount_ntd "
+        "WHEN ledger.entry_type='reversal' AND original.entry_type='receipt' THEN -allocation.amount_ntd ELSE 0 END) AS amount_ntd "
+        "FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id "
+        "LEFT JOIN client_ledger_entries original ON original.id=ledger.reversal_of_entry_id "
+        f"WHERE allocation.obligation_identity IN ({_placeholders(identities)}) GROUP BY allocation.obligation_identity", tuple(identities))
+    return {str(row['obligation_identity']):int(row['amount_ntd']) for row in cursor.fetchall()}
+
+
+def _apply_partial_allocations(cursor, selection, obligation_amounts, allocated_amounts, resulting_version):
+    if set(allocated_amounts) - set(obligation_amounts) or not 0 < sum(allocated_amounts.values()) < sum(obligation_amounts.values()):
+        raise RuntimeError("client_receipt_partial_allocation_invalid")
+    for identity in selection.obligation_identities:
+        allocated = allocated_amounts.get(identity, 0)
+        before = obligation_amounts[identity]
+        if not 0 <= allocated <= before:
+            raise RuntimeError("client_receipt_partial_allocation_invalid")
+        remaining = before - allocated
+        cursor.execute(
+            "UPDATE client_obligations SET amount_due_ntd=%s,status=%s,projection_version=%s "
+            "WHERE obligation_identity=%s AND case_no=%s AND status='open' AND amount_due_ntd=%s",
+            (remaining, 'open' if remaining else 'settled', resulting_version, identity, selection.case_no, before))
+        if cursor.rowcount != 1:
+            raise RuntimeError("client_finance_candidate_stale")
+
+        cursor.execute("INSERT IGNORE INTO client_finance_amount_controls(obligation_identity,case_no,amount_mode,computed_ntd,effective_ntd) "
+            "SELECT o.obligation_identity,o.case_no,'automatic',e.after_amount_ntd,e.after_amount_ntd "
+            "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
+            "WHERE o.obligation_identity=%s AND o.obligation_type IN ('deposit','first','second')",(identity,))
+
+
 # Kept cohesive so every selected obligation enforces the same CAS invariant.
 def _settle_selected_obligations(
     cursor,
@@ -763,13 +835,14 @@ def _upsert_deposit_settlement_projection(
     ledger_entry_ids,
     settlement_identity,
     resulting_version,
+    *, settled_amounts=None,
 ):
     if selection.payment_stage is not PaymentStage.DEPOSIT:
         return
     if len(selection.obligation_identities) != 1:
         raise RuntimeError("deposit receipt must settle exactly one obligation")
     obligation_identity = selection.obligation_identities[0]
-    contracted_amount = obligation_amounts[obligation_identity]
+    contracted_amount = (settled_amounts if settled_amounts is not None else obligation_amounts)[obligation_identity]
     latest_ledger_entry_id = max(ledger_entry_ids.values())
     cursor.execute(
         _DEPOSIT_SETTLEMENT_UPSERT_SQL,
@@ -792,22 +865,24 @@ def _append_projection_outbox(
     settlement_identity,
     resulting_version,
     obligation_amounts,
+    *, fully_settled=True, receipt_amounts=None, purpose='projection',
 ):
     payload = {
         "case_no": request.selection.case_no,
         "settlement_identity": settlement_identity,
         "resulting_account_version": resulting_version,
     }
-    if request.selection.payment_stage is PaymentStage.SECOND:
-        payload.update(line_second_payment_notification=True, payment_stage='second',
+    if fully_settled and request.selection.payment_stage in (PaymentStage.FIRST,PaymentStage.SECOND):
+        stage=request.selection.payment_stage.value
+        payload.update({f'line_{stage}_payment_notification':True}, payment_stage=stage,
                        obligation_identities=list(request.selection.obligation_identities),
-                       amount_ntd=sum(obligation_amounts.values()))
+                       amount_ntd=sum((receipt_amounts if receipt_amounts is not None else obligation_amounts).values()))
     cursor.execute(
         _OUTBOX_INSERT_SQL,
         (
             request.selection.case_no,
             "projection_refresh",
-            _outbox_key(request, "projection"),
+            _outbox_key(request, purpose),
             _canonical_json(payload),
         ),
     )
@@ -835,13 +910,20 @@ def _query_obligations(cursor, case_no):
 
 
 # Kept as one query so source eligibility filtering remains database-side.
-def _query_candidate_bank_rows(cursor):
+def _query_candidate_bank_rows(cursor, case_no):
     cursor.execute(
         "SELECT fir.id,fir.dedup_fingerprint,fir.format_id,"
         "fir.transaction_date,fir.debit,fir.credit,fir.direction,fir.currency,"
         "fir.cancellation_code,fir.bank_references,"
         "fir.classification_type,"
         "classification.classification_type AS authoritative_classification_type,"
+        "classification.disposition AS authoritative_disposition,"
+        "EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=fir.id "
+        "AND issue.active=1 AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest "
+        "WHERE latest.batch_id=issue.batch_id AND latest.finance_import_row_id=issue.finance_import_row_id "
+        "AND latest.issue_code=issue.issue_code)) AS has_active_integrity,"
+        "classification.target_identities AS authoritative_target_identities,"
+        "classification.reason AS authoritative_reason,selected_order.client_id AS selected_client_id,"
         "fir.reconciliation_status,"
         "ledger.id AS ledger_entry_id "
         "FROM finance_import_rows fir "
@@ -851,6 +933,7 @@ def _query_candidate_bank_rows(cursor):
         "WHERE latest.finance_import_row_id=fir.id) "
         "LEFT JOIN client_ledger_entries ledger "
         "ON ledger.finance_import_row_id=fir.id "
+        "JOIN orders selected_order ON selected_order.case_no=%s "
         "WHERE COALESCE(classification.classification_type,"
         "fir.classification_type)='client_receipt' "
         "AND fir.reconciliation_status='pending' "
@@ -861,7 +944,7 @@ def _query_candidate_bank_rows(cursor):
         "AND (fir.currency IS NULL OR fir.currency IN ('TWD','NTD')) "
         "AND fir.transaction_date IS NOT NULL "
         "AND ledger.id IS NULL "
-        "ORDER BY fir.transaction_date,fir.id",
+        "ORDER BY fir.transaction_date,fir.id", (case_no,),
     )
     return tuple(cursor.fetchall())
 
@@ -1023,8 +1106,8 @@ def _insert_refund_recipient_snapshot(cursor, refund_identity, case_no, source_k
 _REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL = (
     "INSERT INTO client_refund_recipient_snapshots "
     "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
-    "SELECT %s,query_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
-    "WHERE query_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
+    "SELECT %s,bound_case_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
+    "WHERE bound_case_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
     "AND CHAR_LENGTH(TRIM(refund_account_no))>0"
 )
 _RECEIPT_INSERT_SQL = (

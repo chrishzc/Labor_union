@@ -1118,6 +1118,38 @@ CREATE TABLE `client_finance_accounts` (
   CONSTRAINT `fk_client_finance_account_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `client_finance_amount_changes` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('manual_amount','adopt_calculation','source_update') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_ntd` bigint NOT NULL,
+  `after_ntd` bigint NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_client_finance_amount_key` (`operation_key`),
+  KEY `ix_client_finance_amount_history` (`obligation_identity`,`id`),
+  CONSTRAINT `fk_client_finance_amount_change_source` FOREIGN KEY (`obligation_identity`) REFERENCES `client_obligations` (`obligation_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_client_finance_amount_change` CHECK (((`before_ntd` >= 0) and (`after_ntd` >= 0) and (`computed_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `client_finance_amount_controls` (
+  `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_mode` enum('automatic','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `effective_ntd` bigint NOT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`obligation_identity`),
+  CONSTRAINT `fk_client_finance_amount_source` FOREIGN KEY (`obligation_identity`) REFERENCES `client_obligations` (`obligation_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_client_finance_amount_control` CHECK (((`computed_ntd` >= 0) and (`effective_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `client_finance_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -1133,6 +1165,34 @@ CREATE TABLE `client_finance_apply_receipts` (
   CONSTRAINT `fk_client_finance_receipt_order` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_client_finance_receipt_fingerprints` CHECK ((regexp_like(`command_fingerprint`,_utf8mb4'^[0-9a-f]{64}$') and regexp_like(`preview_fingerprint`,_utf8mb4'^[0-9a-f]{64}$'))),
   CONSTRAINT `chk_client_finance_receipt_snapshot` CHECK ((json_type(`result_snapshot`) = _utf8mb4'OBJECT'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `client_finance_noncash_events` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `target_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `target_kind` enum('obligation','over_refund_recovery') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('loss','reduce_service_fee','union_bank_fee','absorb_overpayment') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `original_ntd` bigint NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  `before_remaining_ntd` bigint NOT NULL,
+  `after_remaining_ntd` bigint NOT NULL,
+  `bank_fee_row_id` bigint DEFAULT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_client_noncash_key` (`operation_key`),
+  UNIQUE KEY `uq_client_noncash_bank_fee` (`bank_fee_row_id`),
+  KEY `ix_client_noncash_target` (`target_identity`,`id`),
+  KEY `fk_client_noncash_case` (`case_no`),
+  CONSTRAINT `fk_client_noncash_case` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_client_noncash_fee` FOREIGN KEY (`bank_fee_row_id`) REFERENCES `finance_import_rows` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_client_noncash_amount` CHECK (((`original_ntd` >= 0) and (`amount_ntd` > 0) and (`before_remaining_ntd` >= `amount_ntd`) and (`after_remaining_ntd` = (`before_remaining_ntd` - `amount_ntd`)))),
+  CONSTRAINT `chk_client_noncash_reason` CHECK ((char_length(trim(`reason`)) > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `client_finance_outbox` (
@@ -1403,51 +1463,6 @@ CREATE TABLE `client_over_refund_recovery_matchings` (
   CONSTRAINT `fk_client_recovery_matching_recovery` FOREIGN KEY (`recovery_identity`) REFERENCES `client_over_refund_recoveries` (`recovery_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_client_over_refund_recovery_matching_evidence` CHECK (((`evidence_reference` is null) or (char_length(trim(`evidence_reference`)) > 0))),
   CONSTRAINT `chk_client_recovery_matching_version` CHECK ((`matching_version` = 1))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `client_payment_destination_configuration_current` (
-  `singleton_id` tinyint NOT NULL,
-  `current_event_id` bigint NOT NULL,
-  `account_display` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `revision` bigint NOT NULL,
-  PRIMARY KEY (`singleton_id`),
-  UNIQUE KEY `uq_client_payment_destination_current_event` (`current_event_id`),
-  CONSTRAINT `fk_client_payment_destination_current_event` FOREIGN KEY (`current_event_id`) REFERENCES `client_payment_destination_configuration_events` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_client_payment_destination_current_revision` CHECK ((`revision` > 0)),
-  CONSTRAINT `chk_client_payment_destination_current_text` CHECK ((char_length(trim(`account_display`)) > 0)),
-  CONSTRAINT `chk_client_payment_destination_singleton` CHECK ((`singleton_id` = 1))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `client_payment_destination_configuration_events` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `expected_revision` bigint NOT NULL,
-  `resulting_revision` bigint NOT NULL,
-  `account_display` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `reason` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `correlation_id` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `preview_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `created_at` timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_client_payment_destination_event_idempotency` (`idempotency_key`),
-  UNIQUE KEY `uq_client_payment_destination_event_revision` (`resulting_revision`),
-  CONSTRAINT `chk_client_payment_destination_event_fingerprint` CHECK (regexp_like(`preview_fingerprint`,_utf8mb4'^[0-9a-f]{64}$')),
-  CONSTRAINT `chk_client_payment_destination_event_revision` CHECK ((`resulting_revision` = (`expected_revision` + 1))),
-  CONSTRAINT `chk_client_payment_destination_event_text` CHECK (((char_length(trim(`account_display`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`reason`)) > 0) and (char_length(trim(`correlation_id`)) > 0)))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `client_payment_destination_configuration_receipts` (
-  `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `event_id` bigint NOT NULL,
-  `command_fingerprint` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `result_snapshot` json NOT NULL,
-  `created_at` timestamp(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (`idempotency_key`),
-  UNIQUE KEY `uq_client_payment_destination_receipt_event` (`event_id`),
-  CONSTRAINT `fk_client_payment_destination_receipt_event` FOREIGN KEY (`event_id`) REFERENCES `client_payment_destination_configuration_events` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `chk_client_payment_destination_receipt_fingerprint` CHECK (regexp_like(`command_fingerprint`,_utf8mb4'^[0-9a-f]{64}$')),
-  CONSTRAINT `chk_client_payment_destination_receipt_snapshot` CHECK ((json_type(`result_snapshot`) = _utf8mb4'OBJECT'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `client_payment_terms` (
@@ -2635,6 +2650,21 @@ CREATE TABLE `finance_anomaly_occurrences` (
   CONSTRAINT `chk_finance_anomaly_occurrence_source` CHECK (((`finance_import_row_id` is not null) <> (`finance_import_batch_id` is not null)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `finance_case_accounting_markers` (
+  `case_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source_versions` json NOT NULL,
+  `accounting_snapshot` json NOT NULL,
+  `operation_key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_no`),
+  UNIQUE KEY `uk_finance_case_marker_operation` (`operation_key`),
+  CONSTRAINT `chk_finance_case_marker_snapshot` CHECK ((json_type(`accounting_snapshot`) = _utf8mb4'OBJECT')),
+  CONSTRAINT `chk_finance_case_marker_text` CHECK (((char_length(trim(`reason`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`operation_key`)) > 0))),
+  CONSTRAINT `chk_finance_case_marker_versions` CHECK ((json_type(`source_versions`) = _utf8mb4'OBJECT'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `finance_import_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -3129,6 +3159,38 @@ CREATE TABLE `government_subsidy_allocations` (
   CONSTRAINT `chk_government_subsidy_allocation_reversal_target` CHECK ((`reversal_target_type` = _utf8mb4'receipt'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `government_subsidy_amount_changes` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('manual_amount','adopt_calculation','source_update') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_ntd` bigint NOT NULL,
+  `after_ntd` bigint NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_government_subsidy_amount_key` (`operation_key`),
+  KEY `ix_government_subsidy_amount_history` (`case_no`,`id`),
+  CONSTRAINT `fk_government_subsidy_amount_change_source` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_government_subsidy_amount_change` CHECK (((`before_ntd` >= 0) and (`after_ntd` >= 0) and (`computed_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `government_subsidy_amount_controls` (
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_year` smallint unsigned NOT NULL,
+  `amount_mode` enum('automatic','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `effective_ntd` bigint NOT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_no`),
+  CONSTRAINT `fk_government_subsidy_amount_source` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_government_subsidy_amount_control` CHECK (((`computed_ntd` >= 0) and (`effective_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `government_subsidy_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -3400,6 +3462,25 @@ CREATE TABLE `government_subsidy_overpayments` (
   CONSTRAINT `chk_government_subsidy_overpayment_amount` CHECK (((`original_amount_ntd` > 0) and (`remaining_amount_ntd` >= 0) and (`remaining_amount_ntd` <= `original_amount_ntd`) and ((`remaining_amount_ntd` > 0) or (`status` in (_utf8mb4'offset_applied',_utf8mb4'returned')))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `government_subsidy_period_balances` (
+  `balance_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `root_receipt_id` bigint NOT NULL,
+  `balance_kind` enum('original','correction') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `direction` enum('receivable','payable') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `expected_ntd` bigint NOT NULL,
+  `received_ntd` bigint NOT NULL DEFAULT '0',
+  `recognized_ntd` bigint NOT NULL DEFAULT '0',
+  `returned_ntd` bigint NOT NULL DEFAULT '0',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`balance_identity`),
+  KEY `fk_government_balance_case` (`case_no`),
+  KEY `ix_government_balance_kind` (`root_receipt_id`,`balance_kind`,`case_no`),
+  CONSTRAINT `fk_government_balance_case` FOREIGN KEY (`case_no`) REFERENCES `orders` (`case_no`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_government_balance_receipt` FOREIGN KEY (`root_receipt_id`) REFERENCES `government_subsidy_period_entries` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_government_balance_amount` CHECK (((`expected_ntd` >= 0) and (`received_ntd` >= 0) and (`recognized_ntd` >= 0) and (`returned_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `government_subsidy_period_entries` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `period_unit` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -3435,6 +3516,27 @@ CREATE TABLE `government_subsidy_period_members` (
   KEY `ix_subsidy_period_case` (`case_no`),
   CONSTRAINT `fk_subsidy_period_member` FOREIGN KEY (`receipt_id`) REFERENCES `government_subsidy_period_entries` (`id`),
   CONSTRAINT `ck_subsidy_period_member_amount` CHECK ((`amount_ntd` >= 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `government_subsidy_period_operations` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `balance_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('receipt','refund','loss','absorb_overpayment','correction') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  `bank_entry_id` bigint DEFAULT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_government_operation_key` (`operation_key`),
+  UNIQUE KEY `uq_government_operation_bank` (`bank_entry_id`),
+  KEY `ix_government_operation_balance` (`balance_identity`,`id`),
+  CONSTRAINT `fk_government_operation_balance` FOREIGN KEY (`balance_identity`) REFERENCES `government_subsidy_period_balances` (`balance_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_government_operation_bank` FOREIGN KEY (`bank_entry_id`) REFERENCES `government_subsidy_period_entries` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_government_operation_amount` CHECK ((`amount_ntd` > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `government_subsidy_period_years` (
@@ -6171,6 +6273,39 @@ CREATE TABLE `payroll_adjustment_events` (
   CONSTRAINT `chk_payroll_adjustment_nonzero` CHECK ((`amount_ntd` <> 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `payroll_amount_changes` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('manual_amount','adopt_calculation','source_update') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `before_ntd` bigint NOT NULL,
+  `after_ntd` bigint NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_payroll_amount_key` (`operation_key`),
+  KEY `ix_payroll_amount_history` (`obligation_identity`,`id`),
+  CONSTRAINT `fk_payroll_amount_change_source` FOREIGN KEY (`obligation_identity`) REFERENCES `staff_obligations` (`obligation_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_payroll_amount_change` CHECK (((`before_ntd` >= 0) and (`after_ntd` >= 0) and (`computed_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `payroll_amount_controls` (
+  `settlement_base_ntd` bigint DEFAULT NULL,
+  `obligation_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `case_no` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_mode` enum('automatic','manual') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `computed_ntd` bigint NOT NULL,
+  `effective_ntd` bigint NOT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`obligation_identity`),
+  CONSTRAINT `fk_payroll_amount_source` FOREIGN KEY (`obligation_identity`) REFERENCES `staff_obligations` (`obligation_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_payroll_amount_control` CHECK (((`computed_ntd` >= 0) and (`effective_ntd` >= 0)))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `payroll_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -7956,6 +8091,27 @@ CREATE TABLE `staff_profile_change_events` (
   CONSTRAINT `chk_staff_profile_event_version` CHECK ((`resulting_version` = (`expected_version` + 1)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `staff_recovery_noncash_events` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `recovery_identity` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` enum('loss','absorb_overpayment') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_ntd` bigint NOT NULL,
+  `before_remaining_ntd` bigint NOT NULL,
+  `after_remaining_ntd` bigint NOT NULL,
+  `operation_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `command_digest` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `confirmed_on` date NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_staff_noncash_key` (`operation_key`),
+  KEY `ix_staff_noncash_recovery` (`recovery_identity`,`id`),
+  CONSTRAINT `fk_staff_noncash_recovery` FOREIGN KEY (`recovery_identity`) REFERENCES `staff_overpayment_recoveries` (`recovery_identity`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `chk_staff_noncash_amount` CHECK (((`amount_ntd` > 0) and (`before_remaining_ntd` >= `amount_ntd`) and (`after_remaining_ntd` = (`before_remaining_ntd` - `amount_ntd`)))),
+  CONSTRAINT `chk_staff_noncash_reason` CHECK ((char_length(trim(`reason`)) > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `staff_regions` (
   `staff_id` int NOT NULL,
   `region_name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '區域名稱 (北區/東區/香山區/新竹縣/苗栗縣/其他)',
@@ -8358,6 +8514,22 @@ SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be upd
 DELIMITER ;
 
 DELIMITER $$
+CREATE TRIGGER `trg_client_finance_amount_changes_delete` BEFORE DELETE ON `client_finance_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_client_finance_amount_changes_update` BEFORE UPDATE ON `client_finance_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_client_finance_noncash_events_delete` BEFORE DELETE ON `client_finance_noncash_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_noncash_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_client_finance_noncash_events_update` BEFORE UPDATE ON `client_finance_noncash_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_noncash_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
 CREATE TRIGGER `trg_client_finance_receipts_before_delete` BEFORE DELETE ON `client_finance_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be deleted'; END IF; END$$
 DELIMITER ;
 
@@ -8417,22 +8589,6 @@ DELIMITER ;
 DELIMITER $$
 CREATE TRIGGER `trg_client_over_refund_recovery_receipts_before_update` BEFORE UPDATE ON `client_over_refund_recovery_apply_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be updated'$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE TRIGGER `trg_client_payment_destination_events_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable'$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE TRIGGER `trg_client_payment_destination_events_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination events are immutable'$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE TRIGGER `trg_client_payment_destination_receipts_before_delete` BEFORE DELETE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable'$$
-DELIMITER ;
-
-DELIMITER $$
-CREATE TRIGGER `trg_client_payment_destination_receipts_before_update` BEFORE UPDATE ON `client_payment_destination_configuration_receipts` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'client payment destination receipts are immutable'$$
 DELIMITER ;
 
 DELIMITER $$
@@ -8835,6 +8991,14 @@ SET MESSAGE_TEXT = 'government_subsidy_allocations cannot be updated'$$
 DELIMITER ;
 
 DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_amount_changes_delete` BEFORE DELETE ON `government_subsidy_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government_subsidy_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_amount_changes_update` BEFORE UPDATE ON `government_subsidy_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government_subsidy_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_approval_before_delete` BEFORE DELETE ON `government_subsidy_claim_approval_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government subsidy approval cannot be deleted'$$
 DELIMITER ;
@@ -8871,6 +9035,14 @@ DELIMITER ;
 DELIMITER $$
 CREATE TRIGGER `trg_government_subsidy_overpayment_events_before_update` BEFORE UPDATE ON `government_subsidy_overpayment_events` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be updated'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_period_operations_delete` BEFORE DELETE ON `government_subsidy_period_operations` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government_subsidy_period_operations is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_government_subsidy_period_operations_update` BEFORE UPDATE ON `government_subsidy_period_operations` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'government_subsidy_period_operations is immutable'$$
 DELIMITER ;
 
 DELIMITER $$
@@ -9520,6 +9692,14 @@ SET MESSAGE_TEXT = 'payroll_adjustment_events records cannot be updated'$$
 DELIMITER ;
 
 DELIMITER $$
+CREATE TRIGGER `trg_payroll_amount_changes_delete` BEFORE DELETE ON `payroll_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_payroll_amount_changes_update` BEFORE UPDATE ON `payroll_amount_changes` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_amount_changes is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
 CREATE TRIGGER `trg_payroll_apply_receipts_before_delete` BEFORE DELETE ON `payroll_apply_receipts` FOR EACH ROW BEGIN IF NOT COALESCE(((@registry_delete_key IS NOT NULL AND @registry_delete_case IS NOT NULL AND EXISTS(SELECT 1 FROM application_command_claims cmd WHERE cmd.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin) AND cmd.command_family='registry_delete/v1' AND cmd.aggregate_identity=(CONCAT('case:',CONVERT(@registry_delete_case USING utf8mb4)) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM admin_command_receipts receipt WHERE receipt.command_family='registry_delete/v1' AND receipt.idempotency_key=(CONVERT(@registry_delete_key USING utf8mb4) COLLATE utf8mb4_bin)) AND NOT EXISTS(SELECT 1 FROM contract_signing_events signed_event WHERE signed_event.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND signed_event.event_type='signed_received') AND NOT EXISTS(SELECT 1 FROM order_contract_flow_events completed WHERE completed.case_no=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci) AND completed.event_type='contract_completed')) AND ((OLD.`case_no`=(CONVERT(@registry_delete_case USING utf8mb4) COLLATE utf8mb4_unicode_ci)))),FALSE) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be deleted'; END IF; END$$
 DELIMITER ;
 
@@ -9983,6 +10163,14 @@ DELIMITER ;
 DELIMITER $$
 CREATE TRIGGER `trg_staff_recovery_matchings_before_update` BEFORE UPDATE ON `staff_overpayment_recovery_matchings` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be updated'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_staff_recovery_noncash_events_delete` BEFORE DELETE ON `staff_recovery_noncash_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff_recovery_noncash_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_staff_recovery_noncash_events_update` BEFORE UPDATE ON `staff_recovery_noncash_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'staff_recovery_noncash_events is immutable'$$
 DELIMITER ;
 
 CREATE OR REPLACE VIEW `case_pricing_facts` AS select `o`.`case_no` AS `case_no`,1 AS `pricing_active`,(`e`.`id` is not null) AS `pricing_override_active`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.rule')),`i`.`rule_name`) AS `pricing_rule`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.subsidy_hours')),`i`.`subsidy_hours`) AS `pricing_subsidy_hours`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.covered')),`i`.`client_covered`) AS `pricing_client_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.client.excess')),`i`.`client_excess`) AS `pricing_client_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),`i`.`payroll_covered`) AS `pricing_payroll_covered`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.excess')),`i`.`payroll_excess`) AS `pricing_payroll_excess`,coalesce(json_unquote(json_extract(`e`.`pricing_json`,'$.payroll.covered')),json_unquote(json_extract(`p`.`policy_json`,'$.twins_payroll.covered'))) AS `pricing_twins_payroll_covered` from ((((`orders` `o` join `clients` `c` on((`c`.`id` = `o`.`client_id`))) left join `accounting_pricing_policies` `p` on((`p`.`id` = `o`.`pricing_policy_id`))) left join json_table(`p`.`policy_json`, '$.identities[*]' columns (`identity_name` varchar(100) character set utf8mb4 path '$.identity_name', `rule_name` varchar(20) character set utf8mb4 path '$.rule', `subsidy_hours` varchar(100) character set utf8mb4 path '$.subsidy_hours', `client_covered` varchar(30) character set utf8mb4 path '$.client.covered', `client_excess` varchar(30) character set utf8mb4 path '$.client.excess', `payroll_covered` varchar(30) character set utf8mb4 path '$.payroll.covered', `payroll_excess` varchar(30) character set utf8mb4 path '$.payroll.excess')) `i` on(((`i`.`identity_name` collate utf8mb4_unicode_ci) = ((case `c`.`identity_status` when '一般市民' then '補助市民' when '低收入戶' then '社福' when '中低收入戶' then '社福' else `c`.`identity_status` end) collate utf8mb4_unicode_ci)))) left join `case_pricing_events` `e` on(((`e`.`id` = `o`.`pricing_override_event_id`) and (`e`.`case_no` = `o`.`case_no`)))) where ((`o`.`pricing_policy_id` is not null) or (`o`.`pricing_override_event_id` is not null));

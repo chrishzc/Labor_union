@@ -135,6 +135,7 @@ _CURRENT_FLOW_PREVIEWS = (
     ("payment-overdue-second", "第二期款逾期－客戶私訊補寄與人工提醒", "text"),
     ("payment-first-reminder", "第一期款－服務開始日客戶私訊", "text"),
     ("payment-first-greeting", "第一期已結清－服務開始問候", "text"),
+    ("payment-first-settled", "第一期款已確認入帳通知", "text"),
     ("payment-second-reminder", "第二期款－到期日客戶私訊", "text"),
     ("service-day-log-reminder", "服務日誌－工會發送案件群組提醒", "text"),
     ("deposit-reminder", "訂金繳費提醒卡", "flex"),

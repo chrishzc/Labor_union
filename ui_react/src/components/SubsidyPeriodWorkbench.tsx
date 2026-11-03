@@ -1,70 +1,50 @@
-/** One month/quarter/year selector, one bank receipt, one reconciliation. */
-import { useEffect, useRef, useState } from 'react';
-import { subsidyPeriodClient, type SubsidyBankRow, type SubsidyPeriod, type SubsidyPeriodView } from '../api/government_subsidy/period_reconciliation_client';
-import { ApiHttpError } from '../api/shared/typed_errors';
-import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
-
-const money = (value:number|null) => value === null ? '待確認' : `NT$ ${value.toLocaleString('zh-TW')}`;
-export function SubsidyPeriodWorkbench({revision=0,onOpenCase}:{revision?:number;onOpenCase:(caseNo:string)=>void}) {
-  const [period,setPeriod] = useState<SubsidyPeriod>({unit:'quarter',year:new Date().getFullYear(),index:Math.floor(new Date().getMonth()/3)+1});
-  const [yearText,setYearText] = useState(String(new Date().getFullYear()));
-  const [view,setView] = useState<SubsidyPeriodView|null>(null);
-  const [banks,setBanks] = useState<SubsidyBankRow[]>([]);
-  const [bank,setBank] = useState('');
-  const [error,setError] = useState('');
-  const [message,setMessage] = useState('');
-  const [busy,setBusy] = useState(false);
-  const [unknown,setUnknown] = useState(false);
-  const {requestLeave}=useUnsavedNavigation();
-  const [refresh,setRefresh] = useState(0);
-  const command = useRef<{scope:string;key:string}|null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    setView(null);setError('');setBank('');
-    void Promise.all([subsidyPeriodClient.query(period,controller.signal),subsidyPeriodClient.bankRows(controller.signal)])
-      .then(([result,rows]) => {if (!controller.signal.aborted) {setView(result);setBanks(rows);}})
-      .catch(() => {if (!controller.signal.aborted) setError('補助資料暫時無法取得，請重新整理。');});
-    return () => controller.abort();
-  },[period,revision,refresh]);
-  const selected = banks.find(row => String(row.id)===bank);
-  const validYear=/^\d{4}$/.test(yearText)&&Number(yearText)>=1912&&Number(yearText)<=9998;
-  const exact = validYear && !!view && selected?.amount_ntd===view.total_ntd && view.can_reconcile;
-  const apply = async (reversalId?:number) => {
-    if (!view || !selected || busy) return;
-    const scope=JSON.stringify([view.period,view.version,selected.id,reversalId]);
-    if (command.current?.scope!==scope) command.current={scope,key:crypto.randomUUID()};
-    setBusy(true);setError('');setMessage('');
-    try {
-      if (reversalId) await subsidyPeriodClient.reverse(reversalId,selected.id,command.current.key);
-      else await subsidyPeriodClient.reconcile(view,selected.id,command.current.key);
-      command.current=null;
-      setUnknown(false);setBank('');
-      setMessage(reversalId?'整期沖正已記錄，原核銷紀錄保留。':'整期入款已核銷，代墊回收已同步記錄。');
-      setRefresh(value=>value+1);
-    } catch (caught) {
-      setUnknown(!(caught instanceof ApiHttpError) || caught.status>=500 || caught.status===408);
-      setError(caught instanceof ApiHttpError ? caught.message : '尚未確認儲存結果，請用相同選擇重試。');
-    } finally {setBusy(false);}
-  };
-  useUnsavedDraft('政府補助整期核銷', {'選取銀行款項':bank?`${view?.label??''}・流水 #${bank}`:''}, {baseline:{'選取銀行款項':''},busy:busy||unknown,save:async()=>{if(!view||!selected||selected.amount_ntd!==view.total_ntd||!view.can_reconcile)throw new Error('請選擇金額相符且可核銷的銀行款項。');await apply();},discard:()=>setBank('')});
-  return <section aria-label="政府補助整期核銷" className="subsidy-period-workbench">
-    <h3>政府補助整期核銷</h3><p>依服務結束月份彙總；申請與核准在系統外辦理。</p>
-    <div className="finance-filter-bar"><label>彙總單位<select className="finance-select" disabled={busy||unknown} value={period.unit} onChange={event=>{setMessage('');const unit=event.target.value as SubsidyPeriod['unit'];requestLeave(()=>setPeriod({...period,unit,index:1}));}}><option value="month">月</option><option value="quarter">季</option><option value="year">年</option></select></label>
-      <label>年度<input className="finance-input" type="number" min="1912" max="9998" disabled={busy||unknown} value={yearText} onChange={event=>{const value=event.target.value;const year=Number(value);if(/^\d{4}$/.test(value)&&year>=1912&&year<=9998&&year!==period.year)requestLeave(()=>{setYearText(value);setPeriod({...period,year});});else setYearText(value);}} onBlur={()=>{if(!validYear)setYearText(String(period.year));}} /></label>
-      {period.unit!=='year'&&<label>{period.unit==='month'?'月份':'季度'}<select className="finance-select" disabled={busy||unknown} value={period.index} onChange={event=>{const index=Number(event.target.value);requestLeave(()=>setPeriod({...period,index}));}}>{Array.from({length:period.unit==='month'?12:4},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}</select></label>}
-      <button type="button" className="finance-reload-btn" disabled={busy||unknown} onClick={()=>requestLeave(()=>setRefresh(value=>value+1))}>重新整理補助</button></div>
-    {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
-    {!view&&!error&&<p role="status">正在查詢整期補助…</p>}
-    {view&&<><p><strong>{view.label}</strong>・{view.lines.length} 件・本期補助總額 <strong>{money(view.total_ntd)}</strong></p>
-      {view.coverage.map(coverage=><p key={coverage.receipt_id}>本期已由「{coverage.label}」核銷涵蓋。原整筆入款 {money(coverage.amount_ntd)}；已回收代墊 {money(coverage.recovered_advance_ntd)}。{selected&&selected.amount_ntd===-coverage.amount_ntd&&<button type="button" disabled={busy||unknown} onClick={()=>void apply(coverage.receipt_id)}>依整筆退回款沖正</button>}</p>)}
-      {!!view.changed_cases.length&&<p role="alert">已核銷後案件資料有變更：{view.changed_cases.join('、')}。原核銷明細保留，請核對。</p>}
-      {!!view.blocked_cases.length&&!view.coverage.length&&<p role="alert">案件已由其他期間核銷，無法再次核銷：{view.blocked_cases.join('、')}。</p>}
-      <div className="finance-table-container"><table className="finance-table"><thead><tr><th>案件</th><th>服務結束／歸屬月份</th><th>補助金額</th></tr></thead><tbody>{view.lines.map(line=><tr key={line.case_no}><td className="finance-row-actions"><button type="button" disabled={busy||unknown} onClick={()=>onOpenCase(line.case_no)}>{line.case_no}</button></td><td>{line.service_end_date}</td><td>{money(line.amount_ntd)}{line.unavailable_reason&&<small> {line.unavailable_reason==='scheduling_effective_generation_invalid'?'排班資料待確認':'計算資料待確認'}</small>}</td></tr>)}</tbody></table></div>
-      {!view.lines.length&&<p>本期沒有補助案件。</p>}
-      <div className="subsidy-period-bank-actions"><label>政府銀行款項<select className="finance-select" disabled={busy||unknown} value={bank} onChange={event=>setBank(event.target.value)}><option value="">選擇已匯入的整筆款項</option>{banks.map(row=><option key={row.id} value={row.id}>{row.paid_on}・{money(row.amount_ntd)}・流水 #{row.id}</option>)}</select></label>
-      <button type="button" className="finance-btn-primary" disabled={busy||!exact} onClick={()=>void apply()}>{busy?'處理中…':'核銷本期入款'}</button></div>
-      {selected&&selected.amount_ntd>0&&view.total_ntd!==null&&selected.amount_ntd!==view.total_ntd&&<p role="alert">銀行金額與所選期間總額不一致，不能核銷。</p>}
-      <p className="subsidy-refund-note">已涵蓋的月、季、年禁止重複核銷；整筆款項不拆成逐案或逐月入款。</p>
-    </>}
-  </section>;
+/** Whole-period source, balance and next action are independent. */
+import {useEffect,useRef,useState} from 'react';
+import {subsidyPeriodClient,type SubsidyPeriod,type SubsidyPeriodView,type SubsidyBankRow,type GovernmentDifferenceCommand} from '../api/government_subsidy/period_reconciliation_client';
+import {ApiHttpError} from '../api/shared/typed_errors';
+import {useUnsavedChanges,useUnsavedNavigation} from './UnsavedChanges';
+const money=(n:number|null)=>n===null?'待確認':`NT$ ${n.toLocaleString('zh-TW')}`;
+export function SubsidyPeriodWorkbench({revision=0,onOpenCase}:{revision?:number;onOpenCase:(caseNo:string)=>void}){
+ const [period,setPeriod]=useState<SubsidyPeriod>({unit:'quarter',year:new Date().getFullYear(),index:Math.floor(new Date().getMonth()/3)+1});
+ const [yearText,setYearText]=useState(String(period.year));const [view,setView]=useState<SubsidyPeriodView|null>(null);const [banks,setBanks]=useState<SubsidyBankRow[]>([]);
+ const [bank,setBank]=useState('');const [handling,setHandling]=useState('');const [balanceId,setBalanceId]=useState('');const [action,setAction]=useState('');
+ const [amount,setAmount]=useState('');const [reason,setReason]=useState('');const [caseNo,setCaseNo]=useState('');const [correction,setCorrection]=useState('');
+ const [confirmed,setConfirmed]=useState(false);const [busy,setBusy]=useState(false);const [unknown,setUnknown]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');const [refresh,setRefresh]=useState(0);
+ const original=useRef<GovernmentDifferenceCommand|null>(null);const {requestLeave}=useUnsavedNavigation();
+ useUnsavedChanges('政府整期帳務',[bank,handling,balanceId,action,amount,reason,caseNo,correction].map((after,i)=>({label:['銀行款','處理方式','款項','下一步','金額','依據','案件','更正方式'][i],before:'',after})).filter(x=>!!x.after),{busy:busy||unknown,discard:clear,save:async()=>{if(!validDetails||!await apply(true))throw new Error('請先核對完整年度與處理內容。');}});
+ useEffect(()=>{const controller=new AbortController();setView(null);setError('');queueMicrotask(()=>{if(controller.signal.aborted)return;void Promise.all([subsidyPeriodClient.query(period,controller.signal),subsidyPeriodClient.bankRows(controller.signal)]).then(([v,b])=>{if(!controller.signal.aborted){setView(v);setBanks(b);}}).catch(()=>{if(!controller.signal.aborted)setError('補助資料暫時無法取得，請重新查詢。');});});return()=>controller.abort();},[period,revision,refresh]);
+ function clear(){setBank('');setHandling('');setBalanceId('');setAction('');setAmount('');setReason('');setCaseNo('');setCorrection('');setConfirmed(false);}
+ const selected=banks.find(b=>String(b.id)===bank);const balance=view?.balances?.find(b=>b.identity===balanceId);const control=view?.amount_controls?.find(c=>c.case_no===caseNo);
+ const mode=caseNo?'correction':view?.coverage.length?'balance':'initial';
+ const chosenAction=mode==='correction'?correction:mode==='initial'?'initial_receipt':action;
+ const wanted=mode==='initial'?(view?.total_ntd===null?'':selected?.amount_ntd===view?.total_ntd?'exact':selected&&view?.total_ntd!==null&&view?.total_ntd!==undefined&&selected.amount_ntd<view.total_ntd?'partial':'refund_excess'):action==='receipt'&&selected&&balance&&selected.amount_ntd>Math.max(0,balance.expected_ntd-balance.received_ntd)?'refund_excess':'';
+ const validAmount=/^\d+$/.test(amount)&&Number.isSafeInteger(Number(amount))&&(chosenAction==='manual_amount'?Number(amount)>=0:Number(amount)>0);
+ const needBank=['initial_receipt','receipt','refund'].includes(chosenAction);const needAmount=['manual_amount','loss'].includes(chosenAction);const needReason=['manual_amount','adopt_calculation','loss'].includes(chosenAction);
+ const validDetails=!!view&&!!chosenAction&&confirmed&&(!needBank||!!selected&&(chosenAction==='refund'?selected.amount_ntd<0:selected.amount_ntd>0))&&(!needAmount||validAmount)&&(!needReason||!!reason.trim())&&(mode==='initial'?view.can_reconcile&&(wanted==='exact'||handling===wanted):mode==='balance'?!!balance&&(wanted!=='refund_excess'||handling==='refund_excess'):!!control&&(chosenAction!=='adopt_calculation'||control.computed_ntd!==null));
+ const valid=/^\d{4}$/.test(yearText)&&Number(yearText)===period.year&&validDetails;
+ async function apply(saveOriginalPeriod=false){
+  if(busy||(!unknown&&!(saveOriginalPeriod?validDetails:valid))||!view)return false;
+  if(!original.current)original.current={...view.period,action:chosenAction as GovernmentDifferenceCommand['action'],identity:mode==='correction'?caseNo:balanceId,amount_ntd:needAmount?Number(amount):null,bank_row_id:needBank?Number(bank):null,handling:(wanted==='exact'?'exact':handling) as GovernmentDifferenceCommand['handling'],reason:reason.trim(),expected_version:view.version,key:crypto.randomUUID()};
+  setBusy(true);setError('');setMessage('');
+  try{await subsidyPeriodClient.difference(original.current);original.current=null;setUnknown(false);clear();setMessage('已儲存本次處理。請依剩餘金額繼續處理，整期結清後案件才顯示已核銷。');setRefresh(v=>v+1);return true;}
+  catch(caught){const unresolved=!(caught instanceof ApiHttpError)||caught.status>=500||caught.status===408;setUnknown(unresolved);if(!unresolved)original.current=null;setError(unresolved?'尚未確認儲存結果，請查回原次處理結果。':caught instanceof ApiHttpError?caught.message:'請重新查詢後核對。');return false;}finally{setBusy(false);}
+ }
+ const lines=view?.coverage.length?view.recorded_lines:view?.lines;
+ return <section aria-label="政府補助整期核銷" className="subsidy-period-workbench"><h3>政府補助整期帳務</h3><p>首次記錄實收即固定本期案件與應收。後續補撥、損失、退回與更正差額分別列管。</p>
+ <div className="finance-filter-bar"><label>彙總單位<select className="finance-select" disabled={busy||unknown} value={period.unit} onChange={e=>requestLeave(()=>{clear();setPeriod({...period,unit:e.target.value as SubsidyPeriod['unit'],index:1});})}><option value="month">月</option><option value="quarter">季</option><option value="year">年</option></select></label><label>年度<input className="finance-input" type="number" min="1912" max="9998" disabled={busy||unknown} value={yearText} onChange={e=>{const value=e.target.value;const year=Number(value);if(/^\d{4}$/.test(value)&&year>=1912&&year<=9998&&year!==period.year)requestLeave(()=>{clear();setYearText(value);setPeriod({...period,year});});else setYearText(value);}} onBlur={()=>{const year=Number(yearText);if(/^\d{4}$/.test(yearText)&&year>=1912&&year<=9998)requestLeave(()=>{clear();setPeriod({...period,year});});else setYearText(String(period.year));}}/></label>{period.unit!=='year'&&<label>{period.unit==='month'?'月份':'季度'}<select className="finance-select" disabled={busy||unknown} value={period.index} onChange={e=>requestLeave(()=>{clear();setPeriod({...period,index:Number(e.target.value)});})}>{Array.from({length:period.unit==='month'?12:4},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}</select></label>}<button className="finance-btn-secondary" type="button" disabled={busy||unknown} onClick={()=>requestLeave(()=>{clear();setRefresh(v=>v+1);})}>重新整理補助</button></div>
+ {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}{!view&&!error&&<p role="status">正在查詢整期補助…</p>}
+ {view&&<><p><strong>{view.label}</strong> · 本期{view.coverage.length?'原已固定':'目前計算'}應收 <strong>{money(view.coverage.length?view.recorded_lines.reduce((n,l)=>n+(l.amount_ntd??0),0):view.total_ntd)}</strong></p>
+ {view.coverage.map(c=><p key={c.receipt_id}><strong>{c.settled===false?'已納入本期，差額尚待處理':'已核銷'}</strong> ·「{c.label}」首筆實收 {money(c.amount_ntd)}；代墊回收 {money(c.recovered_advance_ntd)}。</p>)}
+ {!!view.blocked_cases.length&&!view.coverage.length&&<p role="alert">案件已納入其他期間，請至原期間處理：{view.blocked_cases.join('、')}。</p>}{!!view.changed_cases.length&&<p>來源資料已更新：{view.changed_cases.join('、')}。原期間快照保留，更正差額另列。</p>}
+ <div className="finance-table-container"><table className="finance-table"><thead><tr><th>本期案件</th><th>服務結束日</th><th>{view.coverage.length?'原已固定金額':'本期應收'}</th></tr></thead><tbody>{lines?.map(l=><tr key={l.case_no}><td className="finance-row-actions"><button type="button" disabled={busy||unknown} onClick={()=>onOpenCase(l.case_no)}>{l.case_no}</button></td><td>{l.service_end_date}</td><td>{money(l.amount_ntd)}{l.unavailable_reason&&<small>{l.unavailable_reason==='scheduling_effective_generation_invalid'?'排班資料待確認':'計算資料待確認'}</small>}</td></tr>)}</tbody></table></div>
+ {!!view.balances?.length&&<div className="finance-table-container"><table className="finance-table"><thead><tr><th>款項</th><th>應收／應退</th><th>實收／實退</th><th>損失處理</th><th>待補撥／待退</th><th>多撥待退回</th><th>目前狀態</th></tr></thead><tbody>{view.balances.map(b=><tr key={b.identity}><td>{b.kind==='original'?'本期原款':`${b.case_no} 更正差額`}</td><td>{money(b.expected_ntd)}</td><td>{money(b.received_ntd)}</td><td>{money(b.recognized_ntd)}</td><td>{money(b.remaining_ntd)}</td><td>{money(b.refund_due_ntd)}</td><td>{b.status}</td></tr>)}</tbody></table></div>}
+ <h4>選擇下一步</h4><div className="finance-filter-bar"><label>處理範圍<select className="finance-select" disabled={busy||unknown} value={caseNo?'correction':'cash'} onChange={e=>{clear();if(e.target.value==='correction')setCaseNo(view.amount_controls?.[0]?.case_no??'');}}><option value="cash">{view.coverage.length?'本期實收與差額':'首次記錄本期實收'}</option><option value="correction">人工更正案件補助金額</option></select></label>
+ {mode==='correction'?<><label>案件<select className="finance-select" disabled={busy||unknown} value={caseNo} onChange={e=>{setCaseNo(e.target.value);setConfirmed(false);}}>{view.amount_controls?.map(c=><option key={c.case_no} value={c.case_no}>{c.case_no}</option>)}</select></label><label>處理方式<select className="finance-select" value={correction} disabled={busy||unknown} onChange={e=>{setCorrection(e.target.value);setConfirmed(false);}}><option value="">請由人員選擇</option><option value="manual_amount">人工更正系統補助金額</option><option value="adopt_calculation">採用最新計算，恢復自動更新</option></select></label></>:view.coverage.length?<><label>款項<select className="finance-select" disabled={busy||unknown} value={balanceId} onChange={e=>{setBalanceId(e.target.value);setAction('');setBank('');setConfirmed(false);}}><option value="">請選擇</option>{view.balances?.map(b=><option key={b.identity} value={b.identity}>{b.kind==='original'?'本期原款':b.case_no+' 更正差額'} · {b.status}</option>)}</select></label><label>處理方式<select className="finance-select" disabled={!balance||busy||unknown} value={action} onChange={e=>{setAction(e.target.value);setBank('');setConfirmed(false);}}><option value="">請由人員選擇</option>{balance?.direction==='receivable'&&<option value="receipt">記錄實際補撥入款</option>}{balance&&balance.remaining_ntd>0&&balance.direction==='receivable'&&<option value="loss">確認收不回，記錄損失</option>}{balance&&(balance.refund_due_ntd>0||balance.direction==='payable'&&balance.remaining_ntd>0)&&<option value="refund">記錄實際退回政府款項</option>}</select></label></>:null}</div>
+ {mode==='correction'&&control&&<p>目前為{control.mode==='manual'?'人工更正':'自動計算'} · 有效金額 {money(control.effective_ntd)} · 最新計算 {money(control.computed_ntd)}。採用最新計算後，來源變動恢復自動更新。</p>}
+ {needBank&&<><label>已匯入銀行對帳單的政府款項<select className="finance-select" disabled={busy||unknown} value={bank} onChange={e=>{setBank(e.target.value);setHandling('');setConfirmed(false);}}><option value="">請選擇已匯入的銀行紀錄</option>{banks.filter(b=>chosenAction==='refund'?b.amount_ntd<0:b.amount_ntd>0).map(b=><option key={b.id} value={b.id}>{b.paid_on} · {money(Math.abs(b.amount_ntd))} · 流水 #{b.id}</option>)}</select></label><p>來源是銀行對帳單匯入；此處不會手動新增銀行入款。</p>{selected&&wanted!=='exact'&&wanted!==''&&<label>{wanted==='partial'?'本次少撥的下一步':'本次多撥的下一步'}<select className="finance-select" disabled={busy||unknown} value={handling} onChange={e=>{setHandling(e.target.value);setConfirmed(false);}}><option value="">請由人員選擇</option>{wanted==='partial'?<option value="partial">先記實收，剩餘款項繼續追收補撥</option>:<option value="refund_excess">先記實收，多撥部分列為待退回</option>}</select></label>}</>}
+ {needAmount&&<label>{chosenAction==='manual_amount'?'更正後本案補助總額':'本次作損失處理金額'}<input className="finance-input" type="number" min="0" step="1" disabled={busy||unknown} value={amount} onChange={e=>{setAmount(e.target.value);setConfirmed(false);}}/></label>}{needReason&&<label className="case-accounting-field">處理依據／更正原因<textarea maxLength={500} disabled={busy||unknown} value={reason} onChange={e=>{setReason(e.target.value);setConfirmed(false);}}/></label>}
+ <p><label><input type="checkbox" checked={confirmed} disabled={busy||unknown} onChange={e=>setConfirmed(e.target.checked)}/>我已核對款項、金額與處理方式</label></p><button className="finance-btn-primary" type="button" disabled={busy||(!unknown&&!valid)} onClick={()=>void apply()}>{busy?'處理中…':unknown?'查回原次處理結果':chosenAction==='loss'?'確認記錄損失':mode==='correction'?'確認更新系統金額':mode==='initial'&&wanted==='exact'?'核銷本期入款':'確認記錄本次處理'}</button>
+ <p>仍有待補撥或待退回款項時，本期案件顯示「已納入本期」；原款結清後才顯示「已核銷」。更正差額另列，整筆入款不拆成逐案或逐月現金。</p><details><summary>整期銀行與差額處理紀錄</summary>{view.operations?.map(o=><p key={o.identity}>{o.confirmed_on} · {{receipt:'實際入款',refund:'實際退回',loss:'已作損失處理',correction:'金額更正'}[o.action]??o.action} · {money(o.amount_ntd)}{o.bank_row_id?` · 銀行流水 #${o.bank_row_id}`:''} · {o.reason} · {o.actor}</p>)}{view.amount_changes?.map((c,i)=><p key={c.case_no+':'+i}>{c.confirmed_on} · {c.case_no} · {{manual_amount:'人工更正',adopt_calculation:'採用新計算，恢復自動',source_update:'來源重算'}[c.action]??c.action} · {money(c.before_ntd)} → {money(c.after_ntd)} · 系統計算 {money(c.computed_ntd)} · {c.reason} · {c.actor}</p>)}</details>
+ </>}
+ </section>;
 }

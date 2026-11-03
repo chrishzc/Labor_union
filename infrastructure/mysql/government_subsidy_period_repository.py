@@ -1,14 +1,15 @@
 """Period receipt adapter. The application owns the only commit; no external effects."""
+from dataclasses import replace
 from domains.government_subsidy.period_reconciliation import (
     PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine,
 )
-from subsystems.government_subsidy.period_reconciliation import CasePeriodCoverage, PeriodBankRow, PeriodCoverage, SubsidyPeriodView
+from subsystems.government_subsidy.period_reconciliation import CasePeriodCoverage, PeriodBankRow, PeriodCoverage, SubsidyPeriodView,GovernmentAmountChange
 from subsystems.government_subsidy.reconciliation_register_query import (
     _select_established_cases, project_receivable_estimate,
 )
 
 
-_ACTIVE = "entry.reversal_of_id IS NULL AND NOT EXISTS (SELECT 1 FROM government_subsidy_period_entries reversal WHERE reversal.reversal_of_id=entry.id)"
+_ACTIVE = "entry.reversal_of_id IS NULL AND NOT EXISTS (SELECT 1 FROM government_subsidy_period_entries reversal WHERE reversal.reversal_of_id=entry.id) AND NOT EXISTS(SELECT 1 FROM government_subsidy_period_operations op WHERE op.bank_entry_id=entry.id)"
 _RECOVERED = "(SELECT COALESCE(SUM(ledger.amount_ntd-COALESCE((SELECT SUM(reversed.amount_ntd) FROM client_ledger_entries reversed WHERE reversed.reversal_of_entry_id=ledger.id),0)),0) FROM government_subsidy_period_members member JOIN client_ledger_entries ledger ON ledger.case_no=member.case_no AND ledger.entry_type='subsidy_advance' WHERE member.receipt_id=entry.id AND ledger.occurred_on<=entry.paid_on)"
 
 
@@ -32,11 +33,16 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 if line.case_no in by_case and by_case[line.case_no] != line:
                     raise PeriodReconciliationConflict('subsidy_period_source_ambiguous')
                 by_case[line.case_no] = line
-            lines = tuple(by_case.values())
+            from infrastructure.mysql.government_period_difference_repository import apply_amount_controls,period_difference_views
+            lines,controls = apply_amount_controls(cursor,tuple(by_case.values()))
+            by_case={line.case_no:line for line in lines}
             cursor.execute('SELECT entry.id,entry.period_unit,entry.period_year,entry.period_index,entry.amount_ntd,'+_RECOVERED+' recovered_advance_ntd FROM government_subsidy_period_entries entry WHERE ' + _ACTIVE +
                 ' AND entry.period_start<%s AND entry.period_end>%s ORDER BY entry.id', (period.end, period.start))
             coverage = tuple(PeriodCoverage(int(row['id']), SubsidyPeriod(row['period_unit'], row['period_year'], row['period_index']),
                                            int(row['amount_ntd']), int(row['recovered_advance_ntd'])) for row in cursor.fetchall())
+            balances,operations=period_difference_views(cursor,[c.receipt_id for c in coverage])
+            originals={b.root_receipt_id:b for b in balances if b.kind=='original'}
+            coverage=tuple(replace(c,settled=originals[c.receipt_id].settled) if c.receipt_id in originals else c for c in coverage)
             # A case moved to a different month/year after receipt remains attached to its immutable receipt.
             blocked = []
             if lines:
@@ -56,12 +62,23 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 'JOIN government_subsidy_period_entries entry ON entry.id=member.receipt_id WHERE ' + _ACTIVE +
                 ' AND member.service_end_date>=%s AND member.service_end_date<%s ORDER BY member.case_no', (period.start,period.end))
             recorded = tuple(SubsidyPeriodLine(row['case_no'],row['service_end_date'],int(row['amount_ntd']),None) for row in cursor.fetchall())
+            from infrastructure.mysql.government_period_difference_repository import recorded_case_amount_control
+            controls=(*controls,*(recorded_case_amount_control(self.connection,cursor,line) for line in recorded if line.case_no not in by_case))
             changed = tuple(sorted(set(line.case_no for line in recorded if by_case.get(line.case_no) != line) |
                 {line.case_no for line in lines if any(item.period.contains(line.service_end_date) for item in coverage)
                  and line.case_no not in {record.case_no for record in recorded}}))
+            cases=sorted({line.case_no for line in (*lines,*recorded)})
+            changes=()
+            if cases:
+                cursor.execute('SELECT * FROM government_subsidy_amount_changes WHERE case_no IN ('+','.join(['%s']*len(cases))+') ORDER BY id',tuple(cases))
+                changes=tuple(GovernmentAmountChange(r['case_no'],r['action'],int(r['before_ntd']),int(r['after_ntd']),int(r['computed_ntd']),r['reason'],r['actor'],str(r['confirmed_on'])) for r in cursor.fetchall())
         total = sum(line.amount_ntd for line in lines) if all(line.amount_ntd is not None for line in lines) else None
         return SubsidyPeriodView(period, version, lines, total, coverage, tuple(sorted(set(blocked))),recorded,changed,
-                                 bool(lines) and total is not None and total > 0 and not coverage and not blocked)
+                                 bool(lines) and total is not None and total > 0 and not coverage and not blocked,balances,controls,operations,changes)
+
+    def apply_difference(self,command):
+        from infrastructure.mysql.government_period_difference_repository import apply_government_difference
+        return apply_government_difference(self,command)
 
     def find_replay(self, key, command):
         with self.connection.cursor() as cursor:
@@ -77,13 +94,18 @@ class MySqlGovernmentSubsidyPeriodRepository:
 
     def bank_amount(self, bank_row_id, *, reversal=False):
         with self.connection.cursor() as cursor:
-            cursor.execute('SELECT bank.credit,bank.debit,bank.currency,bank.transaction_date,bank.direction, '
-                'COALESCE(classification.classification_type,bank.classification_type) classification_type '
+            cursor.execute('SELECT bank.credit,bank.debit,bank.currency,bank.transaction_date,bank.direction,bank.reconciliation_status, '
+                'classification.disposition,COALESCE(classification.classification_type,bank.classification_type) classification_type, '
+                'EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=bank.id AND issue.active=1 '
+                'AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest WHERE latest.batch_id=issue.batch_id '
+                'AND latest.finance_import_row_id=issue.finance_import_row_id AND latest.issue_code=issue.issue_code)) has_active_integrity '
                 'FROM finance_import_rows bank LEFT JOIN finance_import_classification_events classification '
                 'ON classification.id=(SELECT MAX(latest.id) FROM finance_import_classification_events latest '
                 'WHERE latest.finance_import_row_id=bank.id) WHERE bank.id=%s FOR UPDATE', (bank_row_id,))
             row = cursor.fetchone()
             if (row is None or row['currency'] not in (None,'TWD','NTD') or row['transaction_date'] is None
+                    or row['reconciliation_status']!='pending'
+                    or row.get('disposition')=='blocked' or row.get('has_active_integrity')
                     or row['classification_type'] != 'government_subsidy'
                     or row['direction'] != ('outgoing' if reversal else 'incoming')):
                 raise PeriodReconciliationConflict('subsidy_period_bank_invalid')
@@ -106,6 +128,9 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 "LEFT JOIN finance_import_classification_events classification ON classification.id=(SELECT MAX(latest.id) "
                 "FROM finance_import_classification_events latest WHERE latest.finance_import_row_id=bank.id) "
                 "WHERE COALESCE(classification.classification_type,bank.classification_type)='government_subsidy' "
+                "AND bank.reconciliation_status='pending' "
+                "AND COALESCE(classification.disposition,'')<>'blocked' "
+                "AND NOT EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=bank.id AND issue.active=1 AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest WHERE latest.batch_id=issue.batch_id AND latest.finance_import_row_id=issue.finance_import_row_id AND latest.issue_code=issue.issue_code)) "
                 "AND NOT EXISTS(SELECT 1 FROM government_subsidy_period_entries entry WHERE entry.finance_import_row_id=bank.id) "
                 "AND NOT EXISTS(SELECT 1 FROM government_subsidy_transactions old WHERE old.finance_import_row_id=bank.id) "
                 "AND NOT EXISTS(SELECT 1 FROM finance_import_reconciliation_receipts receipt WHERE receipt.finance_import_row_id=bank.id) "
@@ -130,6 +155,10 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 'amount_ntd':int(record['amount_ntd']),'recorded_case_amount_ntd':int(record['member_amount_ntd']),
                 'recorded_service_end_date':record['service_end_date'],
                 'recovered_advance_ntd':int(record['recovered_advance_ntd'])} for record in cursor.fetchall())
+            from infrastructure.mysql.government_period_difference_repository import period_difference_views
+            balances,_=period_difference_views(cursor,[c['receipt_id'] for c in coverage])
+            originals={b.root_receipt_id:b for b in balances if b.kind=='original'}
+            coverage=tuple({**c,'settled':originals[c['receipt_id']].settled if c['receipt_id'] in originals else True} for c in coverage)
             return {'case_no':case_no,'service_end_date':end,'amount_ntd':line.amount_ntd if line else None,'coverage':coverage}
 
     def save(self, view, bank_row_id, key, actor):
@@ -143,6 +172,10 @@ class MySqlGovernmentSubsidyPeriodRepository:
             for line in view.lines:
                 cursor.execute('INSERT INTO government_subsidy_period_members(receipt_id,case_no,service_end_date,amount_ntd) '
                                'VALUES (%s,%s,%s,%s)', (identity,line.case_no,line.service_end_date,line.amount_ntd))
+                cursor.execute("INSERT IGNORE INTO government_subsidy_amount_controls(case_no,period_year,amount_mode,computed_ntd,effective_ntd) VALUES(%s,%s,'automatic',%s,%s)",
+                    (line.case_no,period.year,line.amount_ntd,line.amount_ntd))
+            from infrastructure.mysql.government_period_difference_repository import initialize_balance
+            initialize_balance(cursor,identity,sum(line.amount_ntd for line in view.lines),view.total_ntd)
             self._advance_version(cursor, period.year)
             return identity
 
@@ -158,6 +191,11 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 return replay
             cursor.execute('SELECT aggregate_version FROM government_subsidy_period_years WHERE period_year=%s FOR UPDATE', (period.year,))
             cursor.fetchone()
+            cursor.execute('SELECT expected_ntd,received_ntd,recognized_ntd,returned_ntd FROM government_subsidy_period_balances WHERE root_receipt_id=%s',(receipt_id,))
+            balances=cursor.fetchall()
+            cursor.execute('SELECT 1 FROM government_subsidy_period_operations op JOIN government_subsidy_period_balances b ON b.balance_identity=op.balance_identity WHERE b.root_receipt_id=%s LIMIT 1',(receipt_id,))
+            if cursor.fetchone() or any(int(b['expected_ntd'])!=int(row['amount_ntd']) or int(b['received_ntd'])!=int(row['amount_ntd']) or int(b['recognized_ntd']) or int(b['returned_ntd']) for b in balances):
+                raise PeriodReconciliationConflict('subsidy_period_difference_requires_original_flow')
             cursor.execute('SELECT id FROM government_subsidy_period_entries WHERE reversal_of_id=%s', (receipt_id,))
             if cursor.fetchone():
                 raise PeriodReconciliationConflict('subsidy_period_already_reversed')

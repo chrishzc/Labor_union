@@ -3,6 +3,7 @@ import json
 from infrastructure.mysql.deposit_payment_query_repository import MySqlDepositPaymentQueryRepository
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from infrastructure.mysql.second_payment_query_repository import MySqlSecondPaymentQueryRepository
+from infrastructure.mysql.first_payment_query_repository import MySqlFirstPaymentQueryRepository
 from subsystems.line.payment_receipt_notifications import MANUAL_RECEIPT,PaymentReceiptCandidate,PaymentReceiptHistory
 
 
@@ -13,27 +14,29 @@ class MySqlPaymentReceiptNotificationRepository:
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT id,case_no,intent_type,payload_snapshot FROM client_finance_outbox WHERE id>%s AND ("
                 "intent_type='orders_deposit_reconciled' AND JSON_EXTRACT(payload_snapshot,'$.line_deposit_notification')=TRUE OR "
-                "intent_type='projection_refresh' AND JSON_EXTRACT(payload_snapshot,'$.line_second_payment_notification')=TRUE) "
+                "intent_type='projection_refresh' AND (JSON_EXTRACT(payload_snapshot,'$.line_second_payment_notification')=TRUE "
+                "OR JSON_EXTRACT(payload_snapshot,'$.line_first_payment_notification')=TRUE)) "
                 'ORDER BY id LIMIT %s',(after,limit))
             return tuple(PaymentReceiptCandidate(int(row['id']),str(row['case_no']),
-                'deposit' if row['intent_type']=='orders_deposit_reconciled' else 'second',
+                'deposit' if row['intent_type']=='orders_deposit_reconciled' else ('first' if _object(row['payload_snapshot']).get('line_first_payment_notification') is True else 'second'),
                 str(_object(row['payload_snapshot'])['settlement_identity'])) for row in cursor.fetchall())
 
     def payment(self,case_no,stage,identity,*,lock=False):
-        if stage not in ('deposit','second'): return None
+        if stage not in ('deposit','first','second'): return None
         suffix=' FOR UPDATE' if lock else ''
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT case_no FROM orders WHERE case_no=%s AND status IN ('洽談中','訂單成立','服務中','訂單完成')"+suffix,(case_no,))
             if not cursor.fetchone(): return None
             if lock:
                 cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE',(case_no,));cursor.fetchone()
-            flag='line_deposit_notification' if stage=='deposit' else 'line_second_payment_notification'
+            flag='line_deposit_notification' if stage=='deposit' else f'line_{stage}_payment_notification'
             cursor.execute("SELECT id FROM client_finance_outbox WHERE case_no=%s AND intent_type=%s "
                 f"AND JSON_EXTRACT(payload_snapshot,'$.{flag}')=TRUE "
                 "AND JSON_UNQUOTE(JSON_EXTRACT(payload_snapshot,'$.settlement_identity'))=%s LIMIT 1"+suffix,
                 (case_no,'orders_deposit_reconciled' if stage=='deposit' else 'projection_refresh',identity))
             if not cursor.fetchone(): return None
         if stage=='second': return MySqlSecondPaymentQueryRepository(self.connection).settlement(case_no,identity,lock=lock)
+        if stage=='first': return MySqlFirstPaymentQueryRepository(self.connection).settlement(case_no,identity,lock=lock)
         payment=MySqlDepositPaymentQueryRepository(self.connection).get(case_no,lock=lock)
         return payment if payment and payment.settlement_identity==identity else None
 

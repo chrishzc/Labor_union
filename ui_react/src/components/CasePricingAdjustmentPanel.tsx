@@ -77,7 +77,7 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
     } finally { inFlight.current = false; }
   }
   return <section ref={unsavedRef} className="registry-editor pricing-case" aria-label="個案計價調整"><h3>個案計價調整</h3>
-    <p className="pricing-notice">本案人工設定不受政策生效日或服務開始日影響；不修改身分給付方式與訂金。</p>
+    <p className="pricing-notice">本案人工設定不受政策生效日或服務開始日影響。給付方式與訂金天數沿用原身分規則；變更時薪或補助上限，可能連動訂金與各期金額。</p>
     {message && <p className="pricing-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'}>{message}</p>}
     {status === 'loading' && <p role="status">正在讀取本案參數…</p>}
     {current && draft && <><p className="pricing-note">計價身分：{current.terms.identity_name}；來源：{current.source === 'manual' ? '本案人工設定' : current.source === 'policy' ? '案件綁定政策' : '原案件規則'}（版本 {current.revision}）</p>

@@ -6,7 +6,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -35,6 +35,86 @@ from infrastructure.mysql.contract_full_preview_repository import (
     _special_holidays_text,
 )
 from subsystems.contract_signing.staff_contract_application import _rest_weekdays
+
+
+@pytest.mark.parametrize("start,end,offset,expected", [
+    (timedelta(hours=9), timedelta(hours=16), 0, "09:00–16:00"),
+    (time(22), time(6), 1, "22:00–06:00（翌日）"),
+    (None, None, None, None),
+])
+def test_contract_context_uses_current_order_time_instead_of_legacy_client_text(start, end, offset, expected):
+    from infrastructure.mysql.contract_context_repository import MySqlContractContextRepository
+    from infrastructure.mysql.contract_full_preview_repository import _common_facts
+
+    row = {"case_no": "CASE-1", "service_time": "09:00-17:00",
+           "service_start_time": start, "service_end_time": end,
+           "service_end_day_offset": offset}
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, sql, params):
+            assert params == ("CASE-1",)
+            assert all(f"o.{field}" in sql for field in (
+                "service_start_time", "service_end_time", "service_end_day_offset"))
+
+        def fetchone(self):
+            return dict(row)
+
+    case = MySqlContractContextRepository(SimpleNamespace(cursor=Cursor)).load_case_facts("CASE-1")
+    assert _common_facts(case)["service_time"] == expected
+
+
+def test_formal_staff_obligation_does_not_hide_committed_contract_dates(monkeypatch):
+    from infrastructure.mysql import contract_full_preview_repository as adapter
+    from domains.client_finance.obligation_planning import (
+        ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms,
+    )
+    from subsystems.payroll.terms_impact import (
+        ExistingStaffObligationTermsFact, StaffObligationDirection, StaffObligationKind,
+    )
+    from shared_kernel.money import MoneyNTD
+
+    obligation = ExistingStaffObligationTermsFact(
+        "staff:CASE-1:assignment:1", 1, 1, StaffObligationKind.SERVICE_PAY,
+        StaffObligationDirection.PAYABLE_TO_STAFF, MoneyNTD(17500), MoneyNTD(17500),
+        MoneyNTD(0), False, date(2026, 12, 15),
+    )
+    finance = ClientFinanceTermsFacts(
+        "CASE-1", 7, 7, MoneyNTD(0),
+        tuple(ClientChargeDay(date(2026, 11, day), False) for day in range(4, 10)),
+        ClientPaymentTerms(4, MoneyNTD(400), date(2026, 9, 20), date(2026, 11, 4), None), (),
+    )
+    payroll = SimpleNamespace(payroll_version=1, staff_payment_due_date=date(2026, 12, 15),
+                              source_terms=(), existing_obligations=(obligation,))
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+
+    connection = SimpleNamespace(cursor=Cursor)
+    monkeypatch.setattr(adapter, "select_order", lambda *_args, **_kwargs: {"case_no": "CASE-1"})
+    monkeypatch.setattr(adapter, "load_contract_client_finance_facts", lambda *_args, **_kwargs: finance)
+    monkeypatch.setattr(adapter, "load_preview_facts", lambda *_: SimpleNamespace(payroll=payroll))
+    monkeypatch.setattr(adapter, "_load_commitment", lambda *_: {
+        "id": 1, "matching_plan_id": 1, "plan_snapshot_sha256": "a" * 64,
+        "start_date": date(2026, 10, 1), "end_date": date(2026, 10, 6), "service_day_count": 6,
+    })
+    for name in ("_load_client_email", "_load_approved_subsidy_claim", "_load_assignment_payroll_rate",
+                 "load_explicit_case_service_rate", "_load_client_refund_destination"):
+        monkeypatch.setattr(adapter, name, lambda *_: None)
+    facts, owners = {"identity_status": "一般市民"}, {"scheduling": "b" * 64}
+    adapter._extend_owner_facts(connection, "CASE-1", facts, owners, 1, 1)
+
+    assert facts["staff_payable_total"] == 17500
+    assert facts["staff_payable_due_date"] == date(2026, 12, 15)
+    # Execution dates do not replace the original signed commitment dates.
+    assert facts["committed_service_start_date"] == date(2026, 10, 1)
+    assert facts["committed_service_end_date"] == date(2026, 10, 6)
+    assert "staff_payables" in owners
 
 
 @pytest.mark.parametrize(
@@ -125,13 +205,24 @@ def test_candidate_payment_preview_without_plan_or_payroll(
         formal = adapter.MySqlFullContractProjectionRepository(connection).load_client_projection("CASE-1")
         assert formal.facts["second_payment_amount"] == 9000
         assert formal.facts["total_employer_self_pay_payable"] == 66000
+    from subsystems.orders.order_information import _candidate_line_sections
+    projected = {}
+    original_build = information.build_candidate_information
+
+    def capture_projection(case_no, candidate_id, info_type, facts, issues, recipient):
+        projected.update(facts)
+        return original_build(case_no, candidate_id, info_type, facts, issues, recipient)
+
+    monkeypatch.setattr(information, "build_candidate_information", capture_projection)
     preview = information.MySqlOrderInformationRepository(connection).preview_candidate_information(
         case_no, 91, 1,
     )
     service = dict(next(section.rows for section in preview.line_sections
                         if section.title == "服務約定"))
     assert service["服務方式"] == "連續服務"
-    payments = dict(next(section.rows for section in preview.line_sections
+    assert all(section.title != "客戶付款約定" for section in preview.line_sections)
+    customer_sections = _candidate_line_sections(1, projected, {}, audience="customer")
+    payments = dict(next(section.rows for section in customer_sections
                          if section.title == "客戶付款約定"))
     for label, amount in zip(
         ("訂金金額", "第一期金額", "第二期金額", "客戶應付總額"), expected_amounts,
@@ -150,7 +241,7 @@ def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monk
     from infrastructure.mysql import contract_full_preview_repository as adapter
     from domains.client_finance.obligation_planning import ClientFinanceTermsFacts, ClientPaymentTerms
     from shared_kernel.money import MoneyNTD
-    from subsystems.orders.order_information import build_candidate_information
+    from subsystems.orders.order_information import _candidate_line_sections
 
     finance = ClientFinanceTermsFacts(
         "CASE-PRECONTRACT-SECOND", 1, 8, MoneyNTD(0), (),
@@ -168,8 +259,8 @@ def test_precontract_projection_exposes_second_date_from_finance_stage_plan(monk
     )
     assert facts["second_payment_amount"] == 32000
     assert facts["second_payment_due_date"] == date(2026, 11, 20)
-    preview = build_candidate_information("CASE-PRECONTRACT-SECOND", 1, 1, facts, {}, None)
-    payments = dict(next(section.rows for section in preview.line_sections if section.title == "客戶付款約定"))
+    sections = _candidate_line_sections(1, facts, {}, audience="customer")
+    payments = dict(next(section.rows for section in sections if section.title == "客戶付款約定"))
     assert payments["第二期金額"] == "NT$ 32,000"
     assert payments["預計第二期繳款日"] == "2026-11-20"
 
@@ -181,7 +272,7 @@ def test_current_candidate_payments_survive_stale_plan_and_old_commitment_days(m
     from infrastructure.mysql import order_information_repository as information
     from domains.client_finance.obligation_planning import ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms
     from shared_kernel.money import MoneyNTD
-    from subsystems.orders.order_information import build_candidate_information
+    from subsystems.orders.order_information import _candidate_line_sections
 
     first = date(2026, 11, 3)
     case = {"case_no": "CASE-OLD", "start_date": first, "end_date": date(2026, 11, 22),
@@ -206,8 +297,8 @@ def test_current_candidate_payments_survive_stale_plan_and_old_commitment_days(m
     connection = SimpleNamespace(cursor=lambda: nullcontext(None))
     facts = {"staff_name": "測試月嫂"}
     information._merge_contract_payment_facts(connection, "CASE-OLD", facts, use_current_order_payments=True)
-    preview = build_candidate_information("CASE-OLD", 1, 1, facts, {}, None)
-    payments = dict(next(section.rows for section in preview.line_sections if section.title == "客戶付款約定"))
+    sections = _candidate_line_sections(1, facts, {}, audience="customer")
+    payments = dict(next(section.rows for section in sections if section.title == "客戶付款約定"))
     assert payments["訂金金額"] == "NT$ 9,000"
     assert payments["第一期金額"] == "NT$ 27,000"
     assert payments["第二期金額"] == "NT$ 0"

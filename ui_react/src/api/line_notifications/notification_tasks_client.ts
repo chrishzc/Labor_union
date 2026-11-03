@@ -5,7 +5,7 @@ import { ApiHttpError } from '../shared/typed_errors';
 import { sessionClient } from '../auth/session_client';
 
 export const sourceSchema = z.enum(['registration','identity','customer_binding','staff_binding','profile','information','followup','recommendation',
-  'service_start','deposit','group','overdue','log','customer_service','delivery','notification_failure','runtime']);
+  'service_start','deposit','payment_receipt','group','overdue','log','customer_service','delivery','notification_failure','runtime']);
 export type NotificationSource = z.infer<typeof sourceSchema>;
 const groupSchema = z.enum(['review','reminder','support']);
 const paymentSchema = z.object({case_no:z.string(),payment_stage:z.enum(['deposit','first','second']),obligation_identity:z.string(),
@@ -19,7 +19,8 @@ const itemSchema = z.object({id:z.string(),source:sourceSchema,group:groupSchema
   reference_id:z.number().int().nullable(),person:z.string(),summary:z.string(),reason:z.string(),time:z.string(),tag:z.string(),
   recipient:z.string().nullable(),message:z.string().nullable(),unavailable_reason:z.string().nullable(),expected_version:z.number().int().nullable(),
   delivery_status:z.string().nullable(),payment:paymentSchema.nullable(),log:logSchema.nullable(),information:informationSchema.nullable(),
-  failure:z.object({issue_key:z.string().regex(/^ci_[0-9a-f]{64}$/),notification_reason:z.enum(['recipient_unavailable','template_or_schedule_invalid']),related_task_ids:z.array(z.number().int().positive())}).strict().nullable().optional()}).strict();
+  failure:z.object({issue_key:z.string().regex(/^ci_[0-9a-f]{64}$/),notification_reason:z.enum(['recipient_unavailable','template_or_schedule_invalid']),related_task_ids:z.array(z.number().int().positive())}).strict().nullable().optional(),
+  receipt:z.object({payment_stage:z.enum(['deposit','first','second']),settlement_identity:z.string().min(1).max(128)}).strict().nullable().optional()}).strict();
 const pageSchema = z.object({items:z.array(itemSchema),total:z.number().int().nonnegative().nullable(),next_cursor:z.union([z.number().int().nonnegative(),z.string().min(1).max(2048)]).nullable()}).strict();
 const catalogSchema = z.array(z.object({source:sourceSchema,label:z.string(),group:groupSchema}).strict());
 export type NotificationItem = z.infer<typeof itemSchema>;
@@ -42,6 +43,7 @@ export const notificationTasksClient = {
     return pageSchema.parse(raw.data);
   },
   async send(item:NotificationItem,key:string) {
+    if(item.source==='payment_receipt')throw new Error('請前往帳務頁面確認後發送入帳通知。');
     const path = item.source === 'overdue' ? '/api/v1/line/payment-overdue-reminders/send'
       : item.source === 'log' ? '/api/v1/line/order-groups/log-reminders/send'
       : '/api/v1/line/notification-task-actions/deposit-reminder';

@@ -60,3 +60,25 @@ def test_pending_service_todos_only_include_cases_the_apply_can_handle(status,vi
  items,total=repo.todos(1,25)
  assert bool(items) is visible and total==int(visible)
  c.close()
+@pytest.mark.parametrize('service_type',[None,'','   '])
+def test_missing_service_type_is_a_typed_block_before_schedule_or_finance_writes(service_type):
+ from fastapi import HTTPException
+ from api.routes.service_start import call
+ from infrastructure.mysql.service_start_arrangement import MySqlServiceStartArrangement
+ from types import SimpleNamespace
+ class Cursor:
+  def __enter__(self):return self
+  def __exit__(self,*args):return False
+  def execute(self,sql,params):
+   assert sql.lstrip().startswith('SELECT')
+   self.sql=sql
+  def fetchall(self):
+   return [{'id':1,'staff_id':1,'segment_order':1,'service_days':6}] if 'COUNT(day.id)' in self.sql else []
+  def fetchone(self):return {'service_type':service_type}
+ repository=SimpleNamespace(connection=SimpleNamespace(cursor=Cursor))
+ arrangement=MySqlServiceStartArrangement(repository,None,None,None,None)
+ with pytest.raises(HTTPException) as caught:
+  call(lambda:arrangement._initial({'plan_id':1,'case_no':'CASE','id':1},None,None,None,'original-key'))
+ assert caught.value.status_code==409
+ assert caught.value.detail['error']['code']=='service_start_service_type_required'
+ assert '服務方式' in caught.value.detail['error']['message']

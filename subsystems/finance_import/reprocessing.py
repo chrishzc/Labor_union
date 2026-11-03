@@ -222,7 +222,15 @@ def reprocess_finance_import_batch(
                 row_id = _positive_id(row.get("id"), "finance_import_row_id")
                 if _formal_transaction_exists(cursor, row_id):
                     raise RuntimeError("eligible non_business_review row already has a formal transaction")
-                after = _after_tuple(classify_finance_transaction(_normalized_row(row), identity_maps["client_refund_accounts"], identity_maps["staff_accounts"], identity_maps.get("client_subsidy_return_accounts", {}), identity_maps.get("client_receipt_candidates", ())))
+                after = _after_tuple(classify_finance_transaction(
+                    _normalized_row(row),
+                    identity_maps["client_refund_accounts"],
+                    identity_maps["staff_accounts"],
+                    identity_maps.get("client_subsidy_return_accounts", {}),
+                    identity_maps.get("client_receipt_candidates", ()),
+                    identity_maps.get("staff_case_suffixes", {}),
+                    identity_maps.get("client_refund_case_suffixes", {}),
+                ))
                 plans.append({"row_id": row_id, "before": _before_tuple(row), "after": after})
             plan_fingerprint = _plan_fingerprint(identity, batch_id, plans)
             if expected_plan_fingerprint is not None and plan_fingerprint != expected_plan_fingerprint:

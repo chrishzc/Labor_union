@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-finance-case-accounting-2026-11-02-v1",
+  "release_metadata": {
+    "release_name": "Historical case accounting markers",
+    "application_version": "finance-case-accounting-v1",
+    "published_at": "2026-11-02",
+    "description": "Add historical accounting case markers only; preserve all existing cash and owner facts."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-order-reopen-reason-optional-2026-10-29-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1063_finance_case_accounting_markers.sql",
+      "relative_path": "db/schema_parts/1063_finance_case_accounting_markers.sql",
+      "sha256": "467a30d2aaa7c91ff59b654f8f1775a3484ba8129a113b035ed929bd218b0bf8",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "retain-original-database-and-marker-rows; no-automatic-delete",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "finance-case-accounting-marker-exact",
+      "phase": "post-schema",
+      "policy": "Exact columns, keys and checks; no cash, ledger, allocation or order changes.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "finance-case-accounting-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "finance-case-accounting-marker-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_02_finance_case_accounting_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_02_finance_case_accounting_v1.descriptors.json",
+    "sha256": "7bd95e131dc466b657cc10f1c099e52fa1c1f039320383f46d080e150def6c4f",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

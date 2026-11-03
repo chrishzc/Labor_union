@@ -4,7 +4,7 @@ from datetime import date
 from typing import Protocol, TypedDict
 
 from domains.government_subsidy.period_reconciliation import (
-    PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine, require_exact_period_receipt,
+    PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine, require_exact_period_receipt, GovernmentPeriodBalance,
 )
 
 
@@ -14,6 +14,7 @@ class PeriodCoverage:
     period: SubsidyPeriod
     amount_ntd: int
     recovered_advance_ntd: int
+    settled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,56 @@ class SubsidyPeriodView:
     recorded_lines: tuple[SubsidyPeriodLine, ...]
     changed_cases: tuple[str, ...]
     can_reconcile: bool
+    balances: tuple[GovernmentPeriodBalance,...] = ()
+    amount_controls: tuple['GovernmentAmountItem',...] = ()
+    operations: tuple['GovernmentPeriodOperation',...] = ()
+    amount_changes: tuple['GovernmentAmountChange',...] = ()
+
+
+@dataclass(frozen=True)
+class GovernmentAmountChange:
+    case_no: str
+    action: str
+    before_ntd: int
+    after_ntd: int
+    computed_ntd: int
+    reason: str
+    actor: str
+    confirmed_on: str
+
+
+@dataclass(frozen=True)
+class GovernmentAmountItem:
+    case_no: str
+    mode: str
+    computed_ntd: int | None
+    effective_ntd: int | None
+
+
+@dataclass(frozen=True)
+class GovernmentPeriodOperation:
+    identity: int
+    balance_identity: str
+    action: str
+    amount_ntd: int
+    bank_row_id: int | None
+    reason: str
+    actor: str
+    confirmed_on: str
+
+
+@dataclass(frozen=True)
+class GovernmentDifferenceCommand:
+    period: SubsidyPeriod
+    action: str
+    identity: str
+    amount_ntd: int | None
+    bank_row_id: int | None
+    handling: str
+    reason: str
+    expected_version: int
+    key: str
+    actor: str
 
 
 class PeriodBankRow(TypedDict):
@@ -42,6 +93,7 @@ class CasePeriodReceipt(TypedDict):
     recorded_case_amount_ntd: int
     recorded_service_end_date: date
     recovered_advance_ntd: int
+    settled: bool
 
 
 class CasePeriodCoverage(TypedDict):
@@ -96,5 +148,11 @@ class PeriodReconciliationApplication:
     def reverse(self, receipt_id: int, bank_row_id: int, key: str, actor: str) -> int:
         with self.unit_of_work() as work:
             result = self.repository.reverse(receipt_id, bank_row_id, key, actor)
+            work.commit()
+            return result
+
+    def difference(self,command: GovernmentDifferenceCommand):
+        with self.unit_of_work() as work:
+            result=self.repository.apply_difference(command)
             work.commit()
             return result

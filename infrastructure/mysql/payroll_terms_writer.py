@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.orders.terms_workflow import PayrollImpactPersistenceCommand
@@ -16,16 +17,23 @@ def persist_payroll_terms_impact(cursor, command) -> None:
     _insert_special_pay_events(cursor, command)
     if not command.reuse_existing_assignments:
         _insert_carried_rate_snapshots(cursor, command)
+    from infrastructure.mysql.payroll_amount_correction_repository import controlled_payroll_terms,carry_payroll_amount_control
+    controlled,carry=controlled_payroll_terms(cursor,command)
     for ordinal, action in enumerate(command.candidate.actions, start=1):
+        if (action.source_obligation_identity or action.obligation_identity) in controlled:
+            continue
         if not _action_requires_event(action):
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
         _persist_projection(cursor, command, action, event_id)
+        if action.obligation_identity in carry:
+            carry_payroll_amount_control(cursor,command,action,carry[action.obligation_identity])
     _advance_payroll_version(cursor, command)
     _append_outbox(cursor, command)
     if command.candidate.frozen_settlements:
         from infrastructure.mysql.staff_payable_payroll_correction import persist_staff_payable_payroll_corrections
-        persist_staff_payable_payroll_corrections(cursor.connection, command)
+        filtered=replace(command.candidate,frozen_settlements=tuple(i for i in command.candidate.frozen_settlements if i.obligation_identity not in controlled))
+        persist_staff_payable_payroll_corrections(cursor.connection,replace(command,candidate=filtered))
     from infrastructure.mysql.payroll_installments import persist_payroll_installments
     resolution = command.assignment_resolution.assignment_id_by_candidate_key if command.assignment_resolution is not None else None
     if command.reuse_existing_assignments:

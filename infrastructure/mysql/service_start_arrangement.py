@@ -160,7 +160,11 @@ class MySqlServiceStartArrangement:
                 "WHERE latest.case_no=r.case_no AND latest.segment_id=r.segment_id AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(latest.execution_dates,'$.kind')),'')NOT IN ('leave-v1','handover-v1')) FOR UPDATE", (request['case_no'],request['plan_id']))
             responses={row['segment_id']:row for row in c.fetchall()}
             c.execute('SELECT c.service_type FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s', (request['case_no'],))
-            mode=_canonical_service_mode(c.fetchone()['service_type'])
+            service_type=c.fetchone()['service_type']
+            if service_type is None or not service_type.strip():
+                raise ServiceStartConflict('service_start_service_type_required',
+                    '本案尚未設定服務方式，請聯絡工會補齊資料後再送出。')
+            mode=_canonical_service_mode(service_type)
         intents=[]
         for segment in segments:
             response=responses.get(segment['id'])

@@ -10,6 +10,7 @@ import unicodedata
 from domains.finance_import.normalized_row import validate_normalized_row
 from domains.finance_import.cancellation_code import (
     extract_sinopac_account_reference,
+    extract_sinopac_memo_case_suffix,
     resolve_finance_cancellation_code,
 )
 
@@ -181,7 +182,43 @@ def _classify_sinopac_outgoing(
     row: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
     client_refund_accounts: Mapping[str, Any],
+    staff_case_suffixes: Mapping[str, Any] | None = None,
+    client_refund_case_suffixes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    memo = row.get("memo")
+    suffix = extract_sinopac_memo_case_suffix(memo)
+    if suffix is not None:
+        staff_case_map = staff_case_suffixes or {}
+        refund_case_map = client_refund_case_suffixes or {}
+        memo_staff_ids = _ids_for_account(staff_case_map, suffix)
+        memo_refund_ids = _ids_for_account(refund_case_map, suffix)
+
+        if memo_staff_ids and memo_refund_ids:
+            memo_text = unicodedata.normalize("NFKC", memo) if isinstance(memo, str) else ""
+            if any(k in memo_text for k in ("退款", "退費")) and not any(k in memo_text for k in ("服務人員", "月嫂", "薪資")):
+                memo_staff_ids = []
+            elif any(k in memo_text for k in ("服務人員", "月嫂", "薪資")) and not any(k in memo_text for k in ("退款", "退費")):
+                memo_refund_ids = []
+            else:
+                return _review("counterparty_identity_type_conflict")
+
+        if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
+            return _review("counterparty_account_multiple_matches")
+        if memo_staff_ids:
+            return _result(
+                "staff_salary",
+                memo_staff_ids,
+                "sinopac_unique_staff_case_suffix_in_memo",
+                suffix,
+            )
+        if memo_refund_ids:
+            return _result(
+                "client_refund",
+                memo_refund_ids,
+                "sinopac_unique_client_refund_case_suffix_in_memo",
+                suffix,
+            )
+
     reference_key = (
         "transaction_reference" if row["format_id"] == "legacy" else "交易參考編號"
     )
@@ -217,6 +254,8 @@ def classify_finance_transaction(
     staff_accounts: Mapping[str, Any],
     client_subsidy_return_accounts: Mapping[str, Any] | None = None,
     client_receipt_candidates: Sequence[Mapping[str, Any]] = (),
+    staff_case_suffixes: Mapping[str, Any] | None = None,
+    client_refund_case_suffixes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -249,14 +288,28 @@ def classify_finance_transaction(
             if heuristic_result is not None:
                 return heuristic_result
             return _review("sinopac_invalid_or_missing_virtual_account")
-        return _classify_sinopac_outgoing(row, staff_accounts, client_refund_accounts)
+        return _classify_sinopac_outgoing(
+            row,
+            staff_accounts,
+            client_refund_accounts,
+            staff_case_suffixes,
+            client_refund_case_suffixes,
+        )
 
     if format_id == "taishin":
+        memo = row["memo"]
+        government_memo = isinstance(memo, str) and "新竹市政府" in memo
         if direction == "incoming":
-            memo = row["memo"]
-            if isinstance(memo, str) and "新竹市政府" in memo:
+            if government_memo:
                 return _result("government_subsidy", [], "taishin_government_memo")
             return _review("taishin_incoming_not_government")
+        if government_memo:
+            account = row.get("counterparty_account")
+            if any(_ids_for_account(accounts, account) for accounts in (
+                client_refund_accounts, staff_accounts, client_subsidy_return_accounts,
+            )):
+                return _review("counterparty_identity_type_conflict")
+            return _result("government_subsidy", [], "taishin_government_return_memo")
         return _classify_taishin_outgoing(
             row,
             client_refund_accounts,

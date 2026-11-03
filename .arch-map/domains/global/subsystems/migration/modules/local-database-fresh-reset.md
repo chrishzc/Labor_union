@@ -17,6 +17,7 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
 
 ## Implementation
 - primary:
+  - `scripts/retire_client_payment_destination.py` — separately authorized three-table localhost retirement with plan, backup, qualified engine and full other-table preservation; not an additive/reset operation.
   - `scripts/reset_fake_database.py`
   - `scripts/reset_root_authentication.py` — root-only capture, encrypted backup and exact restoration.
   - `scripts/bootstrap_disposable_mysql_schema.py` — library-only；沒有獨立命令入口。
@@ -33,6 +34,8 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
   - `db/releases/labor_union_validation_schema_v1.sql`
   - `db/releases/labor_union_validation_schema_registry_guards_v1.sql` — current registry-guard successor source snapshot.
+  - `db/releases/labor_union_validation_schema_finance_case_accounting_v1.sql` — preserved v57 predecessor snapshot with historical accounting marker metadata.
+  - `db/releases/labor_union_validation_schema_accounting_differences_v1.sql` — current v58 full source snapshot with owner-specific noncash events, amount modes and frozen government period balances; preserve artifact 1064 and its canonical descriptor/qualification are schema-only, no business backfill.
 
 ## Verification
 - test_root: `tests/domains/global/subsystems/migration/modules/local-database-fresh-reset/`

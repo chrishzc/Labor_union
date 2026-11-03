@@ -3,12 +3,19 @@ import { describe,it,expect,vi } from 'vitest';
 import { FinanceWarningWorkspace } from '../../../../../../../components/FinanceWarningWorkspace';
 import { LineManagementPage } from '../../../../../../../pages/LineManagementPage';
 
-vi.mock('../../../../../../../components/LineNotificationWorkbench',()=>({PAYMENT_REMINDER_MESSAGE_IDS:['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled'],LineNotificationWorkbench:({scope,selectedEntryId,onSelectedEntryChange}:{scope?:string;selectedEntryId:string;onSelectedEntryChange:(id:string)=>void})=><section aria-label={scope==='payment-reminders'?'繳款提醒編輯':'原通知內容工作台'}><p>{selectedEntryId}</p><button onClick={()=>onSelectedEntryChange('payment-overdue-first')}>編輯第一期逾期內容</button></section>}));
+vi.mock('../../../../../../../components/LineNotificationWorkbench',()=>({PAYMENT_REMINDER_MESSAGE_IDS:['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled','payment-first-settled'],LineNotificationWorkbench:({scope,selectedEntryId,onSelectedEntryChange}:{scope?:string;selectedEntryId:string;onSelectedEntryChange:(id:string)=>void})=><section aria-label={scope==='payment-reminders'?'繳款提醒編輯':'原通知內容工作台'}><p>{selectedEntryId}</p><button onClick={()=>onSelectedEntryChange('payment-overdue-first')}>編輯第一期逾期內容</button></section>}));
 vi.mock('../../../../../../../components/FinanceCaseAccounting',()=>({FinanceAccountingWarnings:()=> <p>原有帳務警示</p>}));
 vi.mock('../../../../../../../components/PaymentReminderSchedulePanel',()=>({PaymentReminderSchedulePanel:()=> <p>正式提醒排程設定</p>}));
+vi.mock('../../../../../../../components/PaymentOverdueReminderWorkbench',()=>({PaymentOverdueReminderWorkbench:()=> <p>正式逾期款項清單</p>}));
 vi.mock('../../../../../../../components/LineMessageFlow',()=>({LineMessageFlow:()=>null}));
 
 describe('提醒內容搬移至帳務頁',()=>{
+  it('舊逾期深連結保留實際逾期清單，新入口也能查閱',()=>{
+    window.history.replaceState(null,'','#finance?tab=receipts&view=overdue');
+    render(<FinanceWarningWorkspace onCase={()=>{}}/>);
+    expect(screen.getByRole('tab',{name:'逾期款項'})).toHaveAttribute('aria-selected','true');
+    expect(screen.getByText('正式逾期款項清單')).toBeInTheDocument();
+  });
   it('原警示保留，同頁可切換排程與繳款提醒內容',()=>{
     window.history.replaceState(null,'','#finance?tab=accounting-warnings');
     render(<FinanceWarningWorkspace onCase={()=>{}}/>);
@@ -27,7 +34,7 @@ describe('提醒內容搬移至帳務頁',()=>{
     expect(window.location.hash).toContain('message=service-start-inquiry');
     expect(screen.getByRole('button',{name:'通知與發送'})).toBeInTheDocument();
   });
-  it.each(['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled'])('繳款提醒 %s 深連結移轉至同一則帳務內容',async(id)=>{
+  it.each(['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled','payment-first-settled'])('繳款提醒 %s 深連結移轉至同一則帳務內容',async(id)=>{
     window.history.replaceState(null,'','#line-management?tab=push_queue&message='+id);
     render(<LineManagementPage/>);
     await waitFor(()=>expect(window.location.hash).toContain('#finance?tab=accounting-warnings&view=reminder-content'));

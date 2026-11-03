@@ -35,6 +35,14 @@ def test_stale_is_typed_conflict_and_read_only_principal_cannot_send(http):
     app.dependency_overrides[require_admin]=lambda:AdminPrincipal(2,'reader','唯讀','read_only')
     assert client.post('/api/v1/line/payment-overdue-reminders/receipts/send',json=asdict(PAYMENT)).status_code==403
 
+
+def test_first_receipt_focus_is_passed_to_owner_and_get_does_not_send(http):
+    client,calls,_,app=http;queries=[]
+    app.dependency_overrides[route.application]=lambda:SimpleNamespace(list=lambda *args,**kwargs:(queries.append(kwargs) or ((),0)),send=lambda *_:pytest.fail('GET cannot send'))
+    result=client.get('/api/v1/line/payment-overdue-reminders/receipts',params={'case_no':'DEMO-001','payment_stage':'first','settlement_identity':'a'*64})
+    assert result.status_code==200 and calls==[]
+    assert queries==[{'case_no':'DEMO-001','payment_stage':'first','settlement_identity':'a'*64}]
+
 @pytest.mark.parametrize('event',['deposit_confirmed','client.second_payment_settled'])
 def test_enabled_old_rules_still_cannot_authorize_an_automatic_receipt(event):
     decisions=evaluate_notification_rules(NotificationSourceEvent('synthetic',event,False,{}),{'rules':[{'id':'old','event_code':event,'enabled':True,'predicates':[]}]})

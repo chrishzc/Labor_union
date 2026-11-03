@@ -275,7 +275,9 @@ def test_refund_term_changes_preserve_cash_and_handle_returned_overrefund(http,m
     change(3)
     refund=rows("SELECT obligation_identity,amount_due_ntd,status FROM client_obligations WHERE case_no=%s AND obligation_type='subsidy_return'",(case,))[0]
     assert refund['amount_due_ntd']==0
-    difference=refund['obligation_identity']+':difference'
+    # Confirmed accounting contract: preserve an already reconciled source and
+    # create an independent correction balance instead of reopening that source.
+    difference=rows("SELECT obligation_identity FROM client_obligations WHERE source_obligation_identity=%s AND direction='receivable_from_client' AND obligation_identity LIKE 'client-correction:%%'",(refund['obligation_identity'],))[0]['obligation_identity']
     assert rows('SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s',(difference,))[0]['amount_due_ntd']==4800
     # A real bank workbook and the existing Finance Import writer collect the difference.
     original_workbook=support['bank'].__globals__['workbook']
@@ -288,7 +290,8 @@ def test_refund_term_changes_preserve_cash_and_handle_returned_overrefund(http,m
     support['bank'](http,case,4800,2)
     change(20)
     assert rows('SELECT amount_due_ntd,status FROM client_obligations WHERE obligation_identity=%s',(difference,))==({'amount_due_ntd':0,'status':'settled'},)
-    assert rows('SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s',(refund['obligation_identity'],))[0]['amount_due_ntd']==4800
+    assert rows('SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s',(refund['obligation_identity'],))[0]['amount_due_ntd']==0
+    assert rows("SELECT amount_due_ntd FROM client_obligations WHERE source_obligation_identity=%s AND direction='payable_to_client' AND obligation_identity LIKE 'client-correction:%%'",(refund['obligation_identity'],))[0]['amount_due_ntd']==4800
     assert rows('SELECT id,entry_type,amount_ntd FROM client_ledger_entries WHERE id=%s',(original['id'],))[0]==original
 
 

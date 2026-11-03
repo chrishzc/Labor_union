@@ -22,7 +22,12 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None):
     tiered = tuple(item for item in candidate.assignments if item.tiered_pricing)
     if not tiered:
         return
-    cursor.execute("SELECT actual_end_date FROM orders WHERE case_no=%s", (case_no,))
+    # Scheduling has already saved this generation; Orders' end-date projection
+    # is persisted later in the same outer transaction.
+    cursor.execute("SELECT COALESCE((SELECT MAX(day.work_date) FROM scheduling_aggregates schedule "
+        "JOIN staff_schedule day ON day.generation_id=schedule.effective_generation_id "
+        "WHERE schedule.case_no=o.case_no AND day.effective_marker=1 AND day.is_work_day=1),"
+        "o.actual_end_date) AS actual_end_date FROM orders o WHERE o.case_no=%s", (case_no,))
     row = cursor.fetchone()
     completed_on = row["actual_end_date"] if row else None
     for item in tiered:
@@ -35,7 +40,14 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None):
                 continue
             raise ValueError("payroll_installment_root_ambiguous")
         identity = roots[0]["obligation_identity"]
-        portions = {portion.funding_kind: portion for portion in payroll_installments(item, completed_on)}
+        cursor.execute('SELECT effective_ntd,settlement_base_ntd FROM payroll_amount_controls WHERE obligation_identity=%s',(identity,))
+        control=cursor.fetchone()
+        if control and control['settlement_base_ntd'] is not None:
+            # Paid source schedules stay attached to their original evidence;
+            # correction payables have their own identities and dates.
+            continue
+        effective=int(control['effective_ntd']) if control else None
+        portions = {portion.funding_kind: portion for portion in payroll_installments(item, completed_on,effective_total=effective)}
         for kind in ("client", "subsidy"):
             portion = portions.get(kind)
             cursor.execute("INSERT INTO staff_obligation_installments(obligation_identity,funding_kind,amount_ntd,due_date) "
@@ -46,12 +58,15 @@ def persist_payroll_installments(cursor, case_no, candidate, identities=None):
 def installment_export_sql(statement):
     """Extend existing bank/account/status filters to one scheduled funding portion."""
     original_balance = "COALESCE(projection.balance_ntd, obligations.amount_due_ntd)"
+    from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount
+    effective=effective_staff_obligation_amount('obligations')
+    controlled_balance=f'COALESCE(projection.balance_ntd,{effective})'
     remaining = ("CASE WHEN installments.obligation_identity IS NULL THEN " + original_balance +
         " ELSE GREATEST(0,LEAST(installments.amount_ntd," + original_balance +
         "-CASE WHEN installments.funding_kind='client' THEN COALESCE((SELECT later.amount_ntd "
         "FROM staff_obligation_installments later WHERE later.obligation_identity=installments.obligation_identity "
         "AND later.funding_kind='subsidy'),0) ELSE 0 END)) END")
-    amount = "CASE WHEN installments.obligation_identity IS NULL THEN obligations.amount_due_ntd ELSE installments.amount_ntd END"
+    amount = f"CASE WHEN installments.obligation_identity IS NULL THEN {effective} ELSE installments.amount_ntd END"
     due = "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END"
     # Replace complete select expressions before their component columns.
     select, separator, grouped = statement.partition('GROUP BY')
@@ -60,8 +75,8 @@ def installment_export_sql(statement):
     select = select.replace("       obligations.due_date,", "       __INSTALLMENT_DUE__ AS due_date,", 1)
     statement = (select + separator + grouped).replace('obligations.due_date', due)
     statement = statement.replace('__INSTALLMENT_DUE__', due)
-    statement = statement.replace(original_balance, remaining)
-    statement = statement.replace("FROM staff_obligations obligations", "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments ON installments.obligation_identity=obligations.obligation_identity")
+    statement = statement.replace(original_balance, remaining.replace(original_balance,controlled_balance))
+    statement = statement.replace("FROM staff_obligations obligations", "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments ON installments.obligation_identity=obligations.obligation_identity AND installments.amount_ntd>0")
     statement = statement.replace("GROUP BY obligations.obligation_identity,", "GROUP BY installments.funding_kind,installments.amount_ntd,installments.due_date,obligations.obligation_identity,")
     statement = statement.replace("SELECT obligations.obligation_identity,", "SELECT installments.funding_kind AS installment_funding,obligations.obligation_identity,", 1)
     return statement

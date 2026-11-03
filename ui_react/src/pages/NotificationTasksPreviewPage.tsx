@@ -29,7 +29,7 @@ const PRIMARY:Record<NotificationSource,string> = {
   registration:'查看申請',identity:'審核身分綁定',profile:'審核資料異動',information:'處理確認與條件',
   customer_binding:'查看人工提醒方式',staff_binding:'查看人工提醒方式',
   followup:'查看月嫂回覆',recommendation:'開啟案件工作區',service_start:'處理日期與代班',
-  deposit:'發送繳費提醒',group:'查看建群指令',overdue:'發送提醒',log:'發送提醒',
+  deposit:'發送繳費提醒',payment_receipt:'前往帳務確認',group:'查看建群指令',overdue:'發送提醒',log:'發送提醒',
   customer_service:'前往客服案件',delivery:'查看寄送工作',runtime:'前往通知對象設定',
   notification_failure:'處理通知建立異常',
 };

@@ -81,6 +81,8 @@ Data Browser 依規格 33 保留 `GET /api/v1/admin/data-browser/sources/{source
 
 2026-10-30 人工裁決退役「月嫂履歷暫存下載」端點（`GET /api/v1/matching-confirmation-files/{token}` 回應 typed 410 Gone），月嫂履歷改由業務線下直接傳送，LINE 排班確認卡片不嵌入下載連結；環境變數 `MATCHING_CONFIRMATION_DOWNLOAD_TOKEN_SECRET` 與 `CONTRACT_FINAL_PREVIEW_TOKEN_SECRET` 一併自 `.env.example` 移除，相關防偽/加密改由內部密鑰自動處理。
 
+2026-11-02 使用者明確退役 Finance 工作台「舊帳戶維護」與 `/api/v1/client-finance/payment-destination` 的 GET、`/preview`、`/apply`。API 自路由與 OpenAPI 移除，不留替代讀寫入口；舊 `#finance?tab=payment-destination` 回既有每月帳務。專屬設定、事件及收據資料依規格 10 受控移除，舊契約帳戶維護規格不再有效；本案虛擬帳號及 `account-management` 登入帳號管理保留。
+
 ## 5. Standard local runtime
 
 標準本機管理端固定為：

@@ -1228,21 +1228,25 @@ _CLIENT_PAYMENT_TERMS_SQL = (
     "WHERE a.case_no=%s"
 )
 
-_CLIENT_OBLIGATIONS_SQL = (
-    "SELECT o.obligation_identity,o.obligation_type,o.direction,o.due_date,"
-    "e.after_amount_ntd AS contracted_amount_ntd,"
+# An amount correction preserves allocations made before that correction.
+# The immutable allocated principal remains the lower bound of the old source;
+# its excess is represented by a separate payable, never by rewriting cash.
+_CLIENT_ACCOUNTED_AMOUNT_SQL = (
     "COALESCE((SELECT SUM(CASE l.entry_type "
     "WHEN 'receipt' THEN a.amount_ntd WHEN 'adjustment' THEN a.amount_ntd "
-    "WHEN 'refund' THEN -a.amount_ntd WHEN 'reversal' THEN -a.amount_ntd "
-    "END) FROM client_ledger_obligation_allocations a "
-    "JOIN client_ledger_entries l ON l.id=a.ledger_entry_id "
-    "WHERE a.obligation_identity=o.obligation_identity),0) "
-    "AS net_settled_amount_ntd,"
-    "EXISTS(SELECT 1 FROM client_ledger_obligation_allocations a "
-    "WHERE a.obligation_identity=o.obligation_identity) "
-    "AS formal_history_exists "
-    "FROM client_obligations o "
-    "JOIN client_obligation_events e ON e.id=o.current_event_id "
+    "WHEN 'refund' THEN -a.amount_ntd WHEN 'reversal' THEN -a.amount_ntd END) "
+    "FROM client_ledger_obligation_allocations a JOIN client_ledger_entries l ON l.id=a.ledger_entry_id "
+    "WHERE a.obligation_identity=o.obligation_identity),0) + "
+    "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity),0)"
+)
+_CLIENT_OBLIGATIONS_SQL = (
+    "SELECT o.obligation_identity,o.obligation_type,o.direction,o.due_date,"
+    "CASE WHEN EXISTS(SELECT 1 FROM client_finance_amount_controls c WHERE c.obligation_identity=o.obligation_identity) "
+    "THEN GREATEST(e.after_amount_ntd," + _CLIENT_ACCOUNTED_AMOUNT_SQL + ") ELSE e.after_amount_ntd END AS contracted_amount_ntd,"
+    + _CLIENT_ACCOUNTED_AMOUNT_SQL + " AS net_settled_amount_ntd,"
+    "(EXISTS(SELECT 1 FROM client_ledger_obligation_allocations a WHERE a.obligation_identity=o.obligation_identity) "
+    "OR EXISTS(SELECT 1 FROM client_finance_noncash_events n WHERE n.target_identity=o.obligation_identity)) AS formal_history_exists "
+    "FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id "
     "WHERE o.case_no=%s AND o.obligation_type IN ('deposit','first','second') "
     "ORDER BY o.obligation_type,o.obligation_identity"
 )

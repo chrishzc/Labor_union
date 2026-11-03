@@ -20,7 +20,7 @@ const payableObligation = z.strictObject({
   obligation_identity: identity,
   obligation_type: z.enum(['adjustment', 'refund', 'subsidy_return']),
   amount_due_ntd: z.number().int().positive(),
-  due_date: date,
+  due_date: date.nullable(),
 });
 const incomingBankFact = z.strictObject({
   finance_import_row_id: z.number().int().positive(), amount_ntd: z.number().int().positive(), transaction_date: date,

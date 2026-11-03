@@ -8,6 +8,8 @@
 既有 Payroll 調整 Query／Preview／Apply 與案件、月嫂薪資查詢。Query 保留已取消及已結清的合法 0 元紀錄，不改寫金額、狀態或付款；新增調整仍依 owner 非零規則。
 
 ## Implementation
+- amount modes: `domains/payroll/amount_correction.py`, `subsystems/payroll/amount_correction.py`, `infrastructure/mysql/payroll_amount_correction_repository.py`; original Payroll rebuild borrows amount controls, paid differences delegate recovery to Staff Payables without changing cash.
+- entrypoint: `api/routes/accounting_differences.py`; presentation via `ui_react/src/components/AccountingDifferencePanel.tsx`.
 - primary:
   - `domains/payroll/adjustment.py`
   - `subsystems/payroll/adjustment_workflow.py`
@@ -20,6 +22,7 @@
 - `document/架構重整/01_規格基線/03_Payroll_Domain.md`
 
 ## Verification
+- integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_amount_correction_mysql.py`
 - test_root: `tests/domains/payroll/subsystems/payroll/modules/payroll-adjustment/`
 - integration_root: `tests/domains/payroll/subsystems/payroll/integration/test_payroll_adjustment_workflow.py`
 

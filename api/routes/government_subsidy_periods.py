@@ -13,7 +13,7 @@ from domains.government_subsidy.period_reconciliation import SubsidyPeriodLine
 from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from subsystems.government_subsidy.period_reconciliation import PeriodReconciliationApplication
+from subsystems.government_subsidy.period_reconciliation import PeriodReconciliationApplication,GovernmentDifferenceCommand,GovernmentAmountItem,GovernmentPeriodOperation,GovernmentAmountChange
 
 router = APIRouter(prefix='/api/v1/government-subsidy/periods', tags=['Government Subsidy Periods'])
 
@@ -50,6 +50,24 @@ class CoverageView(BaseModel):
     amount_ntd:int
     recovered_advance_ntd:int
     label:str
+    settled:bool=True
+
+
+class BalanceView(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    identity:str
+    root_receipt_id:int
+    kind:str
+    case_no:str|None
+    direction:str
+    expected_ntd:int
+    received_ntd:int
+    recognized_ntd:int
+    returned_ntd:int
+    remaining_ntd:int
+    refund_due_ntd:int
+    settled:bool
+    status:str
 
 
 class PeriodView(BaseModel):
@@ -64,6 +82,10 @@ class PeriodView(BaseModel):
     changed_cases:list[str]
     can_reconcile:bool
     label:str
+    balances:list[BalanceView]=[]
+    amount_controls:list[GovernmentAmountItem]=[]
+    operations:list[GovernmentPeriodOperation]=[]
+    amount_changes:list[GovernmentAmountChange]=[]
 
 
 class BankRowView(BaseModel):
@@ -85,6 +107,7 @@ class CaseReceiptView(BaseModel):
     recorded_case_amount_ntd:int
     recorded_service_end_date:date
     recovered_advance_ntd:int
+    settled:bool=True
 
 
 class CaseCoverageView(BaseModel):
@@ -119,15 +142,48 @@ def query_period(unit: Literal['month','quarter','year'],year: int=Query(ge=1912
                  principal=Depends(require_system_admin),application=Depends(get_application)):
     try:
         view = application.query(SubsidyPeriod(unit,year,index))
-        data = asdict(view)
-        data['label'] = view.period.label
-        for coverage,item in zip(view.coverage,data['coverage']):
-            item['label'] = coverage.period.label
-        return BaseResponse(data=data)
+        return BaseResponse(data=_period_payload(view))
     except PeriodReconciliationConflict as error:
         raise _conflict(error) from error
     except ValueError as error:
         raise typed_http_error(422,'validation','subsidy_period_invalid','請選擇有效的月份、季度或年度。','subsidy-period') from error
+
+
+def _period_payload(view):
+    data=asdict(view)
+    data['label']=view.period.label
+    for coverage,item in zip(view.coverage,data['coverage']):
+        item['label']=coverage.period.label
+    for balance,item in zip(view.balances,data['balances']):
+        item.update(remaining_ntd=balance.remaining_ntd,refund_due_ntd=balance.refund_due_ntd,settled=balance.settled,status=balance.status)
+    return data
+
+
+class DifferenceBody(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    unit:Literal['month','quarter','year']
+    year:int=Field(ge=1912,le=9998)
+    index:int=Field(ge=1,le=12)
+    action:Literal['initial_receipt','receipt','refund','loss','manual_amount','adopt_calculation']
+    identity:str=Field(default='',max_length=191)
+    amount_ntd:int|None=Field(default=None,ge=0,le=9999999999)
+    bank_row_id:int|None=Field(default=None,gt=0)
+    handling:Literal['','exact','partial','refund_excess']=''
+    reason:str=Field(default='',max_length=500)
+    expected_version:int=Field(ge=0)
+    key:str=Field(min_length=1,max_length=191)
+
+
+@router.post('/differences',response_model=BaseResponse[PeriodView])
+def apply_difference(body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_application)):
+    try:
+        view=_mutate(lambda:application.difference(GovernmentDifferenceCommand(SubsidyPeriod(body.unit,body.year,body.index),body.action,
+            body.identity,body.amount_ntd,body.bank_row_id,body.handling,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+        return BaseResponse(data=_period_payload(view))
+    except PeriodReconciliationConflict as error:
+        raise _conflict(error) from error
+    except ValueError as error:
+        raise typed_http_error(422,'validation','subsidy_period_invalid','請確認期間、處理方式及金額。','subsidy-period') from error
 
 
 @router.get('/bank-rows',response_model=BaseResponse[BankPageView])

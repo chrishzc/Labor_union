@@ -15,10 +15,11 @@ CLIENT_FINANCE_IDEMPOTENCY_CONFLICT = "client_finance_idempotency_conflict"
 
 @dataclass(frozen=True, slots=True)
 class ReconciliationSelection:
-    case_no: str; payment_stage: PaymentStage; bank_fact_identities: tuple[str, ...]; obligation_identities: tuple[str, ...]; allow_overage_disposition: bool = False
+    case_no: str; payment_stage: PaymentStage | None; bank_fact_identities: tuple[str, ...]; obligation_identities: tuple[str, ...]; allow_overage_disposition: bool = False; allow_partial_receipt: bool = False
     def __post_init__(self):
         require_canonical_text(self.case_no, "case number", 191); _ids(self.bank_fact_identities); _ids(self.obligation_identities)
         if not isinstance(self.allow_overage_disposition, bool): raise ValueError("invalid_client_receipt_intent")
+        if not isinstance(self.allow_partial_receipt, bool) or (self.allow_partial_receipt and self.allow_overage_disposition): raise ValueError("invalid_client_receipt_intent")
 
 @dataclass(frozen=True, slots=True)
 class ClientReconciliationFacts:
@@ -65,7 +66,12 @@ class ClientReconciliationWorkflow:
             if replay is not None:
                 if replay.command_fingerprint != command: raise _error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, CLIENT_FINANCE_IDEMPOTENCY_CONFLICT)
                 return replay.receipt
-            preview=_preview(request.selection, self._repository.load(request.selection, for_update=True))
+            facts=self._repository.load(request.selection, for_update=True)
+            if facts.account_version != request.expected_account_version.value:raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=facts.account_version)
+            try:preview=_preview(request.selection, facts)
+            except ValueError as error:
+                if str(error)=="invalid_client_receipt_facts":raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=facts.account_version) from None
+                raise
             if preview.account_version != request.expected_account_version.value or preview.fingerprint != request.preview_fingerprint: raise _error(request.correlation_id, ErrorCategory.CONFLICT, CLIENT_FINANCE_CANDIDATE_STALE, current=preview.account_version)
             if preview.candidate.status is ReconciliationStatus.REVIEW_REQUIRED:
                 raise ClientReconciliationError(TypedError(
@@ -80,25 +86,26 @@ class ClientReconciliationWorkflow:
             self._repository.update_projection(request.selection, receipt.account_version)
             if preview.candidate.status is ReconciliationStatus.OVERAGE:
                 self._repository.establish_overage_refund(preview.candidate, receipt.account_version)
-            if preview.candidate.payment_stage is PaymentStage.DEPOSIT:
+            if preview.candidate.payment_stage is None or (preview.candidate.payment_stage is PaymentStage.DEPOSIT and preview.candidate.status is not ReconciliationStatus.PARTIAL):
                 self._repository.append_orders_deposit_intent(preview.candidate)
             # A normal first/second/adjustment receipt is not an anomaly.
             # Explicit overage disposition retains its real discrepancy event.
-            elif preview.candidate.blockers:
+            elif preview.candidate.blockers and preview.candidate.status is not ReconciliationStatus.PARTIAL:
                 self._repository.append_anomaly_intent(preview.candidate)
             self._repository.save_receipt(request.idempotency_key, StoredClientReconciliationReceipt(command, receipt)); unit.commit(); return receipt
 
 def _preview(selection, facts):
-    _facts(selection, facts); candidate=build_reconciliation_candidate(facts.bank_facts, facts.obligations,allow_overage_disposition=selection.allow_overage_disposition)
+    _facts(selection, facts); candidate=build_reconciliation_candidate(facts.bank_facts, facts.obligations,allow_overage_disposition=selection.allow_overage_disposition,allow_partial_receipt=selection.allow_partial_receipt)
     return ClientReconciliationPreview(candidate, facts.account_version, fingerprint_payload({"selection":_selection(selection), "account_version":facts.account_version, "candidate":candidate.settlement_identity.value}))
 def _receipt(request, preview):
-    c=preview.candidate; return ClientReconciliationReceipt(request.selection.case_no, preview.account_version+1, c.status, c.settlement_identity, len(c.allocations and {x.bank_fact_identity for x in c.allocations}), len(c.allocations), c.blockers)
+    c=preview.candidate; return ClientReconciliationReceipt(request.selection.case_no, preview.account_version+1, c.status, c.settlement_identity, len(request.selection.bank_fact_identities), len(c.allocations), c.blockers)
 def _facts(selection, facts):
-    if any(x.payment_stage is not selection.payment_stage for x in (*facts.bank_facts,*facts.obligations)) or any(x.case_no != selection.case_no for x in facts.obligations): raise ValueError("invalid_client_receipt_facts")
+    if {item.identity for item in facts.bank_facts} != set(selection.bank_fact_identities) or {item.identity for item in facts.obligations} != set(selection.obligation_identities):raise ValueError("invalid_client_receipt_facts")
+    if any(x.payment_stage is not selection.payment_stage for x in facts.bank_facts) or (selection.payment_stage is not None and any(x.payment_stage is not selection.payment_stage for x in facts.obligations)) or any(x.case_no != selection.case_no for x in facts.obligations): raise ValueError("invalid_client_receipt_facts")
 def _ids(values):
     if not isinstance(values,tuple) or not values or values != tuple(sorted(set(values))): raise ValueError("invalid_client_receipt_intent")
     for value in values: require_canonical_text(value,"identity",191)
-def _selection(s): return {"case_no":s.case_no,"payment_stage":s.payment_stage.value,"bank_fact_identities":s.bank_fact_identities,"obligation_identities":s.obligation_identities,"allow_overage_disposition":s.allow_overage_disposition}
+def _selection(s): return {"case_no":s.case_no,"payment_stage":s.payment_stage.value if s.payment_stage is not None else None,"bank_fact_identities":s.bank_fact_identities,"obligation_identities":s.obligation_identities,"allow_overage_disposition":s.allow_overage_disposition,**({"allow_partial_receipt":True} if s.allow_partial_receipt else {})}
 def _command(r): return fingerprint_payload({"selection":_selection(r.selection),"expected_account_version":r.expected_account_version.value,"preview_fingerprint":r.preview_fingerprint.value,"actor":r.actor.actor_id,"reason":r.reason})
 def _error(correlation, category, code, current=None): return ClientReconciliationError(TypedError(category,code,"Client receipt reconciliation failed.",correlation,current_version=None if current is None else ExpectedVersion(current)))
 __all__=[name for name in globals() if name.startswith("Client") or name=="ReconciliationSelection"]

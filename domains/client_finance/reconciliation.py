@@ -1,9 +1,10 @@
-"""Exact same-stage reconciliation of bank facts and client obligations."""
+"""Client receipt allocation; partial/overage require explicit human intent."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from datetime import date
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.money import MoneyNTD
@@ -24,6 +25,7 @@ class PaymentStage(StrEnum):
 class ReconciliationStatus(StrEnum):
     EXACT = "exact"
     OVERAGE = "overage"
+    PARTIAL = "partial"
     REVIEW_REQUIRED = "review_required"
 
 
@@ -61,7 +63,7 @@ class UnreceivedDepositConfirmation:
 class IncomingBankFact:
     identity: str
     amount: MoneyNTD
-    payment_stage: PaymentStage
+    payment_stage: PaymentStage | None
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "bank fact identity")
@@ -74,6 +76,7 @@ class ClientObligation:
     case_no: str
     amount_due: MoneyNTD
     payment_stage: PaymentStage
+    due_date: date | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.identity, "obligation identity")
@@ -91,7 +94,7 @@ class ReconciliationAllocation:
 @dataclass(frozen=True, slots=True)
 class ClientReconciliationCandidate:
     status: ReconciliationStatus
-    payment_stage: PaymentStage
+    payment_stage: PaymentStage | None
     bank_total: MoneyNTD
     obligation_total: MoneyNTD
     overage_amount: MoneyNTD
@@ -105,22 +108,24 @@ def build_reconciliation_candidate(
     obligations: tuple[ClientObligation, ...],
     *,
     allow_overage_disposition: bool = False,
+    allow_partial_receipt: bool = False,
 ) -> ClientReconciliationCandidate:
     payment_stage = _validate_inputs(bank_facts, obligations)
     bank_facts = tuple(sorted(bank_facts, key=lambda item: item.identity))
-    obligations = tuple(sorted(obligations, key=lambda item: item.identity))
+    obligations = tuple(sorted(obligations, key=lambda item: (item.due_date or date.max, item.identity) if payment_stage is None else (date.min, item.identity)))
     bank_total = _sum_bank_facts(bank_facts)
     obligation_total = _sum_obligations(obligations)
     blocker = _amount_blocker(bank_total, obligation_total)
     has_overage = blocker == "client_receipt_overpaid"
     can_dispose_overage = has_overage and allow_overage_disposition
+    can_receive_partial = blocker == "client_receipt_underpaid" and allow_partial_receipt
     allocations = (
         _allocate_to_obligations(bank_facts, obligations)
-        if not blocker or can_dispose_overage
+        if not blocker or can_dispose_overage or can_receive_partial
         else ()
     )
     return ClientReconciliationCandidate(
-        status=_candidate_status(blocker, can_dispose_overage),
+        status=ReconciliationStatus.PARTIAL if can_receive_partial else _candidate_status(blocker, can_dispose_overage),
         payment_stage=payment_stage,
         bank_total=bank_total,
         obligation_total=obligation_total,
@@ -128,11 +133,12 @@ def build_reconciliation_candidate(
             bank_total.amount - obligation_total.amount if can_dispose_overage else 0
         ),
         allocations=allocations,
-        blockers=(blocker,) if blocker else (),
+        blockers=(blocker,) if blocker and not can_receive_partial else (),
         settlement_identity=_settlement_identity(
             bank_facts,
             obligations,
             allow_overage_disposition=allow_overage_disposition,
+            allow_partial_receipt=allow_partial_receipt,
         ),
     )
 
@@ -151,11 +157,15 @@ def _candidate_status(
 def _validate_inputs(
     bank_facts: tuple[IncomingBankFact, ...],
     obligations: tuple[ClientObligation, ...],
-) -> PaymentStage:
+) -> PaymentStage | None:
     if not bank_facts:
         raise ValueError("incoming_bank_facts_required")
     if not obligations:
         raise ValueError("client_obligations_required")
+    if len({item.case_no for item in obligations}) != 1:
+        raise ValueError("cross_case_reconciliation_forbidden")
+    if all(fact.payment_stage is None for fact in bank_facts):
+        return None  # Explicit case-level reconciliation across selected stages.
     stages = {
         *(fact.payment_stage for fact in bank_facts),
         *(obligation.payment_stage for obligation in obligations),
@@ -240,6 +250,7 @@ def _settlement_identity(
     obligations,
     *,
     allow_overage_disposition: bool,
+    allow_partial_receipt: bool = False,
 ) -> PreviewFingerprint:
     return fingerprint_payload(
         {
@@ -253,10 +264,12 @@ def _settlement_identity(
                     "amount_ntd": item.amount_due.amount,
                     "case_no": item.case_no,
                     "payment_stage": item.payment_stage.value,
+                    **({"due_date": item.due_date.isoformat() if item.due_date else None} if all(fact.payment_stage is None for fact in bank_facts) else {}),
                 }
                 for item in obligations
             ),
             "allow_overage_disposition": allow_overage_disposition,
+            **({"allow_partial_receipt": True} if allow_partial_receipt else {}),
         }
     )
 

@@ -52,3 +52,33 @@ def test_second_payment_success_marker_uses_the_existing_projection_outbox():
         assert payload.get('line_second_payment_notification',False)==(stage is PaymentStage.SECOND)
         if stage is PaymentStage.SECOND:
             assert payload['obligation_identities']==['ob'] and payload['amount_ntd']==100
+
+
+def test_partial_deposit_does_not_release_order_or_claim_customer_payment_complete():
+    calls=[]
+    class Repo:
+        def load(self,*_,**__):return ClientReconciliationFacts(1,(IncomingBankFact('bank',MoneyNTD(9000),PaymentStage.DEPOSIT),),(ClientObligation('ob','CASE',MoneyNTD(10000),PaymentStage.DEPOSIT),))
+        def find_receipt(self,_):return None
+        def append_ledger_entries(self,candidate):calls.append(('cash',candidate.bank_total.amount))
+        def append_allocations(self,candidate):calls.append(('allocated',sum(a.amount.amount for a in candidate.allocations)))
+        def update_projection(self,*_):calls.append('projection')
+        def append_orders_deposit_intent(self,_):raise AssertionError('partial deposit must not release order')
+        def append_anomaly_intent(self,_):raise AssertionError('staff choice must not create another warning')
+        def save_receipt(self,*_):calls.append('receipt')
+    class Unit:
+        def __enter__(self):return self
+        def __exit__(self,*_):pass
+        def commit(self):calls.append('commit')
+    selection=ReconciliationSelection('CASE',PaymentStage.DEPOSIT,('bank',),('ob',),allow_partial_receipt=True)
+    workflow=ClientReconciliationWorkflow(Repo(),Unit);preview=workflow.preview(selection)
+    receipt=workflow.apply(ClientReconciliationApplyRequest(selection,ExpectedVersion(1),preview.fingerprint,IdempotencyKey('partial'),ActorContext('synthetic'),'餘額續收',CorrelationId('partial')))
+    assert receipt.status.value=='partial' and ('cash',9000) in calls and ('allocated',9000) in calls
+    assert calls[-1]=='commit'
+    from infrastructure.mysql.client_receipt_reconciliation_repository import _append_projection_outbox
+    written=[]
+    cursor=SimpleNamespace(execute=lambda sql,params:written.append(params))
+    request=SimpleNamespace(selection=ReconciliationSelection('CASE',PaymentStage.FIRST,('bank',),('ob',),allow_partial_receipt=True),idempotency_key=IdempotencyKey('partial'))
+    _append_projection_outbox(cursor,request,'a'*64,2,{'ob':10000},fully_settled=False)
+    assert not json.loads(written[0][3]).get('line_first_payment_notification')
+    _append_projection_outbox(cursor,request,'b'*64,3,{'ob':1000},fully_settled=True,receipt_amounts={'ob':1000})
+    assert json.loads(written[-1][3])['amount_ntd']==1000

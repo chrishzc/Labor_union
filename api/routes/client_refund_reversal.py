@@ -158,12 +158,12 @@ def query_settlement_remediation(
             "refund_obligations": [
                 item
                 for item in payable["refund_obligations"]
-                if item["due_date"] is not None and (include_not_due or item["due_date"] < as_of)
+                if include_not_due or (item["due_date"] is not None and item["due_date"] < as_of)
             ],
             "subsidy_return_obligations": [
                 item
                 for item in payable["subsidy_return_obligations"]
-                if item["due_date"] is not None and (include_not_due or item["due_date"] < as_of)
+                if include_not_due or (item["due_date"] is not None and item["due_date"] < as_of)
             ],
             "incoming_bank_facts": [
                 {
@@ -377,7 +377,7 @@ def apply_matched_refund_overage_recovery(
         body.evidence_reference.strip(),
     )
     return _call_recovery(
-        lambda: _materialize(application.apply(request)), "已核銷已配對客戶追償入款", correlation
+        lambda: ClientOverRefundRecoveryReceiptView.model_validate(application.apply(request),from_attributes=True), "已核銷已配對客戶追償入款", correlation
     )
 
 
@@ -436,7 +436,7 @@ def apply_refund_overage_recovery_adjustment(
         body.evidence_reference.strip(),
     )
     return _call_recovery(
-        lambda: _materialize(application.apply(request)),
+        lambda: ClientOverRefundRecoveryReceiptView.model_validate(application.apply(request),from_attributes=True),
         "已套用客戶退款超額追償調整",
         correlation,
     )
@@ -489,7 +489,7 @@ def apply_refund_overage_recovery_matching(
         body.evidence_reference.strip(),
     )
     return _call_matching(
-        lambda: _materialize(application.apply_matching(request)),
+        lambda: ClientOverRefundRecoveryMatchingReceiptView.model_validate(application.apply_matching(request),from_attributes=True),
         "已建立客戶追償入款配對",
         correlation,
     )

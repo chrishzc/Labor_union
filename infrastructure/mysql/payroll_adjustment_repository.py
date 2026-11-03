@@ -451,7 +451,7 @@ _RECEIPT_SELECT_SQL = (
 )
 _OBLIGATION_COLUMNS = (
     "obligation_identity,assignment_id,case_no,staff_id,obligation_kind,"
-    "direction,source_obligation_identity,amount_due_ntd,due_date,status,"
+    "direction,source_obligation_identity,COALESCE((SELECT COALESCE(c.settlement_base_ntd,c.effective_ntd) FROM payroll_amount_controls c WHERE c.obligation_identity=staff_obligations.obligation_identity),amount_due_ntd) AS amount_due_ntd,due_date,status,"
     "payout_history_exists"
 )
 _CASE_OBLIGATIONS_SQL = (

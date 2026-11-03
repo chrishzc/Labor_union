@@ -137,6 +137,9 @@ class MySqlPayrollRebuildRepository:
                 persistence.preview.actions,
                 start=1,
             ):
+                from infrastructure.mysql.payroll_amount_correction_repository import persist_controlled_payroll_amount
+                if persist_controlled_payroll_amount(self._connection,cursor,persistence,action):
+                    continue
                 if action.action is StaffObligationActionKind.UNCHANGED:
                     continue
                 _persist_action(cursor, persistence, action, ordinal)
@@ -930,7 +933,7 @@ _EXISTING_OBLIGATION_SELECT_SQL = (
     "WHERE handover_delta.source_obligation_identity=base.obligation_identity "
     "AND handover_delta.obligation_identity LIKE 'staff-handover:%%' "
     "AND handover_delta.status<>'cancelled') AS handover_corrections_exist,"
-    "base_event.after_amount_ntd + COALESCE(("
+    "COALESCE((SELECT c.effective_ntd FROM payroll_amount_controls c WHERE c.obligation_identity=base.obligation_identity),base_event.after_amount_ntd + COALESCE(("
     "SELECT SUM(CASE WHEN child.direction='payable_to_staff' "
     "THEN child_event.after_amount_ntd ELSE -child_event.after_amount_ntd END) "
     "FROM staff_obligations child "
@@ -938,7 +941,7 @@ _EXISTING_OBLIGATION_SELECT_SQL = (
     "ON child_event.id=child.current_event_id "
     "WHERE child.source_obligation_identity=base.obligation_identity "
     "AND child.case_no=base.case_no AND child.status<>'cancelled'"
-    "),0) AS effective_contractual_amount_ntd "
+    "),0)) AS effective_contractual_amount_ntd "
     "FROM staff_obligations base "
     "JOIN staff_obligation_events base_event ON base_event.id=base.current_event_id "
     "WHERE base.case_no=%s AND base.obligation_kind='service_pay' "
@@ -983,14 +986,14 @@ _RECEIPT_INSERT_SQL = (
 _MONTHLY_OBLIGATIONS_SQL = (
     "SELECT obligations.obligation_identity,obligations.assignment_id,obligations.case_no,"
     "obligations.staff_id,obligations.direction,"
-    "COALESCE(installments.amount_ntd,obligations.amount_due_ntd) AS amount_due_ntd,"
+    "COALESCE(installments.amount_ntd,(SELECT COALESCE(c.settlement_base_ntd,c.effective_ntd) FROM payroll_amount_controls c WHERE c.obligation_identity=obligations.obligation_identity),obligations.amount_due_ntd) AS amount_due_ntd,"
     "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END AS due_date "
     "FROM staff_obligations obligations LEFT JOIN staff_obligation_installments installments "
     "ON installments.obligation_identity=obligations.obligation_identity "
     "WHERE obligations.staff_id=%s AND "
     "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END >=%s AND "
     "CASE WHEN installments.obligation_identity IS NULL THEN obligations.due_date ELSE installments.due_date END <%s "
-    "AND obligations.status='open' AND COALESCE(installments.amount_ntd,obligations.amount_due_ntd)>0 "
+    "AND obligations.status='open' AND COALESCE(installments.amount_ntd,(SELECT COALESCE(c.settlement_base_ntd,c.effective_ntd) FROM payroll_amount_controls c WHERE c.obligation_identity=obligations.obligation_identity),obligations.amount_due_ntd)>0 "
     "ORDER BY obligations.obligation_identity"
 )
 

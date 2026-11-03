@@ -51,7 +51,6 @@ from api.routes import (
     contract_templates,
     contract_external_signing,
     client_payments,
-    client_payment_destination,
     accounting_pricing,
     contracts,
     controlled_files,
@@ -379,11 +378,12 @@ app.include_router(holidays.router)
 app.include_router(line_system_config.router)
 app.include_router(line_system_config.public_router)
 app.include_router(client_payments.router)
-app.include_router(client_payment_destination.router)
 app.include_router(accounting_pricing.router)
 app.include_router(client_deposit_reversal.router)
 app.include_router(client_deposit_skip.router)
 app.include_router(client_receipt_reconciliation.router)
+from api.routes import accounting_differences
+app.include_router(accounting_differences.router)
 app.include_router(client_refund_reversal.router)
 app.include_router(subsidy_advance_settlement.router)
 app.include_router(financial_adjustment.router)

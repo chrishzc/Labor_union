@@ -16,7 +16,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         amount = effective_staff_obligation_amount("o")
         cursor.execute(
             "SELECT o.obligation_identity,o.due_date,o.payroll_version,s.name AS staff_name,"
-            + amount + " AS expected_ntd,p.net_paid_ntd,p.aggregate_version,"
+            + amount + " AS expected_ntd,p.net_paid_ntd,p.aggregate_version,p.status AS payout_status,"
             "h.confirmation_kind,h.amount_snapshot_ntd,h.current_event_id AS historical_event,"
             "COALESCE(a.aggregate_version,0) AS account_version "
             "FROM staff_obligations o JOIN staff s ON s.id=o.staff_id "
@@ -82,6 +82,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
             identity in paid_ids or row["confirmation_kind"] == "paid",
             f"{row['account_version']}:{row['payroll_version']}:{row['aggregate_version'] or 0}:{row['historical_event'] or 0}",
             None if row["due_date"] is None else str(row["due_date"]),
+            settled=row["confirmation_kind"] == "settled" or row.get("payout_status") == "completed",
         ))
     seen = set()
     for row in overages:
@@ -97,4 +98,6 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
             counterpart.version, None, False,
             int(row["bank_total_ntd"]) - int(row["obligation_total_ntd"]) if related == [case_no] else 0,
         ))
-    return tuple(items), transactions
+    from infrastructure.mysql.staff_recovery_disposition_repository import query_case_staff_recoveries
+    recoveries,recovery_cash=query_case_staff_recoveries(connection,case_no)
+    return (*items,*recoveries),(*transactions,*recovery_cash)

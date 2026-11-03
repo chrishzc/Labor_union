@@ -463,6 +463,12 @@
   border-color: var(--md-sys-color-primary-hover);
   color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary-hover); }
 
+.finance-btn-primary:focus-visible,
+.finance-btn-secondary:focus-visible {
+  outline: 3px solid var(--md-sys-color-focus);
+  outline-offset: 3px;
+}
+
 .finance-btn-disabled,
 .finance-table td button:disabled,
 .finance-header-actions button:disabled,

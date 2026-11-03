@@ -473,10 +473,12 @@ def _mysql_error_code(error):
 
 
 _ORDER_SELECT_SQL = (
-    "SELECT case_no,contract_identity,lifecycle_version,status,"
-    "service_days,service_hours_per_day,floor_fee,"
-    "service_start_time,service_end_time,service_end_day_offset "
-    "FROM orders WHERE case_no=%s"
+    "SELECT o.case_no,o.contract_identity,o.lifecycle_version,o.status,"
+    "o.service_days,o.service_hours_per_day,o.floor_fee,"
+    "o.service_start_time,o.service_end_time,o.service_end_day_offset,"
+    "o.actual_start_date,o.pricing_policy_id,o.pricing_override_event_id,o.pricing_revision,"
+    "c.identity_status AS client_identity_status "
+    "FROM orders o JOIN clients c ON c.case_no=o.case_no WHERE o.case_no=%s"
 )
 _CONTRACT_EVENT_SELECT_SQL = (
     "SELECT id FROM order_contract_flow_events "

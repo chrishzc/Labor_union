@@ -131,6 +131,14 @@ def build_staff_overpayment_recovery_adjustment_candidate(
     )
 
 
+def require_recovery_noncash_disposition(action: str, amount: int, remaining: int, reason: str) -> int:
+    if action not in ('loss','absorb_overpayment'):
+        raise ValueError('staff_recovery_disposition_invalid')
+    if not isinstance(amount,int) or isinstance(amount,bool) or not 0<amount<=remaining or not reason.strip():
+        raise ValueError('staff_recovery_disposition_amount_invalid')
+    return remaining-amount
+
+
 def _require_collection_bank_fact(recovery, bank_fact) -> None:
     if recovery.staff_id != bank_fact.staff_id:
         raise ValueError("staff_overpayment_recovery_target_ambiguous")

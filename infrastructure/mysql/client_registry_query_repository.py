@@ -660,6 +660,18 @@ def _finance_values(connection, case_no):
                 (case_no,),
             )
             subsidy_rows = tuple(cursor.fetchall() or ())
+            cursor.execute(
+                "SELECT o.obligation_type,o.direction,o.amount_due_ntd,c.effective_ntd,"
+                "COALESCE((SELECT SUM(n.amount_ntd) FROM client_finance_noncash_events n "
+                "WHERE n.target_identity=o.obligation_identity AND n.action='reduce_service_fee'),0) "
+                "AS service_reduction_ntd "
+                "FROM client_obligations o LEFT JOIN client_finance_amount_controls c "
+                "ON c.obligation_identity=o.obligation_identity "
+                "WHERE o.case_no=%s AND o.status<>'cancelled' "
+                "AND o.obligation_type IN ('deposit','first','second','adjustment','refund')",
+                (case_no,),
+            )
+            current_rows = tuple(cursor.fetchall() or ())
         if len(subsidy_rows) > 1:
             return "not_ready", "client_subsidy_return_ambiguous", None
         if len(facts.charge_days) >= facts.payment_terms.deposit_service_days:
@@ -730,17 +742,32 @@ def _finance_values(connection, case_no):
                 service_hours = len(facts.charge_days) * facts.service_hours_per_day
                 customer_payable = sum(int(r["amount_due_ntd"]) for r in receivable_rows)
 
+        stage_amounts = {"deposit": deposit_amount, "first": first_payment_amount, "second": second_payment_amount}
+        for row in current_rows:
+            stage = row["obligation_type"]
+            if stage in stage_amounts:
+                effective = max(0, (int(row["effective_ntd"]) if row["effective_ntd"] is not None
+                                    else stage_amounts[stage]) - int(row["service_reduction_ntd"]))
+                customer_payable += effective - stage_amounts[stage]
+                stage_amounts[stage] = effective
+            elif row["obligation_type"] == "adjustment" and row["direction"] == "receivable_from_client":
+                customer_payable -= int(row["service_reduction_ntd"])
+        balance = customer_payable - received_total
+        if current_rows and not status.startswith("歷史"):
+            balance = sum(int(row["amount_due_ntd"]) * (
+                1 if row["direction"] == "receivable_from_client" else -1
+            ) for row in current_rows)
         subsidy = subsidy_rows[0] if subsidy_rows else None
         return "ready", None, {
             "virtual_account": _case_virtual_account(connection, case_no),
             "service_unit_price_ntd": facts.payment_terms.client_hourly_rate.amount,
             "service_hours": service_hours,
             "customer_payable_total_ntd": customer_payable,
-            "deposit_amount_ntd": deposit_amount,
-            "first_payment_amount_ntd": first_payment_amount,
-            "second_payment_amount_ntd": second_payment_amount,
+            "deposit_amount_ntd": stage_amounts["deposit"],
+            "first_payment_amount_ntd": stage_amounts["first"],
+            "second_payment_amount_ntd": stage_amounts["second"],
             "received_total_ntd": received_total,
-            "customer_balance_ntd": customer_payable - received_total,
+            "customer_balance_ntd": balance,
             "subsidy_return_amount_ntd": (
                 int(subsidy["amount_due_ntd"]) if subsidy is not None else None
             ),

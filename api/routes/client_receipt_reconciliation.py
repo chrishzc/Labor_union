@@ -192,7 +192,29 @@ def apply_receipt_overage(
     )
 
 
-def _selection(case_no, body, *, allow_overage_disposition=False) -> ReconciliationSelection:
+@router.post("/partial/preview", response_model=BaseResponse[ClientReceiptPreviewView])
+def preview_partial_receipt(body: ClientReceiptPreviewBody,
+                            case_no: str = Path(..., min_length=1, max_length=191),
+                            principal: AdminPrincipal = Depends(require_system_admin),
+                            application: ClientReceiptReconciliationApplication = Depends(get_client_receipt_reconciliation_application)):
+    del principal
+    return _call(lambda: _preview_payload(application.preview(_selection(case_no, body, allow_partial_receipt=True))),
+                 "成功產生部分收款核銷預覽", CorrelationId("client-partial-receipt-preview"))
+
+
+@router.post("/partial/apply", response_model=BaseResponse[ClientReceiptReceiptView])
+def apply_partial_receipt(body: ClientReceiptApplyBody,
+                          case_no: str = Path(..., min_length=1, max_length=191),
+                          idempotency_key: _IdempotencyHeader = ...,
+                          correlation_id: _CorrelationHeader = ...,
+                          principal: AdminPrincipal = Depends(require_system_admin),
+                          application: ClientReceiptReconciliationApplication = Depends(get_client_receipt_reconciliation_application)):
+    correlation = CorrelationId(correlation_id)
+    return _call(lambda: _materialize(application.apply(_apply_request(case_no, body, idempotency_key, correlation, principal, allow_partial_receipt=True))),
+                 "已核銷實收，餘額仍待收", correlation)
+
+
+def _selection(case_no, body, *, allow_overage_disposition=False, allow_partial_receipt=False) -> ReconciliationSelection:
     row_ids = tuple(str(value) for value in body.finance_import_row_ids)
     obligations = tuple(value.strip() for value in body.obligation_identities)
     _require_unique(row_ids)
@@ -201,10 +223,11 @@ def _selection(case_no, body, *, allow_overage_disposition=False) -> Reconciliat
         raise ValueError("invalid_client_receipt_intent")
     return ReconciliationSelection(
         case_no.strip(),
-        PaymentStage(body.payment_stage),
-        tuple(sorted(row_ids, key=int)),
+        PaymentStage(body.payment_stage) if body.payment_stage is not None else None,
+        tuple(sorted(row_ids)),
         tuple(sorted(obligations)),
         allow_overage_disposition,
+        allow_partial_receipt,
     )
 
 
@@ -216,10 +239,11 @@ def _apply_request(
     principal,
     *,
     allow_overage_disposition=False,
+    allow_partial_receipt=False,
 ):
     actor_id = str(principal.username or "").strip()
     return ClientReconciliationApplyRequest(
-        _selection(case_no, body, allow_overage_disposition=allow_overage_disposition),
+        _selection(case_no, body, allow_overage_disposition=allow_overage_disposition, allow_partial_receipt=allow_partial_receipt),
         ExpectedVersion(body.expected_account_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),

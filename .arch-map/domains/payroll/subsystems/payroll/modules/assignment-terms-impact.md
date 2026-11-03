@@ -10,6 +10,7 @@ BeClass rate correction 保留 Scheduling identity，未付款的 replacement ob
 未綁定新分段計價的既有案件，沿 Payroll 正式付款日規則：客戶代墊次月十五日，社福且零客戶應付才為次次月十五日；已形成日期不覆寫。
 
 ## Implementation
+- manual amount handoff: `infrastructure/mysql/payroll_amount_correction_repository.py` — one-to-one same-person unpaid replacements carry mode to successor; paid/manual roots retain effective amounts and show new computation, automatic corrections use separate obligations/recovery in the caller UoW.
 - primary:
   - `domains/payroll/payment_due_date.py` — 既有 assignment／歷史帳務共同使用的純付款日與社福資格規則；新分段資金來源期程由 tiered-payroll 擁有。
   - `subsystems/payroll/terms_impact.py`

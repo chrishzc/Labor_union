@@ -55,6 +55,7 @@ class NotificationSource(StrEnum):
     SERVICE_START = 'service_start'
     LEAVE = 'leave'
     DEPOSIT = 'deposit'
+    RECEIPT = 'payment_receipt'
     GROUP = 'group'
     OVERDUE = 'overdue'
     LOG = 'log'
@@ -62,6 +63,12 @@ class NotificationSource(StrEnum):
     DELIVERY = 'delivery'
     NOTIFICATION_FAILURE = 'notification_failure'
     RUNTIME = 'runtime'
+
+
+class ReceiptNotificationContext(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    payment_stage: Literal['deposit','first','second']
+    settlement_identity: str = Field(min_length=1,max_length=128)
 
 
 class NotificationItem(BaseModel):
@@ -86,6 +93,7 @@ class NotificationItem(BaseModel):
     log: LogReminderContext | None = None
     information: CandidateInformationStaffItemView | None = None
     failure: NotificationFailureContext | None = None
+    receipt: ReceiptNotificationContext | None = None
 
 
 class NotificationPage(BaseModel):

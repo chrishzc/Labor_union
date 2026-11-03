@@ -52,6 +52,7 @@ class MySqlHistoricalStaffPayoutRepository:
             cursor.execute(
                 "SELECT obligation_identity,case_no,staff_id,amount_due_ntd,payroll_version,"
                 "direction,status FROM staff_obligations WHERE case_no=%s AND staff_id=%s "
+                "AND amount_due_ntd>0 "
                 f"ORDER BY obligation_identity{suffix}",
                 (case_no, staff_id),
             )

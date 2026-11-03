@@ -22,19 +22,21 @@ import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImpor
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
-import { PaymentDestinationConfigurationPanel } from '../components/PaymentDestinationConfigurationPanel';
 import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
 
 import { FinanceReceiptsWorkspace } from '../components/FinanceReceiptsWorkspace';
 import { FinancePaymentsWorkspace } from '../components/FinancePaymentsWorkspace';
 import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
 import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
+import { FinanceMonthlyAccounting } from '../components/FinanceMonthlyAccounting';
+import type { AccountingRange } from '../api/finance_import/monthly_accounting_client';
+import { FinanceReceivableItems, type ReceivableFilters } from '../components/FinanceReceivableItems';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
 import { FinanceWarningWorkspace } from '../components/FinanceWarningWorkspace';
 import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
 import { FinanceStatementArchive } from '../components/FinanceStatementArchive';
 
-type FinanceTab = 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'payment-destination' | 'case-accounting' | 'accounting-warnings';
+type FinanceTab = 'monthly' | 'receipt-notices' | 'pending' | 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'case-accounting' | 'accounting-warnings';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 type FinanceImportReviewSnapshot = {
   batchIdentity: string;
@@ -102,11 +104,13 @@ export const FinancePage: React.FC = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), overdue: params.get('view') === 'overdue', caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
-  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.tab === 'case-accounting' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'payment-destination' ? 'payment-destination' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'client-receipts' : 'receipts');
-  const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments'>('receipts');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.overdue ? 'accounting-warnings' : entry.tab === 'case-accounting' || entry.tab === 'client-receipts' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'receipt-notices' ? 'receipt-notices' : entry.tab === 'pending' ? 'pending' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'case-accounting' : entry.tab === 'receipts' || entry.tab === 'subsidy-advance' ? 'receipts' : 'monthly');
+  const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments' | 'monthly' | 'pending'>('monthly');
   const [subsidyCase, setSubsidyCase] = useState(entry.tab === 'subsidy-advance' || entry.tab === 'cross-order' ? entry.caseNo : '');
-  const activeWorkspace = activeTab === 'staff-payables' ? 'payments' : activeTab === 'client-receipts' ? detailReturn : activeTab;
-  const openCase = (caseNo: string) => { setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeWorkspace === 'payments' ? 'payments' : 'receipts'); setActiveTab('client-receipts'); };
+  const activeWorkspace = ['monthly','receipts','payments','staff-payables','pending','receipt-notices'].includes(activeTab) ? 'receipts' : activeTab === 'client-receipts' ? 'case-accounting' : activeTab;
+  const [monthlyRange,setMonthlyRange] = useState<AccountingRange>(()=>({start_month:currentMonth(),end_month:currentMonth(),category:'subsidy'}));
+  const [receivableFilters,setReceivableFilters] = useState<ReceivableFilters>(()=>({month:currentMonth(),category:'subsidy',status:'all',search:''}));
+  const openCase = (caseNo: string) => { setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeTab === 'pending' ? 'pending' : activeTab === 'monthly' ? 'monthly' : activeTab === 'payments' || activeTab === 'staff-payables' ? 'payments' : 'receipts'); setActiveTab('case-accounting'); };
   const openBank = () => { setSubsidyCase(''); setActiveTab('finance-import'); };
 
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
@@ -191,7 +195,7 @@ export const FinancePage: React.FC = () => {
         if (current('cases', request.sequence, request.controller)) setReceipt({ kind: 'error', message: financeErrorMessage(error, '案件清單載入失敗，請重新整理。') });
       });
     });
-  }, [activeTab, caseQuery, reload]);
+  }, [activeTab, caseQuery, reload, entry.caseNo]);
 
   useEffect(() => {
     if (activeTab !== 'client-receipts' || !selectedCase) return;
@@ -397,15 +401,18 @@ export const FinancePage: React.FC = () => {
     <div data-surface-id="finance.page">
       {entry.fromWorkbench && entry.caseNo && <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>← 返回案件處理</a>}
       <header className="page-header-banner finance-page-header">
-        <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收款、付款與銀行對帳，依工作集中處理。</p></div>
-        <button type="button" className="finance-reload-btn" data-surface-id="finance.tab.payment-destination" onClick={() => { if (('payment-destination') !== activeTab) requestLeave(() => setActiveTab('payment-destination')); }}>帳務設定</button>
+        <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收付款按月份總覽，單案帳務集中查閱與處理。</p></div>
+
       </header>
-      <PaymentReceiptNoticeWorkbench revision={reload} expanded={activeTab==='accounting-warnings'}/>
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
-        {([['receipts', '收款'], ['payments', '付款'], ['finance-import', '銀行對帳'], ['case-accounting', '案件帳務'], ['accounting-warnings', '帳務警示']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id)); }}>{label}</button>)}
+        {([['receipts', '收付款'], ['case-accounting', '案件帳務'], ['finance-import', '銀行對帳'], ['accounting-warnings', '逾期提醒']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id==='receipts'?'monthly':id)); }}>{label}</button>)}
       </nav>
-      {(activeTab === 'client-receipts' || activeTab === 'staff-payables' || activeTab === 'payment-destination') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
-      {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialView={entry.overdue?'overdue':'all'} onOpenBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
+      {activeWorkspace==='receipts'&&<nav className="finance-tab-bar" aria-label="收付款功能">{([['monthly','每月帳務'],['receipts','應收款'],['payments','應付款'],['staff-payables','人員付款'],['pending','待確認與預估'],['receipt-notices','入帳通知']] as const).map(([id,label])=><button type="button" key={id} aria-current={activeTab===id?'page':undefined} className={activeTab===id?'active':''} onClick={()=>requestLeave(()=>setActiveTab(id))}>{label}</button>)}</nav>}
+      {activeTab==='receipt-notices'&&<PaymentReceiptNoticeWorkbench revision={reload} expanded/>}
+      {activeTab==='monthly'&&<FinanceMonthlyAccounting initialRange={monthlyRange} onRangeChange={setMonthlyRange} onCase={openCase}/>}
+      {activeTab==='pending'&&<><FinanceReceivableItems revision={reload} undatedOnly onCase={openCase}/><FinancePaymentsWorkspace pendingOnly revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId=>{if(staffId!==undefined)setSelectedStaff(staffId);setActiveTab('staff-payables');}} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank}/></>}
+      {(activeTab === 'client-receipts' || activeTab === 'staff-payables') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
+      {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialFilters={receivableFilters} onFiltersChange={setReceivableFilters} initialView={entry.overdue?'overdue':'all'} onOpenBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
       {activeTab === 'payments' && <FinancePaymentsWorkspace revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId => { if (staffId !== undefined) setSelectedStaff(staffId); setActiveTab('staff-payables'); }} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank} />}
       {subsidyCase && <CaseSubsidyDetailDrawer key={subsidyCase} caseNo={subsidyCase} onClose={() => setSubsidyCase('')} onOpenBank={openBank} onChanged={() => setReload(value => value + 1)} />}
       {activeTab === 'client-receipts' && (
@@ -523,7 +530,6 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
       {activeTab === 'client-receipts' && selectedCase && <FinanceCaseHistory caseNo={selectedCase} revision={reload} />}
-      {activeTab === 'payment-destination' && <PaymentDestinationConfigurationPanel reload={reload} />}
       {activeTab === 'staff-payables' && (
         <section className="finance-workspace">
           <div className="finance-section-heading">
@@ -622,8 +628,8 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'case-accounting' && <FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} />}
-      {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} />}
+      {activeTab === 'case-accounting' && <><button type="button" className="finance-btn-link" onClick={()=>requestLeave(()=>setActiveTab(detailReturn))}>← 返回收付款</button><FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} onBank={openBank} onSubsidy={setSubsidyCase} onLegacy={caseNo=>requestLeave(()=>{setSelectedCase(caseNo);setCaseQuery(caseNo);setActiveTab('client-receipts');})}/></>}
+      {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} onBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} />}
       {activeTab === 'finance-import' && (
         <section className="finance-workspace">
           <FinanceStatementArchive />
