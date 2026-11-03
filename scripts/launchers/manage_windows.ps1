@@ -58,9 +58,25 @@ function Assert-NoRemainingRuntime {
 
 function Get-ManagedState {
     if (-not (Test-Path -LiteralPath $statePath)) { return $null }
-    $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    try {
+        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    } catch {
+        Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
+        return $null
+    }
     if ($state.contract -ne 'windows-frontend-control/v1' -or $state.project_root -ne $ProjectRoot -or
-        $state.api_port -ne 8000 -or $state.react_port -ne 5173) { throw 'Runtime state belongs to another installation.' }
+        $state.api_port -ne 8000 -or $state.react_port -ne 5173) {
+        $owner = $null
+        if ($state.supervisor_pid) {
+            $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
+        }
+        $alive = $owner -and $owner.StartTime.ToUniversalTime().Ticks -eq ([datetime]$state.supervisor_start_time).ToUniversalTime().Ticks
+        if (-not $alive) {
+            Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
+            return $null
+        }
+        throw 'Runtime state belongs to another installation.'
+    }
     $owner = Get-Process -Id ([int]$state.supervisor_pid) -ErrorAction SilentlyContinue
     $alive = $owner -and $owner.StartTime.ToUniversalTime().Ticks -eq ([datetime]$state.supervisor_start_time).ToUniversalTime().Ticks
     if (-not $alive) {
