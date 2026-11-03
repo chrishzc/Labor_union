@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param(
     [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore')]
@@ -6,6 +6,12 @@ param(
     [switch]$LocalOnly
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSScriptRoot) {
+    $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
+    if (-not $PSScriptRoot) {
+        $PSScriptRoot = Join-Path (Get-Location) 'scripts\launchers'
+    }
+}
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $PythonPath = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 $runtimeDirectory = Join-Path $ProjectRoot 'scratch\windows-remote'
@@ -328,9 +334,10 @@ while ($true) {
     Write-Host '5 狀態／版本  6 備份資料庫  7 安全升級資料庫  8 復原資料庫備份'
     Write-Host '9 首次安裝程式依賴  10 檢查程式環境  0 離開'
     $choice = Read-Host '請選擇'
-    if ($choice -eq '0') { break }
+    if ($null -eq $choice -or $choice.Trim() -eq '0') { break }
     $actions = @{'1'='start';'2'='stop';'3'='update';'4'='frontend';'5'='status';'6'='database-backup';'7'='database-upgrade';'8'='database-restore';'9'='setup';'10'='check'}
-    if (-not $actions.ContainsKey($choice)) { continue }
-    try { Invoke-ManagerAction $actions[$choice] }
+    $trimmed = $choice.Trim()
+    if (-not $actions.ContainsKey($trimmed)) { continue }
+    try { Invoke-ManagerAction $actions[$trimmed] }
     catch { Write-Host ('[Error] ' + $_.Exception.Message) }
 }
