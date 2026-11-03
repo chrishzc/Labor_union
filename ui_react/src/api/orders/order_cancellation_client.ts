@@ -106,6 +106,10 @@ const PayrollAssignmentSchema = z.strictObject({
   floor_fee_allocated: MoneySchema,
   effective_adjustments: MoneySchema,
   total_payable: MoneySchema,
+  covered_salary: z.number().int().nonnegative(),
+  excess_salary: z.number().int().nonnegative(),
+  directly_subsidized: z.boolean(),
+  tiered_pricing: z.boolean(),
 });
 const PayrollCandidateSchema = z.strictObject({
   assignments: z.array(PayrollAssignmentSchema),
@@ -118,6 +122,12 @@ const PayrollRateSnapshotSchema = z.strictObject({
   policy_version: z.string().min(1),
   policy_kind: z.string().min(1),
   hourly_rate: MoneySchema,
+  tiered: z.strictObject({
+    covered_rate: z.number().int().nonnegative(),
+    excess_rate: z.number().int().positive(),
+    subsidy_hours: z.number().nonnegative(),
+    directly_subsidized: z.boolean(),
+  }).nullable(),
 });
 const PayrollActionSchema = z.strictObject({
   action: z.string().min(1),

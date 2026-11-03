@@ -1,0 +1,1004 @@
+{
+  "schema_version": 1,
+  "kind": "closed-accounting-browser-healthcheck-summary",
+  "completed_on": "2026-11-03",
+  "absorbed_at": "2026-11-03T13:52:21.047276+08:00",
+  "status": "passed",
+  "canonical_count": 120,
+  "passed_count": 120,
+  "criteria_sha256": "00c318f03ba9d38dd0743232aa14fa0d23f7951da06f5f2ec8607c3855c1cefa",
+  "source_report_sha256": "263c326320030b753a1f9c9994f350960b74c0dfb7ed84290111f520b8a4434a",
+  "verification_basis": "GPT-6 Luna browser operations plus canonical owner readback; supporting regression/rollback checks separately identified",
+  "effect_ceiling": {
+    "isolated_synthetic_mysql": true,
+    "production_writes": false,
+    "real_transfers": false,
+    "external_notifications": false,
+    "admin_authentication_changes": false
+  },
+  "fixes": [
+    "Sinopac recipient account uses original transaction reference, not case suffix",
+    "Known failed import can start a new confirmed command; unknown acceptance keeps original identity",
+    "Strict cancellation preview decoder accepts canonical Payroll tier fields",
+    "Government corrections synchronize after cancellation projection inside the original transaction"
+  ],
+  "checks": [
+    {
+      "id": "G01-01",
+      "group": "服務與查詢",
+      "criterion": "登入權限",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G01-02",
+      "group": "服務與查詢",
+      "criterion": "前後端連線",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G01-03",
+      "group": "服務與查詢",
+      "criterion": "已有帳務案件",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G01-04",
+      "group": "服務與查詢",
+      "criterion": "尚無帳務案件",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G01-05",
+      "group": "服務與查詢",
+      "criterion": "不存在案件",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G01-06",
+      "group": "服務與查詢",
+      "criterion": "錯誤訊息分類",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-01",
+      "group": "每月到期款",
+      "criterion": "月份區間",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-02",
+      "group": "每月到期款",
+      "criterion": "案件類別",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-03",
+      "group": "每月到期款",
+      "criterion": "應收／應付",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-04",
+      "group": "每月到期款",
+      "criterion": "已收／已付與其他處理",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-05",
+      "group": "每月到期款",
+      "criterion": "待收／待付",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G02-06",
+      "group": "每月到期款",
+      "criterion": "明細與合計一致",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G03-01",
+      "group": "實際收支",
+      "criterion": "銀行月份",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G03-02",
+      "group": "實際收支",
+      "criterion": "跨月補款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G03-03",
+      "group": "實際收支",
+      "criterion": "同案多筆",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G03-04",
+      "group": "實際收支",
+      "criterion": "政府單筆不重計",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G03-05",
+      "group": "實際收支",
+      "criterion": "非現金差額排除",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G03-06",
+      "group": "實際收支",
+      "criterion": "歷史人工核銷排除",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-01",
+      "group": "收付款清單",
+      "criterion": "應收",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-02",
+      "group": "收付款清單",
+      "criterion": "應付",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-03",
+      "group": "收付款清單",
+      "criterion": "人員付款",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-04",
+      "group": "收付款清單",
+      "criterion": "未定日期",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-05",
+      "group": "收付款清單",
+      "criterion": "正式／預估分列",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G04-06",
+      "group": "收付款清單",
+      "criterion": "篩選件數及總額",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-01",
+      "group": "案件帳務",
+      "criterion": "選案搜尋",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-02",
+      "group": "案件帳務",
+      "criterion": "合併清單",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-03",
+      "group": "案件帳務",
+      "criterion": "銀行紀錄",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-04",
+      "group": "案件帳務",
+      "criterion": "款項分配",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-05",
+      "group": "案件帳務",
+      "criterion": "補助／追償入口",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G05-06",
+      "group": "案件帳務",
+      "criterion": "操作後回查",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G06-01",
+      "group": "銀行匯入",
+      "criterion": "正常檔",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G06-02",
+      "group": "銀行匯入",
+      "criterion": "重複檔",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G06-03",
+      "group": "銀行匯入",
+      "criterion": "虛擬帳號",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G06-04",
+      "group": "銀行匯入",
+      "criterion": "多候選人工確認",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G06-05",
+      "group": "銀行匯入",
+      "criterion": "薪資／退款備註辨識",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G06-06",
+      "group": "銀行匯入",
+      "criterion": "對象無法辨識時略過",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G07-01",
+      "group": "客戶核銷",
+      "criterion": "單筆相符",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G07-02",
+      "group": "客戶核銷",
+      "criterion": "同案多筆合計",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G07-03",
+      "group": "客戶核銷",
+      "criterion": "多候選確認",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G07-04",
+      "group": "客戶核銷",
+      "criterion": "少收補款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G07-05",
+      "group": "客戶核銷",
+      "criterion": "多收另列退款",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G07-06",
+      "group": "客戶核銷",
+      "criterion": "核銷後狀態與銀行事實",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-01",
+      "group": "薪資退款",
+      "criterion": "正常付清",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-02",
+      "group": "薪資退款",
+      "criterion": "少付後補付",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-03",
+      "group": "薪資退款",
+      "criterion": "超付追償",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-04",
+      "group": "薪資退款",
+      "criterion": "部分追回",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-05",
+      "group": "薪資退款",
+      "criterion": "追回後結清",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G08-06",
+      "group": "薪資退款",
+      "criterion": "薪資退款互不誤配",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-01",
+      "group": "差額認列",
+      "criterion": "損失",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-02",
+      "group": "差額認列",
+      "criterion": "減收",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-03",
+      "group": "差額認列",
+      "criterion": "工會手續費",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-04",
+      "group": "差額認列",
+      "criterion": "工會承擔超付款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-05",
+      "group": "差額認列",
+      "criterion": "不用再補付／退款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G09-06",
+      "group": "差額認列",
+      "criterion": "無預設及適用範圍",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-01",
+      "group": "人工金額",
+      "criterion": "未核銷更正",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-02",
+      "group": "人工金額",
+      "criterion": "部分收付後更正",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-03",
+      "group": "人工金額",
+      "criterion": "已核銷另列差額",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-04",
+      "group": "人工金額",
+      "criterion": "來源變動保留人工值",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-05",
+      "group": "人工金額",
+      "criterion": "採用計算後恢復自動",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G10-06",
+      "group": "人工金額",
+      "criterion": "反覆更正餘額正確",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G11-01",
+      "group": "政府整期",
+      "criterion": "月季年",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G11-02",
+      "group": "政府整期",
+      "criterion": "相符",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G11-03",
+      "group": "政府整期",
+      "criterion": "部分入款固定本期",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G11-04",
+      "group": "政府整期",
+      "criterion": "少撥補撥／損失",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G11-05",
+      "group": "政府整期",
+      "criterion": "多撥退回",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G11-06",
+      "group": "政府整期",
+      "criterion": "原期與另列更正獨立結清",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G12-01",
+      "group": "歷史核銷",
+      "criterion": "明確人工確認",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G12-02",
+      "group": "歷史核銷",
+      "criterion": "差額與說明",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G12-03",
+      "group": "歷史核銷",
+      "criterion": "只標記案件",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G12-04",
+      "group": "歷史核銷",
+      "criterion": "銀行紀錄不變",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G12-05",
+      "group": "歷史核銷",
+      "criterion": "不直接計損益",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G12-06",
+      "group": "歷史核銷",
+      "criterion": "統計排除",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G13-01",
+      "group": "警示通知匯出",
+      "criterion": "逾期追收",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G13-02",
+      "group": "警示通知匯出",
+      "criterion": "金額警示",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G13-03",
+      "group": "警示通知匯出",
+      "criterion": "解除回查",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G13-04",
+      "group": "警示通知匯出",
+      "criterion": "收款通知義務",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G13-05",
+      "group": "警示通知匯出",
+      "criterion": "成功銀行明細",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G13-06",
+      "group": "警示通知匯出",
+      "criterion": "月份及應付款 Excel",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-01",
+      "group": "異常介面退役",
+      "criterion": "版本衝突",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-02",
+      "group": "異常介面退役",
+      "criterion": "逾時確認原命令",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-03",
+      "group": "異常介面退役",
+      "criterion": "切案防過期畫面",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-04",
+      "group": "異常介面退役",
+      "criterion": "桌機手機／焦點",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-05",
+      "group": "異常介面退役",
+      "criterion": "舊入口及 API 缺席",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G14-06",
+      "group": "異常介面退役",
+      "criterion": "舊資料與規格不再使用",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G15-01",
+      "group": "訂單成立與契約階段",
+      "criterion": "資料未齊待確認且不補造金額",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G15-02",
+      "group": "訂單成立與契約階段",
+      "criterion": "進件／計價齊全自動同步應收與應退補助",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G15-03",
+      "group": "訂單成立與契約階段",
+      "criterion": "契約準備／預覽零新增帳務",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G15-04",
+      "group": "訂單成立與契約階段",
+      "criterion": "簽約只更新文件進度不重建應收",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G15-05",
+      "group": "訂單成立與契約階段",
+      "criterion": "重複簽約及既有核銷保留",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G15-06",
+      "group": "訂單成立與契約階段",
+      "criterion": "訂金核銷後帳務與訂單投影",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-01",
+      "group": "客戶計價條件異動",
+      "criterion": "服務天數",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-02",
+      "group": "客戶計價條件異動",
+      "criterion": "每日時數",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-03",
+      "group": "客戶計價條件異動",
+      "criterion": "開始／結束日及到期月",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-04",
+      "group": "客戶計價條件異動",
+      "criterion": "費率／綁定版本",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-05",
+      "group": "客戶計價條件異動",
+      "criterion": "補助上限及自付轉換",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G16-06",
+      "group": "客戶計價條件異動",
+      "criterion": "樓層費／胎數等適用項目",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-01",
+      "group": "排班與月嫂異動",
+      "criterion": "排班建立產生應付",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-02",
+      "group": "排班與月嫂異動",
+      "criterion": "未安排說明不產生應付",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-03",
+      "group": "排班與月嫂異動",
+      "criterion": "同人調整",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-04",
+      "group": "排班與月嫂異動",
+      "criterion": "換人",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-05",
+      "group": "排班與月嫂異動",
+      "criterion": "代班／分段",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G17-06",
+      "group": "排班與月嫂異動",
+      "criterion": "跨月歸屬與付款日",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-01",
+      "group": "服務完成與取消",
+      "criterion": "實際服務起訖",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-02",
+      "group": "服務完成與取消",
+      "criterion": "實際天數／時數",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-03",
+      "group": "服務完成與取消",
+      "criterion": "提前結束",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-04",
+      "group": "服務完成與取消",
+      "criterion": "取消前尚未收付",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-05",
+      "group": "服務完成與取消",
+      "criterion": "取消後已有收付",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G18-06",
+      "group": "服務完成與取消",
+      "criterion": "取消／更正後的退款補付追償及政府差額",
+      "status": "passed",
+      "lane": "life"
+    },
+    {
+      "id": "G19-01",
+      "group": "每次收付與差額確認",
+      "criterion": "核銷實收",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G19-02",
+      "group": "每次收付與差額確認",
+      "criterion": "後續補款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G19-03",
+      "group": "每次收付與差額確認",
+      "criterion": "實際付款",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G19-04",
+      "group": "每次收付與差額確認",
+      "criterion": "後續補付／追償",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G19-05",
+      "group": "每次收付與差額確認",
+      "criterion": "非現金認列",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G19-06",
+      "group": "每次收付與差額確認",
+      "criterion": "人工更正／歷史人工核銷，各驗證前後餘額及原事實",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G20-01",
+      "group": "跨頁即時更新",
+      "criterion": "操作頁立即回讀",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G20-02",
+      "group": "跨頁即時更新",
+      "criterion": "收付款清單",
+      "status": "passed",
+      "lane": "query"
+    },
+    {
+      "id": "G20-03",
+      "group": "跨頁即時更新",
+      "criterion": "案件明細／摘要",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G20-04",
+      "group": "跨頁即時更新",
+      "criterion": "月份統計",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G20-05",
+      "group": "跨頁即時更新",
+      "criterion": "警示及待通知",
+      "status": "passed",
+      "lane": "main"
+    },
+    {
+      "id": "G20-06",
+      "group": "跨頁即時更新",
+      "criterion": "下載清冊與已開啟其他分頁的一致性",
+      "status": "passed",
+      "lane": "main"
+    }
+  ],
+  "critical_outcomes": {
+    "salary_paid_ntd": 12000,
+    "ordinary_refund_paid_ntd": 100,
+    "partial_termination_hours": 24,
+    "remaining_staff_payable_ntd": 7200,
+    "ordinary_refund_payable_ntd": 6400,
+    "subsidy_return_payable_ntd": 9600,
+    "original_government_receipt_ntd": 12000,
+    "updated_government_computation_ntd": 7200,
+    "separate_government_refund_payable_ntd": 4800,
+    "original_cash_and_receipt_snapshots_preserved": true
+  },
+  "supporting_verification": {
+    "staff_payout_integration": {
+      "status": "passed",
+      "tests": 15
+    },
+    "import_retry_react": {
+      "status": "passed",
+      "tests": 2
+    },
+    "cancellation_react": {
+      "status": "passed",
+      "tests": 37
+    },
+    "cancellation_python": {
+      "status": "passed",
+      "tests": 33
+    },
+    "existing_classifier_regression": {
+      "status": "passed",
+      "tests": 56
+    },
+    "frontend_build": "passed",
+    "architecture_closure": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "Corrected automatic government cancellation hook verified by regression and real MySQL rollback; no second new end-to-end UI cancellation after that backend fix. Existing cancelled fixture corrected using actual government UI adopt-calculation.",
+    "Retired API actual-browser POST was not executed following automatic-review restriction; GET404, OpenAPI absence and TestClient POST404 used.",
+    "Live providers, actual bank transfers and production were excluded.",
+    "Ongoing new Taishin classification rules are excluded from this audit and commit."
+  ],
+  "runtime_cleanup": {
+    "status": "passed",
+    "stopped_process_roots": [
+      33848,
+      25876,
+      34380,
+      424
+    ],
+    "checked_ports": [
+      18808,
+      15178,
+      50817,
+      50706
+    ],
+    "remaining_listeners": [],
+    "remaining_owned_programs": [],
+    "retained": "Shared Docker/MySQL/Redis and unrelated applications/processes"
+  },
+  "artifact_retention": {
+    "raw_acceptance_evidence": "absorbed into this summary; authorized bounded cleanup completed",
+    "retained": [
+      "this per-criterion result summary",
+      "permanent source/tests and current specs",
+      "migration preservation/rollback evidence",
+      "credential and browser account state",
+      "approved interactive prototypes"
+    ],
+    "protected_file_count": 3159,
+    "protected_reasons": {
+      "migration_preservation_or_rollback_evidence": 61,
+      "token_bearing_evidence": 10,
+      "credential_or_authentication_material": 85,
+      "unclassified_format_retained": 1,
+      "browser_account_state": 3002
+    }
+  },
+  "excluded_taishin_paths": [
+    "document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md",
+    "domains/finance_import/transaction_classifier.py",
+    "subsystems/finance_import/identity_maps.py",
+    "subsystems/finance_import/staging.py",
+    "tests/domains/finance-import/subsystems/finance-import/integration/test_finance_import_staging.py",
+    "tests/domains/finance-import/subsystems/finance-import/modules/import006-owner-current-facts/unit/test_finance_transaction_classifier.py"
+  ],
+  "cleanup": {
+    "status": "passed",
+    "applied_at_epoch": 1793685409.323,
+    "removed_candidates": 1926,
+    "removed_files": 3015,
+    "removed_bytes": 90663628,
+    "retained_protected_files": 3159,
+    "retained_classes": {
+      "migration_preservation_or_rollback_evidence": 61,
+      "token_bearing_evidence": 10,
+      "credential_or_authentication_material": 85,
+      "unclassified_format_retained": 1,
+      "browser_account_state": 3002
+    },
+    "no_permanent_tests_removed": true,
+    "no_database_mutation": true,
+    "ongoing_work_untouched": true
+  },
+  "packaging_scope": {
+    "selected_paths": [
+      ".arch-map/domains/orders/subsystems/orders/modules/cancellation.md",
+      ".arch-map/domains/staff-payables/subsystems/staff-payables/modules/payout-reconciliation.md",
+      "document/架構重整/帳務工作台實作工作包.md",
+      "infrastructure/mysql/order_cancellation_repository.py",
+      "subsystems/orders/cancellation_workflow.py",
+      "tests/domains/orders/subsystems/orders/integration/test_order_cancellation_cross_domain_chain.py",
+      "ui_react/src/api/orders/order_cancellation_client.ts",
+      "ui_react/src/pages/FinancePage.tsx",
+      "ui_react/src/tests/order_cancellation_client.test.ts",
+      "ui_react/src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/import_retry.test.tsx",
+      "validation/receipts/PROV-ACCOUNTING-20261103-browser-healthcheck-summary.json"
+    ],
+    "later_concurrent_work": "Ongoing import and application error-isolation changes appearing after this packaging task began are preserved and excluded from this commit."
+  },
+  "post_cleanup_verification": {
+    "react": {
+      "status": "passed",
+      "tests": 39
+    },
+    "python": {
+      "status": "passed",
+      "tests": 48,
+      "groups": {
+        "staff_payout": 15,
+        "orders_cancellation": 33
+      }
+    },
+    "architecture_closure": "passed",
+    "environment_note": "Restricted-run TestClient stalled; those processes were terminated. Same focused cancellation tests passed using the execution permissions used in the original audit."
+  }
+}

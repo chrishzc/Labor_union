@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from domains.client_finance.obligation_planning import (
@@ -90,6 +91,46 @@ def test_cancellation_preview_apply_persists_canonical_cross_domain_chain():
     assert receipt.payroll_version == 4
     assert receipt.lifecycle_status is OrderLifecycleStatus.CANCELLED
     assert repository.persisted[-1].stored_receipt.receipt == receipt
+    order_update = repository.persisted[-2]
+    assert order_update.actor == ActorContext("admin")
+    assert order_update.reason == "client requested cancellation"
+    assert order_update.idempotency_key == IdempotencyKey("cancel-1")
+
+
+@pytest.mark.parametrize("updated_rows", [0, 1])
+def test_cancellation_synchronizes_government_difference_only_after_fresh_order_projection(monkeypatch, updated_rows):
+    from infrastructure.mysql.order_cancellation_repository import MySqlOrderCancellationRepository
+    from infrastructure.mysql import government_period_difference_repository as government
+    from subsystems.orders.cancellation_workflow import CancellationOrderPersistenceCommand
+
+    events = []
+
+    class Cursor:
+        rowcount = updated_rows
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, sql, values):
+            assert sql.startswith("UPDATE orders SET")
+            assert values[:4] == (date(2026, 10, 31), date(2026, 11, 2), "訂單取消", 10)
+            events.append("order-updated")
+
+    cursor = Cursor()
+    def synchronize(received_cursor, case_no, key, actor, reason):
+        assert events == ["order-updated"]
+        assert received_cursor is cursor
+        assert (case_no, key, actor, reason) == ("CASE-808", "cancel-808", "admin", "提前結束")
+        events.append("government-difference")
+
+    monkeypatch.setattr(government, "synchronize_government_case_amount", synchronize)
+    repository = MySqlOrderCancellationRepository(SimpleNamespace(cursor=lambda: cursor))
+    command = CancellationOrderPersistenceCommand("CASE-808", 9, 10, date(2026, 10, 31), date(2026, 11, 2), OrderLifecycleStatus.CANCELLED, ActorContext("admin"), "提前結束", IdempotencyKey("cancel-808"))
+    if updated_rows:
+        repository.update_cancelled_order(command)
+        assert events == ["order-updated", "government-difference"]
+    else:
+        with pytest.raises(RuntimeError, match="order_version_conflict"):
+            repository.update_cancelled_order(command)
+        assert events == ["order-updated"]
 
 
 def test_cancellation_apply_replays_matching_receipt_without_new_writes():

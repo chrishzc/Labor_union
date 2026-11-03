@@ -27,6 +27,7 @@ Query 依注入的台北業務日期排除未來排班，人員核對當日是�
 - outbound: `scheduling/scheduling` — 取消有效 generation 與 assignment 重建。
 - outbound: `client-finance/client-finance` — 取消退款／義務 impact。
 - outbound: `payroll/payroll` — 服務人員薪資 impact。
+- outbound: `government-subsidy/government-subsidy` — 已保存取消狀態與實際結束日後，在原 outer UoW 委派既有補助金額同步；保留整期快照，另列更正差額。
 
 ## Contracts
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — §3.5 cancellation 與 Preview／Apply typed errors。

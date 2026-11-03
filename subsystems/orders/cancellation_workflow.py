@@ -138,6 +138,9 @@ class CancellationOrderPersistenceCommand:
     actual_start_date: date | None
     actual_end_date: date | None
     lifecycle_status: OrderLifecycleStatus
+    actor: ActorContext
+    reason: str
+    idempotency_key: IdempotencyKey
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +259,7 @@ class OrderCancellationWorkflow:
         _persist_finance_and_payroll(self._repository, request, preview, event_id, scheduling)
         control_event_id = self._repository.activate_cancellation_control(request, event_id)
         lifecycle_event_id = self._repository.persist_cancellation_lifecycle(request, preview, control_event_id)
-        self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, preview.candidate.actual_start_date, receipt.actual_end_date, receipt.lifecycle_status))
+        self._repository.update_cancelled_order(CancellationOrderPersistenceCommand(request.case_no, preview.order_version, receipt.order_version, preview.candidate.actual_start_date, receipt.actual_end_date, receipt.lifecycle_status, request.actor, request.reason, request.idempotency_key))
         self._repository.save_receipt(CancellationReceiptPersistenceCommand(request.idempotency_key, StoredCancellationReceipt(command_fingerprint, receipt), event_id, scheduling.scheduling_receipt_id if scheduling else None, control_event_id, lifecycle_event_id, request.correlation_id))
 
 

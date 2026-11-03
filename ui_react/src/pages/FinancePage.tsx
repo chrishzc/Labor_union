@@ -138,7 +138,7 @@ export const FinancePage: React.FC = () => {
   const staffReload = useRef(reload);
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
-  const financeApplyCommandByPreview = useRef(new Map<string, { correlationId: string; reason: string }>());
+  const financeApplyCommandByPreview = useRef(new Map<string, { idempotencyKey: string; correlationId: string; reason: string }>());
   const submittedFinanceCommand = batchPreview.kind === 'ready'
     ? financeApplyCommandByPreview.current.get(batchPreview.data.preview_fingerprint)
     : undefined;
@@ -348,9 +348,9 @@ export const FinancePage: React.FC = () => {
     try {
       const previewFingerprint = checked.preview_fingerprint;
       const command = financeApplyCommandByPreview.current.get(previewFingerprint)
-        ?? { correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
+        ?? { idempotencyKey: `ui-finance-apply-${crypto.randomUUID()}`, correlationId: `ui-finance-apply-${crypto.randomUUID()}`, reason: applyReason.trim() };
       financeApplyCommandByPreview.current.set(previewFingerprint, command);
-      const accepted = await financeImportMutationClient.apply(checked, command.reason, { idempotencyKey: `ui-finance-apply-${previewFingerprint}`, correlationId: command.correlationId });
+      const accepted = await financeImportMutationClient.apply(checked, command.reason, { idempotencyKey: command.idempotencyKey, correlationId: command.correlationId });
       setApplyJob({ kind: 'ready', data: accepted });
       await observeApplyOutcome(accepted.job_id, {
         batchIdentity: checked.batch_identity,
@@ -379,6 +379,9 @@ export const FinancePage: React.FC = () => {
           ) {
             setBatchOutcome({ kind: 'error', message: '匯入結果與原批次預覽不一致；請勿重新提交，請重新查詢結果。' });
             return;
+          }
+          if (expected && outcome.status !== 'succeeded') {
+            financeApplyCommandByPreview.current.delete(expected.previewFingerprint);
           }
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);

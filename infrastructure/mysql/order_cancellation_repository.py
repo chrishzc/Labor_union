@@ -163,6 +163,13 @@ class MySqlOrderCancellationRepository:
             cursor.execute(_ORDER_UPDATE_SQL, _order_update_values(command))
             if cursor.rowcount != 1:
                 raise RuntimeError("order_version_conflict")
+            # The government formula must see the cancelled lifecycle and the
+            # final actual end date, after all replacement facts are written.
+            from infrastructure.mysql.government_period_difference_repository import synchronize_government_case_amount
+            synchronize_government_case_amount(
+                cursor, command.case_no, command.idempotency_key.value,
+                command.actor.actor_id, command.reason,
+            )
 
     def save_receipt(self, command):
         with self._connection.cursor() as cursor:

@@ -133,6 +133,43 @@ describe('orderCancellationClient', () => {
     );
   });
 
+  it.each([null, { covered_rate: 300, excess_rate: 450, subsidy_hours: 40, directly_subsidized: false }])(
+    'decodes current Payroll cancellation assignments and rate snapshots (%j)', async (tiered) => {
+      const data = {
+        ...previewFixture,
+        payroll_impact: {
+          ...previewFixture.payroll_impact,
+          payroll: {
+            ...previewFixture.payroll_impact.payroll,
+            assignments: [{
+              assignment_identity: 'CASE-1:g2:a1', staff_id: 7,
+              official_service_day_count: 3, actual_hours: 24, double_pay_hours: 0,
+              hourly_rate: { amount: 300 }, service_salary: { amount: 7200 },
+              floor_fee_allocated: { amount: 0 }, effective_adjustments: { amount: 0 },
+              total_payable: { amount: 7200 }, covered_salary: tiered ? 7200 : 0,
+              excess_salary: 0, directly_subsidized: false, tiered_pricing: tiered !== null,
+            }],
+            total_payable: { amount: 7200 },
+          },
+          carried_rate_snapshots: [{
+            assignment_identity: 'CASE-1:g2:a1', policy_version: 'test-rates-v1',
+            policy_kind: 'citizen', hourly_rate: { amount: 300 }, tiered,
+          }],
+        },
+      };
+      vi.spyOn(transport, 'post').mockResolvedValue({ success: true, message: 'ok', data, error: null });
+      await expect(orderCancellationClient.preview('CASE-1', [])).resolves.toEqual(data);
+      expect(OrderCancellationPreviewSchema.safeParse({
+        ...data, payroll_impact: {
+          ...data.payroll_impact,
+          carried_rate_snapshots: [{ ...data.payroll_impact.carried_rate_snapshots[0],
+            tiered: { covered_rate: 300, excess_rate: 450, subsidy_hours: 40, directly_subsidized: false, unknown_rate: 1 },
+          }],
+        },
+      }).success).toBe(false);
+    },
+  );
+
   it('gets and strictly decodes a cancellation receipt with the same idempotency key', async () => {
     const get = vi.spyOn(transport, 'get').mockResolvedValue({
       success: true, message: 'ok', data: receiptFixture, error: null,
