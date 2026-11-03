@@ -59,7 +59,7 @@ function applyControlGuidance(
   if (previewState.kind !== 'ready') return '選擇檔案後即可匯入。';
   if (applyState.kind === 'loading') return '正在匯入：請勿換檔、離頁或重新整理。';
   if (applyState.kind === 'ready') return '本次檔案已處理完成。';
-  if (applyState.kind === 'error' && applyState.outcomeUnknown) return '匯入結果尚未確認：請保留本頁，並使用原內容查詢最終結果。';
+  if (applyState.kind === 'error' && applyState.outcomeUnknown) return '匯入結果尚未確認，可稍後查詢；離開匯入頁後需重新選取原檔案。';
   if (applyState.kind === 'error') return '匯入未完成：請依錯誤訊息修正後重試。';
   return '可以開始匯入；完成後會顯示結果。';
 }
@@ -90,8 +90,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   const [selectedWorkbook, setSelectedWorkbook] = useState<File | null>(null);
   const [previewState, setPreviewState] = useState<CasePreviewState<TModel>>({ kind: 'idle' });
   const [applyState, setApplyState] = useState<ApplyState>({ kind: 'idle' });
-  const [waitingStopped, setWaitingStopped] = useState(false);
-  const waitingStoppedRef = useRef(false);
   const snapshotRef = useRef<TSnapshot | null>(null);
   const checkedRef = useRef<TModel | null>(null);
   const commandRef = useRef<{ idempotencyKey: string; correlationId: string } | null>(null);
@@ -100,7 +98,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   const applyInFlightRef = useRef(false);
   const previewAbortRef = useRef<AbortController | null>(null);
   const mutationLocked = previewState.kind === 'reading' || previewState.kind === 'loading' || applyState.kind === 'loading' || (applyState.kind === 'error' && applyState.outcomeUnknown);
-  const navigationLocked = mutationLocked && !waitingStopped;
 
   useEffect(() => () => {
     previewAbortRef.current?.abort();
@@ -109,8 +106,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
 
   const selectWorkbook = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (mutationLocked) return;
-    waitingStoppedRef.current = false;
-    setWaitingStopped(false);
     previewAbortRef.current?.abort();
     generationRef.current += 1;
     setSelectedWorkbook(event.target.files?.[0] ?? null);
@@ -124,8 +119,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
 
   const clearWorkbook = () => {
     if (mutationLocked) return;
-    waitingStoppedRef.current = false;
-    setWaitingStopped(false);
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
     generationRef.current += 1;
@@ -144,8 +137,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
       setPreviewState({ kind: 'error', message: '請先選擇 .xlsx 檔案。' });
       return;
     }
-    waitingStoppedRef.current = false;
-    setWaitingStopped(false);
     previewAbortRef.current?.abort();
     const controller = new AbortController();
     previewAbortRef.current = controller;
@@ -179,8 +170,6 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
     const command = commandRef.current;
     const checked = checkedRef.current;
     if (applyInFlightRef.current || snapshot === null || command === null || checked === null) return;
-    waitingStoppedRef.current = false;
-    setWaitingStopped(false);
     applyInFlightRef.current = true;
     const generation = generationRef.current;
     setApplyState({ kind: 'loading' });
@@ -195,7 +184,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
         kind: 'error',
         message: workbookErrorMessage(error, '工作簿套用失敗。'),
         outcomeUnknown: isOutcomeUnknown(error),
-        autoConfirm: !waitingStoppedRef.current && canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
+        autoConfirm: canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
       });
     } finally {
       applyInFlightRef.current = false;
@@ -203,22 +192,17 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   }, [apply, summarize]);
 
   useEffect(() => {
-    if (waitingStopped || applyState.kind !== 'error' || !applyState.autoConfirm) return undefined;
+    if (applyState.kind !== 'error' || !applyState.autoConfirm) return undefined;
     const timer = window.setTimeout(() => {
-      if (waitingStoppedRef.current) return;
       confirmationAttemptsRef.current += 1;
       void applyWorkbook();
     }, 5000);
     return () => window.clearTimeout(timer);
-  }, [applyState, applyWorkbook, waitingStopped]);
-  const stopWaiting = () => {
-    waitingStoppedRef.current = true;
-    setWaitingStopped(true);
-  };
-  useUnsavedDraft(({ 'hcm-current': 'HCM 案件匯入', 'client-beclass': '客戶 BeClass 匯入', 'staff-historical': '月嫂歷史匯入', 'historical-orders-authoritative-v3': '歷史訂單匯入' } as Record<string, string>)[scope] ?? '工作簿匯入', { '待匯入檔案': selectedWorkbook?.name ?? '' }, { baseline: { '待匯入檔案': '' }, enabled: applyState.kind !== 'ready' && !waitingStopped, busy: navigationLocked });
+  }, [applyState, applyWorkbook]);
+  useUnsavedDraft(({ 'hcm-current': 'HCM 案件匯入', 'client-beclass': '客戶 BeClass 匯入', 'staff-historical': '月嫂歷史匯入', 'historical-orders-authoritative-v3': '歷史訂單匯入' } as Record<string, string>)[scope] ?? '工作簿匯入', { '待匯入檔案': selectedWorkbook?.name ?? '' }, { baseline: { '待匯入檔案': '' }, enabled: applyState.kind === 'idle' && previewState.kind === 'idle' });
 
 
-  return { selectedWorkbook, previewState, applyState, mutationLocked, navigationLocked, waitingStopped, stopWaiting, selectWorkbook, clearWorkbook, previewWorkbook, applyWorkbook };
+  return { selectedWorkbook, previewState, applyState, mutationLocked, selectWorkbook, clearWorkbook, previewWorkbook, applyWorkbook };
 }
 
 interface CaseWorkbookPreviewCardProps {
@@ -230,8 +214,6 @@ interface CaseWorkbookPreviewCardProps {
   previewState: CasePreviewState<{ sourceContentDigest: string; previewFingerprint: string; sourceRowCount: number }>;
   applyState: ApplyState;
   mutationLocked: boolean;
-  waitingStopped: boolean;
-  onStopWaiting: () => void;
   onSelect: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onClear: () => void;
   onPreview: () => Promise<void>;
@@ -239,14 +221,14 @@ interface CaseWorkbookPreviewCardProps {
 }
 
 const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
-  id, title, inputLabel, openPreviewControlId, selectedWorkbook, previewState, applyState, mutationLocked, waitingStopped, onStopWaiting, onSelect, onClear, onPreview, onApply,
+  id, title, inputLabel, openPreviewControlId, selectedWorkbook, previewState, applyState, mutationLocked, onSelect, onClear, onPreview, onApply,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const ready = previewState.kind === 'ready';
   const done = applyState.kind === 'ready';
   const loading = applyState.kind === 'loading';
-  const waiting = !waitingStopped && (loading || (applyState.kind === 'error' && applyState.autoConfirm));
-  const unknown = (applyState.kind === 'error' && applyState.outcomeUnknown) || (waitingStopped && loading);
+  const waiting = loading || (applyState.kind === 'error' && applyState.autoConfirm);
+  const unknown = applyState.kind === 'error' && applyState.outcomeUnknown;
   const result = done ? applyState.result : null;
   const status = waiting ? '匯入處理中' : unknown ? '結果待確認' : done ? '已完成' : ready ? '待確認' : '待選檔';
   const previewGuidanceId = `imports-${id}-preview-guidance`;
@@ -285,17 +267,16 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
           </table></div>}
         </section>}
       </section>}
-      {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。請稍候，保持此頁開啟，勿重新整理或重複上傳。</p>}
-      {mutationLocked && !waitingStopped && <div className="import-simple-actions"><p>可停止等待並切換頁面。已送出的匯入不會因此取消，也不會撤銷已寫入的資料。離頁後需重新選取原檔案確認結果。</p><button type="button" className="import-simple-secondary" onClick={onStopWaiting}>停止等待</button></div>}
+      {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。可以切換至其他頁面；離開匯入頁後，自動確認會停止，需重新選取原檔案查詢結果。請勿重複上傳或重新整理。</p>}
       {ready && !waiting && <footer className="import-simple-actions">
         {done ? <><p role="status">本次檔案已處理完成。</p><button type="button" className="import-apply-btn" onClick={() => fileInputRef.current?.click()}>匯入下一份檔案</button></> : <>
-          <div><p id={applyGuidanceId} className="import-control-guidance">{waitingStopped && unknown ? '可切換頁面；保留本頁時仍可接收原請求結果，或在原請求結束後查詢。' : applyControlGuidance(previewState, applyState)}</p></div>
+          <div><p id={applyGuidanceId} className="import-control-guidance">{applyControlGuidance(previewState, applyState)}</p></div>
           <button type="button" data-control-id={`imports.${id}.apply`} aria-describedby={applyGuidanceId} className="import-apply-btn" disabled={loading || (mutationLocked && !unknown)} onClick={() => void onApply()}>{unknown ? '查詢這次匯入結果' : '重試匯入'}</button>
         </>}
       </footer>}
       {!ready && <p className="import-control-guidance">選擇檔案後即可匯入。</p>}
       {applyState.kind === 'error' && !applyState.outcomeUnknown && <div className="import-error" role="alert">{applyState.message}</div>}
-      {unknown && !waiting && <p className="import-result-state" role="status">{waitingStopped ? '已停止等待與後續自動查詢，可以切換至其他頁面。後端處理結果仍待確認，這不代表匯入已取消。' : '等待時間較長，目前尚未取得最終結果，這不代表匯入失敗。請保留本頁，稍後點選「查詢這次匯入結果」。'}{waitingStopped && loading && '原請求仍在等待回應，暫不重複送出查詢。'}</p>}
+      {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} 目前尚未取得最終結果，這不代表匯入失敗。可以切換至其他頁面，或稍後點選「查詢這次匯入結果」。離開匯入頁後需重新選取原檔案查詢。</p>}
     </section>
   );
 };
@@ -327,19 +308,6 @@ export const DataImportPage: React.FC = () => {
     (snapshot, fingerprint, options) => historicalOrderWorkbookPreviewClient.apply(snapshot, fingerprint, options),
     adaptHistoricalOrderWorkbookPreview, adaptHistoricalOrderImportResult, '歷史訂單工作簿處理失敗。', 'historical-orders-authoritative-v3');
   const mutationLocked = hcmCurrent.mutationLocked || clientBeClass.mutationLocked || staffHistorical.mutationLocked || historicalOrders.mutationLocked;
-  const navigationLocked = hcmCurrent.navigationLocked || clientBeClass.navigationLocked || staffHistorical.navigationLocked || historicalOrders.navigationLocked;
-  useEffect(() => {
-    if (!navigationLocked) return undefined;
-    const preventUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    const preventInAppNavigation = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target?.closest('a[href^="#"], .brand-section, .section-tab-btn, .sidebar-nav-item, .notification-btn, .logout-action-btn')) return;
-      event.preventDefault(); event.stopPropagation();
-    };
-    window.addEventListener('beforeunload', preventUnload);
-    document.addEventListener('click', preventInAppNavigation, true);
-    return () => { window.removeEventListener('beforeunload', preventUnload); document.removeEventListener('click', preventInAppNavigation, true); };
-  }, [navigationLocked]);
   const cards = {
     'hcm-current': { flow: hcmCurrent, title: 'HCM 案件匯入', inputLabel: '選擇 HCM Current Workbook' },
     'client-beclass': { flow: clientBeClass, title: '客戶 BeClass 匯入', inputLabel: '選擇客戶 BeClass Workbook' },
@@ -349,11 +317,9 @@ export const DataImportPage: React.FC = () => {
   const { flow, title, inputLabel } = cards[activeImportKind];
   return <div data-surface-id="imports.page" className="import-page-container import-simple-page">
     <header className="import-simple-page-heading"><h1>批次資料匯入</h1><p>選擇檔案後按「匯入」。</p></header>
-    {navigationLocked && <p className="import-result-state" role="status" data-surface-id="imports.apply-navigation-lock">匯入已送出或結果尚未確認；請等待結果，或點選「停止等待」後切換至其他頁面。</p>}
-    <nav className="import-kind-selector" aria-label="選擇匯入類型"><div>{WORKBOOK_IMPORT_OPTIONS.map(option => <button type="button" key={option.kind} className={activeImportKind === option.kind ? 'active' : ''} aria-pressed={activeImportKind === option.kind} disabled={mutationLocked} onClick={() => setActiveImportKind(option.kind)}>{option.label}</button>)}</div></nav>
+    <nav className="import-kind-selector" aria-label="選擇匯入類型"><div>{WORKBOOK_IMPORT_OPTIONS.map(option => <button type="button" key={option.kind} className={activeImportKind === option.kind ? 'active' : ''} aria-pressed={activeImportKind === option.kind} onClick={() => setActiveImportKind(option.kind)}>{option.label}</button>)}</div></nav>
     <CaseWorkbookPreviewCard key={activeImportKind} id={activeImportKind} title={title} inputLabel={inputLabel} openPreviewControlId={activeImportKind === 'hcm-current' ? 'imports.hcm-current.open-preview' : undefined}
       selectedWorkbook={flow.selectedWorkbook} previewState={flow.previewState} applyState={flow.applyState} mutationLocked={mutationLocked}
-      waitingStopped={flow.waitingStopped} onStopWaiting={flow.stopWaiting}
       onSelect={flow.selectWorkbook} onClear={flow.clearWorkbook} onPreview={flow.previewWorkbook} onApply={flow.applyWorkbook} />
   </div>;
 };

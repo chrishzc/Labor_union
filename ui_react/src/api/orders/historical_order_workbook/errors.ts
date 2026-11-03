@@ -72,6 +72,8 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError('apply');
+    if (error.code === 'historical_order_database_upgrade_required') return new HistoricalOrderWorkbookApplyError(error.code, '歷史訂單資料庫結構尚未升級（HTTP 503）；請由系統管理員完成資料庫更新後，再查詢這次匯入結果。', true, error.status);
+    if (error.code === 'historical_order_import_database_unavailable') return new HistoricalOrderWorkbookApplyError(error.code, '歷史訂單的資料庫操作失敗（HTTP 503）；請由系統管理員檢查資料庫連線與權限，並查核該次資料庫錯誤紀錄，再確認匯入結果。', true, error.status);
     if (error.code === 'historical_client_payment_terms_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少客戶付款條款，無法建立應收應付；本次匯入未完成，請先補齊付款條款。', false, error.status);
     if (error.code === 'historical_payroll_rate_policy_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少月嫂薪資費率，無法建立應付帳務；本次匯入未完成，請先補齊費率。', false, error.status);
     if (error.code === 'historical_default_accounting_unavailable') return new HistoricalOrderWorkbookApplyError(error.code, '歷史帳務建立服務未就緒，本次匯入未完成，請由系統管理員檢查服務設定。', false, error.status);
@@ -84,7 +86,7 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? '歷史訂單檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? '歷史訂單匯入服務暫時無法回覆（HTTP 503），結果尚未確認。請保留本頁並查詢這次匯入結果。'
+            ? '歷史訂單匯入服務暫時無法回覆（HTTP 503），結果尚未確認，可稍後查詢這次匯入結果。'
             : '歷史訂單檔案套用目前無法完成。';
     return new HistoricalOrderWorkbookApplyError(error.code || `HTTP_${error.status}`, message, error.retryable, error.status);
   }

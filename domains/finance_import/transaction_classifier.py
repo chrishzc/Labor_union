@@ -1,4 +1,7 @@
-"""Pure classification of normalized finance rows; classification is not reconciliation."""
+"""
+File: transaction_classifier.py
+Description: 純函式正規化財務流水分類，支援台新備註姓名與月份金額退款判定，不直接核銷。
+"""
 
 from __future__ import annotations
 
@@ -248,6 +251,41 @@ def _classify_sinopac_outgoing(
     )
 
 
+def extract_client_name_from_memo(
+    memo: str | None, client_names: Sequence[str]
+) -> str | None:
+    """Extract matching client name from memo beginning using longest prefix match."""
+    if not memo or not isinstance(memo, str):
+        return None
+    normalized_memo = unicodedata.normalize("NFKC", memo).strip()
+    for name in client_names:
+        if name and normalized_memo.startswith(name):
+            return name
+    return None
+
+
+def _is_same_month(trans_date: Any, due_date: Any) -> bool:
+    if not trans_date or not due_date:
+        return False
+    t_str = trans_date.isoformat() if hasattr(trans_date, "isoformat") else str(trans_date)
+    d_str = due_date.isoformat() if hasattr(due_date, "isoformat") else str(due_date)
+    try:
+        t_parts = t_str[:10].split("-")
+        d_parts = d_str[:10].split("-")
+        return len(t_parts) >= 2 and len(d_parts) >= 2 and t_parts[0] == d_parts[0] and t_parts[1] == d_parts[1]
+    except Exception:
+        return False
+
+
+def _is_same_amount(debit: Any, due_amount: Any) -> bool:
+    if debit is None or due_amount is None:
+        return False
+    try:
+        return Decimal(str(debit)) == Decimal(str(due_amount))
+    except Exception:
+        return False
+
+
 def classify_finance_transaction(
     row: Mapping[str, Any],
     client_refund_accounts: Mapping[str, Any],
@@ -256,6 +294,8 @@ def classify_finance_transaction(
     client_receipt_candidates: Sequence[Mapping[str, Any]] = (),
     staff_case_suffixes: Mapping[str, Any] | None = None,
     client_refund_case_suffixes: Mapping[str, Any] | None = None,
+    all_client_names: Sequence[str] = (),
+    taishin_client_refund_candidates: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -310,6 +350,52 @@ def classify_finance_transaction(
             )):
                 return _review("counterparty_identity_type_conflict")
             return _result("government_subsidy", [], "taishin_government_return_memo")
+
+        if all_client_names or taishin_client_refund_candidates:
+            names_pool = sorted(
+                set(all_client_names) | {c["name"] for c in taishin_client_refund_candidates if c.get("name")},
+                key=len,
+                reverse=True,
+            )
+            matched_name = extract_client_name_from_memo(memo, names_pool)
+            if matched_name is not None:
+                matching_obligations = [
+                    c for c in taishin_client_refund_candidates if c.get("name") == matched_name
+                ]
+                trans_date = row.get("transaction_date")
+                debit_val = row.get("debit")
+
+                if not matching_obligations:
+                    return _review("taishin_client_refund_no_open_obligation")
+
+                month_matched = [
+                    c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
+                ]
+                exact_matched = [
+                    c for c in month_matched if _is_same_amount(debit_val, c.get("amount_due_ntd"))
+                ]
+
+                if len(exact_matched) == 1:
+                    cand = exact_matched[0]
+                    reason = (
+                        "taishin_unique_client_refund_name_and_month_matched"
+                        if len(matching_obligations) == 1
+                        else "taishin_client_refund_disambiguated_by_month_and_amount"
+                    )
+                    return _result(
+                        "client_refund",
+                        [cand["client_id"]],
+                        reason,
+                        matched_name,
+                    )
+                if len(exact_matched) > 1:
+                    return _review("taishin_client_refund_multiple_exact_matches")
+                if month_matched:
+                    return _review("taishin_client_refund_amount_mismatch")
+                return _review("taishin_client_refund_month_no_match")
+
+            return _review("taishin_outgoing_unrecognized")
+
         return _classify_taishin_outgoing(
             row,
             client_refund_accounts,

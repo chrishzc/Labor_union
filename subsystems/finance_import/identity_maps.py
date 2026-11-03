@@ -1,4 +1,7 @@
-"""Read exact bank-account identity candidates used by finance classification."""
+"""
+File: identity_maps.py
+Description: 讀取銀行帳戶、客戶姓名及待退款義務候選，供財務分類與台新比對使用。
+"""
 
 from __future__ import annotations
 
@@ -184,7 +187,63 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         "client_receipt_candidates": _client_receipt_candidates(cursor),
         "staff_case_suffixes": _stable_map(staff_case_candidates),
         "client_refund_case_suffixes": _stable_map(refund_case_candidates),
+        "all_client_names": _all_client_names(cursor),
+        "taishin_client_refund_candidates": _client_refund_name_candidates(cursor),
     }
+
+
+def _all_client_names(cursor: Any) -> tuple[str, ...]:
+    try:
+        cursor.execute("SELECT DISTINCT name FROM clients WHERE name IS NOT NULL AND name <> ''")
+        names = []
+        for row in cursor.fetchall():
+            if isinstance(row, Mapping) and row.get("name"):
+                normalized = _account(row.get("name"))
+                if normalized:
+                    names.append(normalized)
+        return tuple(sorted(set(names), key=len, reverse=True))
+    except Exception:
+        return ()
+
+
+def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
+    try:
+        cursor.execute(
+            """SELECT order_row.client_id, client.name, obligation.case_no,
+                      obligation.obligation_identity, obligation.amount_due_ntd,
+                      obligation.due_date
+               FROM client_obligations obligation
+               JOIN orders order_row ON order_row.case_no=obligation.case_no
+               JOIN clients client ON client.id=order_row.client_id
+               WHERE obligation.direction='payable_to_client'
+                 AND obligation.status='open' AND obligation.amount_due_ntd>0
+               ORDER BY order_row.client_id, obligation.obligation_identity"""
+        )
+        results = []
+        for row in cursor.fetchall():
+            if not isinstance(row, Mapping):
+                continue
+            client_id = _positive_id(row.get("client_id"), "client_id")
+            name = _account(row.get("name")) or ""
+            due_date = row.get("due_date")
+            due_date_str = (
+                due_date.isoformat()
+                if hasattr(due_date, "isoformat")
+                else (str(due_date) if due_date else None)
+            )
+            results.append(
+                {
+                    "client_id": client_id,
+                    "name": name,
+                    "case_no": str(row.get("case_no") or ""),
+                    "obligation_identity": str(row.get("obligation_identity") or ""),
+                    "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
+                    "due_date": due_date_str,
+                }
+            )
+        return tuple(results)
+    except Exception:
+        return ()
 
 
 def _client_receipt_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:

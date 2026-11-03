@@ -359,3 +359,25 @@ def test_same_fingerprint_changed_bank_fact_preserves_occurrence_and_blocks(form
     assert all(json.loads(event[3])["differing_fields"] == ["posting_date"] for event in events)
     assert sum(sql.startswith("INSERT INTO finance_import_occurrences") for sql, _ in cursor.executed) == 1
     assert not any(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed)
+
+
+def test_taishin_outgoing_scenario_c1_unrecognized_skipped(monkeypatch):
+    cursor = FakeCursor()
+    row_known = _row(17)
+    row_known["memo"] = "林小美退款"
+    row_unknown = _row(18)
+    row_unknown["memo"] = "私人轉帳未知對象"
+
+    result = staging.stage_finance_rows(
+        cursor,
+        _normalized([row_known, row_unknown]),
+        {
+            "client_refund_accounts": {},
+            "staff_accounts": {},
+            "all_client_names": ("林小美",),
+        },
+    )
+
+    assert len(result["staged_rows"]) == 1
+    insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
+    assert len(insert_calls) == 1

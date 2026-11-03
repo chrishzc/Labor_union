@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClientBeClassWorkbookSnapshot, clientBeClassWorkbookPreviewClient } from '../api/case_import/client_beclass_workbook/client';
 import { ClientBeClassWorkbookApplyError } from '../api/case_import/client_beclass_workbook/errors';
 import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient } from '../api/case_import/staff_historical_workbook/client';
-import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
+import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient, applyHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
+import { mapHistoricalOrderWorkbookApplyError, mapHistoricalOrderWorkbookPreviewError } from '../api/orders/historical_order_workbook/errors';
+import { ApiDecodeError, ApiHttpError, ApiNetworkError } from '../api/shared/typed_errors';
+import { ADMIN_SESSION_UNAUTHORIZED_EVENT } from '../api/shared/transport';
+import { sessionClient } from '../api/auth/session_client';
 import { historicalReviewRemediationClient } from '../api/orders/historical_review_remediation/client';
 import { DataImportPage } from '../pages/DataImportPage';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../components/UnsavedChanges';
@@ -51,7 +55,109 @@ function ImportNavigationHarness() {
   return <><button className="sidebar-nav-item" onClick={() => requestLeave(() => setLeft(true))}>前往其他頁面</button>{left ? <h1>其他頁面</h1> : <DataImportPage />}</>;
 }
 describe('Data Import simple result flows', () => {
-  it('stopping an in-flight wait releases actual navigation guards without claiming cancellation or sending another Apply', async () => {
+  it.each((['preview', 'apply'] as const).flatMap(phase => ['network', 'decode'].map(fault => ({ phase, fault }))))(
+    '$phase $fault failure leaves navigation usable without further requests after leaving', async ({ phase, fault }) => {
+      const error = fault === 'network' ? new ApiNetworkError('Synthetic network loss') : new ApiDecodeError('Synthetic invalid response');
+      if (phase === 'preview') vi.mocked(historicalOrderWorkbookPreviewClient.preview).mockRejectedValueOnce(mapHistoricalOrderWorkbookPreviewError(error));
+      else vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockRejectedValueOnce(mapHistoricalOrderWorkbookApplyError(error));
+      render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
+      const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+      vi.useFakeTimers();
+      try {
+        await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
+        fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+        expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(phase === 'apply' ? 1 : 0);
+      } finally { vi.useRealTimers(); }
+    },
+  );
+
+  it('decodes the reported database-unavailable JSON through real transport without blocking navigation or logging out', async () => {
+    vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-import-session');
+    const unauthorized = vi.fn();
+    window.addEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, unauthorized);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ detail: { error: {
+      category: 'unavailable', code: 'historical_order_import_database_unavailable',
+      message: '歷史訂單工作簿服務暫時無法使用。', field_errors: [], domain_blockers: [],
+      retryable: true, correlation_id: 'synthetic-import-correlation', current_version: null,
+    } } }), { status: 503, headers: { 'content-type': 'application/json' } }));
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockImplementation(applyHistoricalOrderWorkbook);
+    try {
+      render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
+      const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+      fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+      expect(await within(card).findByRole('status')).toHaveTextContent('historical_order_import_database_unavailable');
+      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+      expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(unauthorized).not.toHaveBeenCalled();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { window.removeEventListener(ADMIN_SESSION_UNAUTHORIZED_EVENT, unauthorized); }
+  });
+
+  it.each(([400, 403, 409, 422, 429, 500, 501, 502, 503, 504, 507, 599] as const)
+    .flatMap(status => (['preview', 'apply'] as const).map(phase => ({ status, phase }))))(
+    '$phase HTTP $status leaves navigation and import tabs usable and stops confirmation on unmount', async ({ status, phase }) => {
+      const apiError = new ApiHttpError(status, `HTTP_${status}`, 'Synthetic error', [502, 503, 504].includes(status));
+      if (phase === 'preview') vi.mocked(historicalOrderWorkbookPreviewClient.preview).mockRejectedValueOnce(mapHistoricalOrderWorkbookPreviewError(apiError));
+      else vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockRejectedValueOnce(mapHistoricalOrderWorkbookApplyError(apiError));
+      render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
+      const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+      vi.useFakeTimers();
+      try {
+        await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
+        expect(screen.getByRole('button', { name: '月嫂歷史資料' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+        expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(phase === 'apply' ? 1 : 0);
+      } finally { vi.useRealTimers(); }
+    },
+  );
+
+  it.each([
+    ['historical_order_database_upgrade_required', '資料庫結構尚未升級'],
+    ['historical_order_import_database_unavailable', '檢查資料庫連線與權限'],
+    ['503', '匯入服務暫時無法回覆'],
+  ])('historical HTTP 503 %s shows the actual cause and allows leaving without blind retries', async (code, guidance) => {
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockRejectedValueOnce(
+      mapHistoricalOrderWorkbookApplyError(new ApiHttpError(503, code, 'Unavailable', true)),
+    );
+    render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
+    const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+    vi.useFakeTimers();
+    try {
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
+      expect(within(card).getByRole('status')).toHaveTextContent(guidance);
+      expect(within(card).getByRole('status')).toHaveTextContent(`錯誤代碼：${code}`);
+      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      expect(within(card).queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+      expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+      expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows 49 source rows as 37 imported staff and 12 duplicate rows from the owner receipt', async () => {
+    vi.mocked(staffHistoricalWorkbookPreviewClient.apply).mockResolvedValueOnce({
+      source_content_digest: digest, source_row_count: 49, created_count: 37, adopted_existing_count: 0,
+      exact_replay_count: 12, blocked_identity_count: 0, identity_conflict_count: 0, review_required_count: 0,
+      preview_fingerprint: fingerprint, replayed_workbook: true, row_issues: [],
+    });
+    render(<DataImportPage />);
+    const card = await selectWorkbook('月嫂歷史資料', '選擇月嫂歷史 Workbook', 'staff-historical');
+    await apply(card);
+    expect(metrics(card)).toEqual(['49', '37', '12', '0']);
+  });
+
+  it('allows actual navigation during an in-flight Apply without a stop button or another request', async () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
@@ -59,11 +165,8 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
     fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
-    expect(screen.queryByRole('heading', { name: '其他頁面' })).not.toBeInTheDocument();
-    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
-    expect(within(card).getByText(/已停止等待與後續自動查詢/)).toHaveTextContent('這不代表匯入已取消');
-    expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeDisabled();
+    expect(within(card).queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
+    expect(within(card).getByRole('status')).toHaveTextContent('需重新選取原檔案查詢結果');
     expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
@@ -79,7 +182,7 @@ describe('Data Import simple result flows', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('stopping between confirmations clears scheduled retries and manual lookup reuses the original command', async () => {
+  it('keeps automatic confirmation and the original command when switching import tabs', async () => {
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_coordinator_lock_timeout', '等待鎖逾時', true, 503));
     render(<DataImportPage />);
     const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
@@ -87,38 +190,33 @@ describe('Data Import simple result flows', () => {
     try {
       expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
       await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
-      fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
-      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-      expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
-      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '查詢這次匯入結果' })); });
-      expect(within(card).getByText('匯入結果')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '歷史訂單' }));
+      expect(screen.getByLabelText('選擇歷史訂單 Workbook')).toBeDisabled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      fireEvent.click(screen.getByRole('button', { name: '客戶 BeClass' }));
+      expect(screen.getByText('匯入結果')).toBeInTheDocument();
       const calls = vi.mocked(clientBeClassWorkbookPreviewClient.apply).mock.calls;
       expect(calls).toHaveLength(2);
       expect(calls[1]).toEqual(calls[0]);
     } finally { vi.useRealTimers(); }
   });
 
-  it('does not restart automatic confirmation when the original request times out after stopping', async () => {
-    let rejectApply!: (reason: unknown) => void;
-    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
-    render(<DataImportPage />);
+  it('leaving the import page clears a scheduled confirmation', async () => {
+    vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockRejectedValueOnce(new ClientBeClassWorkbookApplyError('client_beclass_workbook_apply_timeout', '逾時', true));
+    render(<UnsavedChangesProvider><ImportNavigationHarness /></UnsavedChangesProvider>);
     const card = await selectWorkbook('客戶 BeClass', '選擇客戶 BeClass Workbook', 'client-beclass');
     expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
-    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
-    await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
     vi.useFakeTimers();
     try {
-      await act(async () => { rejectApply(new ClientBeClassWorkbookApplyError('client_beclass_workbook_apply_timeout', '逾時', true)); });
+      await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
+      fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
+      expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
       await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
-      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
-      expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
-      expect(document.querySelector('[data-surface-id="imports.apply-navigation-lock"]')).not.toBeInTheDocument();
     } finally { vi.useRealTimers(); }
   });
 
-  it('still displays a successful original response after stopping the wait', async () => {
+  it('still displays a successful original response after switching import tabs', async () => {
     const receipt = await clientBeClassWorkbookPreviewClient.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockClear();
     let finish!: (value: typeof receipt) => void;
@@ -128,10 +226,11 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByLabelText('我已核對檔案名稱與預覽筆數')).not.toBeInTheDocument();
     fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
-    fireEvent.click(within(card).getByRole('button', { name: '停止等待' }));
+    fireEvent.click(screen.getByRole('button', { name: '歷史訂單' }));
     await act(async () => { finish(receipt); });
-    expect(within(card).getByText('匯入結果')).toBeInTheDocument();
-    expect(within(card).queryByText(/已停止等待/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '客戶 BeClass' }));
+    expect(screen.getByText('匯入結果')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
     expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
   });
   it.each(cases)('%s shows receipt-owned non-imported rows without using preview warnings', async (kind, label, id) => {
@@ -184,7 +283,8 @@ describe('Data Import simple result flows', () => {
       expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(7);
       expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
       expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
-      expect(within(card).getByText(/等待時間較長/)).toHaveTextContent('這不代表匯入失敗');
+      expect(within(card).getByRole('status')).toHaveTextContent('這不代表匯入失敗');
+      expect(within(card).getByRole('status')).toHaveTextContent('client_beclass_workbook_coordinator_lock_timeout');
     } finally { vi.useRealTimers(); }
   });
 
@@ -229,7 +329,7 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByText(/需檢查|問題列|第.*列/)).not.toBeInTheDocument();
   });
 
-  it('keeps one operation identity and navigation lock while an Apply result is unknown', async () => {
+  it('keeps one operation identity and file lock while allowing navigation for an unknown result', async () => {
     let rejectApply!: (reason: unknown) => void;
     vi.mocked(clientBeClassWorkbookPreviewClient.apply).mockReturnValueOnce(new Promise((_, reject) => { rejectApply = reject; }));
     render(<DataImportPage />);
@@ -239,13 +339,13 @@ describe('Data Import simple result flows', () => {
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(clientBeClassWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText('選擇客戶 BeClass Workbook')).toBeDisabled();
-    expect(screen.getByRole('button', { name: '月嫂歷史資料' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '月嫂歷史資料' })).toBeEnabled();
     expect(within(card).queryByText('匯入結果')).not.toBeInTheDocument();
     const navigation = document.createElement('button');
     navigation.className = 'sidebar-nav-item';
     const navigate = vi.fn(); navigation.addEventListener('click', navigate); document.body.appendChild(navigation);
-    fireEvent.click(navigation); expect(navigate).not.toHaveBeenCalled(); navigation.remove();
-    const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(true);
+    fireEvent.click(navigation); expect(navigate).toHaveBeenCalledOnce(); navigation.remove();
+    const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(false);
     rejectApply(new ClientBeClassWorkbookApplyError('timeout', '等待回應逾時，結果尚未確認。', true));
     const query = await within(card).findByRole('button', { name: '查詢這次匯入結果' });
     expect(query).toBeEnabled();

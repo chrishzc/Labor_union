@@ -471,6 +471,7 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
 - 2026-08-31 Global React ErrorBoundary沿用既有區域隔離、自訂fallback、重新嘗試與整頁重載。
   預設crash畫面只呈現closed復原指引，不得顯示render exception message；既有auth/navigation與
   nested boundary行為不變。
+  2026-11-03 人工補充：管理頁內容與其頁級 provider 的 render／lazy-load 失敗須隔離在 MasterLayout 內容區，保留側邊與分區導覽；切換頁面重置該內容邊界，卸載失敗頁的未儲存／busy 登記。HTTP 4xx／5xx、網路及回應格式錯誤須經既有 typed error 呈現，不因錯誤而鎖住整個管理介面或清除登入；Session 失效仍只沿既有 401 契約處理。已提交 mutation 的結果未知仍沿各 owner 的同命令確認規則，不因解鎖導覽而重送或宣稱取消。
 - 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
 - Anomalies 的分類、Preview、Apply、Drawer 關閉與背景篩選若因正式 action、未填理由、尚未 Preview、
   Preview 失效、提交中或結果確認中而不可操作，必須常駐顯示 closed 業務原因並以

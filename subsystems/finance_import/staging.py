@@ -64,6 +64,8 @@ def _identity_maps(
     tuple[Any, ...],
     Mapping[str, Any],
     Mapping[str, Any],
+    tuple[str, ...],
+    tuple[Any, ...],
 ]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
@@ -73,6 +75,8 @@ def _identity_maps(
     receipt_candidates = identity_maps.get("client_receipt_candidates", ())
     staff_case_suffixes = identity_maps.get("staff_case_suffixes", {})
     client_refund_case_suffixes = identity_maps.get("client_refund_case_suffixes", {})
+    all_client_names = tuple(identity_maps.get("all_client_names", ()))
+    taishin_candidates = tuple(identity_maps.get("taishin_client_refund_candidates", ()))
     if not isinstance(client_accounts, Mapping) or not isinstance(
         staff_accounts, Mapping
     ):
@@ -94,6 +98,8 @@ def _identity_maps(
         receipt_candidates,
         staff_case_suffixes,
         client_refund_case_suffixes,
+        all_client_names,
+        taishin_candidates,
     )
 
 
@@ -132,6 +138,8 @@ def stage_finance_rows(
         receipt_candidates,
         staff_case_suffixes,
         client_refund_case_suffixes,
+        all_client_names,
+        taishin_candidates,
     ) = _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
@@ -153,6 +161,19 @@ def stage_finance_rows(
             raise ValueError("each normalized row must be a mapping")
         if row.get("format_id") != format_id or row.get("sheet_name") != sheet_name:
             raise ValueError("normalized row metadata does not match its batch")
+
+        # 情境 C（選項 C-1）：台新支出若非新竹市政府且備註查無客戶姓名，直接跳過不匯入
+        if format_id == "taishin" and row.get("direction") == "outgoing":
+            memo = row.get("memo") or ""
+            is_government = isinstance(memo, str) and "新竹市政府" in memo
+            if not is_government and all_client_names:
+                from domains.finance_import.transaction_classifier import (
+                    extract_client_name_from_memo,
+                )
+
+                matched_name = extract_client_name_from_memo(memo, all_client_names)
+                if not matched_name:
+                    continue
 
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
@@ -294,6 +315,8 @@ def stage_finance_rows(
                 receipt_candidates,
                 staff_case_suffixes,
                 client_refund_case_suffixes,
+                all_client_names,
+                taishin_candidates,
             )
         except TypeError:
             classification = classify_finance_transaction(

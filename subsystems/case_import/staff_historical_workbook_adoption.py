@@ -5,7 +5,7 @@ Description: 編排 Staff 歷史 workbook 的 Preview、逐列採納、replay �
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from typing import Callable
 
@@ -101,7 +101,7 @@ class StaffHistoricalWorkbookService:
         try:
             replay = self._workbook_repository.load_receipt(key)
             if replay is not None:
-                return self._replay(replay, workbook.source_content_digest)
+                return self._replay(replay, workbook)
             preview = self._preview(workbook)
             if preview.preview_fingerprint != preview_fingerprint:
                 raise StaffHistoricalWorkbookConflict("staff_historical_workbook_preview_stale")
@@ -144,16 +144,25 @@ class StaffHistoricalWorkbookService:
         return "adopted_existing", bool(row.errors or merge.conflict_fields or name_changed)
 
     def _apply_rows(self, workbook: StaffHistoricalWorkbook, preview_fingerprint: str) -> StaffHistoricalWorkbookReceipt:
+        outcomes = [self._apply_row(workbook, row) for row in workbook.rows]
+        return self._receipt(workbook, preview_fingerprint, outcomes, replayed=False)
+
+    def _receipt(self, workbook, preview_fingerprint, outcomes, *, replayed):
         counts = _counts()
         row_issues = []
-        for row in workbook.rows:
-            outcome, reviewed = self._apply_row(workbook, row)
+        imported_identities = set()
+        for row, (outcome, reviewed) in zip(workbook.rows, outcomes, strict=True):
+            if outcome in {"created", "adopted_existing"}:
+                identity = str(row.record["identity_card"]).strip().upper()
+                if identity in imported_identities:
+                    outcome = "exact_replay"
+                imported_identities.add(identity)
             counts[outcome] += 1
             counts["review_required"] += int(reviewed)
             if outcome in {"blocked_identity", "identity_conflict"}:
                 row_issues.append({"source_row": row.source_row, "fields": sorted(set(row.errors) | {"姓名", "身分證字號"}), "issue_codes": list(_issues(row, outcome))})
         _assert_outcomes(len(workbook.rows), counts)
-        return StaffHistoricalWorkbookReceipt(workbook.source_content_digest, len(workbook.rows), counts["created"], counts["adopted_existing"], counts["exact_replay"], counts["blocked_identity"], counts["identity_conflict"], counts["review_required"], preview_fingerprint, False, tuple(row_issues))
+        return StaffHistoricalWorkbookReceipt(workbook.source_content_digest, len(workbook.rows), counts["created"], counts["adopted_existing"], counts["exact_replay"], counts["blocked_identity"], counts["identity_conflict"], counts["review_required"], preview_fingerprint, replayed, tuple(row_issues))
 
     def _apply_row(self, workbook: StaffHistoricalWorkbook, row: StaffHistoricalWorkbookRow) -> tuple[str, bool]:
         identity = str(row.record.get("identity_card") or "")
@@ -167,7 +176,8 @@ class StaffHistoricalWorkbookService:
             return self._record_terminal_review(workbook, row, "identity_conflict", staff_id)
         if roots:
             result = adopt_existing_staff(self._connection, source_content_digest=workbook.source_content_digest, source_row=row.source_row, identity_card=identity, historical_record=row.record, source_sheet=workbook.sheet_identity, review_payload=_review_payload(row.record), validation_issue_codes=tuple(f"staff_field_invalid:{field}" for field in row.errors), bank_accounts=row.bank_accounts, relations=row.relations, repository=repository, unit_of_work_factory=self._unit_of_work_factory, review_recorder=self._review_recorder)
-            return ("exact_replay", bool(row.errors)) if result.replayed else ("adopted_existing", bool(row.errors or result.conflict_fields))
+            # A resumed row retains its original success; the workbook counts each identity once.
+            return result.outcome, bool(row.errors or result.conflict_fields)
         return self._create_new_staff(workbook, row)
 
     def _record_terminal_review(self, workbook, row, outcome, staff_id) -> tuple[str, bool]:
@@ -199,10 +209,27 @@ class StaffHistoricalWorkbookService:
             unit_of_work.commit()
         return "created", bool(issues)
 
-    def _replay(self, stored, digest: str) -> StaffHistoricalWorkbookReceipt:
-        if str(stored["request_fingerprint"]) != digest:
+    def _replay(self, stored, workbook: StaffHistoricalWorkbook) -> StaffHistoricalWorkbookReceipt:
+        if str(stored["request_fingerprint"]) != workbook.source_content_digest:
             raise StaffHistoricalWorkbookConflict("staff_historical_workbook_idempotency_conflict")
-        return StaffHistoricalWorkbookReceipt(**{**json.loads(stored["result_snapshot"]), "replayed_workbook": True})
+        receipt = StaffHistoricalWorkbookReceipt(**{**json.loads(stored["result_snapshot"]), "replayed_workbook": True})
+        if len(workbook.rows) != receipt.source_row_count:
+            return receipt
+        repository = self._adoption_repository()
+        outcomes = []
+        for row in workbook.rows:
+            row_receipt = repository.find_receipt(
+                f"staff-historical-adoption:{workbook.source_content_digest}:row:{row.source_row}"
+            )
+            if row_receipt is None or row_receipt["outcome"] not in {"created", "adopted_existing", "blocked_identity", "identity_conflict"}:
+                # Legacy aggregates without complete row evidence cannot be safely reclassified.
+                return receipt
+            outcomes.append((str(row_receipt["outcome"]), bool(row_receipt["review_identity"])))
+        # Read-only projection of original row receipts; no fresh staff facts or historical writes.
+        projected = self._receipt(workbook, receipt.preview_fingerprint, outcomes, replayed=True)
+        return replace(receipt, created_count=projected.created_count,
+                       adopted_existing_count=projected.adopted_existing_count,
+                       exact_replay_count=projected.exact_replay_count)
 
 
 def _record_review(connection, workbook, row, issues: tuple[str, ...], *, recorder, repository) -> str:

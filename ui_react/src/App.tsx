@@ -194,6 +194,7 @@ const AppContent: React.FC = () => {
         onSelectPage={handleSelectPage}
         onLogout={handleLogout}
       >
+        <ErrorBoundary key={currentPage}>
         <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'historical-service-accounting', 'line-management'].includes(currentPage)}>
         <Suspense fallback={<div className="app-route-loading" role="status" aria-live="polite">載入頁面中…</div>}>
         {/* Operations Section */}
@@ -222,6 +223,7 @@ const AppContent: React.FC = () => {
         {currentPage === 'database-backup' && <DatabaseBackupPage />}
         </Suspense>
         </StaffIdentityProvider>
+        </ErrorBoundary>
       </MasterLayout>
     </ErrorBoundary>
   );

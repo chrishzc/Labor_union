@@ -26,6 +26,7 @@
 - retired page: `ui_react/src/pages/line_management/AlertGroupSecurity.tsx` — 2026-10-30 移除 line-security 導航、hash alias 及 render branch；狀態改在既有管理員 LIFF 待辦工作台。
 
 ## Contracts
+- MasterLayout 內容區以按 currentPage 重置的 ErrorBoundary 包住頁面及頁級 Staff provider；頁面 render／lazy-load 失敗保留導覽，失敗頁卸載清除其 busy 登記。HTTP 5xx 不清除登入，401 沿既有 Session 失效契約。
 - `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。建置以 `manualChunks` 切分穩定第三方套件（`vendor-react`、`vendor-icons`、`vendor-utils`），並由 `ui_react/src/App.tsx` 對次要／低頻管理頁面採 `React.lazy`＋`Suspense` 動態分塊載入，保留每日核心工作台同步載入。
 - 已登入的案件、客戶、財務、歷史服務帳務與 LINE 管理頁掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。

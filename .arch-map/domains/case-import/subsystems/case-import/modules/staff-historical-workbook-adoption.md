@@ -25,6 +25,7 @@
 - outbound: `case-import/case-import` — invalid or conflicting source rows enter the owned BeClass review intake contract.
 
 ## Contracts
+- 月嫂工作簿完成結果按成功採納的唯一身分計成功筆數，同人其他成功列計重複略過；所有來源列仍走既有逐列採納。續跑保留原逐列結果；同檔舊結果只在逐列收據完整時唯讀重新彙總，不讀目前主檔或改寫歷史收據。
 - `document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md` — current Case Import decisions.
 - `document/架構重整/01_規格基線/00_Global_共同契約.md` — Preview／Apply、idempotency 與 receipt contract.
 

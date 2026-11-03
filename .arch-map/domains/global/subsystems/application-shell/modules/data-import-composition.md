@@ -19,6 +19,7 @@
 - inbound: authenticated React application navigation。
 
 ## Contracts
+- 匯入等待與結果未確認時維持換檔／重複送出鎖，允許側邊導覽與匯入類型切換；不提供「停止等待」。離開匯入頁停止後續確認，不取消已送出的 Apply。未知結果仍顯示實際去敏錯誤原因及穩定代碼。
 - `document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md` §5.2 — four exclusive counters、未匯入明細及 bounded same-key 結果確認。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` §3.7 — Historical Order Adoption presentation boundary。
 

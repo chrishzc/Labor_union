@@ -508,6 +508,159 @@ def test_sinopac_outgoing_memo_classifies_staff_salary():
     )
     assert result["classification_type"] == "staff_salary"
     assert result["matched_identity_ids"] == [7]
+
+
+def test_taishin_outgoing_scenario_a_exact_match():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-15",
+        debit=Decimal("10000"),
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [101]
+    assert result["reason"] == "taishin_unique_client_refund_name_and_month_matched"
+
+
+def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-14",
+        debit=Decimal("9970"),  # 手續費扣除或金額不合
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "taishin_client_refund_amount_mismatch"
+
+
+def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-16",
+        debit=Decimal("5000"),
+        credit=None,
+        memo="陳小芬",
+    )
+    # 同名同姓或多筆案件，只有 10 月份且金額 5000 的唯一符合
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("陳小芬",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 201,
+                "name": "陳小芬",
+                "case_no": "115002",
+                "amount_due_ntd": 3000,
+                "due_date": "2026-09-15",
+            },
+            {
+                "client_id": 202,
+                "name": "陳小芬",
+                "case_no": "115003",
+                "amount_due_ntd": 5000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [202]
+    assert result["reason"] == "taishin_client_refund_disambiguated_by_month_and_amount"
+
+
+def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-11-01",  # 11月出款，但應退款為 10 月
+        debit=Decimal("10000"),
+        credit=None,
+        memo="林小美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "taishin_client_refund_month_no_match"
+
+
+def test_taishin_outgoing_longest_prefix_match():
+    # 測試名冊中同時有 "王明" 與 "王明星"，備註為 "王明星退款" 應精確匹配 "王明星"
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-15",
+        debit=Decimal("2000"),
+        credit=None,
+        memo="王明星退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("王明", "王明星"),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 301,
+                "name": "王明星",
+                "case_no": "115005",
+                "amount_due_ntd": 2000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [301]
     assert result["reason"] == "sinopac_unique_staff_case_suffix_in_memo"
 
 
@@ -588,3 +741,156 @@ def test_sinopac_outgoing_fullwidth_memo():
     )
     assert result["classification_type"] == "staff_salary"
     assert result["matched_identity_ids"] == [7]
+
+
+def test_taishin_outgoing_scenario_a_exact_match():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-15",
+        debit=Decimal("10000"),
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [101]
+    assert result["reason"] == "taishin_unique_client_refund_name_and_month_matched"
+
+
+def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-14",
+        debit=Decimal("9970"),  # 手續費扣除或金額不合
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "taishin_client_refund_amount_mismatch"
+
+
+def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-16",
+        debit=Decimal("5000"),
+        credit=None,
+        memo="陳小芬",
+    )
+    # 同名同姓或多筆案件，只有 10 月份且金額 5000 的唯一符合
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("陳小芬",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 201,
+                "name": "陳小芬",
+                "case_no": "115002",
+                "amount_due_ntd": 3000,
+                "due_date": "2026-09-15",
+            },
+            {
+                "client_id": 202,
+                "name": "陳小芬",
+                "case_no": "115003",
+                "amount_due_ntd": 5000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [202]
+    assert result["reason"] == "taishin_client_refund_disambiguated_by_month_and_amount"
+
+
+def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-11-01",  # 11月出款，但應退款為 10 月
+        debit=Decimal("10000"),
+        credit=None,
+        memo="林小美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "taishin_client_refund_month_no_match"
+
+
+def test_taishin_outgoing_longest_prefix_match():
+    # 測試名冊中同時有 "王明" 與 "王明星"，備註為 "王明星退款" 應精確匹配 "王明星"
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-15",
+        debit=Decimal("2000"),
+        credit=None,
+        memo="王明星退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("王明", "王明星"),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 301,
+                "name": "王明星",
+                "case_no": "115005",
+                "amount_due_ntd": 2000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [301]

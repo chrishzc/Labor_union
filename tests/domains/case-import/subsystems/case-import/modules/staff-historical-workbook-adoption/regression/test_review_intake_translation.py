@@ -152,7 +152,7 @@ def test_staff_historical_exact_replay_precedes_fresh_preview_check(monkeypatch)
     monkeypatch.setattr(
         workflow,
         "load_staff_historical_workbook",
-        lambda _path, _revision: SimpleNamespace(source_content_digest=digest),
+        lambda _path, _revision: SimpleNamespace(source_content_digest=digest, rows=()),
     )
     monkeypatch.setattr(
         service,
