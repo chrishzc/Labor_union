@@ -152,7 +152,7 @@ function Submit-RuntimeStop {
     [void][IO.Directory]::CreateDirectory($directory)
     $lock = [IO.File]::Open((Join-Path $directory 'update.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     try {
-        $state = Get-FrontendUpdateSupervisor
+        $state = Get-FrontendUpdateSupervisor -ForStop
         $owner = Get-ProcessSnapshot ([int]$state.supervisor_pid)
         if ($owner.State -ne 'alive' -or -not (Test-SameProcessIdentity ([pscustomobject]@{StartTime=[datetime]$state.supervisor_start_time}) $owner)) {
             throw 'Supervisor identity changed; no stop request was sent.'
@@ -162,7 +162,8 @@ function Submit-RuntimeStop {
         }
         if (-not $owner.Process.WaitForExit(180000)) { throw 'Runtime stop is still pending; do not start another host.' }
         $finished = Get-Content -Raw -LiteralPath (Join-Path $directory 'state.json') -Encoding UTF8 | ConvertFrom-Json
-        if ($finished.run_id -ne $state.run_id -or $finished.runtime_status -ne 'stopped') {
+        if ($finished.run_id -ne $state.run_id -or $finished.runtime_status -ne 'stopped' -or
+            $finished.cleanup_confirmed -ne $true) {
             throw 'Runtime cleanup was not confirmed; do not start another host.'
         }
         Write-Host '[Ready] Owned API, frontend, workers and Tunnel stopped. Database and Redis preserved.'
@@ -217,6 +218,7 @@ function Initialize-AdoptedRemoteRuntime {
 }
 
 function Get-FrontendUpdateSupervisor {
+    param([switch]$ForStop)
     $directory = Get-FrontendControlDirectory
     $statePath = Join-Path $directory 'state.json'
     if (Test-Path -LiteralPath $statePath) {
@@ -226,6 +228,11 @@ function Get-FrontendUpdateSupervisor {
             $state.api_port -eq $ApiPort -and $state.react_port -eq $ReactPort -and
             $snapshot.State -eq 'alive' -and (Test-SameProcessIdentity ([pscustomobject]@{StartTime=[datetime]$state.supervisor_start_time}) $snapshot)) {
             if ($state.controller_digest -eq $script:FrontendControllerDigest) { return $state }
+            # Existing lifecycle-aware supervisors already understand the same
+            # run-bound stop request. Source updates must not require replacing
+            # that verified owner merely to ask it to clean up its own children.
+            if ($ForStop -and $state.runtime_status -in @('starting','ready','stopping') -and
+                $state.cleanup_confirmed -is [bool]) { return $state }
             # A live supervisor can still have older function definitions loaded
             # after source files change. Upgrade that verified owner by handoff.
         }

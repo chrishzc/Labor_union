@@ -157,6 +157,157 @@ Write-Output 'PASS'
     assert 'PASS' in result.stdout
 
 
+def test_stop_uses_existing_protocol_after_source_update_with_unknown_child(tmp_path):
+    root = tmp_path / '獅子 runtime'
+    root.mkdir()
+    legacy = root / 'supervise_local_runtime.ps1'
+    legacy.write_text(r'''
+param($ProjectRoot,$PythonPath)
+$ErrorActionPreference='Stop'
+$directory=Join-Path $ProjectRoot 'scratch\windows-remote\frontend-control'
+[void][IO.Directory]::CreateDirectory($directory)
+$child=Start-Process -FilePath $PythonPath -ArgumentList @('-c','"import time; time.sleep(120)"') -WindowStyle Hidden -PassThru
+$state=@{
+    contract='windows-frontend-control/v1';run_id='previous-release'
+    controller_digest='previous-release';project_root=$ProjectRoot;api_port=8000;react_port=5173
+    supervisor_pid=$PID;supervisor_start_time=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
+    runtime_status='ready';cleanup_confirmed=$false
+    roots=@(@{label='Unrecognized helper';pid=$child.Id;start_time=$child.StartTime.ToUniversalTime().ToString('o')})
+}
+$statePath=Join-Path $directory 'state.json'
+try {
+    [IO.File]::WriteAllText($statePath,($state|ConvertTo-Json -Depth 8))
+    while($true){
+        $requestPath=Join-Path $directory 'request.json'
+        if(Test-Path -LiteralPath $requestPath){
+            $request=[IO.File]::ReadAllText($requestPath)|ConvertFrom-Json
+            if($request.run_id -eq $state.run_id -and $request.operation -eq 'stop_runtime'){break}
+        }
+        Start-Sleep -Milliseconds 50
+    }
+} finally {
+    if(-not $child.HasExited){$child.Kill();[void]$child.WaitForExit(5000)}
+}
+$state.runtime_status='stopped';$state.cleanup_confirmed=$true
+[IO.File]::WriteAllText($statePath,($state|ConvertTo-Json -Depth 8))
+''', encoding='utf-8')
+    process = subprocess.Popen([
+        str(POWERSHELL), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', str(legacy), '-ProjectRoot', str(root), '-PythonPath', sys.executable,
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    control_dir = root / 'scratch/windows-remote/frontend-control'
+    state_path = control_dir / 'state.json'
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                original = json.loads(state_path.read_text(encoding='utf-8-sig'))
+                break
+            except (OSError, ValueError):
+                assert process.poll() is None, 'Previous-release fixture exited early'
+                assert time.monotonic() < deadline, 'Previous-release state was not published'
+                time.sleep(.05)
+        result = subprocess.run([
+            str(POWERSHELL), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-Command', LOAD_FUNCTIONS + r'''
+function Get-NetTCPConnection {throw 'Stop must not enter legacy adoption'}
+Submit-RuntimeStop
+$state=Get-Content -LiteralPath (Join-Path (Get-FrontendControlDirectory) 'state.json') -Raw -Encoding UTF8|ConvertFrom-Json
+$helper=Get-ProcessSnapshot ([int]$state.roots[0].pid)
+if($helper.State -eq 'alive' -and (Test-SameProcessIdentity ([pscustomobject]@{StartTime=[datetime]$state.roots[0].start_time}) $helper)){
+    throw 'Owned helper is still running'
+}
+'''], cwd=ROOT, env={**os.environ,
+                'SUPERVISOR_TEST_PATH': str(SUPERVISOR), 'CONTROL_TEST_PATH': str(CONTROL),
+                'FRONTEND_TEST_ROOT': str(root), 'FRONTEND_TEST_PYTHON': sys.executable,
+                'FRONTEND_TEST_API_PORT': '8000', 'FRONTEND_TEST_PORT': '5173',
+            }, capture_output=True, text=True, timeout=25)
+        assert result.returncode == 0, result.stdout + result.stderr
+        process.wait(timeout=5)
+        terminal = json.loads(state_path.read_text(encoding='utf-8-sig'))
+        assert terminal['supervisor_pid'] == original['supervisor_pid'] == process.pid
+        assert terminal['runtime_status'] == 'stopped' and terminal['cleanup_confirmed'] is True
+        assert not list(control_dir.glob('adoption-*.json'))
+    finally:
+        if process.poll() is None:
+            # Ask the fixture to clean up its own verified child even on failure.
+            request = control_dir / 'request.json'
+            temporary = control_dir / 'cleanup-request.tmp'
+            temporary.write_text(json.dumps({'run_id': 'previous-release', 'operation': 'stop_runtime'}), encoding='utf-8')
+            temporary.replace(request)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+
+@pytest.mark.parametrize('fault', ['owner-identity', 'project-root', 'no-stop-protocol'])
+def test_stop_compatibility_keeps_identity_and_protocol_checks(tmp_path, fault):
+    result = subprocess.run([
+        str(POWERSHELL), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-Command', LOAD_FUNCTIONS + r'''
+$script:Owned=@();$script:CleanupSucceeded=$false
+Publish-FrontendControlState
+$statePath=Join-Path (Get-FrontendControlDirectory) 'state.json'
+$state=Get-Content -LiteralPath $statePath -Raw -Encoding UTF8|ConvertFrom-Json
+$state.controller_digest='previous-release'
+switch($env:STOP_FAULT_TEST){
+    'owner-identity' {$state.supervisor_start_time=([datetime]$state.supervisor_start_time).AddSeconds(-1).ToString('o')}
+    'project-root' {$state.project_root='C:\other-installation'}
+    'no-stop-protocol' {$state.PSObject.Properties.Remove('cleanup_confirmed')}
+}
+Write-FrontendControlJson $statePath $state
+$script:adoptionAttempted=$false
+function Get-NetTCPConnection {$script:adoptionAttempted=$true;throw 'Legacy adoption required'}
+$rejected=$false
+try{Get-FrontendUpdateSupervisor -ForStop|Out-Null}catch{$rejected=$true}
+if(-not $rejected){throw 'Unverified stop owner or protocol was accepted'}
+if($script:adoptionAttempted -ne ($env:STOP_FAULT_TEST -eq 'no-stop-protocol')){throw 'Identity check was bypassed'}
+if(Test-Path -LiteralPath (Join-Path (Get-FrontendControlDirectory) 'request.json')){throw 'Stop request sent before verification'}
+'''], cwd=ROOT, env={**os.environ,
+            'SUPERVISOR_TEST_PATH': str(SUPERVISOR), 'CONTROL_TEST_PATH': str(CONTROL),
+            'FRONTEND_TEST_ROOT': str(tmp_path), 'FRONTEND_TEST_PYTHON': sys.executable,
+            'FRONTEND_TEST_API_PORT': '8000', 'FRONTEND_TEST_PORT': '5173', 'STOP_FAULT_TEST': fault,
+        }, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_stop_requires_explicit_cleanup_confirmation(tmp_path, confirmed):
+    result = subprocess.run([
+        str(POWERSHELL), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-Command', LOAD_FUNCTIONS + r'''
+$native=(Get-Process -Id $PID).StartTime.ToUniversalTime()
+$fakeProcess=[pscustomobject]@{}
+$fakeProcess|Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {param($Timeout);return $true}
+function Get-FrontendUpdateSupervisor {
+    param([switch]$ForStop)
+    if(-not $ForStop){throw 'Stop protocol lookup missing'}
+    return [pscustomobject]@{run_id='stop-test';supervisor_pid=$PID;supervisor_start_time=$native}
+}
+function Get-ProcessSnapshot {
+    param($ProcessId)
+    return [pscustomobject]@{State='alive';StartTime=$native;Process=$fakeProcess}
+}
+$directory=Get-FrontendControlDirectory
+[void][IO.Directory]::CreateDirectory($directory)
+$confirmed=$env:CLEANUP_CONFIRMED_TEST -eq '1'
+Write-FrontendControlJson (Join-Path $directory 'state.json') @{
+    run_id='stop-test';runtime_status='stopped';cleanup_confirmed=$confirmed
+}
+$rejected=$false
+try{Submit-RuntimeStop}catch{$rejected=$true}
+if($rejected -eq $confirmed){throw 'Cleanup confirmation did not control the stop result'}
+'''], cwd=ROOT, env={**os.environ,
+            'SUPERVISOR_TEST_PATH': str(SUPERVISOR), 'CONTROL_TEST_PATH': str(CONTROL),
+            'FRONTEND_TEST_ROOT': str(tmp_path), 'FRONTEND_TEST_PYTHON': sys.executable,
+            'FRONTEND_TEST_API_PORT': '8000', 'FRONTEND_TEST_PORT': '5173',
+            'CLEANUP_CONFIRMED_TEST': '1' if confirmed else '0',
+        }, capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_live_legacy_handoff_and_repeated_frontend_updates_do_not_restart_other_services(tmp_path):
     paths, guard = artifacts(tmp_path)
     launcher_dir = tmp_path / 'scripts/launchers'
