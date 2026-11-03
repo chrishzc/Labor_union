@@ -4,7 +4,7 @@
     "dependencies": [],
     "descriptor_sha256": "97d28e0fa6a86b8cf4941f169ddeac47e8bc9cd18f390b97159056160df67cb7",
     "name": "1064_accounting_difference_resolution.sql",
-    "sql_sha256": "5796e05346fdcea5d0ea089ee2de1923df9a2acdccbb0897fa7b0cf065e4f1de"
+    "sql_sha256": "b384d7f93e6e5a326e4d8305f012675f07f7ccf8e99c3afd9f0b9b61c77775ee"
   },
   "contract": "local-additive-qualification/v1",
   "fresh_bootstrap": {
@@ -19,7 +19,7 @@
       "data_effect": "schema_only",
       "dependencies": [],
       "name": "1064_accounting_difference_resolution.sql",
-      "sha256": "5796e05346fdcea5d0ea089ee2de1923df9a2acdccbb0897fa7b0cf065e4f1de"
+      "sha256": "b384d7f93e6e5a326e4d8305f012675f07f7ccf8e99c3afd9f0b9b61c77775ee"
     }
   ],
   "metadata_backup": {

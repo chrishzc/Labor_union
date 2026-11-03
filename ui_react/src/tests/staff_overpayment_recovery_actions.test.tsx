@@ -7,6 +7,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StaffOverpaymentRecoveryActions } from '../components/StaffOverpaymentRecoveryActions';
 import { staffOverpaymentRecoveryClient } from '../api/staff_payables/staff_overpayment_recovery_client';
 
+it('keeps the actual recovery entry without offering an unclassified noncash adjustment', async () => {
+  vi.spyOn(staffOverpaymentRecoveryClient, 'query').mockResolvedValue(openQuery);
+  render(<StaffOverpaymentRecoveryActions staffId={7} recoveryIdentity="staff-overpayment-recovery:1" cashOnly />);
+  await screen.findByText(/剩餘 NT\$ 500/);
+  expect(screen.getByRole('button', {name: '儲存入款配對'})).toBeVisible();
+  expect(screen.queryByRole('button', {name: '儲存精確調整'})).toBeNull();
+});
+
 const openQuery = {
   staff_id: 7, recovery_identity: 'staff-overpayment-recovery:1', remaining_amount_ntd: 500,
   status: 'open' as const, recovery_version: 3, staff_payables_version: 9,

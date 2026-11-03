@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/components/StaffOverpaymentRecoveryActions.tsx`
+- inbound: `ui_react/src/components/AccountingDifferencePanel.tsx` — 案件帳務依正式 staff recovery identity／staff_id 提供實際追回入口；`cashOnly` 不顯示舊精確人工調整，非現金處理由現行差額 owner 承接。
 
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Staff Payables超額付款追償與結清規則。

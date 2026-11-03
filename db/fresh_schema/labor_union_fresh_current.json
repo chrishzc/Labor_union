@@ -3,8 +3,8 @@
   "profile_id": "labor-union-compact-fresh-2026-10-15-v1",
   "release_id": "labor-union-validation-schema-2026-11-02-v58",
   "source_bindings": {
-    "assembly_sha256": "9e173469b809e7aeb709593ed02dade555a61a730b9cfc76a7419256d6156ac8",
-    "validation_manifest_sha256": "96277dce0684c8a83a1cfd39f5fa06cb8d4af9a34203c3cb461d71fa548bf1be",
+    "assembly_sha256": "e3a1524031547b6324c501e0f14efb172fea33aaa48f8900678032368e6571ee",
+    "validation_manifest_sha256": "3b95dc87f10c7da27e3681eb2e83f3c0dddd8fbab3b4a42852164528fc29994f",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
   "sql_sha256": "839de494db23a59645f41b3b69fef9e511e9cf7dbb0fb2bba672afc018369689",

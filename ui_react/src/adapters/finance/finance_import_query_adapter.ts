@@ -24,6 +24,15 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   subsidy_advance_not_due: '補助退款尚未符合政府入款或工會代墊條件，暫時無法核銷。',
 };
 
+export function financeImportSkipsUnidentifiedOutgoing(
+  row: FinanceImportReviewPage['items'][number],
+  preview?: FinanceImportBatchPreview['rows'][number],
+): boolean {
+  return row.classification_type === 'non_business_review' && row.direction === 'outgoing'
+    && !!preview?.evidence.some(code => ['counterparty_account_missing', 'counterparty_account_invalid',
+      'counterparty_account_no_match', 'sinopac_staff_account_no_match'].includes(code));
+}
+
 export function financeImportReviewReason(
   row: FinanceImportReviewPage['items'][number],
   preview?: FinanceImportBatchPreview['rows'][number],
@@ -32,6 +41,7 @@ export function financeImportReviewReason(
   if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
   if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
   if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
+  if (financeImportSkipsUnidentifiedOutgoing(row, preview)) return '無法辨識收款對象，已略過核銷；只保留原始銀行紀錄，不指定案件或月嫂。';
   if (postingStopped && preview?.disposition === 'create') return '此筆符合自動入帳條件，但本次匯入有錯誤，尚未執行入帳。';
   if (row.available_actions.includes('review_suspected_duplicate_business_match')) return REVIEW_REASON_LABELS.suspected_duplicate_business_match;
   const reasons = (preview?.evidence ?? []).flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);

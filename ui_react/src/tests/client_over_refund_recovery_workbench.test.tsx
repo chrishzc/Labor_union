@@ -20,6 +20,15 @@ function client(overrides: Partial<ClientOverRefundRecoveryClient> = {}): Client
 }
 
 describe('ClientOverRefundRecoveryWorkbench', () => {
+  it('keeps cash collection available without exposing the old noncash adjustment route', async () => {
+    const owner = client();
+    render(<ClientOverRefundRecoveryWorkbench caseNo="CASE-1" recoveryIdentity="recovery:1" client={owner} cashOnly />);
+    await screen.findByText(/目前餘額：500/);
+    expect(screen.getByRole('button', {name: '建立入款配對'})).toBeVisible();
+    expect(screen.queryByRole('button', {name: '授權人工調整'})).toBeNull();
+    expect(owner.applyMatching).not.toHaveBeenCalled();
+    expect(owner.applyAdjustment).not.toHaveBeenCalled();
+  });
   it('keeps an open recovery visible and requires preview before Apply', async () => {
     const owner = client();
     render(<ClientOverRefundRecoveryWorkbench caseNo="CASE-1" recoveryIdentity="recovery:1" client={owner} />);

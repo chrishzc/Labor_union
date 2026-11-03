@@ -2,6 +2,7 @@ import {fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {AccountingDifferencePanel} from '../../../../../../../components/AccountingDifferencePanel';
 import {differenceResolutionClient,type ClientDifferenceView} from '../../../../../../../api/client_finance/difference_resolution_client';
+import {clientOverRefundRecoveryClient} from '../../../../../../../api/client_finance/client_over_refund_recovery_client';
 vi.mock('../../../../../../../api/client_finance/difference_resolution_client',()=>({differenceResolutionClient:{client:vi.fn(),payroll:vi.fn(),staff:vi.fn(),apply:vi.fn()}}));
 const view=():ClientDifferenceView=>({case_no:'CASE',version:4,items:[{identity:'first',label:'第一期',kind:'first',direction:'receivable_from_client',expected_ntd:10000,actual_ntd:9900,remaining_ntd:100,noncash_ntd:0,mode:'manual',computed_ntd:10100,effective_ntd:10000,status:'待處理',options:['loss','reduce_service_fee','union_bank_fee','manual_amount','adopt_calculation']}],events:[]});
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(differenceResolutionClient.client).mockResolvedValue(view());vi.mocked(differenceResolutionClient.payroll).mockResolvedValue({case_no:'CASE',version:1,items:[],events:[]});vi.mocked(differenceResolutionClient.staff).mockResolvedValue({case_no:'CASE',items:[],events:[]});vi.mocked(differenceResolutionClient.apply).mockResolvedValue(view());});
@@ -9,6 +10,17 @@ async function target(){fireEvent.change(await screen.findByLabelText('選擇款
 function select(action:string){fireEvent.change(screen.getByLabelText('處理方式'),{target:{value:action}});}
 function confirm(){fireEvent.click(screen.getByRole('checkbox',{name:'我已核對款項、金額及處理方式'}));}
 describe('explicit accounting difference choices',()=>{
+ it('connects an open refund recovery to the existing cash owner without applying a noncash disposition',async()=>{
+   const recovery=view();recovery.items=[{...recovery.items[0],identity:'recovery:1',kind:'over_refund_recovery',label:'客戶退款超付追償',options:['loss','absorb_overpayment']}];
+   vi.mocked(differenceResolutionClient.client).mockResolvedValue(recovery);
+   const query=vi.spyOn(clientOverRefundRecoveryClient,'query').mockResolvedValue({case_no:'CASE',recovery_identity:'recovery:1',remaining_amount_ntd:100,status:'open',recovery_version:1,account_version:4,source_row_reference:'bank:1',current_matchings:[]});
+   render(<AccountingDifferencePanel caseNo="CASE" onChanged={vi.fn()}/>);
+   const entry=await screen.findByText(/登記已追回的客戶退款/);fireEvent.click(entry);
+   await screen.findByRole('heading',{name:'客戶退款超額追償'});
+   expect(query).toHaveBeenCalledWith('CASE','recovery:1');
+   expect(screen.queryByRole('button',{name:'授權人工調整'})).toBeNull();
+   expect(differenceResolutionClient.apply).not.toHaveBeenCalled();query.mockRestore();
+ });
  it('updates external receipt facts while preserving a draft and requiring its confirmation again',async()=>{
    const changed=vi.fn();const rendered=render(<AccountingDifferencePanel caseNo="CASE" onChanged={changed} refreshVersion={0}/>);
    await target();select('loss');fireEvent.change(screen.getByLabelText('本次處理差額'),{target:{value:'100'}});fireEvent.change(screen.getByLabelText('更正原因／處理依據'),{target:{value:'保留人員尚未送出的說明'}});confirm();

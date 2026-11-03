@@ -27,6 +27,8 @@ export interface StaffOverpaymentRecoveryActionsProps {
   /** Optional numeric bank-row binding from the anomaly owner context. It is never editable for collection. */
   initialFinanceImportRowId?: number;
   onCommitted?: () => Promise<void> | void;
+  /** Noncash dispositions are owned by the current accounting difference panel. */
+  cashOnly?: boolean;
 }
 
 type PreviewState =
@@ -81,6 +83,7 @@ export function StaffOverpaymentRecoveryActions({
   recoveryIdentity,
   initialFinanceImportRowId,
   onCommitted,
+  cashOnly = false,
 }: StaffOverpaymentRecoveryActionsProps) {
   const [query, setQuery] = useState<StaffOverpaymentRecoveryQuery | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -241,7 +244,7 @@ export function StaffOverpaymentRecoveryActions({
       </header>
       {error && <div role="alert" style={{ color: '#9f1239' }}>{error}</div>}
       {notice && <div role="status">{notice}</div>}
-      {outcomeUnknown && <button type="button" onClick={() => void reconcileUnknown()} disabled={operation === 'reconcile'}>重新查詢原操作結果</button>}
+      {outcomeUnknown && <button type="button" className="finance-btn-secondary" onClick={() => void reconcileUnknown()} disabled={operation === 'reconcile'}>重新查詢原操作結果</button>}
       {query && !active && <div role="status">此筆追償已完成；只有最新追償資料確認後才可移除異常。</div>}
       {query && active && multipleMatchings && <div role="alert">目前有多筆入款配對，收款目標不唯一；請先人工整理配對資料。</div>}
       {query && active && query.matchings.length === 0 && (
@@ -249,13 +252,13 @@ export function StaffOverpaymentRecoveryActions({
           <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
             <legend>配對退回入款（配對不會解除異常）</legend>
             <label>銀行流水編號<input aria-label="銀行流水編號" inputMode="numeric" value={rowIdText} onChange={(event) => { setRowIdText(event.target.value); invalidatePreview(); }} /></label>
-            <button type="button" disabled={!matchingReady} onClick={() => void runPreview('matching')}>儲存入款配對</button>
+            <button type="button" className="finance-btn-secondary" disabled={!matchingReady} onClick={() => void runPreview('matching')}>儲存入款配對</button>
           </fieldset>
-          <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
+          {!cashOnly && <fieldset disabled={busy || outcomeUnknown} style={{ display: 'grid', gap: 8 }}>
             <legend>人工調整（一次精確結清）</legend>
             <p>依正式應付款規則，調整金額固定為目前剩餘追償額：NT$ {query.remaining_amount_ntd.toLocaleString('en-US')}，不可自行輸入部分金額。</p>
-            <button type="button" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>儲存精確調整</button>
-          </fieldset>
+            <button type="button" className="finance-btn-secondary" disabled={!adjustmentReady} onClick={() => void runPreview('adjustment')}>儲存精確調整</button>
+          </fieldset>}
         </>
       )}
       {query && active && uniqueMatching && !multipleMatchings && (
@@ -264,7 +267,7 @@ export function StaffOverpaymentRecoveryActions({
           <details><summary>技術操作欄位</summary><p>配對識別值：{uniqueMatching.matching_identity}（資料版本 {uniqueMatching.matching_version}）</p></details>
           {collectionRowId === null && <p role="alert">目前配對缺少可提交的銀行流水編號，已停止操作。</p>}
           {collectionRowId !== null && <p>銀行流水編號：{collectionRowId}</p>}
-          <button type="button" disabled={!collectionReady} onClick={() => void runPreview('collection')}>儲存收款核銷</button>
+          <button type="button" className="finance-btn-secondary" disabled={!collectionReady} onClick={() => void runPreview('collection')}>儲存收款核銷</button>
         </fieldset>
       )}
       {query && active && (

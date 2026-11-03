@@ -17,7 +17,7 @@ import { adaptClientReceiptQuery } from '../adapters/finance/client_receipt_quer
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { adaptStaffPayablesQuery } from '../adapters/finance/staff_payables_query_adapter';
 import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_payable_query_client';
-import { financeImportBlockerMessage, financeImportReviewReason } from '../adapters/finance/finance_import_query_adapter';
+import { financeImportBlockerMessage, financeImportReviewReason, financeImportSkipsUnidentifiedOutgoing } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
@@ -52,7 +52,7 @@ const FINANCE_CORRECTION_ACTIONS = new Set([
 ]);
 
 function canCorrectFinanceImportRow(row: FinanceImportReviewSnapshot['items'][number], preview?: FinanceImportBatchPreview['rows'][number]): boolean {
-  return row.disposition !== 'blocked' && preview?.disposition !== 'blocked'
+  return !financeImportSkipsUnidentifiedOutgoing(row, preview) && row.disposition !== 'blocked' && preview?.disposition !== 'blocked'
     && !preview?.fingerprint_collision && !preview?.formal_reference_conflict && !preview?.integrity_violations.length
     && ['client_receipt', 'staff_payout', 'client_refund', 'non_business_review'].includes(row.classification_type)
     && row.available_actions.some((action) => FINANCE_CORRECTION_ACTIONS.has(action));

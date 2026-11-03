@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary: `ui_react/src/components/ClientOverRefundRecoveryWorkbench.tsx`
+- inbound: `ui_react/src/components/AccountingDifferencePanel.tsx` — 案件帳務的未清客戶超退款提供實際追回入口；`cashOnly` 僅提供銀行配對／收回，非現金損失與工會承擔仍由現行差額 owner 處理。
 
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — Client Finance追償、結清與fresh readback規則。

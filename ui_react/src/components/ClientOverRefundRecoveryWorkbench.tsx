@@ -28,6 +28,8 @@ export interface ClientOverRefundRecoveryWorkbenchProps {
   initialFinanceImportRowId?: number;
   client?: ClientOverRefundRecoveryClient;
   onCommitted?: (query: ClientOverRefundRecoveryQuery) => void;
+  /** Noncash dispositions are owned by the current accounting difference panel. */
+  cashOnly?: boolean;
 }
 
 type Action = 'matching' | 'collection' | 'adjustment';
@@ -62,6 +64,7 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
   initialFinanceImportRowId,
   client = clientOverRefundRecoveryClient,
   onCommitted,
+  cashOnly = false,
 }) => {
   const [query, setQuery] = useState<ClientOverRefundRecoveryQuery | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -178,7 +181,7 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
   useUnsavedDraft('客戶溢退追回', { '處理方式': action, '金額': amount, '原因': reason, '佐證': evidence, '銀行交易資料列': rowId, '核銷紀錄': matchingIdentity, '核銷版本': matchingVersion }, { busy, resetKey: query });
 
   if (loading && !query) return <section aria-label="客戶退款超額追償處理"><p>正在讀取最新客戶追償資料…</p></section>;
-  if (queryError && !query) return <section aria-label="客戶退款超額追償處理"><p role="alert">{queryError}</p><button type="button" onClick={() => void readOwner()}>重新查詢</button></section>;
+  if (queryError && !query) return <section aria-label="客戶退款超額追償處理"><p role="alert">{queryError}</p><button type="button" className="finance-btn-secondary" onClick={() => void readOwner()}>重新查詢</button></section>;
   if (!query) return null;
   if (terminal(query)) return <section aria-label="客戶退款超額追償處理"><h3>客戶退款超額追償已解除</h3><p>目前餘額：0 元｜狀態：{recoveryStatusLabel(query.status)}</p></section>;
 
@@ -188,16 +191,16 @@ export const ClientOverRefundRecoveryWorkbench: React.FC<ClientOverRefundRecover
     <p>目前餘額：{query.remaining_amount_ntd.toLocaleString()} 元｜狀態：{recoveryStatusLabel(query.status)}</p>
     <p>完成條件：追償餘額歸零，且款項已收回或授權調整已完成；只有建立配對不會解除異常。</p>
     <div role="group" aria-label="處置方式">
-      <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'matching'} onClick={() => { setAction('matching'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>建立入款配對</button>
-      {query.current_matchings.length > 0 && <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'collection'} onClick={() => { setAction('collection'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>核銷已配對入款</button>}
-      <button type="button" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'adjustment'} onClick={() => { setAction('adjustment'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>授權人工調整</button>
+      <button type="button" className="finance-btn-secondary" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'matching'} onClick={() => { setAction('matching'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>建立入款配對</button>
+      {query.current_matchings.length > 0 && <button type="button" className="finance-btn-secondary" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'collection'} onClick={() => { setAction('collection'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>核銷已配對入款</button>}
+      {!cashOnly && <button type="button" className="finance-btn-secondary" disabled={busy || applyCommand.current !== null} aria-pressed={action === 'adjustment'} onClick={() => { setAction('adjustment'); setPreview(null); setPreviewKey(null); applyCommand.current = null; }}>授權人工調整</button>}
     </div>
     {action !== 'adjustment' && <label>入款流水紀錄編號<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={rowId} onChange={invalidate(setRowId)} /></label>}
     {action === 'collection' && <details><summary>技術操作欄位</summary><label>配對識別值<input disabled={busy || applyCommand.current !== null} value={matchingIdentity} onChange={invalidate(setMatchingIdentity)} /></label><label>配對資料版本<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={matchingVersion} onChange={invalidate(setMatchingVersion)} /></label></details>}
     {action === 'adjustment' && <label>調整金額（元）<input disabled={busy || applyCommand.current !== null} inputMode="numeric" value={amount} onChange={invalidate(setAmount)} /></label>}
     <label>處理原因（選填）<textarea disabled={busy || applyCommand.current !== null} value={reason} onChange={invalidate(setReason)} /></label>
     <label>佐證紀錄（必填，可填電話／紙本紀錄索引）<input disabled={busy || applyCommand.current !== null} value={evidence} onChange={invalidate(setEvidence)} /></label>
-    <div>{applyCommand.current && preview && <button type="button" disabled={busy} onClick={() => void applyAction()}>以原操作確認結果</button>}<button type="button" onClick={() => void previewAction()} disabled={!canPreview}>{busy ? '處理中…' : '儲存處理'}</button></div>
+    <div>{applyCommand.current && preview && <button type="button" className="finance-btn-secondary" disabled={busy} onClick={() => void applyAction()}>以原操作確認結果</button>}<button type="button" className="finance-btn-secondary" onClick={() => void previewAction()} disabled={!canPreview}>{busy ? '處理中…' : '儲存處理'}</button></div>
     {previewCurrent && <p role="status">本次處理已檢核，系統會重新讀取最新追償資料確認結果。</p>}
     {notice && <p role="status">{notice}</p>}
     {error && <p role="alert">{error}</p>}
