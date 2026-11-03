@@ -20,6 +20,7 @@ import { accountsPayableQueryClient } from '../api/accounts_payable/accounts_pay
 import { financeImportBlockerMessage, financeImportReviewReason, financeImportSkipsUnidentifiedOutgoing } from '../adapters/finance/finance_import_query_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
+import type { FinanceImportBatchSummary } from '../api/finance_import/finance_import_query_schemas';
 import { HistoricalClientPaymentWorkbench } from '../components/HistoricalClientPaymentWorkbench';
 import { HistoricalStaffPayoutWorkbench } from '../components/HistoricalStaffPayoutWorkbench';
 import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPanel';
@@ -124,6 +125,8 @@ export const FinancePage: React.FC = () => {
   const [historicalStaffCase, setHistoricalStaffCase] = useState('');
   const [targetMonth, setTargetMonth] = useState(currentMonth);
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
+  const [batches, setBatches] = useState<FinanceImportBatchSummary[]>([]);
+  const [selectedBatchIdentity, setSelectedBatchIdentity] = useState<string>('');
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
   const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
@@ -300,7 +303,7 @@ export const FinancePage: React.FC = () => {
         items.push(...page.items);
       }
       if (items.length !== manifest.review_count) {
-        setSourceReview({ kind: 'error', message: '未入帳明細與統計不一致，請重新查詢。' });
+        setSourceReview({ kind: 'error', message: '未銷帳明細與統計不一致，請重新查詢。' });
         return;
       }
       setSourceReview({
@@ -310,9 +313,42 @@ export const FinancePage: React.FC = () => {
       setCorrectionRow((currentRow) => currentRow && items.some((row) => row.row_identity === currentRow.row_identity) ? currentRow : null);
     } catch (error) {
       if (current('source-review', request.sequence, request.controller)) {
-        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '未入帳明細載入失敗，請重新查詢。') });
+        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '未銷帳明細載入失敗，請重新查詢。') });
       }
     }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'finance-import') return;
+    let active = true;
+    void (async () => {
+      try {
+        const list = await financeImportQueryClient.listBatches({ limit: 50 });
+        if (!active) return;
+        setBatches(list);
+        const valid = list.filter((b) => b.batch_identity && b.batch_identity.trim() !== '');
+        if (valid.length > 0) {
+          setSelectedBatchIdentity((currentId) => {
+            const chosen = currentId && valid.some((b) => b.batch_identity === currentId) ? currentId : valid[0].batch_identity!;
+            if (sourceReview.kind === 'idle' && batchPreview.kind === 'idle') {
+              void loadSourceReview(chosen);
+            }
+            return chosen;
+          });
+        }
+      } catch {
+        // Fallback for offline / unmocked test contexts
+      }
+    })();
+    return () => { active = false; };
+  }, [activeTab]);
+
+  const handleSelectBatch = (identity: string) => {
+    setSelectedBatchIdentity(identity);
+    setBatchPreview({ kind: 'idle' });
+    setBatchOutcome({ kind: 'idle' });
+    setCorrectionRow(null);
+    void loadSourceReview(identity);
   };
 
   const ingestWorkbook = async () => {
@@ -391,7 +427,7 @@ export const FinancePage: React.FC = () => {
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
       }
       if (current('batch-outcome', request.sequence, request.controller)) {
-        setBatchOutcome({ kind: 'error', message: '正式入帳仍在處理中；可重新查詢結果，不需重複上傳。' });
+        setBatchOutcome({ kind: 'error', message: '正式銷帳仍在處理中；可重新查詢結果，不需重複上傳。' });
       }
     } catch (error) {
       if (current('batch-outcome', request.sequence, request.controller)) setBatchOutcome({ kind: 'error', message: financeErrorMessage(error, '正式匯入結果查詢失敗，請稍後重新查詢。') });
@@ -634,26 +670,56 @@ export const FinancePage: React.FC = () => {
       {activeTab === 'case-accounting' && <><button type="button" className="finance-btn-link" onClick={()=>requestLeave(()=>setActiveTab(detailReturn))}>← 返回收付款</button><FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} onBank={openBank} onSubsidy={setSubsidyCase} onLegacy={caseNo=>requestLeave(()=>{setSelectedCase(caseNo);setCaseQuery(caseNo);setActiveTab('client-receipts');})}/></>}
       {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} onBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} />}
       {activeTab === 'finance-import' && (
-        <section className="finance-workspace">
-          <FinanceStatementArchive />
-          <div className="finance-section-heading">
-            <div>
-              <h2>銀行對帳</h2>{selectedCase && <p>目前核對案件：{selectedCase}</p>}
-              <p>選擇銀行交易明細工作簿後，按「匯入銀行交易明細」；系統自動檢查並提交可入帳款項，完成後顯示結果。</p>
+        <section className="finance-workspace" data-surface-id="finance.finance-import.workflow">
+          {/* 1. 緊湊型頂部工具列 */}
+          <div className="finance-section-heading" style={{ borderBottom: '1px solid #f2e2dc', paddingBottom: '14px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🏦 銀行流水對帳</span>
+              </h2>
+              {batches.filter(b => b.batch_identity).length > 0 && (
+                <label style={{ margin: 0, fontWeight: 600, fontSize: '0.84rem' }}>
+                  <select
+                    className="finance-select"
+                    style={{ minHeight: '36px', padding: '6px 12px' }}
+                    value={selectedBatchIdentity}
+                    onChange={(e) => handleSelectBatch(e.target.value)}
+                    aria-label="選擇匯入批次"
+                  >
+                    {batches.filter(b => b.batch_identity).map((b) => (
+                      <option key={b.batch_identity!} value={b.batch_identity!}>
+                        批次 #{b.batch_id} · {b.format_id === 'taishin' ? '台新銀行' : b.format_id === 'sinopac' ? '永豐銀行' : '歷史格式'} ({b.row_count} 筆)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           </div>
 
-          <section className="finance-detail-block finance-dropzone" data-surface-id="finance.finance-import.workflow">
-            <div style={{ fontSize: '2rem' }}>📥</div>
-            <h3>選擇銀行交易明細工作簿</h3>
-            <p>選擇工作簿後，按一次匯入即可完成上傳、核對與正式入帳。</p>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* 2. 緊湊一列式檔案上傳列 */}
+          <div
+            className="finance-inline-import"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px',
+              padding: '12px 16px',
+              background: '#fffaf7',
+              border: '1px dashed #fed9b8',
+              borderRadius: '10px',
+              marginBottom: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <input
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 aria-label="選擇銀行交易明細工作簿"
                 className="finance-input"
+                style={{ padding: '6px 10px', fontSize: '0.82rem' }}
                 disabled={importBusy || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready')}
                 onChange={(event) => {
                   controllers.current.get('batch-preview')?.abort();
@@ -663,126 +729,185 @@ export const FinancePage: React.FC = () => {
                   setFinanceWorkbook(event.target.files?.[0] ?? null);
                   setIngestion({ kind: 'idle' });
                   setBatchPreview({ kind: 'idle' });
-                  setSourceReview({ kind: 'idle' });
                   setCorrectionRow(null);
                   setManuallyPostedRows(new Set());
                   setApplyJob({ kind: 'idle' });
                   setBatchOutcome({ kind: 'idle' });
                 }}
               />
-              <label>正式入帳原因（選填）<input className="finance-input" value={displayedApplyReason} maxLength={500} disabled={importBusy || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || submittedFinanceCommand !== undefined} onChange={event => setApplyReason(event.target.value)} /></label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', margin: 0 }}>
+                正式銷帳原因（選填）
+                <input
+                  className="finance-input"
+                  placeholder="輸入銷帳說明"
+                  value={displayedApplyReason}
+                  maxLength={500}
+                  disabled={importBusy || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || submittedFinanceCommand !== undefined}
+                  onChange={event => setApplyReason(event.target.value)}
+                  style={{ width: '200px', minHeight: '34px', padding: '6px 10px' }}
+                />
+              </label>
               <button
                 className="finance-btn-primary"
                 data-control-id="finance.finance-import.upload"
                 disabled={importBusy || financeWorkbook === null || ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || submittedFinanceCommand !== undefined}
                 onClick={() => void ingestWorkbook()}
+                style={{ padding: '7px 14px' }}
               >
                 {ingestion.kind === 'loading' || batchPreview.kind === 'loading' || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ? '匯入中…' : '匯入銀行交易明細'}
               </button>
             </div>
+          </div>
 
-            {ingestion.kind === 'error' && <StateMessage state={ingestion} empty="" />}
-            {batchPreview.kind === 'error' && <StateMessage state={batchPreview} empty="" />}
+          {ingestion.kind === 'error' && <StateMessage state={ingestion} empty="" />}
+          {batchPreview.kind === 'error' && <StateMessage state={batchPreview} empty="" />}
 
-            {batchPreview.kind === 'ready' && (
-              <div style={{ marginTop: '14px', padding: '16px', background: '#fffaf7', border: '1px solid #fed9b8', borderRadius: '12px', textAlign: 'left' }}>
-                {(confirmedImportReceipt || (!importBusy && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch === 0))) && (
-                  <div className="finance-meta" aria-label="匯入結果">
-                    <span>本次入帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜已存在略過 {confirmedImportReceipt?.existing_count ?? batchPreview.data.counts.existing} 筆</span>
-                  </div>
-                )}
-                {!batchPreview.data.apply_allowed && <p role="alert">自動入帳未執行：{financeImportBlockerMessage(batchPreview.data.blocking_codes)}。請查看未入帳明細與原因。</p>}
+          {/* 3. 核心未銷帳明細工作台 (常駐呈現) */}
+          <div style={{ marginTop: '10px' }}>
+            {(confirmedImportReceipt || (batchPreview.kind === 'ready' && !importBusy && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch === 0))) && (
+              <div className="finance-meta" aria-label="匯入結果">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span>本次已銷帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜已存在略過 {confirmedImportReceipt?.existing_count ?? (batchPreview.kind === 'ready' ? batchPreview.data.counts.existing : 0)} 筆</span>
+                  {batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed && (
+                    <span style={{ color: '#c5221f', fontWeight: 700 }} role="alert">
+                      （自動銷帳未執行：{financeImportBlockerMessage(batchPreview.data.blocking_codes)}。資料已匯入入帳，請查看未銷帳明細與原因）
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
-                <StateMessage state={sourceReview} empty="目前沒有未入帳資料。" />
-                {sourceReview.kind === 'ready' && (
-                  <div id="finance-import-review" className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
-                    <div className="finance-meta">
-                      <span>未入帳明細 {sourceReview.data.items.length + sourceReview.data.sourceReviews.length} 筆</span>
-                      <button
-                        className="finance-btn-secondary"
-                        data-control-id="finance.finance-import.review-reload"
-                        onClick={() => void loadSourceReview(sourceReview.data.batchIdentity)}
-                      >
-                        重新查詢未入帳明細
-                      </button>
-                    </div>
-                    {sourceReview.data.items.length + sourceReview.data.sourceReviews.length === 0 ? (
-                      <div className="finance-state">目前沒有未入帳資料。</div>
-                    ) : (
-                      <div className="finance-table-container">
-                        <table className="finance-table">
-                          <thead>
-                            <tr>
-                              <th>來源列</th>
-                              <th>交易日期</th>
-                              <th>方向</th>
-                              <th>金額</th>
-                              <th>分類</th>
-                              <th>未入帳原因</th>
-                              <th>處置</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {sourceReview.data.sourceReviews.map((row) => (
-                              <tr key={row.review_identity}>
-                                <td><code>{row.source_sheet}#{row.source_row}</code></td>
-                                <td colSpan={3}>來源資料未形成銀行交易</td>
-                                <td>來源資料待人工確認</td>
-                                <td>{row.issue_codes.join('、')}</td>
-                                <td>請核對來源資料</td>
-                              </tr>
-                            ))}
-                            {sourceReview.data.items.map((row) => (
-                              <tr key={row.row_id}>
-                                <td><code>{row.source_sheet}#{row.source_row}</code></td>
-                                <td>{row.transaction_date ?? '—'}</td>
-                                <td>{{ incoming: '存入', credit: '存入', outgoing: '支出', debit: '支出' }[row.direction] ?? '待確認'}</td>
-                                <td><strong>{row.amount_ntd}</strong></td>
-                                <td>{{ receivable: '應收', payable: '應付', government_subsidy: '政府補助', subsidy_return: '補助退款', review: '待核對', legacy: '歷史格式' }[row.bank_type ?? 'legacy']}</td>
-                                <td className="finance-review-reason">{financeImportReviewReason(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity), postingStopped)}</td>
-                                <td>{row.disposition === 'blocked' || batchPreview.data.rows.find(item => item.row_identity === row.row_identity)?.disposition === 'blocked' ? <span>入帳受阻</span> : canCorrectFinanceImportRow(row, batchPreview.data.rows.find(item => item.row_identity === row.row_identity)) ? <button type="button" className="finance-btn-secondary" onClick={() => requestLeave(()=>setCorrectionRow(row))}>{row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}</button> : '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    {correctionRow && <Drawer isOpen onClose={() => setCorrectionRow(null)} closeDisabled={correctionBusy} closeLabel="關閉" ariaLabel="指定銀行入款的正確訂單" title={correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}>
-                      <div className="finance-scope-note">
-                        <strong>{correctionRow.source_sheet}#{correctionRow.source_row}</strong>
-                        <p>{correctionRow.transaction_date ?? '日期未提供'}｜{['incoming', 'credit'].includes(correctionRow.direction) ? '存入' : '支出'} NT$ {correctionRow.amount_ntd.toLocaleString()}</p>
-                        <p><strong>未入帳原因：</strong>{financeImportReviewReason(correctionRow, batchPreview.data.rows.find(item => item.row_identity === correctionRow.row_identity), postingStopped)}</p>
-                      </div>
-                      <FinanceImportCorrectionForm key={correctionRow.row_identity} rowIdentity={correctionRow.row_identity} sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`} staff={staff} initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'} onBusyChange={setCorrectionBusy} onPosted={() => { setManuallyPostedRows(rows => new Set([...rows, correctionRow.row_identity])); setReload(value => value + 1); void loadSourceReview(sourceReview.data.batchIdentity); }} />
-                    </Drawer>}
-                  </div>
-                )}
+            <StateMessage state={sourceReview} empty="目前沒有未銷帳資料。" />
 
-                {sourceReview.kind === 'error' && (
+            {sourceReview.kind === 'ready' && (
+              <div id="finance-import-review" className="finance-detail-block" data-surface-id="finance.finance-import.manual-review" style={{ marginTop: '12px' }}>
+                <div className="finance-meta" style={{ background: '#ffffff', border: 'none', padding: '0 0 10px 0' }}>
+                  <span style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1e1b19' }}>
+                    未銷帳明細 {sourceReview.data.items.length + sourceReview.data.sourceReviews.length} 筆
+                  </span>
                   <button
                     className="finance-btn-secondary"
-                    style={{ marginTop: '10px' }}
                     data-control-id="finance.finance-import.review-reload"
-                    onClick={() => void loadSourceReview(batchPreview.data.batch_identity)}
+                    onClick={() => void loadSourceReview(sourceReview.data.batchIdentity)}
+                    style={{ padding: '5px 12px', fontSize: '0.8rem' }}
                   >
-                    重新查詢未入帳明細
+                    重新查詢未銷帳明細
                   </button>
+                </div>
+
+                {sourceReview.data.items.length + sourceReview.data.sourceReviews.length === 0 ? (
+                  <div className="finance-state">目前沒有未銷帳資料。</div>
+                ) : (
+                  <div className="finance-table-container">
+                    <table className="finance-table">
+                      <thead>
+                        <tr>
+                          <th>來源列</th>
+                          <th>交易日期</th>
+                          <th>方向</th>
+                          <th>金額</th>
+                          <th>分類</th>
+                          <th>未銷帳原因</th>
+                          <th>處置</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sourceReview.data.sourceReviews.map((row) => (
+                          <tr key={row.review_identity}>
+                            <td><code>{row.source_sheet}#{row.source_row}</code></td>
+                            <td colSpan={3}>來源資料未形成銀行交易</td>
+                            <td>來源資料待人工確認</td>
+                            <td>{row.issue_codes.join('、')}</td>
+                            <td>請核對來源資料</td>
+                          </tr>
+                        ))}
+                        {sourceReview.data.items.map((row) => (
+                          <tr key={row.row_id}>
+                            <td><code>{row.source_sheet}#{row.source_row}</code></td>
+                            <td>{row.transaction_date ?? '—'}</td>
+                            <td>
+                              <span className={['incoming', 'credit'].includes(row.direction) ? 'tag-incoming' : 'tag-outgoing'}>
+                                {{ incoming: '存入', credit: '存入', outgoing: '支出', debit: '支出' }[row.direction] ?? '待確認'}
+                              </span>
+                            </td>
+                            <td><strong>{row.amount_ntd}</strong></td>
+                            <td>{{ receivable: '應收', payable: '應付', government_subsidy: '政府補助', subsidy_return: '補助退款', review: '待核對', legacy: '歷史格式' }[row.bank_type ?? 'legacy']}</td>
+                            <td className="finance-review-reason">{financeImportReviewReason(row, batchPreview.kind === 'ready' ? batchPreview.data.rows.find(item => item.row_identity === row.row_identity) : undefined, postingStopped)}</td>
+                            <td>
+                              {row.disposition === 'blocked' || (batchPreview.kind === 'ready' && batchPreview.data.rows.find(item => item.row_identity === row.row_identity)?.disposition === 'blocked') ? (
+                                <span>銷帳受阻</span>
+                              ) : canCorrectFinanceImportRow(row, batchPreview.kind === 'ready' ? batchPreview.data.rows.find(item => item.row_identity === row.row_identity) : undefined) ? (
+                                <button
+                                  type="button"
+                                  className={row.classification_type === 'client_refund' ? 'finance-btn-primary' : 'finance-btn-secondary'}
+                                  style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                                  onClick={() => requestLeave(() => setCorrectionRow(row))}
+                                >
+                                  {row.classification_type === 'staff_payout' ? '處理月嫂付款' : row.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
 
-                {applyJob.kind === 'error' && submittedFinanceCommand && (
-                  <button type="button" className="finance-btn-primary" disabled={batchOutcome.kind === 'loading'} onClick={() => void applyImportedBatch(batchPreview.data)}>以原操作確認匯入結果</button>
+                {correctionRow && (
+                  <Drawer isOpen onClose={() => setCorrectionRow(null)} closeDisabled={correctionBusy} closeLabel="關閉" ariaLabel="指定銀行入款的正確訂單" title={correctionRow.classification_type === 'staff_payout' ? '處理月嫂付款' : correctionRow.classification_type === 'client_refund' ? '處理客戶退款' : '指定正確訂單'}>
+                    <div className="finance-scope-note">
+                      <strong>{correctionRow.source_sheet}#{correctionRow.source_row}</strong>
+                      <p>{correctionRow.transaction_date ?? '日期未提供'}｜{['incoming', 'credit'].includes(correctionRow.direction) ? '存入' : '支出'} NT$ {correctionRow.amount_ntd.toLocaleString()}</p>
+                      <p><strong>未銷帳原因：</strong>{financeImportReviewReason(correctionRow, batchPreview.kind === 'ready' ? batchPreview.data.rows.find(item => item.row_identity === correctionRow.row_identity) : undefined, postingStopped)}</p>
+                    </div>
+                    <FinanceImportCorrectionForm
+                      key={correctionRow.row_identity}
+                      rowIdentity={correctionRow.row_identity}
+                      sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`}
+                      staff={staff}
+                      initialKind={correctionRow.classification_type === 'client_refund' ? 'client_refund' : correctionRow.classification_type === 'staff_payout' ? 'staff_payout' : 'client_receipt'}
+                      onBusyChange={setCorrectionBusy}
+                      onPosted={() => {
+                        setManuallyPostedRows(rows => new Set([...rows, correctionRow.row_identity]));
+                        setReload(value => value + 1);
+                        void loadSourceReview(sourceReview.data.batchIdentity);
+                      }}
+                    />
+                  </Drawer>
                 )}
               </div>
             )}
 
-            {applyJob.kind === 'error' && <StateMessage state={applyJob} empty="" />}
-            {batchOutcome.kind === 'error' && <StateMessage state={batchOutcome} empty="" />}
-            {applyJob.kind === 'ready' && batchOutcome.kind === 'error' && (
-              <button type="button" className="finance-btn-secondary" data-control-id="finance.finance-import.receipt" onClick={() => void observeApplyOutcome(applyJob.data.job_id, batchPreview.kind === 'ready' ? { batchIdentity: batchPreview.data.batch_identity, previewFingerprint: batchPreview.data.preview_fingerprint } : undefined)}>重新查詢匯入結果</button>
+            {sourceReview.kind === 'error' && (
+              <button
+                className="finance-btn-secondary"
+                style={{ marginTop: '10px' }}
+                data-control-id="finance.finance-import.review-reload"
+                onClick={() => void loadSourceReview(selectedBatchIdentity || (batchPreview.kind === 'ready' ? batchPreview.data.batch_identity : ''))}
+              >
+                重新查詢未銷帳明細
+              </button>
             )}
-            {batchOutcome.kind === 'ready' && batchOutcome.data.status !== 'succeeded' && <p role="alert">未完成入帳，請查看未入帳明細與原因。</p>}
-          </section>
 
+            {applyJob.kind === 'error' && submittedFinanceCommand && batchPreview.kind === 'ready' && (
+              <button type="button" className="finance-btn-primary" disabled={batchOutcome.kind === 'loading'} onClick={() => void applyImportedBatch(batchPreview.data)}>以原操作確認匯入結果</button>
+            )}
+          </div>
+
+          {applyJob.kind === 'error' && <StateMessage state={applyJob} empty="" />}
+          {batchOutcome.kind === 'error' && <StateMessage state={batchOutcome} empty="" />}
+          {applyJob.kind === 'ready' && batchOutcome.kind === 'error' && (
+            <button type="button" className="finance-btn-secondary" data-control-id="finance.finance-import.receipt" onClick={() => void observeApplyOutcome(applyJob.data.job_id, batchPreview.kind === 'ready' ? { batchIdentity: batchPreview.data.batch_identity, previewFingerprint: batchPreview.data.preview_fingerprint } : undefined)}>重新查詢匯入結果</button>
+          )}
+          {batchOutcome.kind === 'ready' && batchOutcome.data.status !== 'succeeded' && <p role="alert">未完成銷帳，請查看未銷帳明細與原因。</p>}
+
+          {/* 成功對帳歷史明細 (置於底部) */}
+          <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #f2e2dc' }}>
+            <FinanceStatementArchive />
+          </div>
         </section>
       )}
     </div>

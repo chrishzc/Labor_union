@@ -89,10 +89,10 @@ async function showPreview() {
   fireEvent.click(screen.getByRole('button', { name: '銀行對帳' }));
   fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['finance-review'], 'finance.xlsx')] } });
   fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-  await screen.findByText(/^未入帳明細 \d+ 筆$/);
+  await screen.findByText(/^未銷帳明細 \d+ 筆$/);
 }
 function reviewCount() {
-  return screen.getByText(/^未入帳明細 \d+ 筆$/).textContent?.match(/未入帳明細 (\d+)/)?.[1];
+  return screen.getByText(/^未銷帳明細 \d+ 筆$/).textContent?.match(/未銷帳明細 (\d+)/)?.[1];
 }
 
 function previewRow(row: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'][number], evidence: string[]): FinanceImportBatchPreview['rows'][number] {
@@ -146,15 +146,15 @@ describe('Finance source-review owner readback', () => {
     fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
 
-    const manualReviewSummary = await screen.findByText('未入帳明細 1 筆');
-    expect(screen.getByLabelText('匯入結果')).toHaveTextContent('本次入帳 0 筆｜已存在略過 0 筆');
+    const manualReviewSummary = await screen.findByText('未銷帳明細 1 筆');
+    expect(screen.getByLabelText('匯入結果')).toHaveTextContent('本次已銷帳 0 筆｜已存在略過 0 筆');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢未入帳明細' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢未銷帳明細' }));
     await waitFor(() => expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(2));
     expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledTimes(2);
-    expect(manualReviewSummary).toHaveTextContent('未入帳明細 1 筆');
+    expect(manualReviewSummary).toHaveTextContent('未銷帳明細 1 筆');
     expect(screen.getByText('Sheet1#3')).toBeInTheDocument();
   });
 
@@ -172,11 +172,11 @@ describe('Finance source-review owner readback', () => {
     await showPreview();
 
     const entry = await screen.findByRole('button', { name: '指定正確訂單' });
-    expect(screen.getByText(/尚未確認可自動核銷的案件及待收款項/)).toBeInTheDocument();
+    expect(screen.getByText(/尚未確認可自動銷帳的案件及待收款項/)).toBeInTheDocument();
     entry.focus();
     fireEvent.click(entry);
     expect(screen.getByRole('dialog', { name: '指定銀行入款的正確訂單' })).toBeInTheDocument();
-    expect(screen.getAllByText(/尚未確認可自動核銷的案件及待收款項/)).toHaveLength(2);
+    expect(screen.getAllByText(/尚未確認可自動銷帳的案件及待收款項/)).toHaveLength(2);
     expect(screen.getByLabelText('案件編號')).toBeInTheDocument();
     expect(screen.getByText('查詢待核銷款項')).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -235,7 +235,7 @@ describe('Finance source-review owner readback', () => {
   it('automatically refreshes owner review after terminal Apply', async () => {
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, counts: { ...PREVIEW.counts, ready_dispatch: 1 } });
     await showPreview();
-    await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆');
+    await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆');
     await waitFor(() => expect(financeImportQueryClient.listReviewRows).toHaveBeenCalledOnce());
     expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
     expect(reviewCount()).toBe('1');
@@ -260,8 +260,8 @@ describe('Finance source-review owner readback', () => {
     expect(financeImportQueryClient.listReviewRows).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('匯入結果')).not.toBeInTheDocument();
     await act(async () => finish({ job_id: 'review-job', status: 'succeeded', attempt_count: 1, max_attempts: 1, result_reference: 'batch', receipt: { batch_identity: BATCH, resulting_batch_version: 8, preview_fingerprint: PREVIEW.preview_fingerprint, reconciled_count: 1, existing_count: 4, pending_count: 2 } }));
-    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 4 筆')).toBeInTheDocument();
-    expect(await screen.findByText('未入帳明細 2 筆')).toBeInTheDocument();
+    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 4 筆')).toBeInTheDocument();
+    expect(await screen.findByText('未銷帳明細 2 筆')).toBeInTheDocument();
     expect(screen.getByText('交易帳號找不到對應的收付款對象。')).toBeInTheDocument();
     expect(screen.getByText(/銷帳編號格式可辨識/)).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '指定正確訂單' })).toHaveLength(2);
@@ -274,8 +274,8 @@ describe('Finance source-review owner readback', () => {
     vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({ ...MANIFEST, review_count: 0 });
     vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [] });
     await showPreview();
-    expect(await screen.findByText('本次入帳 0 筆｜已存在略過 3 筆')).toBeInTheDocument();
-    expect(screen.getByText('目前沒有未入帳資料。')).toBeInTheDocument();
+    expect(await screen.findByText('本次已銷帳 0 筆｜已存在略過 3 筆')).toBeInTheDocument();
+    expect(screen.getByText('目前沒有未銷帳資料。')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 
@@ -286,14 +286,14 @@ describe('Finance source-review owner readback', () => {
     vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({ ...REVIEW_PAGE, items: [blocked, ready] });
     vi.mocked(financeImportMutationClient.preview).mockResolvedValue({ ...PREVIEW, apply_allowed: false, blocking_codes: ['fingerprint_collision'], counts: { ...PREVIEW.counts, ready_dispatch: 1, blocked: 1 }, rows: [{ ...previewRow(blocked, []), disposition: 'blocked', fingerprint_collision: true }, previewRow(ready, [])] });
     await showPreview();
-    expect(await screen.findByText('本次入帳 0 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('自動入帳未執行：存在可能重複的銀行交易');
+    expect(await screen.findByText('本次已銷帳 0 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('自動銷帳未執行：存在可能重複的銀行交易');
     const row = within(screen.getByText('Sheet1#3').closest('tr')!);
     expect(row.getByText('存在可能重複的銀行交易，需先核對原始資料。')).toBeInTheDocument();
     expect(row.getByText('5000')).toBeInTheDocument();
     expect(row.queryByRole('button', { name: '指定正確訂單' })).not.toBeInTheDocument();
-    expect(screen.getByText('未入帳明細 2 筆')).toBeInTheDocument();
-    expect(within(screen.getByText('Sheet1#4').closest('tr')!).getByText('此筆符合自動入帳條件，但本次匯入有錯誤，尚未執行入帳。')).toBeInTheDocument();
+    expect(screen.getByText('未銷帳明細 2 筆')).toBeInTheDocument();
+    expect(within(screen.getByText('Sheet1#4').closest('tr')!).getByText('此筆資料已匯入入帳，符合自動銷帳條件，但因批次預覽有阻擋，尚未執行自動銷帳。')).toBeInTheDocument();
     expect(financeImportMutationClient.apply).not.toHaveBeenCalled();
   });
 
@@ -303,10 +303,10 @@ describe('Finance source-review owner readback', () => {
     render(<FinancePage />);
     fireEvent.change(screen.getByLabelText('選擇銀行交易明細工作簿'), { target: { files: [new File(['mixed'], 'mixed.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '匯入銀行交易明細' }));
-    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('未入帳明細載入失敗');
-    fireEvent.click(screen.getByRole('button', { name: '重新查詢未入帳明細' }));
-    await screen.findByText('未入帳明細 1 筆');
+    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('未銷帳明細載入失敗');
+    fireEvent.click(screen.getByRole('button', { name: '重新查詢未銷帳明細' }));
+    await screen.findByText('未銷帳明細 1 筆');
     expect(financeImportMutationClient.apply).toHaveBeenCalledOnce();
   });
 
@@ -328,8 +328,8 @@ describe('Finance source-review owner readback', () => {
     fireEvent.click(obligation);
     await waitFor(() => expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '儲存更正並核銷' }));
-    expect(await screen.findByText('本次入帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
-    expect(await screen.findByText('未入帳明細 0 筆')).toBeInTheDocument();
+    expect(await screen.findByText('本次已銷帳 1 筆｜已存在略過 0 筆')).toBeInTheDocument();
+    expect(await screen.findByText('未銷帳明細 0 筆')).toBeInTheDocument();
     expect(screen.queryByText('Sheet1#3')).not.toBeInTheDocument();
     expect(financeImportCorrectionClient.apply).toHaveBeenCalledOnce();
   });

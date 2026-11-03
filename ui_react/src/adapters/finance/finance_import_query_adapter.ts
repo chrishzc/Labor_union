@@ -41,21 +41,21 @@ export function financeImportReviewReason(
   if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
   if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
   if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
-  if (financeImportSkipsUnidentifiedOutgoing(row, preview)) return '無法辨識收款對象，已略過核銷；只保留原始銀行紀錄，不指定案件或月嫂。';
-  if (postingStopped && preview?.disposition === 'create') return '此筆符合自動入帳條件，但本次匯入有錯誤，尚未執行入帳。';
+  if (financeImportSkipsUnidentifiedOutgoing(row, preview)) return '無法辨識收款對象，已略過銷帳；只保留原始銀行紀錄，不指定案件或月嫂。';
+  if (postingStopped && preview?.disposition === 'create') return '此筆資料已匯入入帳，符合自動銷帳條件，但因批次預覽有阻擋，尚未執行自動銷帳。';
   if (row.available_actions.includes('review_suspected_duplicate_business_match')) return REVIEW_REASON_LABELS.suspected_duplicate_business_match;
   const reasons = (preview?.evidence ?? []).flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);
   if (reasons.length) return [...new Set(reasons)].join(' ');
   if (row.disposition === 'business_pending') {
-    const target = ({ staff_payout: '月嫂及待付款項', client_refund: '案件及待退款項', government_subsidy: '政府補助待核銷款項', client_subsidy_return: '補助退款項', client_refund_return: '客戶退款退回款項' } as Record<string, string>)[row.classification_type] ?? '案件及待收款項';
-    return `尚未確認可自動核銷的${target}，請人工選擇正確對象與款項後核對金額。`;
+    const target = ({ staff_payout: '月嫂及待付款項', client_refund: '案件及待退款項', government_subsidy: '政府補助待銷帳款項', client_subsidy_return: '補助退款項', client_refund_return: '客戶退款退回款項' } as Record<string, string>)[row.classification_type] ?? '案件及待收款項';
+    return `尚未確認可自動銷帳的${target}，請人工選擇正確對象與款項後核對金額。`;
   }
-  if (row.disposition === 'blocked') return '這筆交易未通過入帳檢查，請核對來源資料後重新查詢。';
+  if (row.disposition === 'blocked') return '這筆交易未通過銷帳檢查，請核對來源資料後重新查詢。';
   return '現有銀行資料不足以自動確認收付款用途或對象，需人工核對。';
 }
 
 export function financeImportDispositionLabel(disposition: string): string {
-  return ({ manual_review: '待人工核對', business_pending: '待指定款項', blocked: '入帳受阻' } as Record<string, string>)[disposition] ?? '待確認';
+  return ({ manual_review: '待人工核對', business_pending: '待指定款項', blocked: '銷帳受阻' } as Record<string, string>)[disposition] ?? '待確認';
 }
 const FINANCE_IMPORT_BLOCKER_LABELS: Readonly<Record<string, string>> = {
   batch_not_completed: '檔案尚未完成解析',

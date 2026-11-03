@@ -69,7 +69,7 @@ export function FinanceStatementArchive() {
   }
   return <section className="case-accounting-card statement-archive" aria-label="成功對帳明細">
     <div className="finance-section-heading statement-archive-heading">
-      <div><h3>成功對帳明細</h3><p>包含正式入帳與人工新增的銀行明細。</p></div>
+      <div><h3>成功對帳明細</h3><p>包含已銷帳與人工新增的銀行明細。</p></div>
       <div className="statement-archive-actions">
         <button type="button" className="finance-btn-primary" disabled={busy || unknown || manualOpen} onClick={() => void download()}>{busy && !manualOpen ? '匯出中…' : '匯出 Excel'}</button>
         <button ref={manualTrigger} type="button" className="finance-btn-secondary" disabled={busy || unknown || manualOpen} onClick={() => { setMessage(''); setError(''); setManualOpen(true); }}>新增人工明細</button>
@@ -82,7 +82,7 @@ export function FinanceStatementArchive() {
       <button type="submit" form={formId} className="finance-btn-primary" disabled={busy}>{busy ? '儲存中…' : unknown ? '重新確認儲存結果' : '儲存明細'}</button>
     </>}>
       <form id={formId} ref={draft} className="statement-manual-form" noValidate onSubmit={event => { event.preventDefault(); void saveManual(); }}>
-        <p className="statement-manual-note">只保存銀行明細，不會完成案件核銷。</p>
+        <p className="statement-manual-note">只保存銀行明細，不會完成案件銷帳。</p>
         {error && <p role="alert" className="statement-field-error">{error}</p>}
         <fieldset className="statement-manual-fields" disabled={busy || unknown} aria-label="人工明細資料">
           <div className="statement-field"><label htmlFor={`${formId}-date`}>交易日（必填）</label><input id={`${formId}-date`} type="date" required value={fields['交易日'] ?? ''} aria-invalid={!!fieldErrors.date} aria-describedby={fieldErrors.date ? `${formId}-date-error` : undefined} onChange={event => editField('交易日', event.target.value)} />{errorText('date')}</div>
