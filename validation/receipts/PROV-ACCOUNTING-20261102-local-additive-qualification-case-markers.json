@@ -2,7 +2,7 @@
   "artifact": {
     "data_effect": "schema_only",
     "dependencies": [],
-    "descriptor_sha256": "7bd95e131dc466b657cc10f1c099e52fa1c1f039320383f46d080e150def6c4f",
+    "descriptor_sha256": "1c0985e14a2d4b6d7376aec31533cae69c1b48742c6ca29f5992668d4b1421ee",
     "name": "1063_finance_case_accounting_markers.sql",
     "sql_sha256": "467a30d2aaa7c91ff59b654f8f1775a3484ba8129a113b035ed929bd218b0bf8"
   },
@@ -2639,7 +2639,7 @@
   "target_projection": {
     "artifact_name": "1063_finance_case_accounting_markers.sql",
     "contract": "local-additive-target-projection/v1",
-    "descriptor_sha256": "7bd95e131dc466b657cc10f1c099e52fa1c1f039320383f46d080e150def6c4f",
+    "descriptor_sha256": "1c0985e14a2d4b6d7376aec31533cae69c1b48742c6ca29f5992668d4b1421ee",
     "fresh_fingerprint": "2aa5063a9be417376aa72f5277016014feb8520eb6fa7e1e6d6f2221503773cf",
     "fresh_state": "exact",
     "preserve_candidate_fingerprint": "2aa5063a9be417376aa72f5277016014feb8520eb6fa7e1e6d6f2221503773cf",

@@ -59,7 +59,7 @@
   "descriptor_artifact": {
     "name": "labor_union_2026_11_02_finance_case_accounting_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_11_02_finance_case_accounting_v1.descriptors.json",
-    "sha256": "7bd95e131dc466b657cc10f1c099e52fa1c1f039320383f46d080e150def6c4f",
+    "sha256": "1c0985e14a2d4b6d7376aec31533cae69c1b48742c6ca29f5992668d4b1421ee",
     "dependencies": []
   },
   "tool_archive_policy": {
