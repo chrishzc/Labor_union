@@ -49,7 +49,7 @@ describe('Four mutually exclusive import result counters', () => {
   it('preserves a non-imported HCM row without a case number and rejects incomplete claimed detail', () => {
     const receipt = { source_content_digest: digest, source_row_count: 1, inserted_count: 0, inserted_with_warning_count: 0, exact_replay_count: 0, skipped_existing_count: 0, review_required_count: 1, failed_count: 0, replayed_workbook: false, row_outcomes_available: true, legacy_summary_only: false,
       row_outcomes: [{ source_row: 3, case_no: null, outcome: 'review_required' as const, problem_identity: null, problem_fields: ['案件編號'], issue_codes: ['hcm_case_import:case_import_case_no_required'], referral_occurrence_identities: [] }] };
-    expect(adaptHcmImportResult(receipt).notImportedRows).toEqual([{ sourceRow: 3, identifier: null, fields: ['案件編號'], reasons: ['缺少可用的案件編號'] }]);
+    expect(adaptHcmImportResult(receipt).notImportedRows).toEqual([{ sourceRow: 3, identifier: null, fields: ['案件編號', '查詢序號(案件編號)'], reasons: ['【修正匯入資料】缺少可用的案件編號；請補齊「查詢序號(案件編號)」。'] }]);
     expect(() => adaptHcmImportResult({ ...receipt, row_outcomes: [] })).toThrow('筆數不一致');
   });
   it('HCM counts imported warnings and email fills once, and includes both duplicate outcomes', () => {
