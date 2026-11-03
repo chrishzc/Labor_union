@@ -6,7 +6,7 @@ import { AdminPasswordChallengeResponseSchema } from './two_step_auth_schemas';
 
 export const setupClient = {
   async status() {
-    return decodePayload(z.object({ required: z.boolean(), enrollment_required: z.boolean() }),
+    return decodePayload(z.object({ required: z.boolean() }),
       await transport.get('/api/v1/admin/setup', { cache: 'no-store' }));
   },
   async create(values: { username: string; display_name: string; password: string }) {

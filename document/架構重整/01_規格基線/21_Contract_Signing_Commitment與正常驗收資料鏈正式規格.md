@@ -306,7 +306,7 @@ archive 與 LINE 是 port adapter，不重新判斷狀態機或 commit。
 ## 10. Preservation migration 與 validation dataset
 
 - 唯一 legacy source 固定為核准的 preserved source；source 永遠唯讀。
-- 目標只允許明確確認的 `lu_test_dataset_*`，每次重建使用 current schema，不寫 candidate／正式庫。
+- 驗收目標不再強制 disposable DB 或 `lu_test_dataset_*`／`lu_test_*` 前綴，可使用明確確認的 localhost development `union_db`；每次重建使用 current schema，但重建仍須另有明確授權，不寫 production DB 或 scope 外的 candidate／既有資料。
 - additive schema → preflight/digest → root adapter migration → projector rebuild → replay versioned
   scenario manifests → DB/API/UI verifier。
 - 不直接搬運 view、cache、summary、current alert、derived occupancy、mutable status projection、
@@ -314,10 +314,10 @@ archive 與 LINE 是 port adapter，不重新判斷狀態機或 commit。
 - legacy 與 validation case number、external event identity、document digest、idempotency key 不得碰撞。
 - migration runner 必須使用 table classification allowlist；禁止對所有 base tables做通用
   `INSERT ... SELECT`，也禁止以關閉 FK 作為正常搬移策略。
-- 依 2026-08-26 最新人工裁決，本機 DB 驗收皆屬測試版本；名稱通過 `lu_test_*` allowlist 且
-  environment／host／database／credential class 已精確回讀後，可直接建立或重建 disposable DB、寫入
+- 依 2026-11-03 最新人工裁決，本機 DB 驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`；
+  environment／host／database／credential class 已精確回讀後，可在 current task 明確範圍內使用既有 DB，或依明確建立／重建授權準備目標，寫入
   去識別代表性測試資料、執行 Query／Preview／Apply、receipt readback 與只清理本次 scenario owned rows，
-  不需逐次請示。這項授權不涵蓋 `union_db`、production、全庫 cleanup、source replacement、`--switch`、
+  不需逐次請示；建立／重建仍須在 current task 明確授權範圍內。這項授權不涵蓋 production、全庫 cleanup、source replacement、`--switch`、
   未核准 schema／migration 或其他不可逆外部效果。
 
 ## 11. Legacy exit
@@ -349,7 +349,7 @@ Domain：
    仍可完成 Scheduling substitution、排班 lineage 與 Payroll，補充文件若存在則只作 evidence。
 
 Global：每個 UI scenario 具 versioned fixture/expected、command lineage、DB verifier JSON、
-disposable-MySQL pytest、typed API contract、UI 截圖或人工驗收、Repair/Re-observe/Replay receipt；
+真實 MySQL pytest、typed API contract、UI 截圖或人工驗收、Repair/Re-observe/Replay receipt；DB 不強制 disposable 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9.1 保存 before／after 與限定 scenario-owned 資料；
 preserved migration 另具 source/target digest、projection rebuild 與 legacy immutability 證據。
 
 完成不得只以 schema、route、測試檔或最終資料存在判定。production DB、外部 LINE、部署與
@@ -438,14 +438,14 @@ Preview／確認／Apply／receipt/readback，列為 `completed`；外部 LINE �
 
 客戶與所有服務區段的 current 未簽 PDF 仍須完整；版本衝突、身分錯配或儲存失敗維持 typed conflict／零 partial write。無完整歷史簽回證據的新案件不顯示歷史人工修復區；最終 PDF 完成主流程沿用既有條件。本次授權本機程式及合成資料驗證，不操作外部簽署平台、LINE provider 或另一主機。
 
-Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 `lu_test_*` schema gate、
+Runtime gap 狀態（2026-08-26）：`approved`。人工已授權本機實作、必要的 schema gate、
 controlled-file adapter 與 LINE sandbox 驗收；current renderer 仍僅產生 XLSX，現有 `media_assets` 與
 `contract_document_versions.storage_key` 尚未驗證為 `00` §2.2 的受控 NAS logical object reference／digest／
 version adapter，事件模型也只有 legacy `sent`／`signed_received`，尚無外部平台雙方 completion report。
 必須先完成 PDF renderer、NAS discovery／read adapter、metadata 對帳與 completion-report contract；若盤點確認
 現有 schema 足夠，可不新增 binary 欄位，若不足仍須另立 DB Work Package。不得以 raw NAS path、受控 HTTPS URL
-或直接 signed-return 假裝完成。DDL／migration 只限正式 release chain 與 allowlisted `lu_test_*` 驗證；
-production／`union_db`、external deployment 與 entry switch 仍需精確 target gate。既有人工補登完成狀態不受影響。
+或直接 signed-return 假裝完成。DDL／migration 仍須走正式 release chain；驗證不強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9 通過必要 gates；
+production、external deployment 與 entry switch 仍需精確 target gate。既有人工補登完成狀態不受影響。
 
 ## 2026-08-21 M3 acceptance-effect amendment
 

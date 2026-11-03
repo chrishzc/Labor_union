@@ -197,12 +197,6 @@ class RootBootstrapResult:
     enrollment: MfaEnrollmentChallenge
 
 
-@dataclass(frozen=True, slots=True)
-class RootSetupStatus:
-    required: bool
-    enrollment_required: bool
-
-
 @dataclass(frozen=True)
 class PasswordLoginChallenge:
     """Password proof that cannot itself authorize a business Session."""
@@ -376,24 +370,6 @@ def has_root_admin(*, connection_factory: ConnectionFactory) -> bool:
         with conn.cursor() as cursor:
             cursor.execute("SELECT EXISTS(SELECT 1 FROM admin_root_account WHERE singleton_key=1) AS present")
             return bool(cursor.fetchone()["present"])
-    finally:
-        conn.close()
-
-
-def get_root_setup_status(*, connection_factory: ConnectionFactory) -> RootSetupStatus:
-    """Read anonymous setup progress without exposing identity or enrollment proof."""
-    conn = connection_factory()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """SELECT r.admin_user_id,
-                          EXISTS(SELECT 1 FROM admin_totp_factors f
-                                 WHERE f.admin_user_id=r.admin_user_id AND f.factor_state='active') AS enrolled
-                   FROM admin_root_account r WHERE r.singleton_key=1"""
-            )
-            row = cursor.fetchone()
-            return RootSetupStatus(required=row is None,
-                                   enrollment_required=row is not None and not bool(row["enrolled"]))
     finally:
         conn.close()
 

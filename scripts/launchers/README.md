@@ -71,6 +71,16 @@ Windows 免登入入口不要求主機安裝 Node.js：有 `npm.cmd` 時直接�
 
 Smoke test 只建立本次 owned 的 FastAPI＋React process，執行 GET-only readiness 後清理。一般入口才會啟動 monitor 與 workers。
 
+## 重置錯誤建立、尚未完成 TOTP 的初始 root
+
+先停止網站服務，再雙擊 `scripts\launchers\reset_incomplete_root.bat`。
+工具會顯示本機資料庫、root id 與版本；只有輸入畫面指定的完整確認文字才會清除該初始帳號。
+完成後重新啟動網站，即可重新設定帳號密碼，並依「建立 root → QR Code → TOTP 驗證 → 保存復原碼 → 返回登入」完成設定。
+
+僅允許本機 development／local／test 的 `union_db` 或 `lu_test_*`，且帳號安全版本必須仍為初始值 `1`。曾更換帳密／安全設定、已綁定／使用過 TOTP、登入過、已有其他管理員或業務資料引用時拒絕重置。
+業務資料、稽核紀錄及加密金鑰保留；不需提供舊帳密。取消不會異動資料。
+只想先檢查時，執行 `python -m scripts.reset_incomplete_root_setup`；加上 `--apply` 才會進入確認操作。
+
 ## Database operations
 
 ### NAS 正式資料庫：備份、升級、復原

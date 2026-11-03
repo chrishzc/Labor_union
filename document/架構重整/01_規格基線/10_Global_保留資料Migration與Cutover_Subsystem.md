@@ -337,9 +337,9 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - Source schema／rows／fingerprints 全程不變。
 - source read-only principal 與 zero-write audit 必須有機械證據。
 - Candidate exact 且完整通過後才可 switch。
-- 測試只能使用明確 disposable source/candidate database；不得使用正式 `union_db`。
+- 測試不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`；source 仍全程唯讀，candidate 必須與 source 分離，寫入限 current task 的明確 scope，不得使用 production DB。
 - Mock PASS 不能取代真實 mysqldump、restore、DDL、metadata 與 switch 驗收。
-- 每個 schema release 必須同時通過：(a) 空白 disposable DB 的 fresh bootstrap；(b) 含上一支援版
+- 每個 schema release 必須同時通過：(a) 空白 DB 的 fresh bootstrap；(b) 含上一支援版
   schema 與代表性舊資料的 source → dump → candidate → latest release → verify。`update_local_database`
   的唯讀 migration plan 必須列出最新 release id、待套 artifact 與任何 blocked partial／drift；
   launcher `--dry-run` 只驗證入口 wiring 與依賴，不構成 DB plan，啟動腳本成功也不構成 schema
@@ -386,7 +386,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
    含資料轉換時明確導向 preserve-data 路徑，不因較早的 schema qualification 缺件隱藏真正需求。
    預設 preserve 選取必須包含 current 補助身分／退款 backfill；預覽與 plan fingerprint 均列入
    實際選取的 backfill id、artifact 及 hash，不能只建表卻漏執行資料轉換。
-6. **Engine verification**：先跑 metadata／manifest／plan focused tests，再以 disposable DB 驗 fresh
+6. **Engine verification**：先跑 metadata／manifest／plan focused tests，再以符合各情境前置條件的本機 DB 驗 fresh
    bootstrap，最後以含上一支援版 schema 與代表性舊資料的 source 驗 dump → candidate → apply → verify。
    schema／migration 沒有真 MySQL evidence 時為 `BLOCKED_ENGINE_EVIDENCE`，mock／compile 不能取代。
 7. **Developer acceptance**：前六項 PASS 後才驗本機 launcher；保存 source backup、candidate／replacement
@@ -397,7 +397,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 
 ### 9.1 既有開發 DB 的受控驗收
 
-依 2026-08-21 人工裁決，一般 API／UI／Domain 驗收不再強制 disposable DB 或 non-root：
+依 2026-11-03 最新人工裁決，本機 DB 驗收一律不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost 的 `union_db`；本條取代各 owner 規格、驗收基線及草案中的相反目標限制。沿用既有不強制 non-root 的裁決：
 
 - 只允許 `APP_ENV=development` 或等價 validation profile；database 可為 `lu_test_*`，或 localhost 上的
   `union_db`。每次先回讀 environment、host、database 與 credential class，target 不符即 fail closed。
@@ -408,11 +408,11 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   已有 owner Query／Preview／Apply 時須使用正式 writer 並保存 before／after、idempotency 與 receipt。
 - 仍禁止 production DB／provider、未核准 DDL／migration／seed／backfill、reset、source replacement、
   `--switch`、全庫清理與其他超出 current scope 的破壞性操作。
-- schema／migration 仍須完整通過 disposable fresh-bootstrap 與 preserve-data candidate gates；既有 DB
-  runtime 不能取代。
+- schema／migration 仍須完整通過 fresh-bootstrap 與 preserve-data candidate gates；不強制 disposable DB 或名稱前綴，
+  但 fresh 必須空庫、candidate 必須與 source 分離，既有 DB runtime 不能取代各階段必要證據。
 - 2026-10-29 案件刪除保護規則修正：1060 以 hash-bound predecessor／successor 定義精確辨識條件式 trigger；歷史 release 僅相容完全匹配的 successor，未知修改仍阻擋。共用 SQL loader 支援 quote／comment-aware `DELIMITER`，compact 產生器須保留完整 trigger body；新生成檔使用 manifest 指定的 `db/releases/labor_union_validation_schema_registry_guards_v1.sql`，原受鎖定生成檔保留。此項 schema-only 更新須驗 fresh 與 preserve candidate 全表資料不變，再以 release-scoped 備份與 qualified Apply 更新既有本機資料庫。
-- 本裁決不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；更嚴格的
-  scenario data policy 繼續適用。
+- 本裁決只放寬驗收 DB 的 disposable／名稱限制，不擴張 package 的業務 scope、owner、public contract、external effect 或 write set；
+  scenario-owned 資料範圍、既有資料保護及正式 writer 要求繼續適用。reset／重建仍須另有明確授權與目標確認，不因驗收自動清空 `union_db`。
 
 ### 9.2 NAS 已存在空庫的首次初始化
 
@@ -448,8 +448,8 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
   預檢無法保證後續不會遇到斷線／資源變動，因此 SQL 完成後仍保留 object/current 兩層驗證，失敗直接輸出安全原因。
   目標非空時預設維持拒絕初始化；同一入口以既有 readonly current gate 解釋現有結構是否完整／查核失敗原因，
   不要求額外檢查腳本，不自動清空或續跑；已完整提示可直接啟動服務。人工明確清空路徑依下段。
-  測試使用 local disposable `lu_test_*` 呼叫同一 executor，驗完整 fresh、system seed、current gate、
-  非空資料與 view 拒絕、重跑拒絕及失敗紀錄；不碰本機既有 union_db 或 NAS。此入口不支援 preserve-data，
+  測試不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db` 呼叫同一 executor，驗完整 fresh、system seed、current gate、
+  非空資料與 view 拒絕、重跑拒絕及失敗紀錄；fresh 仍須空庫，非空庫不因驗收而清空，不直接操作 NAS。此入口不支援 preserve-data，
   因此驗收不執行無關的 dump／candidate／switch。真正 NAS Apply 留給 operator 明確執行。
 
 本次 write set 限新 initializer／launchers、對應 Module tests、launcher README、本節及 migration 地圖；
@@ -472,7 +472,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - Data effect 為 destructive schema/data replacement + canonical schema-only/system-seed；沒有業務 backfill、
   provider 或部署。既有 NAS 資料明確放棄，不自動備份／rollback；失敗不 retry 或繼續，顯示 reset_database
   或既有失敗 phase 及 journal。已刪庫但建庫失敗時也保留錯誤，不宣稱回復成功。
-- 驗收限本機自行新建 lu_test_*：取消保留舊 rows、缺權限／跨庫 FK 在寫入前停止、確認後 partial 庫清空且
+- 驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`；reset 仍須另有明確授權與目標確認：取消保留舊 rows、缺權限／跨庫 FK 在寫入前停止、確認後 partial 庫清空且
   compact 結構與 system seed 通過 final gate、neighbor schema/rows 保留、失敗 journal、安全錯誤及實際 Windows
   `.bat` 互動。NAS 真正清空由 operator 在視窗確認執行；Agent 不以本次開發要求直接清空 NAS。
 
@@ -503,7 +503,7 @@ DROP／CREATE／USE 執行前後立即 flush operation／等待上限／耗時�
   建庫後重驗空庫與 canonical metadata，再共用 compact schema/system-seed executor 及 object/current gate。
 - Data effect 是新的測試庫、canonical schema/system seed；不轉換業務資料、不改既有 DB 或 provider。
   write set 沿用 initializer、三份 Module tests、README、本節與 Module map；沒有新 SQL/release。
-  本機 lu_test_* 驗收缺庫不自動建庫、取消保留 absent、競爭建立保留 sentinel、完整 CREATE/current/seed、
+  本機驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用符合各情境缺庫／空庫條件的 localhost development `union_db`；驗缺庫不自動建庫、取消保留 absent、競爭建立保留 sentinel、完整 CREATE/current/seed、
   neighbor rows 保留及真正 Windows 雙擊確認；NAS 真正建庫仍由 operator 在同一視窗明確確認。
 
 ### 9.3 NAS 新庫結構精簡與退役清單（2026-10-15）
@@ -527,14 +527,14 @@ DROP／CREATE／USE 執行前後立即 flush operation／等待上限／耗時�
 |---|---|---|
 | FRESH-01 | NAS 使用 final DDL＋canonical system seed，不重播 ALTER／DROP／PREPARE 升級片段 | compact SQL static shape；真 MySQL 初始化 |
 | FRESH-02 | register omit 表與其 triggers 缺席，所有 retain 表／欄位／index／FK／check／trigger／view 不變 | synthetic source → compact target metadata equality；無 retained→omitted FK／trigger／view |
-| FRESH-03 | system seed 的有效值／identity／relationships 等價，不帶業務 fixture／PII／credential | 來源必須由 builder 新建 local lu_test_*、執行 canonical bootstrap；seed rows 比較 |
+| FRESH-03 | system seed 的有效值／identity／relationships 等價，不帶業務 fixture／PII／credential | builder 在本機空庫執行 canonical bootstrap；不強制 disposable DB 或 `lu_test_*` 前綴，可使用符合空庫條件的 localhost development `union_db`；seed rows 比較 |
 | FRESH-04 | 舊庫 metadata／rows 不改，current gate 接受 omit 表 absent 或 historical present；現行物件 drift 仍失敗 | legacy sentinel before/after；retained column/index tamper negative |
 | FRESH-05 | 空庫／非空／重跑／partial／雙擊 Y/N 契約維持 | 重用 initializer 與 Windows focused regressions |
 
 方案（NO_RESEARCH，依已驗證的 source/model）：
 
 - 唯一生成來源仍為既有 hash-locked assembly／validation manifest；其 SQL／preserve-release bytes 不改。
-  `scripts/compact_fresh_schema.py` builder 自行建立獨立 local `lu_test_compact_source_*`，不接受既有 source DB。
+  `scripts/compact_fresh_schema.py` builder 的生成來源須為本機空庫，不強制 disposable DB 或 `lu_test_*` 前綴，可使用符合空庫條件的 localhost development `union_db`；不得以含業務資料的現用庫產生 fresh asset。
   完整 canonical bootstrap 通過後，以 SHOW CREATE 匯出 retained final DDL、必要系統資料與 retained triggers/views。
   generation 不啟動 runtime／worker／provider；最後只清理 builder 自己新建的 disposable DB。
 - 生成 asset 為 `db/fresh_schema/labor_union_fresh_current.sql` 與 hash-bound manifest；NAS 直接載入此一 current

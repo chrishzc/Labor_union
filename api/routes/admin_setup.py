@@ -18,8 +18,8 @@ from api.dependencies.admin_auth import get_access_control_connection_factory
 from api.schemas.errors import GlobalErrorCategory, GlobalTypedErrorView
 from api.schemas.admin_auth import AdminPasswordChallengeResponse
 from subsystems.access.authentication_session import (
-    AdminMfaConfigurationError, AdminSessionSchemaError, RootSetupStatus,
-    bootstrap_root_admin, get_root_setup_status,
+    AdminMfaConfigurationError, AdminSessionSchemaError,
+    bootstrap_root_admin, has_root_admin,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -57,9 +57,9 @@ def _require_secure_transport(request: Request) -> None:
         raise _error(426, "https_required", "請使用 HTTPS 網址開啟管理介面後設定帳號。")
 
 
-def _status() -> RootSetupStatus:
+def _required() -> bool:
     try:
-        return get_root_setup_status(connection_factory=get_access_control_connection_factory())
+        return not has_root_admin(connection_factory=get_access_control_connection_factory())
     except pymysql.MySQLError:
         raise _error(503, "setup_unavailable", "設定服務暫時無法使用，請稍後再試。") from None
 
@@ -71,8 +71,7 @@ async def setup_page(request: Request):
 
 @router.get("/api/v1/admin/setup")
 async def setup_status(request: Request):
-    state = await asyncio.to_thread(_status)
-    return JSONResponse({"required": state.required, "enrollment_required": state.enrollment_required}, headers=HEADERS)
+    return JSONResponse({"required": await asyncio.to_thread(_required)}, headers=HEADERS)
 
 
 @router.post("/api/v1/admin/setup")
@@ -84,7 +83,7 @@ async def create_first_root(request: Request):
     expected_origin = f"{request.url.scheme}://{request.url.netloc}".lower().removesuffix(default_port)
     if origin != expected_origin:
         raise _error(403, "setup_origin_rejected", "請從設定的管理介面網址重新開啟。")
-    if not (await asyncio.to_thread(_status)).required:
+    if not await asyncio.to_thread(_required):
         raise _error(410, "setup_closed", "最高管理員已建立，請直接登入。")
     if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
         raise _error(415, "json_required", "請使用設定頁面提交資料。")

@@ -236,7 +236,7 @@ flowchart TD
 
 ##### 本次 DB 變更執行範圍
 
-SSTART 實作使用 Scheduling-owned 服務開始回覆／代班處理紀錄及代班人選詢問紀錄，保存本人決策、日期、來源方案／區段、選定人選、意願與 command replay，不能借用 LINE 日期確認事件冒充。新增 schema-only additive tables，不作 system seed、business-row backfill 或 destructive change；舊 snapshot、客服日期申請、assignment 及 ledger 不改寫。新庫 assembly 與 preserve-data release 同步登錄，驗 absent／exact／partial／drift；重播 exact no-op，未知 partial／drift 關閉。切換前可丟棄候選庫，套用後保留 additive objects 並以前向相容修正，不自行 drop。DB 驗證限 localhost development 的新 lu_test_*，保存 fresh／舊資料 preserve evidence；本輪不做 production、source replacement、provider send 或選單 publication。
+SSTART 實作使用 Scheduling-owned 服務開始回覆／代班處理紀錄及代班人選詢問紀錄，保存本人決策、日期、來源方案／區段、選定人選、意願與 command replay，不能借用 LINE 日期確認事件冒充。新增 schema-only additive tables，不作 system seed、business-row backfill 或 destructive change；舊 snapshot、客服日期申請、assignment 及 ledger 不改寫。新庫 assembly 與 preserve-data release 同步登錄，驗 absent／exact／partial／drift；重播 exact no-op，未知 partial／drift 關閉。切換前可丟棄候選庫，套用後保留 additive objects 並以前向相容修正，不自行 drop。DB 驗證不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，保存 scenario-owned before／after 與 fresh／舊資料 preserve evidence；本輪不做 production、source replacement、provider send 或選單 publication。
 
 ##### 驗收與後續實作順序
 

@@ -10,7 +10,6 @@ import './FirstRootSetup.css';
 
 export function FirstRootSetupGate({ children }: { children: ReactNode }) {
   const [required, setRequired] = useState<boolean | null>(null);
-  const [enrollmentRequired, setEnrollmentRequired] = useState(false);
   const [checking, setChecking] = useState(true);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
@@ -26,8 +25,6 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
     setupClient.status().then(status => {
       if (active) {
         setRequired(status.required);
-        setEnrollmentRequired(status.enrollment_required);
-        if (status.enrollment_required) sessionClient.clearSession();
       }
     }).catch(() => {
       if (active) setError('無法讀取帳號設定狀態，請確認資料庫連線與初始化已完成後重試。');
@@ -62,7 +59,6 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
           if (!status.required) {
             sessionClient.clearSession();
             setRequired(false);
-            setEnrollmentRequired(status.enrollment_required);
             return;
           }
         } catch { /* Keep setup closed to the application until status is known. */ }
@@ -76,10 +72,9 @@ export function FirstRootSetupGate({ children }: { children: ReactNode }) {
     }
   }
 
-  if (enrollment || enrollmentRequired) return <LoginPage enrollmentOnly
-    initialEnrollment={enrollment ? { username: username.trim(), challenge: enrollment } : undefined}
+  if (enrollment) return <LoginPage initialEnrollment={{ username: username.trim(), challenge: enrollment }}
     onEnrollmentFinished={() => {
-      sessionClient.clearSession(); setEnrollment(null); setEnrollmentRequired(false); setRequired(false);
+      sessionClient.clearSession(); setEnrollment(null); setRequired(false);
     }} />;
   if (required === false) return children;
 

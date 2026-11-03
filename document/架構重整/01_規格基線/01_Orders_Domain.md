@@ -727,7 +727,7 @@ Client Finance 付款政策與 Payroll 費率分類建立缺少的本案初始�
 不得保留已完成補件卻未初始化的部分結果。初始化僅建立付款條款、薪資政策與空 aggregate，
 完整計價資料由 Client Finance 在同一交易自動同步客戶應付，不新增人工建帳關卡；不建立實際收付款 ledger、正式 assignment 或外部通知。same-key 重播回讀原 receipt，
 不重複初始化；既有完整初始資料維持原值，partial roots typed 拒絕，不補零、不覆寫。
-既有案件資料回填不在本次施工範圍，驗證使用 localhost 全新隔離 lu_test_* 合成資料。
+既有案件資料回填不在本次施工範圍；驗證不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，以 scenario-owned 合成資料經正式 writer 驗證並保存 before／after。
 
 此 preassignment Terms Query／Preview／Apply 只讀 Orders、Scheduling 與判斷下游完整性所需的最小
 存在／義務 facts；Client Finance／Payroll root 可合法不存在，回應與 receipt 的對應 version／impact

@@ -526,7 +526,7 @@ Authority：使用者核准本次最終權限清單並授權實作、設定與�
 - NAS-LINE-04 的資料庫邊界：公開 LINE profile 對 controlled-file staging／objects／receipts／finalize／lease／reference／cleanup／reconciliation 及日誌主檔／附件／完成事件僅 SELECT，不可直接 INSERT／UPDATE；私人管理後端保留原受限 management profile 的合法 writer。原 LINE 通知 outbox／checkpoint、LINE 專用媒體及其他既有功能權限不變；不加寬任何 DB 權限，不新增表。
 - 本人附件下載：`POST /api/v1/line/staff-self-service/service-day-logs/{log_id}/photos/{file_id}/download` 保留 LINE token 在 body；私人對應路徑為 `/internal/v1/line-media/service-day-logs/{log_id}/photos/{file_id}/download`。先查本人日誌，限制 file_id 為該日誌已保存附件且屬 Scheduling／相同案件／寶寶或餐食照片，再經原 controlled-file digest-verified download 讀取；未授權／不相關檔案皆不得開檔。只回 JPEG／PNG，private no-store／nosniff；不提供任意檔案下載、公開 URL 或 token query。前端以 authenticated fetch／Blob 顯示及下載本人已提交照片。
 
-驗收對照：上述每一契約均需包含合法成功與邊界拒絕。DB 必須在 local disposable MySQL 驗直接刪除／DDL 拒絕、授權程序成功、錯目標與 stale 拒絕及 outer rollback；Worker 必須驗各服務隔離、HTTPS／CA、撤銷與不攜 DB credential。NAS 與 provider 未執行不得宣稱通過。
+驗收對照：上述每一契約均需包含合法成功與邊界拒絕。DB 必須在本機 MySQL 驗直接刪除／DDL 拒絕、授權程序成功、錯目標與 stale 拒絕及 outer rollback；不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，僅操作 current scenario-owned 資料並保存 before／after。Worker 必須驗各服務隔離、HTTPS／CA、撤銷與不攜 DB credential。NAS 與 provider 未執行不得宣稱通過。
 
 2026-08-16 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
 role、capability、職稱或部門限制內部使用者可操作的業務功能，也不採 fixed role bundle、dynamic
@@ -632,14 +632,22 @@ Modules：
 #### 4.3.1 管理端首次安裝的統一網頁 bootstrap（2026-11-03 使用者裁決）
 
 - 所有管理入口（標準 `api.main`、NAS management factory、本機及 Windows 遠端管理端）共用一個網頁建帳流程，以 MySQL `admin_root_account` 是否已有 root designation 判斷首次設定，與主機身分、帳號名稱或環境變數是否存在無關。停用並移除啟動時依 `DEV_ROOT_USERNAME`／`DEV_ROOT_PASSWORD` 自動建立 root 的分支，不保留兩套初始化模式。
-- React 在掛載管理應用及處理既有登入狀態前，以 `GET /api/v1/admin/setup` 的 `required`／`enrollment_required` 確認設定進度；無 root 時顯示建帳表單，root 尚無 active TOTP 時繼續綁定，已綁定才進入既有登入／session 流程。`POST /api/v1/admin/setup` 是唯一網頁首次建帳入口；舊 `GET /setup` 僅導向共用管理介面。不要求部署啟用碼或預填固定網址。
+- React 在掛載管理應用及處理既有登入狀態前，以 `GET /api/v1/admin/setup` 的 `required` 確認是否需要建帳；無 root 時顯示建帳表單，已有 root 時進入既有管理端。依同日後續人工裁決，撤回額外的 `enrollment_required` 狀態與自動「繼續綁定」入口；錯誤流程留下的未完成 root 由下述本機離線重置工具處理。`POST /api/v1/admin/setup` 是唯一網頁首次建帳入口；舊 `GET /setup` 僅導向共用管理介面。
 - 建帳要求 HTTPS；僅當 request Host 與實際 client 同為 loopback 時允許本機 HTTP。提交 Origin 必須與目前管理入口同源。Vite 保留原 Host；Windows gateway 只對 setup API 傳入已驗證的 Host 及由自身 request 決定的 scheme，捨棄外來 forwarded headers，API 僅信任既有 loopback proxy。LINE public factory 不掛載此入口。
 - 空資料庫須先完成既有 schema 初始化。資料庫連線失敗或缺少資料表時回 typed unavailable，介面顯示錯誤並提供人工重查，不當作無 root，也不自動 bootstrap schema 或資料。
 - 寫入只能委派既有 `bootstrap_root_admin`；2026-11-03 後續人工裁決要求於同一 outer transaction／audit 內建立唯一 root designation 與 `enrollment_pending` factor／短效 enrollment challenge。金鑰缺失、schema／寫入失敗全部回滾，不留下僅有 root 的新安裝。root 已存在時拒絕建立或覆寫；concurrent bootstrap 只能有一個成功，競爭／deadlock 回 typed 409，不做 blind retry。不新增 table、root owner 或 reset／recovery HTTP endpoint。
 - 唯一正常流程為「建立 root → 立即顯示 TOTP QR Code → 驗證綁定 → 保存復原碼 → 返回登入頁，重新輸入帳密與 TOTP」。POST setup 以 201 回傳 `created` 與既有 `mfa_enrollment` 型別的 `enrollment`，不再回傳直接前往登入的 `next`。沿用共用 10–256 字元密碼政策與再次輸入確認；建帳與綁定皆不簽發 session，僅使用者提交有效 TOTP 後啟用 factor，保存復原碼後清除設定中的機密資料與既有 session，再顯示登入。
-- 綁定中重新整理或 challenge 逾時，只能透過既有帳密 challenge 確認身分並繼續綁定，不是正式登入、不簽發 session、不重建 root。共用既有 LoginPage 的 enrollment UI，續綁定畫面須明確命名，不提供登入或跳過綁定操作。provisioning URI、challenge token、TOTP 與復原碼僅留在記憶體，不以 browser storage／cookie／URL 保存來維持跨刷新狀態。
+- 共用既有 LoginPage 的 enrollment UI，正常初始設定不先要求登入，不提供跳過綁定操作。初始 challenge 逾時即停止該次設定，提示以離線重置工具重新開始；不新增另一套帳密續綁定流程。provisioning URI、challenge token、TOTP 與復原碼僅留在記憶體，不以 browser storage／cookie／URL 保存來維持跨刷新狀態。
 - TOTP 金鑰無法使用與 session schema 缺失分別回傳安全的明確 unavailable code／訊息；不能以另一台主機的設定推定錯誤原因，也不得自動產生／覆寫已存在的加密金鑰。
 - password 不得出現在 validation error、browser storage、URL、log 或 audit detail。root designation 存在後關閉建立入口，重新啟動／重新下載映像不重開設定，也不變更帳號或 MFA。
+
+#### 4.3.2 錯誤初始 root 的本機離線重置（2026-11-03 使用者明確授權）
+
+- 使用者選定「清除尚未完成 TOTP 的初始 root，回到建立帳號起點」。唯一工具為 `scripts.reset_incomplete_root_setup`，Windows 入口為 `scripts/launchers/reset_incomplete_root.bat`；不增加 HTTP 重置／break-glass endpoint，不沿用只更換帳密的既有 recovery command。
+- 預設只讀預覽；`--apply` 顯示目前資料庫、root id／version，要求輸入精確 `RESET ROOT <database> <id>` 後，才委派 Access owner fresh-read／lock／Apply。取消零寫入；目標、id、version 或 guard 變更即拒絕，不盲目重試。操作前由管理者停止網站服務，完成後重新啟動並依 §4.3.1 重建帳號、綁定 TOTP、保存復原碼、返回登入。
+- 僅允許 development／local／test 的 loopback `union_db` 或 `lu_test_*`；實際 connection host 與 `DATABASE()` 都須核對。NAS、遠端及 production 拒絕。
+- 必須是唯一 enabled 管理員，安全版本仍為初始值 `1`，沒有 LINE 綁定、登入 session／last_login_at、已啟用或使用過的 factor、復原碼，且沒有業務表的 FK 引用。曾變更帳密／安全設定、存在其他管理員、已使用帳號、跨庫或不明引用均拒絕；不得以 SET NULL／CASCADE 改動業務資料。確認前的 preview 不代表可直接刪除，Apply 必須重新鎖定並核對；任何拒絕／取消都不得改動帳密、MFA、session、稽核或業務列。
+- 單一 outer UoW 僅清除該 root 的未完成 enrollment／password challenges、pending factor、root designation 與 admin user。既有稽核列保留；account FK 依既有 ON DELETE SET NULL，另寫 reset audit，保存被移除的 account id／version。其他帳號、business rows、login attempts、歷史 receipt、schema 與加密金鑰不變；不要求舊密碼或可用的 TOTP 金鑰，亦不自動產生新金鑰。失敗全部回滾。
 
 ### 4.4 Subsystem：Account／Session Administration
 

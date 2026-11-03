@@ -41,11 +41,11 @@ runtime／客訴告警只使用已設定管理員個人對象，呈現去敏摘�
 啟用狀態；只有真正由 notification rule／template engine 產生的營運提醒提供文字內容編輯。
 
 development-only reset/bootstrap 可由既有 Notification owner 的 typed fixture writer 建立上述最小 synthetic
-owner-root recipient fixture／projection 與 source trigger event；fixture 只含 `lu_test_*` synthetic principal／binding、canonical
+owner-root recipient fixture／projection 與 source trigger event；fixture 只含 scenario-owned synthetic principal／binding、canonical
 identity、source subject 與 revision，不建立假的 matching／leave decision、assignment、payroll obligation 或
 production side effect。source trigger event 只保存 canonical event identity、trigger kind、source subject 與
 producer reference，不捏造 business decision；若 trigger 語意依賴 owner decision，整合驗收時必須由該 owner
-producer 提供 decision reference，P0 writer 不得直接補寫。fresh reset 必須能用相同 canonical IDs 重建，重跑必須 idempotent；既有 Notification Query
+producer 提供 decision reference，P0 writer 不得直接補寫。驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9.1 保存 before／after；fresh reset 仍須另有明確 reset 授權。fresh reset 必須能用相同 canonical IDs 重建，重跑必須 idempotent；既有 Notification Query
 讀回 catalog／revision／selector，Preview 只預覽 source event→intent／task（零寫入），Apply 由 owner commit
 intent／outbox 並回 receipt，public typed readback 再讀回 deterministic task、mock/local result 與 typed failure。
 若 current owner 沒有 development-only typed source ingress，
@@ -352,7 +352,7 @@ New_Reg_Form（新客預填問卷與條款確認）。
 ## 9. Task 96 required flow gaps（current SPEC_READY disposition）
 
 下列原圖需求已由 current owner／UoW 邊界唯一收斂為 SPEC_READY 的 observable contract；列入 SPEC_READY
-不等於 runtime 已完成。每項都必須以 `lu_test_*` no-auth Browser 或 verified-token LIFF 直接操作，並取得
+不等於 runtime 已完成。驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9.1 限定 scenario-owned 資料；每項都必須以既有 no-auth Browser 或 verified-token LIFF 驗收入口直接操作，並取得
 committed root／intent／outbox、deterministic delivery task、retry/manual fallback、mock/local result 與
 typed readback；缺任一 required evidence 即為 implementation `not_run`，不是新的 Authority blocker。
 

@@ -1,11 +1,12 @@
 """
 File: test_staff_payout_repository_recovery.py
-Description: 驗證 Staff payout recovery producer 的 canonical Finance Import row identity。
+Description: 驗證銀行來源帳戶投影與 recovery producer 的 canonical Finance Import row identity。
 """
 
 from __future__ import annotations
 
 import pytest
+from datetime import date
 
 from domains.staff_payables.reconciliation import (
     StaffOverpaymentRecoveryCandidate,
@@ -15,10 +16,15 @@ from domains.staff_payables.reconciliation import (
     StaffPayoutEventStatus,
     StaffPayoutEventType,
     StaffPayoutLedgerEventCandidate,
+    StaffPayableFacts,
+    build_staff_payout_candidate,
 )
 from infrastructure.mysql.staff_payout_repository import (
     MySqlStaffPayoutRepository,
     _bank_facts_version,
+    _load_selected_bank_rows,
+    _load_bank_accounts,
+    _outgoing_bank_fact,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
@@ -49,6 +55,69 @@ class _Connection:
 
     def cursor(self):
         return self.cursor_value
+
+
+class _BankReadCursor(_Cursor):
+    def __init__(self, source, account_owner=7):
+        super().__init__()
+        self.source = source
+        self.account_owner = account_owner
+        self.rows = []
+
+    def execute(self, statement, params=()):
+        super().execute(statement, params)
+        if 'FROM finance_import_rows fir' in statement:
+            self.rows = [self.source]
+        elif 'FROM staff_bank_accounts' in statement:
+            self.rows = ([{'account_no': '000012345678', 'staff_id': self.account_owner, 'is_primary': 1}]
+                         if '000012345678' in params else [])
+        else:
+            raise AssertionError('Unexpected bank projection query')
+
+    def fetchall(self):
+        return self.rows
+
+
+def _candidate_from_bank_source(source, account_owner=7):
+    cursor = _BankReadCursor(source, account_owner)
+    selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, ('33',), ('obligation:1',))
+    rows = _load_selected_bank_rows(cursor, selection, False)
+    accounts = _load_bank_accounts(cursor, rows, False)
+    return build_staff_payout_candidate(
+        (_outgoing_bank_fact(rows[0], 7, ()),),
+        (StaffPayableFacts('obligation:1', 7, MoneyNTD(500)),),
+        bank_accounts=accounts, require_primary_account_owner=True,
+    )
+
+
+def _sinopac_bank_source():
+    return {'id': 33, 'format_id': 'sinopac', 'resolved_counterparty_account': '115807',
+            'bank_references': {'交易參考編號': '000012345678', '備註': 'HC115807服務人員'},
+            'transaction_date': date(2026, 11, 3), 'debit': 500, 'credit': None,
+            'direction': 'outgoing', 'currency': 'TWD', 'classification_type': 'staff_payout',
+            'reconciliation_status': 'pending', 'payout_event_id': None,
+            'dedup_fingerprint': 'c' * 64}
+
+
+def test_sinopac_case_suffix_is_not_used_as_staff_recipient_bank_account():
+    source = _sinopac_bank_source()
+    candidate = _candidate_from_bank_source(source)
+
+    assert candidate.resulting_status is StaffPayableStatus.COMPLETED
+    assert source['resolved_counterparty_account'] == '115807'
+    assert source['bank_references']['交易參考編號'] == '000012345678'
+
+
+def test_sinopac_recipient_account_still_rejects_another_staff_owner():
+    with pytest.raises(ValueError, match='cross_staff_allocation_forbidden'):
+        _candidate_from_bank_source(_sinopac_bank_source(), account_owner=8)
+
+
+def test_sinopac_memo_cannot_replace_missing_recipient_account():
+    source = _sinopac_bank_source()
+    source['bank_references'] = {'備註': 'HC115807服務人員'}
+    with pytest.raises(ValueError, match='staff_bank_account_ambiguous'):
+        _candidate_from_bank_source(source)
 
 
 def _candidate(

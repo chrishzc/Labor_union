@@ -45,14 +45,14 @@ describe('shared first-root setup', () => {
     const child = renderGate();
     expect(child).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toBeInTheDocument();
-    resolve(json({ required: false, enrollment_required: false }));
+    resolve(json({ required: false }));
     expect(await screen.findByText('管理端登入畫面')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/admin/setup', expect.objectContaining({ cache: 'no-store' }));
   });
 
   it('creates root then binds TOTP, saves recovery codes and only then returns to login', async () => {
     vi.stubEnv('VITE_PUBLIC_PATH_PREFIX', '/test');
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
+    fetchMock.mockResolvedValueOnce(json({ required: true }))
       .mockResolvedValueOnce(json({ created: true, enrollment }, 201))
       .mockResolvedValueOnce(json({ success: true, data: { recovery_codes: ['MOCK-RECOVERY'] } }));
     const clear = vi.spyOn(sessionClient, 'clearSession');
@@ -81,7 +81,7 @@ describe('shared first-root setup', () => {
   });
 
   it('requires matching passwords before sending a creation request', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }));
+    fetchMock.mockResolvedValueOnce(json({ required: true }));
     renderGate();
     await fill(PASSWORD, 'different-password');
     expect(screen.getByRole('alert')).toHaveTextContent('兩次輸入的密碼不一致');
@@ -90,7 +90,7 @@ describe('shared first-root setup', () => {
 
   it('keeps the application closed on status failure and allows a manual retry', async () => {
     fetchMock.mockResolvedValueOnce(json({ detail: 'database unavailable' }, 503))
-      .mockResolvedValueOnce(json({ required: false, enrollment_required: false }));
+      .mockResolvedValueOnce(json({ required: false }));
     const child = renderGate();
     expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取帳號設定狀態');
     expect(child).not.toHaveBeenCalled();
@@ -100,9 +100,9 @@ describe('shared first-root setup', () => {
   });
 
   it('rechecks a concurrent creation conflict and enters login only after root exists', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
+    fetchMock.mockResolvedValueOnce(json({ required: true }))
       .mockResolvedValueOnce(json({ detail: '最高管理員已建立，請直接登入。' }, 410))
-      .mockResolvedValueOnce(json({ required: false, enrollment_required: false }));
+      .mockResolvedValueOnce(json({ required: false }));
     renderGate();
     await fill();
     expect(await screen.findByText('管理端登入畫面')).toBeInTheDocument();
@@ -110,7 +110,7 @@ describe('shared first-root setup', () => {
   });
 
   it('clears submitted passwords on failure without automatically retrying a write', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
+    fetchMock.mockResolvedValueOnce(json({ required: true }))
       .mockResolvedValueOnce(json({ detail: '請使用 HTTPS 網址開啟管理介面後設定帳號。' }, 426));
     const child = renderGate();
     await fill();
@@ -121,48 +121,23 @@ describe('shared first-root setup', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('resumes unfinished root enrollment after refresh without entering normal login', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: false, enrollment_required: true }))
-      .mockResolvedValueOnce(json({ success: true, data: enrollment }));
-    const child = renderGate();
-    expect(await screen.findByRole('heading', { name: '繼續綁定 TOTP 驗證器' })).toBeInTheDocument();
-    expect(child).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('帳號 (Username)'), { target: { value: 'first-root' } });
-    fireEvent.change(screen.getByLabelText('密碼 (Password)'), { target: { value: PASSWORD } });
-    fireEvent.click(screen.getByRole('button', { name: '確認帳密並繼續綁定' }));
-    expect(await screen.findByRole('heading', { name: '綁定您的驗證器' })).toBeInTheDocument();
-    expect(sessionClient.isAuthenticated()).toBe(false);
-    expect(fetchMock.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1);
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/admin/auth/login/challenges');
-  });
-
-  it('requires identity confirmation after QR expiry and never starts a login session', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
+  it('stops initial setup after QR expiry without returning to login', async () => {
+    fetchMock.mockResolvedValueOnce(json({ required: true }))
       .mockResolvedValueOnce(json({ created: true, enrollment: { ...enrollment, expires_at: '2000-01-01T00:00:00Z' } }, 201));
     const child = renderGate();
     await fill();
     await screen.findByRole('heading', { name: '綁定您的驗證器' });
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: '確認綁定驗證器' }));
-    expect(await screen.findByRole('heading', { name: '繼續綁定 TOTP 驗證器' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '初始設定已逾時' })).toBeInTheDocument();
     expect(screen.queryByRole('img', { name: '驗證器綁定 QR Code' })).not.toBeInTheDocument();
     expect(child).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(sessionClient.isAuthenticated()).toBe(false);
   });
 
-  it('keeps unfinished enrollment in setup when another creation wins the race', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
-      .mockResolvedValueOnce(json({ detail: 'setup closed' }, 410))
-      .mockResolvedValueOnce(json({ required: false, enrollment_required: true }));
-    const child = renderGate();
-    await fill();
-    expect(await screen.findByRole('heading', { name: '繼續綁定 TOTP 驗證器' })).toBeInTheDocument();
-    expect(child).not.toHaveBeenCalled();
-  });
-
-  it('returns to enrollment identity confirmation when the server expires the challenge', async () => {
-    fetchMock.mockResolvedValueOnce(json({ required: true, enrollment_required: false }))
+  it('stops initial setup when the server expires the challenge', async () => {
+    fetchMock.mockResolvedValueOnce(json({ required: true }))
       .mockResolvedValueOnce(json({ created: true, enrollment }, 201))
       .mockResolvedValueOnce(json({ detail: { code: 'mfa_challenge_expired', message: 'MFA 綁定已失效或驗證碼錯誤' } }, 409));
     const child = renderGate();
@@ -170,7 +145,7 @@ describe('shared first-root setup', () => {
     await screen.findByRole('heading', { name: '綁定您的驗證器' });
     fireEvent.change(screen.getByLabelText('六位數驗證碼'), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: '確認綁定驗證器' }));
-    expect(await screen.findByRole('heading', { name: '繼續綁定 TOTP 驗證器' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '初始設定已逾時' })).toBeInTheDocument();
     expect(child).not.toHaveBeenCalled();
     expect(screen.queryByRole('img', { name: '驗證器綁定 QR Code' })).not.toBeInTheDocument();
     expect(sessionClient.isAuthenticated()).toBe(false);

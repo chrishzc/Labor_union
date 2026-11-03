@@ -18,7 +18,6 @@ import {
 export interface LoginPageProps {
   onLoginSuccess?: (username: string) => void;
   initialEnrollment?: { username: string; challenge: AdminPasswordChallengeResponse };
-  enrollmentOnly?: boolean;
   onEnrollmentFinished?: () => void;
 }
 
@@ -175,9 +174,9 @@ function clearRememberedUsername(): void {
   }
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnrollment, enrollmentOnly = false, onEnrollmentFinished }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnrollment, onEnrollmentFinished }) => {
   // Stage 1: Account Login, Stage 2: TOTP 2FA Verification
-  const [authStage, setAuthStage] = useState<'stage1' | 'stage2'>(initialEnrollment ? 'stage2' : 'stage1');
+  const [authStage, setAuthStage] = useState<'stage1' | 'stage2' | 'setup-expired'>(initialEnrollment ? 'stage2' : 'stage1');
 
   const [rememberMe, setRememberMe] = useState<boolean>(() => {
     const saved = getRememberedUsername();
@@ -218,20 +217,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
     }
 
     // Persist or clear remembered username in cookie
-    if (!enrollmentOnly && rememberMe) {
+    if (rememberMe) {
       setRememberedUsername(trimmedUser);
-    } else if (!enrollmentOnly) {
+    } else {
       clearRememberedUsername();
     }
 
     setIsLoading(true);
     try {
       const challenge = await sessionClient.issuePasswordChallenge(trimmedUser, password);
-      if (enrollmentOnly && challenge.challenge_type !== 'mfa_enrollment') {
-        setPassword('');
-        onEnrollmentFinished?.();
-        return;
-      }
       setChallengeId(challenge.challenge_id);
       setChallengeToken(challenge.challenge_token);
       setChallengeExpiresAt(challenge.expires_at);
@@ -276,8 +270,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
       setChallengeToken(null);
       setChallengeExpiresAt(null);
       setProvisioningUri(null);
-      setAuthStage('stage1');
-      setErrorMessage(enrollmentOnly ? '綁定資料已逾時，請確認帳號密碼後繼續綁定驗證器。' : '驗證階段已過期，請重新輸入帳號密碼');
+      setAuthStage(initialEnrollment ? 'setup-expired' : 'stage1');
+      setErrorMessage('驗證階段已過期，請重新輸入帳號密碼');
       return;
     }
 
@@ -305,7 +299,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
       setChallengeExpiresAt(null);
       setTotpCode('');
 
-      if (!enrollmentOnly && onLoginSuccess) {
+      if (onLoginSuccess) {
         onLoginSuccess(username.trim());
       }
     } catch (err) {
@@ -318,7 +312,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
         setChallengeToken(null);
         setChallengeExpiresAt(null);
         setProvisioningUri(null);
-        setAuthStage('stage1');
+        setAuthStage(initialEnrollment ? 'setup-expired' : 'stage1');
       }
       setErrorMessage(message);
     } finally {
@@ -344,14 +338,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
       <div className="login-top-brand">🤱 月子工會管理系統</div>
 
       <div className="login-card-container">
+        {authStage === 'setup-expired' && <section role="alert">
+          <h1 className="login-main-title">初始設定已逾時</h1>
+          <p>請先停止網站，執行「重置未完成 root」工具，再重新開啟網站，從建立帳號開始設定。</p>
+        </section>}
         {/* Stage 1: Username & Password */}
         {authStage === 'stage1' && (
           <>
             <div className="login-brand-badge">🤱</div>
-            <h1 className="login-main-title">{enrollmentOnly ? '繼續綁定 TOTP 驗證器' : '月子工會管理系統'}</h1>
-            <p className="login-desc-subtitle">{enrollmentOnly
-              ? '請確認帳號密碼以繼續設定驗證器，此步驟不會登入系統。'
-              : '請輸入您的帳號密碼以登入後台'}</p>
+            <h1 className="login-main-title">月子工會管理系統</h1>
+            <p className="login-desc-subtitle">請輸入您的帳號密碼以登入後台</p>
 
             {errorMessage && (
               <div
@@ -413,7 +409,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
                 </div>
               </div>
 
-              {!enrollmentOnly && <div className="login-options-row">
+              <div className="login-options-row">
                 <label className="login-remember-me">
                   <input
                     type="checkbox"
@@ -423,10 +419,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
                   />
                   <span>記住帳號 (Remember Me)</span>
                 </label>
-              </div>}
+              </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>
-                {isLoading ? '處理中...' : enrollmentOnly ? '確認帳密並繼續綁定' : '下一步：進行雙重驗證 ➔ (Next: 2FA)'}
+                {isLoading ? '處理中...' : '下一步：進行雙重驗證 ➔ (Next: 2FA)'}
               </button>
             </form>
           </>
@@ -518,7 +514,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, initialEnr
                 {isLoading ? '驗證中...' : provisioningUri ? '確認綁定驗證器' : '驗證並登入系統 (Verify & Login)'}
               </button>
 
-              {!enrollmentOnly && <button
+              {!initialEnrollment && <button
                 type="button"
                 className="back-to-stage1-btn"
                 disabled={isLoading}

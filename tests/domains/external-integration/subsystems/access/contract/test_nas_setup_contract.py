@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 
 from api.routes import admin_setup
-from subsystems.access.authentication_session import RootBootstrapResult, RootSetupStatus, MfaEnrollmentChallenge
+from subsystems.access.authentication_session import RootBootstrapResult, MfaEnrollmentChallenge
 from api.exception_handlers import install_typed_error_handlers
 
 ORIGIN = "https://nas.example.test:18443"
@@ -21,7 +21,7 @@ def setup_app(monkeypatch):
     monkeypatch.delenv("NAS_SETUP_KEY", raising=False)
     monkeypatch.delenv("NAS_PUBLIC_ORIGIN", raising=False)
     monkeypatch.setattr(admin_setup, "get_access_control_connection_factory", lambda: object())
-    monkeypatch.setattr(admin_setup, "get_root_setup_status", lambda **_: RootSetupStatus(not state["root"], state["root"]))
+    monkeypatch.setattr(admin_setup, "has_root_admin", lambda **_: state["root"])
     def bootstrap(**kwargs):
         assert kwargs["password"] == PASSWORD
         if state["root"]:
@@ -67,7 +67,7 @@ def test_first_root_created_once_without_session_or_secret_projection(setup_app)
     assert len(PASSWORD) == 10 and PASSWORD not in response.text
     assert request(app, headers=headers(), payload=payload()).status_code == 410
     assert state["writes"] == 1
-    assert request(app, "GET").json() == {"required": False, "enrollment_required": True}
+    assert request(app, "GET").json() == {"required": False}
 
 
 @pytest.mark.parametrize("case,status", [("http", 426), ("origin", 403), ("missing_origin", 403),
@@ -119,7 +119,7 @@ def test_current_https_address_needs_no_installation_key_or_fixed_url(setup_app,
 @pytest.mark.parametrize("base", ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"])
 def test_loopback_browser_uses_the_same_setup_without_environment_credentials(setup_app, base):
     app, state = setup_app
-    assert request(app, "GET", base=base).json() == {"required": True, "enrollment_required": False}
+    assert request(app, "GET", base=base).json() == {"required": True}
     assert request(app, base=base, headers={"Origin": base}, payload=payload()).status_code == 201
     assert state["writes"] == 1
 
@@ -137,7 +137,7 @@ def test_missing_schema_or_database_connection_is_not_a_fresh_install(setup_app,
     app, state = setup_app
     def unavailable(**_):
         raise pymysql.err.OperationalError(error_code, "synthetic database failure")
-    monkeypatch.setattr(admin_setup, "get_root_setup_status", unavailable)
+    monkeypatch.setattr(admin_setup, "has_root_admin", unavailable)
     for method in ("GET", "POST"):
         response = request(app, method, headers=headers(), payload=payload() if method == "POST" else None)
         assert response.status_code == 503
@@ -151,11 +151,11 @@ def test_standard_and_nas_management_entries_share_one_setup_router(setup_app, m
     original_lifespan = main.app.router.lifespan_context
     monkeypatch.setattr(main.app.router, "lifespan_context", original_lifespan)
     for app in (main.app, nas_apps.management_app()):
-        assert request(app, "GET").json() == {"required": True, "enrollment_required": False}
+        assert request(app, "GET").json() == {"required": True}
         response = request(app, "GET", path="/setup")
         assert response.status_code == 303 and response.headers["location"] == "/admin/"
     assert request(nas_apps.management_app(), headers=headers(), payload=payload()).status_code == 201
-    assert request(main.app, "GET").json() == {"required": False, "enrollment_required": True}
+    assert request(main.app, "GET").json() == {"required": False}
     assert request(main.app, headers=headers(), payload=payload()).status_code == 410
     assert request(nas_apps.line_app(), "GET").status_code == 404
 

@@ -630,7 +630,7 @@ Ingest
 - Finance Import → Client Finance → Orders deposit lifecycle → Anomalies。
 - Finance Import → Staff Payables／Payroll → Anomalies。
 - projector failure 後重試不重複 ledger。
-- real-format Excel 加隔離 disposable MySQL；不得使用正式 `union_db`。
+- real-format Excel 加真實 MySQL；不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，僅操作 current scenario-owned 資料並保存 before／after，不得使用 production DB。
 
 ## 11. 現況吸收與退出
 

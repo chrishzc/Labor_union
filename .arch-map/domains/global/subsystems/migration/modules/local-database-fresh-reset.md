@@ -6,8 +6,8 @@
 
 ## Responsibility
 提供 localhost development 的 explicit fresh-schema reset：operator `union_db`
-必須先產生 canonical plan 並確認 `RESET`；自動驗收只使用明確 `lu_test_*`
-target。此 Module 不屬於 preserved-data additive upgrade，也不載入 business
+必須先產生 canonical plan 並確認 `RESET`；自動驗收不再強制 disposable DB 或 `lu_test_*`
+前綴，可使用 localhost development 的 `union_db`，但 reset 仍須明確授權與目標確認。此 Module 不屬於 preserved-data additive upgrade，也不載入 business
 fixture。
 本機完整初始化與 reset 共用 NAS 的 hash-bound compact final schema；只有明確 base_only/max_schema_part
 的 predecessor／歷史 fixture 繼續使用原 assembly。保留資料升級不經 compact reset。

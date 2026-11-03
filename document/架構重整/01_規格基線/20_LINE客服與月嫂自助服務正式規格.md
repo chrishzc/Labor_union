@@ -387,8 +387,8 @@ verified LIFF 送出只保存待審申請，顯示申請編號及「待工會核
    rollback 與合法唯讀原因。不得以 API mutation、直接 DB patch、假 token 或改狀態欄取代 UI。
 
 資料異動執行狀態（2026-08-26）：`approved`。人工已授權先由 Client／Staff owner 補齊 root、欄位
-allowlist、version、repository contract 與必要 `lu_test_*` schema release，再依本節完成 LIFF／管理端 E2E。
-所有 schema 工作仍須完整 DB change gates；production DB／`union_db` 與 provider push 不由 schema 授權推導。
+allowlist、version、repository contract 與必要 schema release，再依本節完成 LIFF／管理端 E2E；不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，依規格10 §9.1 限定 scenario-owned 資料。
+所有 schema 工作仍須完整 DB change gates；production DB 與 provider push 不由 schema 授權推導。
 
 ### 6.1A 客戶訂單異動申請 LIFF（2026-09-09 人工裁決）
 
@@ -573,11 +573,11 @@ LIFF 圖例與正式入口依目前流程呈現：客戶無實際服務日期修
 
 ## 2026-08-26 current execution authorization amendment
 
-- 人工已授權 current LINE lanes 的本機實作、`lu_test_*` 必要 schema gates、verified-token Chrome E2E、
+- 人工已授權 current LINE lanes 的本機實作、必要 schema gates、verified-token Chrome E2E、
   controlled NAS media flow、AI feedback contract-first 工作與 provider sandbox qualification。
 - 先前「provider 尚未授權／先不真實 push」只就 current sandbox lane 由本 amendment supersede；執行前仍須
   回讀 exact environment、target、recipient、quota 與 worker isolation，只送最小受控案例並保存 provider receipt。
-- 這項授權不允許猜測 production recipient、`union_db`、部署 target 或 entry switch，也不取消各 owner 的
+- 本機驗收不再強制 disposable DB 或 `lu_test_*` 前綴，可使用 localhost development 的 `union_db`，但須依規格10 §9.1 回讀精確 target 與限定 scenario-owned 資料。這項授權不允許猜測 production recipient、部署 target 或 entry switch，也不取消各 owner 的
   Preview／Apply、fresh-lock、idempotency、receipt、readback、rollback 與 manual fallback。
 
 

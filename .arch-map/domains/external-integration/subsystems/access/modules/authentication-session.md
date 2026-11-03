@@ -18,6 +18,8 @@ Owns admin authentication/session persistence orchestration, including the absol
 - `subsystems/access/authentication_session.py` — shared password hashing and account/session orchestration.
 - `api/dependencies/admin_auth.py` — authenticated principal and bounded registry read/write capability guards.
 - `api/routes/admin_auth.py` — password challenges, TOTP enrollment confirmation and session transport; distinct safe keyring/schema failures, no session from enrollment.
+- `subsystems/access/incomplete_root_reset.py` — offline Query/Apply for the sole unused, unbound root at initial security version 1; local target/id/version and business-reference guards, fresh locked recheck after confirmation, atomic bounded deletion and retained audit.
+- `scripts/reset_incomplete_root_setup.py`、`scripts/launchers/reset_incomplete_root.bat` — default read-only preview and exact interactive confirmation for local incomplete-root reset; no HTTP entry or credential arguments.
 - `api/schemas/account_center.py` — account creation/reset transport constraints.
 - `api/routes/admin_setup.py` — shared first-root progress/create API for standard and NAS management entries; same-origin HTTPS (HTTP only for a loopback Host and peer). `bootstrap_root_admin` atomically commits root plus pending enrollment and returns `RootBootstrapResult`; 201 returns a typed enrollment challenge, not a login redirect. Root designation closes recreation; active TOTP completes setup. `/setup` redirects to React; LINE public entry does not attach setup.
 - `ui_react/src/api/auth/setup_client.ts` — bounded first-root status/create transport using the shared public-prefix handling.
@@ -32,7 +34,7 @@ Owns admin authentication/session persistence orchestration, including the absol
 - Existing stored sessions are evaluated by the absolute deadline; refresh does not extend that deadline.
 - Creating or resetting an admin password requires at least 10 characters, including root bootstrap; existing password hashes remain valid.
 - All management entries use one flow: create root → QR → TOTP confirmation → recovery codes → fresh two-step login. Setup and enrollment issue no session. Root/pending factor/challenge commit together; encryption or persistence failures roll back creation. Existing recovery rules and the unique root fact are unchanged.
-- `get_root_setup_status` returns only typed `required`／`enrollment_required` from MySQL. An unfinished root resumes enrollment after refresh or expiry using password confirmation, never by persisting provisioning secrets or bypassing binding. Missing encryption configuration and schema failures have distinct safe errors; legacy development credentials never create accounts at startup.
+- `has_root_admin` gates the sole first-install form. The automatic unfinished-root continuation state/entry is retired; expired initial enrollment stops and names the offline reset tool. Missing encryption configuration and schema failures have distinct safe errors; legacy development credentials never create accounts at startup.
 
 ## Verification
 
@@ -45,7 +47,9 @@ Owns admin authentication/session persistence orchestration, including the absol
 - layout_basis: Existing Access public account contract remains in the canonical subsystem `contract/` root; it verifies the API projection/request boundary together with the shared authentication policy. Session lifecycle integration remains in the existing sibling `integration/` root.
 - `tests/domains/external-integration/subsystems/access/integration/test_access_session_expiry_policy.py`
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_access_account_center_public_contract.py` — account request boundaries, safe public projection and shared password policy.
-- test_root: `ui_react/src/tests/FirstRootSetup.test.tsx` — create→QR→TOTP→recovery→login order, refresh/expiry continuation, no session before login, password clearing, public prefix, unavailable state and concurrent closure.
+- test_root: `ui_react/src/tests/FirstRootSetup.test.tsx` — create→QR→TOTP→recovery→login order, expired initial setup stops, no session before login, password clearing, public prefix, unavailable state and concurrent closure.
+- test_root: `tests/domains/external-integration/subsystems/access/contract/test_incomplete_root_reset_cli.py` — preview/confirmation/cancellation, remote and production refusal, safe errors.
+- test_root: `tests/domains/external-integration/subsystems/access/integration/test_incomplete_root_reset_mysql.py` — legacy/pending root reset and all other table contents preserved; full database hashes verify no writes on cancellation, wrong target/id/version, changed security state during confirmation and used/enrolled/business-referenced account refusal, including the real CLI entry.
 - test_root: `tests/domains/external-integration/subsystems/access/contract/test_nas_setup_contract.py` — shared API composition, secure same-origin transport, secret-safe errors, single-use closure, typed races and database/schema failure.
 - test_root: `tests/domains/external-integration/subsystems/access/regression/test_development_root_admin_connection_lifetime.py` — legacy development credentials cannot bootstrap root at startup.
 - test_root: `tests/domains/external-integration/subsystems/access/regression/test_admin_auth_runtime.py` — retained TOTP, session, rate-limit and local-bypass regression contracts; the retired startup-bootstrap oracle is replaced by the shared setup contract and web-MFA integration test.

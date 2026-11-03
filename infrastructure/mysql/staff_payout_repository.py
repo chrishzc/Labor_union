@@ -15,6 +15,7 @@ import re
 from typing import Iterator, Mapping
 
 from pymysql.err import IntegrityError, OperationalError
+from domains.finance_import.cancellation_code import extract_sinopac_account_reference
 
 from domains.staff_payables.reconciliation import (
     BankTransactionDirection,
@@ -476,7 +477,7 @@ def _load_selected_bank_rows(cursor, selection, lock):
     placeholders = _placeholders(row_ids)
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT fir.id,fir.dedup_fingerprint,fir.transaction_date,"
+        "SELECT fir.id,fir.dedup_fingerprint,fir.transaction_date,fir.format_id,fir.bank_references,"
         "fir.debit,fir.credit,fir.direction,fir.currency,"
         "fir.resolved_counterparty_account,fir.classification_type,"
         "classification.classification_type AS authoritative_classification_type,"
@@ -490,7 +491,21 @@ def _load_selected_bank_rows(cursor, selection, lock):
         f"WHERE fir.id IN ({placeholders}) ORDER BY fir.id{suffix}",
         row_ids,
     )
-    return tuple(cursor.fetchall())
+    return tuple(
+        {**row, "resolved_counterparty_account": _payout_source_account(row)}
+        for row in cursor.fetchall()
+    )
+
+
+def _payout_source_account(row):
+    if row.get("format_id") == "sinopac":
+        references = row.get("bank_references")
+        if isinstance(references, str):
+            references = json.loads(references)
+        if not isinstance(references, Mapping):
+            return None
+        return extract_sinopac_account_reference(references.get("交易參考編號"))
+    return row.get("resolved_counterparty_account")
 
 
 def _selected_finance_row_ids(selection) -> tuple[int, ...]:
