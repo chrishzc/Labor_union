@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Callable, ContextManager, Protocol
 
-from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy
+from domains.client_finance.pricing_policy import CasePricingTerms, PricingPolicy, calculate_case_total_amount
 from domains.payroll.tiered_rates import TieredPayrollRate, price_hours
 from domains.government_subsidy.pricing import subsidy_claim_amount
 from shared_kernel.fingerprints import fingerprint_payload
@@ -113,6 +113,11 @@ def pricing_impact(terms: CasePricingTerms, facts: CasePricingFacts) -> PricingI
     return PricingImpact(covered, excess, client + facts.floor_fee, staff_covered,
         staff_excess, staff_covered + staff_excess + facts.floor_fee + facts.payroll_adjustment,
         subsidy_claim_amount(consumed, terms.subsidy_hours, terms.payroll.covered), terms.subsidy_return(consumed))
+
+
+def case_total_amount(facts: CasePricingFacts) -> int:
+    return calculate_case_total_amount(facts.terms,
+        tuple((day.hours, day.double_pay) for day in sorted(facts.days, key=lambda item: item.occurred_on)), facts.floor_fee)
 
 
 def current_pricing_impact(facts):

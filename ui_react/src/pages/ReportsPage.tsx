@@ -21,6 +21,9 @@ import {
 import { WeeklyOperationsReportError } from '../api/reports/weekly_operations_report_errors';
 import { WeeklyMetricsEditor } from '../components/reports/WeeklyMetricsEditor';
 
+import { StaffPerformancePanel } from '../components/reports/StaffPerformancePanel';
+import { useUnsavedNavigation } from '../components/UnsavedChanges';
+
 type ReportKind = 'weekly' | 'quarterly' | 'annual';
 type WeeklyTab = 'cases' | 'subsidy' | 'service';
 type ReportState =
@@ -233,7 +236,7 @@ const WeeklyServiceView: React.FC<{ report: WeeklyView }> = ({ report }) => {
   </div>;
 };
 
-export const ReportsPage: React.FC = () => {
+const OperationsReportsWorkspace: React.FC = () => {
   const period = currentPeriod();
   const [reportKind, setReportKind] = useState<ReportKind>('weekly');
   const [weeklyTab, setWeeklyTab] = useState<WeeklyTab>('cases');
@@ -454,6 +457,19 @@ export const ReportsPage: React.FC = () => {
 
     </section>
   </div>;
+};
+
+export const ReportsPage: React.FC = () => {
+  const [initialStaffId] = useState(() => {
+    const value = Number(new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('staff_id'));
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  });
+  const [workspace, setWorkspace] = useState<'operations' | 'staff'>(initialStaffId ? 'staff' : 'operations');
+  const { requestLeave } = useUnsavedNavigation();
+  return <><nav className="reports-analysis-navigation" aria-label="報表工作區">
+    <button type="button" aria-pressed={workspace === 'operations'} onClick={() => requestLeave(() => setWorkspace('operations'))}>營運與補助報表</button>
+    <button type="button" aria-pressed={workspace === 'staff'} onClick={() => requestLeave(() => setWorkspace('staff'))}>月嫂表現分析</button>
+  </nav>{workspace === 'operations' ? <OperationsReportsWorkspace /> : <StaffPerformancePanel initialStaffId={initialStaffId} />}</>;
 };
 
 export default ReportsPage;

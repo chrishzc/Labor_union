@@ -467,6 +467,8 @@ fingerprint。任一不同均零 mutation 回 conflict；不得信任 Preview sn
 
 ## 7. 必要資料模型
 
+2026-11-04 Reporting 開案歸屬唯讀投影：`15` §15.4 的開案主責借用第一個正式 segment 的人員；同人 generation rebuild 沿 exact assignment lineage 回溯，首日代班沿 committed 每日 outcome 回到原主責。服務前整案替換由新正式人員取得主責，服務中接手不得覆蓋已開案歸屬。`resolve_opening_primary_staff` 只投影既有事實；缺漏／歧義關閉查詢，不新增人工主責欄位、資料表、writer 或 Scheduling root。
+
 - **已確認採用 `generation + effective` 模型**：每次正式 Apply 取消舊有效 generation、完整保留其 assignment／schedule 歷史，並建立新的 effective generation；目前排班、工時、檔期與薪資只讀 effective generation。
 - 同一個 `case_no` 同一時間只能有一個 effective scheduling generation；切換 effective generation 必須與新 assignments、schedules、重建事件及 aggregate version 在同一交易完成。
 - `UNIQUE(staff_id, work_date)` 與 `UNIQUE(case_no, assignment_sequence)` 必須納入 generation／effective 語意，使歷史 generation 與目前 generation 可共存，同時仍禁止 effective generation 內重複 ownership。

@@ -40,6 +40,7 @@
 - entrypoint: `POST /api/v1/staff/{staff_id}/bank-accounts/{preview|apply}`
 
 ## Contracts
+- 月嫂詳情提供 `#reports?staff_id=<canonical id>` 的表現分析捷徑，沿既有未儲存變更／busy navigation guard；分析屬 `global/reporting/staff-performance`，本頁不計算統計。
 - 名冊先循既有 bounded Staff id cursor 讀取全部頁面，再以公會編號自然升冪呈現；未設定排最後、相同比較以 id 穩定排序。`staff_directory_adapter.ts` 共用排序與「公會編號 姓名」顯示，排班與候選呈現借用此規則，不改 Staff identity 或 writer。
 - `StaffIdentityProvider` 在 authenticated 管理頁共用 bounded 摘要全頁讀取，只保留 id／姓名／公會編號，以 canonical id 提供標籤與選單排序；離頁中止讀取，錯誤可重讀，不以姓名比對或保存跨 session 快取。案件、財務、歷史帳務與 LINE 管理借用此唯讀 presentation，不改人員或段落命令。
 - 名冊主頁預設「現役月嫂」，以「已退役月嫂」分頁分開呈現；`/roster` optional `lifecycle_state=active|retired` 在 cursor／limit 前依 Staff-owned lifecycle 篩選，省略維持原查詢，不增加回應欄位或逐人查詢。退役／復職的正式 readback 同步移除原分頁清單列；搜尋與排序沿用目前分頁。

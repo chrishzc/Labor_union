@@ -15,6 +15,7 @@
   - `api/schemas/assignment_plan.py`
 
 ## Dependencies
+- inbound: `global/reporting/staff-performance` — `resolve_opening_primary_staff` reads ordered segment identity, same-person rebuild lineage and exact daily substitution outcomes. Pre-service replacement changes principal; later handover/substitution does not duplicate opening credit. No root/writer change.
 - 七日 buffer 是獨立提醒 facts，不參與 assignment interval 的 hard occupancy claim；實際服務占用仍唯一。
 - inbound: `orders/order-terms` — Orders Terms workflow 只透過 typed generation candidate 交付排班影響。
 - inbound: Scheduling workflows — 使用 current generation facts 建立正式重建 candidate。
@@ -23,6 +24,8 @@
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md` — generation、assignment 與 occupancy ownership。
 
 ## Verification
+- layout_status: `custom_current`
+- test_root: `tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/`
 - default_boundary: Module
 - cross-owner behavior is verified by the Orders Terms owner at its declared focused test root.
 

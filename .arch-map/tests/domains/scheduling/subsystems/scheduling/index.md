@@ -5,6 +5,9 @@ test_root: tests/domains/scheduling/subsystems/scheduling/
 integration_root: tests/domains/scheduling/subsystems/scheduling/integration/
 fixtures_root: tests/fixtures/
 modules:
+  schedule-generation:
+    module: modules/schedule-generation.md
+    test_root: tests/domains/scheduling/subsystems/scheduling/modules/schedule-generation/
   current-service-projection:
     test_root: tests/domains/scheduling/subsystems/scheduling/modules/current-service-projection/
   matching-coordination:

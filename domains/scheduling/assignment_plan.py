@@ -24,6 +24,72 @@ _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _MAXIMUM_SEGMENT_COUNT = 4
 
 
+@dataclass(frozen=True, slots=True)
+class OpeningAssignmentIdentity:
+    assignment_id: int
+    staff_id: int
+    sequence: int
+    first_service_date: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningAssignmentLineage:
+    source_assignment_id: int
+    resulting_assignment_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class OpeningSubstitutionIdentity:
+    original_assignment_id: int
+    original_work_date: date
+    resulting_assignment_id: int
+    resulting_service_date: date
+
+
+def resolve_opening_primary_staff(
+    first_assignment_id: int,
+    assignments: tuple[OpeningAssignmentIdentity, ...],
+    lineage: tuple[OpeningAssignmentLineage, ...],
+    substitutions: tuple[OpeningSubstitutionIdentity, ...],
+) -> int:
+    """Retain the opening principal through date rebuilds and first-day leave.
+
+    A pre-service replacement changes the principal. A committed daily
+    substitution retains its original principal; same-person rebuild lineage
+    leads back to the exact assignment identities used by those outcomes.
+    """
+    identities = {item.assignment_id: item for item in assignments}
+    current_id = first_assignment_id
+    if current_id not in identities:
+        raise ValueError("opening_assignment_lineage_incomplete")
+    work_date = identities[current_id].first_service_date
+    visited = set()
+    while True:
+        if current_id in visited or current_id not in identities:
+            raise ValueError("opening_assignment_lineage_invalid")
+        visited.add(current_id)
+        current = identities[current_id]
+        origins = {(item.original_assignment_id, item.original_work_date) for item in substitutions
+                   if item.resulting_assignment_id == current_id and item.resulting_service_date == work_date}
+        if len(origins) > 1:
+            raise ValueError("opening_assignment_lineage_ambiguous")
+        if origins:
+            current_id, work_date = next(iter(origins))
+            continue
+        source_ids = {item.source_assignment_id for item in lineage if item.resulting_assignment_id == current_id}
+        if any(source_id not in identities for source_id in source_ids):
+            raise ValueError("opening_assignment_lineage_incomplete")
+        same_person = [identities[source_id] for source_id in source_ids if identities[source_id].staff_id == current.staff_id]
+        if not same_person:
+            return current.staff_id
+        earliest = min(item.sequence for item in same_person)
+        candidates = [item for item in same_person if item.sequence == earliest]
+        if len(candidates) != 1:
+            raise ValueError("opening_assignment_lineage_ambiguous")
+        current_id = candidates[0].assignment_id
+        work_date = candidates[0].first_service_date
+
+
 class AssignmentPlanIssue(StrEnum):
     INVALID_INTENT = "invalid_scheduling_intent"
     COVERAGE_INCOMPLETE = "coverage_incomplete"

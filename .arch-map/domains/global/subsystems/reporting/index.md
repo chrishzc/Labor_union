@@ -7,6 +7,7 @@
 協調各owner的唯讀facts形成跨Domain營運報表；business roots與公式仍由Orders、Scheduling、Government Subsidy等owner擁有。現行runtime另接週報批次結算與指標寫入，不是整個Subsystem皆唯讀；期間與交易邊界的規格／實作差異見 `modules/weekly-operations-report.md`。
 
 ## Modules
+- `staff-performance` — 月／季／年月嫂接案、排班工時及整案金額分析；path: `modules/staff-performance.md`
 - `weekly-operations-report` — 案件、補助與正式服務工時報表，以及現行批次寫入與期間邏輯差異；path: `modules/weekly-operations-report.md`
 
 ## Dependencies

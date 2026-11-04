@@ -10,6 +10,16 @@ from infrastructure.mysql.weekly_operations_report_query_adapter import (
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
 from subsystems.reporting.weekly_report_metrics_service import WeeklyReportMetricsService
+from infrastructure.mysql.staff_performance_query_repository import MySqlStaffPerformanceQueryRepository
+from subsystems.reporting.staff_performance_query import StaffPerformanceQuery
+
+
+def get_staff_performance_query():
+    connection = get_connection()
+    try:
+        yield StaffPerformanceQuery(MySqlStaffPerformanceQueryRepository(connection), SystemBusinessClock().now)
+    finally:
+        connection.close()
 
 
 def get_weekly_operations_report_query():
@@ -31,4 +41,4 @@ def get_weekly_report_metrics_service():
         connection.close()
 
 
-__all__ = ["get_weekly_operations_report_query", "get_weekly_report_metrics_service"]
+__all__ = ["get_weekly_operations_report_query", "get_weekly_report_metrics_service", "get_staff_performance_query"]

@@ -116,6 +116,26 @@ class PricingPolicy:
             raise ValueError("pricing_covered_rate_must_be_positive")
 
 
+def calculate_case_total_amount(terms: CasePricingTerms, service_hours: tuple[tuple[Decimal, bool], ...], floor_fee: int) -> int:
+    """Full service charge before subsidy funding, plus the case's fixed fee.
+
+    Funding rules change who pays; they do not remove covered service from T.
+    Salary adjustments and cash receipts are not service-price components.
+    """
+    if type(floor_fee) is not int or floor_fee < 0:
+        raise ValueError("pricing_floor_fee_invalid")
+    consumed = Decimal(0)
+    amount = Decimal(floor_fee)
+    for hours, double_pay in service_hours:
+        hours = Decimal(str(hours))
+        if not hours.is_finite() or hours < 0:
+            raise ValueError("pricing_service_hours_invalid")
+        covered = min(hours, max(Decimal(0), terms.subsidy_hours - consumed))
+        amount += (covered * terms.client.covered + (hours - covered) * terms.client.excess) * (2 if double_pay else 1)
+        consumed += hours
+    return whole_ntd(amount)
+
+
 def whole_ntd(value: Decimal) -> int:
     if not value.is_finite() or value != value.to_integral_value():
         raise ValueError("pricing_amount_must_be_whole_ntd")

@@ -6,6 +6,7 @@ Description: 提供自選期間營運報表 strict JSON Query 與同 candidate �
 from __future__ import annotations
 
 from datetime import date
+from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -15,6 +16,7 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.operations_reports import (
     get_weekly_operations_report_query,
     get_weekly_report_metrics_service,
+    get_staff_performance_query,
 )
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
@@ -30,6 +32,9 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.reporting.weekly_operations_report_export import export_weekly_operations_report
 from subsystems.reporting.weekly_operations_report_query import WeeklyOperationsReportQuery
 from subsystems.reporting.weekly_report_metrics_service import WeeklyReportMetricsService
+from subsystems.reporting.staff_performance_query import StaffPerformanceQuery
+from subsystems.reporting.staff_performance_export import export_staff_performance
+from api.schemas.staff_performance import StaffPerformanceReportView
 
 
 router = APIRouter(prefix="/api/v1/operations-reports", tags=["Operations Reports"])
@@ -328,6 +333,64 @@ def save_weekly_report_metric(
             "每週推廣與詢問數值儲存失敗。",
             "weekly-report-metrics",
         ) from exc
+
+
+def _performance_candidate(request, query, year, period, month, quarter, staff_id):
+    allowed = {"year", "period", "month", "quarter", "staff_id"}
+    if request.url.path.endswith("/export"):
+        allowed.add("sort_by")
+    if set(request.query_params) - allowed:
+        raise ValueError("staff_performance_period_invalid")
+    return query.query(year, period, month, quarter, staff_id)
+
+
+def _performance_error(exc):
+    if isinstance(exc, ValueError) and str(exc) in {"staff_performance_period_invalid", "staff_performance_sort_invalid", "staff_performance_staff_not_found"}:
+        return typed_http_error(400, "validation", str(exc), "請確認統計期間及月嫂篩選。", "staff-performance")
+    return internal_query_error("staff_performance_query_failed", "月嫂表現分析載入失敗，請重新查詢。", "staff-performance")
+
+
+@router.get("/staff-performance", response_model=BaseResponse[StaffPerformanceReportView])
+def query_staff_performance(
+    request: Request,
+    year: int = Query(..., ge=2, le=9998),
+    period: Literal["month", "quarter", "year"] = Query("month"),
+    month: int | None = Query(None, ge=1, le=12),
+    quarter: int | None = Query(None, ge=1, le=4),
+    staff_id: int | None = Query(None, gt=0),
+    principal: AdminPrincipal = Depends(require_admin),
+    query: StaffPerformanceQuery = Depends(get_staff_performance_query),
+):
+    del principal
+    try:
+        report = _performance_candidate(request, query, year, period, month, quarter, staff_id)
+        return BaseResponse(data=StaffPerformanceReportView.model_validate(asdict(report)))
+    except Exception as exc:
+        raise _performance_error(exc) from exc
+
+
+@router.get("/staff-performance/export")
+def export_staff_performance_xlsx(
+    request: Request,
+    year: int = Query(..., ge=2, le=9998),
+    period: Literal["month", "quarter", "year"] = Query("month"),
+    month: int | None = Query(None, ge=1, le=12),
+    quarter: int | None = Query(None, ge=1, le=4),
+    staff_id: int | None = Query(None, gt=0),
+    sort_by: Literal["case_count", "service_hours", "total_amount_ntd"] = Query("service_hours"),
+    principal: AdminPrincipal = Depends(require_admin),
+    query: StaffPerformanceQuery = Depends(get_staff_performance_query),
+):
+    del principal
+    try:
+        report = _performance_candidate(request, query, year, period, month, quarter, staff_id)
+        content = export_staff_performance(report, sort_by)
+    except Exception as exc:
+        raise _performance_error(exc) from exc
+    return StreamingResponse(iter([content]), media_type=XLSX_MEDIA_TYPE, headers={
+        "Content-Disposition": f'attachment; filename="staff-performance-{report.start_date}_{report.end_date}.xlsx"',
+        "X-Staff-Performance-Version": report.schema_version,
+    })
 
 
 __all__ = ["router"]

@@ -1345,6 +1345,7 @@ export const StaffPage: React.FC = () => {
       >
         {selectedStaff && (
           <div className="staff-drawer-content">
+            <button type="button" className="staff-next-btn" disabled={interactionLocked} onClick={() => requestLeave(() => { window.location.hash = `reports?staff_id=${selectedStaff.id}`; })}>查看表現分析</button>
             {/* 完整資格主檔：個資、履歷、銀行與接案條件 */}
               <section className="staff-drawer-section" data-surface-id="staff.qualification-master" aria-label="完整資格主檔">
                 <h2 className="staff-management-title">📋 完整資格主檔</h2>
