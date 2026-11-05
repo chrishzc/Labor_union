@@ -5,13 +5,20 @@ Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與 Orders
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+from hashlib import sha256
+from io import BytesIO
+import json
 import os
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from openpyxl import Workbook
 import pytest
+from api.dependencies import historical_order_adoption as historical_dependencies
+from api.routes import historical_order_adoption as historical_routes
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
 from domains.orders.lifecycle import OrderLifecycleStatus
@@ -20,6 +27,8 @@ from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAss
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from shared_kernel.clock import FixedBusinessClock
+from subsystems.access.authentication_session import AdminPrincipal
 from .historical_accounting_fixture import default_accounting, seed_accounting_basis
 from infrastructure.mysql.historical_pending_deposit_matching_repository import MySqlHistoricalPendingDepositMatchingRepository
 from subsystems.orders.historical_order_adoption_outbox_consumer import (
@@ -47,6 +56,88 @@ pytestmark = pytest.mark.skipif(
 class _OutboxRuntime:
     def failure_unit_of_work(self, connection):
         return MySqlUnitOfWork(connection)
+
+
+def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monkeypatch):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        morning_case, staff_name = _seed_case(connection, token, "am")
+        afternoon_case, _ = _seed_case(connection, token, "pm")
+    finally:
+        connection.close()
+
+    clock = FixedBusinessClock(datetime(2026, 11, 5, 1, tzinfo=timezone.utc))
+    monkeypatch.setattr(historical_dependencies, "SystemBusinessClock", lambda: clock)
+    app = FastAPI()
+    app.include_router(historical_routes.router)
+    app.dependency_overrides[historical_routes.require_admin] = lambda: AdminPrincipal(
+        1, "historical-e2e", "測試工會人員", "system_admin",
+    )
+    path = "/api/v1/orders/historical-adoption/workbooks"
+
+    def workbook_bytes(morning, afternoon):
+        book = Workbook()
+        sheet = book.active
+        sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名", "服務時間"])
+        sheet.append([_client_name(morning_case), morning_case, date(2026, 9, 15), date(2026, 10, 30), 1, staff_name, morning])
+        sheet.append([_client_name(afternoon_case), afternoon_case, date(2026, 10, 19), date(2026, 11, 9), 1, staff_name, afternoon])
+        output = BytesIO()
+        book.save(output)
+        book.close()
+        return output.getvalue()
+
+    def apply_workbook(client, workbook):
+        files = {"workbook": ("history.xlsx", workbook)}
+        preview_response = client.post(f"{path}/preview", files=files)
+        assert preview_response.status_code == 200, preview_response.text
+        preview = preview_response.json()["data"]
+        response = client.post(
+            f"{path}/apply", files=files,
+            data={"preview_fingerprint": preview["preview_fingerprint"]},
+            headers={"Idempotency-Key": f"ui-import-historical-orders-authoritative-v3-{sha256(workbook).hexdigest()}",
+                     "X-Correlation-ID": f"historical-shifts-{token}"},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+
+    with TestClient(app) as client:
+        incomplete = workbook_bytes(None, None)
+        excluded = apply_workbook(client, incomplete)
+        assert excluded["import_counts"]["imported_count"] == 0
+        assert excluded["current_conflict_count"] == 2
+        assert apply_workbook(client, incomplete)["replayed_workbook"] is True
+
+        corrected = workbook_bytes("9:00-13:00(4小時)", "13:30 - 17:30(4小時)")
+        imported = apply_workbook(client, corrected)
+        assert imported["import_counts"]["imported_count"] == 2
+        assert imported["assignments_created"] == 2
+        assert apply_workbook(client, corrected)["replayed_workbook"] is True
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT o.case_no,o.status,a.staff_id,a.assigned_start_date,a.assigned_end_date,"
+                "r.result_snapshot FROM orders o JOIN case_staff_assignments a ON a.case_no=o.case_no "
+                "JOIN historical_order_adoption_receipts r ON r.case_no=o.case_no "
+                "WHERE o.case_no IN (%s,%s)", (morning_case, afternoon_case),
+            )
+            rows = cursor.fetchall()
+        assert len(rows) == 2
+        assert rows[0]["staff_id"] == rows[1]["staff_id"]
+        by_case = {row["case_no"]: row for row in rows}
+        for case, status, start_date, end_date, start_time, end_time in (
+            (morning_case, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, date(2026, 9, 15), date(2026, 10, 30), "09:00:00", "13:00:00"),
+            (afternoon_case, OrderLifecycleStatus.HISTORICAL_IN_SERVICE, date(2026, 10, 19), date(2026, 11, 9), "13:30:00", "17:30:00"),
+        ):
+            row = by_case[case]
+            assert (row["status"], row["assigned_start_date"], row["assigned_end_date"]) == (status.value, start_date, end_date)
+            assert json.loads(row["result_snapshot"])["historical_service_time"] == {
+                "start_time": start_time, "end_time": end_time, "end_day_offset": 0,
+            }
+    finally:
+        connection.close()
 
 
 def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):

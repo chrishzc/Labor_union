@@ -33,25 +33,7 @@ export type AdminLoginRequest = z.infer<typeof AdminLoginRequestSchema>;
 const STORAGE_KEY_TOKEN = 'union_admin_session_token';
 const STORAGE_KEY_USER = 'union_admin_session_user';
 
-const DEVELOPMENT_BYPASS_ENABLED =
-  import.meta.env.DEV &&
-  import.meta.env.VITE_ACCESS_CONTROL_PROFILE === 'local_bypass';
-
-const DEVELOPMENT_BYPASS_USER: AdminPublic = {
-  id: null,
-  username: 'development-bypass',
-  display_name: '開發模式管理員',
-  role: 'system_admin',
-  linked_line_user_id: null,
-  capabilities: [],
-  is_root: false,
-  access_control_version: 1,
-};
-
 function getInitialToken(): string | null {
-  if (DEVELOPMENT_BYPASS_ENABLED) {
-    return 'development-bypass';
-  }
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const storedToken = window.sessionStorage.getItem(STORAGE_KEY_TOKEN);
@@ -66,9 +48,6 @@ function getInitialToken(): string | null {
 }
 
 function getInitialUser(): AdminPublic | null {
-  if (DEVELOPMENT_BYPASS_ENABLED) {
-    return DEVELOPMENT_BYPASS_USER;
-  }
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const raw = window.sessionStorage.getItem(STORAGE_KEY_USER);

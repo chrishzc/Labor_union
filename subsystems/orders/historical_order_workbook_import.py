@@ -694,6 +694,8 @@ def _source_schedule_conflict_exclusions(
                 issue_codes_by_index.setdefault(row_index, set()).update(
                     (conflict.issue_code, detail_code)
                 )
+                if own.service_time is None and "historical_service_time_unconfirmed" not in workbook.rows[row_index].issue_codes:
+                    issue_codes_by_index[row_index].add("historical_service_time_missing")
                 fields_by_index.setdefault(row_index, set()).update(
                     ("服務時段", f"第 {own.pairing_ordinal} 位月嫂姓名")
                 )

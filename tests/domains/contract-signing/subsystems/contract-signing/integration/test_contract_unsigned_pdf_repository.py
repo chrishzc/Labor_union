@@ -360,7 +360,7 @@ def test_append_audit_uses_borrowed_transaction_and_excludes_locator_and_digest(
     assert connection.rollback_calls == 0
 
 
-def test_append_audit_records_explicit_local_bypass_as_system_actor():
+def test_append_audit_records_persisted_admin_actor():
     connection = _Connection([])
     repository = MySqlContractUnsignedPdfRepository(connection)
 
@@ -368,7 +368,7 @@ def test_append_audit_records_explicit_local_bypass_as_system_actor():
         UnsignedContractPdfDownloadAudit(
             case_no="CASE-1",
             document_version_id=41,
-            actor_id="system:local_bypass",
+            actor_id="admin:7",
             correlation_id="corr-local-1",
             filename="unsigned-contract.pdf",
             mime_type="application/pdf",
@@ -378,5 +378,5 @@ def test_append_audit_records_explicit_local_bypass_as_system_actor():
 
     sql, parameters = connection.cursor_instance.executions[0]
     assert "INSERT INTO admin_audit_logs" in sql
-    assert parameters[0] is None
+    assert parameters[0] == 7
     assert "contract_unsigned_pdf_downloaded" in parameters

@@ -504,6 +504,7 @@ describe('Data Import simple result flows', () => {
           issue_codes: [
             'historical_order_source_schedule_conflict',
             'historical_order_source_schedule_conflict_detail:row=28;staff_id=11;own=2026-08-01~2026-08-10;peer=2026-08-08~2026-08-15;case_no=CASE-028',
+            'historical_service_time_missing',
           ],
         },
         {
@@ -524,6 +525,7 @@ describe('Data Import simple result flows', () => {
     const details = within(card).getByLabelText('未匯入明細');
     expect(details).toHaveTextContent('CASE-015');
     expect(details).toHaveTextContent('與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂服務時段待確認。');
+    expect(details).toHaveTextContent('本列沒有讀到服務時段');
     expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
   });
 });

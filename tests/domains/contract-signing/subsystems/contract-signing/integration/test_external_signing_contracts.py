@@ -161,20 +161,19 @@ def test_manual_report_requires_persisted_admin_actor() -> None:
         )
 
 
-def test_manual_report_accepts_the_exact_local_bypass_validation_actor() -> None:
-    command = RecordManualExternalStaffSigningReport(
-        "ces_1234567890abcdef1234567890abcdef", "CASE-001", 9, 11, 101, "501",
-        ManualAttestationEvidence(
-            ManualAttestationMethod.PHONE, "confirmed", "evidence:1", "e" * 64
-        ),
-        "manual-event-local-bypass", "d" * 64,
-        datetime(2026, 8, 26, 12, tzinfo=timezone.utc), ExpectedVersion(0),
-        ActorContext("system:local_bypass"),
-        IdempotencyKey("external-report:manual:local-bypass"),
-        CorrelationId("corr-manual-local-bypass"),
-    )
-
-    assert command.actor.actor_id == "system:local_bypass"
+def test_manual_report_rejects_the_retired_local_bypass_actor() -> None:
+    with pytest.raises(ValueError, match="persisted admin"):
+        RecordManualExternalStaffSigningReport(
+            "ces_1234567890abcdef1234567890abcdef", "CASE-001", 9, 11, 101, "501",
+            ManualAttestationEvidence(
+                ManualAttestationMethod.PHONE, "confirmed", "evidence:1", "e" * 64
+            ),
+            "manual-event-local-bypass", "d" * 64,
+            datetime(2026, 8, 26, 12, tzinfo=timezone.utc), ExpectedVersion(0),
+            ActorContext("system:local_bypass"),
+            IdempotencyKey("external-report:manual:local-bypass"),
+            CorrelationId("corr-manual-local-bypass"),
+        )
 
 
 def _staff_command(

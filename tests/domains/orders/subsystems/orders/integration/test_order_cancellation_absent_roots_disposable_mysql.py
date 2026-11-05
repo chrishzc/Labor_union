@@ -86,7 +86,7 @@ def test_real_http_nullable_versions_refund_partial_roots_and_stale_apply(monkey
     app = FastAPI()
     for router in (cancellation_router, reopen_router, bootstrap_router):
         app.include_router(router)
-    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(id=None, username="local_bypass", display_name="Synthetic test", role="system_admin")
+    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(id=1, username="admin_tester", display_name="Synthetic test", role="system_admin")
     connection = mysql_adapter.get_connection()
     cases = ("ENGINE-NO-ROOTS", "ENGINE-SCHEDULING", "ENGINE-PARTIAL", "ENGINE-STALE", "ENGINE-DEPOSIT")
     try:

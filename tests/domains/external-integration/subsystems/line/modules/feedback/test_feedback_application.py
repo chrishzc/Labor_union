@@ -201,7 +201,7 @@ def test_development_router_preview_exposes_fixed_buckets_and_requested_confiden
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
     monkeypatch.setenv("LIFF_REQUIRE_ID_TOKEN", "false")
 
     clarification = preview_router(LineRouterPreviewRequest(
@@ -233,7 +233,7 @@ def test_development_router_preview_exposes_fixed_buckets_and_requested_confiden
 
 def test_router_preview_is_closed_outside_development_no_auth_profile(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
     monkeypatch.setenv("LIFF_REQUIRE_ID_TOKEN", "false")
 
     with pytest.raises(HTTPException) as raised:

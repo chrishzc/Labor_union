@@ -42,7 +42,7 @@ def create_app():
     app = FastAPI()
     for router in (registry_router, bootstrap_router, intake_router):
         app.include_router(router)
-    principal = AdminPrincipal(id=None, username="local_bypass", display_name="Synthetic test", role="system_admin")
+    principal = AdminPrincipal(id=1, username="admin_tester", display_name="Synthetic test", role="system_admin")
     for dependency in (require_persisted_admin, require_registry_reader, require_registry_writer, require_system_admin):
         app.dependency_overrides[dependency] = lambda: principal
     return app

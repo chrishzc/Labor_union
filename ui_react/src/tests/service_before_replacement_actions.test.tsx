@@ -484,7 +484,7 @@ describe('RPRE cryptographic response verification', () => {
       username: 'development-bypass',
       role: 'system_admin',
     })).toEqual({
-      actor: 'system:local_bypass',
+      actor: 'admin:development',
       capabilities: ['orders.historical_review.remediate'],
     });
     expect(serviceBeforeReplacementActorBinding({

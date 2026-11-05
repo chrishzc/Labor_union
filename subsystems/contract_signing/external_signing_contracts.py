@@ -29,7 +29,7 @@ from shared_kernel.validation import (
 _SESSION_ID = re.compile(r"^ces_[0-9a-f]{32}$")
 _REPORT_ID = re.compile(r"^cer_[0-9a-f]{32}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,190}$")
-_MANUAL_ATTESTATION_ACTOR = re.compile(r"^(?:admin:[1-9][0-9]*|system:local_bypass)$")
+_MANUAL_ATTESTATION_ACTOR = re.compile(r"^admin:[1-9][0-9]*$")
 
 
 class ExternalCompletionReportScope(StrEnum):

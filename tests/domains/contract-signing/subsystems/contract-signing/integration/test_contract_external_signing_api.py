@@ -690,42 +690,17 @@ def test_external_platform_handoff_uses_persisted_admin_and_expected_version() -
     assert command.actor.actor_id == "admin:7"
 
 
-def test_local_bypass_can_execute_the_approved_recovery_without_a_root_account(monkeypatch) -> None:
+def test_unauthenticated_recovery_is_rejected_when_bypass_is_retired(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
     application = FakeApplication()
     client = _local_bypass_client(application)
-    preview_body = {
-        "scope": "staff",
-        "matching_segment_id": 71,
-        "legacy_document_version_id": 61,
-        "signing_event_id": 62,
-        "command_receipt_id": 63,
-        "confirmation_method": "paper",
-        "reason": "依受控歷史紙本建立修復血緣",
-    }
 
     query = client.get(
         f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery"
     )
-    apply = client.post(
-        f"/api/v1/orders/{CASE_NO}/contract-external-signing/legacy-recovery/apply",
-        headers={
-            "Idempotency-Key": "contract-legacy-recovery:" + UUID,
-            "X-Receipt-ID": RECEIPT_ID,
-            "X-Correlation-ID": "corr-local-bypass-recovery",
-        },
-        json={
-            **preview_body,
-            "preview_fingerprint": "f" * 64,
-            "expected_status_version": 0,
-        },
-    )
-
-    assert query.status_code == 200
-    assert apply.status_code == 200
-    assert application.reports.command.actor.actor_id == "system:local_bypass"
+    assert query.status_code == 401
 
 
 def test_legacy_recovery_query_preview_and_apply_are_typed_and_closed() -> None:

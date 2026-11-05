@@ -38,6 +38,7 @@ const REASON_LABELS: Record<string, string> = {
   historical_order_source_schedule_conflict: '與同檔案其他案件的月嫂服務時段重疊',
   historical_order_source_schedule_unconfirmed: '同一月嫂的服務時段待確認',
   historical_service_time_unconfirmed: '每日服務起訖或跨日標記不完整',
+  historical_service_time_missing: '本列沒有讀到服務時段，請在 Excel「服務時間」欄填入完整起訖，例如 09:00–13:00。',
 };
 
 const SCHEDULE_CONFLICT_DETAIL_PREFIX = 'historical_order_source_schedule_conflict_detail:';
@@ -161,10 +162,10 @@ function reasonLabel(code: string): string {
 }
 
 function historicalOrderRowReasons(issueCodes: ReadonlyArray<string>): string[] {
-  const hasConflictDetail = issueCodes.some(code => code.startsWith(SCHEDULE_CONFLICT_DETAIL_PREFIX));
-  const filtered = hasConflictDetail
-    ? issueCodes.filter(code => code !== 'historical_order_source_schedule_conflict')
-    : issueCodes;
+  const filtered = issueCodes.filter(code => !(
+    (code === 'historical_order_source_schedule_conflict' || code === 'historical_order_source_schedule_unconfirmed')
+    && issueCodes.some(detail => detail.startsWith(`${code}_detail:`))
+  ));
   return [...new Set(filtered.map(reasonLabel))];
 }
 

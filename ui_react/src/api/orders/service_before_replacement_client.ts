@@ -648,9 +648,7 @@ export function serviceBeforeReplacementActorBinding(
 ): ServiceBeforeReplacementActorBinding {
   const actor = user.id !== null
     ? `admin:${user.id}`
-    : user.username === 'development-bypass' && user.role === 'system_admin'
-      ? 'system:local_bypass'
-      : 'admin:development';
+    : 'admin:development';
   return {
     actor,
     capabilities: ['orders.historical_review.remediate'],

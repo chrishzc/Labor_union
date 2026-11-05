@@ -27,7 +27,7 @@ from subsystems.contract_signing.template_catalog import TemplateCatalogPort, lo
 
 
 _AUTHORIZED_LOCAL_OR_PERSISTED_ACTOR = re.compile(
-    r"^(?:admin:[1-9][0-9]*|system:local_bypass)$"
+    r"^admin:[1-9][0-9]*$"
 )
 _OPAQUE_OBJECT_REFERENCE = re.compile(r"^[a-z][a-z0-9_-]{15,63}$")
 _UNSIGNED_DOCUMENT_ROLE = "template_generated"

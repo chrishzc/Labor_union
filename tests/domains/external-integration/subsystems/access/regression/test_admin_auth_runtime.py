@@ -194,17 +194,17 @@ def test_login_attempt_window_uses_injected_clock_boundary():
     assert cursor.parameters[-1] == now
 
 
-def test_development_bypass_cannot_publish_to_line(monkeypatch):
+def test_retired_bypass_profile_rejects_missing_bearer_token(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
     monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
     request = Request({"type": "http"})
 
-    principal = require_admin(request, None)
+    with pytest.raises(HTTPException) as exc_info:
+        require_admin(request, None)
 
-    assert "line.config.manage" in principal.effective_capabilities()
-    assert "line.menu.publish" not in principal.effective_capabilities()
-    assert "line.rich_menu.publish" not in principal.effective_capabilities()
+    assert exc_info.value.status_code == 401
+    assert "缺少有效的管理員 Session" in str(exc_info.value.detail)
 
 
 def test_capability_projection_ignores_legacy_persisted_subsets():

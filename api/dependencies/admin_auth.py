@@ -25,12 +25,9 @@ from subsystems.access.integration_capabilities import IntegrationCapability
 
 
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
-DEVELOPMENT_BYPASS_DENIED_CAPABILITIES = frozenset(
-    {"line.menu.publish", "line.rich_menu.publish"}
-)
 
 ACCESS_CONTROL_PROFILES = frozenset(
-    {"local_bypass", "local_auth", "local_developer_session", "production"}
+    {"local_auth", "local_developer_session", "production"}
 )
 
 
@@ -48,15 +45,8 @@ def access_control_profile() -> str:
 
 
 def admin_auth_is_enabled() -> bool:
-    """Return False only for the named local_bypass profile with both safeguards."""
-    app_env = os.getenv("APP_ENV", "").strip().lower()
-    configured = os.getenv("ENABLE_ADMIN_AUTH", "true").strip().lower()
-    requested_bypass = configured in {"0", "false", "no", "off"}
-    return not (
-        access_control_profile() == "local_bypass"
-        and app_env in DEVELOPMENT_ENVIRONMENTS
-        and requested_bypass
-    )
+    """Bypass is retired; admin authentication is always enforced."""
+    return True
 
 
 def ensure_development_line_configuration() -> None:
@@ -116,12 +106,6 @@ def require_admin(
     authorization: str | None = Header(default=None),
     connection_factory: ConnectionFactory = Depends(get_access_control_connection_factory),
 ) -> AdminPrincipal:
-    if not admin_auth_is_enabled():
-        principal = _development_bypass_principal()
-        request.state.admin_principal = principal
-        request.state.admin_auth_bypassed = True
-        return principal
-
     token = get_bearer_token(authorization)
     try:
         principal = get_admin_session(token, connection_factory=connection_factory)
@@ -151,28 +135,11 @@ def optional_admin(
 ) -> AdminPrincipal | None:
     """Optional admin session extractor; returns None if absent or invalid without throwing 401."""
     if not authorization:
-        if not admin_auth_is_enabled():
-            return require_admin(request, authorization, connection_factory)
         return None
     try:
         return require_admin(request, authorization, connection_factory)
     except Exception:
         return None
-
-
-def _development_bypass_principal() -> AdminPrincipal:
-    base = AdminPrincipal(None, "development-bypass", "開發模式管理員", "system_admin")
-    capabilities = frozenset(
-        base.effective_capabilities() - DEVELOPMENT_BYPASS_DENIED_CAPABILITIES
-    )
-    return AdminPrincipal(
-        base.id,
-        base.username,
-        base.display_name,
-        base.role,
-        capabilities=capabilities,
-        is_root=True,
-    )
 
 
 def require_root(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
@@ -190,13 +157,7 @@ def require_persisted_admin(
     principal: AdminPrincipal = Depends(require_admin),
 ) -> AdminPrincipal:
     """Require an enabled, persisted human session for durable business commands."""
-    local_bypass = (
-        not admin_auth_is_enabled()
-        and principal.id is None
-        and principal.username == "development-bypass"
-        and principal.role == "system_admin"
-    )
-    if (principal.id is None and not local_bypass) or not principal.enabled:
+    if principal.id is None or not principal.enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="需要已登入且啟用的內部使用者 Session",
@@ -218,16 +179,7 @@ def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
 
 
 def admin_actor_context(principal: AdminPrincipal) -> ActorContext:
-    if principal.id is not None:
-        actor_id = f"admin:{principal.id}"
-    elif (
-        not admin_auth_is_enabled()
-        and principal.username == "development-bypass"
-        and principal.role == "system_admin"
-    ):
-        actor_id = "system:local_bypass"
-    else:
-        actor_id = "admin:development"
+    actor_id = f"admin:{principal.id}" if principal.id is not None else "admin:development"
     return ActorContext(actor_id, tuple(sorted(principal.effective_capabilities())))
 
 

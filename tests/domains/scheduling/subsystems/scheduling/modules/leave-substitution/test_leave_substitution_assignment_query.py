@@ -69,10 +69,12 @@ class _Application:
         return self.assignments
 
 
-def _app(application: _Application) -> FastAPI:
+def _app(application: _Application, override_auth: bool = True) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_leave_substitution_application] = lambda: application
+    if override_auth:
+        app.dependency_overrides[require_admin] = lambda: AdminPrincipal(1, "admin", "Admin", "system_admin")
     return app
 
 
@@ -190,7 +192,7 @@ def test_route_keeps_401_and_403_admin_boundary(monkeypatch):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    unauthenticated_app = _app(_Application())
+    unauthenticated_app = _app(_Application(), override_auth=False)
 
     unauthenticated = TestClient(unauthenticated_app).get(
         "/api/v1/orders/CASE-LEAVE-1/leave-substitution/assignments"

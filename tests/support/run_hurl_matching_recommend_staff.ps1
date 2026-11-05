@@ -48,8 +48,8 @@ finally {
 
 $controlledEnvironment = @{
     "APP_ENV" = "test"
-    "ACCESS_CONTROL_PROFILE" = "local_bypass"
-    "ENABLE_ADMIN_AUTH" = "false"
+    "ACCESS_CONTROL_PROFILE" = "local_auth"
+    "ENABLE_ADMIN_AUTH" = "true"
     "DB_DATABASE" = $DisposableDatabase
 }
 $originalEnvironment = @{}

@@ -49,7 +49,7 @@ Global 只定義跨 Domain 不得被破壞的不變量與共用技術契約，�
 - Typed schema 下 `1` 與 `1.0` 是不同 payload；若 persistence 無法保存此差異，對應 caller fail closed。
 - canonical idempotency key 必須先符合 `^[a-z0-9][a-z0-9._:-]{0,190}$`；禁止 silent lowercase。
 - `submitted_by` 必須是 immutable actor identity，不得用 display username。
-- 只有 development/dev/local/test＋明確 local-bypass profile 才可使用 `system:local_bypass`；production 或一般無 ID principal 拒絕。
+- local_bypass profile 已正式退役；所有 command 與持久化變更必須由具備明確 ID 之管理員（`admin:<id>`）或授權系統服務提交，禁止無 ID 之 bypass principal。
 - terminal receipt/error 使用 closed command discriminator＋schema version；禁止 raw map 穿透 public view。
 - repository 不 hidden commit／rollback；application composition 是唯一 outer UoW／commit owner。
 

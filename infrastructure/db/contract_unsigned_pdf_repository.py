@@ -286,8 +286,6 @@ class MySqlContractUnsignedPdfRepository:
 
 
 def _admin_user_id(actor_id: str) -> int | None:
-    if actor_id == "system:local_bypass":
-        return None
     prefix, separator, value = actor_id.partition(":")
     if prefix != "admin" or separator != ":" or not value.isascii() or not value.isdigit():
         raise ValueError("invalid persisted admin actor")

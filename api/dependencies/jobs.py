@@ -48,13 +48,6 @@ def get_durable_job_cancellation() -> Iterator[DurableJobCancellationApplication
 def immutable_admin_job_actor(principal: AdminPrincipal, correlation_id: str) -> str:
     if isinstance(principal.id, int) and principal.id > 0:
         return f"admin_user_id:{principal.id}"
-    if (
-        not admin_auth_is_enabled()
-        and principal.id is None
-        and principal.username == "development-bypass"
-        and principal.role == "system_admin"
-    ):
-        return "system:local_bypass"
     raise typed_http_error(
         403,
         "authorization",

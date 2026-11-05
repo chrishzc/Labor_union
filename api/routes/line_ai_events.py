@@ -304,7 +304,7 @@ def _development_identity_fallback_enabled() -> bool:
     access_profile = os.getenv("ACCESS_CONTROL_PROFILE", "").strip().lower()
     required = os.getenv("LIFF_REQUIRE_ID_TOKEN", "true").strip().lower()
     return (
-        access_profile in {"local_bypass", "local_auth"}
+        access_profile == "local_auth"
         and app_env in {"development", "dev", "local", "test"}
         and required in {"0", "false", "no", "off"}
     )

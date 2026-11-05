@@ -101,7 +101,7 @@ def preview_approval(request_id: int, payload: ClientProfileApprovalPreviewReque
 @review_router.post("/{request_id}/approve/apply", response_model=BaseResponse[ClientProfileApprovalReceiptView])
 def apply_approval(request_id: int, payload: ClientProfileApprovalApplyRequest, principal: AdminPrincipal = Depends(require_customer_service_handler), application: ClientProfileApplication = Depends(get_client_profile_application)):
     try:
-        actor = ActorContext(f"admin:{principal.id}" if principal.id is not None else "system:local_bypass", tuple(sorted(principal.effective_capabilities())))
+        actor = ActorContext(f"admin:{principal.id}", tuple(sorted(principal.effective_capabilities())))
         receipt = application.apply_approval(
             request_id, actor, payload.reason, ExpectedVersion(payload.expected_request_version),
             ExpectedVersion(payload.expected_profile_version), PreviewFingerprint(payload.preview_fingerprint),
@@ -124,7 +124,7 @@ def preview_rejection(request_id: int, payload: ClientProfileRejectPreviewReques
 @review_router.post("/{request_id}/reject", response_model=BaseResponse[ClientProfileRequestView])
 def reject_request(request_id: int, payload: ClientProfileRejectRequest, principal: AdminPrincipal = Depends(require_customer_service_handler), application: ClientProfileApplication = Depends(get_client_profile_application)):
     try:
-        actor = ActorContext(f"admin:{principal.id}" if principal.id is not None else "system:local_bypass", tuple(sorted(principal.effective_capabilities())))
+        actor = ActorContext(f"admin:{principal.id}", tuple(sorted(principal.effective_capabilities())))
         result = application.reject_request(
             request_id, actor, payload.reason, ExpectedVersion(payload.expected_request_version),
             PreviewFingerprint(payload.preview_fingerprint), IdempotencyKey(payload.idempotency_key), CorrelationId(payload.correlation_id),

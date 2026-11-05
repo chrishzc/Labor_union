@@ -122,7 +122,7 @@ Current 與 previous React artifact 可供 React artifact rollback；這不等�
 5. incident worker
 6. 依 current configuration 啟用的 LINE／knowledge workers
 
-Windows `local_bypass` 可使用主機 npm 或 Docker Vite。沒有主機 npm 時，
+Windows 開發環境可使用主機 npm 或 Docker Vite（註：`local_bypass` profile 已退役，統一採 `local_auth`）。沒有主機 npm 時，
 `supervise_local_runtime.ps1` 將 Docker Vite 發布於動態分配的 `127.0.0.1` port，
 並啟動 owned `scripts.launchers.local_react_gateway`，在 `127.0.0.1:5173`
 將 `/api`、`/line-`、`/webhook` 請求轉送至主機 loopback FastAPI，

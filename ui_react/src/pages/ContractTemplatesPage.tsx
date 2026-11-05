@@ -10,7 +10,7 @@ const COMMAND_STORAGE = 'contract-template-pending-command';
 type Pending = { key: TemplateKey; id: string; action: 'save' | 'activate'; versionId?: string; expectedVersion: number; save?: TemplateSave; requiresFile?: boolean; fileName?: string; fileDigest?: string; restored?: boolean };
 const templateName = (key: TemplateKey) => key === 'contract_client_copy' ? '客戶服務契約' : '服務人員委任契約';
 const label = (text: string) => text.replace(/（[^）]*）|\([^)]*\)/g, '').trim();
-const actorLabel = (value: string) => value === 'system' ? '系統隨附' : value === 'system:local_bypass' ? '本機管理員' : value.replace(/^admin:/, '管理員 ');
+const actorLabel = (value: string) => value === 'system' ? '系統隨附' : value.replace(/^admin:/, '管理員 ');
 function column(n: number): string { let name = ''; for (; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name; return name; }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : '目前無法完成操作，請保留內容後重試。'; }
 function initialPending(): Pending | null { try { const raw = sessionStorage.getItem(COMMAND_STORAGE); if (!raw) return null; const value: unknown = JSON.parse(raw); if (typeof value !== 'object' || value === null) return null; const row = value as Record<string, unknown>; return (row.key === 'contract_client_copy' || row.key === 'contract_staff_service') && typeof row.id === 'string' && (row.action === 'save' || row.action === 'activate') && typeof row.expectedVersion === 'number' ? { ...row, restored: true } as unknown as Pending : null; } catch { return null; } }

@@ -46,7 +46,8 @@ def test_workbook_compares_combined_service_times_across_overlapping_date_ranges
     workbook.save(path)
     workbook.close()
 
-    morning, afternoon = load_historical_order_workbook(path).rows
+    source = load_historical_order_workbook(path)
+    morning, afternoon = source.rows
     assert morning.service_time == ServiceTimeTerms(time(9), time(13), 0)
     assert afternoon.service_time == ServiceTimeTerms(time(13, 30), time(17, 30), 0)
     previews = tuple(
@@ -61,6 +62,12 @@ def test_workbook_compares_combined_service_times_across_overlapping_date_ranges
         for row in (morning, afternoon)
     )
     assert module.project_source_schedule_conflicts(previews, (morning, afternoon)) == ()
+
+    missing_time = replace(source, rows=(replace(morning, service_time=None), afternoon))
+    exclusions = module._source_schedule_conflict_exclusions(missing_time, previews)
+    assert exclusions[0].fields == ("服務時段", "第 1 位月嫂姓名")
+    assert "historical_service_time_missing" in exclusions[0].issue_codes
+    assert "historical_service_time_missing" not in exclusions[1].issue_codes
 
     overlapping = replace(afternoon, service_time=ServiceTimeTerms(time(12, 30), time(16, 30), 0))
     conflict, = module.project_source_schedule_conflicts(previews, (morning, overlapping))

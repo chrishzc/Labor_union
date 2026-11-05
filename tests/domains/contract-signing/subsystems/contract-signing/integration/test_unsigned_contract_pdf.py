@@ -244,21 +244,22 @@ def test_download_rejects_unapproved_nonpersisted_actor_before_repository_access
     assert storage.calls == []
 
 
-def test_download_accepts_the_exact_local_bypass_validation_actor():
+def test_download_rejects_the_retired_local_bypass_actor():
     application, repository, storage, _renderer = _application(stored=_stored())
 
-    result = application.download(
-        DownloadUnsignedContractPdf(
-            "CASE-1",
-            12,
-            _actor("system:local_bypass"),
-            CorrelationId("contract-download-local-bypass"),
+    with pytest.raises(UnsignedContractPdfError) as captured:
+        application.download(
+            DownloadUnsignedContractPdf(
+                "CASE-1",
+                12,
+                _actor("system:local_bypass"),
+                CorrelationId("contract-download-local-bypass"),
+            )
         )
-    )
 
-    assert result.content == PDF
-    assert len(repository.audits) == 1
-    assert storage.calls
+    assert captured.value.code == "contract_pdf_requires_persisted_actor"
+    assert repository.download_queries == []
+    assert storage.calls == []
 
 
 @pytest.mark.parametrize(
