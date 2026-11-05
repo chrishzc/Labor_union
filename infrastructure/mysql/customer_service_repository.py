@@ -39,8 +39,6 @@ class MySqlCustomerServiceRepository:
             return existing_event
         ticket = self._active_ticket(command.line_user_id, command.category)
         if ticket is None:
-            ticket = self._latest_ticket(command.line_user_id, command.category)
-        if ticket is None:
             ticket = self._create_ticket(command)
         self._append_event(ticket.ticket_id, command)
         return self.get(ticket.ticket_id)

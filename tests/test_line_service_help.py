@@ -64,6 +64,7 @@ def test_service_help_page_returns_html(client):
     assert "AI 智慧問答" in content
     assert "沒看到您想問的問題？" in content
     assert "ai-guide-banner" in content
+    assert "依據規範" not in content
 
 
 def test_service_help_faq_endpoint(client):

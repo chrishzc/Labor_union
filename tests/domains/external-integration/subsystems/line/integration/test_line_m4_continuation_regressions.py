@@ -57,6 +57,10 @@ class SqlCursor:
     def rowcount(self):
         return self.inner.rowcount
 
+    @property
+    def lastrowid(self):
+        return self.inner.lastrowid
+
     def fetchone(self):
         row = self.inner.fetchone()
         return dict(row) if row is not None else None
@@ -73,9 +77,12 @@ class SqlConnection:
         self.statements = []
         self.db.executescript("""
             CREATE TABLE clients (id INTEGER PRIMARY KEY, name TEXT, phone TEXT);
+            CREATE TABLE orders (case_no TEXT PRIMARY KEY, client_id INTEGER, status TEXT, start_date TEXT, end_date TEXT, created_at TEXT);
+            CREATE TABLE line_identity_role_bindings (line_user_id TEXT, subject_type TEXT, subject_reference TEXT, binding_status TEXT);
             CREATE TABLE customer_service_tickets (
-                id INTEGER PRIMARY KEY, line_user_id TEXT, category TEXT, status TEXT,
-                version INTEGER, assigned_to_admin_user_id INTEGER, client_id INTEGER,
+                id INTEGER PRIMARY KEY AUTOINCREMENT, line_user_id TEXT, client_id INTEGER,
+                case_no TEXT, category TEXT, status TEXT DEFAULT 'waiting',
+                version INTEGER DEFAULT 0, assigned_to_admin_user_id INTEGER,
                 resolved_at_utc TEXT);
             CREATE TABLE customer_service_ticket_events (
                 id INTEGER PRIMARY KEY, ticket_id INTEGER, event_key TEXT UNIQUE,
@@ -98,20 +105,27 @@ class TicketSqlTests(unittest.TestCase):
         self.addCleanup(self.connection.db.close)
         self.repo = MySqlCustomerServiceRepository(self.connection)
         self.connection.db.execute(
-            "INSERT INTO customer_service_tickets VALUES (31,'U-m4','other','resolved',2,NULL,NULL,'2026-09-01')"
+            "INSERT INTO customer_service_tickets (id, line_user_id, client_id, case_no, category, status, version, assigned_to_admin_user_id, resolved_at_utc) "
+            "VALUES (31,'U-m4',NULL,NULL,'other','resolved',2,NULL,'2026-09-01')"
         )
 
-    def test_new_message_reopens_then_escalation_can_take_over_same_ticket(self):
+    def test_resolved_ticket_creates_new_ticket_on_reengagement(self):
         ticket = self.repo.create_or_append(CreateCustomerServiceMessage(
             "U-m4", CustomerServiceCategory.OTHER, "synthetic complaint", "message:m4:1"
         ))
+        self.assertNotEqual(ticket.ticket_id, 31)
+        self.assertIs(ticket.status, CustomerServiceStatus.WAITING)
+        self.assertEqual(ticket.version, 1)
+        self.assertIs(self.repo.get(31).status, CustomerServiceStatus.RESOLVED)
+
+    def test_active_ticket_appends_new_message_to_same_ticket(self):
+        self.connection.db.execute("UPDATE customer_service_tickets SET status='handling' WHERE id=31")
+        ticket = self.repo.create_or_append(CreateCustomerServiceMessage(
+            "U-m4", CustomerServiceCategory.OTHER, "synthetic continuation", "message:m4:2"
+        ))
+        self.assertEqual(ticket.ticket_id, 31)
         self.assertIs(ticket.status, CustomerServiceStatus.HANDLING)
         self.assertEqual(ticket.version, 3)
-        handled = self.repo.start_handling_for_escalation(31, 3, "admin:7")
-        self.assertIs(handled.status, CustomerServiceStatus.HANDLING)
-        self.assertEqual(handled.version, 4)
-        self.assertEqual(handled.assigned_admin_user_id, 7)
-        self.assertEqual(self.connection.db.execute("SELECT COUNT(*) FROM customer_service_ticket_events").fetchone()[0], 2)
 
     def test_waiting_ticket_can_still_be_taken_over(self):
         self.connection.db.execute("UPDATE customer_service_tickets SET status='waiting'")
