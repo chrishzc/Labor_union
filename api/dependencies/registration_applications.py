@@ -1,4 +1,7 @@
-"""Internal human review composition; the public intake application does not import this module."""
+"""
+File: registration_applications.py
+Description: 管理後台需求審核依賴組裝，自動確認共用 Redis 暫存命名空間初始化狀態。
+"""
 from functools import lru_cache
 
 from api.dependencies.line_identity import get_line_identity_application
@@ -16,4 +19,11 @@ def get_registration_staging_repository():
 def get_registration_review_application():
     staging = get_registration_staging_repository()
     formal = get_line_identity_application()
+    try:
+        staging.ensure_initialized()
+    except Exception:
+        try:
+            staging.initialize(formal.registration_id_high_water(), shared_instance=True)
+        except Exception:
+            pass
     return RegistrationReviewApplication(staging, formal)

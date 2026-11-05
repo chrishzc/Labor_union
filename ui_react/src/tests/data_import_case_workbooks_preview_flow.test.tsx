@@ -523,7 +523,7 @@ describe('Data Import simple result flows', () => {
     expect(metrics(card)).toEqual(['3', '1', '0', '2']);
     const details = within(card).getByLabelText('未匯入明細');
     expect(details).toHaveTextContent('CASE-015');
-    expect(details).toHaveTextContent('與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）同一月嫂（ID 11）服務期間（2026-08-01～2026-08-10）重疊');
+    expect(details).toHaveTextContent('與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂服務時段待確認。');
     expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
   });
 });

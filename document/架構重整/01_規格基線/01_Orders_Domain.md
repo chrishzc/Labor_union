@@ -647,6 +647,8 @@ Order、驗證 version／fingerprint，並以單一 UoW 保存 Orders root、eve
 
 **HIST-SHIFT-01／同日分時。** Preview 對整份工作簿零寫入驗證採納資格、狀態機、實際期間及同一月嫂跨案班次。以可追溯的歷史來源時段或能證明當時約定的 Orders 完整時段為準，保留起訖及跨日標記。當期條款不能覆蓋已證實的歷史約定，兩種來源矛盾時列待確認。依規格 02 SHIFT-01 比較班次。同日已證實不重疊可並列採納；已證實重疊回 `historical_order_source_schedule_conflict`。日期有交集但缺少時段或服務日證據而無法判定時，回「時段待確認」，不以當前條款、每日時數或預設時間猜填，也不虛構逐日服務。
 
+來源可使用起訖時間分欄，或在「服務時間／服務時段」欄提供完整區間，例如 `9:00-13:00(4小時)`。區間後的時數只作來源註記；跨午夜須明示跨日，分欄與區間同時存在時須一致。
+
 Preview 與 Apply 將已證實衝突的雙方列排除至 `current_conflict`／未匯入；待確認問題列也進未匯入明細，使用可區分的原因。問題明細列出對造 Excel 列號、案件編號、日期及可證實的時段或重疊起訖，沿用 `not_imported_count`、`row_issues` 與適用的 `field_errors` 去敏回傳。更正後可重傳。Apply 不寫入排除列的 Orders、assignment 或逐列收據；其餘列以單一 outer UoW 原子保存 workbook claim、歷史證據及 terminal receipt，任一實際寫入失敗整批回滾。same key＋same canonical workbook 重播原收據；same key＋different workbook 回 conflict。匯入頁保留四種互斥筆數與問題列明細。
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
 Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與

@@ -1,3 +1,7 @@
+/**
+ * File: case_virtual_account_client.ts
+ * Description: 案件虛擬帳號讀取與設定客戶端，提供永豐專屬虛擬帳號查詢與變更。
+ */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
@@ -21,8 +25,8 @@ const forCase = <T extends { case_no: string }>(value: T, caseNo: string): T => 
 };
 
 export const caseVirtualAccountClient = {
-  async query(caseNo: string): Promise<CaseVirtualAccountView> {
-    return forCase(decodePayload(envelope(viewSchema), await transport.get(path(caseNo), { token: token() })).data, caseNo);
+  async query(caseNo: string, signal?: AbortSignal): Promise<CaseVirtualAccountView> {
+    return forCase(decodePayload(envelope(viewSchema), await transport.get(path(caseNo), { token: token(), signal })).data, caseNo);
   },
   async apply(command: CaseVirtualAccountCommand, key: string) {
     const raw = await transport.post(`${path(command.case_no)}/apply`, {

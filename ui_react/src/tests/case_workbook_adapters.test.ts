@@ -119,7 +119,7 @@ describe('Four mutually exclusive import result counters', () => {
       sourceRow: 15,
       identifier: 'CASE-015',
       fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
-      reasons: ['與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）同一月嫂（ID 11）服務期間（2026-08-01～2026-08-10）重疊'],
+      reasons: ['與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂服務時段待確認。'],
     });
   });
 });

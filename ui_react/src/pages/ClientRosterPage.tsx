@@ -218,7 +218,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   };
 
   return <div className={`client-roster-page${embedded ? ' client-roster-page--embedded' : ''}`}>
-    {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較；點選案件即可查看與編輯詳細資料。</p></div></header>}
+    {!embedded && <header><div><h1>客戶名冊清單</h1><p>以案件為單位快速瀏覽與比較。💡 <strong>點選任一案件列即可開啟右側抽屜</strong>，查看詳細資料並於<strong>「客戶帳務」</strong>區塊直接補登或調整<strong>歷史服務天數</strong>與重算帳務。</p></div></header>}
     {!error && page && <nav className="client-roster-pagination" aria-label="客戶名冊分頁">
       <button type="button" disabled={loading || pageOffset === 0} onClick={previousPage}>上一頁</button>
       <span aria-live="polite">第 {Math.floor(pageOffset / pageSize) + 1} 頁<span className="client-roster-page-count">（本頁 {page.items.length} 筆）</span></span>

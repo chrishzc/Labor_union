@@ -21,13 +21,15 @@
 - `clients`
 - `data-import`
 - `reports`
-- `line-management`
-- `line-ai-events`
-- `line-llm-settings`
-- `line-liff-studio`
+- `line-management` — 客服與營運（客服案件、身分與授權、案件群組）。
+- `line-notifications` — 通知與寄送（通知與發送、寄送與異常）。
+- `line-interface` — LINE 介面設定（圖文選單、表單、LINE 流程圖）。
+- `line-ai-events` — AI 客服工作室（常見問答、引導動作、回答測試、回饋分析、模型設定）。
+
+2026-11-05 人工裁決重整 LINE 專區導航與責任邊界：原 `line-management` 七個分頁依客服、營運與設定責任拆分為 `line-management`（客服與營運）、`line-notifications`（通知與寄送）與 `line-interface`（LINE 介面設定）；原獨立側欄入口 `line-liff-studio`（表單）併入 `line-interface` 分頁，原獨立側欄入口 `line-llm-settings`（AI 模型設定）併入 `line-ai-events`（AI 客服工作室）模型設定分頁。舊 `line-llm`／`line-llm-settings` hash 解析至 `line-ai-events` 模型設定分頁；舊 `line-studio`／`line-liff-studio` 解析至 `line-interface` 表單分頁；舊 `line-management?tab=` 之 `push_queue`、`delivery`、`richmenu`、`message_flow`、`liff` 依責任導向 `line-notifications` 或 `line-interface`。此為前端導覽重整，不改任何後端 owner、API 或 contract。
 - `finance`
 - `accounting-parameters`
-- `historical-service-accounting`
+- payment-reminder-settings — 帳務作業內的帳務通知排程條件與10則帳務LINE範本設定。
 - `database-backup` — 稽核與系統內的每日備份時間與狀態，owner 為 Global migration §9.5。
 - `account-management`
 - `contract-templates`
@@ -35,6 +37,8 @@
 依 `33_案件與月嫂整合名冊正式規格.md` 的名冊裁決，`data-browser` 相容深連結顯示客戶名冊，不再開啟 `DataImportPage` 的六來源分頁。现行 `databrowser` 與 `client-roster` aliases 亦映射至 `clients`，使用同一個 `ClientRegistryPage`；此為頁面解析，不要求網址立即改寫。
 
 `order-tracker`、`orders` 與獨立 `system-status` 已不在上述正式導航及 render branches。系統狀態的既有 snapshot Query 與 shell 指示器仍保留，不因獨立頁面退出而刪除。
+
+2026-11-05 人工裁決退役帳務作業之「歷史服務天數」(historical-service-accounting) 獨立導航入口與頁面，其歷史實際服務天數填寫與帳務重算面板改內嵌於客戶名冊詳情抽屜（ClientRegistryDetailEditor）之案件帳務區塊原地操作。舊 #historical-service-accounting 導航項目移除，未知 hash 沿用 App 既有規則導向待辦看板。
 
 2026-10-30 人工裁決退役稽核與系統之「儲存空間管理」(`storage-management`) 與「檔案設定」(`file-settings`) 兩處 UI 頁面入口與導航項目。既有後端 30 天自動排程清理 (`run_automatic_retention_cycle`)、檔案傳輸安全預設限制（照片 10MB、履歷 20MB）及 API 保持運作，但不再於管理端側欄呈現維護畫面。舊 `#storage-management` 與 `#file-settings` 沿用 App 既有未知 hash 規則導向待辦看板。
 

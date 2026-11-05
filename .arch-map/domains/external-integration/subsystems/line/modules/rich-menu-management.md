@@ -23,7 +23,7 @@
   - `ui_react/src/components/LineRichMenuDraftSaveActions.tsx` — shared draft Preview/Confirm/Apply with fresh Query readback.
   - `ui_react/src/pages/line_management/LineRichMenuWorkspace.css`
   - `ui_react/src/components/LineRichMenuPublicationActions.tsx`
-  - `ui_react/src/pages/LineManagementPage.tsx`
+  - `ui_react/src/pages/LineManagementPage.tsx` — `scope="interface"`（`#line-interface`）組裝圖文選單（`richmenu`）與表單（`liff`）分頁。
   - `ui_react/src/pages/line_management/LiffCardStudio.tsx`
   - `ui_react/src/pages/line_management/LiffCardStudio.css` — 用途分組與兩欄表單預覽，保留既有正式／安全展示入口及案件專屬連結限制；訊息卡片統一在「通知與發送」維護。
   - `ui_react/src/components/LineFlexDesignPreview.tsx` — 既有 standalone 規則面板的圖例；表單工作室不再顯示卡片。

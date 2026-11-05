@@ -274,11 +274,12 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
     vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
     window.history.replaceState(null, '', '#line-management?tab=message_flow');
-    const { unmount } = render(<UnsavedChangesProvider><LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
+    const flow = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
     fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
     fireEvent.click(screen.getByRole('button', { name: '日誌連續缺漏－工會決定提醒 由流程控制 調整訊息' }));
     expect(window.location.hash).toContain('message=service-day-log-reminder');
     await waitFor(()=>expect(window.location.hash).toContain('tab=push_queue'));
+    flow.unmount(); const { unmount } = render(<UnsavedChangesProvider><LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
     await screen.findByText('請 範例月嫂 補上尚未填寫的服務日誌，謝謝。');
     fireEvent.click(screen.getByText('公版預覽資料', { selector: 'summary' }));
     expect(screen.getByRole('region', { name: '帶入欄位與值' })).toHaveTextContent('月嫂姓名（staff_name）範例月嫂');
@@ -302,9 +303,10 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(previews.catalog);
     vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
     window.history.replaceState(null, '', '#line-management?tab=message_flow&rule_q=遮蔽條件&rule_state=enabled');
-    const { unmount,rerender } = render(<UnsavedChangesProvider><LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
+    const flow = render(<UnsavedChangesProvider><LineManagementPage scope="interface" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
     fireEvent.click(await screen.findByRole('button', { name: '6 持續服務與異動 3 則訊息' }));
     fireEvent.click(screen.getByRole('button', { name: '第二期款到期與入帳 已停用 調整訊息' }));
+    flow.unmount(); const { unmount, rerender } = render(<UnsavedChangesProvider><LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} /></UnsavedChangesProvider>);
     financeContentClients(clients);
     await waitFor(()=>expect(window.location.hash).toContain('view=reminder-content'));
     rerender(<UnsavedChangesProvider><FinanceWarningWorkspace onCase={()=>{}}/></UnsavedChangesProvider>);
@@ -327,7 +329,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     vi.spyOn(lineMessagePreviewClient, 'catalog').mockImplementation(() => new Promise(resolve => { resolveCatalog = resolve; }));
     vi.spyOn(lineMessagePreviewClient, 'render').mockImplementation(previews.render);
     window.history.replaceState(null, '', '#line-management?tab=push_queue&message=card-candidate-information-1');
-    const { unmount } = render(<LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
+    const { unmount } = render(<LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
     expect(window.location.hash).toContain('tab=push_queue');
     await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' });
     expect(screen.queryByText(/找不到指定訊息/)).not.toBeInTheDocument();
@@ -337,7 +339,7 @@ describe('LINE 精簡流程圖與正式訊息定位', () => {
     unmount();
     vi.mocked(lineMessagePreviewClient.catalog).mockResolvedValue(rows);
     window.history.replaceState(null, '', '#line-management?tab=push_queue&message=removed-message');
-    const view = render(<LineManagementPage lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
+    const view = render(<LineManagementPage scope="notifications" lineConfiguration={configuration} notificationTemplateClient={templates} onboardingClient={onboarding} />);
     expect(window.location.hash).toContain('tab=push_queue');
     await screen.findByText(/找不到指定訊息/);
     expect(screen.queryByRole('textbox', { name: '通知內容' })).not.toBeInTheDocument();

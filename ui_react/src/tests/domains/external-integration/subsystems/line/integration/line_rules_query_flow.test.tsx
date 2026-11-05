@@ -47,10 +47,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
     });
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration } = dependencies();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
-    expect(configuration.getNotificationRules).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
     await screen.findByRole('button', { name: '編輯訂金確認內容' });
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
@@ -82,7 +79,7 @@ describe('LINE 通知規則 query 與 mutation 接線', () => {
   it('revision 0 的空 definition 顯示真實空狀態而不是 mock 規則', async () => {
     const empty = { revision: 0, definition: {} } as const;
     const { customer, identity, configuration } = dependencies(empty);
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} onboardingClient={onboardingClient} />);
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     expect(await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' })).toBeInTheDocument();
     // An empty rules definition retains the welcome entry, without inventing notification rules.

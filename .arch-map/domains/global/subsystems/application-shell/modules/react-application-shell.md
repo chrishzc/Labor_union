@@ -29,7 +29,7 @@
 ## Contracts
 - MasterLayout 內容區以按 currentPage 重置的 ErrorBoundary 包住頁面及頁級 Staff provider；頁面 render／lazy-load 失敗保留導覽，失敗頁卸載清除其 busy 登記。HTTP 5xx 不清除登入，401 沿既有 Session 失效契約。
 - `ui_react/vite.config.ts` 的 `WINDOWS_REMOTE_BUILD=1` 關閉 Vite envDir discovery，Windows managed artifact 僅採明確 process build settings，不讀 `.env*`；一般開發模式設定載入不變。建置以 `manualChunks` 切分穩定第三方套件（`vendor-react`、`vendor-icons`、`vendor-utils`），並由 `ui_react/src/App.tsx` 對次要／低頻管理頁面採 `React.lazy`＋`Suspense` 動態分塊載入，保留每日核心工作台同步載入。
-- 已登入的案件、客戶、財務、歷史服務帳務與 LINE 管理頁掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
+- 已登入的案件、客戶、財務、帳務通知設定與 LINE 三個工作頁（`line-management`、`line-notifications`、`line-interface`）掛載 Staff-owned `StaffIdentityProvider`，以 current Staff id 共用公會編號標籤與人員選單排序；頁面切換／登出卸載，無跨 session 身分快取。
 - `document/架構重整/01_規格基線/12_Global_效能與UX體感架構.md` — Global UI shell、recovery與closed error presentation。
 - `document/架構重整/01_規格基線/25_Access_Control正式規格.md` — session/auth boundary。
 
@@ -48,3 +48,4 @@ Reconcile when React shell navigation、session/auth composition、ErrorBoundary
 - 同頁點選「待辦看板」傳遞明確返回請求，由案件工作區沿既有關閉流程回到清單並清除案件深連結；進行中或結果未明的操作不被卸載，稍後解鎖也不自動跳走。
 - Canonical `#clients` exposes one 客戶清單 with editable case-detail Drawer; independent 名冊資料 and 變更歷程 tabs are merged. Case／field deep links open the selected Drawer, with case history at the bottom; the virtual-account import tab remains. Legacy `#client-roster`、`#data-browser`／`#databrowser` redirect to `#clients`.
 - Data Import no longer composes the six-source Data Browser tab; the archived server API remains read-only for compatibility.
+- LINE 專區收斂為四個左側入口：`#line-management`（客服與營運：客服案件、身分與授權、案件群組）、`#line-notifications`（通知與寄送：通知與發送、寄送與異常）、`#line-interface`（LINE 介面設定：圖文選單、表單、LINE 流程圖）、`#line-ai-events`（AI 客服工作室，含模型設定分頁）。舊 `#line-llm`／`#line-llm-settings`、`#line-studio`／`#line-liff-studio` 與 `#line-management?tab=push_queue|delivery|richmenu|message_flow|liff` 相容導向對應新頁。

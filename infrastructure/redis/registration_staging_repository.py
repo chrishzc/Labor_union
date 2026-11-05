@@ -1,4 +1,7 @@
-"""Dedicated durable registration Redis. No cache fallback and no SQL dependency."""
+"""
+File: registration_staging_repository.py
+Description: Redis 註冊暫存儲存庫，支援獨立實例與共用實例之原子狀態與命名空間治理。
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -115,8 +118,8 @@ if redis.call('EXISTS',KEYS[1])==1 then
  if value<tonumber(ARGV[1]) then redis.call('SET',KEYS[2],ARGV[1]) end
  return {'ready'}
 end
-if ARGV[2]~='new-empty-instance' then return {'uninitialized'} end
-if redis.call('DBSIZE')~=0 then return {'incomplete_restore'} end
+if ARGV[2]~='new-empty-instance' and ARGV[2]~='shared-instance' then return {'uninitialized'} end
+if ARGV[2]=='new-empty-instance' and redis.call('DBSIZE')~=0 then return {'incomplete_restore'} end
 redis.call('SET',KEYS[2],ARGV[1]);redis.call('SET',KEYS[1],ARGV[1]);return {'ready'}
 """
 
@@ -137,11 +140,12 @@ class RedisRegistrationStagingRepository:
         result = self._call("eval", script, len(keys), *keys, *args)
         return [_text(item) for item in result]
 
-    def initialize(self, sql_high_water: int, *, new_empty_instance=False):
+    def initialize(self, sql_high_water: int, *, new_empty_instance=False, shared_instance=True):
         if isinstance(sql_high_water, bool) or not 0 <= sql_high_water < 9007199254740991:
             raise ValueError("registration_high_water_invalid")
+        mode = "new-empty-instance" if new_empty_instance else ("shared-instance" if shared_instance else "verify")
         result = self._eval(_INITIALIZE, [PREFIX + "ready", PREFIX + "counter"],
-                            [sql_high_water, "new-empty-instance" if new_empty_instance else "verify"])
+                            [sql_high_water, mode])
         if result != ["ready"]:
             raise ProvisionalRegistrationStorageError("registration_redis_initialization_required")
 

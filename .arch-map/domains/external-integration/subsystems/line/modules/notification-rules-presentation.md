@@ -37,7 +37,7 @@
   - `api/routes/line_message_preview.py`
   - `api/schemas/line_message_preview.py`
   - `ui_react/src/components/LineNotificationWorkbench.css`
-  - `ui_react/src/pages/LineManagementPage.tsx` — 組裝 message_flow 導覽與 push_queue 內容設定，以 message query 定位目前訊息並沿未儲存草稿保護切換；不再掛載獨立歡迎／發送歷程分頁，也不查發送摘要與清單。
+  - `ui_react/src/pages/LineManagementPage.tsx` — 以 `scope="interface"`（`#line-interface`）組裝 `message_flow` 導覽、以 `scope="notifications"`（`#line-notifications`）組裝 `push_queue` 內容設定，透過 `#line-management?tab=push_queue&message=...`／`#line-management?tab=message_flow` 跨頁切換並沿未儲存草稿保護；不再掛載獨立歡迎／發送歷程分頁，也不查發送摘要與清單。
   - `ui_react/src/components/LineNotificationRulesMutationPanel.tsx` — scoped settingsOnly 模式保留原規則 mutation。
   - `ui_react/src/components/LineNotificationTemplateEditor.tsx`
   - `ui_react/src/api/line_notification_rules/line_notification_template_client.ts`

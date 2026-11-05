@@ -170,9 +170,9 @@ service-day 驗證、staging 與直接 Apply；不能因 NAS watcher 發現檔�
 - 正式服務時段結束後才計入缺漏，依台北時區及跨日結束時間判斷。依案件及月嫂分開計算，
   日曆日期相連且未填的正式服務日連續超過 3 日（至少 4 日）才顯示；已填日、非服務日均切斷連續區間。
   零散缺漏不得累計達門檻，不同月嫂不得混算；排班重建、代班及補填後依 current facts 即時重算。
-- 工會 LINE 管理端「案件群組」內提供「服務日誌提醒」，列出案件群組及連續缺漏幾日，server 分頁。
+- 依 2026-11-05 最新人工裁決，工會 LINE 管理端「客服與營運 → 案件群組」將「服務日誌提醒」整合縮小至各案件群組中呈現：後端維持原 server 分頁 Query，前端依案件編號彙整缺漏，於案件群組清單列標示「日誌連續缺漏 N 日」，並於該案件群組明細抽屜內顯示「服務日誌提醒」區塊與連續缺漏天數，不再於案件群組頁頂端並列獨立表格。
   Query 零寫入，不新增付款、案件或待辦狀態，不自動私訊月嫂，也不自動通知群組。
-- 工會人員自行決定是否點「發送提醒」；點擊即以既有 LINE durable delivery 建立寄送工作，不再確認。
+- 工會人員於群組明細抽屜內自行決定是否點「發送提醒」；點擊即以既有 LINE durable delivery 建立寄送工作，不再確認。
   文案為 `請 {月嫂姓名} 補上尚未填寫的服務日誌，謝謝。`，收件人固定為該案目前案件群組。
   缺少可用群組時列出內部提醒但停用發送，不改寄私人或其他群組。
 - 建立工作與 provider 發送前皆重新核對所選連續缺漏區間及群組。補填造成區間失效、取消／換人／
@@ -181,7 +181,7 @@ service-day 驗證、staging 與直接 Apply；不能因 NAS watcher 發現檔�
   新提醒，已排入的舊自動提醒在 provider 前攔下。歷史日誌、事件及寄送結果不刪除。
 - 全部現行使用者介面與正式規格採「案件群組」名稱。日誌完成不自動發送內容給客戶或群組，
   不直接改正式排班、訂單與付款狀態。
-- LINE 流程圖的「日誌連續缺漏－工會決定提醒」連到「通知與發送」的人工日誌提醒公版。
+- LINE 介面設定「LINE 流程圖」的「日誌連續缺漏－工會決定提醒」連到「通知與寄送 → 通知與發送」的人工日誌提醒公版。
   預覽與人工寄送共用同一文案組裝，列出範例月嫂姓名及帶入值；狀態顯示「由流程控制」，
   由工會逐次決定是否提醒，沒有獨立啟用開關；提醒文案沿規格 17 LINE-COPY 的版本化設定維護，不連回退役自動私訊規則。
 
@@ -549,7 +549,7 @@ LIFF 圖例與正式入口依目前流程呈現：客戶無實際服務日期修
 - **LINE-PAY-03 一次補寄**：每筆期別獨立，在雙方簽約完成、台北日期已進入正式到期隔天、該期餘額仍正，且距「原繳費提醒成功送出紀錄」滿 24 小時後，於下一個每日補寄設定時段自動補寄一次。由成功寄送的 `sent_at_utc` 起算，不能以排隊／失敗時間起算；沒有成功原提醒時不啟動補寄。不跨期合計，不因重掃、重播或 worker restart 重新補寄。既有同工作 retry 沿原 durable delivery 契約；不另開第二筆。曾建立的自動補寄不因取消／失敗自動再建另一筆，後續交由原人工流程。
 - **LINE-PAY-04 回覆停止**：原提醒送出後，客戶在目前本人私人聊天室任何訊息或按鈕 postback 都算回覆，與內容是否涉及付款無關。依已驗證 canonical `line_inbox_events` 的 user source／本人及事件時間唯讀判定；原提醒前的訊息、其他人、群組留言／群組按鈕與 follow 等非回覆事件不算。建立補寄前及 provider 前重查；偵測回覆後沿既有 LINE command receipt 保存同筆原提醒的轉人工結果，避免 inbox 自身生命週期或 worker 重啟恢復補寄。排隊後已回覆就取消自動補寄；人員可繼續使用原手動提醒 command。回覆不是入帳，未核銷款項仍列原待辦；不得因回覆新增核銷或人工結案狀態。
 - **LINE-PAY-05 排程維護**：左側「帳務作業 → 帳務通知設定」（#payment-reminder-settings?view=reminder-schedule）提供訂金模式／時間、第一期時間、第二期時間、每日補寄時間與公版即時試算，取代舊「帳務 → 帳務警示 → 提醒排程」。時區固定 Asia/Taipei，24 小時及最多一次是固定條件。GET／PUT /api/v1/line/payment-overdue-reminders/schedule 沿既有 line.config.read／manage、MESSAGE_SCHEDULES revision CAS／audit／單一 outer commit，將排程保存於 payment_reminders 區塊並保留其他設定。錯誤／權限／衝突回 closed response；CAS conflict 為 typed 409，前端保留草稿。儲存只影響新建提醒，不重寫既有工作快照或因排程時間變更取消已提交工作。
-- **LINE-PAY-06 提醒內容獨立**：依 2026-11-05 最新人工裁決，左側「帳務作業 → 帳務通知設定」（#payment-reminder-settings?view=reminder-content）專頁獨立維護排程使用的訂金首次提醒（deposit-reminder）、第一期繳款提醒／已結清問候（payment-first-reminder／payment-first-greeting）、第二期到期提醒（payment-second-reminder），以及三期逾期提醒（payment-overdue-deposit／payment-overdue-first／payment-overdue-second），加上訂金入帳卡（deposit-settled）、第一期入帳通知（payment-first-settled）及目前規則引用 LINE-SECOND-PAYMENT-SETTLED-TEXT-V1 的第二期入帳文案，正常目錄共十則，頁面標題為「帳務 LINE 範本」。第二期沿 current rule ID 維護原模板，不建立第二份文案。自動補寄與人工提醒共用各期逾期文案。沿用同一 MESSAGE_TEMPLATES／原 writer、CAS、樣本與草稿保護，不複製文案、不改已提交 payload。「通知與發送」完整工作台保留於 LINE，其他通知、卡片、公版預覽與發送設定維持原入口；其他非帳款通知不移轉。上述帳款內容的 LINE 深連結／流程導覽導向 #payment-reminder-settings?view=reminder-content&message=...（相容接收舊 #finance?tab=accounting-warnings&view=reminder-content 轉址）；其他 #line-management?tab=push_queue&message=... 仍在 LINE 開搞。
+- **LINE-PAY-06 提醒內容獨立**：依 2026-11-05 最新人工裁決，左側「帳務作業 → 帳務通知設定」（#payment-reminder-settings?view=reminder-content）專頁獨立維護排程使用的訂金首次提醒（deposit-reminder）、第一期繳款提醒／已結清問候（payment-first-reminder／payment-first-greeting）、第二期到期提醒（payment-second-reminder），以及三期逾期提醒（payment-overdue-deposit／payment-overdue-first／payment-overdue-second），加上訂金入帳卡（deposit-settled）、第一期入帳通知（payment-first-settled）及目前規則引用 LINE-SECOND-PAYMENT-SETTLED-TEXT-V1 的第二期入帳文案，正常目錄共十則，頁面標題為「帳務 LINE 範本」。第二期沿 current rule ID 維護原模板，不建立第二份文案。自動補寄與人工提醒共用各期逾期文案。沿用同一 MESSAGE_TEMPLATES／原 writer、CAS、樣本與草稿保護，不複製文案、不改已提交 payload。「通知與發送」完整工作台位於左側「LINE 專區 → 通知與寄送」（`#line-notifications`），其他通知、卡片、公版預覽與發送設定維持原功能；其他非帳款通知不移轉。上述帳款內容的 LINE 深連結／流程導覽導向 #payment-reminder-settings?view=reminder-content&message=...（相容接收舊 #finance?tab=accounting-warnings&view=reminder-content 轉址）；其他 #line-management?tab=push_queue&message=... 相容導向「通知與寄送」開啟。
 - **LINE-PAY-07 外部效果與交易**：只用既有 committed delivery task／audit／lease／receipt／provider pipeline。每次新建先按同一 Orders／Finance／obligation 鎖序讀目前 facts，再讀既有工作；同一期有待寄、處理中或等待重試工作時不能新建另一筆。送前重驗正式來源、金額、期限、資格及唯一客戶私訊綁定，失效就取消，不能標示送達；期限及本人回覆條件依§6.10／§6.10.1來源分工與LINE-PAY-01／03／04分別適用。不得以自動補寄的回覆停止或逾期待辦的已逾期門檻，單獨攔下案件抽屜合法人工通知。LINE 不寫 Finance／Orders／Scheduling facts，不新增資料表、財務狀態、Preview fingerprint 或 raw webhook payload 跨層傳遞。
 - **LINE-PAY-08 入帳通知人工發送（最新人工裁決）**：訂金、第一期及第二期正式入帳通知均由人員確認後發送，原核銷 outbox 標記僅作唯讀待辦證據。帳務頁讀到有效核銷時跳出「帳款已入帳，請確認是否通知客戶」提示；人員可逐筆點「發送入帳通知」或稍後處理。首次開啟、重新整理、30 秒唯讀查詢與核銷回讀均不建立寄送工作。只有具原 line.task.send 能力的人員命令才能透過既有 UoW 建立客戶私訊工作；不讓前端提供收件者／任意文案。逐筆 fresh-read 同案正式 settlement、原金額、來源版本與目前客戶綁定，送前再驗一次；沖正、取消、來源或綁定變動則取消工作。依 settlement／來源快照／客戶去重，連點及同一操作結果查詢不重複建立，曾嘗試但結果未明者交原寄送紀錄確認。既有已排隊的自動訂金／第二期入帳通知在 provider 前取消，舊規則及人工重播也不得繞過專用人工命令。原財務核銷、outbox status、歷史已寄紀錄及未核銷待辦不改寫，不補發無原通知標記的歷史帳款；第一期新增獨立入帳通知，與服務開始日的已結清問候分開維護；只讀新提交的 line_first_payment_notification=true 核銷標記，必須是同案唯一有效第一期應收、已結清且餘額為零，本次收款／分配金額相符，無退款或沖正造成不一致。無標記的歷史入帳不回填通知。核銷後同一 committed outbox 事件亦衍生通知中心 payment_receipt 待處理事項，使用「帳款已入帳，待人員確認通知」來源；每筆以期別／settlement identity 穩定定位，重新查詢不重複記錄、不寄送客戶。通知提供「前往帳務確認」，攜帶 case_no 深連結直開案件帳務抽屜（FinanceCaseAccounting），即使該案已因款齊移出進行中案件，仍由原抽屜即時查閱各期核銷紀錄、銀行流水號與結清事實，並於抽屜內完成發送或稍後處理；稍後處理或寄送尚未完成時待辦保留，送達後由原 owner 查詢移出。手機通知只顯示內部指引及案號，不簽發或跨接後台 Session。API 沿 /api/v1/line/payment-overdue-reminders/receipts Query 與 /receipts/send 人員 Send，衝突為 409、越權為 403。
 

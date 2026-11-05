@@ -10,7 +10,7 @@ import pytest
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
 from subsystems.client_finance.pricing_configuration import (
-    CasePricingFacts, PricingServiceDay, pricing_impact, PricingConfigurationApplication, PricingConflict,
+    CasePricingFacts, PricingServiceDay, pricing_impact, PricingConfigurationApplication, PricingConflict, pricing_payload,
 )
 
 
@@ -207,6 +207,8 @@ def test_direct_save_accepts_omitted_reason_without_preview_and_preserves_stale_
     from api.dependencies.admin_auth import require_system_admin
     from api.dependencies.accounting_pricing import get_pricing_application
     from subsystems.access.authentication_session import AdminPrincipal
+    from subsystems.client_finance.pricing_configuration import pricing_payload
+    from contextlib import contextmanager
     from subsystems.client_finance.pricing_configuration import pricing_payload
 
     class Repository:
@@ -409,3 +411,32 @@ def test_pricing_catalog_endpoint_uses_lazy_connection_redis_cache_and_post_comm
     finally:
         pricing_deps._pricing_catalog_cache.configure_backend(pricing_deps.default_redis_cache_backend)
         pricing_deps.invalidate_pricing_catalog_cache()
+
+
+def test_case_apply_missing_refund_recipient_snapshot_returns_informative_validation_error():
+    from contextlib import contextmanager
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.accounting_pricing import router
+    from api.dependencies.admin_auth import require_system_admin
+    from api.dependencies.accounting_pricing import get_pricing_application
+    from subsystems.access.authentication_session import AdminPrincipal
+
+    class Repository:
+        def case(self, case_no, *, lock=False):
+            return CasePricingFacts('direct-case', 0, (0,), terms(), 'policy', (), 1000)
+        def receipt(self, key, actor, command): return None
+        def save_case(self, facts, candidate, actor, reason, key):
+            raise ValueError('client_refund_recipient_snapshot_missing')
+    @contextmanager
+    def unit(): yield None
+    app = FastAPI(); app.include_router(router)
+    app.dependency_overrides[get_pricing_application] = lambda: PricingConfigurationApplication(Repository(), unit)
+    app.dependency_overrides[require_system_admin] = lambda: AdminPrincipal(1, 'synthetic', 'Synthetic', 'system_admin')
+    body = {'terms': pricing_payload(terms()), 'expected_revision': 0}
+    with TestClient(app) as client:
+        response = client.post('/api/v1/accounting-pricing/cases/direct-case/apply', json=body, headers={'Idempotency-Key': 'key-1'})
+        assert response.status_code == 422
+        payload = response.json()['detail']['error']
+        assert payload['code'] == 'client_refund_recipient_snapshot_missing'
+        assert '缺少客戶退款銀行帳號' in payload['message']

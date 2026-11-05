@@ -1,11 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ServiceDayLogReminderWorkbench } from '../../../../../../../components/ServiceDayLogReminderWorkbench';
+import { ServiceDayLogCaseReminders, useServiceDayLogReminders } from '../../../../../../../components/ServiceDayLogReminderWorkbench';
 import type { ServiceDayLogReminderClient } from '../../../../../../../api/line_order_groups/service_day_log_reminder_client';
 import { adaptLineNotificationRulesCatalog } from '../../../../../../../adapters/line_configuration/line_configuration_query_adapter';
 
 const item={case_no:'CASE-1',staff_id:1,missing_from:'2032-05-04',missing_through:'2032-05-07',
   consecutive_days:4,group_label:'案件 CASE-1 群組',can_send:true};
+function Harness({api,caseNo='CASE-1'}:{api:ServiceDayLogReminderClient;caseNo?:string}){
+  const reminders=useServiceDayLogReminders(api);
+  return <><p>{reminders.error}</p><ServiceDayLogCaseReminders items={reminders.byCase[caseNo]??[]} client={api} onRefresh={reminders.reload}/></>;
+}
 function client():ServiceDayLogReminderClient {return {
   list:vi.fn().mockResolvedValue({items:[item],total:1,page:1,page_size:25}),
   send:vi.fn().mockResolvedValue({task_id:88,status:'pending'}),
@@ -19,10 +23,9 @@ describe('服務日誌人工提醒',()=>{
     }]}});
     expect(model.rules).toEqual([]);expect(model.isEmpty).toBe(true);
   });
-  it('shows case group and consecutive count; viewing never sends',async()=>{
-    const api=client();render(<ServiceDayLogReminderWorkbench client={api}/>);
-    await screen.findByText('案件 CASE-1 群組');
-    expect(screen.getByText('連續 4 日')).toBeInTheDocument();
+  it('shows consecutive count in the case group; viewing never sends',async()=>{
+    const api=client();render(<Harness api={api}/>);
+    await screen.findByText('連續 4 日');
     expect(api.send).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button',{name:'發送提醒'}));
     await screen.findByText('已建立案件群組提醒寄送工作。');
@@ -32,7 +35,7 @@ describe('服務日誌人工提醒',()=>{
   });
   it('keeps the same operation key after uncertain send failure',async()=>{
     const api=client();vi.mocked(api.send).mockRejectedValueOnce(new Error('連線中斷')).mockResolvedValueOnce({task_id:88,status:'pending'});
-    render(<ServiceDayLogReminderWorkbench client={api}/>);
+    render(<Harness api={api}/>);
     fireEvent.click(await screen.findByRole('button',{name:'發送提醒'}));
     await screen.findByRole('alert');
     fireEvent.click(screen.getByRole('button',{name:'發送提醒'}));
@@ -41,14 +44,24 @@ describe('服務日誌人工提醒',()=>{
   });
   it('retains internal reminder without a usable case group',async()=>{
     const api=client();vi.mocked(api.list).mockResolvedValue({items:[{...item,can_send:false}],total:1,page:1,page_size:25});
-    render(<ServiceDayLogReminderWorkbench client={api}/>);
+    render(<Harness api={api}/>);
     await screen.findByText('尚無可用案件群組');
     expect(screen.getByRole('button',{name:'發送提醒'})).toBeDisabled();
     expect(api.send).not.toHaveBeenCalled();
   });
+  it('only lists reminders of the opened case group and reads every page',async()=>{
+    const api=client();
+    vi.mocked(api.list).mockImplementation(async page=>page===1
+      ?{items:[{...item,case_no:'CASE-9'}],total:2,page:1,page_size:1}
+      :{items:[item],total:2,page:2,page_size:1});
+    render(<Harness api={api}/>);
+    await screen.findByText('連續 4 日');
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(screen.getAllByRole('button',{name:'發送提醒'})).toHaveLength(1);
+  });
   it('refresh reflects diary completion without creating tasks',async()=>{
-    const api=client();render(<ServiceDayLogReminderWorkbench client={api}/>);
-    await screen.findByText('案件 CASE-1 群組');
+    const api=client();render(<Harness api={api}/>);
+    await screen.findByText('連續 4 日');
     vi.mocked(api.list).mockResolvedValue({items:[],total:0,page:1,page_size:25});
     fireEvent.click(screen.getByRole('button',{name:'重新整理日誌提醒'}));
     await screen.findByText('目前沒有連續超過 3 日未填的服務日誌。');

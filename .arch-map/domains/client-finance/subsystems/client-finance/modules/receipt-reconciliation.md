@@ -33,7 +33,7 @@
   - `ui_react/src/api/client_finance/client_receipt_reconciliation_client.ts`、`ui_react/src/components/ClientReceiptReconciliationPanel.tsx` — 案件頁同案入款與合計核對，精確／部分／超收正式 Preview/Apply；差額處理不預選。
 
 - payment terms port: `subsystems/client_finance/case_accounting_query.py::ClientCasePaymentTerms`、`infrastructure/mysql/client_payments_query_repository.py::query_case_payment_terms` — 提供 FULL-01 的正式資金來源，並由 Client Finance 期款計算確認與既有義務相符的零元期款。沒有正式依據的缺列維持未知。
-- refund recipient writer: `infrastructure/mysql/client_receipt_reconciliation_repository.py::_insert_refund_recipient_snapshot` — 正常／補助退款及金額更正共用唯一bound_case_no來源；已有快照不覆寫，必填流程缺件拒絕，已確認補助退款缺帳戶可保持待補。
+- refund recipient writer: `infrastructure/mysql/client_receipt_reconciliation_repository.py::_insert_refund_recipient_snapshot` — 正常／補助退款及金額更正共用唯一bound_case_no來源；已有快照不覆寫，必填流程缺件拒絕，已確認補助退款與金額更正缺帳戶可保持待補。
 - financial adjustment adapter: `infrastructure/mysql/financial_adjustment_repository.py` — 原財務調整外層交易內的客戶退款快照委派上述共用writer；不另定收款帳戶來源或新增commit。
 
 ## Dependencies

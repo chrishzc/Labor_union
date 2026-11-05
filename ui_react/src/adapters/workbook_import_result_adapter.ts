@@ -48,11 +48,10 @@ function parseScheduleConflictDetail(code: string): string | null {
   if (!unconfirmed && !code.startsWith(SCHEDULE_CONFLICT_DETAIL_PREFIX)) return null;
   const payload = code.slice((unconfirmed ? SCHEDULE_UNCONFIRMED_DETAIL_PREFIX : SCHEDULE_CONFLICT_DETAIL_PREFIX).length);
   const match = /^row=(\d+);staff_id=(\d+);own=([^~;]+)~([^;]+);peer=([^~;]+)~([^;]+);case_no=([^;]*)(?:;overlap=([^~;]+)~([^;]+))?$/.exec(payload);
-  if (!match) return REASON_LABELS.historical_order_source_schedule_conflict;
-  const [, peerRow, staffId, ownStart, ownEnd, peerStart, peerEnd, peerCaseNo, overlapStart, overlapEnd] = match;
-  if (unconfirmed) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}，${peerStart}～${peerEnd}）的月嫂服務時段待確認。`;
-  if (overlapStart && overlapEnd) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}）重疊 ${overlapStart.slice(0, 16).replace('T', ' ')}～${overlapEnd.slice(0, 16).replace('T', ' ')}。`;
-  return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo || '未提供'}，${peerStart}～${peerEnd}）同一月嫂（ID ${staffId}）服務期間（${ownStart}～${ownEnd}）重疊`;
+  if (!match) return REASON_LABELS.historical_order_source_schedule_unconfirmed;
+  const [, peerRow, , , , peerStart, peerEnd, peerCaseNo, overlapStart, overlapEnd] = match;
+  if (!unconfirmed && overlapStart && overlapEnd) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}）重疊 ${overlapStart.slice(0, 16).replace('T', ' ')}～${overlapEnd.slice(0, 16).replace('T', ' ')}。`;
+  return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo || '未提供'}，${peerStart}～${peerEnd}）的月嫂服務時段待確認。`;
 }
 
 // Only receipt-owned codes determine guidance; never infer a historical failure from current data.

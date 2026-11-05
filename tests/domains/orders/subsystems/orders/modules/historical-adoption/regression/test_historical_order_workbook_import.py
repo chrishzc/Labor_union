@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import time
+from datetime import date, time
 from types import SimpleNamespace
 
 import pytest
@@ -34,6 +34,38 @@ def test_workbook_reads_explicit_time_and_cross_day_evidence(tmp_path):
     workbook.close()
     row, = load_historical_order_workbook(path).rows
     assert row.service_time == ServiceTimeTerms(time(22), time(6), 1)
+
+
+def test_workbook_compares_combined_service_times_across_overlapping_date_ranges(tmp_path):
+    path = tmp_path / "historical-service-time-text.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂", "服務時間"])
+    sheet.append(["CASE-1", "示範客戶甲", "2026-09-15", "2026-10-30", 1, "示範月嫂", "9:00-13:00(4小時)"])
+    sheet.append(["CASE-2", "示範客戶乙", "2026-10-19", "2026-11-09", 1, "示範月嫂", "13:30 - 17:30(4小時)"])
+    workbook.save(path)
+    workbook.close()
+
+    morning, afternoon = load_historical_order_workbook(path).rows
+    assert morning.service_time == ServiceTimeTerms(time(9), time(13), 0)
+    assert afternoon.service_time == ServiceTimeTerms(time(13, 30), time(17, 30), 0)
+    previews = tuple(
+        SimpleNamespace(
+            case_no=row.case_no,
+            canonical_service_dates=(date(2026, 10, 19),),
+            pairings=(SimpleNamespace(
+                resolution="assignment_candidate", staff_id=21,
+                start_date=row.actual_start_date, end_date=row.actual_end_date,
+            ),),
+        )
+        for row in (morning, afternoon)
+    )
+    assert module.project_source_schedule_conflicts(previews, (morning, afternoon)) == ()
+
+    overlapping = replace(afternoon, service_time=ServiceTimeTerms(time(12, 30), time(16, 30), 0))
+    conflict, = module.project_source_schedule_conflicts(previews, (morning, overlapping))
+    assert conflict.issue_code == "historical_order_source_schedule_conflict"
+    assert [instant.strftime("%H:%M") for instant in conflict.overlap] == ["12:30", "13:00"]
 
 
 class _Repository:

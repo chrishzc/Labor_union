@@ -38,22 +38,14 @@ const AiCustomerServiceStudioPage = lazy(() =>
     default: m.AiCustomerServiceStudioPage,
   }))
 );
-const LlmConfigurationPage = lazy(() =>
-  import('./pages/line_management/LlmConfigurationPage').then((m) => ({
-    default: m.LlmConfigurationPage,
-  }))
-);
-const LiffCardStudio = lazy(() =>
-  import('./pages/line_management/LiffCardStudio').then((m) => ({ default: m.LiffCardStudio }))
-);
 const AccountingParametersPage = lazy(() =>
   import('./pages/AccountingParametersPage').then((m) => ({
     default: m.AccountingParametersPage,
   }))
 );
-const HistoricalServiceAccountingPage = lazy(() =>
-  import('./pages/HistoricalServiceAccountingPage').then((m) => ({
-    default: m.HistoricalServiceAccountingPage,
+const PaymentReminderSettingsPage = lazy(() =>
+  import('./pages/PaymentReminderSettingsPage').then((m) => ({
+    default: m.PaymentReminderSettingsPage,
   }))
 );
 const AccountManagementPage = lazy(() =>
@@ -79,15 +71,31 @@ export const HASH_ALIASES: Record<string, PageType> = {
   'line-management': 'line-management',
   'line-ai': 'line-ai-events',
   'line-ai-events': 'line-ai-events',
-  'line-llm': 'line-llm-settings',
-  'line-llm-settings': 'line-llm-settings',
-  'line-studio': 'line-liff-studio',
-  'line-liff-studio': 'line-liff-studio',
+  'line-llm': 'line-ai-events',
+  'line-llm-settings': 'line-ai-events',
+  'line-notifications': 'line-notifications',
+  'line-interface': 'line-interface',
+  'line-studio': 'line-interface',
+  'line-liff-studio': 'line-interface',
   'order-beta': 'order-workbench-v2',
+  'historical-service-accounting': 'clients',
+};
+
+/** 舊版 #line-management?tab= 深連結依分頁責任導向新頁面。 */
+const LINE_TAB_PAGES: Record<string, PageType> = {
+  push_queue: 'line-notifications',
+  delivery: 'line-notifications',
+  richmenu: 'line-interface',
+  message_flow: 'line-interface',
+  liff: 'line-interface',
 };
 
 function getPageFromHash(): PageType {
-  const hashPath = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
+  const [hashPath, hashQuery = ''] = window.location.hash.replace(/^#\/?/, '').split('?', 2);
+  if (hashPath === 'line-management' || hashPath === 'line') {
+    const tabPage = LINE_TAB_PAGES[new URLSearchParams(hashQuery).get('tab') ?? ''];
+    if (tabPage) return tabPage;
+  }
   if (hashPath in HASH_ALIASES) {
     return HASH_ALIASES[hashPath];
   }
@@ -195,7 +203,7 @@ const AppContent: React.FC = () => {
         onLogout={handleLogout}
       >
         <ErrorBoundary key={currentPage}>
-        <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'historical-service-accounting', 'line-management'].includes(currentPage)}>
+        <StaffIdentityProvider key={currentPage} enabled={['order-workbench-v2', 'clients', 'finance', 'payment-reminder-settings', 'line-management', 'line-notifications', 'line-interface'].includes(currentPage)}>
         <Suspense fallback={<div className="app-route-loading" role="status" aria-live="polite">載入頁面中…</div>}>
         {/* Operations Section */}
         {currentPage === 'notifications' && <NotificationTasksPage />}
@@ -207,15 +215,15 @@ const AppContent: React.FC = () => {
         {currentPage === 'reports' && <ReportsPage />}
 
         {/* LINE Hub Section */}
-        {currentPage === 'line-management' && <LineManagementPage />}
+        {currentPage === 'line-management' && <LineManagementPage scope="service" />}
+        {currentPage === 'line-notifications' && <LineManagementPage scope="notifications" />}
+        {currentPage === 'line-interface' && <LineManagementPage scope="interface" />}
         {currentPage === 'line-ai-events' && <AiCustomerServiceStudioPage />}
-        {currentPage === 'line-llm-settings' && <LlmConfigurationPage />}
-        {currentPage === 'line-liff-studio' && <LiffCardStudio />}
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}
         {currentPage === 'accounting-parameters' && <AccountingParametersPage />}
-        {currentPage === 'historical-service-accounting' && <HistoricalServiceAccountingPage />}
+        {currentPage === 'payment-reminder-settings' && <PaymentReminderSettingsPage />}
 
         {/* Audit & System Section */}
         {currentPage === 'account-management' && <AccountManagementPage />}

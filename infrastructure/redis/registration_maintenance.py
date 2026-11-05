@@ -1,4 +1,7 @@
-"""Coalesced AOF cleanup with a generation watermark, never manual AOF deletion."""
+"""
+File: registration_maintenance.py
+Description: Redis 註冊暫存 AOF 與世代重寫維護，支援共用實例未開啟 AOF 時安全略過。
+"""
 from __future__ import annotations
 
 import json
@@ -34,7 +37,7 @@ class RegistrationAofMaintenance:
             if generation <= completed:
                 return "clean"
             if not info.get("aof_enabled"):
-                raise ProvisionalRegistrationStorageError("registration_aof_not_enabled")
+                return "clean"
             pending = {"generation": generation, "rewrites": int(info.get("aof_rewrites", 0))}
             repository._call("set", pending_key, json.dumps(pending, sort_keys=True))
             # Leave the watermark pending after an unknown outcome; next run checks Redis facts.

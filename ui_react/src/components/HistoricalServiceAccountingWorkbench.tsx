@@ -6,9 +6,14 @@ import { loadAllOrderSummaries, ordersQueryClient } from '../api/orders/order_qu
 import { ApiHttpError } from '../api/shared/typed_errors';
 import type { OrderSummaryItem } from '../api/orders/order_query_schemas';
 
-export const HistoricalServiceAccountingWorkbench: React.FC = () => {
+export interface HistoricalServiceAccountingWorkbenchProps {
+  caseNo?: string;
+  onSaved?: () => void;
+}
+
+export const HistoricalServiceAccountingWorkbench: React.FC<HistoricalServiceAccountingWorkbenchProps> = ({ caseNo: propCaseNo, onSaved }) => {
   const staffIdentity = useStaffIdentityLabels();
-  const [caseNo, setCaseNo] = useState('');
+  const [caseNo, setCaseNo] = useState(propCaseNo ?? '');
   const [orderSummaries, setOrderSummaries] = useState<OrderSummaryItem[]>([]);
   const [orderListState, setOrderListState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [facts, setFacts] = useState<HistoricalServiceAccountingQuery | null>(null);
@@ -20,6 +25,28 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (propCaseNo !== undefined) {
+      setCaseNo(propCaseNo);
+      setFacts(null);
+      setPreview(null);
+      setMessage('');
+      if (propCaseNo.trim()) {
+        void run(async () => {
+          try {
+            const result = await historicalServiceAccountingClient.query(propCaseNo.trim());
+            setFacts(result);
+            setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, ''])));
+            setPreview(null);
+          } catch (error) {
+            setMessage(error instanceof Error ? error.message : '載入歷史服務帳務資料失敗。');
+          }
+        });
+      }
+    }
+  }, [propCaseNo]);
+
+  useEffect(() => {
+    if (propCaseNo) return;
     let active = true;
     void loadAllOrderSummaries((params, options) => ordersQueryClient.getOrderSummaries(params, options))
       .then((page) => {
@@ -33,7 +60,7 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
         setOrderListState('error');
       });
     return () => { active = false; };
-  }, []);
+  }, [propCaseNo]);
 
   const { requestLeave } = useUnsavedNavigation();
   const inputs = (): HistoricalCaregiverDays[] => (facts?.assignments ?? []).map((item) => ({ assignment_identity: item.assignment_identity, staff_id: item.staff_id, actual_service_days: Number(days[item.assignment_identity]) }));
@@ -56,18 +83,27 @@ export const HistoricalServiceAccountingWorkbench: React.FC = () => {
     try { receipt = await historicalServiceAccountingClient.apply(checked, checkedInputs, reason.trim()); }
     catch (error) { const rejected = error instanceof ApiHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429; setOutcomeUnknown(!rejected); throw error; }
     setPreview(checked); unsaved.markSaved(); setMessage(receipt.replayed ? '此筆已套用，已讀取原收據。' : '實際服務天數與應收應付已更新。');
+    onSaved?.();
   }
-
 
   return <section className="import-workbench-card" aria-label="歷史訂單實際服務天數與帳務">
     <h2>🧮 歷史訂單實際服務天數與帳務</h2>
     <p>只填每位月嫂的實際服務天數；系統會自動重算月嫂應付，已有付款紀錄時則建立差額，不改動歷史訂單完成狀態。</p>
     <div className="import-result-title-row">
-      <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable || busy || outcomeUnknown} onChange={(event) => { const value = event.target.value; requestLeave(() => { setCaseNo(value); setFacts(null); setPreview(null); }); }}>
-        <option value="">{casePlaceholder}</option>
-        {orderSummaries.map((item) => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}｜{item.order_status}</option>)}
-      </select></label>
-      <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢服務帳務</button>
+      {propCaseNo ? (
+        <div>
+          <span>案件編號：<strong>{propCaseNo}</strong></span>{' '}
+          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>重新查詢服務帳務</button>
+        </div>
+      ) : (
+        <>
+          <label>案件編號 <select aria-label="案件編號" value={caseNo} disabled={caseOptionsUnavailable || busy || outcomeUnknown} onChange={(event) => { const value = event.target.value; requestLeave(() => { setCaseNo(value); setFacts(null); setPreview(null); }); }}>
+            <option value="">{casePlaceholder}</option>
+            {orderSummaries.map((item) => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}｜{item.order_status}</option>)}
+          </select></label>
+          <button type="button" disabled={busy || !caseNo.trim()} onClick={() => void run(async () => { const result = await historicalServiceAccountingClient.query(caseNo.trim()); setFacts(result); setDays(Object.fromEntries(result.assignments.map((item) => [item.assignment_identity, '']))); setPreview(null); })}>查詢服務帳務</button>
+        </>
+      )}
     </div>
     {facts && <div>
       <p>目前狀態：{facts.lifecycle_status}；原訂 {facts.contracted_service_days} 天；每日 {facts.service_hours_per_day} 小時。</p>

@@ -13,13 +13,12 @@ import {
   FileBarChart,
   FileSpreadsheet,
   HeartHandshake,
-  History,
-  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
   MessageCircle,
   PanelTop,
+  Send,
   UserRound,
   UsersRound,
   X,
@@ -43,11 +42,11 @@ export type PageType =
   | 'reports'
   | 'line-management'
   | 'line-ai-events'
-  | 'line-llm-settings'
-  | 'line-liff-studio'
+  | 'line-notifications'
+  | 'line-interface'
   | 'finance'
   | 'accounting-parameters'
-  | 'historical-service-accounting'
+  | 'payment-reminder-settings'
   | 'account-management'
   | 'contract-templates'
   | 'database-backup';
@@ -63,12 +62,12 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
 
   'line-management': 'line',
   'line-ai-events': 'line',
-  'line-llm-settings': 'line',
-  'line-liff-studio': 'line',
+  'line-notifications': 'line',
+  'line-interface': 'line',
 
   'finance': 'finance',
   'accounting-parameters': 'finance',
-  'historical-service-accounting': 'finance',
+  'payment-reminder-settings': 'finance',
 
   'account-management': 'audit',
   'contract-templates': 'audit',
@@ -93,14 +92,14 @@ export const NAV_ITEMS: NavItem[] = [
 
   // LINE Section
   { id: 'line-management', icon: ClipboardList, label: '客服與營運', section: 'line' },
+  { id: 'line-notifications', icon: Send, label: '通知與寄送', section: 'line' },
+  { id: 'line-interface', icon: PanelTop, label: 'LINE 介面設定', section: 'line' },
   { id: 'line-ai-events', icon: Bot, label: 'AI 客服工作室', section: 'line' },
-  { id: 'line-llm-settings', icon: KeyRound, label: 'AI 模型設定', section: 'line' },
-  { id: 'line-liff-studio', icon: PanelTop, label: '表單', section: 'line' },
 
   // Finance Section
   { id: 'finance', icon: CircleDollarSign, label: '帳務中心', section: 'finance' },
   { id: 'accounting-parameters', icon: CircleDollarSign, label: '帳務參數設定', section: 'finance' },
-  { id: 'historical-service-accounting', icon: History, label: '歷史服務天數', section: 'finance' },
+  { id: 'payment-reminder-settings', icon: Bell, label: '帳務通知設定', section: 'finance' },
 
   // Audit & System Section
   { id: 'account-management', icon: UserRound, label: '帳號權限', section: 'audit' },

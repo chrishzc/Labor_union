@@ -7,10 +7,14 @@ import {UnsavedChangesProvider} from '../../../../../../../components/UnsavedCha
 import {financeAccountingClient,type CaseAccounting} from '../../../../../../../api/finance_import/finance_accounting_client';
 import {paymentOverdueReminderClient,type CasePaymentReminder} from '../../../../../../../api/line_order_groups/payment_overdue_reminder_client';
 import {ordersQueryClient} from '../../../../../../../api/orders/order_query_client';
+import {clientRegistryClient} from '../../../../../../../api/client_registry/client_registry_client';
+import {caseVirtualAccountClient} from '../../../../../../../api/client_finance/case_virtual_account_client';
 import {ApiHttpError} from '../../../../../../../api/shared/typed_errors';
 vi.mock('../../../../../../../api/finance_import/finance_accounting_client',()=>({financeAccountingClient:{query:vi.fn(),saveSubsidyPlan:vi.fn(),subsidyPlan:vi.fn()}}));
 vi.mock('../../../../../../../api/line_order_groups/payment_overdue_reminder_client',()=>({paymentOverdueReminderClient:{case:vi.fn(),sendCase:vi.fn()}}));
 vi.mock('../../../../../../../api/orders/order_query_client',()=>({ordersQueryClient:{getOrderDetail:vi.fn()}}));
+vi.mock('../../../../../../../api/client_registry/client_registry_client',()=>({clientRegistryClient:{query:vi.fn()}}));
+vi.mock('../../../../../../../api/client_finance/case_virtual_account_client',()=>({caseVirtualAccountClient:{query:vi.fn()}}));
 const caseNo='115000701';
 const plan={case_no:caseNo,version:0,events:[]};
 function facts():CaseAccounting{return {case_no:caseNo,client_name:'合成客戶',receivable_ntd:30000,received_ntd:20000,payable_ntd:30000,paid_ntd:0,pending_warning_count:0,staff_receivable_ntd:30000,subsidy_ntd:12000,customer_amount_ntd:30000,customer_fully_received:false,scheme:'direct',subsidy_plan:plan,ongoing_completed:false,collection_progress:{stage:'first',sources_complete:true,expected_ntd:15000,received_ntd:14000,remaining_ntd:1000,due_date:'2026-11-01'},client_items:([
@@ -18,7 +22,7 @@ function facts():CaseAccounting{return {case_no:caseNo,client_name:'合成客戶
 ] as const).map(([stage,expected,actual,remaining])=>({identity:stage,direction:'receivable',label:stage,party:'合成客戶',expected_ntd:expected,actual_ntd:actual,remaining_ntd:remaining,payment_stage:stage,has_payment:actual>0,version:'1',due_date:stage==='second'?'2099-11-16':'2026-11-01'})),staff_items:[{identity:'staff',direction:'payable',label:'服務費',party:'合成月嫂',expected_ntd:30000,actual_ntd:0,has_payment:false,version:'1',due_date:null}],transactions:[{identity:'receipt',item_identity:'first',occurred_on:'2026-11-02',kind:'receipt',amount_ntd:14000,bank:'sinopac'}],warnings:[]};}
 function notice(stage:'deposit'|'first'|'second'='first'):CasePaymentReminder{return {case_no:caseNo,payment_stage:stage,payment:{case_no:caseNo,payment_stage:stage,obligation_identity:stage,projection_version:1,obligation_event_id:1,due_date:'2099-11-16',remaining_amount_ntd:stage==='deposit'?0:1000},recipient_label:'合成客戶（私人LINE）',can_send:stage!=='deposit',unavailable_reason:stage==='deposit'?'本期已繳齊':null,message:'請繳納剩餘 1,000 元。',history:[]};}
 function wrapper(ui:React.ReactNode){return render(<UnsavedChangesProvider>{ui}</UnsavedChangesProvider>);}
-beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));});
+beforeEach(()=>{vi.clearAllMocks();vi.mocked(financeAccountingClient.query).mockResolvedValue(facts());vi.mocked(ordersQueryClient.getOrderDetail).mockResolvedValue({case_no:caseNo,actual_start_date:'2026-10-01',actual_end_date:null} as never);vi.mocked(paymentOverdueReminderClient.case).mockResolvedValue(['deposit','first','second'].map(stage=>notice(stage as 'deposit'|'first'|'second')));vi.mocked(clientRegistryClient.query).mockResolvedValue({case_no:caseNo,client:{client_id:1,version:1,values:{name:'合成客戶',phone:'0912345678'}},beclass:{status:'ready',record_id:1,source_kind:'imported',version:1,values:{name:'報名客戶',phone:'0912345678',refund_bank_code:'8120012',refund_account_no:'****5678',refund_account_status:'complete'},field_capabilities:{}},finance:{status:'ready',code:null,values:{virtual_account:'99781699115701'}},order_terms:{status:'ready',code:null,data:null,field_capabilities:{}},order_information:{status:'ready',values:null,field_issues:{}}} as never);vi.mocked(caseVirtualAccountClient.query).mockResolvedValue({case_no:caseNo,imported_virtual_accounts:[],built_in_virtual_account:'99781699115701',mapping_ids:[]});});
 describe('精簡案件抽屜',()=>{
  it('只有兩個區塊與七欄；已核銷來源、缺日期、已齊鎖定及未到期通知照實呈現',async()=>{
   wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
@@ -66,6 +70,51 @@ describe('精簡案件抽屜',()=>{
   expect(financeAccountingClient.saveSubsidyPlan).toHaveBeenCalledWith(caseNo,{scheme:'advance',expected_version:0},expect.any(String));
   await screen.findByRole('table');
   expect(financeAccountingClient.query).toHaveBeenCalledTimes(2);
+ });
+ it('呈現專屬虛擬帳號、退款帳號與銀行資訊，提供快速複製與對帳依據',async()=>{
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  expect(await screen.findByTestId('virtual-account-display')).toHaveTextContent('99781699115701');
+  expect(screen.getByTestId('refund-bank-display')).toHaveTextContent('812 台新銀行（分行 0012）');
+  expect(screen.getByTestId('refund-account-display')).toHaveTextContent('****5678');
+  expect(screen.getByText('已登錄完整')).toBeVisible();
+  expect(screen.getByRole('button',{name:'複製虛擬帳號'})).toBeVisible();
+ });
+ it('退款帳號缺漏時明確標示待補齊狀態，便於區分是無資料還是流水未配對',async()=>{
+  vi.mocked(clientRegistryClient.query).mockResolvedValueOnce({
+    case_no: caseNo,
+    client: { client_id: 1, version: 1, values: { name: '合成客戶', phone: null } },
+    beclass: {
+      status: 'ready',
+      record_id: 1,
+      source_kind: 'imported',
+      version: 1,
+      values: {
+        name: '報名客戶',
+        phone: null,
+        refund_bank_code: null,
+        refund_account_no: null,
+        refund_account_status: 'incomplete',
+      },
+      field_capabilities: {},
+    },
+    finance: {
+      status: 'ready',
+      code: null,
+      values: { virtual_account: null },
+    },
+    order_terms: { status: 'ready', code: null, data: null, field_capabilities: {} },
+    order_information: { status: 'ready', values: null, field_issues: {} },
+  } as never);
+  vi.mocked(caseVirtualAccountClient.query).mockResolvedValueOnce({
+    case_no: caseNo,
+    imported_virtual_accounts: [],
+    built_in_virtual_account: null,
+    mapping_ids: [],
+  });
+  wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
+  expect(await screen.findByTestId('refund-bank-missing')).toHaveTextContent('待補齊 / 未填寫銀行代碼');
+  expect(screen.getByTestId('refund-account-missing')).toHaveTextContent('待補齊 / 未填寫帳號');
+  expect(screen.getByText('未填寫')).toBeVisible();
  });
 });
 describe('同案通知與方案保存防重',()=>{

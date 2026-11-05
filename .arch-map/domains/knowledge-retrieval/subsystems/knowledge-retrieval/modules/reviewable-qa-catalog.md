@@ -21,6 +21,8 @@
 - `api/routes/line_service_help.py`
 - `api/routes/llm_configuration.py`
 - `api/dependencies/llm_configuration.py`
+- `ui_react/src/pages/line_management/AiCustomerServiceStudioPage.tsx`
+- `ui_react/src/pages/line_management/LlmConfigurationPage.tsx`
 - `ui_react/src/pages/line_management/CommonQaCatalogPanel.tsx`
 - `ui_react/src/pages/line_management/RealLlmSemanticTestPanel.tsx`
 - `ui_react/src/pages/line_management/KnowledgeFeedbackPanel.tsx`

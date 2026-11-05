@@ -4,4 +4,12 @@
 .finance-monthly{grid-template-columns:minmax(0,1fr)}
 .finance-monthly .finance-month-summary-due{grid-template-columns:repeat(2,minmax(0,1fr))}
 .finance-monthly .finance-month-summary-cash{grid-template-columns:repeat(3,minmax(0,1fr))}
+.finance-heading-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
+.finance-modal-backdrop{position:fixed;inset:0;background-color:rgba(30,27,25,0.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:1000}
+.finance-modal-card{width:100%;max-width:440px;background-color:#ffffff;border-radius:16px;padding:24px 28px;box-shadow:0 16px 36px rgba(74,69,67,0.16);border:1px solid #f2e2dc;display:flex;flex-direction:column;gap:16px;text-align:left}
+.finance-modal-header h3{font-size:1.15rem;font-weight:700;color:#1e1b19;margin:0 0 6px}
+.finance-modal-header p{font-size:0.85rem;color:#74593f;margin:0}
+.finance-modal-body label{display:flex;flex-direction:column;gap:8px;font-weight:600;color:#4a3b32;font-size:0.9rem}
+.finance-modal-body input[type="month"]{padding:10px 14px;border:1px solid #dec8bd;border-radius:8px;font:inherit;font-size:1rem}
+.finance-modal-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:8px}
 @media(max-width:560px){.finance-monthly .finance-month-summary{grid-template-columns:1fr}}

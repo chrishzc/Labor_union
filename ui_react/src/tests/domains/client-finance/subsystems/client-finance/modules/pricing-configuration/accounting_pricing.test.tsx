@@ -221,4 +221,13 @@ describe('Client registry case pricing section', () => {
     await screen.findByText('已離開案件');
     expect(accountingPricingClient.applyCase).toHaveBeenCalledTimes(1);
   });
+
+  it('shows precise message when refund recipient snapshot is missing', async () => {
+    vi.mocked(accountingPricingClient.queryCase).mockResolvedValue(current);
+    vi.mocked(accountingPricingClient.applyCase).mockRejectedValue(new ApiHttpError(422, 'client_refund_recipient_snapshot_missing', '計價資料不完整或不符合規則。'));
+    render(<UnsavedChangesProvider><NavigationHarness /></UnsavedChangesProvider>);
+    fireEvent.change(await screen.findByLabelText('客戶用盡後時薪'), { target: { value: '300' } });
+    fireEvent.click(screen.getByRole('button', { name: '儲存本案調整' }));
+    await screen.findByText('本案調整將產生退款，但缺少客戶退款銀行帳戶；請先至客戶資料補齊退款帳號後再儲存。');
+  });
 });

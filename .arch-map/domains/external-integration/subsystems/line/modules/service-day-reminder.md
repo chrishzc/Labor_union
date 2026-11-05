@@ -13,9 +13,9 @@
   - `infrastructure/mysql/service_day_log_reminder_repository.py`
   - `api/dependencies/service_day_log_reminders.py`
   - `api/routes/line_order_groups.py` — `/log-reminders` Query 及 `/log-reminders/send` 工會人工寄送。
-  - `ui_react/src/components/ServiceDayLogReminderWorkbench.tsx`
+  - `ui_react/src/components/ServiceDayLogReminderWorkbench.tsx` — 依案件編號分組缺漏，於案件群組列與群組明細內顯示並由工會逐筆發送。
   - `ui_react/src/api/line_order_groups/service_day_log_reminder_client.ts`
-  - `ui_react/src/pages/LineManagementPage.tsx` — 案件群組頁內部提醒。
+  - `ui_react/src/pages/LineManagementPage.tsx` — 案件群組頁（客服與營運）組裝提醒 client。
 - retained history/cancellation:
   - `subsystems/line/scheduling_checkpoint_notification_source.py`
   - `subsystems/line/service_day_log_notification_stop.py`

@@ -13,7 +13,7 @@ import type { LineConfigurationQueryClient } from '../../../../../../api/line_co
 import type { LineRichMenuDraftClient } from '../../../../../../api/line_rich_menu_draft/line_rich_menu_draft_client';
 import type { LineOnboardingClient } from '../../../../../../api/line_onboarding/line_onboarding_client';
 import { lineMessagePreviewClient } from '../../../../../../api/line_notification_rules/line_message_preview_client';
-import { LineManagementPage } from '../../../../../../pages/LineManagementPage';
+import { LineManagementPage, type LineScope } from '../../../../../../pages/LineManagementPage';
 import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOMER_SERVICE_SUMMARY_FIXTURE } from '../../../../../fixtures/customer_service/customer_service_contract_fixtures';
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE } from '../../../../../fixtures/line_identity/line_identity_contract_fixtures';
 import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_FIXTURE, LINE_RICH_MENU_DRAFT_FIXTURE, LINE_RICH_MENU_PUBLICATION_FIXTURE, LINE_RICH_MENU_PUBLICATION_PAGE_FIXTURE } from '../../../../../fixtures/line_configuration_query_fixtures';
@@ -108,8 +108,11 @@ describe('LINE 管理頁禁止假 mutation', () => {
       }),
     };
 
-    render(
+    const emptyReminders = { list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 }), send: vi.fn() };
+    const page = (scope: LineScope) => (
       <LineManagementPage
+        scope={scope}
+        serviceDayLogReminder={emptyReminders}
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}
@@ -118,15 +121,12 @@ describe('LINE 管理頁禁止假 mutation', () => {
         notificationTemplateClient={{ get: vi.fn(async (ruleId: string) => ({ rule_id: ruleId, template_id: 'deposit_template', name: '訂金確認通知', content: '正式訂金通知內容', revision: 1, variables: [], sample_preview: '正式訂金通知內容' })), update: vi.fn() }}
       />
     );
+    const view = render(page('service'));
     await waitFor(() => expect(screen.getByText('ORD-TEST-0031')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: '檢查結案影響' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看明細' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
-    expect((await screen.findAllByText('案件進度')).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
     await screen.findByText('測試客戶甲');
@@ -136,6 +136,18 @@ describe('LINE 管理頁禁止假 mutation', () => {
     expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉身分明細' }));
 
+    expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '案件群組' }));
+    expect(screen.queryByRole('button', { name: /建立案件群組/ })).not.toBeInTheDocument();
+    view.unmount();
+
+    const interfaceView = render(page('interface'));
+    fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
+    expect((await screen.findAllByText('案件進度')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
+    interfaceView.unmount();
+
+    render(page('notifications'));
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     const ruleWorkspace = (await screen.findByRole('heading', { name: '通知與發送' })).closest('section');
     expect(ruleWorkspace).not.toBeNull();
@@ -145,10 +157,6 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(await within(ruleWorkspace as HTMLElement).findByRole('button', { name: '編輯訂金確認通知內容' }));
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
-
-    expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '案件群組' }));
-    expect(screen.queryByRole('button', { name: /建立案件群組/ })).not.toBeInTheDocument();
 
     expect(previewResolve).not.toHaveBeenCalled();
     expect(applyResolve).not.toHaveBeenCalled();
@@ -202,6 +210,7 @@ describe('LINE 管理頁禁止假 mutation', () => {
 
     render(
       <LineManagementPage
+        scope="interface"
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}

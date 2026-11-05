@@ -16,8 +16,8 @@ import { LiffCardStudio } from '../pages/line_management/LiffCardStudio';
 
 const EXPECTED_HASHES = [
   'order-workbench-v2', 'scheduling', 'staff', 'clients', 'data-import', 'reports',
-  'line-management', 'line-ai-events', 'line-llm-settings', 'line-liff-studio',
-  'finance', 'accounting-parameters', 'historical-service-accounting', 'account-management', 'contract-templates', 'database-backup',
+  'line-management', 'line-notifications', 'line-interface', 'line-ai-events',
+  'finance', 'payment-reminder-settings', 'accounting-parameters', 'account-management', 'contract-templates', 'database-backup',
 ] as const;
 
 // Explicit test oracle: presentation names map to the same 18 canonical LIFF assets.
@@ -70,8 +70,10 @@ describe('React entrypoint registry', () => {
     expect(HASH_ALIASES).toMatchObject({
       'line-ai': 'line-ai-events',
       'line-ai-events': 'line-ai-events',
-      'line-studio': 'line-liff-studio',
-      'line-liff-studio': 'line-liff-studio',
+      'line-llm': 'line-ai-events',
+      'line-llm-settings': 'line-ai-events',
+      'line-studio': 'line-interface',
+      'line-liff-studio': 'line-interface',
     });
   });
 
@@ -110,7 +112,7 @@ describe('React entrypoint registry', () => {
     };
     render(React.createElement(LiffCardStudio, { runtimeConfigClient }));
     expect(screen.getByRole('heading', { name: 'LINE 表單' })).toBeInTheDocument();
-    expect(NAV_ITEMS.find(item => item.id === 'line-liff-studio')?.label).toBe('表單');
+    expect(NAV_ITEMS.find(item => item.id === 'line-interface')?.label).toBe('LINE 介面設定');
     expect(screen.queryByRole('button', { name: /訊息卡片/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/原始 8 個 LIFF 與 4 個 Flex 功能均保留/)).not.toBeInTheDocument();
     expect(visibleLiffNames()).toEqual([

@@ -1,3 +1,7 @@
+/**
+ * File: client_registry_client.ts
+ * Description: 客戶名冊查詢、篩選、歷史與匯出客戶端，支援取消信號與嚴格解碼。
+ */
 import { applicationFetch } from '../shared/application_fetch';
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
@@ -80,8 +84,8 @@ export const clientRegistryClient = {
     });
     return decode(ClientRegistryFilterOptionsResponseSchema, raw, '篩選選項回應結構異常');
   },
-  async query(caseNo: string): Promise<ClientRegistryDetail> {
-    const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token() });
+  async query(caseNo: string, signal?: AbortSignal): Promise<ClientRegistryDetail> {
+    const raw = await transport.get(`/api/v1/admin/registries/clients/${encodeURIComponent(caseNo)}`, { token: token(), signal });
     return decode(ClientRegistryDetailResponseSchema, raw, '客戶名冊詳情回應結構異常');
   },
   async history(caseNo: string): Promise<ClientRegistryChangeHistoryItem[]> {

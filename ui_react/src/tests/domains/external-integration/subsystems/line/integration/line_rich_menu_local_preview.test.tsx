@@ -58,7 +58,7 @@ describe('Rich Menu 本機互動預覽', () => {
     };
 
     const { container } = render(
-      <LineManagementPage
+      <LineManagementPage scope="interface"
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={configuration}

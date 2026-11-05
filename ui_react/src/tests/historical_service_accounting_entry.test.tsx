@@ -52,8 +52,9 @@ describe('historical service accounting entry ownership', () => {
     expect(screen.getByRole('heading', { name: /歷史訂單實際服務天數設定/ })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '歷史訂單實際服務天數與帳務' })).toBeInTheDocument();
 
-    expect(NAV_ITEMS.find((item) => item.id === 'historical-service-accounting')).toMatchObject({
-      label: '歷史服務天數',
+    expect(NAV_ITEMS.find((item) => (item.id as string) === 'historical-service-accounting')).toBeUndefined();
+    expect(NAV_ITEMS.find((item) => item.id === 'payment-reminder-settings')).toMatchObject({
+      label: '帳務通知設定',
       section: 'finance',
     });
   });

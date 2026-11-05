@@ -57,7 +57,7 @@ describe('LINE Rich Menu query 接線', () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration, richMenuDraft } = dependencies();
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} richMenuDraft={richMenuDraft} />);
+    render(<LineManagementPage scope="interface" customerService={customer} lineIdentity={identity} lineConfiguration={configuration} richMenuDraft={richMenuDraft} />);
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
 
     await waitFor(() => expect(screen.getAllByText('案件進度').length).toBeGreaterThan(0));
@@ -102,7 +102,7 @@ describe('LINE Rich Menu query 接線', () => {
       }],
     }));
 
-    render(<LineManagementPage customerService={dependenciesValue.customer} lineIdentity={dependenciesValue.identity} lineConfiguration={dependenciesValue.configuration} richMenuDraft={dependenciesValue.richMenuDraft} />);
+    render(<LineManagementPage scope="interface" customerService={dependenciesValue.customer} lineIdentity={dependenciesValue.identity} lineConfiguration={dependenciesValue.configuration} richMenuDraft={dependenciesValue.richMenuDraft} />);
     fireEvent.click(screen.getByRole('button', { name: '圖文選單' }));
 
     fireEvent.click(await screen.findByRole('button', { name: '外觀與名稱' }));
@@ -156,7 +156,7 @@ describe('LINE Rich Menu query 接線', () => {
     };
 
     render(
-      <LineManagementPage
+      <LineManagementPage scope="interface"
         customerService={dependenciesValue.customer}
         lineIdentity={dependenciesValue.identity}
         lineConfiguration={dependenciesValue.configuration}
@@ -205,7 +205,7 @@ describe('Rich Menu shared draft persistence', () => {
       persisted = { ...persisted, revision: persisted.revision + 1, definition: request.definition, publication_locks: persisted.publication_locks.map(lock => ({ ...lock, configuration_revision: persisted.revision + 1, state: 'editable', readonly_reason: null })) };
       return { receipt: { outcome: 'created', committed_revision: persisted.revision, receipt_reference: 'shared-draft-save' }, readback: structuredClone(persisted) };
     });
-    const page = () => <LineManagementPage customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} richMenuPublication={publication} />;
+    const page = () => <LineManagementPage scope="interface" customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} richMenuPublication={publication} />;
     const mounted = render(page());
     const color = await screen.findByLabelText('自訂選單底色');
     expect(screen.queryByLabelText('按鈕顯示名稱')).not.toBeInTheDocument();
@@ -243,7 +243,7 @@ describe('Rich Menu shared draft persistence', () => {
     vi.mocked(deps.richMenuDraft.query).mockResolvedValue(initial);
     vi.mocked(deps.richMenuDraft.preview).mockImplementation(async request => ({ before_revision: 8, resulting_revision: 9, normalized_definition: request.definition, preview_fingerprint: 'a'.repeat(64) }));
     vi.mocked(deps.richMenuDraft.apply).mockResolvedValue({ receipt: { outcome: 'created', committed_revision: 9, receipt_reference: 'readback-mismatch' }, readback: { ...initial, revision: 9 } });
-    render(<LineManagementPage customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
+    render(<LineManagementPage scope="interface" customerService={deps.customer} lineIdentity={deps.identity} lineConfiguration={deps.configuration} richMenuDraft={deps.richMenuDraft} />);
     fireEvent.change(await screen.findByLabelText('自訂選單底色'), { target: { value: '#123456' } });
     fireEvent.change(screen.getByLabelText('備註（選填）'), { target: { value: '驗證讀回衝突' } });
     expect(screen.queryByRole('checkbox', { name: /我確認儲存此草稿/ })).not.toBeInTheDocument();

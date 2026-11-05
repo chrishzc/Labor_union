@@ -1,3 +1,7 @@
+/**
+ * File: LineDeliveryOperationsWorkbench.tsx
+ * Description: LINE 寄送與異常作業工作區，提供寄送任務與通知建立異常之查詢、重試與補送操作。
+ */
 import { useCallback, useEffect, useState } from 'react';
 import { LineDeliveryTaskWorkbench } from './LineDeliveryTaskWorkbench';
 import { LineDeliveryTaskActions } from './LineDeliveryTaskActions';
@@ -20,7 +24,9 @@ export function LineDeliveryOperationsWorkbench() {
     const params=new URLSearchParams(window.location.hash.split('?')[1]);
     params.set('tab','delivery');params.delete('task');params.delete('issue');params.delete('view');
     if(nextFailures)params.set('view','failures');if(nextTask)params.set('task',nextTask);if(nextIssue)params.set('issue',nextIssue);
-    window.history.replaceState(null,'',`#line-management?${params}`);
+    const currentRoute = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
+    const baseRoute = currentRoute === 'line-notifications' ? 'line-notifications' : 'line-management';
+    window.history.replaceState(null,'',`#${baseRoute}?${params}`);
   });
   useEffect(()=>{if(!failures)return;const abort=new AbortController();setResult(null);setError('');
     void notificationTasksClient.list('notification_failure',cursor,abort.signal)

@@ -1,19 +1,24 @@
 import { useUnsavedNavigation } from '../../components/UnsavedChanges';
 /**
- * Unified AI customer-service studio: curated common QA plus event-rule workspace.
+ * File: AiCustomerServiceStudioPage.tsx
+ * Description: AI 客服工作室，整合常見問答、引導動作、回答測試、回饋分析與 AI 模型設定。
  */
 import React, { useState } from 'react';
-import { Bot, BookOpenText, FlaskConical, MessageSquareHeart, Workflow } from 'lucide-react';
+import { Bot, BookOpenText, FlaskConical, KeyRound, MessageSquareHeart, Workflow } from 'lucide-react';
 import { AiEventStudio } from './AiEventStudio';
 import { CommonQaCatalogPanel } from './CommonQaCatalogPanel';
 import { RealLlmSemanticTestPanel } from './RealLlmSemanticTestPanel';
 import { KnowledgeFeedbackPanel } from './KnowledgeFeedbackPanel';
+import { LlmConfigurationPage } from './LlmConfigurationPage';
 
-type StudioTab = 'qa' | 'rules' | 'test' | 'feedback';
+type StudioTab = 'qa' | 'rules' | 'test' | 'feedback' | 'model';
 
 export const AiCustomerServiceStudioPage: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
-  const [activeTab, setActiveTab] = useState<StudioTab>('qa');
+  const [activeTab, setActiveTab] = useState<StudioTab>(() => {
+    const route = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
+    return route === 'line-llm' || route === 'line-llm-settings' ? 'model' : 'qa';
+  });
   const [qaTarget, setQaTarget] = useState<{ id?: string; question?: string }>({});
 
   const openQa = (id: string) => { setQaTarget({ id }); setActiveTab('qa'); };
@@ -27,7 +32,7 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
           <div>
             <p className="line-hub-eyebrow">LINE 專區</p>
             <h1 id="ai-studio-title">AI 客服工作室</h1>
-            <p>維護答案，測試回覆，持續改善客服品質。</p>
+            <p>維護答案，測試回覆，持續改善客服品質，並管理 AI 模型設定。</p>
           </div>
         </div>
       </header>
@@ -45,6 +50,9 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
         <button type="button" className={activeTab === 'feedback' ? 'active' : ''} aria-current={activeTab === 'feedback' ? 'page' : undefined} onClick={() => { if (('feedback') !== activeTab) requestLeave(() => setActiveTab('feedback')); }}>
           <MessageSquareHeart aria-hidden="true" />回饋分析
         </button>
+        <button type="button" className={activeTab === 'model' ? 'active' : ''} aria-current={activeTab === 'model' ? 'page' : undefined} onClick={() => { if (('model') !== activeTab) requestLeave(() => setActiveTab('model')); }}>
+          <KeyRound aria-hidden="true" />模型設定
+        </button>
       </nav>
 
       <div className="line-hub-tab-panel">
@@ -54,6 +62,7 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
           <RealLlmSemanticTestPanel onOpenQa={openQa} onCreateQa={createQa} />
         )}
         {activeTab === 'feedback' && <KnowledgeFeedbackPanel onOpenQa={openQa} onCreateQa={createQa} />}
+        {activeTab === 'model' && <LlmConfigurationPage />}
       </div>
     </section>
   );

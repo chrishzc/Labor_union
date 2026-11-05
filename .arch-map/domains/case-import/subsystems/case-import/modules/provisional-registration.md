@@ -9,7 +9,7 @@
 
 ## Implementation
 - `subsystems/case_import/registration_staging.py` — Redis 待審、核准／拒絕／到期與原正式 writer 協調。
-- `infrastructure/redis/registration_staging_repository.py`、`infrastructure/redis/registration_connection.py`、`infrastructure/redis/registration_maintenance.py` — 獨立耐久暫存、ACL／原子狀態及 AOF generation 清除。
+- `infrastructure/redis/registration_staging_repository.py`、`infrastructure/redis/registration_connection.py`、`infrastructure/redis/registration_maintenance.py` — 支援共用標準 Redis (REDIS_URL) 或獨立容器、命名空間隔離、原子狀態及 AOF 維護。
 - `api/registration_intake.py`、`api/registration_contracts.py`、`api/registration_token_verification.py`、`infrastructure/line/registration_token_verifier.py` — 無 SQL 公開接收與固定 LINE 驗證 transport。
 - `api/dependencies/registration_applications.py`、`api/dependencies/registration_runtime.py`、`subsystems/case_import/registration_maintenance.py`、`scripts/registration_maintenance.py`、`docker-compose.registration.yml`、`deploy/registration/` — 內部核准 composition、每分鐘 recovery／expiry 與每小時 AOF maintenance；部署仍需環境驗收。
 - primary:
@@ -32,7 +32,7 @@
   - `line/line_bot.py`（舊SQL問卷入口固定410，不因legacy開關復活）
 
 ## Dependencies
-- inbound: `api/main.py`、`api/nas_apps.py` — 僅管理服務在設定專用admin Redis憑證時啟動每分鐘expiry／recovery、每小時AOF維護；公開LINE與intake不載入此生命週期。
+- inbound: `api/main.py`、`api/nas_apps.py` — 管理服務啟動每分鐘 expiry／recovery 與世代維護；公開 LINE 與 intake 不載入此生命週期。
 - outbound: `case-import/pairing-current-facts` — 正式退款欄位正規化及遮蔽；保留新核准與匯入各入口必填。
 - inbound: `external-integration/line/registration-presentation` — canonical LIFF Preview／Apply transport。
 - outbound: MySQL `beclass_records.survey_details` — persists the enriched registration survey payload。

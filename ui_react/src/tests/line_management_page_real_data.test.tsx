@@ -346,7 +346,7 @@ describe('LINE 管理頁真實資料呈現', () => {
       get: vi.fn(async (ruleId: string) => ({ rule_id: ruleId, template_id: 'deposit_template', name: '訂金通知', content: '正式通知內容', revision: 1, variables: [], sample_preview: '正式通知內容' })),
       update: vi.fn(),
     };
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} onboardingClient={onboardingClient} notificationTemplateClient={notificationTemplateClient} />);
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} delivery={delivery} onboardingClient={onboardingClient} notificationTemplateClient={notificationTemplateClient} />);
     await screen.findByRole('button', { name: '編輯新好友歡迎訊息內容' });
     expect(screen.queryByRole('button', { name: '發送佇列與歷程' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Onboarding 訊息' })).not.toBeInTheDocument();
@@ -362,11 +362,11 @@ describe('LINE 管理頁真實資料呈現', () => {
       getRichMenuConfiguration: vi.fn(), listRichMenuPublications: vi.fn(), getRichMenuPublication: vi.fn(),
     };
     const onboardingClient = { get: vi.fn(() => new Promise<never>(() => {})), update: vi.fn(), preview: vi.fn() };
-    render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} onboardingClient={onboardingClient} />);
+    render(<LineManagementPage scope="notifications" customerService={customer} lineIdentity={identity} lineConfiguration={lineConfiguration} onboardingClient={onboardingClient} />);
     fireEvent.click(screen.getByRole('button', { name: '通知與發送' }));
     await waitFor(() => expect(onboardingClient.get).toHaveBeenCalled());
     const options = vi.mocked(onboardingClient.get).mock.calls[0] as unknown as [{ signal: AbortSignal }];
-    fireEvent.click(screen.getByRole('button', { name: '身分與授權' }));
+    fireEvent.click(screen.getByRole('button', { name: '寄送與異常' }));
     expect(options[0].signal.aborted).toBe(true);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -399,6 +399,7 @@ describe('LINE 管理頁真實資料呈現', () => {
 
     render(
       <LineManagementPage
+        scope="interface"
         customerService={customer}
         lineIdentity={identity}
         lineConfiguration={lineConfiguration}

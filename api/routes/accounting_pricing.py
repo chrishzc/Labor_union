@@ -43,6 +43,8 @@ def _error(error):
     conflict = isinstance(error, PricingConflict)
     if code == 'full_subsidy_existing_financial_history_conflict':
         return typed_http_error(409, 'conflict', code, '本案已有收付款或退款紀錄，無法自動改為免自備，請先核對原始帳務。', 'pricing')
+    if code == 'client_refund_recipient_snapshot_missing':
+        return typed_http_error(422, 'validation', code, '本案調降金額產生退款差額，但缺少客戶退款銀行帳號；請先於客戶資料補齊退款帳戶。', 'pricing')
     return typed_http_error(409 if conflict else 422, "conflict" if conflict else "validation",
         code, "資料已變更，請重新查詢後再儲存。" if conflict else "計價資料不完整或不符合規則。", "pricing")
 

@@ -1,14 +1,15 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { monthlyAccountingClient, type AccountingRange, type MonthlyAccountingReport } from '../api/finance_import/monthly_accounting_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
+import { accountsPayableExportClient } from '../api/accounts_payable/accounts_payable_export_client';
 import './FinanceMonthlyAccounting.css';
 
 type MonthRow = MonthlyAccountingReport['rows'][number];
 type AmountKey = 'expected_in_ntd' | 'received_ntd' | 'remaining_in_ntd' | 'expected_out_ntd' | 'paid_ntd' | 'remaining_out_ntd' | 'cash_in_ntd' | 'cash_out_ntd' | 'other_in_ntd' | 'other_out_ntd';
-const cashColumns = [['C','永豐客戶入款'],['G','台新政府入款'],['PS','永豐付月嫂'],['PT','台新轉交月嫂'],['RS','永豐退客戶'],['RT','台新退先墊補助']] as const;
+const cashColumns: [AmountKey, string][] = [['cash_in_ntd', '已核銷入款'], ['cash_out_ntd', '已核銷出款']];
 const categories = { subsidy: '補助案件', non_citizen: '非市民案件', all: '全部案件' };
 const monthNow = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; };
-const dueColumns: [AmountKey, string][] = [['expected_in_ntd', '應收'], ['received_ntd', '已收'], ['other_in_ntd', '其他處理'], ['remaining_in_ntd', '待收'], ['expected_out_ntd', '應付'], ['paid_ntd', '已付'], ['other_out_ntd', '其他處理'], ['remaining_out_ntd', '待付']];
+const dueColumns: [AmountKey, string][] = [['expected_in_ntd', '應收'], ['remaining_in_ntd', '待收'], ['expected_out_ntd', '應付'], ['remaining_out_ntd', '待付']];
 
 export function FinanceMonthlyAccounting({ onCase, initialRange, onRangeChange, revision = 0 }: { onCase: (caseNo: string) => void; initialRange?:AccountingRange; onRangeChange?:(range:AccountingRange)=>void; revision?: number }) {
   const [draft, setDraft] = useState<AccountingRange>(() => initialRange??({ start_month: monthNow(), end_month: monthNow(), category: 'subsidy' }));
@@ -23,6 +24,12 @@ export function FinanceMonthlyAccounting({ onCase, initialRange, onRangeChange, 
   const [downloading, setDownloading] = useState(false);
   const [refreshing,setRefreshing]=useState(false);
   const downloadRequest = useRef<AbortController | null>(null);
+  const [payablesDownloading, setPayablesDownloading] = useState(false);
+  const [payablesDownloadNotice, setPayablesDownloadNotice] = useState('');
+  const [showPayablesModal, setShowPayablesModal] = useState(false);
+  const [payablesTargetMonth, setPayablesTargetMonth] = useState(range.start_month);
+  const payablesDownloadRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => payablesDownloadRequest.current?.abort(), []);
   useEffect(() => () => downloadRequest.current?.abort(), []);
   useEffect(() => {
     const controller = new AbortController(); setRefreshing(true);setState(previous=>previous.data?.start_month===range.start_month&&previous.data.end_month===range.end_month&&previous.data.category===range.category?previous:{});
@@ -37,6 +44,12 @@ export function FinanceMonthlyAccounting({ onCase, initialRange, onRangeChange, 
   const hasData = !cashUnavailable && (data?.rows.some(row => basis === 'due' ? row.items.length > 0 : row.bank_facts.length > 0) ?? false);
   function query(next = draft) { if (!next.start_month || !next.end_month || next.start_month > next.end_month) { setInvalid('起始月份不可晚於結束月份。'); return; } setInvalid(''); setDownload(''); setExpansions({due:'',cash:''}); setRange({ ...next }); onRangeChange?.({...next}); }
   function quick(unit: 'month' | 'quarter' | 'year') { const now = new Date(), year = now.getFullYear(), first = unit === 'year' ? 1 : unit === 'quarter' ? Math.floor(now.getMonth() / 3) * 3 + 1 : now.getMonth() + 1; const last = unit === 'year' ? 12 : unit === 'quarter' ? first + 2 : first; const next = { ...draft, start_month: `${year}-${String(first).padStart(2, '0')}`, end_month: `${year}-${String(last).padStart(2, '0')}` }; setDraft(next); query(next); }
+  async function exportPayablesXlsx(month = payablesTargetMonth) {
+    const controller = new AbortController(); payablesDownloadRequest.current = controller; setPayablesDownloading(true); setPayablesDownloadNotice('');
+    try { const artifact = await accountsPayableExportClient.download(month, controller.signal); if (controller.signal.aborted) return; const url = URL.createObjectURL(artifact.blob), link = document.createElement('a'); link.href = url; link.download = artifact.filename; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); setPayablesDownloadNotice(`已送出下載：${artifact.filename}`); setShowPayablesModal(false); }
+    catch { if (!controller.signal.aborted) setPayablesDownloadNotice('下載應付帳款 Excel 失敗，請確認登入與付款資料後重試。'); }
+    finally { if (!controller.signal.aborted) setPayablesDownloading(false); }
+  }
   async function exportReport() {
     const controller = new AbortController(); downloadRequest.current = controller; setDownloading(true); setDownload('');
     try { const blob = await monthlyAccountingClient.download(range, basis, controller.signal); if (controller.signal.aborted) return; const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = `每月帳務-${range.start_month}-${range.end_month}-${basis}.xlsx`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setDownload('已送出下載。'); }
@@ -48,10 +61,78 @@ export function FinanceMonthlyAccounting({ onCase, initialRange, onRangeChange, 
     <form className="case-accounting-card finance-month-filter" onSubmit={event => { event.preventDefault(); query(); }}><label>起始月份<input type="month" required value={draft.start_month} onChange={event => setDraft({ ...draft, start_month: event.target.value })} /></label><label>結束月份<input type="month" required value={draft.end_month} onChange={event => setDraft({ ...draft, end_month: event.target.value })} /></label><label>案件類別<select value={draft.category} onChange={event => setDraft({ ...draft, category: event.target.value as AccountingRange['category'] })}>{Object.entries(categories).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="finance-btn-primary">查詢</button><div className="finance-month-quick">快速選擇{(['month', 'quarter', 'year'] as const).map((unit, index) => <button key={unit} type="button" className="finance-btn-secondary" onClick={() => quick(unit)}>{['本月', '本季', '本年'][index]}</button>)}</div></form>
     <div className="finance-tab-bar" role="tablist" aria-label="每月帳務口徑">{(['due', 'cash'] as const).map((value, index) => <button key={value} type="button" role="tab" id={`monthly-basis-${value}`} aria-controls="monthly-accounting-output" aria-selected={basis === value} tabIndex={basis === value ? 0 : -1} onClick={() => { setBasis(value); }} onKeyDown={event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const next = event.key === 'Home' ? 'due' : event.key === 'End' ? 'cash' : index ? 'due' : 'cash'; setBasis(next); document.getElementById(`monthly-basis-${next}`)?.focus(); }}>{value === 'due' ? '到期款進度' : '已核銷收付款'}</button>)}</div>
     {refreshing&&state.data&&<p role="status">正在更新正式帳務，保留目前月份與展開位置…</p>}{invalid && <p role="alert">{invalid}</p>}{!invalid && state.error && <p role="alert">{state.error}</p>}{!invalid && !state.data && !state.error && <p role="status">正在載入每月帳務…</p>}
-    {data && <div id="monthly-accounting-output" role="tabpanel" aria-labelledby={`monthly-basis-${basis}`}><p>{data.start_month} — {data.end_month} · {categories[data.category]} · 資料截至 {data.as_of}</p>{hasData && <div className={`case-accounting-summary finance-month-summary finance-month-summary-${basis}`}>{basis === 'due' ? <>{(['in', 'out'] as const).map(direction => <article key={direction}><span>{direction === 'in' ? '到期應收' : '到期應付'}</span><strong>{financeMoney(total(direction === 'in' ? 'expected_in_ntd' : 'expected_out_ntd'))}</strong><small>{direction === 'in' ? '已收' : '已付'} {financeMoney(total(direction === 'in' ? 'received_ntd' : 'paid_ntd'))} · 其他處理 {financeMoney(total(direction === 'in' ? 'other_in_ntd' : 'other_out_ntd'))}</small><small>{direction === 'in' ? '待收' : '待付'} {financeMoney(total(direction === 'in' ? 'remaining_in_ntd' : 'remaining_out_ntd'))}</small></article>)}</> : [['已核銷入款', total('cash_in_ntd')], ['已核銷出款', total('cash_out_ntd')], ['已核銷收付差額', total('cash_in_ntd') - total('cash_out_ntd')]].map(([label, value]) => <article key={label}><span>{label}</span><strong>{financeMoney(Number(value))}</strong></article>)}</div>}
-      <div className="case-accounting-card"><div className="finance-section-heading"><h3>{basis === 'due' ? '每月到期款進度' : '每月已核銷收付款'}</h3><button type="button" className="finance-btn-secondary" disabled={!hasData || downloading} onClick={() => void exportReport()}>下載每月摘要 Excel</button></div>{cashUnavailable ? <p className="finance-scope-note" role="status">部分銀行款同時關聯統計範圍內與範圍外的案件，尚無各案正式分配金額，無法正確拆分已核銷收付款。到期款進度仍可查閱。</p> : hasData ? <div className="finance-table-container"><table className="finance-table finance-month-table"><thead><tr><th>月份</th>{basis === 'due' ? dueColumns.map(([key, label]) => <th key={key}>{label}</th>) : <>{cashColumns.map(([key,label])=><th key={key}>{label}</th>)}</>}<th>{basis === 'due' ? '應收－應付' : '已核銷收付差額'}</th><th>查閱</th></tr></thead><tbody>{data.rows.map(row => <Fragment key={row.month}><tr><th scope="row">{row.month}</th>{basis === 'due' ? dueColumns.map(([key]) => <td key={key}>{financeMoney(row[key])}</td>) : <>{cashColumns.map(([key])=><td key={key}>{financeMoney(row.cash_by_flow?.[key]??null)}</td>)}</>}<td>{financeMoney(basis === 'due' ? row.expected_in_ntd - row.expected_out_ntd : (row.cash_in_ntd ?? 0) - (row.cash_out_ntd ?? 0))}</td><td><button type="button" className="finance-btn-secondary" aria-expanded={expanded === row.month} onClick={() => setExpanded(expanded === row.month ? '' : row.month)}>{expanded === row.month ? '收合' : '展開'}明細</button></td></tr>{expanded === row.month && <tr><td colSpan={basis === 'due' ? 11 : 9}>{details(row)}</td></tr>}</Fragment>)}</tbody><tfoot><tr><th>所選月份合計</th>{basis === 'due' ? dueColumns.map(([key]) => <td key={key}>{financeMoney(total(key))}</td>) : <>{cashColumns.map(([key])=><td key={key}>{financeMoney(data.rows.every(row=>row.cash_by_flow!=null)?data.rows.reduce((sum,row)=>sum+row.cash_by_flow![key],0):null)}</td>)}</>}<td>{financeMoney(basis === 'due' ? total('expected_in_ntd') - total('expected_out_ntd') : total('cash_in_ntd') - total('cash_out_ntd'))}</td><td /></tr></tfoot></table></div> : <p className="finance-state">所選月份沒有資料，請調整月份或案件類別。</p>}</div>
+    {data && <div id="monthly-accounting-output" role="tabpanel" aria-labelledby={`monthly-basis-${basis}`}><p>{data.start_month} — {data.end_month} · {categories[data.category]} · 資料截至 {data.as_of}</p>{hasData && <div className={`case-accounting-summary finance-month-summary finance-month-summary-${basis}`}>{basis === 'due' ? <>{(['in', 'out'] as const).map(direction => <article key={direction}><span>{direction === 'in' ? '到期應收' : '到期應付'}</span><strong>{financeMoney(total(direction === 'in' ? 'expected_in_ntd' : 'expected_out_ntd'))}</strong><small>{direction === 'in' ? '待收' : '待付'} {financeMoney(total(direction === 'in' ? 'remaining_in_ntd' : 'remaining_out_ntd'))}</small></article>)}</> : [['已核銷入款', total('cash_in_ntd')], ['已核銷出款', total('cash_out_ntd')]].map(([label, value]) => <article key={label}><span>{label}</span><strong>{financeMoney(Number(value))}</strong></article>)}</div>}
+      <div className="case-accounting-card"><div className="finance-section-heading"><h3>{basis === 'due' ? '每月到期款進度' : '每月已核銷收付款'}</h3><div className="finance-heading-actions"><button type="button" className="finance-btn-secondary" disabled={!hasData || downloading} onClick={() => void exportReport()}>下載每月摘要 Excel</button><button type="button" className="finance-btn-secondary" data-control-id="finance.accounts-payable.export-xlsx" disabled={payablesDownloading} onClick={() => { setPayablesTargetMonth(range.start_month); setShowPayablesModal(true); }}>{payablesDownloading ? '正在準備會計 Excel…' : '匯出應付帳款 Excel（會計十欄版）'}</button></div></div>{cashUnavailable ? <p className="finance-scope-note" role="status">部分銀行款同時關聯統計範圍內與範圍外的案件，尚無各案正式分配金額，無法正確拆分已核銷收付款。到期款進度仍可查閱。</p> : hasData ? <div className="finance-table-container"><table className="finance-table finance-month-table"><thead><tr><th>月份</th>{basis === 'due' ? dueColumns.map(([key, label]) => <th key={key}>{label}</th>) : <>{cashColumns.map(([key,label])=><th key={key}>{label}</th>)}</>}<th>查閱</th></tr></thead><tbody>{data.rows.map(row => <Fragment key={row.month}><tr><th scope="row">{row.month}</th>{basis === 'due' ? dueColumns.map(([key]) => <td key={key}>{financeMoney(row[key])}</td>) : <>{cashColumns.map(([key])=><td key={key}>{financeMoney(row[key])}</td>)}</>}<td><button type="button" className="finance-btn-secondary" aria-expanded={expanded === row.month} onClick={() => setExpanded(expanded === row.month ? '' : row.month)}>{expanded === row.month ? '收合' : '展開'}明細</button></td></tr>{expanded === row.month && <tr><td colSpan={basis === 'due' ? 6 : 4}>{details(row)}</td></tr>}</Fragment>)}</tbody><tfoot><tr><th>所選月份合計</th>{basis === 'due' ? dueColumns.map(([key]) => <td key={key}>{financeMoney(total(key))}</td>) : <>{cashColumns.map(([key])=><td key={key}>{financeMoney(total(key))}</td>)}</>}<td /></tr></tfoot></table></div> : <p className="finance-state">所選月份沒有資料，請調整月份或案件類別。</p>}</div>
       <p className="finance-scope-note">{basis === 'due' ? '到期款進度含客戶應收、薪資及客戶退款；已收／已付為目前進度，可能在其他月份收付。政府整期待收請由「政府補助／代墊回收」查閱。' : '依銀行交易日歸月，不以核銷操作日歸月；未核對銀行交易不計入已核銷金額。政府整期銀行款只計一次，代墊回收不重複列為收入。'} 歷史人工核銷案件 {data.excluded_cases.length} 案不計入金額；另有 {data.undated_item_count} 筆未定到期日款項未分入月份。</p>
       <section className="case-accounting-card" aria-label="按確認月份認列差額"><h3>差額認列 · 依確認處理月份</h3><p>依人員實際確認處理月份列示；與原到期月份及銀行收付月份分開，不重複列為現金收支。</p>{data.recognition_unavailable_reason?<p role="status">部分差額關聯統計範圍外案件，尚缺正式分配金額，無法正確拆分。</p>:data.recognitions?.length?<div className="finance-table-container"><table className="finance-table"><thead><tr><th>確認月份</th><th>處理方式</th><th>非現金金額</th></tr></thead><tbody>{Object.values((data.recognitions??[]).reduce<Record<string,{month:string;action:string;amount:number}>>((groups,event)=>{const month=event.confirmed_on.slice(0,7);const key=month+':'+event.action;const row=groups[key]??{month,action:event.action,amount:0};row.amount+=event.amount_ntd;groups[key]=row;return groups;},{})).map(row=><tr key={row.month+row.action}><td>{row.month}</td><td>{{loss:'確認收不回，記錄損失',reduce_service_fee:'同意減收服務費',union_bank_fee:'由工會負擔手續費',absorb_overpayment:'工會承擔超付款，不再追回'}[row.action]??row.action}</td><td>{financeMoney(row.amount)}</td></tr>)}</tbody></table></div>:<p>所選月份尚無差額認列。</p>}</section>
-    </div>}{download && <p role="status">{download}</p>}
+    </div>}{download && <p role="status">{download}</p>}{showPayablesModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payables-modal-title"
+          className="finance-modal-backdrop"
+          onClick={e => { if (e.target === e.currentTarget) setShowPayablesModal(false); }}
+        >
+          <div className="finance-modal-card">
+            <div className="finance-modal-header">
+              <h3 id="payables-modal-title">匯出應付帳款 Excel（會計十欄版）</h3>
+              <p>依選定出款月份產出月嫂服務費、退款與差額沖帳清冊（標準十欄格式）。</p>
+            </div>
+            <div className="finance-modal-body">
+              <label>
+                選擇出款月份
+                <input
+                  type="month"
+                  required
+                  value={payablesTargetMonth}
+                  onChange={e => setPayablesTargetMonth(e.target.value)}
+                />
+              </label>
+              {data?.rows && data.rows.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
+                  <span style={{ fontSize: '0.8rem', color: '#74593f' }}>目前查詢月份快速選擇：</span>
+                  {data.rows.map(r => (
+                    <button
+                      key={r.month}
+                      type="button"
+                      className="finance-btn-secondary"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.8rem',
+                        borderRadius: 6,
+                        backgroundColor: payablesTargetMonth === r.month ? '#fff0e8' : undefined,
+                        borderColor: payablesTargetMonth === r.month ? '#ab482d' : undefined,
+                        fontWeight: payablesTargetMonth === r.month ? 700 : 400
+                      }}
+                      onClick={() => setPayablesTargetMonth(r.month)}
+                    >
+                      {r.month}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="finance-modal-actions">
+              <button
+                type="button"
+                className="finance-btn-secondary"
+                disabled={payablesDownloading}
+                onClick={() => setShowPayablesModal(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="finance-btn-primary"
+                disabled={payablesDownloading || !payablesTargetMonth}
+                onClick={() => void exportPayablesXlsx(payablesTargetMonth)}
+              >
+                {payablesDownloading ? '正在準備會計 Excel…' : '確認匯出 Excel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    {payablesDownloadNotice && <p role="status">{payablesDownloadNotice}</p>}
   </section>;
 }

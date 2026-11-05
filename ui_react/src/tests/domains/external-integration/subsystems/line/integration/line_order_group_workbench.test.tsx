@@ -15,10 +15,14 @@ const page = (items: LineOrderGroupWorkspaceRecord[] = [record], number = 1, tot
 function client(): LineOrderGroupWorkspaceClient {
   return { workspaceList: vi.fn().mockResolvedValue(page()), workspaceDetail: vi.fn().mockResolvedValue(record), workspaceEvents: vi.fn().mockResolvedValue({ items: [event], page: 1, page_size: 25, total: 1, total_pages: 1 }) };
 }
-function mount(api = client(), startPage = 1) {
+const reminderItem = { case_no: 'CASE-1', staff_id: 1, missing_from: '2032-05-04', missing_through: '2032-05-07', consecutive_days: 4, group_label: '案件 CASE-1 群組', can_send: true };
+function reminders(items: typeof reminderItem[] = []) {
+  return { list: vi.fn().mockResolvedValue({ items, total: items.length, page: 1, page_size: 25 }), send: vi.fn().mockResolvedValue({ task_id: 9, status: 'pending' }) };
+}
+function mount(api = client(), startPage = 1, reminderClient = reminders()) {
   function Workspace() {
     const [search, setSearch] = useState(''); const [status, setStatus] = useState<LineOrderGroupStatus | 'all'>('all'); const [number, setNumber] = useState(startPage);
-    return <LineOrderGroupWorkbench client={api} search={search} status={status} page={number} onSearchChange={setSearch} onStatusChange={setStatus} onPageChange={setNumber} />;
+    return <LineOrderGroupWorkbench client={api} reminderClient={reminderClient} search={search} status={status} page={number} onSearchChange={setSearch} onStatusChange={setStatus} onPageChange={setNumber} />;
   }
   return { api, ...render(<Workspace />) };
 }
@@ -29,6 +33,19 @@ function expandHistory() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('案件群組精簡工作區', () => {
+  it('shows the service-day log gap inside the group row and drawer, and only sends from the drawer', async () => {
+    const reminderClient = reminders([reminderItem]);
+    mount(client(), 1, reminderClient);
+    await screen.findByText('日誌連續缺漏 4 日');
+    expect(screen.queryByRole('button', { name: '發送提醒' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看案件 CASE-1 群組明細' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(reminderClient.send).not.toHaveBeenCalled();
+    fireEvent.click(await within(dialog).findByRole('button', { name: '發送提醒' }));
+    await within(dialog).findByText('已建立案件群組提醒寄送工作。');
+    expect(reminderClient.send).toHaveBeenCalledTimes(1);
+  });
+
   it('only shows three useful columns and reads events after expanding the drawer history', async () => {
     const { api } = mount();
     await screen.findByRole('button', { name: '查看案件 CASE-1 群組明細' });

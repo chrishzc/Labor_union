@@ -28,7 +28,7 @@ describe('提醒內容搬移至帳務頁',()=>{
   });
   it('其他通知編輯入口仍在 LINE，不導向帳務',()=>{
     window.history.replaceState(null,'','#line-management?tab=push_queue&message=service-start-inquiry');
-    render(<LineManagementPage/>);
+    render(<LineManagementPage scope="notifications"/>);
     expect(screen.getByRole('region',{name:'原通知內容工作台'})).toBeInTheDocument();
     expect(window.location.hash).toContain('#line-management?');
     expect(window.location.hash).toContain('message=service-start-inquiry');
@@ -36,7 +36,7 @@ describe('提醒內容搬移至帳務頁',()=>{
   });
   it.each(['deposit-reminder','payment-first-reminder','payment-first-greeting','payment-second-reminder','payment-overdue-deposit','payment-overdue-first','payment-overdue-second','deposit-settled','payment-first-settled'])('繳款提醒 %s 深連結移轉至同一則帳務內容',async(id)=>{
     window.history.replaceState(null,'','#line-management?tab=push_queue&message='+id);
-    render(<LineManagementPage/>);
+    render(<LineManagementPage scope="notifications"/>);
     await waitFor(()=>expect(window.location.hash).toContain('#finance?tab=accounting-warnings&view=reminder-content'));
     expect(window.location.hash).toContain('message='+id);
     expect(screen.queryByRole('region',{name:'原通知內容工作台'})).not.toBeInTheDocument();

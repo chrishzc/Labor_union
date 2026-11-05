@@ -1,3 +1,7 @@
+/**
+ * File: CasePricingAdjustmentPanel.tsx
+ * Description: 客戶名冊右側抽屜個案計價調整面板，支援人工設定時薪、補助上限與明確錯誤提示。
+ */
 import { useEffect, useRef, useState } from 'react';
 import { accountingPricingClient, PricingTermsSchema, pricingTermsError, pricingIdentityLabel, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -72,7 +76,13 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
       if (!alive.current) return;
       if (!applied && error instanceof ApiHttpError && error.status < 500) {
         pending.current = null; setStatus('error');
-        setMessage(error.status === 409 ? '資料已變更，或涉及已核銷補助的更正；請重新查詢並核對。' : '本案調整未完成，請確認資料及權限。');
+        setMessage(
+          error.code === 'client_refund_recipient_snapshot_missing'
+            ? '本案調整將產生退款，但缺少客戶退款銀行帳戶；請先至客戶資料補齊退款帳號後再儲存。'
+            : error.status === 409
+            ? '資料已變更，或涉及已核銷補助的更正；請重新查詢並核對。'
+            : '本案調整未完成，請確認資料及權限。'
+        );
       } else { setStatus('unknown'); setMessage('儲存或回讀結果待確認；請重試原操作，系統會沿用同一識別防止重複調整。'); }
     } finally { inFlight.current = false; }
   }

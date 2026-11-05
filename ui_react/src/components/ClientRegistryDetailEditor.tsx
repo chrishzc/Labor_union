@@ -11,6 +11,7 @@ import { ClientRegistryServiceStaff } from './ClientRegistryServiceStaff';
 import { ClientRegistryVirtualAccount } from './ClientRegistryVirtualAccount';
 import { ClientRegistryAccountingSummary } from './ClientRegistryAccountingSummary';
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
+import { HistoricalServiceAccountingWorkbench } from './HistoricalServiceAccountingWorkbench';
 import '../pages/ClientRegistryPage.css';
 
 const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '客戶備註（主檔）', service_type: '服務方式（排班參考）' };
@@ -238,9 +239,19 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     </section>
     <ClientRegistryVirtualAccount caseNo={detail.case_no} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || pricingState.busy} onRefresh={onRefresh} onStateChange={setAccountState} />
     <CasePricingAdjustmentPanel caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some(action => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || staffState.busy || intakeState.busy || accountState.busy} onCommitted={refreshRelated} onStateChange={setPricingState} />
-    <section className="registry-editor"><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
+    <section className="registry-editor"><h3>客戶帳務</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <dl className="registry-information-fields">{Object.entries(financeLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{display(detail.finance.values![field as keyof typeof detail.finance.values])}</dd></div>)}</dl>
-      : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}</section>
+      : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}
+      <div className="historical-days-box" style={{ marginTop: 16, padding: '14px 16px', background: '#faf6f3', border: '1px solid #ebdcd3', borderRadius: 8 }}>
+        <details open style={{ border: 0, padding: 0, margin: 0 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#4a3b32', display: 'flex', alignItems: 'center', gap: 6 }}>🧮 歷史訂單實際服務天數與帳務設定（歷史案件適用）</summary>
+          <div style={{ marginTop: 10 }}>
+            <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#74593f' }}>適用於歷史訂單補登實際服務天數與時數，儲存後自動重算客戶應收及月嫂服務費。</p>
+            <HistoricalServiceAccountingWorkbench caseNo={detail.case_no} onSaved={refreshRelated} />
+          </div>
+        </details>
+      </div>
+    </section>
     <ClientRegistryAccountingSummary caseNo={detail.case_no} revision={detail} />
     <ClientRegistryServiceStaff key={detail.case_no} caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || intakeState.busy || accountState.busy || pricingState.busy} onCommitted={refreshRelated} onStateChange={setStaffState} onOpenServiceArrangement={onOpenServiceArrangement} />
     <ClientChangeHistory detail={detail} />

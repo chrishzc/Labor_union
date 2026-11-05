@@ -28,9 +28,15 @@ _FIELD_ALIASES = {
     "start_time": {"service_start_time", "每日服務開始時間", "服務開始時間"},
     "end_time": {"service_end_time", "每日服務結束時間", "服務結束時間"},
     "end_day_offset": {"service_end_day_offset", "跨日標記", "服務結束日偏移"},
+    "time_range": {"service_time", "服務時間", "每日服務時間", "服務時段", "每日服務時段"},
     "status": {"status", "狀態", "訂單狀態", "訂單成立狀態"},
 }
 _STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)$")
+_TIME_RANGE = re.compile(
+    r"(?P<start>[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)\s*[-–—－~～至]\s*"
+    r"(?P<overnight>次日|翌日|\+1)?\s*(?P<end>[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"
+    r"\s*(?:[(（]\s*[0-9]+(?:\.[0-9]+)?\s*(?:小時|小時整)\s*[)）])?"
+)
 _STATUS_MAP = {
     "0": HistoricalOrderSourceStatus.CANCELLED,
     "1": HistoricalOrderSourceStatus.DEPOSIT_PAID,
@@ -170,17 +176,11 @@ def _parse_row(values, positions, source_row, epoch, digest):
     raw_time = tuple(_value(values, positions.get(key)) for key in (
         "start_time", "end_time", "end_day_offset",
     ))
-    service_time = None
-    if any(not _blank(value) for value in raw_time):
-        try:
-            service_time = ServiceTimeTerms(
-                _clock_time(raw_time[0]), _clock_time(raw_time[1]), int(str(raw_time[2]).strip())
-            )
-            if service_time.service_interval(date(2000, 1, 1)) is None:
-                raise ValueError("invalid historical service interval")
-        except (TypeError, ValueError):
-            service_time = None
-            issues += ("historical_service_time_unconfirmed",)
+    try:
+        service_time = _read_service_time(raw_time, _value(values, positions.get("time_range")))
+    except (TypeError, ValueError):
+        service_time = None
+        issues += ("historical_service_time_unconfirmed",)
     payload = {
         "case_no": _text(_value(values, positions.get("case_no"))),
         "client_name": _text(_value(values, positions.get("client_name"))),
@@ -213,12 +213,38 @@ def _parse_row(values, positions, source_row, epoch, digest):
     )
 
 
+def _read_service_time(raw_time, raw_range) -> ServiceTimeTerms | None:
+    split_time = None
+    if any(not _blank(value) for value in raw_time):
+        start, end, offset = raw_time
+        split_time = ServiceTimeTerms(
+            _clock_time(start), _clock_time(end), 0 if _blank(offset) else int(str(offset).strip()),
+        )
+    range_time = None
+    if not _blank(raw_range):
+        match = _TIME_RANGE.fullmatch(str(raw_range).strip())
+        if match is None:
+            raise ValueError("invalid historical service time range")
+        range_time = ServiceTimeTerms(
+            _clock_time(match["start"]), _clock_time(match["end"]), int(bool(match["overnight"])),
+        )
+    if split_time is not None and range_time is not None and split_time != range_time:
+        raise ValueError("conflicting historical service times")
+    service_time = split_time or range_time
+    if service_time is not None and service_time.service_interval(date(2000, 1, 1)) is None:
+        raise ValueError("invalid historical service interval")
+    return service_time
+
+
 def _clock_time(value):
     if isinstance(value, datetime):
         return value.time()
     if isinstance(value, time):
         return value
-    return time.fromisoformat(str(value).strip())
+    text = str(value).strip()
+    if re.fullmatch(r"[0-9]:.*", text):
+        text = "0" + text
+    return time.fromisoformat(text)
 
 
 def _header_positions(headers):

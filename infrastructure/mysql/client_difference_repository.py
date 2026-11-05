@@ -1,4 +1,7 @@
-"""Client Finance owner adapter. Never edits a bank row or a cash ledger entry."""
+"""
+File: client_difference_repository.py
+Description: 客戶帳務差額處置與金額更正寫入器，保留真實金流，更正退款缺受款帳戶允許保持待補。
+"""
 from dataclasses import replace
 from datetime import datetime
 from hashlib import sha256
@@ -205,7 +208,7 @@ def _set_client_amount(cursor,case_no,identity,effective,before,key,actor,reason
                 "SELECT %s,case_no,bank_code,bank_account,'amount_correction' FROM client_refund_recipient_snapshots WHERE refund_obligation_identity=%s",(child,identity))
             if cursor.rowcount==0:
                 from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot
-                _insert_refund_recipient_snapshot(cursor,child,case_no,'amount_correction')
+                _insert_refund_recipient_snapshot(cursor,child,case_no,'amount_correction',require_complete=False)
 
 
 def _correct_unpaid_opposite(cursor,source,direction,amount,key,actor,reason,version):
