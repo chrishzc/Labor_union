@@ -1,0 +1,64 @@
+# Additive override: docker compose -f docker-compose.yml -f docker-compose.registration.yml ...
+# Set the tested Python base image to an immutable repo@sha256 digest before building.
+services:
+  registration-redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/registration-redis-entrypoint"]
+    volumes:
+      - registration-data:/data
+      - ./deploy/registration/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./deploy/registration/redis-entrypoint.sh:/usr/local/bin/registration-redis-entrypoint:ro
+    tmpfs:
+      - /run/registration:mode=0700
+    secrets:
+      - registration_intake_password
+      - registration_admin_password
+    networks: [registration-private]
+  registration-intake:
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+      args:
+        PYTHON_IMAGE: ${REGISTRATION_INTAKE_PYTHON_IMAGE:?Use a tested Python 3.14 image pinned by sha256}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:?LINE channel required}
+      REGISTRATION_REDIS_HOST: registration-redis
+      REGISTRATION_REDIS_INTAKE_PASSWORD_FILE: /run/secrets/registration_intake_password
+    secrets: [registration_intake_password]
+    depends_on: [registration-redis, registration-token-verifier]
+    networks: [registration-private, registration-verification, registration-ingress]
+  registration-token-verifier:
+    build:
+      context: .
+      dockerfile: deploy/registration/Dockerfile
+      args:
+        PYTHON_IMAGE: ${REGISTRATION_INTAKE_PYTHON_IMAGE:?Use a tested Python 3.14 image pinned by sha256}
+    command: [uvicorn, api.registration_token_verification:app, --host, 0.0.0.0, --port, "8081", --no-access-log]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      LINE_LOGIN_CHANNEL_ID: ${LINE_LOGIN_CHANNEL_ID:?LINE channel required}
+    networks: [registration-verification, registration-egress]
+networks:
+  registration-private:
+    internal: true
+  registration-verification:
+    internal: true
+  registration-ingress:
+    internal: true
+  registration-egress:
+    driver: bridge
+volumes:
+  registration-data:
+secrets:
+  registration_intake_password:
+    file: ${REGISTRATION_INTAKE_PASSWORD_FILE:?Private secret file required}
+  registration_admin_password:
+    file: ${REGISTRATION_ADMIN_PASSWORD_FILE:?Private secret file required}

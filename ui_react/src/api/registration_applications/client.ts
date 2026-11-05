@@ -5,7 +5,9 @@ import { transport } from '../shared/transport';
 
 const view = z.strictObject({
   registration_id: z.number().int().positive(), version: z.number().int().positive(),
-  name: z.string(), phone: z.string(), approved: z.boolean(),
+  name: z.string().nullable(), phone: z.string().nullable(), approved: z.boolean(),
+  status: z.enum(['pending', 'approving', 'approved', 'rejected', 'expired']),
+  submitted_at_utc: z.string().datetime({offset:true}), expires_at_utc: z.string().datetime({offset:true}),
   fields: z.array(z.strictObject({ label: z.string(), value: z.string() })),
   registration_kind: z.enum(['subsidy', 'non_citizen']),
   case_no: z.string().nullable(), approved_at_utc: z.string().nullable(),
@@ -27,6 +29,12 @@ export const registrationApplicationsClient = {
   async detail(id: number): Promise<RegistrationApplication> {
     const result = decodePayload(envelope(view), await transport.get(`${path}/${id}`, options())).data;
     if (result.registration_id !== id) throw new Error('申請回應編號不一致。');
+    return result;
+  },
+  async reject(application: RegistrationApplication): Promise<RegistrationApplication> {
+    const result = decodePayload(envelope(view), await transport.post(`${path}/${application.registration_id}/reject`,
+      { expected_version: application.version }, options())).data;
+    if (result.registration_id !== application.registration_id || !['rejected', 'expired'].includes(result.status)) throw new Error('拒絕結果尚未確認，請重新查詢同一筆申請。');
     return result;
   },
   async approve(application: RegistrationApplication): Promise<RegistrationApplication> {

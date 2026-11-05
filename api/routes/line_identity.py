@@ -360,10 +360,6 @@ def apply_admin(payload: AdminIdentityBindingApplyRequest):
     return BaseResponse(data=_apply_response(result, payload.preview_fingerprint))
 
 
-@public_router.post(
-    "/registration/preview",
-    response_model=BaseResponse[ProvisionalRegistrationPreviewResponse],
-)
 def preview_provisional_registration(
     payload: ProvisionalRegistrationPreviewRequest,
     application: LineIdentityApplication = Depends(get_line_identity_application),
@@ -385,10 +381,6 @@ def preview_provisional_registration(
     )
 
 
-@public_router.post(
-    "/registration/apply",
-    response_model=BaseResponse[ProvisionalRegistrationResponse],
-)
 def apply_provisional_registration(
     payload: ProvisionalRegistrationRequest,
     application: LineIdentityApplication = Depends(get_line_identity_application),
@@ -648,35 +640,7 @@ def retired_direct_review_decision(
     )
 
 
-# Kept as one mapping so every public registration field has one auditable owner input.
-def _registration_intent(payload, line_user_id):
-    return ProvisionalRegistrationIntent(
-        line_user_id=line_user_id.value,
-        name=payload.name,
-        phone=payload.phone,
-        expected_date=payload.expected_date,
-        service_days=payload.service_days,
-        address=payload.address,
-        gender=payload.gender,
-        email=payload.email,
-        birth_date=payload.birth_date,
-        tel=payload.tel,
-        ext=payload.ext,
-        city=payload.city,
-        zip_code=payload.zip_code,
-        id_number=payload.id_number,
-        liff_config_revision=payload.liff_config_revision,
-        survey_details=payload.survey_details,
-        registration_kind=payload.registration_kind,
-        service_start_date=payload.service_start_date,
-        service_time=payload.service_time,
-        residence_type=payload.residence_type,
-        delivery_type=payload.delivery_type,
-        service_type=payload.service_type,
-        baby_info=payload.baby_info,
-        notes=payload.notes,
-        line_id=payload.line_id,
-    )
+from api.registration_contracts import registration_intent as _registration_intent
 
 
 def _registration_http_error(status_code, code, message):

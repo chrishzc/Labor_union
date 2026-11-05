@@ -5,7 +5,7 @@ import { registrationApplicationsClient as client } from '../api/registration_ap
 import { sessionClient } from '../api/auth/session_client';
 
 const application = { registration_id: 5, version: 1, name: '測試申請人', phone: '0900000000',
-  approved: false, registration_kind: 'subsidy' as const, case_no: null, approved_at_utc: null,
+  approved: false, status: 'pending' as const, submitted_at_utc: '2026-11-05T00:00:00Z', expires_at_utc: '2026-11-19T00:00:00Z', registration_kind: 'subsidy' as const, case_no: null, approved_at_utc: null,
   fields: [{ label: '服務地址', value: '測試地址' }] };
 const envelope = (data: unknown) => ({ success: true, message: '', data, error: null });
 const response = (data: unknown) => ({ ok: true, status: 200, statusText: 'OK',
@@ -17,14 +17,14 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); sessionClient.cle
 describe('saved demand application review', () => {
   it('requires a complete non-citizen case result after approval', async () => {
     const pending = { ...application, registration_kind: 'non_citizen' as const };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...pending, approved: true, version: 2 })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ ...pending, approved: true, status: 'approved' as const, version: 2 })));
     await expect(client.approve(pending)).rejects.toThrow('正式案件尚未確認');
-    const approved = { ...pending, approved: true, version: 2, case_no: 'A115001', approved_at_utc: '2026-10-29T05:00:00+00:00' };
+    const approved = { ...pending, approved: true, status: 'approved' as const, version: 2, case_no: 'A115001', approved_at_utc: '2026-10-29T05:00:00+00:00' };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(approved)));
     await expect(client.approve(pending)).resolves.toEqual(approved);
   });
   it('uses the authenticated session and version, without accepting an actor from the browser', async () => {
-    const fetch = vi.fn().mockResolvedValue(response({ ...application, approved: true, version: 2 }));
+    const fetch = vi.fn().mockResolvedValue(response({ ...application, approved: true, status: 'approved' as const, version: 2 }));
     vi.stubGlobal('fetch', fetch);
     await client.approve(application);
     expect(fetch.mock.calls[0][0]).toBe('/api/v1/admin/registration-applications/5/approve');
@@ -51,5 +51,19 @@ describe('saved demand application review', () => {
     expect(screen.getByText('申請 5：測試申請人／0900000000')).toBeInTheDocument();
     expect(approve).toHaveBeenCalledWith(application);
     await waitFor(() => expect(state).toHaveBeenLastCalledWith({ dirty: false, busy: false }));
+  });
+
+  it('rejects using the original version and displays only the cleared terminal result', async () => {
+    vi.spyOn(client, 'pending').mockResolvedValue([application]);
+    vi.spyOn(client, 'detail').mockResolvedValue(application);
+    const reject = vi.spyOn(client, 'reject').mockResolvedValue({...application, name:null, phone:null,
+      fields:[], status:'rejected', version:2});
+    render(<RegistrationApplications onEditStateChange={vi.fn()}/>);
+    fireEvent.click(await screen.findByText('申請 5：測試申請人／0900000000'));
+    fireEvent.click(await screen.findByRole('button', {name:'拒絕並清除問卷'}));
+    await screen.findByRole('heading', {name:'申請 5：內容已清除'});
+    expect(reject).toHaveBeenCalledWith(application);
+    expect(screen.queryByText('測試地址')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name:'核准並建立客戶'})).not.toBeInTheDocument();
   });
 });

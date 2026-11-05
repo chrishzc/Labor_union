@@ -81,8 +81,63 @@ class MySqlProvisionalRegistrationRepository:
                 raise ProvisionalRegistrationConflictError("registration_application_not_found")
             return _application_snapshot(row)
 
-    def approve(self, registration_id, expected_version, actor) -> ProvisionalRegistrationReceipt:
-        snapshot = self.load_application(registration_id, for_update=True)
+    def registration_id_high_water(self):
+        with _cursor(self._connection) as cursor:
+            cursor.execute("SELECT COALESCE(MAX(id),0) AS high_water FROM provisional_client_registrations")
+            return int(cursor.fetchone()["high_water"])
+
+    def approval_receipt(self, registration_id, operation_id):
+        with _cursor(self._connection) as cursor:
+            cursor.execute("SELECT result_snapshot FROM admin_command_receipts "
+                           "WHERE command_family='registration_approval/v1' AND idempotency_key=%s",
+                           (operation_id,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        saved = json.loads(row["result_snapshot"]) if isinstance(row["result_snapshot"], str) else row["result_snapshot"]
+        if saved.get("registration_id") != registration_id or saved.get("operation_id") != operation_id:
+            raise ProvisionalRegistrationConflictError("registration_operation_mismatch")
+        return saved["receipt"]
+
+    def prepare_staged_approval(self, staged):
+        """Human approval only: insert the minimal FK parent in the existing outer UoW."""
+        candidate = staged.candidate
+        with _cursor(self._connection) as cursor:
+            cursor.execute("INSERT IGNORE INTO provisional_client_registrations "
+                           "(id,line_user_id,active_line_user_id,payload_fingerprint,application_payload) "
+                           "VALUES (%s,%s,%s,%s,NULL)",
+                           (staged.registration_id, candidate.line_user_id, candidate.line_user_id,
+                            candidate.payload_fingerprint.value))
+            cursor.execute(_APPLICATION_SELECT + " WHERE id=%s FOR UPDATE", (staged.registration_id,))
+            row = cursor.fetchone()
+        if (not row or row["line_user_id"] != candidate.line_user_id
+                or row["payload_fingerprint"] != candidate.payload_fingerprint.value
+                or row["application_payload"] is not None):
+            raise ProvisionalRegistrationConflictError("registration_parent_mismatch")
+        return RegistrationApplicationSnapshot(staged.registration_id, int(row["application_version"]),
+            candidate, row["client_id"], row["beclass_record_id"], row["approved_by_actor"],
+            row.get("case_no"), row.get("approved_at_utc"))
+
+    def save_approval_receipt(self, staged, outcome):
+        with _cursor(self._connection) as cursor:
+            cursor.execute("SELECT approved_at_utc FROM provisional_client_registrations WHERE id=%s", (staged.registration_id,))
+            approved_at = cursor.fetchone()["approved_at_utc"]
+            if approved_at.tzinfo is None:
+                approved_at = approved_at.replace(tzinfo=timezone.utc)
+            receipt = {"client_id": outcome.client_id, "beclass_record_id": outcome.beclass_record_id,
+                       "case_no": outcome.case_no, "approved_at_utc": approved_at.isoformat()}
+            fingerprint = fingerprint_payload({"registration_id": staged.registration_id,
+                "operation_id": staged.operation_id, "payload_fingerprint": staged.candidate.payload_fingerprint.value})
+            cursor.execute("INSERT INTO admin_command_receipts "
+                "(command_family,idempotency_key,request_fingerprint,preview_fingerprint,actor,reason,result_snapshot) "
+                "VALUES ('registration_approval/v1',%s,%s,%s,%s,'',%s)",
+                (staged.operation_id, fingerprint.value, fingerprint.value, staged.actor,
+                 json.dumps({"registration_id": staged.registration_id, "operation_id": staged.operation_id,
+                             "receipt": receipt}, sort_keys=True)))
+        return receipt
+
+    def approve(self, registration_id, expected_version, actor, *, snapshot=None) -> ProvisionalRegistrationReceipt:
+        snapshot = snapshot or self.load_application(registration_id, for_update=True)
         candidate = snapshot.candidate
         if snapshot.client_id is not None and snapshot.beclass_record_id is not None:
             if candidate.registration_kind == "non_citizen" and snapshot.case_no is None:
@@ -205,12 +260,16 @@ def _insert_client(cursor, candidate) -> int:
 def _insert_beclass_record(cursor, candidate) -> int:
     payload = candidate.beclass_payload
     survey = dict(payload["survey_details"])
+    from domains.case_import.refund_account import REFUND_SURVEY_FIELDS
+    for field in REFUND_SURVEY_FIELDS:
+        survey.pop(field, None)
     survey["_liff_meta"] = {**dict(survey["_liff_meta"]), "submitted_at": datetime.now(timezone.utc).isoformat()}
     cursor.execute(
-        "INSERT INTO beclass_records (name,email,birth_date,phone,tel,ext,city,zip_code,address,created_at,survey_details) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),%s)",
+        "INSERT INTO beclass_records (name,email,birth_date,phone,tel,ext,city,zip_code,address,refund_bank_code,refund_account_no,created_at,survey_details) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(),%s)",
         tuple(payload[name] for name in ("name", "email", "birth_date", "phone", "tel", "ext", "city", "zip_code", "address"))
-        + (json.dumps(survey, ensure_ascii=False, sort_keys=True, separators=(",", ":")),),
+        + (payload.get("refund_bank_code"), payload.get("refund_account_no"),
+           json.dumps(survey, ensure_ascii=False, sort_keys=True, separators=(",", ":"))),
     )
     return _last_insert_id(cursor, "provisional_registration_beclass_insert_failed")
 

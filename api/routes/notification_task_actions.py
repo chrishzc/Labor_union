@@ -238,10 +238,11 @@ def adjustment_recontact_apply(pool_id:int,body:AdjustmentRecontactApply,princip
 def mobile_registration_query(identity:int,body:MobileAuth):
     from api.routes.registration_applications import application_detail
     principal = _mobile(body.line_id_token, None)
-    return application_detail(identity,principal,get_line_identity_application())
+    return application_detail(identity,principal,get_registration_review_application())
 
 
-from api.routes.registration_applications import ApprovalRequest, get_line_identity_application
+from api.routes.registration_applications import ApprovalRequest
+from api.dependencies.registration_applications import get_registration_review_application
 from api.schemas.line_tasks import LineTaskActionRequest
 from api.schemas.runtime_health import AlertAdminTargetRequest, AlertAdminTargetApplyRequest, AlertTargetEnabledRequest, AlertTargetEnabledApplyRequest
 
@@ -254,7 +255,7 @@ class MobileRegistrationApproval(ApprovalRequest, MobileAuth):
 def mobile_registration_approve(identity:int,body:MobileRegistrationApproval):
     from api.routes.registration_applications import approve_application
     principal = _mobile(body.line_id_token, LineCapability.REVIEW_DECIDE)
-    return approve_application(identity,ApprovalRequest(expected_version=body.expected_version),principal,get_line_identity_application())
+    return approve_application(identity,ApprovalRequest(expected_version=body.expected_version),principal,get_registration_review_application())
 
 
 @mobile_router.post('/delivery/{identity}/query')

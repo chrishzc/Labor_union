@@ -13,6 +13,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
   const [items, setItems] = useState<RegistrationApplication[]>([]);
   const [selected, setSelected] = useState<RegistrationApplication | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -29,7 +30,7 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     const current=++selection.current;setSelected(null);setError(false);setMessage('');
     if(!Number.isSafeInteger(id) || id<=0){setError(true);setMessage('申請編號無效，請從通知事項重新開啟。');return;}
     setBusy(true);
-    void client.detail(id).then(detail=>{if(current===selection.current)setSelected(detail);})
+    void client.detail(id).then(detail=>{if(current===selection.current){setSelected(detail);setUnknown(false);}})
       .catch(failure=>{if(current===selection.current){setError(true);setMessage(failure instanceof Error?failure.message:'申請暫時無法讀取，請重新查詢。');}})
       .finally(()=>{if(current===selection.current)setBusy(false);});
   };
@@ -40,15 +41,28 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     return()=>{selection.current++;};
   }, [initialId]);
   const approve = () => {
-    if (!selected || busy || selected.approved) return;
+    if (!selected || busy || selected.status !== 'pending') return;
     const submitted = selected;
     void run(async () => {
-      const result = await client.approve(submitted); setSelected(result);
+      setUnknown(true);
+      const result = await client.approve(submitted); setSelected(result); setUnknown(false);
       setItems(previous => previous.filter(item => item.registration_id !== result.registration_id));
       setMessage(result.registration_kind === 'non_citizen' ? `非市民需求已核准，案件 ${result.case_no} 已建立。` : '需求申請已核准，正式客戶資料已建立。');
       await onCommitted?.();
     });
   };
+  const reject = () => {
+    if (!selected || busy || unknown || selected.status !== 'pending') return;
+    const original = selected;
+    void run(async () => {
+      setUnknown(true);
+      const result = await client.reject(original); setSelected(result); setUnknown(false);
+      setItems(previous => previous.filter(item => item.registration_id !== result.registration_id));
+      setMessage(result.status === 'expired' ? '申請已到期，問卷內容已清除。' : '申請已拒絕，問卷內容已清除。');
+    });
+  };
+  const statuses = {pending: '待核准', approving: '建檔或清除確認中', approved: '已核准，問卷已清除', rejected: '已拒絕，問卷已清除', expired: '已到期，問卷已清除'};
+  const time = (value: string) => new Intl.DateTimeFormat('zh-TW', {dateStyle:'medium', timeStyle:'short', timeZone:'Asia/Taipei'}).format(new Date(value));
   return <section className="registration-applications" aria-label="待核准需求申請" aria-busy={busy}>
     <header className="registration-applications__header">
       <div><h2>待核准需求</h2><p>需求表單先保存為申請。查看內容並核准後，才建立正式客戶資料及完成對應綁定。</p></div>
@@ -71,10 +85,15 @@ export function RegistrationApplications({ onEditStateChange, initialId, onCommi
     })}>載入更多</button>}
     </div>
     {selected ? <section className="registration-applications__detail" aria-label={`需求申請 ${selected.registration_id}`}>
-      <header className="registration-applications__detail-header"><h3>申請 {selected.registration_id}：{selected.name}</h3><span className="registration-applications__badge">{selected.approved ? '已核准' : '待核准'}</span></header>
+      <header className="registration-applications__detail-header"><h3>申請 {selected.registration_id}：{selected.name ?? '內容已清除'}</h3><span className="registration-applications__badge">{statuses[selected.status]}</span></header>
       {selected.registration_kind === 'non_citizen' && <p className="registration-applications__kind">非市民服務申請{selected.case_no && ` · 案件編號：${selected.case_no}`}</p>}
+      <p>送出：{time(selected.submitted_at_utc)}（台北時間） · 待審到期：{time(selected.expires_at_utc)}（台北時間）</p>
       <dl className="registration-applications__fields">{selected.fields.map((field, index) => <div key={`${field.label}-${index}`}><dt>{fieldLabels[field.label] ?? field.label}</dt><dd>{field.value}</dd></div>)}</dl>
-      <footer className="registration-applications__actions">{selected.approved ? <p>此申請已核准。</p> : <button type="button" className="registration-applications__approve" disabled={busy} onClick={approve}>{selected.registration_kind === 'non_citizen' ? '核准並建立案件' : '核准並建立客戶'}</button>}</footer>
+      <footer className="registration-applications__actions">
+        {selected.status === 'pending' && !unknown && <><button type="button" className="registration-applications__approve" disabled={busy} onClick={approve}>{selected.registration_kind === 'non_citizen' ? '核准並建立案件' : '核准並建立客戶'}</button><button type="button" disabled={busy} onClick={reject}>拒絕並清除問卷</button></>}
+        {(unknown || selected.status === 'approving') && <button type="button" disabled={busy} onClick={() => loadDetail(selected.registration_id)}>查詢原申請處理結果</button>}
+        {selected.status !== 'pending' && <p>{statuses[selected.status]}</p>}
+      </footer>
     </section> : <div className="registration-applications__placeholder"><h3>查看申請內容</h3><p>選擇一筆需求申請，確認填寫內容後再核准。</p></div>}
     </div>
   </section>;

@@ -8,6 +8,7 @@ import re
 from typing import Any, Literal, Mapping
 
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from domains.case_import.refund_account import refund_fields_from_survey
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 
@@ -108,6 +109,10 @@ def build_provisional_registration_candidate(
             optional["liff_config_revision"],
         ),
     }
+    try:
+        beclass.update(refund_fields_from_survey(survey_details))
+    except ValueError as error:
+        raise ProvisionalRegistrationDomainError(ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, str(error)) from None
     if intent.registration_kind not in {"subsidy", "non_citizen"}:
         raise ProvisionalRegistrationDomainError(
             ProvisionalRegistrationIssue.INVALID_ROOT_FACTS, "registration kind is invalid"

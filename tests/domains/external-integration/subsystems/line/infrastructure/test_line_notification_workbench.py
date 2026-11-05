@@ -342,7 +342,7 @@ def test_information_missing_binding_remains_original_owner_conflict(monkeypatch
 
 def test_mobile_registration_uses_binding_auth_and_original_approval(monkeypatch):
     monkeypatch.setattr(line_mobile_admin,'_mobile_admin_context',lambda *args:(_ for _ in ()).throw(HTTPException(403,'unbound')))
-    monkeypatch.setattr(actions,'get_line_identity_application',lambda:pytest.fail('must not create writer'))
+    monkeypatch.setattr(actions,'get_registration_review_application',lambda:pytest.fail('must not create writer'))
     with pytest.raises(HTTPException):
         actions.mobile_registration_approve(3,actions.MobileRegistrationApproval(line_id_token='unbound',expected_version=2))
 
