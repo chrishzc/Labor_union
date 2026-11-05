@@ -110,12 +110,13 @@ export const FinancePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<FinanceTab>(entry.overdue ? 'accounting-warnings' : entry.tab === 'case-accounting' || entry.tab === 'client-receipts' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'receipt-notices' ? 'receipt-notices' : entry.tab === 'pending' ? 'pending' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'case-accounting' : entry.tab === 'receipts' || entry.tab === 'subsidy-advance' ? 'receipts' : entry.tab === 'government-list' ? 'government-list' : entry.tab === 'monthly' ? 'monthly' : 'case-accounting');
   const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments' | 'monthly' | 'pending'>('monthly');
   const [caseDrawer,setCaseDrawer]=useState(entry.caseNo);
+  const [caseClientName,setCaseClientName]=useState('');
   const [caseNotice,setCaseNotice]=useState<'deposit'|'first'|'second'|undefined>();
   const setSubsidyCase=(caseNo:string)=>{if(caseNo)openCase(caseNo);};
   const activeWorkspace = activeTab === 'client-receipts' ? 'case-accounting' : activeTab;
   const [monthlyRange,setMonthlyRange] = useState<AccountingRange>(()=>({start_month:currentMonth(),end_month:currentMonth(),category:'all'}));
   const [receivableFilters,setReceivableFilters] = useState<ReceivableFilters>(()=>({month:currentMonth(),category:'subsidy',status:'all',search:''}));
-  const openCase = (caseNo: string,noticeStage?:'deposit'|'first'|'second') => { setCaseNotice(noticeStage); setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeTab === 'pending' ? 'pending' : activeTab === 'monthly' ? 'monthly' : activeTab === 'payments' || activeTab === 'staff-payables' ? 'payments' : 'receipts'); setCaseDrawer(caseNo); };
+  const openCase = (caseNo: string,noticeStage?:'deposit'|'first'|'second') => { setCaseClientName(''); setCaseNotice(noticeStage); setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeTab === 'pending' ? 'pending' : activeTab === 'monthly' ? 'monthly' : activeTab === 'payments' || activeTab === 'staff-payables' ? 'payments' : 'receipts'); setCaseDrawer(caseNo); };
   const openBank = () => { setSubsidyCase(''); setActiveTab('finance-import'); };
 
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
@@ -917,8 +918,8 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
       <details className="finance-related-tools"><summary>其他帳務作業</summary><nav className="finance-tab-bar" aria-label="帳務相關工具">{([['receipts','應收款'],['payments','應付款'],['staff-payables','人員付款'],['pending','待確認與預估'],['receipt-notices','入帳通知'],['accounting-warnings','逾期提醒']] as const).map(([id,label])=><button type="button" key={id} aria-current={activeTab===id?'page':undefined} onClick={()=>requestLeave(()=>setActiveTab(id))}>{label}</button>)}</nav></details>
-      {caseDrawer&&<Drawer isOpen title={'案件帳務 · '+caseDrawer} ariaLabel={'案件帳務 · '+caseDrawer} closeLabel="關閉案件" size="xl" className="finance-accounting-drawer" onClose={()=>setCaseDrawer('')} footer={<button type="button" className="finance-btn-secondary" onClick={()=>requestLeave(()=>setCaseDrawer(''))}>關閉案件</button>}>
-        <FinanceCaseAccounting key={caseDrawer} embedded initialCase={caseDrawer} initialNoticeStage={caseNotice} onChanged={()=>setReload(value=>value+1)}/>
+      {caseDrawer&&<Drawer isOpen title={caseDrawer+(caseClientName?' · '+caseClientName:'')} ariaLabel={'案件帳務 · '+caseDrawer} closeLabel="關閉案件" size="xl" className="finance-accounting-drawer" onClose={()=>setCaseDrawer('')} footer={<button type="button" className="finance-btn-secondary" onClick={()=>requestLeave(()=>setCaseDrawer(''))}>關閉案件</button>}>
+        <FinanceCaseAccounting key={caseDrawer} embedded initialCase={caseDrawer} initialNoticeStage={caseNotice} onIdentity={(caseNo,name)=>{if(caseNo===caseDrawer)setCaseClientName(name);}} onChanged={()=>setReload(value=>value+1)}/>
       </Drawer>}
     </div>
   );

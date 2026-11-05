@@ -2,7 +2,7 @@
  * File: reports_query_page.test.tsx
  * Description: 驗證 ReportsPage 週報三分頁、季度／年度 regression、XLSX 與 stale 狀態清除。
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { subsidyReportQueryClient } from '../api/reports/subsidy_report_query_client';
 import { subsidyReportExportClient } from '../api/reports/subsidy_report_export_client';
@@ -10,6 +10,7 @@ import { weeklyOperationsReportExportClient } from '../api/reports/weekly_operat
 import { weeklyOperationsReportQueryClient } from '../api/reports/weekly_operations_report_query_client';
 import { weeklyReportMetricsClient } from '../api/reports/weekly_report_metrics_client';
 import { ReportsPage } from '../pages/ReportsPage';
+import { FinanceGovernmentSubsidyList } from '../components/FinanceGovernmentSubsidyList';
 import { SUBSIDY_REPORT_RESPONSE } from './fixtures/reports/subsidy_report_query_contract_fixtures';
 import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
 describe('ReportsPage query-only presentation', () => {
@@ -33,31 +34,37 @@ describe('ReportsPage query-only presentation', () => {
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
   });
-  it('顯示週報三分頁、null 待補正與完整 XLSX，並保留季度／年度補助', async () => {
+  it('營運只留兩分頁，帳務唯一入口保留三種補助欄位與完整 XLSX', async () => {
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
-    expect(screen.getByRole('region', { name: '營運與補助報表查詢工作區' })).toBeInTheDocument();
+    await screen.findByRole('table', { name: '週報案件受理總表' });
+    expect(screen.getByRole('region', { name: '營運報表查詢工作區' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: '資料品質待補正' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: '資料品質' })).not.toBeInTheDocument();
     expect(screen.getAllByText('未登錄／待補正').length).toBeGreaterThan(1);
-    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.queryByRole('tab', {name:'補助案件統計表'})).not.toBeInTheDocument();
+    expect(screen.getByRole('link', {name:'前往政府補助清單 →'})).toHaveAttribute('href','#finance?tab=government-list');
+    cleanup();
+    const openCase=vi.fn();
+    render(<FinanceGovernmentSubsidyList onCase={openCase}/>);
+    await screen.findByRole('table', {name:'一般市民補助案件統計明細'});
 
-    fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
     const weeklySubsidyTable = screen.getByRole('table', { name: '一般市民補助案件統計明細' });
     expect(within(weeklySubsidyTable).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
-      '序號', '', '', '年度接案', '訂單號碼', '起日', '訖日', '補助時數', '補助天數', '備註',
+      '序號', '案件編號', '年度與身分', '年度接案', '訂單號碼', '起日', '訖日', '補助時數', '補助天數', '備註',
       '補助款金額', '單價', '結案/核銷', '年度季度',
     ]);
     expect(within(weeklySubsidyTable).getAllByText('CASE-RPT-001')).toHaveLength(2);
-    expect(within(weeklySubsidyTable).getByText('(114)補助市民')).toBeInTheDocument();
+    expect(within(weeklySubsidyTable).getByText('(114)一般市民')).toBeInTheDocument();
     expect(within(weeklySubsidyTable).getByText('2026年第三季')).toBeInTheDocument();
     expect(within(weeklySubsidyTable).queryByText('王**')).not.toBeInTheDocument();
     expect(within(weeklySubsidyTable).queryByText('A*********')).not.toBeInTheDocument();
     expect(screen.getAllByText('NT$ 12,000').length).toBeGreaterThan(0);
     expect(screen.getByText('2026-01-01～2026-12-31')).toBeInTheDocument();
     expect(screen.queryByText(/年初至本週/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
-    expect(screen.getByText('王**')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name:'開啟案件 CASE-RPT-001'}));
+    expect(openCase).toHaveBeenCalledWith('CASE-RPT-001');
+    expect(screen.queryByText('正式政府格式待確認')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     await waitFor(() => expect(weeklyOperationsReportExportClient.download).toHaveBeenCalledTimes(1));
@@ -92,7 +99,7 @@ describe('ReportsPage query-only presentation', () => {
 
   it('日期範圍與 reload 變更會清除 stale export success', async () => {
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     await screen.findByText('XLSX 已產生並開始下載。');
 
@@ -116,7 +123,7 @@ describe('ReportsPage query-only presentation', () => {
 
   it('手動日期範圍變更後保留選定期間', async () => {
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
 
     const startInput = screen.getByLabelText('起日') as HTMLInputElement;
     const endInput = screen.getByLabelText('迄日') as HTMLInputElement;
@@ -136,7 +143,11 @@ describe('ReportsPage query-only presentation', () => {
 
   it.each(['起日', '迄日'])('%s 的年份未輸完時不送出跨千年查詢，離開欄位後才查詢', async (label) => {
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
+    fireEvent.change(screen.getByLabelText('起日'), {target:{value:'2026-08-17'}});
+    fireEvent.change(screen.getByLabelText('迄日'), {target:{value:'2026-08-23'}});
+    fireEvent.blur(screen.getByLabelText('迄日'));
+    await waitFor(()=>expect(weeklyOperationsReportQueryClient.query).toHaveBeenLastCalledWith('2026-08-17','2026-08-23',expect.any(Object)));
     const input = screen.getByLabelText(label);
     const initialCalls = vi.mocked(weeklyOperationsReportQueryClient.query).mock.calls.length;
     for (const year of ['0002', '0020', '0202', '2026']) {
@@ -154,8 +165,8 @@ describe('ReportsPage query-only presentation', () => {
     vi.mocked(weeklyOperationsReportExportClient.download).mockImplementation(
       () => new Promise((resolve) => { resolveExport = resolve; }),
     );
-    render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    render(<FinanceGovernmentSubsidyList onCase={vi.fn()}/>);
+    await screen.findByRole('table', { name: '一般市民補助案件統計明細' });
 
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     expect(screen.getByRole('button', { name: '正在產生 XLSX…' })).toBeDisabled();
@@ -170,7 +181,7 @@ describe('ReportsPage query-only presentation', () => {
 
   it('可按星期一所屬週次儲存推廣與詢問，下載只帶查詢日期', async () => {
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
 
     const promoInput = screen.getAllByLabelText('推廣次數')[0] as HTMLInputElement;
     const inqInput = screen.getAllByLabelText('詢問人次')[0] as HTMLInputElement;
@@ -183,6 +194,7 @@ describe('ReportsPage query-only presentation', () => {
       { promotion_count: 15, inquiry_count: 42 },
     ));
 
+    await waitFor(() => expect(screen.getByRole('button', {name:'下載營運報表 XLSX'})).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '下載營運報表 XLSX' }));
     await waitFor(() => expect(weeklyOperationsReportExportClient.download).toHaveBeenCalledWith(
       expect.any(String),
@@ -190,9 +202,32 @@ describe('ReportsPage query-only presentation', () => {
       expect.any(AbortSignal),
     ));
 
-    fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });
-    await waitFor(() => expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(1));
-
+    expect(screen.queryByLabelText('報表範圍')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', {name:'前往政府補助清單 →'})).toBeInTheDocument();
     expect(screen.queryByText('下載核銷含印領清冊 (雙分頁)')).not.toBeInTheDocument();
   });
+  it('same report filters retain ready data and case refresh preserves the selected year and quarter', async () => {
+    const onCase=vi.fn();
+    const view=render(<FinanceGovernmentSubsidyList onCase={onCase} revision={0}/>);
+    await screen.findByRole('table',{name:'一般市民補助案件統計明細'});
+    fireEvent.change(screen.getByLabelText('報表範圍'),{target:{value:'quarterly'}});
+    await screen.findByRole('table',{name:'一般市民季度補助明細'});
+    fireEvent.change(screen.getByLabelText('年度'),{target:{value:'2025'}});
+    await screen.findByText('2025 Q'+Math.ceil((new Date().getMonth()+1)/3));
+    fireEvent.change(screen.getByLabelText('季度'),{target:{value:'2'}});
+    await screen.findByText('2025 Q2');
+    const calls=vi.mocked(subsidyReportQueryClient.query).mock.calls.length;
+    fireEvent.change(screen.getByLabelText('年度'),{target:{value:'2025'}});
+    fireEvent.change(screen.getByLabelText('季度'),{target:{value:'2'}});
+    expect(screen.getByRole('table',{name:'一般市民季度補助明細'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'匯出 XLSX'})).toBeEnabled();
+    expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(calls);
+    view.rerender(<FinanceGovernmentSubsidyList onCase={onCase} revision={1}/>);
+    await waitFor(()=>expect(subsidyReportQueryClient.query).toHaveBeenCalledTimes(calls+1));
+    await screen.findByText('2025 Q2');
+    expect(screen.getByLabelText('年度')).toHaveValue(2025);
+    expect(screen.getByLabelText('季度')).toHaveValue('2');
+    expect(screen.getByRole('button',{name:'匯出 XLSX'})).toBeEnabled();
+  });
+
 });

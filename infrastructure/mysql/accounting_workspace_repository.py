@@ -1,9 +1,26 @@
-"""Application acknowledgements and historical case markers; no money mutations."""
+"""Application acknowledgements, arrangement history and case markers; no money mutations."""
 import json
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pymysql.err import IntegrityError
+from domains.finance_import.statement_archive import ArrangementEvent, CaseArrangement, SubsidyPlanEvent, CaseSubsidyPlan
 
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker, HistoricalAccountingAmount, AccountingConflict
+
+
+def build_accounting_workspace(connection):
+    """One composition for the case page, payable export and original owner writers."""
+    from functools import partial
+    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
+    from infrastructure.mysql.client_payments_query_repository import query_case_accounting, query_case_funding
+    from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+    from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    state = MySqlAccountingWorkspaceState(connection)
+    return AccountingWorkspace(state, partial(query_case_accounting, connection),
+        partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
+        lambda case_no: MySqlGovernmentSubsidyPeriodRepository(connection).case_coverage(case_no)['amount_ntd'],
+        partial(query_case_funding, connection), plan=state.subsidy_plan)
 
 
 class MySqlAccountingWorkspaceState:
@@ -17,6 +34,56 @@ class MySqlAccountingWorkspaceState:
         if row is None:
             raise LookupError("accounting_case_not_found")
         return str(row["name"])
+
+    def lock_arrangement_case(self, case_no):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
+            row = cursor.fetchone()
+            if row is None or row["case_no"] != case_no:
+                raise LookupError("accounting_case_not_found")
+
+    def subsidy_plan(self, case_no):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT version,scheme,actor,UNIX_TIMESTAMP(created_at) created_epoch FROM finance_case_subsidy_plan_events WHERE case_no=%s ORDER BY version", (case_no,))
+            events = tuple(SubsidyPlanEvent(int(row["version"]), row["scheme"], row["actor"], datetime.fromtimestamp(int(row["created_epoch"]), timezone.utc).isoformat()) for row in cursor.fetchall())
+        return CaseSubsidyPlan(case_no, events[-1].version if events else 0, events)
+
+    def subsidy_plan_command(self, key):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no,version,scheme,actor FROM finance_case_subsidy_plan_events WHERE operation_key=%s", (key,))
+            row = cursor.fetchone()
+        return None if row is None else (row["case_no"], int(row["version"])-1, row["scheme"], row["actor"])
+
+    def append_subsidy_plan(self, case_no, version, scheme, actor, key):
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("INSERT INTO finance_case_subsidy_plan_events(case_no,version,scheme,actor,operation_key) VALUES (%s,%s,%s,%s,%s)", (case_no,version,scheme,actor,key))
+        except IntegrityError as error:
+            if error.args[0] == 1062:
+                raise AccountingConflict("subsidy_plan_version_changed") from None
+            raise
+
+    def arrangement(self, case_no):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT version,action,reason,actor,UNIX_TIMESTAMP(created_at) created_epoch FROM finance_case_arrangement_events WHERE case_no=%s ORDER BY version", (case_no,))
+            events = tuple(ArrangementEvent(int(row["version"]), row["action"], row["reason"], row["actor"], datetime.fromtimestamp(int(row["created_epoch"]), timezone.utc).isoformat()) for row in cursor.fetchall())
+        return CaseArrangement(case_no, events[-1].version if events else 0, events)
+
+    def arrangement_command(self, key):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT case_no,version,action,reason,actor FROM finance_case_arrangement_events WHERE operation_key=%s", (key,))
+            row = cursor.fetchone()
+        return None if row is None else (row["case_no"], int(row["version"])-1, row["action"], row["reason"], row["actor"])
+
+    def append_arrangement(self, case_no, version, action, reason, actor, key):
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("INSERT INTO finance_case_arrangement_events(case_no,version,action,reason,actor,operation_key) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (case_no, version, action, reason, actor, key))
+        except IntegrityError as error:
+            if error.args[0] == 1062:
+                raise AccountingConflict("arrangement_version_changed") from None
+            raise
 
     def marker(self, case_no):
         with self.connection.cursor() as cursor:

@@ -3,13 +3,36 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from domains.finance_import.statement_archive import accounting_warning
+from domains.finance_import.statement_archive import (
+    accounting_warning, case_accounting_scheme, direct_arrangement_conflict,
+    direct_arrangement_ready, ArrangementEvent, CaseArrangement,
+    CaseSubsidyPlan, ongoing_case_completed,
+)
+from domains.finance_import.statement_archive import CollectionProgress, CollectionStageSource, current_collection_progress
 from subsystems.client_finance.case_accounting_query import ClientAccountingItem, ClientAccountingTransaction
 from subsystems.staff_payables.case_accounting_query import StaffAccountingItem, StaffAccountingTransaction
 
 
+@dataclass(frozen=True)
+class SubsidyPlanApplyResult:
+    case_no: str
+    applied_version: int
+    plan: CaseSubsidyPlan
+
+
 class AccountingConflict(ValueError):
     pass
+
+
+class ArrangementNotReady(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class ArrangementApplyResult:
+    case_no: str
+    applied_version: int
+    arrangement: CaseArrangement
 
 
 @dataclass(frozen=True)
@@ -32,6 +55,8 @@ class AccountingBankFact:
     direction: str
     amount_ntd: int
     cases: tuple[str, ...]
+    bank: str | None = None
+    cash_flow: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +76,20 @@ class CaseAccounting:
     historical_marker: HistoricalAccountingMarker | None = None
     remaining_in_ntd: int | None = None
     remaining_out_ntd: int | None = None
+    staff_receivable_ntd: int | None = None
+    customer_amount_ntd: int | None = None
+    customer_fully_received: bool | None = None
+    subsidy_ntd: int | None = None
+    scheme: str = "unknown"
+    cash_by_flow: dict[str, int] | None = None
+    cash_net_ntd: int | None = None
+    customer_burden_ntd: int | None = None
+    arrangement: CaseArrangement | None = None
+    scheme_conflict: bool = False
+    can_confirm_direct: bool = False
+    collection_progress: CollectionProgress | None = None
+    subsidy_plan: CaseSubsidyPlan | None = None
+    ongoing_completed: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +112,13 @@ class HistoricalAccountingMarker:
 
 class AccountingStatePort(Protocol):
     def case_client(self, case_no: str) -> str: ...
+    def arrangement(self, case_no: str) -> CaseArrangement: ...
+    def subsidy_plan(self, case_no: str) -> CaseSubsidyPlan: ...
+    def subsidy_plan_command(self, key: str) -> tuple[str, int, str, str] | None: ...
+    def append_subsidy_plan(self, case_no: str, version: int, scheme: str, actor: str, key: str) -> None: ...
+    def lock_arrangement_case(self, case_no: str) -> None: ...
+    def arrangement_command(self, key: str) -> tuple[str, int, str, str, str] | None: ...
+    def append_arrangement(self, case_no: str, version: int, action: str, reason: str, actor: str, key: str) -> None: ...
     def dismissed(self, case_no: str, *, for_update=False): ...
     def dismiss(self, case_no, warning, actor): ...
     def begin(self): ...
@@ -93,9 +139,76 @@ class StaffAccountingPort(Protocol):
 
 
 class AccountingWorkspace:
-    def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort, bank=None):
+    def __init__(self, state: AccountingStatePort, client: ClientAccountingPort, staff: StaffAccountingPort, bank=None, subsidy=None, funding=None, plan=None):
         self.state, self.client, self.staff = state, client, staff
         self.bank = bank
+        self.subsidy = subsidy
+        self.funding = funding
+        self.plan = plan
+
+    def subsidy_plan_history(self, case_no: str):
+        self.state.case_client(case_no)
+        return self.state.subsidy_plan(case_no)
+
+    def save_subsidy_plan(self, case_no: str, scheme: str, expected_version: int, key: str, actor: str):
+        if scheme not in {"split", "advance", "direct"} or expected_version < 0 or not key.strip() or not actor.strip():
+            raise ValueError("subsidy_plan_command_invalid")
+        command = (case_no, expected_version, scheme, actor)
+        self.state.begin()
+        try:
+            self.state.lock_arrangement_case(case_no)
+            previous = self.state.subsidy_plan_command(key)
+            if previous is not None:
+                if previous != command:
+                    raise AccountingConflict("subsidy_plan_command_changed")
+                result = SubsidyPlanApplyResult(case_no, expected_version + 1, self.state.subsidy_plan(case_no))
+            else:
+                current = self.state.subsidy_plan(case_no)
+                if current.version != expected_version:
+                    raise AccountingConflict("subsidy_plan_version_changed")
+                self.state.append_subsidy_plan(case_no, expected_version + 1, scheme, actor, key)
+                result = SubsidyPlanApplyResult(case_no, expected_version + 1, self.state.subsidy_plan(case_no))
+            self.state.commit()
+            return result
+        except Exception:
+            self.state.rollback()
+            raise
+
+    def arrangement_history(self, case_no: str):
+        self.state.case_client(case_no)
+        return self.state.arrangement(case_no)
+
+    def confirm_arrangement(self, case_no: str, action: str, reason: str, expected_version: int, key: str, actor: str):
+        reason = reason.strip()
+        if action not in {"confirm_direct", "withdraw_direct"} or not reason or len(reason) > 500 or not key.strip() or expected_version < 0:
+            raise ArrangementNotReady("arrangement_command_invalid")
+        command = (case_no, expected_version, action, reason, actor)
+        self.state.begin()
+        try:
+            self.state.lock_arrangement_case(case_no)
+            previous = self.state.arrangement_command(key)
+            if previous:
+                if previous != command:
+                    raise AccountingConflict("arrangement_command_changed")
+                history = self.state.arrangement(case_no)
+                self.state.commit()
+                return ArrangementApplyResult(case_no, expected_version + 1, history)
+            current = self.state.arrangement(case_no)
+            if current.version != expected_version:
+                raise AccountingConflict("arrangement_version_changed")
+            if action == "confirm_direct":
+                fresh = self.query(case_no, for_update=True)
+                if not fresh.can_confirm_direct:
+                    raise ArrangementNotReady("direct_arrangement_not_ready")
+            elif not current.direct_confirmed:
+                raise ArrangementNotReady("direct_arrangement_not_confirmed")
+            self.state.append_arrangement(case_no, expected_version + 1, action, reason, actor, key)
+            history = self.state.arrangement(case_no)
+            self.state.commit()
+            return ArrangementApplyResult(case_no, expected_version + 1, history)
+        except Exception:
+            self.state.rollback()
+            raise
 
     def mark_historical(self, case_no: str, reason: str, versions: dict[str, str], key: str, actor: str):
         if not reason.strip() or not key.strip():
@@ -162,6 +275,37 @@ class AccountingWorkspace:
         incoming = [item for item in items if item.direction == "receivable" and getattr(item, "summary_included", True)]
         outgoing = [item for item in items if item.direction == "payable" and getattr(item, "summary_included", True)]
         unallocated = sum(item.unallocated_surplus_ntd for item in staff_items)
+        banks = self.bank(case_no) if include_sources and self.bank is not None else ()
+        stages = [item for item in client_items if item.payment_stage in {"deposit", "first", "second"}]
+        complete_terms = {item.payment_stage for item in stages} == {"deposit", "first", "second"}
+        customer_amount = sum(item.expected_ntd for item in stages) if complete_terms else None
+        fully_received = all(item.actual_ntd >= item.expected_ntd for item in stages) if complete_terms else None
+        staff_due = [item for item in staff_items if item.direction == "payable" and item.summary_included]
+        staff_total = sum(item.expected_ntd for item in staff_due) if staff_due else None
+        subsidy = self.subsidy(case_no) if include_sources and self.subsidy is not None else None
+        funding = self.funding(case_no) if include_sources and self.funding is not None else None
+        full_subsidy = bool(funding and funding.full_subsidy)
+        funding_conflict = False
+        if full_subsidy:
+            funding_conflict = (funding.has_subsidy_return or any(item.expected_ntd or item.actual_ntd or item.noncash_ntd for item in stages)
+                or (staff_total is not None and staff_total != funding.total_ntd)
+                or (subsidy is not None and subsidy != funding.total_ntd))
+            if not funding_conflict:
+                staff_total, customer_amount, subsidy, fully_received = funding.total_ntd, 0, funding.total_ntd, True
+        government = sum(bank.amount_ntd for bank in banks if bank.cash_flow == "G" and bank.cases == (case_no,))
+        cash_flows = None
+        if include_sources and self.bank is not None and all(bank.cash_flow in {"C", "G", "PS", "PT", "RS", "RT"} and bank.cases == (case_no,) for bank in banks):
+            cash_flows = {flow: sum(bank.amount_ntd for bank in banks if bank.cash_flow == flow) for flow in ("C", "G", "PS", "PT", "RS", "RT")}
+        cash_net = None if cash_flows is None else cash_flows["C"] + cash_flows["G"] - sum(cash_flows[flow] for flow in ("PS", "PT", "RS", "RT"))
+        arrangement = self.state.arrangement(case_no) if include_sources and self.bank is not None else None
+        direct = bool(arrangement and arrangement.direct_confirmed)
+        conflict = funding_conflict or (direct and direct_arrangement_conflict(staff_total, customer_amount, government,
+            sum(bank.amount_ntd for bank in banks if bank.cash_flow == "PT" and bank.cases == (case_no,)),
+            sum(bank.amount_ntd for bank in banks if bank.cash_flow == "RT" and bank.cases == (case_no,))))
+        scheme = case_accounting_scheme(staff_total, customer_amount, subsidy, fully_received, government,
+            direct_confirmed=direct, bank_sources_complete=cash_flows is not None, direct_conflict=conflict,
+            full_subsidy=full_subsidy)
+        plan = self.plan(case_no) if include_sources and self.plan is not None else None
         return CaseAccounting(
             case_no, client_name,
             sum(item.expected_ntd for item in incoming) if incoming else None,
@@ -170,10 +314,16 @@ class AccountingWorkspace:
             sum(item.actual_ntd for item in outgoing) + unallocated if outgoing else None,
             sum(not warning.dismissed for warning in warnings), client_items, staff_items,
             (*client_transactions, *staff_transactions), tuple(warnings),
-            self.bank(case_no) if include_sources and self.bank is not None else (),
+            banks,
             self.state.marker(case_no) if include_sources and self.bank is not None else None,
             sum(item.remaining_ntd for item in incoming) if incoming else None,
             sum(item.remaining_ntd for item in outgoing) if outgoing else None,
+            staff_total, customer_amount, fully_received, subsidy, scheme, cash_flows, cash_net,
+            staff_total - subsidy if staff_total is not None and subsidy is not None else None,
+            arrangement, conflict, direct_arrangement_ready(staff_total, customer_amount, subsidy, fully_received, cash_flows),
+            CollectionProgress("scheme", True) if full_subsidy and not funding_conflict else current_collection_progress(
+                tuple(CollectionStageSource(item.payment_stage, item.expected_ntd, item.actual_ntd, item.due_date) for item in stages)),
+            plan, ongoing_case_completed(fully_received, plan),
         )
 
     def dismiss(self, case_no, target: AccountingWarning, actor):

@@ -1,0 +1,213 @@
+{
+  "task": "APX-20261105",
+  "target": "localhost development union_db",
+  "mysql_fixture_query_and_xlsx": "PASS",
+  "fixture_scope": "new isolated lu_test database; minimal query schema; callback supplies formally confirmed scheme",
+  "fixture_database": "lu_test_apx_20261105_d7dedbb525",
+  "archive_bytes_and_fixed_columns": "PASS",
+  "protected_real_tables_unchanged": "PASS",
+  "protected_before": {
+    "union_db.orders": 1139786792,
+    "union_db.clients": 3787111366,
+    "union_db.beclass_records": 519641314,
+    "union_db.client_obligations": 787733661,
+    "union_db.client_ledger_entries": 0,
+    "union_db.client_refund_recipient_snapshots": 0,
+    "union_db.staff_obligations": 0,
+    "union_db.staff_payable_projections": 0
+  },
+  "protected_after": {
+    "union_db.orders": 1139786792,
+    "union_db.clients": 3787111366,
+    "union_db.beclass_records": 519641314,
+    "union_db.client_obligations": 787733661,
+    "union_db.client_ledger_entries": 0,
+    "union_db.client_refund_recipient_snapshots": 0,
+    "union_db.staff_obligations": 0,
+    "union_db.staff_payable_projections": 0
+  },
+  "actual_candidate_audit": [
+    {
+      "case_no": "115000001",
+      "obligation_identity": "client-subsidy-return:115000001:terminal",
+      "current_event_id": 34,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-02-15",
+      "snapshots": 0,
+      "bound_sources": 1,
+      "complete_sources": 0,
+      "scheme": "unknown",
+      "scheme_conflict": false,
+      "T": null,
+      "B": null,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000002",
+      "obligation_identity": "client-subsidy-return:115000002:terminal",
+      "current_event_id": 6,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-01-15",
+      "snapshots": 0,
+      "bound_sources": 1,
+      "complete_sources": 0,
+      "scheme": "unknown",
+      "scheme_conflict": false,
+      "T": null,
+      "B": null,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000003",
+      "obligation_identity": "client-subsidy-return:115000003:terminal",
+      "current_event_id": 9,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-01-15",
+      "snapshots": 0,
+      "bound_sources": 1,
+      "complete_sources": 0,
+      "scheme": "unknown",
+      "scheme_conflict": false,
+      "T": null,
+      "B": null,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000179",
+      "obligation_identity": "client-subsidy-return:115000179:terminal",
+      "current_event_id": 15,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-06-15",
+      "snapshots": 0,
+      "bound_sources": 0,
+      "complete_sources": 0,
+      "scheme": "unknown",
+      "scheme_conflict": false,
+      "T": null,
+      "B": null,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000180",
+      "obligation_identity": "client-subsidy-return:115000180:terminal",
+      "current_event_id": 19,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-02-15",
+      "snapshots": 0,
+      "bound_sources": 0,
+      "complete_sources": 0,
+      "scheme": "waiting",
+      "scheme_conflict": false,
+      "T": null,
+      "B": 36000,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000181",
+      "obligation_identity": "client-subsidy-return:115000181:terminal",
+      "current_event_id": 23,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-06-15",
+      "snapshots": 0,
+      "bound_sources": 0,
+      "complete_sources": 0,
+      "scheme": "waiting",
+      "scheme_conflict": false,
+      "T": null,
+      "B": 96000,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    },
+    {
+      "case_no": "115000182",
+      "obligation_identity": "client-subsidy-return:115000182:terminal",
+      "current_event_id": 26,
+      "amount_due_ntd": 12000,
+      "due_date": "2027-01-15",
+      "snapshots": 0,
+      "bound_sources": 0,
+      "complete_sources": 0,
+      "scheme": "unknown",
+      "scheme_conflict": false,
+      "T": null,
+      "B": null,
+      "S": null,
+      "status": "BLOCKED",
+      "reasons": [
+        "formal_customer_return_basis_not_confirmed",
+        "unique_complete_recipient_source_missing",
+        "recipient_snapshot_missing"
+      ]
+    }
+  ],
+  "actual_exportable_subsidy_rows_by_month": {
+    "2027-01": 0,
+    "2027-02": 0,
+    "2027-06": 0
+  },
+  "actual_supplements_applied": 0,
+  "data_supplement_status": "BLOCKED",
+  "blocking_reason": "No unique complete recipient source or confirmed customer-refund basis; no account invented",
+  "synthetic_workbook_sha256": "163a2eddcc9456b32c915d97e99acd0502e8b6e2bbbaedfbe43300b5b1f3d795",
+  "synthetic_archive_path": "D:\\project\\Labor_union\\scratch\\accounts_payable_fix_20261105\\verified-archive\\2027\\accounts-payable-2027-02-15-20261105T082432287937-163a2eddcc94.xlsx",
+  "program_verification": {
+    "focused_backend": {
+      "passed": 189,
+      "skipped": 1
+    },
+    "pricing_mysql_http": {
+      "passed": 10
+    },
+    "government_period_mysql_http": {
+      "passed": 1,
+      "database": "lu_test_apx_gov_ad168fb2ce5d",
+      "scope": "one existing current-policy period reconciliation test; full suite not run"
+    },
+    "payments_ui": {
+      "passed": 7
+    },
+    "typescript_vite_build": "PASS",
+    "architecture_closure": {
+      "status": "PASS",
+      "scope": "explicit task source/test paths including shared factory",
+      "fingerprint": "afeae4e50c488c5123f64e1648fe74aed3e1bb0a82d9ff25241733648c714452"
+    }
+  },
+  "authorization": "User explicitly requested program corrections, data supplementation and post-fix acceptance; source evidence still required for actual supplementation.",
+  "overall_data_repair": "BLOCKED; actual supplements remain 0 of 7"
+}

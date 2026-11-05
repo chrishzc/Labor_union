@@ -14,10 +14,11 @@ from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.finance_import import (
     AccountingWarningBody, CaseAccountingView, ManualStatementBody,
-    StatementCommandReceiptView, StatementDuplicateBody,
+    StatementCommandReceiptView, StatementDuplicateBody, ArrangementBody, CaseArrangementView, ArrangementApplyView,
+    CaseSubsidyPlanView, SubsidyPlanBody, SubsidyPlanApplyView,
 )
 from domains.finance_import.statement_archive import STATEMENT_COLUMNS
-from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning
+from subsystems.finance_import.accounting_workspace import AccountingConflict, AccountingWarning, ArrangementNotReady
 from subsystems.finance_import.accounting_workspace import HistoricalAccountingMarker
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingReport, MonthlyAccountingUnavailable, ReceivableAccountingList
 from subsystems.finance_import.statement_archive import StatementCommandConflict
@@ -30,6 +31,10 @@ def _error(error):
         return typed_http_error(503, "unavailable", "accounting_scope_unavailable", "部分銀行款跨統計範圍，尚缺正式分配金額，無法提供正確合計。請調整案件類別或核對原始款項。", "finance-workspace")
     if isinstance(error, ValueError) and str(error).startswith("invalid_accounting_"):
         return typed_http_error(422, "validation", "invalid_accounting_range", "請選擇有效的起訖月份、案件類別及統計口徑，起始月份不可晚於結束月份。", "finance-workspace")
+    if isinstance(error, ArrangementNotReady):
+        return typed_http_error(422, "validation", str(error), "請確認各期已收齊、應繳工會等於案件總額，且補助未經工會。資料不足、衝突或尚無可撤回安排時，請保留待確認。", "finance-workspace")
+    if isinstance(error, AccountingConflict) and str(error).startswith("arrangement_"):
+        return typed_http_error(409, "conflict", "arrangement_source_changed", "安排已由其他人更正，或原操作內容不同。請重新讀取並保留本次輸入後核對。", "finance-workspace")
     if isinstance(error, (AccountingConflict, StatementCommandConflict)):
         return typed_http_error(409, "conflict", "accounting_source_changed", "資料已變更，請重新整理後再確認。", "finance-workspace")
     if isinstance(error, LookupError):
@@ -41,6 +46,18 @@ def _error(error):
 
 def _actor(principal):
     return f"admin_user_id:{principal.id}" if principal.id is not None else principal.username
+
+
+def _arrangement_view(arrangement):
+    payload = asdict(arrangement)
+    payload["events"] = list(payload["events"])
+    return CaseArrangementView(**payload)
+
+
+def _subsidy_plan_view(plan):
+    payload = asdict(plan)
+    payload["events"] = list(payload["events"])
+    return CaseSubsidyPlanView(**payload)
 
 
 def _case_view(case):
@@ -55,6 +72,10 @@ def _case_view(case):
     ]
     if payload["historical_marker"] is not None:
         payload["historical_marker"]["amounts"] = list(payload["historical_marker"]["amounts"])
+    if case.arrangement is not None:
+        payload["arrangement"] = _arrangement_view(case.arrangement)
+    if case.subsidy_plan is not None:
+        payload["subsidy_plan"] = _subsidy_plan_view(case.subsidy_plan)
     return CaseAccountingView(**payload)
 
 
@@ -106,6 +127,12 @@ def export_monthly_accounting(start_month: str, end_month: str, category: str = 
             sheet.append([row.month, *values])
             totals = [left + right for left, right in zip(totals, values)]
         sheet.append(["合計", *totals])
+        if basis == "cash":
+            classified = book.create_sheet("已核銷六項")
+            classified.append(["交易月份", "永豐客戶入款", "台新政府入款", "永豐付月嫂", "台新轉交月嫂", "永豐退客戶", "台新退先墊補助"])
+            for row in report.rows:
+                classified.append([row.month, *[row.cash_by_flow.get(flow) if row.cash_by_flow is not None else None for flow in ("C", "G", "PS", "PT", "RS", "RT")]])
+            classified.append(["空白分類表示來源不足或特殊款；原總收付及銀行證據仍保留。"])
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
         sheet.column_dimensions['A'].width = 18
@@ -138,6 +165,47 @@ def export_monthly_accounting(start_month: str, end_month: str, category: str = 
         return Response(content.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         headers={"Content-Disposition": 'attachment; filename="monthly-accounting.xlsx"', "Cache-Control": "no-store"})
     except (ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+@router.get("/cases/{case_no}/accounting/subsidy-plan", response_model=BaseResponse[CaseSubsidyPlanView])
+def subsidy_plan_history(case_no: str, principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
+    del principal
+    try:
+        return BaseResponse(data=_subsidy_plan_view(application.subsidy_plan_history(case_no)))
+    except (LookupError, ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+@router.post("/cases/{case_no}/accounting/subsidy-plan", response_model=BaseResponse[SubsidyPlanApplyView])
+def save_subsidy_plan(case_no: str, body: SubsidyPlanBody,
+                      idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
+                      principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
+    try:
+        result = application.save_subsidy_plan(case_no, body.scheme, body.expected_version, idempotency_key, _actor(principal))
+        return BaseResponse(data=SubsidyPlanApplyView(case_no=result.case_no, applied_version=result.applied_version,
+            plan=_subsidy_plan_view(result.plan)), message="人工方案已保存；原各期金額及實際收付不變")
+    except (LookupError, ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+@router.get("/cases/{case_no}/accounting/arrangement", response_model=BaseResponse[CaseArrangementView])
+def arrangement_history(case_no: str, principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
+    del principal
+    try:
+        return BaseResponse(data=_arrangement_view(application.arrangement_history(case_no)), message="已取得逐案直付安排與更正歷史")
+    except (LookupError, ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+
+@router.post("/cases/{case_no}/accounting/arrangement", response_model=BaseResponse[ArrangementApplyView])
+def confirm_arrangement(case_no: str, body: ArrangementBody,
+                        idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
+                        principal=Depends(require_admin), application=Depends(get_accounting_workspace)):
+    try:
+        result = application.confirm_arrangement(case_no, body.action, body.reason, body.expected_version, idempotency_key, _actor(principal))
+        return BaseResponse(data=ArrangementApplyView(case_no=result.case_no, applied_version=result.applied_version, arrangement=_arrangement_view(result.arrangement)), message="安排已記錄；實際分類及收付款仍依目前事實查核")
+    except (LookupError, ValueError, MySQLError) as error:
         raise _error(error) from None
 
 

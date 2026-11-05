@@ -79,7 +79,8 @@ export const Drawer: React.FC<DrawerProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       document.body.classList.remove('modal-open');
-      previousFocus?.focus();
+      if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});
+      else document.querySelector<HTMLInputElement>('[data-ongoing-focus]')?.focus({preventScroll:true});
     };
   }, [closeDisabled, isOpen]);
 

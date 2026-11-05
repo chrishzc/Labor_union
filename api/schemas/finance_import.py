@@ -61,6 +61,7 @@ class AccountingItemView(_StrictModel):
     noncash_ntd: int = 0
     settled: bool = False
     recognized_ntd: int = 0
+    payment_stage: Literal["deposit", "first", "second"] | None = None
 
 
 class AccountingTransactionView(_StrictModel):
@@ -78,6 +79,8 @@ class AccountingBankFactView(_StrictModel):
     direction: Literal["in", "out"]
     amount_ntd: int
     cases: list[str]
+    bank: str | None = None
+    cash_flow: Literal["C", "G", "PS", "PT", "RS", "RT"] | None = None
 
 
 class HistoricalAccountingAmountView(_StrictModel):
@@ -96,6 +99,65 @@ class HistoricalAccountingMarkerView(_StrictModel):
     amounts: list[HistoricalAccountingAmountView] = Field(default_factory=list)
 
 
+class ArrangementEventView(_StrictModel):
+    version: int = Field(gt=0)
+    action: Literal["confirm_direct", "withdraw_direct"]
+    reason: str
+    actor: str
+    created_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+
+
+class CaseArrangementView(_StrictModel):
+    case_no: str
+    version: int = Field(ge=0)
+    events: list[ArrangementEventView] = Field(default_factory=list)
+
+
+class ArrangementApplyView(_StrictModel):
+    case_no: str
+    applied_version: int = Field(gt=0)
+    arrangement: CaseArrangementView
+
+
+class ArrangementBody(_StrictModel):
+    action: Literal["confirm_direct", "withdraw_direct"]
+    reason: str = Field(min_length=1, max_length=500)
+    expected_version: int = Field(ge=0, strict=True)
+
+
+class SubsidyPlanEventView(_StrictModel):
+    version: int = Field(gt=0)
+    scheme: Literal["split", "advance", "direct"]
+    actor: str
+    created_at: str
+
+
+class CaseSubsidyPlanView(_StrictModel):
+    case_no: str
+    version: int = Field(ge=0)
+    events: list[SubsidyPlanEventView] = Field(default_factory=list)
+
+
+class SubsidyPlanBody(_StrictModel):
+    scheme: Literal["split", "advance", "direct"]
+    expected_version: int = Field(ge=0, strict=True)
+
+
+class SubsidyPlanApplyView(_StrictModel):
+    case_no: str
+    applied_version: int = Field(gt=0)
+    plan: CaseSubsidyPlanView
+
+
+class CollectionProgressView(_StrictModel):
+    stage: Literal["deposit", "first", "second", "scheme"]
+    sources_complete: bool
+    expected_ntd: int | None = None
+    received_ntd: int | None = None
+    remaining_ntd: int | None = None
+    due_date: str | None = None
+
+
 class CaseAccountingView(_StrictModel):
     case_no: str
     client_name: str
@@ -112,6 +174,20 @@ class CaseAccountingView(_StrictModel):
     historical_marker: HistoricalAccountingMarkerView | None = None
     remaining_in_ntd: int | None = None
     remaining_out_ntd: int | None = None
+    staff_receivable_ntd: int | None = None
+    customer_amount_ntd: int | None = None
+    customer_fully_received: bool | None = None
+    subsidy_ntd: int | None = None
+    scheme: Literal["unknown", "waiting", "split", "advance", "direct"] = "unknown"
+    cash_by_flow: dict[Literal["C", "G", "PS", "PT", "RS", "RT"], int] | None = None
+    cash_net_ntd: int | None = None
+    customer_burden_ntd: int | None = None
+    arrangement: CaseArrangementView | None = None
+    scheme_conflict: bool = False
+    can_confirm_direct: bool = False
+    collection_progress: CollectionProgressView | None = None
+    subsidy_plan: CaseSubsidyPlanView | None = None
+    ongoing_completed: bool = False
 
 
 class FinanceImportBatchPreviewBody(_StrictModel):

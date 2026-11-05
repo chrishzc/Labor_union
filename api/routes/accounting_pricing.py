@@ -41,6 +41,8 @@ def _error(error):
         return typed_http_error(409, "conflict", "pricing_write_conflict", "資料已變更或操作識別重複，請重新查詢。", "pricing")
     code = getattr(error, "code", str(error))
     conflict = isinstance(error, PricingConflict)
+    if code == 'full_subsidy_existing_financial_history_conflict':
+        return typed_http_error(409, 'conflict', code, '本案已有收付款或退款紀錄，無法自動改為免自備，請先核對原始帳務。', 'pricing')
     return typed_http_error(409 if conflict else 422, "conflict" if conflict else "validation",
         code, "資料已變更，請重新查詢後再儲存。" if conflict else "計價資料不完整或不符合規則。", "pricing")
 

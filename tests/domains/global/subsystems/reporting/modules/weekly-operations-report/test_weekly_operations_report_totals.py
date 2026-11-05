@@ -222,6 +222,28 @@ def test_xlsx_annual_first_monthly_after_last_week_and_merges_stop_before_subtot
     assert sheet.cell(4, 1).comment and "2026-01-01" in sheet.cell(4, 1).comment.text
 
 
+def test_template_headers_flags_and_service_columns_are_fixed():
+    report = _query(_Facts([
+        _case("2026-09-01", 731, order_status="服務中"),
+        _case("2026-09-02", 732, order_status="訂單取消", reject_reason="測試不符"),
+    ]), "2026-08-31", "2026-09-06")
+    sheet = _workbook(report).worksheets[0]
+    assert tuple(cell.value for cell in sheet[2]) == (
+        "平台序號", "年度月份", None, "週報週數", "申請人", "推廣次數", "詢問人次", "平台案件申請數",
+        "市民案件審核", None, "社福案件審核", None, "申請案件狀況", None, None, None,
+        "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "備註",
+    )
+    assert tuple(sheet.cell(3, col).value for col in range(9, 17)) == (
+        "一般市民符合", "一般市民不符合", "補助市民符合", "補助市民不符合", "訂單成立", "洽談中", "取消", "審核不符合",
+    )
+    assert {"I2:J2", "K2:L2", "M2:P2", "Q2:Q3", "W2:W3"}.issubset({str(r) for r in sheet.merged_cells.ranges})
+    assert sheet.cell(5, 1).value == 731
+    assert tuple(sheet.cell(5, col).value for col in range(13, 17)) == (1, None, None, None)
+    assert tuple(sheet.cell(6, col).value for col in range(13, 17)) == (None, None, None, 1)
+    assert tuple(sheet.cell(4, col).value for col in range(13, 17)) == (1, 0, 0, 1)
+    assert tuple(sheet.cell(5, col).value for col in (17, 18, 21, 22, 23)) == (20, 8, "服務中", "東區", None)
+
+
 def test_empty_cases_keep_week_rows_and_monthly_zero():
     report = _query(_Facts(), "2026-08-31", "2026-09-06")
     sheet = _workbook(report).worksheets[0]
@@ -257,7 +279,7 @@ def test_inverted_period_does_not_read_sources():
     assert facts.calls == []
 
 
-def test_every_lifecycle_status_is_counted_separately_in_both_totals_and_xlsx():
+def test_lifecycle_counts_are_preserved_but_xlsx_uses_existing_template_flags():
     assert ORDER_STATUS_LABELS == (
         "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
     )
@@ -282,18 +304,16 @@ def test_every_lifecycle_status_is_counted_separately_in_both_totals_and_xlsx():
         assert sum(total.order_status_counts.values()) == total.application_count
 
     sheet = _workbook(report).worksheets[0]
-    assert tuple(sheet.cell(3, col).value for col in range(13, 20)) == (*ORDER_STATUS_LABELS, MISSING_ORDER_STATUS)
-    assert sheet.cell(2, 20).value == "審核不符合"
-    assert sheet.cell(2, 21).value == "服務天數"
-    assert sheet.max_column == 27
+    assert tuple(sheet.cell(3, col).value for col in range(13, 17)) == ("訂單成立", "洽談中", "取消", "審核不符合")
+    assert sheet.cell(2, 13).value == "申請案件狀況"
+    assert sheet.cell(2, 17).value == "服務天數"
+    assert sheet.max_column == 23
     total_rows = [row for row in range(4, sheet.max_row + 1)
                   if isinstance(sheet.cell(row, 1).value, str)]
     for row_number, total in zip(total_rows, (annual, august, september), strict=True):
-        for col, status in enumerate((*ORDER_STATUS_LABELS, MISSING_ORDER_STATUS), 13):
-            assert sheet.cell(row_number, col).value == total.order_status_counts[status]
-    for row_number in range(5, sheet.max_row + 1):
-        if isinstance(sheet.cell(row_number, 1).value, int):
-            assert sum(sheet.cell(row_number, col).value or 0 for col in range(13, 20)) == 1
+        assert tuple(sheet.cell(row_number, col).value for col in range(13, 17)) == (
+            total.order_established_count, total.negotiating_count, total.cancelled_count, total.review_rejected_count,
+        )
 
 
 def test_cancelled_and_rejected_are_independent_not_mutually_exclusive():
@@ -317,8 +337,9 @@ def test_missing_empty_and_additional_source_status_are_not_lost():
     assert sum(total.order_status_counts.values()) == 3
     assert total.review_rejected_count == 1
     sheet = _workbook(report).worksheets[0]
-    assert sheet.cell(3, 20).value == "來源狀態：審核不符合"
-    assert sheet.cell(2, 21).value == "審核不符合"
+    assert sheet.max_column == 23
+    assert sheet.cell(3, 16).value == "審核不符合"
+    assert sheet.cell(2, 17).value == "服務天數"
 
 
 def test_empty_report_still_has_every_status_with_numeric_zero():

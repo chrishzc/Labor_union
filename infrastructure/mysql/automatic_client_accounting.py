@@ -24,12 +24,19 @@ def synchronize_client_charges(cursor, case_no, *, actor, key, correlation_id, s
         return int(account["aggregate_version"])
     facts, _ = load_calculable_client_finance_facts(cursor, order, lock=True)
     candidate = build_client_finance_terms_candidate(facts, f"{source_family}:{source_id}")
+    if candidate.blockers:
+        return facts.account_version  # Keep protected history; the case query exposes the conflict.
     if (all(action.action is ClientObligationActionKind.UNCHANGED for action in candidate.actions)
             and candidate.payment_terms == facts.payment_terms and candidate.subsidy_return_plan is None):
-        return facts.account_version
+        synchronize_terminal_subsidy_return(cursor, case_no, actor=actor, key=key,
+            correlation_id=correlation_id, source_family=source_family, source_id=source_id)
+        cursor.execute('SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s', (case_no,))
+        return int(cursor.fetchone()['aggregate_version'])
     persist_client_finance_terms_impact(cursor, ClientFinanceImpactPersistenceCommand(
         candidate, key, actor, "系統依完整案件資料同步客戶應付", correlation_id, source_family, source_id,
     ))
+    synchronize_terminal_subsidy_return(cursor, case_no, actor=actor, key=key,
+        correlation_id=correlation_id, source_family=source_family, source_id=source_id, advance_version=False)
     return candidate.resulting_account_version
 
 
@@ -40,14 +47,26 @@ def synchronize_terminal_subsidy_return(cursor, case_no, *, actor, key, correlat
         return
     if any(order.get(name) is None for name in ('start_date','service_days','service_hours_per_day','floor_fee')):
         return
+    cursor.execute('SELECT 1 FROM client_finance_accounts a JOIN client_payment_terms t ON t.case_no=a.case_no WHERE a.case_no=%s', (case_no,))
+    if cursor.fetchone() is None:
+        return
     facts, source = load_calculable_client_finance_facts(cursor, order, lock=True,
         allow_planned=str(order['status']) not in ('訂單完成','訂單取消'))
     if facts is None:
         return  # Actual service facts must exist; planned/signed dates cannot authorize a refund.
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+    case = build_accounting_workspace(cursor.connection).query(case_no)
+    from shared_kernel.money import MoneyNTD
+    facts = replace(facts, subsidy_return_confirmed=case.scheme == 'advance' and not case.scheme_conflict,
+        confirmed_subsidy_amount=MoneyNTD(case.subsidy_ntd) if case.subsidy_ntd is not None else None)
     plan = automatic_subsidy_return_plan(facts, identity_status=source.identity_status,
         completed_on=max(day.service_date for day in facts.charge_days), existing_return_count=source.existing_subsidy_return_count)
     if plan is None:
         return
+    from hashlib import sha256
+    from shared_kernel.identities import IdempotencyKey
+    key = IdempotencyKey('subsidy-return:' + sha256(key.value.encode()).hexdigest())
+    source_family = source_family + ':subsidy-return'
     candidate = replace(build_client_finance_terms_candidate(facts, f"{source_family}:{source_id}"),
                         actions=(), subsidy_return_plan=plan,
                         stage_plans=(),payment_terms=None,

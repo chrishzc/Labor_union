@@ -101,8 +101,6 @@ def persist_subsidy_return_plan(cursor, command):
     plan = command.candidate.subsidy_return_plan
     from infrastructure.mysql.client_difference_repository import persist_controlled_client_amount
     handled,changed=persist_controlled_client_amount(cursor,command,'subsidy_return',plan.amount.amount,plan.due_date)
-    if handled:
-        return changed
     cursor.execute('SELECT o.obligation_identity,o.amount_due_ntd,o.due_date,e.after_amount_ntd '
         'FROM client_obligations o JOIN client_obligation_events e ON e.id=o.current_event_id '
         "WHERE o.case_no=%s AND o.obligation_type='subsidy_return' ORDER BY o.obligation_identity FOR UPDATE",
@@ -112,6 +110,11 @@ def persist_subsidy_return_plan(cursor, command):
         raise ValueError('subsidy_return_lineage_ambiguous')
     current = existing[0] if existing else None
     identity = current['obligation_identity'] if current else plan.obligation_identity
+    from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot
+    snapshot_changed = (_insert_refund_recipient_snapshot(cursor, identity, command.candidate.case_no,
+        'subsidy_return_supplement', require_complete=False) if current and int(current['amount_due_ntd']) > 0 and plan.amount.amount > 0 else False)
+    if handled:
+        return changed or snapshot_changed
     cursor.execute('SELECT COALESCE(SUM(CASE WHEN ledger.entry_type IN (\'subsidy_return\',\'subsidy_advance\') '
         'THEN allocation.amount_ntd WHEN ledger.entry_type IN (\'reversal\',\'subsidy_return_reversal\') THEN -allocation.amount_ntd ELSE 0 END),0) paid '
         'FROM client_ledger_obligation_allocations allocation JOIN client_ledger_entries ledger ON ledger.id=allocation.ledger_entry_id '
@@ -124,7 +127,7 @@ def persist_subsidy_return_plan(cursor, command):
     recovered=int(cursor.fetchone()['recovered'])
     remaining = max(0, plan.amount.amount - paid + recovered)
     if current and int(current['after_amount_ntd']) == plan.amount.amount and current['due_date'] == plan.due_date:
-        return False
+        return snapshot_changed
     ordinal = len(command.candidate.actions) + 1
     cursor.execute(
         _EVENT_INSERT_SQL,
@@ -168,6 +171,9 @@ def persist_subsidy_return_plan(cursor, command):
             command.candidate.resulting_account_version,
         ),
     )
+    if remaining > 0:
+        _insert_refund_recipient_snapshot(cursor, plan.obligation_identity, command.candidate.case_no,
+            'subsidy_return', require_complete=False)
     return True
 
 

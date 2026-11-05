@@ -34,6 +34,11 @@ class MySqlClientPaymentReminderQueryRepository:
                 'AND o.obligation_identity>%s ORDER BY o.obligation_identity LIMIT %s', (day,day,after,limit))
             return tuple(_facts(row) for row in cursor.fetchall())
 
+    def for_case(self, case_no):
+        with self.connection.cursor() as cursor:
+            cursor.execute(_SELECT+_FROM+'AND o.case_no=%s ORDER BY o.obligation_identity',(case_no,))
+            return tuple(_facts(row) for row in cursor.fetchall())
+
     def get(self, identity, *, lock=False):
         with self.connection.cursor() as cursor:
             if lock:

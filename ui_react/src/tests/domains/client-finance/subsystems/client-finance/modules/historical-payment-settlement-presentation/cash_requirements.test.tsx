@@ -8,6 +8,7 @@ import { accountsPayableQueryClient } from '../../../../../../../api/accounts_pa
 import { accountsPayableExportClient } from '../../../../../../../api/accounts_payable/accounts_payable_export_client';
 import { CashRequirementsPanel } from '../../../../../../../components/CashRequirementsPanel';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
+import { caseCategoriesClient } from '../../../../../../../api/client_finance/case_categories_client';
 import { ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
 
 function row(changes: Partial<CashRequirementRow> = {}): CashRequirementRow {
@@ -109,15 +110,17 @@ describe('cash planning panel', () => {
 describe('existing payable composition', () => {
   it('keeps accounting export independent while replacing the old two tabs with filters', async () => {
     window.location.hash = '#finance?tab=accounts-payable';
+    vi.spyOn(caseCategoriesClient, 'query').mockResolvedValue(new Map([['C-1', 'subsidy']]));
     const confirmed = vi.spyOn(accountsPayableQueryClient, 'query').mockResolvedValue(ACCOUNTS_PAYABLE_RESPONSE.data);
-    const forecast = vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([row()]);
+    const forecast = vi.spyOn(cashRequirementsQueryClient, 'queryAll').mockResolvedValue([row({ pending_reasons: ['退款收款資料待確認'] })]);
     const download = vi.spyOn(accountsPayableExportClient, 'download');
     render(<FinancePage />);
     await screen.findByLabelText('付款摘要');
     expect(screen.queryByRole('tablist', { name: '應付帳款檢視' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['收款', '付款', '銀行對帳', '案件帳務', '帳務警示']);
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['進行中案件', '銀行對帳', '政府補助清單', '每月帳務']);
     expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
-    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'service_pending' } });
+    expect(screen.getByText('退款收款資料待確認')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'partially_paid' } });
     expect(screen.queryByText('月嫂甲')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
     expect(forecast).toHaveBeenCalledTimes(1); expect(confirmed).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();

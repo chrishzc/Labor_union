@@ -95,6 +95,8 @@ def test_case_statistics_calendar_periods_merge_history_and_preserve_unknowns():
     assert annual.annual_application_count == annual.summary.application_count == 12
     assert annual.summary.order_status_counts == {"待補件": 1, "洽談中": 1, "訂單成立": 2, "服務中": 2, "訂單完成": 3, "訂單取消": 2}
     assert annual.summary.other_status_count == 1
+    assert (annual.summary.order_established_count, annual.summary.negotiating_count,
+            annual.summary.cancelled_count, annual.summary.review_rejected_count) == (7, 1, 0, 2)
     assert (annual.summary.general_eligible_count, annual.summary.general_ineligible_count,
             annual.summary.subsidized_eligible_count, annual.summary.subsidized_ineligible_count) == (5, 1, 3, 1)
     assert annual.summary.unclassified_qualification_count == 2
@@ -123,6 +125,9 @@ def test_case_statistics_api_is_authenticated_strict_and_rejects_conflicting_fil
     data = response.json()["data"]
     assert data["summary"]["application_count"] == 4
     assert data["annual_application_count"] == 12
+    assert tuple(data["summary"][field] for field in (
+        "order_established_count", "negotiating_count", "cancelled_count", "review_rejected_count",
+    )) == (4, 0, 0, 0)
     assert data["available_years"] == [2027, 2026, 2025]
     assert (data["start_date"], data["end_date"]) == ("2026-04-01", "2026-04-30")
     assert "王小美" not in response.text and "115000" not in response.text
@@ -150,9 +155,9 @@ def test_weekly_json_and_xlsx_merge_historical_statuses_without_mutating_facts()
     worksheet = load_workbook(BytesIO(export_weekly_operations_report(report)), data_only=True)["週報案件受理總表"]
     headers = [cell.value for cell in worksheet[3]]
     assert not any("歷史訂單" in str(value) for value in headers)
-    assert worksheet.cell(4, headers.index("訂單完成") + 1).value == 3
-    completion_column = headers.index("訂單完成") + 1
-    assert sum(worksheet.cell(row, completion_column).value == 1 for row in range(5, worksheet.max_row + 1)) == 3
+    assert worksheet.cell(4, headers.index("訂單成立") + 1).value == 7
+    established_column = headers.index("訂單成立") + 1
+    assert sum(worksheet.cell(row, established_column).value == 1 for row in range(5, worksheet.max_row + 1)) == 7
 
 
 def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_period():
@@ -168,10 +173,11 @@ def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_peri
     for quarter, month in ((None, None), (2, None), (2, 4), (4, 11)):
         statistics = query.query_case_statistics(2026, quarter, month)
         report = query.query(statistics.start_date, statistics.end_date)
-        for field in ("application_count", "general_eligible_count", "general_ineligible_count", "subsidized_eligible_count", "subsidized_ineligible_count"):
+        for field in ("application_count", "general_eligible_count", "general_ineligible_count", "subsidized_eligible_count", "subsidized_ineligible_count", "order_established_count", "negotiating_count", "cancelled_count"):
             assert getattr(statistics.summary, field) == getattr(report.summary, field)
         statuses = query._case_totals(2026, month, statistics.start_date, statistics.end_date, report.case_rows, ()).order_status_counts
         assert statistics.summary.order_status_counts == {status: statuses[status] for status in statistics.summary.order_status_counts}
+        assert statistics.summary.review_rejected_count == sum(row.review_rejected for row in report.case_rows)
         assert report.summary.general_ineligible_count == report.summary.subsidized_ineligible_count == 0
 
     # 尚有未能判定身分的不符合案件時，兩處共同保留未知，不猜成零。
@@ -338,6 +344,14 @@ def test_weekly_query_is_redacted_and_uses_official_work_days():
     assert data["summary"]["application_count"] == 2
     assert data["summary"]["general_eligible_count"] == 1
     assert data["summary"]["rejection_unpartitioned_count"] == 1
+    assert data["case_rows"][0]["serial_number"] == 1
+    assert data["case_rows"][0]["application_date_roc"] == "115/08/20"
+    assert tuple(data["case_rows"][0][field] for field in (
+        "general_eligible", "general_ineligible", "subsidized_eligible", "subsidized_ineligible",
+        "order_established", "negotiating", "cancelled", "review_rejected",
+    )) == (1, 0, 0, 0, 1, 0, 0, 0)
+    assert data["case_rows"][0]["service_status"] == "服務中"
+    assert data["case_rows"][0]["notes"] == ""
     assert [(item["week_start_date"], item["promotion_count"]) for item in data["weekly_metrics"]] == [
         ("2026-08-17", 12),
         ("2026-08-24", 5),
@@ -566,12 +580,9 @@ def test_weekly_export_has_fixed_three_sheets_and_summary_without_pii():
     assert case_values[4][3] == "2026-08-17 ~ 2026-08-23"
     assert case_values[4][5:7] == (12, 34)
     assert case_values[4][7:12] == (1, 1, None, None, None)
-    assert case_values[2][12:19] == (
-        "待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消",
-        "無訂單／狀態缺值",
-    )
-    assert case_values[4][12:19] == (None, None, None, 1, None, None, None)
-    assert case_values[5][18:20] == (1, 1)  # 缺狀態、審核不符合分開列示
+    assert case_values[2][12:16] == ("訂單成立", "洽談中", "取消", "審核不符合")
+    assert case_values[4][12:16] == (1, None, None, None)
+    assert case_values[5][12:16] == (None, None, None, 1)
     assert case_values[5][3] == "2026-08-24 ~ 2026-08-30"
     assert case_values[6][0] == "115年8月小計"
     assert case_values[6][5:8] == (17, 40, 2)

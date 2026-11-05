@@ -1,22 +1,20 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
-import { financeAccountingClient, type AccountingItem, type AccountingWarning, type CaseAccounting } from '../api/finance_import/finance_accounting_client';
-import { financeMoney } from './FinanceReceiptsWorkspace';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
+import {paymentOverdueReminderClient,type CasePaymentReminder} from '../api/line_order_groups/payment_overdue_reminder_client';
+import {ordersQueryClient} from '../api/orders/order_query_client';
+import type {OrderDetail} from '../api/orders/order_query_schemas';
+import {financeMoney} from './FinanceReceiptsWorkspace';
+import {useUnsavedChanges,useUnsavedNavigation} from './UnsavedChanges';
+import {ApiHttpError} from '../api/shared/typed_errors';
+import {FinanceSubsidyPlanForm,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
+import {FinanceCaseNotice,lastNotification,notificationTime,notificationStatus} from './FinanceCaseNotice';
 import './FinanceCaseAccounting.css';
-import { ordersQueryClient } from '../api/orders/order_query_client';
-import { HistoricalAccountingMarkerPanel } from './HistoricalAccountingMarkerPanel';
-import { ClientReceiptReconciliationPanel } from './ClientReceiptReconciliationPanel';
-import { AccountingDifferencePanel } from './AccountingDifferencePanel';
-import { useUnsavedChanges, useUnsavedNavigation } from './UnsavedChanges';
-import { ApiHttpError } from '../api/shared/typed_errors';
-
-const labels = { over_received: '客戶超收', over_paid: '付款超付', under_paid: '付款差額超過 100 元' };
-const money = (value: number | null) => value === null ? '尚無款項' : financeMoney(value);
-function difference(item: AccountingItem) {
-  if (!item.has_payment) return item.direction === 'payable' ? '待付款' : '待收款';
-  const value = item.expected_ntd - item.actual_ntd;
-  return value === 0 ? '金額相符' : `${value > 0 ? (item.direction === 'payable' ? '少付' : '少收') : (item.direction === 'payable' ? '超付' : '超收')} ${financeMoney(Math.abs(value))}`;
-}
-
+import './FinanceCompactCase.css';
+const labels={over_received:'客戶超收',over_paid:'付款超付',under_paid:'付款差額超過 100 元'};
+const money=(value:number|null|undefined)=>value==null?'待確認':financeMoney(value);
+type Stage='deposit'|'first'|'second';
+const stageNames:Record<Stage,string>={deposit:'訂金',first:'第一期',second:'第二期'};
+const stages:Stage[]=['deposit','first','second'];
 export function AccountingWarningList({ data, onChange }: { data: CaseAccounting; onChange: (data: CaseAccounting) => void }) {
   const [showDismissed, setShowDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,90 +37,38 @@ export function AccountingWarningList({ data, onChange }: { data: CaseAccounting
   </section>;
 }
 
-export function FinanceCaseAccounting({ initialCase = '', onBank, onSubsidy, onLegacy }: { initialCase?: string; onBank?: () => void; onSubsidy?: (caseNo: string) => void; onLegacy?: (caseNo: string) => void }) {
-  const {requestLeave} = useUnsavedNavigation();
-  const [input, setInput] = useState(initialCase);
-  const [selected, setSelected] = useState(initialCase);
-  const [revision, setRevision] = useState(0);
-  const [state, setState] = useState<{ caseNo: string; data?: CaseAccounting; error?: string }>({ caseNo: initialCase });
-  const [detailItem, setDetailItem] = useState('');
-  const [view, setView] = useState<'detail'|'historical'>('detail');
-  const [matches, setMatches] = useState<{ case_no: string; client_name: string }[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [listQuery, setListQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
-  const searchRequest = useRef<AbortController | null>(null);
-  useEffect(() => () => searchRequest.current?.abort(), []);
-  function openCase(caseNo: string) { requestLeave(()=>{searchRequest.current?.abort(); setSearching(false); setSearchError(''); setInput(caseNo); setState({ caseNo }); setSelected(caseNo); setView('detail'); setDetailItem(''); setRevision(value => value + 1);}); }
-  async function loadCases(value: string, after?: string) {
-    searchRequest.current?.abort(); setSearchError('');
-    const controller = new AbortController(); searchRequest.current = controller;
-    setSearching(true);
-    if (!after) { setMatches([]); setNextCursor(null); setListQuery(value); }
-    try {
-      const page = await ordersQueryClient.getOrderSummaries({ query_text: value, page_size: 50, ...(after ? { after_case_no: after } : {}) }, { signal: controller.signal });
-      if (!controller.signal.aborted) {
-        setMatches(previous => after ? [...new Map([...previous, ...page.items].map(row => [row.case_no, row])).values()] : page.items);
-        setNextCursor(page.next_cursor);
-      }
-    }
-    catch { if (!controller.signal.aborted) setSearchError('案件搜尋失敗，請稍後再試。'); }
-    finally { if (!controller.signal.aborted) setSearching(false); }
-  }
-  useEffect(() => { let active=true; queueMicrotask(()=>{if(active)void loadCases('');}); return()=>{active=false;}; }, []);
-  async function search() {
-    const value = input.trim();
-    if (/^(?:[0-9]{9}|A[0-9]{6})$/.test(value)) { openCase(value); return; }
-    requestLeave(()=>{setSelected(''); setDetailItem(''); void loadCases(value);});
-  }
-  useEffect(() => {
-    const controller = new AbortController();
-    if (selected) {
-      queueMicrotask(()=>{if(controller.signal.aborted)return;void financeAccountingClient.query(selected, controller.signal).then(data => { if (!controller.signal.aborted) setState({ caseNo: selected, data }); }).catch(error => { if (!controller.signal.aborted) setState({ caseNo: selected, error: error instanceof ApiHttpError && error.status === 404 ? '找不到此案件，請確認案件編號。' : error instanceof ApiHttpError && error.status === 401 ? '登入已失效，請重新登入後查詢。' : error instanceof ApiHttpError && error.status === 403 ? '目前沒有查閱帳務的權限。' : '帳務資料暫時無法取得，請稍後重新查詢。' }); });});
-    }
-    return () => controller.abort();
-  }, [selected, revision]);
-  const data = state.caseNo === selected && !state.error ? state.data : undefined;
-  const allItems = data ? [...data.client_items, ...data.staff_items].filter(item => item.summary_included !== false) : [];
-  const kindLabels: Record<string,string> = { receipt:'收款', refund:'退款', payout:'付款', subsidy_return:'補助退款', subsidy_advance:'工會代墊', subsidy_return_reversal:'補助退款沖正', return:'既有返款紀錄', reversal:'沖正' };
-  const unified = () => <div className="finance-table-container"><table className="finance-table case-accounting-unified"><thead><tr><th>款項／對象</th><th>方向</th><th>到期日</th><th>應收／應付</th><th>已核銷收／付</th><th>其他處理</th><th>待收／待付</th><th>目前狀態</th><th>明細</th></tr></thead><tbody>{allItems.map(item => <Fragment key={item.identity}><tr data-obligation-id={item.identity}><td><strong>{item.label}</strong><small>{item.party}</small></td><td>{item.direction==='receivable'?'收':'付'}</td><td>{item.due_date??'待確認'}</td><td>{money(item.expected_ntd)}</td><td>{money(item.actual_ntd)}</td><td>{money(item.noncash_ntd??0)}</td><td>{money(item.remaining_ntd??null)}</td><td>{data?.historical_marker?'案件已人工核銷':item.settled?'已結清':difference(item)}</td><td><button type="button" className="finance-btn-secondary" aria-expanded={detailItem===item.identity} onClick={()=>setDetailItem(detailItem===item.identity?'':item.identity)}>{detailItem===item.identity?'收合':'展開'}明細</button></td></tr>{detailItem===item.identity&&<tr><td colSpan={9}><section className="case-accounting-allocation" aria-label="收付款明細"><h4>{item.label} · 收付款分配紀錄</h4><div className="finance-table-container"><table className="finance-table"><thead><tr><th>日期</th><th>銀行</th><th>種類</th><th>本項分配金額</th></tr></thead><tbody>{data?.transactions.filter(row=>row.item_identity===item.identity).map(row=><tr key={row.identity}><td>{row.occurred_on}</td><td>{{sinopac:'永豐',taishin:'台新',legacy:'歷史格式'}[row.bank??'']??'非銀行來源'}</td><td>{kindLabels[row.kind]??row.kind}</td><td>{money(row.amount_ntd)}</td></tr>)}</tbody></table></div>{!data?.transactions.some(row=>row.item_identity===item.identity)&&<p>本項尚無銀行收付款分配紀錄。</p>}</section></td></tr>}</Fragment>)}</tbody></table></div>;
-  return <section aria-label="案件帳務" className="case-accounting">
-    <h2>案件帳務</h2><p>集中查看單一案件的應收、應付與實際收付款差額。</p>
-    <form className="case-accounting-card case-accounting-search" onSubmit={event => { event.preventDefault(); void search(); }}>
-      <div className="case-accounting-field"><label htmlFor="accounting-case-select">選擇案件</label><select id="accounting-case-select" value={selected} onChange={event => { if (event.target.value) openCase(event.target.value); }}>
-        <option value="">請選擇案件</option>
-        {selected && !matches.some(row => row.case_no === selected) && <option value={selected}>{selected}</option>}
-        {matches.map(row => <option key={row.case_no} value={row.case_no}>{row.case_no}｜{row.client_name}</option>)}
-      </select></div>
-      <div className="case-accounting-field"><label htmlFor="accounting-case">案件編號</label><input id="accounting-case" placeholder="輸入完整／部分案件編號或客戶姓名" value={input} maxLength={50} onChange={event => setInput(event.target.value)} /></div><button className="finance-btn-primary">查看案件</button>
-      {nextCursor && <button type="button" className="finance-btn-secondary" disabled={searching} onClick={() => void loadCases(listQuery, nextCursor)}>載入更多案件</button>}
-    </form>
-    {searching && <p role="status">正在搜尋案件…</p>}{searchError && <p role="alert">{searchError}</p>}
-    {!searching && !searchError && <p className="finance-state">{matches.length ? '可直接下拉選擇案件，或輸入編號／姓名搜尋；同名客戶請核對案件編號。' : '沒有符合的案件，可輸入完整編號直接查詢，或重新搜尋。'}{nextCursor && ' 尚有更多案件，可繼續載入或縮小搜尋。'}</p>}
-    {!selected ? <p className="finance-state">請選擇或搜尋案件。</p> : state.caseNo === selected && state.error ? <p role="alert">{state.error}</p> : !data ? <p role="status">正在載入案件帳務…</p> : <>
-      <h3>{data.client_name} · 案件 {data.case_no}</h3>
-      {data.historical_marker&&<p className="finance-scope-note">案件帳務已人工核銷；原差額保留，整案金額不計入統計，不表示訂單或服務已完成。</p>}
-      <div className="case-accounting-summary case-accounting-totals">
-        <article><span>{data.historical_marker?'原始未收餘額':'目前待收'}</span><strong>{money(data.remaining_in_ntd??null)}</strong><small>應收 {money(data.receivable_ntd)} · 已核銷收款 {money(data.received_ntd)}</small></article>
-        <article><span>{data.historical_marker?'原始未付餘額':'目前待付'}</span><strong>{money(data.remaining_out_ntd??null)}</strong><small>應付 {money(data.payable_ntd)} · 已核銷付款 {money(data.paid_ntd)}</small></article>
-      </div>
-      <div className="finance-tab-bar" role="tablist" aria-label="案件帳務功能">{(['detail','historical'] as const).map((id,index)=><button key={id} type="button" role="tab" id={'accounting-view-'+id} aria-controls="case-accounting-output" aria-selected={view===id} tabIndex={view===id?0:-1} onClick={()=>requestLeave(()=>setView(id))} onKeyDown={event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'detail':event.key==='End'?'historical':index?'detail':'historical';requestLeave(()=>{setView(next);document.getElementById('accounting-view-'+next)?.focus();});}}>{id==='detail'?'帳務明細':'歷史人工核銷'}</button>)}</div>
-      <div id="case-accounting-output" role="tabpanel" aria-labelledby={'accounting-view-'+view}>{view==='historical'?<HistoricalAccountingMarkerPanel key={data.case_no} data={data} onMarked={marker=>setState(previous=>previous.data?{...previous,data:{...previous.data,historical_marker:marker}}:previous)}/>:<>
-        <section className="case-accounting-card"><h3>本案帳務明細</h3><p>全期款項，不受收付款頁的月份篩選影響；應收、應付與實際收付合併查閱。</p>{unified()}
-          {data.staff_items.filter(item=>item.summary_included===false).map(item=><p className="finance-scope-note" key={item.identity}>{item.label} · {item.party} · 來源實付 {money(item.actual_ntd)}；跨案來源不重複計入本案應付。</p>)}
-        </section>
-        {!data.historical_marker&&<ClientReceiptReconciliationPanel key={data.case_no} caseNo={data.case_no} refreshVersion={revision} onChanged={()=>setRevision(value=>value+1)}/>}
-        {!data.historical_marker&&<AccountingDifferencePanel key={'difference:'+data.case_no} caseNo={data.case_no} refreshVersion={revision} onChanged={()=>setRevision(value=>value+1)}/>}
-        <section className="case-accounting-card"><h3>本案關聯銀行收付款</h3><p>銀行各筆來源獨立保留；同一銀行款只列一次，跨案件款項的全額不當作本案分配金額。</p><div className="finance-table-container"><table className="finance-table"><thead><tr><th>日期</th><th>來源</th><th>關聯案件</th><th>實際入款</th><th>實際出款</th></tr></thead><tbody>{data.bank_facts?.map(bank=><tr key={bank.identity}><td>{bank.occurred_on}</td><td>{bank.identity}</td><td>{bank.cases.join('、')}</td><td>{bank.direction==='in'?money(bank.amount_ntd):'—'}</td><td>{bank.direction==='out'?money(bank.amount_ntd):'—'}</td></tr>)}</tbody></table>{!data.bank_facts?.length&&<p>尚無已正式核銷的銀行來源。</p>}</div>{onBank&&<button type="button" className="finance-btn-secondary" onClick={onBank}>前往銀行對帳核對收付款</button>}</section>
-        {onSubsidy&&<section className="case-accounting-card"><h3>政府補助與工會代墊</h3><p>查閱本案補助、退款及整期歸屬；政府整筆入款不拆成本案實收。</p><button type="button" className="finance-btn-secondary" onClick={()=>onSubsidy(data.case_no)}>查看補助與整期帳務</button></section>}
-      </>}</div>
-      <details><summary>金額警示與既有檢查紀錄</summary><AccountingWarningList key={data.case_no} data={data} onChange={value => setState(previous => previous.caseNo === value.case_no ? { caseNo: value.case_no, data: value } : previous)} /></details>
-      {onLegacy && <details><summary>歷史收付款與既有查證工具</summary><p>查閱原有款項歷程、歷史收付款確認及歷史案件完成工具。</p><button type="button" className="finance-btn-secondary" onClick={() => onLegacy(data.case_no)}>開啟本案既有帳務工具</button></details>}
-    </>}
-  </section>;
+export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void}){
+ const {requestLeave}=useUnsavedNavigation();
+ const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
+ const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
+ const section=useRef<HTMLElement>(null),returnScroll=useRef(0),returnFocus=useRef<HTMLElement|null>(null);
+ useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal)]).then(([accounting,order,notices])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
+ useLayoutEffect(()=>{if(view!==null){section.current?.querySelector<HTMLElement>('.finance-case-subview h3')?.focus();return;}if(view===null&&returnFocus.current){const body=section.current?.closest('.drawer-body');if(body)body.scrollTop=returnScroll.current;const trigger=returnFocus.current;const target=trigger.isConnected?trigger:section.current?.querySelector('summary');target?.focus({preventScroll:true});returnFocus.current=null;}},[view,!!state.data]);
+ useEffect(()=>{if(state.caseNo===initialCase&&state.data)onIdentity?.(initialCase,state.data.client_name);},[initialCase,state.caseNo,state.data,onIdentity]);
+ function refresh(){setRevision(v=>v+1);onChanged?.();}
+ function open(next:Stage|'plan'){returnFocus.current=document.activeElement instanceof HTMLElement?document.activeElement:null;returnScroll.current=section.current?.closest('.drawer-body')?.scrollTop??0;requestLeave(()=>setView(next));}
+ function back(){requestLeave(()=>setView(null));}
+ const data=state.caseNo===initialCase?state.data:undefined;
+ const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ if(!initialCase)return <p>請從案件清單選擇案件。</p>;
+ const selected=data?.subsidy_plan?.events.at(-1)?.scheme;
+ const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
+ return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
+ {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
+ {data&&<><div hidden={view!==null}>
+ <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>
+ <details className="finance-case-block" open><summary>01　客戶繳款</summary><div className="finance-case-block-body"><div className="finance-table-container" tabIndex={0} role="region" aria-label="各期繳款與通知，可左右捲動"><table className="finance-table finance-case-periods"><thead><tr><th>期款</th><th>原到期日</th><th>應繳</th><th>已收／待收</th><th>入帳資訊</th><th>通知時間</th><th>通知</th></tr></thead><tbody>{stages.map(stage=>{
+ const sources=data.client_items.filter(row=>row.direction==='receivable'&&row.payment_stage===stage),item=sources.length===1?sources[0]:undefined;
+ const exempt=data.customer_fully_received===true&&data.customer_amount_ntd===0;
+ const expected=item?.expected_ntd??(exempt?0:null),actual=item?.actual_ntd??(exempt?0:null),remaining=item?.remaining_ntd??(exempt?0:null);
+ const notice=state.notices?.find(row=>row.payment_stage===stage),last=lastNotification(notice);
+ const receipts=item?data.transactions.filter(row=>row.item_identity===item.identity&&row.kind==='receipt'&&row.amount_ntd>0).slice().sort((a,b)=>b.occurred_on.localeCompare(a.occurred_on)):[];
+ return <tr key={stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{expected===0?'不需繳納':item?.due_date??'日期待確認'}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {money(row.amount_ntd)}</p>)}</details>}</>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'通知'+stageNames[stage]} disabled={remaining==null||remaining<=0||!notice?.can_send||!!state.loading} title={remaining===0?(expected===0?'本期免繳':'本期已繳齊'):notice?.unavailable_reason??(notice?'查看本期通知內容與紀錄':'通知來源待確認')} onClick={()=>open(stage)}>通知</button></td></tr>;
+ })}</tbody></table></div>{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}</div></details>
+ <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'由人員設定補助款歸屬，不從歷史金流自動代選。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><p>可提前設定，不改各期應繳。案件結束後再處理補助與應付清單。</p>{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
+ </section>;
 }
-
 export function FinanceAccountingWarnings({ onCase }: { onCase: (caseNo: string) => void }) {
   const [data, setData] = useState<CaseAccounting[] | null>(null);
   const [error, setError] = useState(false);

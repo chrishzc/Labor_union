@@ -43,11 +43,15 @@ class StaffPayableExportFact:
     payment_date: date
     status: StaffPayableStatus
     recipient_identity_card: str = ""
+    outgoing_bank: Literal["31", "633"] = "31"
+    staff_union_no: str = ""
 
     def __post_init__(self) -> None:
         _validate_export_identity(self)
         require_positive_integer(self.staff_id, "staff id")
         _require_positive_money(self.amount)
+        if self.outgoing_bank not in _OUTGOING_BANKS:
+            raise ValueError("staff payable outgoing bank is invalid")
 
 
 CaseStaffPayableSource = Literal["formal_obligation", "historical_projection", "order_facts"]
@@ -75,6 +79,7 @@ class CaseStaffPayableAuditItem:
     disposition: CaseStaffPayableDisposition
     reason: str
     payment_status: Literal["pending", "partially_paid", "paid", "settled"] = "pending"
+    funding_kind: Literal["client", "subsidy"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +124,8 @@ class AccountsPayableRow:
     obligation_identities: tuple[str, ...]
     case_numbers: tuple[str, ...]
     recipient_identity_card: str = ""
+    outgoing_bank: Literal["31", "633"] = "31"
+    staff_union_no: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +227,7 @@ def _sort_rows(rows):
 def _aggregate_staff_rows(facts):
     groups = {}
     for item in facts:
-        groups.setdefault((item.staff_id, item.payment_date), []).append(item)
+        groups.setdefault((item.staff_id, item.payment_date, item.outgoing_bank, item.bank_code, item.bank_account), []).append(item)
     return tuple(_staff_row(items) for _, items in sorted(groups.items(), key=lambda item: item[0]))
 
 
@@ -234,14 +241,16 @@ def _staff_row(items):
         bank_code=first.bank_code,
         bank_account=first.bank_account,
         amount=MoneyNTD(sum(item.amount.amount for item in items)),
-        obligation_identities=tuple(sorted(item.obligation_identity for item in items)),
-        case_numbers=tuple(sorted(item.case_no for item in items)),
+        obligation_identities=tuple(sorted({item.obligation_identity for item in items})),
+        case_numbers=tuple(sorted({item.case_no for item in items})),
         recipient_identity_card=first.recipient_identity_card,
+        outgoing_bank=first.outgoing_bank,
+        staff_union_no=first.staff_union_no,
     )
 
 
 def _validate_staff_bank_identity(items) -> None:
-    identities = {(item.recipient_name, item.bank_code, item.bank_account) for item in items}
+    identities = {(item.recipient_name, item.staff_union_no, item.bank_code, item.bank_account) for item in items}
     if len(identities) != 1:
         raise ValueError("accounts_payable_export_has_anomaly")
 
@@ -260,6 +269,7 @@ def _refund_row(item):
         amount=item.amount,
         obligation_identities=(item.obligation_identity,),
         case_numbers=(item.case_no,),
+        outgoing_bank="633" if item.refund_type == "subsidy_return" else "31",
     )
 
 
@@ -295,7 +305,7 @@ def _transfer_rows(rows):
         yield (
             f"{row.payment_date.month}-{outgoing_bank}-{serials[outgoing_bank]}",
             _OUTGOING_BANKS[outgoing_bank],
-            row.recipient_name,
+            f"{row.staff_union_no or '未設定'} {row.recipient_name}" if row.payment_type == "staff_payable" else row.recipient_name,
             row.bank_account,
             row.bank_code,
             row.amount.amount,
@@ -307,7 +317,7 @@ def _transfer_rows(rows):
 
 
 def _outgoing_bank(row):
-    return "31" if row.payment_type == "staff_payable" else "633"
+    return row.outgoing_bank
 
 
 def _style_headers(worksheet) -> None:

@@ -8,6 +8,7 @@
 依一致性快照彙整正式月嫂應付與客戶退款／補助退回；歷史案件也只讀相同 Payroll obligation 及其 assignment binding，缺少義務時明示缺件，不在 Query 重算一份歷史薪資或建立假 obligation identity。產生會計 XLSX，下載與封存使用同一份位元組，不執行付款或在 Query 時寫 DB。
 同一 reporting owner 提供已排班案件的資金需求唯讀投影；保留未知金額／日期及受款資料待確認項目，未建客戶補助退款單時沿用 Client Finance 規則預估，不修改帳務或付款。
 同份月清冊的月嫂款項沿用該月 15 日；客戶一般退款及補助退款讀取月底以前仍未清償的款項，包含以前月份餘額及部分退款剩餘款，不重列已退金額。
+依規格16 §2.5.4消費共用正式案件方案；月嫂永豐／台新分列，正常客戶退款永豐、補助退款台新，月嫂姓名欄組合公會自訂編號。未知付款用途保留排除原因，不用舊分期標記另判三方案；既有退款與新方案衝突保留原記錄及原因。
 
 ## Implementation
 - primary: `subsystems/staff_payables/accounts_payable_export.py`
@@ -19,6 +20,8 @@
 - cash planning: `subsystems/staff_payables/cash_requirements_query.py` — 付款統一清單來源，唯讀保留 staff_id 供逐人明細精確定位；金額與日期規則不變。
 - cash planning source: `infrastructure/mysql/cash_requirements_repository.py`
   - 付款主清單保留已付／結清列，以獨立 `payment_status` 呈現 pending／partially_paid／paid／settled；包含 exact current 歷史確認及沖正後的目前餘額。匯出仍只選未付項目。
+
+- shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 與案件查詢共用typed Client Finance funding及正式方案，清冊／cash planning不另算資格或S。
 
 ## Contracts
 - `document/架構重整/01_規格基線/16_Staff_Payables與Client_Refund正式規格.md` — §2.5、§2.5.1。

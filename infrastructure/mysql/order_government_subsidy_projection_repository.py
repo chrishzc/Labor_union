@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 from domains.government_subsidy.ledger import GovernmentSubsidyBatchStatus
+from infrastructure.mysql.pricing_configuration_repository import CASE_PRICING_FACTS_SQL
 from domains.government_subsidy.overpayment import GovernmentSubsidyOverpaymentStatus
 from shared_kernel.validation import require_canonical_text
 from subsystems.government_subsidy.reconciliation_register_query import project_receivable_estimate
@@ -41,7 +42,7 @@ class MySqlOrderGovernmentSubsidyProjectionRepository:
         placeholders = ",".join("%s" for _ in case_nos)
         with self._connection.cursor() as cursor:
             cursor.execute(
-                _ORDER_SUBSIDY_FACTS_SELECT_SQL.format(placeholders=placeholders),
+                _ORDER_SUBSIDY_FACTS_SELECT_SQL.format(placeholders=placeholders, pricing_facts=CASE_PRICING_FACTS_SQL),
                 case_nos,
             )
             rows = cursor.fetchall()
@@ -263,7 +264,7 @@ SELECT
     overpayment.remaining_amount_ntd AS overpayment_remaining_ntd,
     overpayment.projection_version AS overpayment_version
 FROM orders o
-LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
+LEFT JOIN ({pricing_facts}) pricing ON pricing.case_no=o.case_no
 JOIN clients c ON c.id = o.client_id
 LEFT JOIN case_payroll_rate_policy_snapshots payroll_policy ON payroll_policy.case_no=o.case_no
 LEFT JOIN beclass_records br ON (br.query_no=o.case_no OR br.bound_case_no=o.case_no)

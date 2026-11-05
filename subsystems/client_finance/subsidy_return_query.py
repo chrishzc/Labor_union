@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from domains.client_finance.subsidy_return_projection import project_subsidy_return
+from domains.client_finance.pricing_policy import CasePricingTerms
 from domains.orders.lifecycle import OrderLifecycleStatus
 
 
@@ -23,6 +24,7 @@ class SubsidyReturnCaseFacts:
     formal_amount_ntd: int | None
     formal_due_date: date | None
     return_settled: bool
+    pricing: CasePricingTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,7 @@ def query_subsidy_returns(repository: SubsidyReturnQueryRepository, *, page_size
             completed_on=fact.actual_end_date,
             has_formal_return=fact.has_formal_return, formal_amount_ntd=fact.formal_amount_ntd,
             formal_due_date=fact.formal_due_date, return_settled=fact.return_settled,
+            pricing=fact.pricing,
         )
         if projection is None:
             continue

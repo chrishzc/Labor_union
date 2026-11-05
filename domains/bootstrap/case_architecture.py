@@ -314,7 +314,7 @@ def policy_kind_for_identity(identity_status: str, pricing_identity_rule: str | 
         return rules[pricing_identity_rule]
     mappings = {
         "一般市民": PayrollPolicyKind.CITIZEN,
-        "補助市民": PayrollPolicyKind.CITIZEN,
+        "補助市民": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "社福": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "低收入戶": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
         "中低收入戶": PayrollPolicyKind.SUBSIDIZED_CITIZEN,
@@ -377,7 +377,7 @@ def _validate_client_payment_terms(order, payment_terms) -> None:
 
 def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
     coverage = derive_subsidy_coverage(
-        {"citizen": "補助市民", "social": "社福", "non_citizen": "非市民"}.get(order.pricing_identity_rule, order.source_identity_status),
+        {"citizen": "一般市民", "social": "補助市民", "non_citizen": "非市民"}.get(order.pricing_identity_rule, order.source_identity_status),
         Decimal(order.service_days) * Decimal(str(order.service_hours_per_day)),
         Decimal(order.floor_fee.amount),
     )

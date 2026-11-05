@@ -2665,6 +2665,33 @@ CREATE TABLE `finance_case_accounting_markers` (
   CONSTRAINT `chk_finance_case_marker_versions` CHECK ((json_type(`source_versions`) = _utf8mb4'OBJECT'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `finance_case_arrangement_events` (
+  `case_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `version` bigint NOT NULL,
+  `action` enum('confirm_direct','withdraw_direct') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `operation_key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_no`,`version`),
+  UNIQUE KEY `uk_finance_arrangement_operation` (`operation_key`),
+  CONSTRAINT `chk_finance_arrangement_text` CHECK (((char_length(trim(`reason`)) > 0) and (char_length(trim(`actor`)) > 0) and (char_length(trim(`operation_key`)) > 0))),
+  CONSTRAINT `chk_finance_arrangement_version` CHECK ((`version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `finance_case_subsidy_plan_events` (
+  `case_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `version` bigint NOT NULL,
+  `scheme` enum('split','advance','direct') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `operation_key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`case_no`,`version`),
+  UNIQUE KEY `uk_finance_subsidy_plan_operation` (`operation_key`),
+  CONSTRAINT `chk_finance_subsidy_plan_text` CHECK (((char_length(trim(`actor`)) > 0) and (char_length(trim(`operation_key`)) > 0))),
+  CONSTRAINT `chk_finance_subsidy_plan_version` CHECK ((`version` > 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `finance_import_apply_receipts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -8822,6 +8849,22 @@ DELIMITER ;
 DELIMITER $$
 CREATE TRIGGER `trg_finance_anomaly_occurrences_before_update` BEFORE UPDATE ON `finance_anomaly_occurrences` FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be updated'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_finance_case_arrangement_events_delete` BEFORE DELETE ON `finance_case_arrangement_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'finance_case_arrangement_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_finance_case_arrangement_events_update` BEFORE UPDATE ON `finance_case_arrangement_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'finance_case_arrangement_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_finance_case_subsidy_plan_events_delete` BEFORE DELETE ON `finance_case_subsidy_plan_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'finance_case_subsidy_plan_events is immutable'$$
+DELIMITER ;
+
+DELIMITER $$
+CREATE TRIGGER `trg_finance_case_subsidy_plan_events_update` BEFORE UPDATE ON `finance_case_subsidy_plan_events` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'finance_case_subsidy_plan_events is immutable'$$
 DELIMITER ;
 
 DELIMITER $$

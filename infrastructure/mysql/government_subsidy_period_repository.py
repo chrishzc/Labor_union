@@ -177,6 +177,15 @@ class MySqlGovernmentSubsidyPeriodRepository:
             from infrastructure.mysql.government_period_difference_repository import initialize_balance
             initialize_balance(cursor,identity,sum(line.amount_ntd for line in view.lines),view.total_ntd)
             self._advance_version(cursor, period.year)
+            # The government receipt and a newly confirmed customer return share this outer UoW.
+            from hashlib import sha256
+            from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+            from infrastructure.mysql.automatic_client_accounting import synchronize_terminal_subsidy_return
+            for line in view.lines:
+                child_key = 'government-return:' + sha256((key + ':' + line.case_no).encode()).hexdigest()
+                synchronize_terminal_subsidy_return(cursor, line.case_no, actor=ActorContext(actor),
+                    key=IdempotencyKey(child_key), correlation_id=CorrelationId('government-period:' + str(identity)),
+                    source_family='government-period', source_id=identity)
             return identity
 
     def reverse(self, receipt_id, bank_row_id, key, actor):

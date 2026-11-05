@@ -4,7 +4,7 @@ from domains.line.identities import LineUserId
 from infrastructure.mysql.client_payment_reminder_query_repository import MySqlClientPaymentReminderQueryRepository
 from infrastructure.mysql.deposit_notification_repository import MySqlDepositNotificationRepository
 from infrastructure.mysql.line_repository_support import aware_utc, database_utc
-from subsystems.line.payment_overdue_reminders import ReminderRecipient
+from subsystems.line.payment_overdue_reminders import ReminderRecipient, CASE_SOURCE_TYPE
 from subsystems.line.payment_reminder_notifications import INITIAL, FOLLOWUP, OriginalPaymentReminder
 
 
@@ -52,9 +52,9 @@ class MySqlPaymentReminderNotificationRepository:
     def pending(self, identity, *, lock=True):
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT 1 FROM line_delivery_tasks WHERE (source_aggregate_identity=%s '
-                'AND source_aggregate_type IN (%s,%s,%s) '
+                'AND source_aggregate_type IN (%s,%s,%s,%s) '
                 "OR source_aggregate_type='client_deposit_reminder' AND SUBSTRING_INDEX(source_aggregate_identity,':',1)="
                 "(SELECT case_no FROM client_obligations WHERE obligation_identity=%s AND obligation_type='deposit')) "
                 "AND processing_status IN ('pending','processing','retryable_failed') LIMIT 1"+(' FOR UPDATE' if lock else ''),
-                (identity,INITIAL,FOLLOWUP,'manual_payment_overdue_reminder',identity))
+                (identity,INITIAL,FOLLOWUP,'manual_payment_overdue_reminder',CASE_SOURCE_TYPE,identity))
             return cursor.fetchone() is not None

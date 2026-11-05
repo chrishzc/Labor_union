@@ -67,7 +67,7 @@ describe('各期繳款逾期待辦',()=>{
     window.history.replaceState(null,'','#finance?tab=receipts&view=overdue');
     const view=render(<FinanceReceiptsWorkspace revision={0} initialView="overdue" onOpenCase={()=>{}} onOpenSubsidy={()=>{}}/>);
     expect(await screen.findByRole('heading',{name:'逾期提醒'})).toBeInTheDocument();
-    expect(screen.getByRole('button',{name:'逾期提醒'})).toHaveAttribute('aria-pressed','true');
+    expect(screen.getByRole('button',{name:'返回應收款'})).toBeVisible();
     await screen.findByText('客戶私人聊天室');view.unmount();
     window.history.replaceState(null,'','#line-management?tab=payment_overdue');
     render(<LineManagementPage/>);

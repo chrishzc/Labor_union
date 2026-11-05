@@ -20,6 +20,7 @@
 .pricing-table th { background: #fff0e3; font-weight: 650; }
 .pricing-table td, .pricing-table th { text-align: left; padding: 10px; border-bottom: 1px solid #f2e2dc; }
 .pricing-table input { width: 100%; min-width: 82px; }
+.pricing-page .pricing-table th[scope=row] { min-width: 168px; }
 .pricing-table input:disabled { background: #f4efed; color: #756b67; }
 .pricing-actions { justify-content: flex-end; margin-top: 16px; }
 .pricing-actions button, .pricing-section-heading button, .pricing-reload { border: 1px solid #dec0b6; border-radius: 6px; background: white; color: #57423b; font: inherit; padding: 10px 16px; cursor: pointer; }

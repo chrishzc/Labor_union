@@ -93,8 +93,33 @@ def test_aggregate_merges_same_staff_day_and_excludes_non_payable_or_anomalous_r
 
 
 def test_aggregate_rejects_inconsistent_staff_bank_identity():
+    from dataclasses import replace
     with pytest.raises(ValueError, match="accounts_payable_export_has_anomaly"):
-        aggregate_accounts_payable_rows((_staff("obligation:1", "CASE-1", 100), _staff("obligation:2", "CASE-2", 100, account="002")), ())
+        aggregate_accounts_payable_rows((_staff("obligation:1", "CASE-1", 100),
+            replace(_staff("obligation:2", "CASE-2", 100), recipient_name="另一人")), ())
+
+
+def test_export_preserves_staff_number_and_keeps_banks_and_recipient_accounts_separate():
+    from dataclasses import replace
+    first = replace(_staff("one", "CASE-1", 100), staff_union_no="00123")
+    staff = (first, replace(first, obligation_identity="two", case_no="CASE-2", amount=MoneyNTD(200)),
+             replace(first, obligation_identity="subsidy", outgoing_bank="633", amount=MoneyNTD(500)),
+             replace(first, obligation_identity="other-account", bank_account="002", amount=MoneyNTD(50)))
+    rows = aggregate_accounts_payable_rows(staff, (_refund("normal", 120), _refund("subsidy:1", 80, refund_type="subsidy_return")))
+    sheet = load_workbook(BytesIO(build_accounts_payable_workbook(rows))).active
+    values = list(sheet.values)[2:]
+    staff_values = [row for row in values if row[2] == "00123 王月嫂"]
+    assert sorted((row[1], row[3], row[5]) for row in staff_values) == [
+        ("台新銀行", "001", 500), ("永豐銀行", "001", 300), ("永豐銀行", "002", 50)]
+    assert all(sheet.cell(index, 3).data_type == "s" for index in range(3, sheet.max_row + 1))
+    assert [(row[1], row[5]) for row in values if row[2] == "林客戶"] == [("永豐銀行", 120), ("台新銀行", 80)]
+    assert all(item.recipient_name == "王月嫂" for item in rows if item.payment_type == "staff_payable")
+
+
+def test_missing_staff_number_does_not_remove_an_otherwise_payable_row():
+    rows = aggregate_accounts_payable_rows((_staff("one", "CASE-1", 100),), ())
+    sheet = load_workbook(BytesIO(build_accounts_payable_workbook(rows))).active
+    assert sheet['C3'].value == '未設定 王月嫂'
 
 
 

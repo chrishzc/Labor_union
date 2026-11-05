@@ -40,6 +40,7 @@ db/schema_parts/238_registry_case_deletion_guards.sql -text whitespace=cr-at-eol
 db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.json -text whitespace=cr-at-eol
 db/migration_releases/labor_union_2026_10_29_registry_case_deletion_guards_v1.descriptors.json -text whitespace=cr-at-eol
 db/schema_assembly/labor_union_fresh_schema_v1.json -text whitespace=cr-at-eol
+db/schema_assembly/labor_union_fresh_table_retirements_v1.json -text whitespace=cr-at-eol
 db/cutover_releases/labor_union_validation_schema_v1.json -text whitespace=cr-at-eol
 # Generated snapshot retains formatting from unchanged historical SQL sources.
 db/releases/labor_union_validation_schema_registry_guards_v1.sql -whitespace
@@ -51,3 +52,6 @@ db/releases/labor_union_validation_schema_registry_guards_v1.sql -whitespace
 *.jpeg binary
 *.gif  binary
 *.pdf  binary
+
+db/releases/labor_union_validation_schema_finance_case_arrangements_v1.sql -whitespace
+db/releases/labor_union_validation_schema_case_subsidy_plans_v1.sql -whitespace

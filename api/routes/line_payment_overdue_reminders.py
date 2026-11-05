@@ -48,6 +48,32 @@ class ReminderItemView(BaseModel):
     last_reminder: LastReminderView | None
 
 
+class ReminderHistoryView(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    task_id: int
+    requested_at: datetime
+    sent_at: datetime | None
+    status: str
+    content: str | None
+    actor: str | None = None
+
+
+class CaseReminderPaymentSnapshot(PaymentSnapshot):
+    remaining_amount_ntd: int = Field(ge=0)
+
+
+class CaseReminderView(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    case_no: str
+    payment_stage: Literal['deposit','first','second']
+    payment: CaseReminderPaymentSnapshot | None
+    recipient_label: str
+    can_send: bool
+    unavailable_reason: str | None
+    message: str | None
+    history: list[ReminderHistoryView]
+
+
 class ReminderPageView(BaseModel):
     items: list[ReminderItemView]
     total: int
@@ -75,4 +101,19 @@ def send_reminder(body: ReminderSend,principal: AdminPrincipal=Depends(require_c
         identity,status = application.send(expected,body.idempotency_key,admin_actor_context(principal))
     except PaymentOverdueReminderConflict as error:
         raise typed_http_error(409,'conflict',str(error),'款項或收件對象已更新，請重新整理後再操作。','payment-overdue-reminder') from error
+    return BaseResponse(data={'task_id':identity,'status':status})
+
+
+@router.get('/cases/{case_no}', response_model=BaseResponse[list[CaseReminderView]])
+def case_reminders(case_no: str,principal: AdminPrincipal=Depends(require_customer_service_handler),application=Depends(get_payment_overdue_reminders)):
+    return BaseResponse(data=[asdict(row) for row in application.case(case_no)])
+
+
+@router.post('/cases/send', response_model=BaseResponse[ReminderReceiptView])
+def send_case_reminder(body: ReminderSend,principal: AdminPrincipal=Depends(require_customer_service_handler),application=Depends(get_payment_overdue_reminders)):
+    try:
+        expected=OverdueClientPayment(**body.model_dump(exclude={'idempotency_key'}))
+        identity,status=application.send_case(expected,body.idempotency_key,admin_actor_context(principal))
+    except PaymentOverdueReminderConflict as error:
+        raise typed_http_error(409,'conflict',str(error),'款項、收件對象或原寄送工作已更新，請重新讀取後確認。','payment-case-reminder') from error
     return BaseResponse(data={'task_id':identity,'status':status})

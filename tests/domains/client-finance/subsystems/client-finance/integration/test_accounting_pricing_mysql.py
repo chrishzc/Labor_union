@@ -2,7 +2,9 @@
 
 from argparse import Namespace
 from datetime import date, timedelta
+from decimal import Decimal
 import os
+import json
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -14,7 +16,7 @@ from api.dependencies.admin_auth import require_system_admin
 from api.routes.accounting_pricing import router as pricing_router
 from api.routes.case_architecture_bootstrap import router as bootstrap_router
 from infrastructure.mysql import mysql_adapter
-from infrastructure.mysql.pricing_configuration_repository import bind_initial_pricing
+from infrastructure.mysql.pricing_configuration_repository import bind_initial_pricing, CASE_PRICING_FACTS_SQL
 from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from subsystems.access.authentication_session import AdminPrincipal
@@ -65,11 +67,11 @@ def policy():
         return {"identity_name": name, "rule": rule, "subsidy_hours": cap,
             "client": {"covered": rate, "excess": excess or rate}, "payroll": {"covered": rate, "excess": excess or rate}}
     return {"effective_on": (date.today() - timedelta(days=1)).isoformat(),
-        "identities": [identity("補助市民", "citizen", 40, 300), identity("社福", "social", 120, 350, 300), identity("非市民", "non_citizen", 0, 320), identity("新增社福身分", "social", 100, 340, 290)],
+        "identities": [identity("一般市民", "citizen", 40, 300), identity("補助市民", "social", 120, 350, 300), identity("非市民", "non_citizen", 0, 320), identity("新增補助市民身分", "social", 100, 340, 290)],
         "twins_client": {"covered": 450, "excess": 400}, "twins_payroll": {"covered": 450, "excess": 410}}
 
 
-def seed_case(case_no, identity="社福"):
+def seed_case(case_no, identity="補助市民"):
     connection = mysql_adapter.get_connection()
     try:
         with connection.cursor() as cursor:
@@ -104,6 +106,7 @@ def test_policy_replay_conflict_case_binding_and_manual_http_flow(client):
     stale = client.post("/api/v1/accounting-pricing/policies", json=body, headers={"Idempotency-Key": "pricing-policy-stale"})
     assert stale.status_code == 409
     seed_case("pricing-new")
+    seed_case("pricing-general", identity="一般市民")
     bootstrap_case(client, "pricing-new")
     value = client.get("/api/v1/accounting-pricing/cases/pricing-new")
     assert value.status_code == 200, value.text
@@ -122,17 +125,39 @@ def test_policy_replay_conflict_case_binding_and_manual_http_flow(client):
     after = client.get("/api/v1/accounting-pricing/cases/pricing-new").json()["data"]
     assert after["source"] == "manual" and after["terms"] == terms
     connection = mysql_adapter.get_connection()
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT pricing_policy_id FROM orders WHERE case_no='pricing-legacy'")
-        assert cursor.fetchone()["pricing_policy_id"] is None
-        cursor.execute("SELECT COUNT(*) AS n FROM case_pricing_events WHERE case_no='pricing-new'")
-        assert cursor.fetchone()["n"] == 1
-        cursor.execute(f"SELECT o.case_no,{CASE_CATEGORY_SQL} AS category FROM orders o "
-            "JOIN clients c ON c.id=o.client_id WHERE o.case_no IN ('pricing-new','opaque-legacy-case')")
-        assert {row['case_no']: row['category'] for row in cursor.fetchall()} == {
-            'pricing-new': 'subsidy', 'opaque-legacy-case': 'non_citizen',
-        }
-    connection.close()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT case_no,pricing_rule,pricing_subsidy_hours FROM ({CASE_PRICING_FACTS_SQL}) pricing WHERE case_no IN ('pricing-new','pricing-general')")
+            assert {row['case_no']: (row['pricing_rule'], int(Decimal(str(row['pricing_subsidy_hours'])))) for row in cursor.fetchall()} == {
+                'pricing-new': ('social', 120), 'pricing-general': ('citizen', 40),
+            }
+            cursor.execute("SELECT pricing_policy_id FROM orders WHERE case_no='pricing-legacy'")
+            assert cursor.fetchone()["pricing_policy_id"] is None
+            cursor.execute("SELECT COUNT(*) AS n FROM case_pricing_events WHERE case_no='pricing-new'")
+            assert cursor.fetchone()["n"] == 1
+            cursor.execute(f"SELECT o.case_no,{CASE_CATEGORY_SQL} AS category FROM orders o "
+                "JOIN clients c ON c.id=o.client_id WHERE o.case_no IN ('pricing-new','opaque-legacy-case')")
+            assert {row['case_no']: row['category'] for row in cursor.fetchall()} == {
+                'pricing-new': 'subsidy', 'opaque-legacy-case': 'non_citizen',
+            }
+            # Simulate an immutable historical binding; rollback this fixture-only snapshot.
+            legacy = policy()
+            legacy['identities'][0]['identity_name'] = '補助市民'
+            legacy['identities'][1]['identity_name'] = '社福'
+            cursor.execute("INSERT INTO accounting_pricing_policies(id,effective_on,policy_json,actor,reason,created_at_utc) VALUES(999,'2026-01-01',%s,'synthetic','legacy fixture',UTC_TIMESTAMP(6))", (json.dumps(legacy),))
+            cursor.execute("UPDATE orders SET pricing_policy_id=999 WHERE case_no='pricing-general'")
+            cursor.execute("UPDATE clients SET identity_status='補助市民' WHERE case_no='pricing-general'")
+            from infrastructure.mysql.subsidy_return_query_repository import MySqlSubsidyReturnQueryRepository
+            from subsystems.client_finance.subsidy_return_query import query_subsidy_returns
+            repository = MySqlSubsidyReturnQueryRepository(connection)
+            fact, = repository.query_facts(after_case_no=None, case_no='pricing-general', search=None, limit=2)
+            assert fact.pricing.rule.value == 'citizen' and fact.pricing.subsidy_hours == 40
+            refund, = query_subsidy_returns(repository, case_no='pricing-general').rows
+            assert refund.amount_ntd == 12000
+            assert not query_subsidy_returns(repository, case_no='pricing-new').rows
+    finally:
+        connection.rollback()
+        connection.close()
 
 
 def test_direct_case_save_without_preview_or_reason_commits_once(client):
@@ -251,7 +276,7 @@ def test_real_salary_writer_installments_export_and_repricing(client):
 
 
 def test_new_identity_inherits_existing_give_and_deposit_rules(client):
-    seed_case('pricing-new-identity','新增社福身分')
+    seed_case('pricing-new-identity','新增補助市民身分')
     bootstrap_case(client,'pricing-new-identity')
     response = client.get('/api/v1/accounting-pricing/cases/pricing-new-identity')
     assert response.status_code == 200, response.text
@@ -334,7 +359,7 @@ def test_contract_estimate_and_government_projection_use_current_case_tiers(clie
             staff_id = cursor.fetchone()['id']
         segment = {'id':1,'staff_id':staff_id}
         plan = {'segments':(segment,), 'allocations':tuple((segment,date(2026,10,day)) for day in range(1,21))}
-        facts = {'identity_status':'新增社福身分','service_days':20,'service_hours_per_day':8,
+        facts = {'identity_status':'新增補助市民身分','service_days':20,'service_hours_per_day':8,
             'total_hours':160,'floor_fee':0,'total_employer_self_pay_payable':17400}
         owners = {}
         _extend_precontract_staff_payroll(connection,'pricing-new-identity',facts,owners,plan,1)

@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-finance-case-arrangements-2026-11-04-v1",
+  "release_metadata": {
+    "release_name": "Per-case direct arrangement confirmation history",
+    "application_version": "finance-case-arrangements-v1",
+    "published_at": "2026-11-04",
+    "description": "Explicit human direct arrangement and append-only corrections; preserves every financial row and formed date."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-historical-order-reused-pairing-check-2026-11-03-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1066_finance_case_arrangements.sql",
+      "relative_path": "db/schema_parts/1066_finance_case_arrangements.sql",
+      "sha256": "aed093c9b9696430122b35a7527afca5271cf9c76b050c29bdf449a8df7b0e4f",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "disable new arrangement writes and retain all existing rows and history; no automatic deletion",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "finance-case-arrangements-exact",
+      "phase": "post-schema",
+      "policy": "Exact columns, indexes, checks and immutable triggers; no existing data changes.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "finance-case-arrangements-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "finance-case-arrangements-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_04_finance_case_arrangements_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_04_finance_case_arrangements_v1.descriptors.json",
+    "sha256": "8a0bc136bf3d4ab1f3df621bc106817757154f8443db7cd52a752c0835103720",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

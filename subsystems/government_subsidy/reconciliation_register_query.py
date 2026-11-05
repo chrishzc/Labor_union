@@ -16,6 +16,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from domains.case_import.order_information import project_order_information
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+from infrastructure.mysql.pricing_configuration_repository import CASE_PRICING_FACTS_SQL
 
 QUARTERLY_HEADERS = (
     "\u5e8f\u865f", "\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc", "\u88dc\u52a9\u8cc7\u683c", "\u670d\u52d9\u958b\u59cb", "\u670d\u52d9\u7d50\u675f",
@@ -27,8 +29,8 @@ ANNUAL_HEADERS = (
     "\u670d\u52d9\u5929\u6578", "\u88dc\u52a9\u6b3e\u91d1\u984d", "\u55ae\u50f9", "\u96c7\u4e3b", "\u670d\u52d9\u4eba\u54e1",
 )
 
-GENERAL_CITIZEN = "補助市民"
-SUBSIDIZED_CITIZEN = "社福"
+GENERAL_CITIZEN = "一般市民"
+SUBSIDIZED_CITIZEN = "補助市民"
 IDENTITY_CARD_KEY = "\u8eab\u5206\u8b49\u5b57\u865f"
 CLAIMED_BATCH_STATUSES = ("submitted", "approved", "partially_paid", "paid")
 ESTABLISHED_ORDER_STATUSES = (
@@ -105,7 +107,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT o.case_no, o.status AS order_status, c.identity_status, o.actual_start_date,
                        pricing.pricing_active,pricing.pricing_rule,pricing.pricing_subsidy_hours,
                        pricing.pricing_override_active,pricing.pricing_payroll_covered,pricing.pricing_twins_payroll_covered,
@@ -125,7 +127,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                             AND schedule.effective_marker=1 AND schedule.is_work_day=1)
                        AS official_service_days
                 FROM orders o
-                LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
+                LEFT JOIN ({CASE_PRICING_FACTS_SQL}) pricing ON pricing.case_no=o.case_no
                 JOIN clients c ON c.id = o.client_id
                 LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
                 LEFT JOIN scheduling_generations current_generation
@@ -139,7 +141,7 @@ def _fetch_completed_cases(connection_factory: Callable[[], Any]) -> list[dict]:
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
-                  AND (c.identity_status IN (%s, %s) OR pricing.pricing_active=1)
+                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶')) OR pricing.pricing_active=1)
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
@@ -225,7 +227,7 @@ def _select_established_cases(
                             AND schedule.effective_marker=1 AND schedule.is_work_day=1)
                        AS official_service_days
                 FROM orders o
-                LEFT JOIN case_pricing_facts pricing ON pricing.case_no=o.case_no
+                LEFT JOIN ({CASE_PRICING_FACTS_SQL}) pricing ON pricing.case_no=o.case_no
                 JOIN clients c ON c.id = o.client_id AND c.case_no = o.case_no
                 LEFT JOIN scheduling_aggregates current_schedule ON current_schedule.case_no=o.case_no
                 LEFT JOIN scheduling_generations current_generation
@@ -240,7 +242,7 @@ def _select_established_cases(
                 LEFT JOIN historical_service_day_projections historical_service
                     ON historical_service.case_no = o.case_no
                 WHERE o.status IN ({status_placeholders})
-                  AND (c.identity_status IN (%s, %s) OR pricing.pricing_active=1)
+                  AND ((c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶')) OR pricing.pricing_active=1)
                 {period_clause}
                 ORDER BY o.case_no {"FOR UPDATE" if lock else ""}
                 """,
@@ -321,7 +323,7 @@ def _fetch_claim_submission_period_cases(
                         AND latest.quarter = batch.quarter
                         AND latest.status IN (%s, %s, %s, %s)
                   )
-                  AND c.identity_status IN (%s, %s)
+                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶'))
                 ORDER BY o.case_no, item.id
                 """,
                 (
@@ -377,7 +379,7 @@ def _fetch_claim_batch_cases(
                         AND latest.quarter = batch.quarter
                         AND latest.status IN (%s, %s, %s, %s)
                   )
-                  AND c.identity_status IN (%s, %s)
+                  AND (c.identity_status IN (%s, %s) OR c.identity_status IN ('社福','低收入戶','中低收入戶'))
                 ORDER BY batch.quarter, o.case_no, item.id
                 """,
                 (
@@ -428,7 +430,7 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
         return SubsidyReceivableEstimate(0, None)
     if source.get("pricing_active") and source.get("pricing_subsidy_hours") is None:
         return SubsidyReceivableEstimate(None, "pricing_policy_source_missing")
-    if not source.get("pricing_active") and source.get("identity_status") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
+    if not source.get("pricing_active") and normalize_subsidy_policy_identity(source.get("identity_status") or "") not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
         return SubsidyReceivableEstimate(None, "eligibility_pending")
     days = source.get("service_days")
     hours = source.get("service_hours_per_day")
@@ -452,6 +454,7 @@ def project_receivable_estimate(source: dict) -> SubsidyReceivableEstimate:
 
 
 def _subsidy_hour_limit(eligibility: object) -> Decimal:
+    eligibility = normalize_subsidy_policy_identity(str(eligibility or ""))
     if eligibility == GENERAL_CITIZEN:
         return Decimal("40")
     if eligibility == SUBSIDIZED_CITIZEN:
@@ -506,6 +509,13 @@ def _effective_payroll_rate(source: dict) -> object | None:
     return source.get("pricing_payroll_covered") if source.get("pricing_active") else source.get("payroll_hourly_rate_ntd")
 
 
+def _register_eligibility(source: dict) -> str:
+    identity = normalize_subsidy_policy_identity(source["identity_status"])
+    if source.get("pricing_active") and identity in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}:
+        return {"citizen": GENERAL_CITIZEN, "social": SUBSIDIZED_CITIZEN}.get(source.get("pricing_rule"), identity)
+    return identity
+
+
 def _to_register_row(source: dict) -> dict | None:
     if source.get("scheduling_source_invalid"):
         raise ValueError("scheduling_effective_generation_invalid")
@@ -536,7 +546,7 @@ def _to_register_row(source: dict) -> dict | None:
 
     return {
         "市府訂單號碼": str(source["case_no"]),
-        "補助資格": source["identity_status"],
+        "補助資格": _register_eligibility(source),
         "服務開始": actual_start,
         "服務結束": actual_end,
         "補助時數": subsidy_hours,
@@ -579,7 +589,7 @@ def _to_claim_register_row(source: dict) -> dict | None:
     )
     return {
         "市府訂單號碼": str(source["case_no"]),
-        "補助資格": source["identity_status"],
+        "補助資格": normalize_subsidy_policy_identity(source["identity_status"]),
         "服務開始": actual_start,
         "服務結束": actual_end,
         "補助時數": claimed_hours,

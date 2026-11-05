@@ -34,8 +34,9 @@ class MySqlReadOnlySnapshot:
 
 
 class MySqlStaffPayableExportSource:
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, *, case_query=None) -> None:
         self._connection = connection
+        self._case_query = case_query
 
     def load(
         self,
@@ -44,7 +45,16 @@ class MySqlStaffPayableExportSource:
         with self._connection.cursor() as cursor:
             cursor.execute(installment_export_sql(_STAFF_PAYABLES_SQL), (target_payment_date,))
             rows = tuple(cursor.fetchall())
-        facts = tuple(_staff_fact(row) for row in rows)
+        cases = {}
+        routed = []
+        for row in rows:
+            case = None
+            if self._case_query is not None:
+                if row['case_no'] not in cases:
+                    cases[row['case_no']] = self._case_query(row['case_no'])
+                case = cases[row['case_no']]
+            routed.append(_staff_fact(_staff_payment_route(row, case)))
+        facts = tuple(routed)
         return tuple(sorted(facts, key=lambda item: (item.staff_id, item.obligation_identity)))
 
     def load_case(
@@ -55,7 +65,8 @@ class MySqlStaffPayableExportSource:
             formal_rows = tuple(cursor.fetchall())
             cursor.execute(_STAFF_PAYABLE_CASE_ORDER_FACTS_SQL, (case_no,))
             order_rows = tuple(cursor.fetchall())
-            items = tuple(_formal_case_audit_item(row, target_payment_date) for row in formal_rows)
+            case = self._case_query(case_no) if self._case_query is not None else None
+            items = tuple(_formal_case_audit_item(_staff_payment_route(row, case), target_payment_date) for row in formal_rows)
             if not order_rows:
                 return items
             aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
@@ -74,8 +85,9 @@ class MySqlStaffPayableExportSource:
 
 
 class MySqlClientRefundExportSource:
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, *, case_query=None) -> None:
         self._connection = connection
+        self._case_query = case_query
 
     def load(
         self,
@@ -87,7 +99,43 @@ class MySqlClientRefundExportSource:
             )
             cursor.execute(_CLIENT_REFUNDS_SQL, (month_end,))
             rows = tuple(cursor.fetchall())
-        return tuple(_refund_fact(row) for row in rows)
+        facts = []
+        cases = {}
+        for row in rows:
+            fact = _refund_fact(row)
+            if fact.refund_type == 'subsidy_return' and self._case_query is not None:
+                if fact.case_no not in cases:
+                    cases[fact.case_no] = self._case_query(fact.case_no)
+                if cases[fact.case_no].scheme in {'split', 'direct'} or cases[fact.case_no].scheme_conflict:
+                    from dataclasses import replace
+                    fact = replace(fact, payable=False, anomaly=True)
+            facts.append(fact)
+        return tuple(facts)
+
+
+def _staff_payment_route(row, case):
+    """Funding labels are schedules; only confirmed case facts choose subsidy routing."""
+    if row.get('historical_confirmation_kind') is not None or row.get('export_amount_ntd', 0) <= 0:
+        return {**row, 'outgoing_bank': '31'}
+    portion = row.get('installment_funding')
+    outgoing = '31'
+    blocked = False
+    reason = ''
+    if case is not None and case.scheme_conflict:
+        blocked = True
+        reason = '本案方案或金額來源互相衝突，出款銀行待確認。'
+    elif case is not None and case.scheme == 'split':
+        if case.customer_amount_ntd == 0 and case.staff_receivable_ntd == case.subsidy_ntd:
+            outgoing = '633'
+        elif portion == 'subsidy':
+            outgoing = '633'
+        elif portion != 'client':
+            blocked = True  # No formal allocation between the two outgoing banks.
+            reason = '已確認補助轉交月嫂，但缺少永豐／台新正式付款分配。'
+    elif portion == 'subsidy' and (case is None or case.scheme not in {'advance', 'direct'}):
+        blocked = True
+        reason = '補助款的正式方案及出款對象尚未確認。'
+    return {**row, 'outgoing_bank': outgoing, **({'payout_status': 'anomaly', 'funding_reason': reason} if blocked else {})}
 
 
 
@@ -107,11 +155,13 @@ def _staff_fact(row) -> StaffPayableExportFact:
         payment_date=_date_value(row["due_date"]),
         status=status,
         recipient_identity_card=_clean_text(row.get("identity_card")),
+        outgoing_bank=row.get('outgoing_bank', '31'),
+        staff_union_no=_clean_text(row.get('union_no')),
     )
 
 
 def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableAuditItem:
-    if row.get("installment_funding") is not None:
+    if row.get("installment_funding") is not None and not row.get('funding_reason'):
         balance, amount = int(row["export_amount_ntd"]), int(row["amount_due_ntd"])
         row = {**row, "payout_status": "completed" if balance == 0 else "partially_paid" if balance < amount else "payable"}
     due_date = row.get("due_date")
@@ -121,7 +171,7 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
     if historical_confirmation is not None or payout_status == "completed":
         disposition, reason = "paid_or_settled", "已有有效付款／結清證據，不列入待付清冊。"
     elif status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
-        disposition, reason = "blocked", "現行付款狀態或受款資料尚有 blocker。"
+        disposition, reason = "blocked", row.get('funding_reason') or "現行付款狀態或受款資料尚有 blocker。"
     elif due_date is None:
         disposition, reason = "date_not_formed", "月嫂應付日尚未形成。"
     elif _date_value(due_date) == target_payment_date:
@@ -144,6 +194,7 @@ def _formal_case_audit_item(row, target_payment_date: date) -> CaseStaffPayableA
                         "paid" if payout_status in {"completed", "recovery_required"}
                             or _integer(row["export_amount_ntd"], "staff payable balance") < 0 else
                         "partially_paid" if payout_status == "partially_paid" else "pending"),
+        funding_kind=row.get('installment_funding'),
     )
 
 
@@ -268,6 +319,7 @@ SELECT obligations.obligation_identity,
        obligations.case_no,
        obligations.staff_id,
        staff.name AS recipient_name,
+       staff.union_no,
        staff.identity_card,
        obligations.amount_due_ntd,
        COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS export_amount_ntd,
@@ -299,6 +351,7 @@ GROUP BY obligations.obligation_identity,
          obligations.case_no,
          obligations.staff_id,
          staff.name,
+          staff.union_no,
          obligations.amount_due_ntd,
          obligations.due_date,
          projection.balance_ntd,
@@ -312,6 +365,7 @@ SELECT obligations.obligation_identity,
        obligations.case_no,
        obligations.staff_id,
        staff.name AS recipient_name,
+       staff.union_no,
        staff.identity_card,
        COALESCE(projection.obligation_amount_ntd, obligations.amount_due_ntd) AS amount_due_ntd,
        COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS export_amount_ntd,
@@ -343,6 +397,7 @@ GROUP BY obligations.obligation_identity,
          obligations.case_no,
          obligations.staff_id,
          staff.name,
+          staff.union_no,
          staff.identity_card,
          obligations.amount_due_ntd,
          projection.obligation_amount_ntd,
@@ -396,6 +451,7 @@ LEFT JOIN client_ledger_entries ledger
   ON ledger.id = allocations.ledger_entry_id
 WHERE obligations.due_date <= %s
   AND obligations.direction = 'payable_to_client'
+  AND obligations.obligation_type IN ('refund', 'subsidy_return')
   AND obligations.status = 'open'
   AND obligations.amount_due_ntd > 0
 GROUP BY obligations.obligation_identity,

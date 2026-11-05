@@ -22,6 +22,7 @@ function crossMonthReport() {
     case_no: `CASE-MONTH-${index + 1}`,
     applicant_name: `測試案件${index + 1}`,
     application_date: day,
+    serial_number: index + 1,
     week_start_date: index < 2 ? '2026-08-31' : '2026-09-07',
     week_end_date: index < 2 ? '2026-09-06' : '2026-09-13',
     week_label: index < 2 ? '2026-08-31 ~ 2026-09-06' : '2026-09-07 ~ 2026-09-13',
@@ -61,21 +62,39 @@ describe('週報年度累計與月小計', () => {
   beforeEach(() => vi.restoreAllMocks());
   afterEach(cleanup);
 
+  it('雙層表頭、平台序號、明細指標與服務欄位依原模板對齊', async () => {
+    const table = await renderReport(WEEKLY_OPERATIONS_REPORT);
+    expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      '平台序號', '年度月份', '週報週數', '申請人', '推廣次數', '詢問人次', '平台案件申請數',
+      '市民案件審核', '社福案件審核', '申請案件狀況', '服務天數', '每日服務時數',
+      '預計服務開始日期', '預計服務結束日期', '服務狀況', '區域', '備註',
+      '一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合',
+      '訂單成立', '洽談中', '取消', '審核不符合',
+    ]);
+    const first = within(table).getByRole('row', { name: '週次 2026-08-17' });
+    const cells = within(first).getAllByRole('cell');
+    expect(cells.map((cell) => cell.textContent)).toEqual([
+      '101', '8月', '115/08/20', '2026-08-17 ~ 2026-08-23', '王**', '12', '8', '1',
+      '1', '', '', '', '1', '', '', '', '10', '8', '2026-08-17', '2026-08-28', '服務中', '板橋區', '',
+    ]);
+    expect(within(first).queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
+  });
+
   it('年度在最上方，跨月整週只出現一次，各月小計在該月最後一組資料下方', async () => {
     const table = await renderReport();
     const order = [...table.querySelectorAll<HTMLTableRowElement>('tbody > tr')]
       .map((row) => row.getAttribute('aria-label') ?? row.cells[0].textContent);
     expect(order).toEqual([
-      '115年度累計', '週次 2026-08-31', 'CASE-MONTH-1', 'CASE-MONTH-2',
-      '115年8月小計', '週次 2026-09-07', 'CASE-MONTH-3', '115年9月小計',
+      '115年度累計', '週次 2026-08-31', '案件 CASE-MONTH-2',
+      '115年8月小計', '週次 2026-09-07', '115年9月小計',
     ]);
     const annual = within(table).getByRole('row', { name: '115年度累計' });
-    expect(within(annual).getByText('平台案件申請數：10')).toBeInTheDocument();
-    expect(within(annual).getByText('推廣次數：77')).toBeInTheDocument();
+    expect(within(annual).getByRole('cell', { name: '平台案件申請數：10' })).toBeInTheDocument();
+    expect(within(annual).getByRole('cell', { name: '推廣次數：77' })).toBeInTheDocument();
     const august = within(table).getByRole('row', { name: '115年8月小計' });
-    expect(within(august).getByText('平台案件申請數：2')).toBeInTheDocument();
-    expect(within(august).getByText('推廣次數：12')).toBeInTheDocument();
-    expect(within(table).getAllByText('CASE-MONTH-2')).toHaveLength(1);
+    expect(within(august).getByRole('cell', { name: '平台案件申請數：2' })).toBeInTheDocument();
+    expect(within(august).getByRole('cell', { name: '推廣次數：12' })).toBeInTheDocument();
+    expect(within(table).getAllByText('測試案件2')).toHaveLength(1);
   });
 
   it('未完整登錄不顯示為零；已登錄的零保留', async () => {
@@ -86,9 +105,9 @@ describe('週報年度累計與月小計', () => {
     const table = await renderReport(report);
     const august = within(table).getByRole('row', { name: '115年8月小計' });
     const september = within(table).getByRole('row', { name: '115年9月小計' });
-    expect(within(august).getByText('推廣次數：未完整登錄')).toBeInTheDocument();
-    expect(within(september).getByText('詢問人次：0')).toBeInTheDocument();
-    expect(within(table).getByRole('row', { name: '週次 2026-08-31' })).toHaveTextContent('推廣次數：未登錄／待補正');
+    expect(within(august).getByRole('cell', { name: '推廣次數：未完整登錄' })).toBeInTheDocument();
+    expect(within(september).getByRole('cell', { name: '詢問人次：0' })).toBeInTheDocument();
+    expect(within(table).getByRole('row', { name: '週次 2026-08-31' })).toHaveTextContent('未登錄／待補正');
   });
 
   it('案件為空仍保留每週數值及月小計', async () => {
@@ -102,8 +121,8 @@ describe('週報年度累計與月小計', () => {
     expect(screen.getByText('此期間沒有案件受理資料。')).toBeInTheDocument();
     expect(within(table).getByRole('row', { name: '週次 2026-08-31' })).toBeInTheDocument();
     const subtotal = within(table).getByRole('row', { name: '115年8月小計' });
-    expect(within(subtotal).getByText('平台案件申請數：0')).toBeInTheDocument();
-    expect(within(subtotal).getByText('推廣次數：12')).toBeInTheDocument();
+    expect(within(subtotal).getByRole('cell', { name: '平台案件申請數：0' })).toBeInTheDocument();
+    expect(within(subtotal).getByRole('cell', { name: '推廣次數：12' })).toBeInTheDocument();
   });
 
   it('strict view 接受年度／月小計並拒絕缺少總計欄位', () => {
@@ -115,7 +134,7 @@ describe('週報年度累計與月小計', () => {
     expect(WeeklyOperationsReportSchema.safeParse(missingMonth).success).toBe(false);
   });
 
-  it('顯示每種訂單狀態及缺值；使用 server 年度數值，不把服務中併入訂單成立', async () => {
+  it('模板四欄使用 server 指標，不以六種生命週期計數替代', async () => {
     const report = crossMonthReport();
     const counts = report.annual_totals[0].order_status_counts;
     counts['待補件'] = 2;
@@ -125,12 +144,11 @@ describe('週報年度累計與月小計', () => {
     report.annual_totals[0].application_count = Object.values(counts).reduce((sum, n) => sum + n, 0);
     const table = await renderReport(report);
     const annual = within(table).getByRole('row', { name: '115年度累計' });
-    for (const [status, count] of Object.entries(counts)) {
-      expect(within(annual).getByText(`${status}：${count}`)).toBeInTheDocument();
-    }
-    expect(within(annual).getByText('服務中：10')).toBeInTheDocument();
-    expect(within(annual).getByText('訂單成立：4')).toBeInTheDocument();
-    expect(within(annual).getByText('審核不符合（獨立）：0')).toBeInTheDocument();
+    expect(within(annual).getByRole('cell', { name: '訂單成立：10' })).toBeInTheDocument();
+    expect(within(annual).getByRole('cell', { name: '取消：0' })).toBeInTheDocument();
+    expect(within(annual).getByRole('cell', { name: '審核不符合：0' })).toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: '待補件' })).not.toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: '訂單完成' })).not.toBeInTheDocument();
   });
 
   it('strict status totals 拒絕缺值、負值或字串計數', () => {

@@ -9,10 +9,10 @@
 尚未排班且 Scheduling root 不存在的取消，以明確零服務量計算既有訂金退款，不補造 Scheduling generation。
 第二期有金額時，stage plan 預計繳款日由第一期預計入帳日加 15 個曆日計算；零金額不產生第二期日期。契約及訂單資訊重用此 owner 日期投影。
 原已收期款取消歸零而產生退款時，若 stage plan 不再產生日期，退款保留原義務的到期日；不把既有已知退款日期清空，原本未知則保留待確認。
-完整進件及計價條件保存時，在同一 outer UoW 自動同步訂金、第一二期及應退補助，不等待簽約、完工、收款齊全或人工建立付款義務。補助市民最高 40 小時先墊，社福最高 120 小時不先墊補助部分。日期／條件變動沿原 identity 更新，實付不可變；取消使用實際服務量。應退於有效服務結束月加兩月 15 日到期，所有月份適用。歷史分支保持 actual-service owner。
+完整進件及計價條件保存時，在同一outer UoW同步各期應繳。全額免自備唯一沿規格22 §17.4.1：補助市民／原住民H≤本案有效L時各期為0，不以固定120／80或費用覆蓋作第二門檻；既有收付款／退款衝突回blocker，不自動轉換歷史。客戶補助退款只在原案件Query確認先墊後退及Government Subsidy正式金額後同步，不由身分或客戶費率另建；缺帳戶保留待補。原收款、政府整期及合法資料保存交易沿同一outer UoW接線，獨立child identity避免與前序期款自我衝突，沒有hidden commit。已形成日期／實付保留，歷史actual-service owner不變。
 
 ## Implementation
-- subsidy policy: `domains/client_finance/subsidy_coverage.py` — canonical 補助市民 40／社福 120 小時，歷史來源別名不新增申請關卡。
+- subsidy policy: `domains/client_finance/subsidy_coverage.py` — canonical 一般市民 40／補助市民 120 小時，社福／低收入戶／中低收入戶為補助市民來源別名。
 - primary: `domains/client_finance/obligation_planning.py`
 - calculation: `domains/client_finance/order_amount_calculation.py`
 - adapter: `infrastructure/mysql/client_finance_terms_writer.py`
@@ -25,6 +25,7 @@
 
 ## Verification
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_automatic_accounting.py`
+- integration_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_order_amount_calculator.py`
 - layout_status: `custom_current`
 - test_root: `tests/domains/client-finance/subsystems/client-finance/integration/test_client_finance_cancellation_direction.py`
 - routing: `.arch-map/tests/domains/client-finance/subsystems/client-finance/index.md`

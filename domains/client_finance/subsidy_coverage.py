@@ -9,20 +9,18 @@ from decimal import Decimal
 _ZERO = Decimal("0")
 _SUBSIDY_HOUR_CAPS = {
     "一般市民": Decimal("40"),
-    "補助市民": Decimal("40"),
-    "社福": Decimal("120"),
+    "補助市民": Decimal("120"),
     "非市民": _ZERO,
 }
 _SUBSIDY_CLAIM_HOURLY_RATES = {
     "一般市民": Decimal("300"),
-    "補助市民": Decimal("300"),
-    "社福": Decimal("350"),
+    "補助市民": Decimal("350"),
     "非市民": _ZERO,
 }
 _POLICY_IDENTITY_BY_SOURCE_IDENTITY = {
-    "一般市民": "補助市民",
-    "低收入戶": "社福",
-    "中低收入戶": "社福",
+    "社福": "補助市民",
+    "低收入戶": "補助市民",
+    "中低收入戶": "補助市民",
 }
 
 
@@ -40,7 +38,7 @@ class SubsidyCoverage:
     @property
     def is_full_subsidy_order(self) -> bool:
         return (
-            self.identity_status == "社福"
+            self.identity_status == "補助市民"
             and self.self_pay_service_hours == _ZERO
             and self.client_floor_fee == _ZERO
         )
@@ -78,8 +76,24 @@ def normalize_subsidy_policy_identity(identity_status: str) -> str:
     return _POLICY_IDENTITY_BY_SOURCE_IDENTITY.get(identity_status, identity_status)
 
 
+def is_full_subsidy_case(identity_status: str | None, service_hours: Decimal | None,
+                         subsidy_limit: Decimal | None) -> bool | None:
+    """FULL-01: use the case's effective limit, never a fixed identity threshold."""
+    if identity_status is None:
+        return None
+    if normalize_subsidy_policy_identity(identity_status) not in {"補助市民", "原住民"}:
+        return False
+    if service_hours is None or subsidy_limit is None:
+        return None
+    hours, limit = Decimal(str(service_hours)), Decimal(str(subsidy_limit))
+    if not hours.is_finite() or not limit.is_finite() or hours < 0 or limit < 0:
+        raise ValueError("full_subsidy_hours_invalid")
+    return 0 < hours <= limit
+
+
 __all__ = [
     "SubsidyCoverage",
     "derive_subsidy_coverage",
     "normalize_subsidy_policy_identity",
+    "is_full_subsidy_case",
 ]

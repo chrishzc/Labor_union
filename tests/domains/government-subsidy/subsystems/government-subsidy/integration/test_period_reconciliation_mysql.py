@@ -92,24 +92,27 @@ def test_real_query_totals_are_consistent_and_quarter_covers_months_without_spli
     months=[query(http,'month',year,month) for month in range(1,13)]
     quarters=[query(http,'quarter',year,q) for q in range(1,5)]
     annual=query(http,'year',year)
-    assert [m['total_ntd'] for m in months]==[12000]*12
-    assert [q['total_ntd'] for q in quarters]==[36000]*4
-    assert annual['total_ntd']==144000==sum(q['total_ntd'] for q in quarters)==sum(m['total_ntd'] for m in months)
+    # 160 service hours exceed the bound 120-hour limit: 120 * 350 = 42,000.
+    assert [m['total_ntd'] for m in months]==[42000]*12
+    assert [q['total_ntd'] for q in quarters]==[126000]*4
+    assert annual['total_ntd']==504000==sum(q['total_ntd'] for q in quarters)==sum(m['total_ntd'] for m in months)
     before=rows('SELECT COUNT(*) n FROM government_subsidy_period_entries')[0]['n']
-    assert reconcile(http,quarters[0],bank(35999)).status_code==409
+    assert reconcile(http,quarters[0],bank(125999)).status_code==409
     assert rows('SELECT COUNT(*) n FROM government_subsidy_period_entries')[0]['n']==before
-    source=bank(36000)
+    source=bank(126000)
     receipt=checked(reconcile(http,quarters[0],source,'same-quarter-key'))
     assert checked(reconcile(http,quarters[0],source,'same-quarter-key'))==receipt
     assert reconcile(http,quarters[1],source,'same-quarter-key').status_code==409
     month=query(http,'month',year,2)
     assert not month['can_reconcile'] and month['coverage'][0]['period']['unit']=='quarter'
-    assert month['coverage'][0]['amount_ntd']==36000
-    assert reconcile(http,month,bank(12000)).status_code==409
-    assert reconcile(http,query(http,'year',year),bank(144000)).status_code==409
+    assert month['coverage'][0]['amount_ntd']==126000
+    assert reconcile(http,month,bank(42000)).status_code==409
+    assert reconcile(http,query(http,'year',year),bank(504000)).status_code==409
     assert rows('SELECT COUNT(*) n FROM government_subsidy_period_entries')[0]['n']==before+1
     assert checked(http.get('/api/v1/government-subsidy/periods/cases/'+cases[0]))['coverage'][0]['receipt_id']==receipt['receipt_id']
 
+    # A period member snapshot is not per-case receipt allocation or refund authority.
+    assert rows("SELECT COUNT(*) n FROM client_obligations WHERE obligation_type='subsidy_return'")[0]['n']==0
 
 def test_stale_and_changed_case_membership_do_not_allow_double_receipt(http):
     year=2062

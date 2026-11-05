@@ -8,10 +8,35 @@ from zoneinfo import ZoneInfo
 
 from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule, PricingPolicy
 from domains.payroll.tiered_rates import TieredPayrollRate
+from infrastructure.mysql.case_category_query import BOUND_POLICY_IDENTITY_SQL
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.client_finance.pricing_configuration import (
     CasePricingFacts, PolicyVersion, PricingCatalog, PricingConflict, PricingServiceDay, pricing_impact, pricing_payload,
 )
+
+
+# Source-owned read projection replaces the two runtime uses of the old SQL view.
+# Its column contract is unchanged; released schema artifacts and stored snapshots remain intact.
+CASE_PRICING_FACTS_SQL = f"""SELECT o.case_no,1 AS pricing_active,
+ (e.id IS NOT NULL) AS pricing_override_active,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.rule')),i.rule_name) AS pricing_rule,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.subsidy_hours')),i.subsidy_hours) AS pricing_subsidy_hours,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.client.covered')),i.client_covered) AS pricing_client_covered,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.client.excess')),i.client_excess) AS pricing_client_excess,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.payroll.covered')),i.payroll_covered) AS pricing_payroll_covered,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.payroll.excess')),i.payroll_excess) AS pricing_payroll_excess,
+ COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.pricing_json,'$.payroll.covered')),
+          JSON_UNQUOTE(JSON_EXTRACT(p.policy_json,'$.twins_payroll.covered'))) AS pricing_twins_payroll_covered
+FROM orders o JOIN clients c ON c.id=o.client_id
+LEFT JOIN accounting_pricing_policies p ON p.id=o.pricing_policy_id
+LEFT JOIN JSON_TABLE(p.policy_json,'$.identities[*]' COLUMNS (
+ identity_name VARCHAR(100) PATH '$.identity_name', rule_name VARCHAR(20) PATH '$.rule',
+ subsidy_hours VARCHAR(100) PATH '$.subsidy_hours', client_covered VARCHAR(30) PATH '$.client.covered',
+ client_excess VARCHAR(30) PATH '$.client.excess', payroll_covered VARCHAR(30) PATH '$.payroll.covered',
+ payroll_excess VARCHAR(30) PATH '$.payroll.excess'
+)) i ON BINARY i.identity_name=BINARY {BOUND_POLICY_IDENTITY_SQL}
+LEFT JOIN case_pricing_events e ON e.id=o.pricing_override_event_id AND e.case_no=o.case_no
+WHERE o.pricing_policy_id IS NOT NULL OR o.pricing_override_event_id IS NOT NULL"""
 
 
 def _object(value):
@@ -37,9 +62,17 @@ def _json(value):
 def bind_initial_pricing(cursor, case_no):
     """Called only immediately after first Orders insertion, including partial intake."""
     today = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Taipei")).date()
-    cursor.execute("SELECT id FROM accounting_pricing_policies WHERE effective_on<=%s ORDER BY effective_on DESC,id DESC LIMIT 1", (today,))
+    cursor.execute("SELECT id,policy_json FROM accounting_pricing_policies WHERE effective_on<=%s ORDER BY effective_on DESC,id DESC LIMIT 1", (today,))
     row = cursor.fetchone()
     if row is not None:
+        policy = policy_from_payload(row["policy_json"])
+        if policy.uses_legacy_identity_names:
+            cursor.execute("SELECT c.identity_status FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
+            case = cursor.fetchone()
+            if case and case["identity_status"] in {"一般市民", "補助市民", "社福", "低收入戶", "中低收入戶"}:
+                from domains.case_import.case_import import CaseImportDomainError, CaseImportIssue
+                raise CaseImportDomainError(CaseImportIssue.BOOTSTRAP_BLOCKED,
+                    "pricing_policy_identity_names_outdated: 請先在帳務參數設定儲存一般市民／補助市民的新政策版本。")
         cursor.execute("UPDATE orders SET pricing_policy_id=%s WHERE case_no=%s AND pricing_policy_id IS NULL", (row["id"], case_no))
 
 
@@ -172,7 +205,7 @@ class MySqlPricingConfigurationRepository:
     def _legacy_terms(self, cursor, order, finance):
         from infrastructure.mysql.effective_case_service_rate import load_explicit_case_service_rate
         identity = str(order["client_identity_status"])
-        rule = {"一般市民": IdentityRule.CITIZEN, "補助市民": IdentityRule.CITIZEN,
+        rule = {"一般市民": IdentityRule.CITIZEN, "補助市民": IdentityRule.SOCIAL,
             "社福": IdentityRule.SOCIAL, "低收入戶": IdentityRule.SOCIAL,
             "中低收入戶": IdentityRule.SOCIAL, "非市民": IdentityRule.NON_CITIZEN}.get(identity)
         if rule is None:
@@ -220,6 +253,8 @@ class MySqlPricingConfigurationRepository:
             if finance is None:
                 raise ValueError("case_pricing_service_facts_required")
             candidate = build_client_finance_terms_candidate(finance, f"case-pricing:{event_id}")
+            if candidate.blockers:
+                raise PricingConflict('full_subsidy_existing_financial_history_conflict')
             persist_client_finance_terms_impact(cursor, ClientFinanceImpactPersistenceCommand(candidate,
                 IdempotencyKey(key), ActorContext(actor), reason, CorrelationId(key), "case-pricing", event_id))
         self._synchronize_payroll(facts.case_no, event_id, actor, reason, key)

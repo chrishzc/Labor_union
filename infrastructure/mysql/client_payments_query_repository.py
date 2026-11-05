@@ -29,6 +29,35 @@ class ClientFinanceCaseNotFound(ValueError):
     """The requested case has no canonical Client Finance account."""
 
 
+def query_case_funding(connection, case_no):
+    """Read the original service/pricing owner; absent facts never imply free service."""
+    from decimal import Decimal
+    from domains.client_finance.pricing_policy import calculate_case_total_amount
+    from infrastructure.mysql.order_terms_read_model import select_order, load_calculable_client_finance_facts
+    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding
+    with connection.cursor() as cursor:
+        order = select_order(cursor, case_no, lock=False)
+        if str(order['status']).startswith('歷史') or any(order.get(key) is None for key in
+                ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee')):
+            return None
+        pricing = load_case_pricing(cursor, order, lock=False)
+        if pricing is None:
+            return None
+        cursor.execute('SELECT 1 FROM client_finance_accounts a JOIN client_payment_terms t ON t.case_no=a.case_no WHERE a.case_no=%s', (case_no,))
+        if cursor.fetchone() is None:
+            return None
+        facts, _ = load_calculable_client_finance_facts(cursor, order, lock=False,
+            allow_planned=str(order['status']) not in ('訂單完成', '訂單取消'))
+        if facts is None:
+            return None
+    hours = Decimal(str(facts.service_hours_per_day))
+    return ClientCaseFunding(case_no, facts.identity_status, hours * len(facts.charge_days),
+        pricing.subsidy_hours, calculate_case_total_amount(pricing,
+            tuple((hours, day.is_double_pay) for day in facts.charge_days), facts.floor_fee.amount),
+        facts.existing_subsidy_return_count > 0)
+
+
 class MySqlClientFinanceQueryRepository:
     def __init__(self, connection) -> None:
         self._connection = connection
@@ -382,6 +411,7 @@ def query_case_accounting(connection, case_no, *, for_update=False):
             None if row["due_date"] is None else str(row["due_date"]),
             settled=row["confirmation_kind"] == "settled" or row["status"] == "settled",
             recognized_ntd=recognized,
+            payment_stage=row["obligation_type"] if row["obligation_type"] in {"deposit", "first", "second"} else None,
         ))
     valid = {item.identity for item in items}
     for row in recovery_rows:

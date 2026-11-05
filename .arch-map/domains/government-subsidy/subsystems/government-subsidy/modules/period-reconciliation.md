@@ -24,6 +24,7 @@
 - `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md`
 - Client Finance 出款不可變，期款不重付；年度 version 與來源／bank fresh locks，同一 application 單次 outer commit。
 - Finance Import 政府流水保留待選期間；核銷後標為已消費，不能再人工更正到其他 owner。
+- 原整期save後沿同一outer UoW借用Client Finance正式同步；只在共用案件Query確認本案客戶先墊後退及正式S時成立客戶應退，不由member快照拆造逐案政府現金，不增加commit或新銀行writer。
 
 ## Verification
 - integration_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_period_differences_mysql.py`

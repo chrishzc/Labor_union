@@ -2,16 +2,17 @@ import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react'
 import { afterEach,beforeEach,it,expect,vi } from 'vitest';
 import { ClientRegistryPage } from '../../../../../../../pages/ClientRegistryPage';
 import { RegistrationApplications } from '../../../../../../../components/RegistrationApplications';
-import { registrationApplicationsClient } from '../../../../../../../api/registration_applications/client';
+import { registrationApplicationsClient,type RegistrationApplication } from '../../../../../../../api/registration_applications/client';
 import { sessionClient } from '../../../../../../../api/auth/session_client';
 import { transport } from '../../../../../../../api/shared/transport';
+const applicationLifecycle={status:'pending' as const,submitted_at_utc:'2032-05-01T00:00:00Z',expires_at_utc:'2032-05-15T00:00:00Z'};
 const request={request_id:73,client_id:8,status:'pending',request_version:2,profile_version:4,before:{name:'原名'},requested:{name:'申請新名'},reason:''};
 beforeEach(()=>vi.spyOn(sessionClient,'getToken').mockReturnValue('synthetic-session'));
 afterEach(()=>{cleanup();vi.restoreAllMocks();window.history.replaceState(null,'','/');});
 it('名冊深連結直接讀取不在第一頁的需求申請，開頁不核准',async()=>{
  window.location.hash='#clients?tab=applications&registration=73';
  vi.spyOn(registrationApplicationsClient,'pending').mockResolvedValue([]);
- const detail=vi.spyOn(registrationApplicationsClient,'detail').mockResolvedValue({registration_id:73,version:1,name:'測試需求',phone:'',approved:false,fields:[],registration_kind:'subsidy',case_no:null,approved_at_utc:null});
+ const detail=vi.spyOn(registrationApplicationsClient,'detail').mockResolvedValue({...applicationLifecycle,registration_id:73,version:1,name:'測試需求',phone:'',approved:false,fields:[],registration_kind:'subsidy',case_no:null,approved_at_utc:null});
  const approve=vi.spyOn(registrationApplicationsClient,'approve');
  render(<ClientRegistryPage/>);await screen.findByRole('heading',{name:'申請 73：測試需求'});
  expect(screen.getByRole('tab',{name:'待核准需求'})).toHaveAttribute('aria-selected','true');
@@ -35,7 +36,7 @@ it('單筆回應不是指定申請時不提供審核操作',async()=>{
 });
 it('需求申請切換後，晚到的舊申請不能覆寫目前事項',async()=>{
  vi.spyOn(registrationApplicationsClient,'pending').mockResolvedValue([]);
- const application={registration_id:73,version:1,name:'舊申請',phone:'',approved:false,fields:[],registration_kind:'subsidy' as const,case_no:null,approved_at_utc:null};
+ const application:RegistrationApplication={...applicationLifecycle,registration_id:73,version:1,name:'舊申請',phone:'',approved:false,status:'pending' as const,submitted_at_utc:'2026-11-05T00:00:00Z',expires_at_utc:'2026-11-19T00:00:00Z',fields:[],registration_kind:'subsidy' as const,case_no:null,approved_at_utc:null};
  let finish!:(value:typeof application)=>void;
  vi.spyOn(registrationApplicationsClient,'detail').mockImplementation(async id=>id===73?new Promise(resolve=>{finish=resolve;}):{...application,registration_id:74,name:'新申請'});
  const onEditStateChange=vi.fn();const view=render(<RegistrationApplications initialId={73} onEditStateChange={onEditStateChange}/>);

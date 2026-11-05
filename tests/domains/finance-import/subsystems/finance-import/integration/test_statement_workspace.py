@@ -344,3 +344,334 @@ def test_monthly_route_and_export_share_the_same_figures():
         sheet = load_workbook(BytesIO(download.content), data_only=True).active
         assert list(sheet.values)[-1] == ("合計", 100000, 0, 100000)
         assert client.get("/accounting/monthly?start_month=2026-11&end_month=2026-10").status_code == 422
+
+
+@pytest.mark.parametrize('bank,direction,proof,flow', [
+    ('sinopac','incoming','receipt','C'), ('taishin','incoming','government','G'),
+    ('sinopac','outgoing','staff','PS'), ('taishin','outgoing','staff','PT'),
+    ('sinopac','outgoing','refund','RS'), ('taishin','outgoing','subsidy_return','RT'),
+])
+def test_six_cash_flows_require_bank_direction_and_unique_owner_proof(bank, direction, proof, flow):
+    from infrastructure.mysql.monthly_accounting_repository import _cash_flow
+    row = {'format_id':bank, 'direction':direction, proof+'_proof':True}
+    assert _cash_flow(row) == (bank, flow)
+    assert _cash_flow({**row, proof+'_proof':False}) == (bank, None)
+    other = 'refund' if proof != 'refund' else 'staff'
+    assert _cash_flow({**row, other+'_proof':True}) == (bank, None)
+    assert _cash_flow({**row, 'direction':'outgoing' if direction=='incoming' else 'incoming'}) == (bank, None)
+
+
+@pytest.mark.parametrize('total,customer,subsidy,complete,government,expected', [
+    (30000,18000,12000,False,12000,'waiting'),
+    (30000,18000,12000,True,0,'split'),
+    (30000,30000,12000,True,12000,'advance'),
+    (30000,30000,12000,True,0,'unknown'),
+    (30000,30000,0,True,0,'unknown'),
+    (30000,None,12000,None,12000,'unknown'),
+    (30000,20000,12000,True,12000,'unknown'),
+])
+def test_scheme_gate_uses_independent_terms_and_never_infers_direct_from_absent_cash(total,customer,subsidy,complete,government,expected):
+    from domains.finance_import.statement_archive import case_accounting_scheme
+    assert case_accounting_scheme(total,customer,subsidy,complete,government) == expected
+
+
+@pytest.mark.parametrize('identity,hours,limit', [('補助市民',11,12),('補助市民',12,12),('原住民',79,80),('原住民',80,80)])
+def test_full_subsidy_case_does_not_require_customer_receipts_or_three_zero_stage_records(identity,hours,limit):
+    from decimal import Decimal
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, _, **kwargs): return {}
+    terms = ClientCaseFunding('CASE-FULL',identity,Decimal(hours),Decimal(limit),12000)
+    result = AccountingWorkspace(State(),lambda *a,**kw:((),()),lambda *a,**kw:((),()),
+        subsidy=lambda _:None,funding=lambda _:terms).query('CASE-FULL')
+    assert result.scheme == 'split'
+    assert result.customer_amount_ntd == 0 and result.customer_fully_received is True
+    assert result.staff_receivable_ntd == result.subsidy_ntd == 12000
+    assert not result.scheme_conflict
+
+
+def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_review():
+    from decimal import Decimal
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding,ClientAccountingItem
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, _, **kwargs): return {}
+    item=ClientAccountingItem('original','receivable','訂金','Synthetic',500,500,True,'1',None,payment_stage='deposit')
+    terms=ClientCaseFunding('CASE-FULL','原住民',Decimal(80),Decimal(80),12000)
+    result=AccountingWorkspace(State(),lambda *a,**kw:((item,),()),lambda *a,**kw:((),()),
+        funding=lambda _:terms).query('CASE-FULL')
+    assert result.scheme == 'unknown' and result.scheme_conflict
+    assert result.client_items[0].expected_ntd == result.client_items[0].actual_ntd == 500
+
+
+def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():
+    from dataclasses import replace
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    from subsystems.staff_payables.case_accounting_query import StaffAccountingItem
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace, AccountingBankFact
+    class State:
+        def case_client(self, _): return 'Synthetic'
+        def dismissed(self, *_, **__): return {}
+        def marker(self, _): return None
+    stages = tuple(ClientAccountingItem(stage,'receivable',stage,'Synthetic',amount,amount,amount>0,'v1','2026-09-20',payment_stage=stage)
+                   for stage,amount in [('deposit',0),('first',18000),('second',0)])
+    staff = (StaffAccountingItem('staff','payable','服務款','Synthetic',30000,30000,True,'v1','2026-09-30'),)
+    banks = (AccountingBankFact('c','2026-10-01','in',18000,('CASE',),'sinopac','C'),
+             AccountingBankFact('g','2026-10-02','in',12000,('CASE',),'taishin','G'),
+             AccountingBankFact('p','2026-10-03','out',30000,('CASE',),'sinopac','PS'))
+    from subsystems.finance_import.accounting_workspace import CaseArrangement
+    State.arrangement=lambda self,case_no: CaseArrangement(case_no)
+    query=AccountingWorkspace(State(),lambda *_,**__: (stages,()),lambda *_,**__: (staff,()),lambda _:banks,lambda _:12000)
+    case=query.query('CASE')
+    assert (case.customer_amount_ntd,case.customer_fully_received,case.scheme)==(18000,True,'split')
+    assert (case.staff_receivable_ntd,case.subsidy_ntd,case.customer_burden_ntd,case.cash_net_ntd)==(30000,12000,18000,0)
+    assert case.cash_by_flow=={'C':18000,'G':12000,'PS':30000,'PT':0,'RS':0,'RT':0}
+    assert stages[1].due_date=='2026-09-20' and staff[0].due_date=='2026-09-30'
+    # Overcollection in another stage must not silently settle the first stage.
+    partial=(replace(stages[0],expected_ntd=100,actual_ntd=0),replace(stages[1],actual_ntd=18100),stages[2])
+    query.client=lambda *_,**__: (partial,())
+    assert query.query('CASE').scheme=='waiting'
+    query.client=lambda *_,**__: (stages[1:],())
+    assert query.query('CASE').customer_fully_received is None
+    query.bank=lambda _: (replace(banks[1],cases=('CASE','OTHER')),)
+    shared=query.query('CASE')
+    assert shared.cash_by_flow is None and shared.cash_net_ntd is None
+    assert stages[1].actual_ntd==18000 and staff[0].actual_ntd==30000
+
+
+def test_monthly_six_cash_channels_keep_original_bank_month_and_count_shared_source_once():
+    from subsystems.finance_import.accounting_workspace import AccountingBankFact
+    query,today=_monthly_query()
+    query.source.bank_facts=lambda *_:(
+        AccountingBankFact('customer','2026-10-01','in',18000,('S1',),'sinopac','C'),
+        AccountingBankFact('government','2026-10-02','in',12000,('S1','S2'),'taishin','G'),
+        AccountingBankFact('staff','2026-10-03','out',30000,('S1',),'sinopac','PS'),
+    )
+    report=query.query('2026-09','2026-10','subsidy',today=today)
+    assert report.rows[0].expected_in_ntd==10000 and report.rows[0].cash_by_flow['G']==0
+    october=report.rows[1]
+    assert october.cash_by_flow=={'C':18000,'G':12000,'PS':30000,'PT':0,'RS':0,'RT':0}
+    assert (october.cash_in_ntd,october.cash_out_ntd)==(30000,30000)
+    assert len(october.bank_facts)==3
+    query.source.bank_facts=lambda *_:(AccountingBankFact('unknown','2026-10-03','out',500,('S1',),'taishin',None),)
+    unknown=query.query('2026-09','2026-10','subsidy',today=today).rows[1]
+    assert unknown.cash_by_flow is None and unknown.cash_out_ntd==500
+
+
+def _direct_arrangement_workspace():
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    from subsystems.staff_payables.case_accounting_query import StaffAccountingItem
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace, AccountingBankFact, ArrangementEvent, CaseArrangement
+    class State:
+        def __init__(self): self.events=[];self.commands={};self.saved=None
+        def case_client(self,case):
+            if case!='DIRECT':raise LookupError('accounting_case_not_found')
+            return 'Synthetic'
+        def dismissed(self,*_,**__): return {}
+        def marker(self,_): return None
+        def lock_arrangement_case(self,case): self.case_client(case)
+        def arrangement(self,case): return CaseArrangement(case,len(self.events),tuple(self.events))
+        def arrangement_command(self,key): return self.commands.get(key)
+        def append_arrangement(self,case,version,action,reason,actor,key):
+            self.events.append(ArrangementEvent(version,action,reason,actor,'2026-11-04T12:00:00+00:00'))
+            self.commands[key]=(case,version-1,action,reason,actor)
+        def begin(self): self.saved=(self.events[:],dict(self.commands))
+        def commit(self): self.saved=None
+        def rollback(self): self.events,self.commands=self.saved;self.saved=None
+    stages=tuple(ClientAccountingItem(stage,'receivable',stage,'Synthetic',amount,amount,amount>0,'v1','2026-10-01',payment_stage=stage) for stage,amount in [('deposit',0),('first',30000),('second',0)])
+    staff=(StaffAccountingItem('staff','payable','月嫂款','Synthetic',30000,0,False,'v1','2026-10-31'),)
+    banks=(AccountingBankFact('c','2026-10-02','in',30000,('DIRECT',),'sinopac','C'),)
+    state=State()
+    return AccountingWorkspace(state,lambda *_,**__: (stages,()),lambda *_,**__: (staff,()),lambda _:banks,lambda _:12000),state
+
+
+def test_direct_arrangement_confirmation_replay_stale_and_full_correction_history():
+    from subsystems.finance_import.accounting_workspace import AccountingConflict
+    query,state=_direct_arrangement_workspace()
+    original=query.query('DIRECT')
+    assert original.scheme=='unknown' and original.can_confirm_direct
+    first=query.confirm_arrangement('DIRECT','confirm_direct',' 已確認直付 ',0,'direct-command','admin:1')
+    assert first.applied_version==1 and query.query('DIRECT').scheme=='direct'
+    assert query.confirm_arrangement('DIRECT','confirm_direct','已確認直付',0,'direct-command','admin:1')==first
+    for reason,version,key in [('不同內容',0,'direct-command'),('已確認直付',0,'different-command')]:
+        with pytest.raises(AccountingConflict):query.confirm_arrangement('DIRECT','confirm_direct',reason,version,key,'admin:1')
+    query.confirm_arrangement('DIRECT','withdraw_direct','更正安排',1,'withdraw-command','admin:2')
+    assert query.query('DIRECT').scheme=='unknown'
+    query.confirm_arrangement('DIRECT','confirm_direct','再次確認依據',2,'reconfirm-command','admin:3')
+    events=state.arrangement('DIRECT').events
+    assert [(e.version,e.action,e.actor,e.reason) for e in events]==[(1,'confirm_direct','admin:1','已確認直付'),(2,'withdraw_direct','admin:2','更正安排'),(3,'confirm_direct','admin:3','再次確認依據')]
+    assert all(e.created_at for e in events)
+    after=query.query('DIRECT')
+    assert (after.client_items,after.staff_items,after.bank_facts)==(original.client_items,original.staff_items,original.bank_facts)
+
+
+@pytest.mark.parametrize('flow,direction,bank',[('G','in','taishin'),('PT','out','taishin'),('RT','out','taishin')])
+def test_new_union_subsidy_cash_conflicts_with_recorded_direct_arrangement_without_erasing_it(flow,direction,bank):
+    from subsystems.finance_import.accounting_workspace import AccountingBankFact, ArrangementNotReady
+    query,state=_direct_arrangement_workspace()
+    query.confirm_arrangement('DIRECT','confirm_direct','直付安排依據',0,'direct-command','admin:1')
+    original_bank=query.bank
+    query.bank=lambda case:(*original_bank(case),AccountingBankFact('later','2026-11-02',direction,12000,('DIRECT',),bank,flow))
+    current=query.query('DIRECT')
+    assert current.scheme=='unknown' and current.scheme_conflict and current.arrangement.direct_confirmed
+    assert not current.can_confirm_direct and len(current.arrangement.events)==1
+    with pytest.raises(ArrangementNotReady):query.confirm_arrangement('DIRECT','confirm_direct','衝突不能強套',1,'conflicting-command','admin:1')
+    assert len(state.events)==1
+
+
+def test_incomplete_or_unknown_bank_sources_cannot_be_confirmed_as_direct():
+    from dataclasses import replace
+    from subsystems.finance_import.accounting_workspace import ArrangementNotReady
+    query,state=_direct_arrangement_workspace()
+    client=query.client
+    query.client=lambda *args,**kwargs:(tuple(replace(item,actual_ntd=0) if item.payment_stage=='first' else item for item in client(*args,**kwargs)[0]),())
+    assert query.query('DIRECT').scheme=='waiting'
+    with pytest.raises(ArrangementNotReady):query.confirm_arrangement('DIRECT','confirm_direct','尚未齊款',0,'incomplete','admin')
+    query.client=client
+    bank=query.bank
+    query.bank=lambda case:tuple(replace(row,cases=('DIRECT','OTHER')) for row in bank(case))
+    assert query.query('DIRECT').cash_by_flow is None
+    with pytest.raises(ArrangementNotReady):query.confirm_arrangement('DIRECT','confirm_direct','不可把未分配當零',0,'unknown','admin')
+    assert not state.events
+
+
+def test_arrangement_http_contract_server_actor_strict_input_and_typed_conflicts():
+    from types import SimpleNamespace
+    query,state=_direct_arrangement_workspace()
+    app=FastAPI();app.include_router(router)
+    app.dependency_overrides[require_admin]=lambda:SimpleNamespace(id=9,username='ignored-client-name')
+    app.dependency_overrides[get_accounting_workspace]=lambda:query
+    path='/cases/DIRECT/accounting/arrangement'
+    body={'action':'confirm_direct','reason':'確認直付依據','expected_version':0}
+    with TestClient(app) as client:
+        assert client.get(path).json()['data']['version']==0
+        response=client.post(path,json=body,headers={'Idempotency-Key':'http-command'})
+        assert response.status_code==200
+        assert response.json()['data']['arrangement']['events'][0]['actor']=='admin_user_id:9'
+        assert client.post(path,json=body,headers={'Idempotency-Key':'http-command'}).json()['data']['applied_version']==1
+        stale=client.post(path,json=body,headers={'Idempotency-Key':'new-command'})
+        assert stale.status_code==409 and 'arrangement_source_changed' in stale.text
+        assert client.post(path,json={**body,'actor':'spoof'},headers={'Idempotency-Key':'bad'}).status_code==422
+        assert client.post(path,json={**body,'expected_version':True},headers={'Idempotency-Key':'bad'}).status_code==422
+        assert client.get('/cases/OTHER/accounting/arrangement').status_code==404
+        def deny():raise HTTPException(403,'forbidden')
+        app.dependency_overrides[require_admin]=deny
+        assert client.get(path).status_code==403 and client.post(path,json=body,headers={'Idempotency-Key':'forbidden'}).status_code==403
+    assert len(state.events)==1
+
+
+@pytest.mark.skipif(not __import__('os').getenv('LABOR_UNION_ARRANGEMENT_MYSQL_DATABASE'),reason='requires the explicit synthetic direct-arrangement scenario database')
+def test_mysql_direct_arrangement_history_is_append_only_and_remains_contiguous():
+    import os
+    import pymysql
+    from infrastructure.mysql.mysql_adapter import DB_CONFIG
+    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
+    database=os.environ['LABOR_UNION_ARRANGEMENT_MYSQL_DATABASE']
+    assert database.startswith('lu_test_direct_arr_20261104_') and DB_CONFIG['host'] in {'localhost','127.0.0.1'}
+    connection=pymysql.connect(**{**DB_CONFIG,'database':database,'cursorclass':pymysql.cursors.DictCursor,'autocommit':False})
+    try:
+        state=MySqlAccountingWorkspaceState(connection)
+        with pytest.raises(LookupError):state.lock_arrangement_case('direct-20261104')
+        connection.rollback()
+        before=state.arrangement('DIRECT-20261104')
+        assert before.version>=4 and [event.version for event in before.events]==list(range(1,before.version+1))
+        for statement in ("UPDATE finance_case_arrangement_events SET reason='must not persist' WHERE case_no=%s AND version=1", "DELETE FROM finance_case_arrangement_events WHERE case_no=%s AND version=1"):
+            with connection.cursor() as cursor:
+                with pytest.raises(pymysql.MySQLError,match='immutable'):cursor.execute(statement,('DIRECT-20261104',))
+            connection.rollback()
+        assert state.arrangement('DIRECT-20261104')==before
+    finally:
+        connection.rollback();connection.close()
+
+
+@pytest.mark.parametrize("values,stage,remaining,complete", [
+    ((('deposit',6000,0),('first',15000,0),('second',9000,0)), 'deposit',6000,True),
+    ((('deposit',6000,6000),('first',15000,14000),('second',9000,0)), 'first',1000,True),
+    ((('deposit',6000,6000),('first',15000,15000),('second',9000,0)), 'second',9000,True),
+    ((('deposit',6000,6000),('first',12000,12000),('second',0,0)), 'scheme',None,True),
+    ((('deposit',6000,6000),('second',9000,0)), 'first',None,False),
+    ((('deposit',6000,6000),('first',15000,0),('first',15000,0)), 'first',None,False),
+])
+def test_current_collection_item_uses_one_earliest_unfinished_stage(values,stage,remaining,complete):
+    from domains.finance_import.statement_archive import CollectionStageSource, current_collection_progress
+    sources=tuple(CollectionStageSource(kind,expected,received,'2026-11-05') for kind,expected,received in values)
+    result=current_collection_progress(sources)
+    assert (result.stage,result.remaining_ntd,result.sources_complete)==(stage,remaining,complete)
+    if remaining is not None:
+        assert result.due_date=='2026-11-05'
+    assert tuple((source.expected_ntd,source.received_ntd) for source in sources)==tuple((value[1],value[2]) for value in values)
+
+
+def test_case_query_keeps_original_stage_amounts_and_dates_for_current_item():
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    class State:
+        def case_client(self,_):return 'Synthetic'
+        def dismissed(self,_,**kwargs):return {}
+    items=tuple(ClientAccountingItem(kind,'receivable',kind,'Synthetic',expected,received,received>0,'1','2026-11-05',payment_stage=kind)
+                for kind,expected,received in [('deposit',6000,6000),('first',15000,14000),('second',9000,0)])
+    result=AccountingWorkspace(State(),lambda *args,**kwargs:(items,()),lambda *args,**kwargs:((),())).query('Synthetic')
+    assert result.collection_progress.stage=='first'
+    assert result.collection_progress.remaining_ntd==1000
+    assert result.collection_progress.due_date=='2026-11-05'
+    assert result.client_items==items
+
+
+def _plan_workspace():
+    from domains.finance_import.statement_archive import CaseSubsidyPlan,SubsidyPlanEvent
+    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
+    class PlanState:
+        def __init__(self): self.events=[];self.commands={};self.commits=0;self.rollbacks=0
+        def begin(self): pass
+        def lock_arrangement_case(self,case):
+            if case!='PLAN-CASE': raise LookupError('accounting_case_not_found')
+        def case_client(self,case): self.lock_arrangement_case(case);return 'Synthetic'
+        def subsidy_plan(self,case): return CaseSubsidyPlan(case,len(self.events),tuple(self.events))
+        def subsidy_plan_command(self,key): return self.commands.get(key)
+        def append_subsidy_plan(self,case,version,scheme,actor,key):
+            self.commands[key]=(case,version-1,scheme,actor)
+            self.events.append(SubsidyPlanEvent(version,scheme,actor,'2026-11-05T00:00:00+00:00'))
+        def commit(self): self.commits+=1
+        def rollback(self): self.rollbacks+=1
+    def no_finance(*args,**kwargs): raise AssertionError('plan setting must not require or mutate financial facts')
+    state=PlanState()
+    return state,AccountingWorkspace(state,no_finance,no_finance)
+
+
+@pytest.mark.parametrize('scheme',['split','advance','direct'])
+def test_human_plan_can_be_saved_before_collection_without_financial_calls(scheme):
+    state,workspace=_plan_workspace()
+    result=workspace.save_subsidy_plan('PLAN-CASE',scheme,0,'operation-1','admin:1')
+    assert result.applied_version==1 and result.plan.selected_scheme==scheme
+    assert state.commits==1 and state.events[0].actor=='admin:1'
+
+
+def test_manual_plan_replays_original_operation_after_later_change_and_rejects_changed_key():
+    from subsystems.finance_import.accounting_workspace import AccountingConflict
+    state,workspace=_plan_workspace()
+    workspace.save_subsidy_plan('PLAN-CASE','split',0,'operation-1','admin:1')
+    workspace.save_subsidy_plan('PLAN-CASE','direct',1,'operation-2','admin:2')
+    replay=workspace.save_subsidy_plan('PLAN-CASE','split',0,'operation-1','admin:1')
+    assert replay.applied_version==1 and replay.plan.version==2 and len(state.events)==2
+    with pytest.raises(AccountingConflict,match='command_changed'):
+        workspace.save_subsidy_plan('PLAN-CASE','advance',0,'operation-1','admin:1')
+    with pytest.raises(AccountingConflict,match='version_changed'):
+        workspace.save_subsidy_plan('PLAN-CASE','advance',0,'operation-new','admin:1')
+    assert len(state.events)==2 and state.rollbacks==2
+
+
+@pytest.mark.parametrize('received,selected,completed',[(False,'split',False),(None,'direct',False),(True,None,False),(True,'advance',True),(True,'direct',True)])
+def test_ongoing_completion_requires_collection_and_explicit_human_plan(received,selected,completed):
+    from domains.finance_import.statement_archive import CaseSubsidyPlan,SubsidyPlanEvent,ongoing_case_completed
+    plan=CaseSubsidyPlan('PLAN-CASE',1,(SubsidyPlanEvent(1,selected,'admin','2026-11-05T00:00:00+00:00'),)) if selected else CaseSubsidyPlan('PLAN-CASE')
+    assert ongoing_case_completed(received,plan) is completed
+
+
+def test_manual_plan_body_does_not_accept_forged_actor_or_financial_values():
+    from pydantic import ValidationError
+    from api.schemas.finance_import import SubsidyPlanBody
+    with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,actor='forged')
+    with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,amount_ntd=10)

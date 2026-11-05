@@ -223,3 +223,78 @@ def test_no_second_payment_and_due_today_do_not_create_todo(http):
     assert not listing(http,case)
     all_due(case)
     assert 'second' not in {x['payment']['payment_stage'] for x in listing(http,case)}
+
+
+# Current compact drawer uses the same native queue; only this fake provider is run.
+def compact_finance_image(case):
+    result={}
+    for table,column in [('orders','case_no'),('client_obligations','case_no'),
+                         ('client_ledger_entries','case_no'),('client_payment_terms','case_no')]:
+        result[table]=rows('SELECT * FROM '+table+' WHERE '+column+'=%s',(case,))
+    result['allocations']=rows('SELECT a.* FROM client_ledger_obligation_allocations a JOIN client_obligations o '
+        'ON o.obligation_identity=a.obligation_identity WHERE o.case_no=%s',(case,))
+    return result
+
+
+def test_compact_case_future_queue_replay_history_success_time_and_actor(http):
+    case,_,_=prepare(http)
+    write("UPDATE client_obligations SET due_date=%s WHERE case_no=%s AND obligation_type='deposit'",(DAY+timedelta(days=7),case))
+    before=compact_finance_image(case)
+    url='/api/v1/line/payment-overdue-reminders/cases/'+case
+    source=checked(http.get(url))
+    item=next(row for row in source if row['payment_stage']=='deposit')
+    assert item['can_send'] and item['history']==[]
+    assert compact_finance_image(case)==before
+    key='compact-'+case
+    command={**item['payment'],'idempotency_key':key}
+    queued=checked(http.post('/api/v1/line/payment-overdue-reminders/cases/send',json=command))
+    assert queued['status']=='pending'
+    assert checked(http.post('/api/v1/line/payment-overdue-reminders/cases/send',json=command))==queued
+    pending=next(row for row in checked(http.get(url)) if row['payment_stage']=='deposit')
+    assert not pending['can_send'] and len(pending['history'])==1
+    event=pending['history'][0]
+    assert event['sent_at'] is None and event['content']==item['message']
+    assert event['actor']=='admin:1'
+    assert len(deliver(queued['task_id']))==1  # task-scoped fake, never actual LINE
+    sent=next(row for row in checked(http.get(url)) if row['payment_stage']=='deposit')
+    assert sent['history'][0]['status']=='sent' and sent['history'][0]['sent_at']
+    assert compact_finance_image(case)==before
+
+
+def test_compact_case_paid_snapshot_zero_readable_and_send_rejected(http):
+    case,_,_=prepare(http)
+    url='/api/v1/line/payment-overdue-reminders/cases/'+case
+    source=next(row for row in checked(http.get(url)) if row['payment_stage']=='deposit')
+    payment=source['payment']; assert payment['remaining_amount_ntd']>0
+    # Formal bank/receipt writer, not a fabricated balance or projection edit.
+    support['existing']['h']['bank'](http,case,payment['remaining_amount_ntd'],1)
+    before=compact_finance_image(case)
+    paid=next(row for row in checked(http.get(url)) if row['payment_stage']=='deposit')
+    assert paid['payment']['remaining_amount_ntd']==0 and not paid['can_send']
+    response=http.post('/api/v1/line/payment-overdue-reminders/cases/send',json={**payment,'idempotency_key':'stale-'+case})
+    assert response.status_code==409 and compact_finance_image(case)==before
+
+
+def test_compact_manual_plan_can_save_before_deposit_cas_replay_and_immutable(http):
+    case,_,_=prepare(http)
+    before=compact_finance_image(case)
+    url='/api/v1/finance-import/cases/'+case+'/accounting/subsidy-plan'
+    assert checked(http.get(url))=={'case_no':case,'version':0,'events':[]}
+    command={'scheme':'advance','expected_version':0}
+    first=checked(http.post(url,json=command,headers={'Idempotency-Key':case+':plan1'}))
+    assert first['applied_version']==1 and first['plan']['events'][0]['actor']=='admin_user_id:1'
+    second=checked(http.post(url,json={'scheme':'direct','expected_version':1},headers={'Idempotency-Key':case+':plan2'}))
+    assert second['plan']['version']==2
+    replay=checked(http.post(url,json=command,headers={'Idempotency-Key':case+':plan1'}))
+    assert replay['applied_version']==1 and replay['plan']['version']==2
+    assert http.post(url,json=command,headers={'Idempotency-Key':case+':stale'}).status_code==409
+    assert http.post(url,json={'scheme':'split','expected_version':0},headers={'Idempotency-Key':case+':plan1'}).status_code==409
+    assert compact_finance_image(case)==before
+    connection=mysql_adapter.get_connection()
+    try:
+        for statement in ("UPDATE finance_case_subsidy_plan_events SET scheme='split' WHERE case_no=%s",
+                          "DELETE FROM finance_case_subsidy_plan_events WHERE case_no=%s"):
+            with pytest.raises(Exception,match='immutable'):
+                with connection.cursor() as cursor: cursor.execute(statement,(case,))
+            connection.rollback()
+    finally: connection.close()

@@ -55,6 +55,10 @@ class CaseStatisticsSummaryView(_StrictModel):
     order_status_counts: dict[Literal["待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"], Annotated[int, Field(ge=0)]]
     unclassified_qualification_count: int = Field(ge=0)
     other_status_count: int = Field(ge=0)
+    order_established_count: int = Field(ge=0)
+    negotiating_count: int = Field(ge=0)
+    cancelled_count: int = Field(ge=0)
+    review_rejected_count: int = Field(ge=0)
 
 
 class CaseStatisticsView(_StrictModel):
@@ -86,6 +90,19 @@ class WeeklyOperationsSubsidyPartitionView(_StrictModel):
 
 
 class WeeklyReportCaseRowView(_StrictModel):
+    serial_number: int
+    month_label: str
+    application_date_roc: str
+    general_eligible: int = Field(ge=0, le=1)
+    general_ineligible: int = Field(ge=0, le=1)
+    subsidized_eligible: int = Field(ge=0, le=1)
+    subsidized_ineligible: int = Field(ge=0, le=1)
+    order_established: int = Field(ge=0, le=1)
+    negotiating: int = Field(ge=0, le=1)
+    cancelled: int = Field(ge=0, le=1)
+    review_rejected: int = Field(ge=0, le=1)
+    service_status: str
+    notes: str
     case_no: str
     applicant_name: str
     application_date: date | None

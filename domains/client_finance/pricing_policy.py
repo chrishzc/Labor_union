@@ -90,22 +90,38 @@ class PricingPolicy:
         names = tuple(item.identity_name for item in self.identities)
         if len(set(names)) != len(names):
             raise ValueError("pricing_identity_names_must_be_unique")
-        if {"一般市民", "低收入戶", "中低收入戶"}.intersection(names):
+        if {"低收入戶", "中低收入戶"}.intersection(names):
             raise ValueError("pricing_identity_alias_reserved")
-        if not {"補助市民", "社福", "非市民"}.issubset(names):
+        expected = ({"補助市民": IdentityRule.CITIZEN, "社福": IdentityRule.SOCIAL, "非市民": IdentityRule.NON_CITIZEN}
+                    if self.uses_legacy_identity_names else
+                    {"一般市民": IdentityRule.CITIZEN, "補助市民": IdentityRule.SOCIAL, "非市民": IdentityRule.NON_CITIZEN})
+        if not set(expected).issubset(names):
             raise ValueError("pricing_existing_identities_required")
-        expected = {"補助市民": IdentityRule.CITIZEN, "社福": IdentityRule.SOCIAL, "非市民": IdentityRule.NON_CITIZEN}
         if any(item.rule is not expected[item.identity_name] for item in self.identities if item.identity_name in expected):
             raise ValueError("pricing_existing_identity_rule_immutable")
 
     def for_case(self, identity: str, *, twins=False) -> CasePricingTerms:
-        identity = {"一般市民": "補助市民", "低收入戶": "社福", "中低收入戶": "社福"}.get(identity, identity)
+        if self.uses_legacy_identity_names:
+            # Bound historical policies retain the exact meaning of their stored keys.
+            identity = {"一般市民": "補助市民", "低收入戶": "社福", "中低收入戶": "社福"}.get(identity, identity)
+        else:
+            from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
+            identity = normalize_subsidy_policy_identity(identity)
         result = next((item for item in self.identities if item.identity_name == identity), None)
         if result is None:
             raise ValueError("pricing_identity_not_in_bound_policy")
         if not twins:
             return result
         return CasePricingTerms(result.identity_name, result.rule, result.subsidy_hours, self.twins_client, self.twins_payroll)
+
+    @property
+    def uses_legacy_identity_names(self) -> bool:
+        return "一般市民" not in {item.identity_name for item in self.identities} and any(
+            item.identity_name == "社福" and item.rule is IdentityRule.SOCIAL for item in self.identities)
+
+    def validate_current_identity_names(self) -> None:
+        if self.uses_legacy_identity_names or any(item.identity_name == "社福" for item in self.identities):
+            raise ValueError("pricing_policy_identity_names_outdated")
 
     def validate_subsidy_rates(self) -> None:
         for item in self.identities:

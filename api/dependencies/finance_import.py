@@ -211,18 +211,10 @@ def get_statement_archive_application():
 
 
 def get_accounting_workspace():
-    from infrastructure.mysql.accounting_workspace_repository import MySqlAccountingWorkspaceState
-    from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
-    from infrastructure.mysql.client_payments_query_repository import query_case_accounting
-    from subsystems.finance_import.accounting_workspace import AccountingWorkspace
-    from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
     connection = get_connection()
     try:
-        yield AccountingWorkspace(
-            MySqlAccountingWorkspaceState(connection), partial(query_case_accounting, connection),
-            partial(query_case_staff_accounting, connection),
-            MySqlMonthlyAccountingSource(connection).case_bank_facts,
-        )
+        yield build_accounting_workspace(connection)
     finally:
         connection.close()
 

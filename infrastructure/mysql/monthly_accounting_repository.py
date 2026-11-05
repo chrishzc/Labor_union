@@ -10,6 +10,28 @@ from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavai
 from subsystems.finance_import.monthly_accounting import AccountingRecognition
 
 
+_CASH_FACT_COLUMNS = """b.id,b.transaction_date,b.direction,b.credit,b.debit,b.format_id,p.case_no,
+ EXISTS(SELECT 1 FROM client_ledger_entries e WHERE e.finance_import_row_id=b.id AND e.entry_type='receipt') receipt_proof,
+ EXISTS(SELECT 1 FROM client_ledger_entries e WHERE e.finance_import_row_id=b.id AND e.entry_type='refund') refund_proof,
+ EXISTS(SELECT 1 FROM client_ledger_entries e WHERE e.finance_import_row_id=b.id AND e.entry_type IN ('subsidy_return','subsidy_advance')) subsidy_return_proof,
+ EXISTS(SELECT 1 FROM staff_payout_events e WHERE e.finance_import_row_id=b.id) staff_proof,
+ (EXISTS(SELECT 1 FROM government_subsidy_transactions t WHERE t.finance_import_row_id=b.id AND t.transaction_status='succeeded')
+ OR EXISTS(SELECT 1 FROM government_subsidy_period_entries e WHERE e.finance_import_row_id=b.id)) government_proof
+"""
+
+def _cash_flow(row):
+    bank = row.get("format_id") if row.get("format_id") in {"sinopac", "taishin"} else None
+    proofs = [name for name in ("receipt", "refund", "subsidy_return", "staff", "government") if row.get(name + "_proof")]
+    if len(proofs) != 1:
+        return bank, None
+    owner = proofs[0]
+    incoming = row["direction"] == "incoming"
+    flow = {("sinopac", True, "receipt"): "C", ("taishin", True, "government"): "G",
+            ("sinopac", False, "staff"): "PS", ("taishin", False, "staff"): "PT",
+            ("sinopac", False, "refund"): "RS", ("taishin", False, "subsidy_return"): "RT"}
+    return bank, flow.get((bank, incoming, owner))
+
+
 class MySqlMonthlyAccountingSource:
     def __init__(self, connection):
         self.connection = connection
@@ -55,8 +77,7 @@ class MySqlMonthlyAccountingSource:
         end_date = date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT b.id,b.transaction_date,b.direction,b.credit,b.debit,p.case_no "
-                "FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
+                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
                 "WHERE b.transaction_date BETWEEN %s AND %s "
                 "ORDER BY b.id,p.case_no", (start, end_date))
             rows = cursor.fetchall()
@@ -65,8 +86,7 @@ class MySqlMonthlyAccountingSource:
     def case_bank_facts(self, case_no):
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT b.id,b.transaction_date,b.direction,b.credit,b.debit,p.case_no "
-                "FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
+                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
                 "WHERE b.id IN (SELECT q.row_id FROM (" + _PROOFS + ") q WHERE q.case_no=%s) "
                 "ORDER BY b.id,p.case_no", (case_no,))
             return self._facts(cursor.fetchall())
@@ -80,4 +100,4 @@ class MySqlMonthlyAccountingSource:
             grouped.setdefault(row["id"], {"row": row, "cases": set()})["cases"].add(row["case_no"])
         return tuple(AccountingBankFact(f"bank:{identity}", str(entry["row"]["transaction_date"]),
             "in" if entry["row"]["direction"] == "incoming" else "out", _integer_bank_amount(entry["row"]["credit"], entry["row"]["debit"]),
-            tuple(sorted(entry["cases"]))) for identity, entry in grouped.items())
+            tuple(sorted(entry["cases"])), *_cash_flow(entry["row"])) for identity, entry in grouped.items())

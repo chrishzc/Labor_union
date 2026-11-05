@@ -22,7 +22,7 @@ def staff(identity="staff:1", *, amount=24000, balance=24000, due=date(2026, 11,
 
 def case(**changes):
     base = CashRequirementCase("C-01", "客戶甲", "服務中", True, date(2026, 11, 30),
-        "一般市民", Decimal(180), Decimal(0), 300, False, False, (staff(),), ())
+        "一般市民", Decimal(180), Decimal(0), 300, True, False, (staff(),), (), confirmed_scheme="advance", subsidy_ntd=12000)
     return replace(base, **changes)
 
 
@@ -69,7 +69,7 @@ def test_unarranged_case_has_no_estimate_and_arrangement_enables_capped_refund_b
 
 
 def test_staff_amounts_preserve_each_owner_balance_and_show_paid_or_settled():
-    rows = query(case(identity_status="非市民", staff_items=(
+    rows = query(case(identity_status="非市民", confirmed_scheme="unknown", staff_items=(
         staff(amount=24000, balance=15000, payment_status="partially_paid"), staff("staff:2", amount=18000, balance=18000),
         staff("staff:paid", balance=0, disposition="paid_or_settled", payment_status="paid"),
         staff("staff:settled", balance=0, disposition="paid_or_settled", payment_status="settled"),
@@ -109,7 +109,7 @@ def test_cash_response_preserves_owner_payment_status():
     from types import SimpleNamespace
     from api.routes.finance_reports import query_accounts_payable_cash_requirements
 
-    page = query(case(identity_status="非市民", staff_items=(
+    page = query(case(identity_status="非市民", confirmed_scheme="unknown", staff_items=(
         staff("pending"),
         staff("partial", balance=1500, payment_status="partially_paid"),
         staff("paid", balance=0, disposition="paid_or_settled", payment_status="paid"),
@@ -168,16 +168,16 @@ def test_cancelled_case_retains_established_unpaid_but_does_not_forecast_unperfo
 
 @pytest.mark.parametrize("identity", ["社福", "低收入戶", "中低收入戶", "非市民"])
 def test_full_subsidy_without_client_payment_or_ineligible_identity_has_no_refund_estimate(identity):
-    assert query(case(identity_status=identity, service_hours=Decimal(80), staff_items=())).rows == ()
+    assert query(case(identity_status=identity, service_hours=Decimal(80), staff_items=(), confirmed_scheme="split" if identity != "非市民" else "unknown")).rows == ()
 
 
 def test_missing_amount_and_date_remain_unknown_and_bank_blocker_is_visible():
-    rows = query(case(service_hours=None, planned_end_date=None, service_fees_collected=None,
+    rows = query(case(service_hours=None, subsidy_ntd=None, planned_end_date=None, service_fees_collected=None,
         staff_items=(staff(amount=None, balance=None, due=None, source="order_facts", disposition="date_not_formed"),))).rows
     assert len(rows) == 2
     assert all(r.unpaid_amount_ntd is None and r.payment_date is None for r in rows)
     assert all(r.pending_reasons for r in rows)
-    blocked = query(case(identity_status="非市民", staff_items=(staff(disposition="blocked"),))).rows[0]
+    blocked = query(case(identity_status="非市民", confirmed_scheme="unknown", staff_items=(staff(disposition="blocked"),))).rows[0]
     assert blocked.unpaid_amount_ntd == 24000
     assert "月嫂付款狀態或受款資料待確認" in blocked.pending_reasons
 
@@ -186,7 +186,7 @@ def test_requery_observes_changes_without_mutating_facts_or_posting_refund():
     original = case()
     repository = Repository((original,))
     first = query_cash_requirements(repository)
-    repository.cases = (replace(original, planned_end_date=date(2026, 12, 4), client_hourly_rate_ntd=350),)
+    repository.cases = (replace(original, planned_end_date=date(2026, 12, 4), client_hourly_rate_ntd=350, subsidy_ntd=14000),)
     second = query_cash_requirements(repository)
     assert first.rows[-1].unpaid_amount_ntd == 12000
     assert second.rows[-1].unpaid_amount_ntd == 14000
@@ -215,7 +215,7 @@ def test_cash_query_composition_rolls_back_read_snapshot_without_committing(monk
         def cursor(self): return Cursor()
         def rollback(self): statements.append("rollback")
         def commit(self): raise AssertionError("cash query must never commit")
-    monkeypatch.setattr(composition, "MySqlCashRequirementsRepository", lambda connection: Repository((case(),)))
+    monkeypatch.setattr(composition, "MySqlCashRequirementsRepository", lambda connection, **options: Repository((case(),)))
     page = composition.CashRequirementsApplication(Connection()).query()
     assert len(page.rows) == 2
     assert statements == ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
@@ -250,3 +250,24 @@ def test_arranged_staff_with_missing_payroll_is_visible_without_relisting_paid_s
     assert rows[1].recipient_name == "月嫂乙"
     assert rows[1].unpaid_amount_ntd is None and rows[1].payment_date is None
     assert rows[1].row_id == "C-01:staff:2"
+
+
+@pytest.mark.parametrize("scheme", ["split", "direct", "waiting", "unknown"])
+def test_unconfirmed_or_non_customer_subsidy_never_forecasts_a_customer_refund(scheme):
+    assert query(case(staff_items=(), confirmed_scheme=scheme)).rows == ()
+
+
+def test_existing_customer_refund_conflict_remains_visible_with_original_balance_and_reason():
+    refund=CashRefundFact("old-refund","client_subsidy_return",12000,date(2027,1,15),"客戶甲",True)
+    result=query(case(staff_items=(),has_subsidy_return=True,refunds=(refund,),confirmed_scheme="split")).rows[0]
+    assert result.unpaid_amount_ntd == 12000
+    assert any("衝突" in reason for reason in result.pending_reasons)
+
+
+def test_same_staff_obligation_and_date_keep_distinct_funding_row_ids():
+    original=staff('one-entitlement', amount=18000, balance=3000)
+    portions=(replace(original,funding_kind='client'),
+              replace(original,funding_kind='subsidy',amount_due=MoneyNTD(12000),balance=MoneyNTD(12000)))
+    rows=query(case(staff_items=portions,confirmed_scheme='split')).rows
+    assert len(rows) == len({item.row_id for item in rows}) == 2
+    assert sum(item.unpaid_amount_ntd for item in rows) == 15000

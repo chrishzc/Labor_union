@@ -13,7 +13,7 @@
 - recovery cash adapter: `infrastructure/mysql/client_over_refund_recovery_repository.py` — existing Client Finance matched collection, preserves true amount/date/reference and returns the declared receipt contract; case/month query includes recovered cash separately from noncash dispositions.
 - entrypoint: `api/routes/accounting_differences.py`; presentation: `ui_react/src/api/client_finance/difference_resolution_client.ts`, `ui_react/src/components/AccountingDifferencePanel.tsx`.
 - `db/schema_parts/236_client_refund_overage_receipt.sql`, `db/schema_parts/1058_client_refund_overage_receipt.sql` — append the already-supported refund_overage kind to persistence receipts; preserve old enum ordinals and receipt rows.
-- case accounting projection: `subsystems/client_finance/case_accounting_query.py`, `infrastructure/mysql/client_payments_query_repository.py` — current obligation events, signed allocations, explicit surplus disposition and valid historical evidence; query only, typed consumer in Finance Import workspace.
+- case accounting projection: `subsystems/client_finance/case_accounting_query.py`, `infrastructure/mysql/client_payments_query_repository.py` — current obligation events, signed allocations, explicit surplus disposition and valid historical evidence; query only, typed consumer in Finance Import workspace; payment_stage 沿原 obligation_type 投影 deposit／first／second，缺來源不猜測期款，也不改已形成金額／日期。
 - primary:
   - `domains/client_finance/reconciliation.py`
   - `subsystems/client_finance/reconciliation_workflow.py`
@@ -32,7 +32,12 @@
   - `api/schemas/client_receipt_reconciliation.py`
   - `ui_react/src/api/client_finance/client_receipt_reconciliation_client.ts`、`ui_react/src/components/ClientReceiptReconciliationPanel.tsx` — 案件頁同案入款與合計核對，精確／部分／超收正式 Preview/Apply；差額處理不預選。
 
+- funding port: `subsystems/client_finance/case_accounting_query.py::ClientCaseFunding`、`infrastructure/mysql/client_payments_query_repository.py::query_case_funding` — 只讀本案原服務／政策綁定，提供FULL-01所需身分、H、L及case total，不把缺期款當0。
+- refund recipient writer: `infrastructure/mysql/client_receipt_reconciliation_repository.py::_insert_refund_recipient_snapshot` — 正常／補助退款及金額更正共用唯一bound_case_no來源；已有快照不覆寫，必填流程缺件拒絕，已確認補助退款缺帳戶可保持待補。
+- financial adjustment adapter: `infrastructure/mysql/financial_adjustment_repository.py` — 原財務調整外層交易內的客戶退款快照委派上述共用writer；不另定收款帳戶來源或新增commit。
+
 ## Dependencies
+- outbound: `case-import/pairing-current-facts` — 一般及補助退款快照以同一BeClass有效帳戶Query取得完整來源；既有快照不覆寫，Query與匯出無補寫。
 - outbound: `orders` — 各期逾期 Query 只讀同案正式契約完成事件與目前契約識別；雙方簽約完成才列入提醒清單與總數，預先計價與核銷不受影響。
 - inbound: `finance-import` — 透過 owning-domain composite 委派收款核銷並保留外層交易。
 - outbound: `orders` — 以已提交的 deposit intent 通知訂金核銷結果。

@@ -46,6 +46,7 @@ class MonthlyAccountingRow:
     bank_facts: tuple[AccountingBankFact, ...]
     other_in_ntd: int = 0
     other_out_ntd: int = 0
+    cash_by_flow: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -168,7 +169,9 @@ class MonthlyAccountingQuery:
                 sum(i.remaining_ntd for i in outgoing),
                 None if cash_unavailable else sum(b.amount_ntd for b in cash if b.direction == "in"),
                 None if cash_unavailable else sum(b.amount_ntd for b in cash if b.direction == "out"), cohort, cash,
-                sum(i.noncash_ntd for i in incoming), sum(i.noncash_ntd for i in outgoing)))
+                sum(i.noncash_ntd for i in incoming), sum(i.noncash_ntd for i in outgoing),
+                None if cash_unavailable or any(bank.cash_flow is None for bank in cash) else
+                {flow: sum(bank.amount_ntd for bank in cash if bank.cash_flow == flow) for flow in ("C", "G", "PS", "PT", "RS", "RT")}))
             if current == end:
                 break
             current = date(current.year + (current.month == 12), current.month % 12 + 1, 1)

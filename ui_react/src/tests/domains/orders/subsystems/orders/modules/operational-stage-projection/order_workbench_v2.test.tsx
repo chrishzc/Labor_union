@@ -30,6 +30,7 @@ function statisticsResult(year: number, quarter: number | null, month: number | 
     summary: {
       application_count: count, general_eligible_count: count, general_ineligible_count: 0,
       subsidized_eligible_count: 0, subsidized_ineligible_count: 0,
+      order_established_count: 0, negotiating_count: 0, cancelled_count: 0, review_rejected_count: 0,
       order_status_counts: { '待補件': count, '洽談中': 0, '訂單成立': 0, '服務中': 0, '訂單完成': 0, '訂單取消': 0 },
       unclassified_qualification_count: 0, other_status_count: 0,
     },

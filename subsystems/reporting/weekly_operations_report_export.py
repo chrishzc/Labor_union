@@ -13,9 +13,6 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from subsystems.reporting.weekly_operations_report_query import (
-    MISSING_ORDER_STATUS,
-    ORDER_STATUS_LABELS,
-    reporting_order_status,
     WeeklyCaseRow,
     WeeklyCaseTotals,
     WeeklyOperationsReport,
@@ -69,16 +66,8 @@ def export_weekly_operations_report(report: WeeklyOperationsReport) -> bytes:
 
 
 def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
-    status_labels = list(dict.fromkeys([
-        *ORDER_STATUS_LABELS, MISSING_ORDER_STATUS,
-        *(status for total in (*report.annual_totals, *report.monthly_subtotals)
-          for status in total.order_status_counts),
-        *(reporting_order_status(row.order_status) for row in report.case_rows),
-    ]))
-    # A:L 為既有案件／審核欄；其後為所有狀態、獨立審核不符合及服務欄。
-    status_last_col = 12 + len(status_labels)
-    rejection_col = status_last_col + 1
-    last_col = rejection_col + 7
+    # 固定沿用原模板 A:W；四欄指標與生命週期逐項計數分開。
+    last_col = 23
     # R1: 報表期間註記
     ws.append(("報表期間", report.period_label))
     ws.cell(row=1, column=1).font = Font(bold=True)
@@ -90,7 +79,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         "推廣次數", "詢問人次", "平台案件申請數",
         "市民案件審核", None,
         "社福案件審核", None,
-        "訂單狀態", *([None] * (len(status_labels) - 1)), "審核不符合",
+        "申請案件狀況", None, None, None,
         "服務天數", "每日服務時數", "預計服務開始日期", "預計服務結束日期", "服務狀況", "區域", "備註",
     ]
     ws.append(h1)
@@ -101,20 +90,19 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
         None, None, None,
         "一般市民符合", "一般市民不符合",
         "補助市民符合", "補助市民不符合",
-        *[status if status in (*ORDER_STATUS_LABELS, MISSING_ORDER_STATUS)
-          else f"來源狀態：{status}" for status in status_labels], None,
+        "訂單成立", "洽談中", "取消", "審核不符合",
         None, None, None, None, None, None, None,
     ]
     ws.append(h2)
 
     # 合併雙層表頭單元格
     for col_letter in ["A", "D", "E", "F", "G", "H",
-                       *(get_column_letter(c) for c in range(rejection_col, last_col + 1))]:
+                       *(get_column_letter(c) for c in range(17, last_col + 1))]:
         ws.merge_cells(f"{col_letter}2:{col_letter}3")
     ws.merge_cells("B2:C3")
     ws.merge_cells("I2:J2")
     ws.merge_cells("K2:L2")
-    ws.merge_cells(start_row=2, start_column=13, end_row=2, end_column=status_last_col)
+    ws.merge_cells("M2:P2")
 
     # 樣式表頭
     for r in (2, 3):
@@ -127,7 +115,7 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
 
     # 年度累計固定在表頭下方；週資料與欄位維持既有格式。
     for total in report.annual_totals:
-        _append_case_totals(ws, total, status_labels)
+        _append_case_totals(ws, total)
     monthly_totals = {(total.year, total.month): total for total in report.monthly_subtotals}
     rows_by_week: dict[object, list[WeeklyCaseRow]] = {}
     undated_rows: list[WeeklyCaseRow] = []
@@ -169,8 +157,9 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
                 p_cell_val, i_cell_val, 1 if row else "",
                 row.general_eligible or "" if row else "", row.general_ineligible or "" if row else "",
                 row.subsidized_eligible or "" if row else "", row.subsidized_ineligible or "" if row else "",
-                *[1 if row and reporting_order_status(row.order_status) == status else ""
-                  for status in status_labels],
+                row.order_established or "" if row else "",
+                row.negotiating or "" if row else "",
+                row.cancelled or "" if row else "",
                 row.review_rejected or "" if row else "",
                 row.service_days if row and row.service_days is not None else "",
                 row.service_hours_per_day if row and row.service_hours_per_day is not None else "",
@@ -204,14 +193,14 @@ def _build_case_sheet(ws, report: WeeklyOperationsReport) -> None:
             month_key = (week_start.year, week_start.month)
             next_week = groups[group_index + 1][0] if group_index + 1 < len(groups) else None
             if next_week is None or (next_week.year, next_week.month) != month_key:
-                _append_case_totals(ws, monthly_totals[month_key], status_labels)
+                _append_case_totals(ws, monthly_totals[month_key])
 
     ws.freeze_panes = f"A{4 + len(report.annual_totals)}"
     _auto_fit_columns(ws, min_col=1, max_col=last_col)
 
 
-def _append_case_totals(ws, total: WeeklyCaseTotals, status_labels: list[str]) -> None:
-    last_col = 20 + len(status_labels)
+def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
+    last_col = 23
     label = (
         f"{total.year - 1911}年度累計" if total.month is None
         else f"{total.year - 1911}年{total.month}月小計"
@@ -223,7 +212,7 @@ def _append_case_totals(ws, total: WeeklyCaseTotals, status_labels: list[str]) -
         total.application_count,
         total.general_eligible_count, total.general_ineligible_count,
         total.subsidized_eligible_count, total.subsidized_ineligible_count,
-        *[total.order_status_counts.get(status, 0) for status in status_labels],
+        total.order_established_count, total.negotiating_count, total.cancelled_count,
         total.review_rejected_count,
     ])
     row_number = ws.max_row
@@ -231,7 +220,7 @@ def _append_case_totals(ws, total: WeeklyCaseTotals, status_labels: list[str]) -
     ws.cell(row=row_number, column=1).comment = Comment(
         f"案件統計期間：{total.start_date}～{total.end_date}。"
         "整週按星期一歸月／年；推廣與詢問每週僅計一次，任一週未登錄時合計標示未完整登錄。"
-        "訂單狀態各自精確計數；審核不符合獨立統計，不加入訂單狀態合計。",
+        "申請案件狀況沿用模板四欄指標；訂單成立含服務中與完成，取消排除審核不符合。",
         "系統",
     )
     for column in range(1, last_col + 1):

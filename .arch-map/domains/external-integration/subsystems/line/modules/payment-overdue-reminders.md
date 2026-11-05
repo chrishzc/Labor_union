@@ -38,6 +38,9 @@
 - `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/pages/FinancePage.tsx` — 四區帳務的「逾期提醒」主入口；舊收款 overdue 深連結與核對銀行時的案號保留。
 - `ui_react/src/pages/LineManagementPage.tsx` — 原深連結導向 `#finance?tab=receipts&view=overdue`。
 
+- `ui_react/src/components/FinanceCaseNotice.tsx` — same-case period copy, recipient and existing history; last success time is separate from queued/failed state, no new cooldown; original-key recovery prevents duplicate requests.
+- `infrastructure/mysql/client_payment_reminder_query_repository.py` — bounded per-case canonical period/balance/contract Query, including future dates and paid zero balances.
+
 ## Dependencies
 - Finance: `client-finance/receipt-reconciliation` 的 typed `OverdueClientPayment`；LINE 不重算或改寫帳務。
 - Delivery: 既有 committed task、audit、receipt／lease 與取消流程；來源快照放既有 correlation，沒有新 Preview fingerprint 或資料表。
@@ -48,6 +51,8 @@
 ## Contracts
 - `document/架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md` §6.7～6.11。
 - `document/架構重整/01_規格基線/04_Client_Finance_Domain.md` — 款項期別、正式到期日及餘額。
+
+- `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §18.4 — GET `/api/v1/line/payment-overdue-reminders/cases/{case_no}` and POST `/cases/send`; manual case reminders may precede due date but retain current contract, unique recipient, positive balance, queue pending and fresh provider guards. All entries share existing delivery tasks and audit/history; requested/queued time never becomes sent time, original automatic schedule unchanged.
 
 ## Verification
 - layout_status: `custom_current`

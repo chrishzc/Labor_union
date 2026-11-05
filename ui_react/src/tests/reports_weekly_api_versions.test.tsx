@@ -31,7 +31,7 @@ describe('週報混合 API 版本畫面', () => {
     render(<ReportsPage />);
     const table = await screen.findByRole('table', { name: '週報案件受理總表' });
     expect(screen.getByText(/週報 API 尚未更新至新版統計/)).toBeInTheDocument();
-    expect(within(table).getByText('CASE-WEEK-001')).toBeInTheDocument();
+    expect(within(table).getByText('101')).toBeInTheDocument();
     expect(within(table).getByRole('row', { name: '週次 2026-08-17' })).toBeInTheDocument();
     expect(within(table).queryByRole('row', { name: '115年度累計' })).not.toBeInTheDocument();
     expect(within(table).queryByRole('row', { name: '115年8月小計' })).not.toBeInTheDocument();

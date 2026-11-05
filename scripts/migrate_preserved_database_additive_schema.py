@@ -374,6 +374,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_02_finance_case_accounting_v1.json",
     "labor_union_2026_11_02_accounting_differences_v1.json",
     "labor_union_2026_11_03_historical_order_reused_pairing_check_v1.json",
+    "labor_union_2026_11_04_finance_case_arrangements_v1.json",
+    "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(

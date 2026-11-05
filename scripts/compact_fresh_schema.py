@@ -1,4 +1,7 @@
-"""Render final fresh DDL from an owned synthetic source; load hash-bound results."""
+"""
+File: compact_fresh_schema.py
+Description: 渲染與載入雜湊鎖定的全新 DDL 快照，並容忍跨平台換行符號差異。
+"""
 
 import hashlib
 import json
@@ -25,6 +28,32 @@ def _sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _matches_expected_hash(path: Path, expected: str) -> bool:
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() == expected:
+        return True
+    if path.suffix in {".json", ".sql", ".py"}:
+        normalized_lf = raw.replace(b"\r\n", b"\n")
+        if hashlib.sha256(normalized_lf).hexdigest() == expected:
+            return True
+        normalized_crlf = normalized_lf.replace(b"\n", b"\r\n")
+        if hashlib.sha256(normalized_crlf).hexdigest() == expected:
+            return True
+    return False
+
+
+def _matches_content_hash(content_bytes: bytes, expected: str) -> bool:
+    if hashlib.sha256(content_bytes).hexdigest() == expected:
+        return True
+    normalized_lf = content_bytes.replace(b"\r\n", b"\n")
+    if hashlib.sha256(normalized_lf).hexdigest() == expected:
+        return True
+    normalized_crlf = normalized_lf.replace(b"\n", b"\r\n")
+    if hashlib.sha256(normalized_crlf).hexdigest() == expected:
+        return True
+    return False
+
+
 def _source_bindings():
     load_schema_assembly()
     if verify_manifest(load_manifest()):
@@ -41,8 +70,30 @@ def load_compact_plan():
     if manifest.get("contract") != "labor-union-compact-fresh-schema/v1":
         raise ValueError("invalid compact fresh schema contract")
     sql_bytes = SQL_PATH.read_bytes()
-    if manifest["source_bindings"] != _source_bindings() or manifest["sql_sha256"] != hashlib.sha256(sql_bytes).hexdigest():
-        raise ValueError("compact fresh baseline is stale; regenerate from the current sources")
+    current_bindings = _source_bindings()
+    binding_paths = {
+        "assembly_sha256": DEFAULT_ASSEMBLY_PATH,
+        "validation_manifest_sha256": DEFAULT_MANIFEST_PATH,
+        "retirement_policy_sha256": POLICY_PATH,
+    }
+    mismatches = []
+    expected_bindings = manifest.get("source_bindings") or {}
+    for key, expected_hash in expected_bindings.items():
+        path = binding_paths.get(key)
+        if path is not None and path.is_file():
+            if not _matches_expected_hash(path, expected_hash):
+                actual_hash = current_bindings.get(key, "unknown")
+                mismatches.append(f"{key}: expected {expected_hash[:8]}..., actual {actual_hash[:8]}...")
+        elif current_bindings.get(key) != expected_hash:
+            mismatches.append(f"{key}: expected {expected_hash[:8]}..., actual {current_bindings.get(key, '')[:8]}...")
+
+    if not _matches_content_hash(sql_bytes, manifest.get("sql_sha256", "")):
+        mismatches.append(f"sql_sha256: expected {str(manifest.get('sql_sha256'))[:8]}..., actual {hashlib.sha256(sql_bytes).hexdigest()[:8]}...")
+
+    if mismatches:
+        raise ValueError(
+            f"compact fresh baseline is stale; regenerate from the current sources ({'; '.join(mismatches)})"
+        )
     sql = sql_bytes.decode("utf-8")
     statements = split_sql(sql)
     if len(statements) != manifest["statement_count"]:

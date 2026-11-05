@@ -17,7 +17,7 @@ describe('ReportsPage service-hours display', () => {
     vi.spyOn(weeklyOperationsReportQueryClient, 'query').mockResolvedValue(WEEKLY_OPERATIONS_REPORT);
 
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('王**')).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('ReportsPage service-hours display', () => {
     });
 
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('已保留可得明細');
@@ -61,7 +61,7 @@ describe('ReportsPage service-hours display', () => {
     });
 
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('此期間服務工時無資料。')).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('ReportsPage service-hours display', () => {
     });
 
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
 
     expect(screen.getByText('8-3')).toHaveAttribute('rowspan', '2');
@@ -119,7 +119,7 @@ describe('ReportsPage service-hours display', () => {
     const query = vi.spyOn(weeklyOperationsReportQueryClient, 'query')
       .mockResolvedValueOnce(originalReport).mockResolvedValueOnce(correctedReport);
     render(<ReportsPage />);
-    await screen.findByText('CASE-WEEK-001');
+    await screen.findByRole('table', { name: '週報案件受理總表' });
     fireEvent.click(screen.getByRole('tab', { name: '每週服務中與工時' }));
     expect(screen.getAllByText('CASE-WEEK-001')).toHaveLength(2);
     expect(screen.getAllByText('2026/8/17')).toHaveLength(2);
@@ -151,12 +151,12 @@ describe('ReportsPage service-hours display', () => {
 
     expect(await screen.findByText('此期間沒有案件受理資料。')).toBeInTheDocument();
     const firstWeek = screen.getByRole('row', { name: '週次 2026-08-17' });
-    expect(firstWeek).toHaveTextContent('2026-08-17～2026-08-23');
-    expect(firstWeek).toHaveTextContent('推廣次數：12');
-    expect(firstWeek).toHaveTextContent('詢問人次：8');
+    expect(firstWeek).toHaveTextContent('2026-08-17 ~ 2026-08-23');
+    expect(within(firstWeek).getByRole('cell', { name: '推廣次數：12' })).toBeInTheDocument();
+    expect(within(firstWeek).getByRole('cell', { name: '詢問人次：8' })).toBeInTheDocument();
     const secondWeek = screen.getByRole('row', { name: '週次 2026-08-24' });
-    expect(secondWeek).toHaveTextContent('推廣次數：未登錄／待補正');
-    expect(secondWeek).toHaveTextContent('詢問人次：0');
+    expect(within(secondWeek).getByRole('cell', { name: '推廣次數：未登錄／待補正' })).toBeInTheDocument();
+    expect(within(secondWeek).getByRole('cell', { name: '詢問人次：0' })).toBeInTheDocument();
   });
 
   it('營運報表查詢失敗時顯示錯誤而不是空白', async () => {

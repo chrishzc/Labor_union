@@ -43,6 +43,19 @@ export const WeeklyReportCaseTotalsSchema = z.strictObject({
 });
 
 export const WeeklyOperationsCaseRowSchema = z.strictObject({
+  serial_number: z.number().int(),
+  month_label: z.string(),
+  application_date_roc: z.string(),
+  general_eligible: z.number().int().min(0).max(1),
+  general_ineligible: z.number().int().min(0).max(1),
+  subsidized_eligible: z.number().int().min(0).max(1),
+  subsidized_ineligible: z.number().int().min(0).max(1),
+  order_established: z.number().int().min(0).max(1),
+  negotiating: z.number().int().min(0).max(1),
+  cancelled: z.number().int().min(0).max(1),
+  review_rejected: z.number().int().min(0).max(1),
+  service_status: z.string(),
+  notes: z.string(),
   case_no: z.string().min(1),
   applicant_name: z.string().min(1),
   application_date: DateSchema.nullable(),
@@ -144,6 +157,10 @@ export type WeeklyOperationsReport = z.infer<typeof WeeklyOperationsReportSchema
 export type WeeklyOperationsReportData = z.infer<typeof WeeklyOperationsReportResponseSchema>['data'];
 
 const CaseStatisticsSummarySchema = z.strictObject({
+  order_established_count: z.number().int().nonnegative(),
+  negotiating_count: z.number().int().nonnegative(),
+  cancelled_count: z.number().int().nonnegative(),
+  review_rejected_count: z.number().int().nonnegative(),
   application_count: z.number().int().nonnegative(),
   general_eligible_count: z.number().int().nonnegative(),
   general_ineligible_count: z.number().int().nonnegative().nullable(),

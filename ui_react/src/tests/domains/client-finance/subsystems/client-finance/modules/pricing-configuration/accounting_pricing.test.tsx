@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { accountingPricingClient, type CasePricing, type PricingCatalog } from '../../../../../../../api/client_finance/accounting_pricing_client';
+import { accountingPricingClient, pricingPolicyDraft, type CasePricing, type PricingCatalog } from '../../../../../../../api/client_finance/accounting_pricing_client';
 import { ApiHttpError, ApiNetworkError } from '../../../../../../../api/shared/typed_errors';
 import { AccountingParametersPage } from '../../../../../../../pages/AccountingParametersPage';
 import { CasePricingAdjustmentPanel } from '../../../../../../../components/CasePricingAdjustmentPanel';
@@ -13,7 +13,7 @@ vi.mock('../../../../../../../api/client_finance/accounting_pricing_client', asy
 });
 
 const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: 'policy',
-  terms: { identity_name: '社福', rule: 'social', subsidy_hours: 120,
+  terms: { identity_name: '補助市民', rule: 'social', subsidy_hours: 120,
     client: { covered: 350, excess: 350 }, payroll: { covered: 350, excess: 350 } },
   impact: { covered_hours: 120, excess_hours: 40, client_amount: 14000, staff_covered_amount: 42000,
     staff_excess_amount: 14000, staff_total_amount: 56000, subsidy_amount: 42000, subsidy_return_amount: 0 } };
@@ -21,6 +21,32 @@ const current: CasePricing = { case_no: 'synthetic-case', revision: 0, source: '
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('Standalone accounting parameter policy', () => {
+  it('renames a legacy draft by its rule while preserving historical amounts and custom identities', async () => {
+    const policy = { effective_on: '2026-10-29', identities: [
+      { ...current.terms, identity_name: '補助市民', rule: 'citizen' as const, subsidy_hours: 40, client: { covered: 300, excess: 320 }, payroll: { covered: 300, excess: 310 } },
+      { ...current.terms, identity_name: '社福' },
+      { ...current.terms, identity_name: '原住民', rule: 'citizen' as const, subsidy_hours: 80 },
+    ], twins_client: { covered: 450, excess: 460 }, twins_payroll: { covered: 450, excess: 470 } };
+    const original = structuredClone(policy);
+    const draft = pricingPolicyDraft(policy);
+    expect(draft.identities.map(item => item.identity_name)).toEqual(['一般市民', '補助市民', '原住民']);
+    expect(draft.identities.map(({ identity_name: _name, ...terms }) => terms))
+      .toEqual(policy.identities.map(({ identity_name: _name, ...terms }) => terms));
+    vi.mocked(accountingPricingClient.catalog).mockResolvedValue({ revision: 7, versions: [{ revision: 7, policy, actor: 'synthetic-admin', reason: '' }] });
+    render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
+    expect(await screen.findByLabelText('一般市民 補助上限')).toHaveValue(40);
+    expect(screen.getByLabelText('補助市民 補助上限')).toHaveValue(120);
+    expect(screen.getByLabelText('原住民 補助上限')).toHaveValue(80);
+    fireEvent.click(screen.getByRole('tab', { name: '版本紀錄' }));
+    fireEvent.click(screen.getByRole('button', { name: '版本 7' }));
+    expect(screen.getByText('原版本名稱：補助市民')).toBeInTheDocument();
+    expect(screen.getByText('原版本名稱：社福')).toBeInTheDocument();
+    expect(screen.getByLabelText('社福 補助上限')).toHaveValue(120);
+    expect(screen.getByLabelText('社福 補助上限')).toBeDisabled();
+    expect(policy).toEqual(original);
+    expect(accountingPricingClient.savePolicy).not.toHaveBeenCalled();
+  });
+
   it('keeps independent excess rates, inherits new identities and confirms saved version by readback', async () => {
     let catalog: PricingCatalog = { revision: 0, versions: [] };
     vi.mocked(accountingPricingClient.catalog).mockImplementation(async () => structuredClone(catalog));
@@ -29,11 +55,11 @@ describe('Standalone accounting parameter policy', () => {
       return { revision: revision + 1 };
     });
     render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
-    const excess = await screen.findByLabelText('社福 客戶用盡後時薪');
+    const excess = await screen.findByLabelText('補助市民 客戶用盡後時薪');
     fireEvent.change(excess, { target: { value: '300' } });
-    fireEvent.change(screen.getByLabelText('社福 月嫂用盡後時薪'), { target: { value: '310' } });
-    expect(screen.getByLabelText('社福 客戶補助內時薪')).toHaveValue(350);
-    expect(screen.getByLabelText('社福 月嫂補助內時薪')).toHaveValue(350);
+    fireEvent.change(screen.getByLabelText('補助市民 月嫂用盡後時薪'), { target: { value: '310' } });
+    expect(screen.getByLabelText('補助市民 客戶補助內時薪')).toHaveValue(350);
+    expect(screen.getByLabelText('補助市民 月嫂補助內時薪')).toHaveValue(350);
     fireEvent.change(screen.getByLabelText('新增身分名稱'), { target: { value: '新增身分' } });
     fireEvent.change(screen.getByLabelText('沿用身分規則'), { target: { value: 'social' } });
     fireEvent.click(screen.getByRole('button', { name: '新增身分' }));
@@ -43,7 +69,7 @@ describe('Standalone accounting parameter policy', () => {
     await screen.findByText('版本 1 已儲存；依生效日期套用新案件。');
     expect(accountingPricingClient.savePolicy).toHaveBeenCalledTimes(1);
     const saved = vi.mocked(accountingPricingClient.savePolicy).mock.calls[0][0];
-    expect(saved.identities.find(item => item.identity_name === '社福')?.payroll).toEqual({ covered: 350, excess: 310 });
+    expect(saved.identities.find(item => item.identity_name === '補助市民')?.payroll).toEqual({ covered: 350, excess: 310 });
     expect(screen.queryByRole('tab', { name: '收款帳戶' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '版本紀錄' }));
     await screen.findByText('synthetic-admin');
@@ -94,10 +120,10 @@ describe('Subsidy pricing protections', () => {
     expect(await screen.findByLabelText('非市民 客戶補助內時薪')).toHaveValue(0);
     expect(screen.getByLabelText('非市民 月嫂補助內時薪')).toHaveValue(0);
     expect(screen.getByLabelText('非市民 客戶用盡後時薪')).toHaveValue(320);
-    fireEvent.change(screen.getByLabelText('社福 客戶補助內時薪'), { target: { value: '351' } });
+    fireEvent.change(screen.getByLabelText('補助市民 客戶補助內時薪'), { target: { value: '351' } });
     const save = screen.getByRole('button', { name: '儲存新版本' });
     expect(save).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('社福 月嫂補助內時薪'), { target: { value: '351' } });
+    fireEvent.change(screen.getByLabelText('補助市民 月嫂補助內時薪'), { target: { value: '351' } });
     expect(save).toBeEnabled();
     fireEvent.change(screen.getByLabelText('雙胞胎客戶補助內時薪'), { target: { value: '451' } });
     expect(save).toBeDisabled();

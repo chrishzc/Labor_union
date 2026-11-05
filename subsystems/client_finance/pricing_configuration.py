@@ -142,6 +142,7 @@ class PricingConfigurationApplication:
                 return replay
             if catalog.revision != expected_revision:
                 raise PricingConflict("pricing_policy_stale")
+            policy.validate_current_identity_names()
             policy.validate_subsidy_rates()
             revision = catalog.revision + 1
             self.repository.save_policy(policy, revision, actor, reason)

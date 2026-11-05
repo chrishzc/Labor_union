@@ -8,8 +8,8 @@ import { subsidyPeriodClient, type SubsidyCaseCoverage } from '../api/government
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { financeEntryLabels } from './FinanceCaseHistory';
 
-type Props = { caseNo: string; onClose: () => void; onOpenBank: () => void; onChanged: () => void };
-export function CaseSubsidyDetailDrawer({ caseNo, onClose, onOpenBank }: Props) {
+type Props = { embedded?: boolean; caseNo: string; onClose: () => void; onOpenBank: () => void; onChanged: () => void };
+export function CaseSubsidyDetailDrawer({ caseNo, onClose, onOpenBank, embedded = false }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const locked = false;
   const [revision, setRevision] = useState(0);
@@ -20,6 +20,7 @@ export function CaseSubsidyDetailDrawer({ caseNo, onClose, onOpenBank }: Props) 
   const [errors, setErrors] = useState<string[]>([]);
   const failed = (section: string) => setErrors(value => [...value, section]);
   useEffect(() => {
+    if (embedded) return;
     const element = dialog.current;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     element?.showModal();
@@ -27,7 +28,7 @@ export function CaseSubsidyDetailDrawer({ caseNo, onClose, onOpenBank }: Props) 
       element?.close();
       queueMicrotask(() => { if (!element?.open && opener?.isConnected) opener.focus(); });
     };
-  }, []);
+  }, [embedded]);
   useEffect(() => {
     const controller = new AbortController(); const signal = controller.signal;
     setErrors([]); setOrder(null); setGovernment(undefined); setHistory(undefined); setRefund(undefined);
@@ -45,20 +46,21 @@ export function CaseSubsidyDetailDrawer({ caseNo, onClose, onOpenBank }: Props) 
     || entry.allocations.some(allocation => subsidyObligations.has(allocation.obligation_identity))).map(entry => entry.entry_id));
   const entries = history?.ledger_entries.filter(entry => subsidyEntryIds.has(entry.entry_id)
     || (entry.reversal_of_entry_id !== null && subsidyEntryIds.has(entry.reversal_of_entry_id))) ?? [];
-  return <dialog className="finance-case-drawer" ref={dialog} aria-labelledby="case-subsidy-title" onCancel={event => { event.preventDefault(); if (!locked) onClose(); }}>
+  const content=<>
     <header><div><p>案件補助明細</p><h2 id="case-subsidy-title">{order?.client_name ?? caseNo}</h2><small>{caseNo}</small></div><button type="button" className="finance-reload-btn" disabled={locked} onClick={onClose} aria-label="關閉案件補助明細">關閉</button></header>
     <div className="finance-drawer-content">
       <p className="subsidy-refund-note">補助資格、政府入款、客戶退款與工會墊款，集中在這裡核對。</p>
       {errors.length > 0 && <p role="alert" className="finance-state error">{errors.join('、')}暫時無法取得。<button type="button" disabled={locked} onClick={() => setRevision(value => value + 1)}>重新查詢</button></p>}
-      <section><h3>補助資格與計算依據</h3><p>身分類別：{order?.identity_status??'待確認'}（補助市民最高 40 小時／社福最高 120 小時）</p></section>
+      <section><h3>補助資格與計算依據</h3><p>身分類別：{order?.identity_status??'待確認'}（一般市民原規則最高 40 小時／補助市民原規則最高 120 小時；實際依本案有效設定）</p></section>
       <section><h3>政府補助</h3>{government===undefined?<p role="status">正在查詢政府補助…</p>:government?<><p>服務結束／歸屬月份：{government.service_end_date??'待確認'}</p><p>本案補助金額：{financeMoney(government.amount_ntd)}</p>{government.coverage.length?government.coverage.map(receipt=><p key={receipt.receipt_id}>{receipt.settled===false?'已納入本期':'已核銷'} ·「{receipt.label}」。整期入款 {financeMoney(receipt.amount_ntd)}；整期代墊回收 {financeMoney(receipt.recovered_advance_ntd)}。</p>):<p>尚未整期核銷。</p>}</>:<p>補助資料待確認。</p>}<p>政府入款與代墊回收請至「收付款 → 應收款 → 政府補助／代墊回收」核對整期款項。</p></section>
       <section><h3>客戶補助退款</h3>{refund === undefined || history === undefined ? <p role="status">正在查詢應退補助與退款紀錄…</p> : <>
         {refund && <dl className="finance-fact-grid"><div><dt>{refund.is_estimate ? '計算資料待同步' : '目前應退'}</dt><dd>{financeMoney(refund.amount_ntd)}</dd></div><div><dt>應退款日期</dt><dd>{refund.due_date ?? '待確認'}</dd></div></dl>}
         {!refund && !errors.includes('應退補助') && <p className="subsidy-refund-note">目前沒有待退補助項目；已付款紀錄如下。</p>}
         <ol className="finance-history-timeline">{entries.map(entry => <li key={entry.entry_id}><strong>{financeEntryLabels[entry.entry_type]} {financeMoney(entry.amount_ntd)}</strong><small>{entry.occurred_on}{entry.reversal_of_entry_id ? '・沖正' : history?.ledger_entries.some(row => row.reversal_of_entry_id === entry.entry_id) ? '・有沖正紀錄' : '・已入帳'}</small></li>)}</ol>
         {!entries.length && !errors.includes('帳務歷史') && <p className="subsidy-refund-note">尚無已入帳的補助退款紀錄。</p>}
-        <button type="button" className="finance-reload-btn" disabled={locked} onClick={onOpenBank}>核對銀行出入款</button>
+        <button type="button" className="finance-reload-btn" disabled={locked} onClick={onOpenBank}>{embedded?'查看案件實際收付款':'核對銀行出入款'}</button>
       </>}</section>
     </div>
-  </dialog>;
+  </>;
+  return embedded?<section className="finance-case-subsidy-inline">{content}</section>:<dialog className="finance-case-drawer" ref={dialog} aria-labelledby="case-subsidy-title" onCancel={event=>{event.preventDefault();if(!locked)onClose();}}>{content}</dialog>;
 }

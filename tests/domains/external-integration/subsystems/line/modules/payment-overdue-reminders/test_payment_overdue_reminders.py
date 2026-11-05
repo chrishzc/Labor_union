@@ -162,3 +162,37 @@ def test_provider_guard_still_rejects_unavailable_or_changed_recipient(recipient
 @pytest.mark.parametrize('stage,label',[('deposit','訂金'),('first','第一期款'),('second','第二期款')])
 def test_copy_has_only_selected_stage_remaining(stage,label):
     assert reminder_text(replace(PAYMENT,payment_stage=stage))==f'本案{label}尚有 NT$ 18,000 未確認入帳，請協助確認繳款，謝謝。'
+
+
+def test_manual_case_notice_allows_future_due_but_uses_existing_queue_and_actor_audit():
+    from subsystems.line.payment_overdue_reminders import CASE_SOURCE_TYPE
+    future=replace(PAYMENT,due_date=date(2099,1,1))
+    unit=Unit();unit.payment_overdue_reminders.payment.return_value=future
+    from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+    unit.payment_overdue_reminders.case_facts=Mock(return_value=(ClientPaymentReminderFacts(future,None,True,'訂單成立'),))
+    result=PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send_case(future,'future-operation',ActorContext('union'))
+    assert result==(1,'pending')
+    request=unit.delivery_tasks.enqueue.call_args.args[0]
+    assert request.source_aggregate_type==CASE_SOURCE_TYPE
+    assert request.source_aggregate_identity==PAYMENT.obligation_identity
+    unit.commit.assert_called_once()
+
+
+def test_manual_case_notice_does_not_enqueue_paid_or_stale_periods():
+    unit=Unit();unit.payment_overdue_reminders.payment.return_value=replace(PAYMENT,remaining_amount_ntd=0)
+    with pytest.raises(PaymentOverdueReminderConflict):
+        PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).send_case(PAYMENT,'paid-operation',ActorContext('union'))
+    unit.delivery_tasks.enqueue.assert_not_called()
+
+
+def test_case_notice_query_returns_period_history_and_does_not_enqueue():
+    from subsystems.client_finance.payment_reminder_query import ClientPaymentReminderFacts
+    from subsystems.line.payment_overdue_reminders import CaseReminderRecord
+    unit=Unit();repo=unit.payment_overdue_reminders
+    repo.case_facts=Mock(return_value=(ClientPaymentReminderFacts(PAYMENT,None,True,'訂單成立'),))
+    repo.history=Mock(return_value=(CaseReminderRecord(7,NOW,None,'pending','queued'),))
+    rows=PaymentOverdueReminderApplication(lambda:unit,lambda:NOW).case(PAYMENT.case_no)
+    assert [row.payment_stage for row in rows]==['deposit','first','second']
+    current=next(row for row in rows if row.payment_stage==PAYMENT.payment_stage)
+    assert current.can_send and current.history[0].sent_at is None and current.message
+    unit.delivery_tasks.enqueue.assert_not_called();unit.commit.assert_not_called()

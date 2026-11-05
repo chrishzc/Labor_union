@@ -11,6 +11,7 @@ from api.dependencies.admin_auth import require_admin
 from api.dependencies.client_subsidy_return_query import get_subsidy_return_query_repository
 from api.routes.finance_reports import router
 from subsystems.client_finance.subsidy_return_query import SubsidyReturnCaseFacts, query_subsidy_returns
+from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
 
 
 def case(case_no='CASE-A', **changes):
@@ -40,7 +41,7 @@ def test_cancelled_refund_remains_visible_and_social_welfare_without_customer_ad
         case('FULL', identity_status='低收入戶', service_hours=Decimal('120')),
         case('NO-ENTITLEMENT', identity_status='非市民'),
         case('PAID', return_settled=True),
-        case('EXCESS', identity_status='社福', client_hourly_rate_ntd=350),
+        case('EXCESS', identity_status='補助市民', client_hourly_rate_ntd=350),
         case('FLOOR', identity_status='中低收入戶', service_hours=Decimal('120'), floor_fee=Decimal('600'), client_hourly_rate_ntd=350),
     )
     result = query_subsidy_returns(Repository(facts))
@@ -51,6 +52,18 @@ def test_formal_refund_overrides_estimate_without_recipient_bank_requirements():
     fact = case(has_formal_return=True, formal_amount_ntd=9000, formal_due_date=date(2026, 9, 15))
     row, = query_subsidy_returns(Repository((fact,))).rows
     assert (row.amount_ntd, row.due_date, row.is_estimate) == (9000, date(2026, 9, 15), False)
+
+
+def test_bound_legacy_rule_and_custom_cap_win_over_renamed_identity_and_default_rates():
+    citizen = CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300))
+    custom = CasePricingTerms('原住民', IdentityRule.CITIZEN, Decimal(80), HourlyRates(350, 300), HourlyRates(350, 300))
+    social = CasePricingTerms('社福', IdentityRule.SOCIAL, Decimal(120), HourlyRates(350, 350), HourlyRates(350, 350))
+    facts = (case('OLD', identity_status='補助市民', pricing=citizen),
+             case('FORMAL', identity_status='補助市民', pricing=citizen, has_formal_return=True, formal_amount_ntd=9000),
+             case('CUSTOM', identity_status='原住民', pricing=custom),
+             case('SOCIAL', identity_status='補助市民', pricing=social))
+    assert [(row.case_no, row.amount_ntd, row.is_estimate) for row in query_subsidy_returns(Repository(facts)).rows] == [
+        ('OLD', 12000, True), ('FORMAL', 9000, False), ('CUSTOM', 28000, True)]
 
 
 def test_missing_amount_is_unknown_and_current_service_end_can_determine_due_date():

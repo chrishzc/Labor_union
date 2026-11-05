@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, normalize_subsidy_policy_identity
+from domains.client_finance.pricing_policy import CasePricingTerms, IdentityRule
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,7 @@ def project_subsidy_return(
     completed_on: date | None, has_formal_return: bool,
     formal_amount_ntd: int | None, formal_due_date: date | None,
     return_settled: bool,
+    pricing: CasePricingTerms | None = None,
 ) -> SubsidyReturnProjection | None:
     """Show eligible cases before posting, using the frozen customer terms rate.
 
@@ -29,13 +31,17 @@ def project_subsidy_return(
     instruction or evidence that the customer's fees have been collected.
     """
     identity = normalize_subsidy_policy_identity(identity_status)
-    if identity != '補助市民' or return_settled:
+    eligible = pricing.rule is IdentityRule.CITIZEN if pricing is not None else identity == '一般市民'
+    if not eligible or return_settled:
         return None
     if has_formal_return:
         return SubsidyReturnProjection(formal_amount_ntd, formal_due_date, False)
     due_date = subsidy_advance_due_date(completed_on) if completed_on else None
     if service_hours is None or floor_fee is None:
         return SubsidyReturnProjection(None, due_date, True)
+    if pricing is not None:
+        amount = pricing.subsidy_return(service_hours)
+        return SubsidyReturnProjection(amount, due_date, True) if amount else None
     coverage = derive_subsidy_coverage(identity, service_hours, floor_fee)
     if coverage.is_full_subsidy_order or coverage.subsidy_hours == 0:
         return None

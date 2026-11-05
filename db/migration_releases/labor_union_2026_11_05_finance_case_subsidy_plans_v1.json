@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-finance-case-subsidy-plans-2026-11-05-v1",
+  "release_metadata": {
+    "release_name": "Independent human case subsidy plans",
+    "application_version": "finance-case-subsidy-plans-v1",
+    "published_at": "2026-11-05",
+    "description": "Append-only human plans selectable before collection; preserves all financial evidence and dates."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-finance-case-arrangements-2026-11-04-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1067_finance_case_subsidy_plans.sql",
+      "relative_path": "db/schema_parts/1067_finance_case_subsidy_plans.sql",
+      "sha256": "f4863b5e856097653f6dc30e1a9453cf1f6ef3c23ba5dd60366705e047f82fce",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "disable new plan writer; retain all events, financial rows and backup",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "finance-case-subsidy-plans-exact",
+      "phase": "post-schema",
+      "policy": "Exact columns, indexes, checks and immutable triggers; no existing data changes.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "finance-case-subsidy-plans-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "finance-case-subsidy-plans-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_05_finance_case_subsidy_plans_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_05_finance_case_subsidy_plans_v1.descriptors.json",
+    "sha256": "1844b2720b62b132a0ce117156993abe3d287075da5b182a29011f4373911a87",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

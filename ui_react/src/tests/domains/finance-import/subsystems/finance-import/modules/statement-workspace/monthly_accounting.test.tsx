@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FinancePostedBankTransactions } from '../../../../../../../components/FinancePostedBankTransactions';
 import { FinanceMonthlyAccounting } from '../../../../../../../components/FinanceMonthlyAccounting';
 import { FinanceReceivableItems } from '../../../../../../../components/FinanceReceivableItems';
 import { HistoricalAccountingMarkerPanel } from '../../../../../../../components/HistoricalAccountingMarkerPanel';
@@ -37,21 +38,21 @@ describe('每月帳務',()=>{
     vi.mocked(monthlyAccountingClient.query).mockResolvedValue(data);
     render(<FinanceMonthlyAccounting initialRange={{start_month:'2026-09',end_month:'2026-10',category:'subsidy'}} onCase={vi.fn()}/>);
     expect(await screen.findByText('每月到期款進度')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab',{name:'實際收支'}));
-    expect(screen.getByRole('status')).toHaveTextContent('無法正確拆分實際收支');
+    fireEvent.click(screen.getByRole('tab',{name:'已核銷收付款'}));
+    expect(screen.getByRole('status')).toHaveTextContent('無法正確拆分已核銷收付款');
     expect(screen.getByRole('button',{name:'下載每月摘要 Excel'})).toBeDisabled();
-    expect(screen.queryByText('實際入款')).not.toBeInTheDocument();
+    expect(screen.queryByText('已核銷入款')).not.toBeInTheDocument();
   });
   it('shows monthly rows, switches cash basis and expands individual bank sources',async()=>{
     render(<FinanceMonthlyAccounting initialRange={{start_month:'2026-09',end_month:'2026-10',category:'subsidy'}} onCase={vi.fn()}/>);
     expect(await screen.findByText('每月到期款進度')).toBeInTheDocument();
     expect(screen.getByText(/歷史人工核銷案件 1 案/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab',{name:'實際收支'}));
+    fireEvent.click(screen.getByRole('tab',{name:'已核銷收付款'}));
     fireEvent.click(screen.getAllByRole('button',{name:'展開明細'})[1]);
     const details=screen.getByRole('region',{name:'2026-10明細'});
     expect(within(details).getByText('b1')).toBeInTheDocument();expect(within(details).getByText('b2')).toBeInTheDocument();
     expect(within(details).getAllByText('government')).toHaveLength(1);
-    fireEvent.keyDown(screen.getByRole('tab',{name:'實際收支'}),{key:'ArrowLeft'});
+    fireEvent.keyDown(screen.getByRole('tab',{name:'已核銷收付款'}),{key:'ArrowLeft'});
     expect(screen.getByRole('tab',{name:'到期款進度'})).toHaveAttribute('aria-selected','true');
   });
   it('hides old results for an invalid range and disables download when empty',async()=>{
@@ -77,4 +78,35 @@ describe('歷史案件人工核銷',()=>{
     expect(vi.mocked(monthlyAccountingClient.mark).mock.calls[0]).toEqual(vi.mocked(monthlyAccountingClient.mark).mock.calls[1]);
     expect(await screen.findByText('案件帳務已人工核銷')).toBeInTheDocument();expect(data.client_items[0].actual_ntd).toBe(9900);
   });
+});
+
+
+it('retains each monthly mode expansion across mode switches and refreshes',async()=>{
+ const open=vi.fn(),range={start_month:'2026-09',end_month:'2026-10',category:'subsidy' as const};
+ const view=render(<FinanceMonthlyAccounting initialRange={range} onCase={open}/>);
+ await screen.findByText('每月到期款進度');
+ fireEvent.click(screen.getAllByRole('button',{name:'展開明細'})[0]);
+ fireEvent.click(within(screen.getByRole('region',{name:'2026-09明細'})).getByRole('button',{name:'處理案件'}));expect(open).toHaveBeenCalledWith('S1');
+ fireEvent.click(screen.getByRole('tab',{name:'已核銷收付款'}));
+ fireEvent.click(screen.getAllByRole('button',{name:'展開明細'})[1]);
+ fireEvent.click(within(screen.getByRole('region',{name:'2026-10明細'})).getAllByRole('button',{name:'S1'})[0]);expect(open).toHaveBeenLastCalledWith('S1');
+ fireEvent.click(screen.getByRole('tab',{name:'到期款進度'}));expect(screen.getByRole('region',{name:'2026-09明細'})).toBeInTheDocument();
+ view.rerender(<FinanceMonthlyAccounting initialRange={range} onCase={open} revision={1}/>);
+ await waitFor(()=>expect(monthlyAccountingClient.query).toHaveBeenCalledTimes(2));
+ expect(screen.getByRole('region',{name:'2026-09明細'})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('tab',{name:'已核銷收付款'}));expect(screen.getByRole('region',{name:'2026-10明細'})).toBeInTheDocument();
+});
+
+
+it('opens posted bank cases without duplicating a shared amount or offering another posting action',async()=>{
+ const data=report();data.rows[1].bank_facts=data.rows[1].bank_facts.map(bank=>({...bank,bank:bank.identity==='government'?'taishin':'sinopac',cash_flow:bank.identity==='government'?'G':'C'}));
+ vi.mocked(monthlyAccountingClient.query).mockResolvedValue(data);
+ const open=vi.fn();render(<FinancePostedBankTransactions onCase={open}/>);
+ fireEvent.change(screen.getByLabelText('銀行交易起日'),{target:{value:'2026-10-01'}});fireEvent.change(screen.getByLabelText('銀行交易迄日'),{target:{value:'2026-10-31'}});fireEvent.click(screen.getByRole('button',{name:'查詢已核銷交易'}));
+ await screen.findByText('government');
+ const row=screen.getByRole('row',{name:/government/});expect(row).toHaveTextContent('NT$ 90,000');expect(within(row).getAllByText('government')).toHaveLength(1);
+ expect(row).toHaveTextContent('整筆來源，不代表每案分配金額');
+ fireEvent.click(within(row).getByRole('button',{name:'S2'}));expect(open).toHaveBeenCalledWith('S2');
+ expect(screen.queryByRole('button',{name:/確認核銷/})).not.toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('已核銷銀行'),{target:{value:'taishin'}});expect(screen.queryByText('b1')).not.toBeInTheDocument();expect(screen.getByText('government')).toBeInTheDocument();
 });

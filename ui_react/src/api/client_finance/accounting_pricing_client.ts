@@ -27,6 +27,18 @@ export type CasePricing = z.infer<typeof caseView>;
 export type PricingPreview = z.infer<typeof preview>;
 export type PricingImpact = z.infer<typeof impact>;
 
+export function pricingIdentityLabel(terms: PricingTerms): string {
+  if (!['一般市民', '補助市民', '社福', '低收入戶', '中低收入戶', '非市民'].includes(terms.identity_name)) return terms.identity_name;
+  return { citizen: '一般市民', social: '補助市民', non_citizen: '非市民' }[terms.rule];
+}
+
+/** Copy a stored policy into a new draft; amounts and historical versions stay intact. */
+export function pricingPolicyDraft(policy: PricingPolicy): PricingPolicy {
+  return { ...structuredClone(policy), identities: policy.identities.map(item => ({
+    ...structuredClone(item), identity_name: pricingIdentityLabel(item),
+  })) };
+}
+
 export function pricingTermsError(terms: PricingTerms): string {
   if (terms.rule === 'non_citizen' && (terms.subsidy_hours !== 0 || terms.client.covered !== 0 || terms.payroll.covered !== 0)) return '非市民的補助時數與補助內時薪必須為 0。';
   if (terms.client.covered !== terms.payroll.covered) return '補助範圍內的客戶時薪與月嫂時薪必須相等，才能向政府報帳。';

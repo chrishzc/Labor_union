@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "7b96d5b9024d959167d6d9aa7976026b61700a7f026542ce795fb16447303461",
+  "active_artifacts_sha256": "a12b3e163686d3858764bf655eccae295531403dc27882fd63fba64d68e4c220",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -194,7 +194,9 @@
     "db/schema_parts/240_order_reopen_reason_optional.sql",
     "db/schema_parts/241_finance_case_accounting_markers.sql",
     "db/schema_parts/242_accounting_difference_resolution.sql",
-    "db/schema_parts/243_historical_order_reused_pairing_check.sql"
+    "db/schema_parts/243_historical_order_reused_pairing_check.sql",
+    "db/schema_parts/244_finance_case_arrangements.sql",
+    "db/schema_parts/245_finance_case_subsidy_plans.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",
@@ -235,7 +237,9 @@
     "db/schema_parts/1062_order_reopen_reason_optional.sql": "migration-only",
     "db/schema_parts/1063_finance_case_accounting_markers.sql": "migration-only",
     "db/schema_parts/1064_accounting_difference_resolution.sql": "migration-only",
-    "db/schema_parts/1065_historical_order_reused_pairing_check.sql": "migration-only"
+    "db/schema_parts/1065_historical_order_reused_pairing_check.sql": "migration-only",
+    "db/schema_parts/1066_finance_case_arrangements.sql": "migration-only",
+    "db/schema_parts/1067_finance_case_subsidy_plans.sql": "migration-only"
   },
   "retirement_contracts": {
     "db/schema_parts/1012_service_before_replacement.sql": {
@@ -579,6 +583,24 @@
       "replay": "exact successor is current; exact predecessor is pending",
       "rollback": "forward-only after reused evidence; retain all rows and source backup",
       "unresolved_policy": "missing, partial or drift CHECK metadata blocks apply"
+    },
+    "db/schema_parts/1066_finance_case_arrangements.sql": {
+      "source_object": "accounting case metadata without explicit direct-arrangement history",
+      "successor": "db/schema_parts/244_finance_case_arrangements.sql",
+      "terminal_schema_evidence": "fresh 244 and preserve 1066 byte-identical",
+      "data_effect": "schema-only; no seed, business backfill or destructive change",
+      "replay": "exact append-only table and guards are current; existing data preserved",
+      "rollback": "disable new writer; retain all events and source backup",
+      "unresolved_policy": "partial or drift metadata blocks apply"
+    },
+    "db/schema_parts/1067_finance_case_subsidy_plans.sql": {
+      "source_object": "accounting metadata without independent human subsidy plans",
+      "successor": "db/schema_parts/245_finance_case_subsidy_plans.sql",
+      "terminal_schema_evidence": "fresh 245 and preserve 1067 are byte-identical",
+      "data_effect": "schema-only; no seed, business backfill or destructive change",
+      "replay": "exact append-only table and guards are current; existing data preserved",
+      "rollback": "disable new writer; retain all events and source backup",
+      "unresolved_policy": "partial or drift metadata blocks apply"
     }
   }
 }

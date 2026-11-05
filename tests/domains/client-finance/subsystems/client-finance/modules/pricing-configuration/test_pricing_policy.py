@@ -3,7 +3,7 @@ File: test_pricing_policy.py
 Description: 驗證帳務計價規則、試算不可變性、延遲連線唯讀目錄快取與儲存後失效邊界。
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -15,7 +15,74 @@ from subsystems.client_finance.pricing_configuration import (
 
 
 def terms(rule=IdentityRule.SOCIAL):
-    return CasePricingTerms("社福", rule, Decimal(120), HourlyRates(350, 300), HourlyRates(350, 310))
+    return CasePricingTerms("補助市民", rule, Decimal(120), HourlyRates(350, 300), HourlyRates(350, 310))
+
+
+def test_citizen_identities_are_distinct_through_import_subsidy_and_payment_rules():
+    from domains.client_finance.subsidy_coverage import derive_subsidy_coverage, normalize_subsidy_policy_identity
+    from subsystems.case_import.hcm_adapter import _client_attributes, build_approved_case_architecture_bootstrap_intent
+    from domains.bootstrap.case_architecture import policy_kind_for_identity, PayrollPolicyKind
+    from subsystems.government_subsidy.reconciliation_register_query import _subsidy_terms
+    for identity, cap, deposit, kind in (
+        ('一般市民', 40, 5, PayrollPolicyKind.CITIZEN),
+        ('補助市民', 120, 0, PayrollPolicyKind.SUBSIDIZED_CITIZEN),
+    ):
+        assert normalize_subsidy_policy_identity(identity) == identity
+        assert _client_attributes({'identity_status': identity})[0].value == identity
+        assert derive_subsidy_coverage(identity, Decimal(160), Decimal(0)).subsidy_hours == cap
+        assert _subsidy_terms(identity, Decimal(160), 350)[0] == cap
+        assert policy_kind_for_identity(identity) is kind
+        candidate = build_approved_case_architecture_bootstrap_intent('synthetic', identity, datetime(2026, 11, 3), date(2026, 12, 1))
+        assert candidate.client_payment_terms.deposit_service_days == deposit
+    for alias in ('社福', '低收入戶', '中低收入戶'):
+        assert normalize_subsidy_policy_identity(alias) == '補助市民'
+
+
+def test_current_policy_selects_40_and_120_without_merging_names():
+    policy = PricingPolicy(date(2026, 11, 3), (
+        CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+        terms(), CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 320), HourlyRates(0, 320)),
+    ), HourlyRates(450, 450), HourlyRates(450, 450))
+    policy.validate_current_identity_names()
+    general, subsidized = policy.for_case('一般市民'), policy.for_case('補助市民')
+    assert (general.subsidy_hours, subsidized.subsidy_hours) == (40, 120)
+    assert (general.client_charge(Decimal(100)), subsidized.client_charge(Decimal(100))) == (30000, 0)
+    assert (general.subsidy_return(Decimal(100)), subsidized.subsidy_return(Decimal(100))) == (12000, 0)
+
+
+def test_bound_legacy_policy_keeps_original_rules_and_cannot_be_published_again():
+    from dataclasses import replace
+    policy = PricingPolicy(date(2026, 10, 29), (
+        CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+        replace(terms(), identity_name='社福'),
+        CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 320), HourlyRates(0, 320)),
+    ), HourlyRates(450, 450), HourlyRates(450, 450))
+    assert policy.uses_legacy_identity_names
+    assert policy.for_case('補助市民').rule is IdentityRule.CITIZEN
+    assert policy.for_case('補助市民').subsidy_hours == 40
+    assert policy.for_case('社福').subsidy_hours == 120
+    with pytest.raises(ValueError, match='pricing_policy_identity_names_outdated'):
+        policy.validate_current_identity_names()
+
+
+def test_new_case_cannot_silently_bind_the_old_merged_identity_policy():
+    from infrastructure.mysql.pricing_configuration_repository import bind_initial_pricing
+    from domains.case_import.case_import import CaseImportDomainError, CaseImportIssue
+    legacy = {'effective_on': '2026-10-29', 'identities': [
+        {'identity_name': '補助市民', 'rule': 'citizen', 'subsidy_hours': 40, 'client': {'covered': 300, 'excess': 300}, 'payroll': {'covered': 300, 'excess': 300}},
+        {'identity_name': '社福', 'rule': 'social', 'subsidy_hours': 120, 'client': {'covered': 350, 'excess': 350}, 'payroll': {'covered': 350, 'excess': 350}},
+        {'identity_name': '非市民', 'rule': 'non_citizen', 'subsidy_hours': 0, 'client': {'covered': 0, 'excess': 320}, 'payroll': {'covered': 0, 'excess': 320}},
+    ], 'twins_client': {'covered': 450, 'excess': 450}, 'twins_payroll': {'covered': 450, 'excess': 450}}
+    class Cursor:
+        sql = ''
+        def execute(self, sql, params):
+            assert not sql.startswith('UPDATE')
+            self.sql = sql
+        def fetchone(self):
+            return {'id': 1, 'policy_json': legacy} if 'accounting_pricing_policies' in self.sql else {'identity_status': '補助市民'}
+    with pytest.raises(CaseImportDomainError, match='pricing_policy_identity_names_outdated') as caught:
+        bind_initial_pricing(Cursor(), 'new-supplement-case')
+    assert caught.value.issue is CaseImportIssue.BOOTSTRAP_BLOCKED
 
 
 def test_covered_rates_match_and_excess_tiers_remain_independent():
@@ -30,7 +97,7 @@ def test_covered_rates_match_and_excess_tiers_remain_independent():
 
 
 def test_cutoff_inside_a_service_day_and_customer_advance_refund():
-    pricing = CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(10), HourlyRates(300, 320), HourlyRates(300, 330))
+    pricing = CasePricingTerms("一般市民", IdentityRule.CITIZEN, Decimal(10), HourlyRates(300, 320), HourlyRates(300, 330))
     assert pricing.client_charge(Decimal(8), Decimal(8)) == 2 * 300 + 6 * 320
     assert pricing.subsidy_return(Decimal(16)) == 10 * 300
     from domains.government_subsidy.pricing import subsidy_claim_amount
@@ -39,7 +106,7 @@ def test_cutoff_inside_a_service_day_and_customer_advance_refund():
 
 def test_policy_birth_override_preserves_identity_subsidy_cap():
     policy = PricingPolicy(date(2026, 11, 1), (
-        CasePricingTerms("補助市民", IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+        CasePricingTerms("一般市民", IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
         terms(), CasePricingTerms("非市民", IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 320), HourlyRates(320, 320))),
         HourlyRates(450, 400), HourlyRates(450, 410))
     case = policy.for_case("低收入戶", twins=True)
@@ -81,7 +148,7 @@ def test_non_citizen_unused_covered_rates_are_zero_and_self_pay_is_preserved():
 def test_policy_guards_identity_and_twins_covered_rates():
     from dataclasses import replace
     valid = PricingPolicy(date(2026, 11, 1), (
-        CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 330), HourlyRates(300, 310)),
+        CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 330), HourlyRates(300, 310)),
         terms(), CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(0, 320), HourlyRates(0, 310))),
         HourlyRates(450, 460), HourlyRates(450, 420))
     valid.validate_subsidy_rates()
@@ -215,7 +282,7 @@ def test_policy_http_to_owner_writer_accepts_optional_reason(reason):
     connection = Connection()
     application = PricingConfigurationApplication(MySqlPricingConfigurationRepository(connection), lambda: MySqlUnitOfWork(connection))
     policy = PricingPolicy(date(2026, 11, 1), (
-        CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+        CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
         terms(), CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 320), HourlyRates(320, 320))),
         HourlyRates(450, 450), HourlyRates(450, 450))
     body = {'policy': pricing_payload(policy), 'expected_revision': 0}
@@ -318,7 +385,7 @@ def test_pricing_catalog_endpoint_uses_lazy_connection_redis_cache_and_post_comm
             policy = PricingPolicy(
                 date(2026, 11, 1),
                 (
-                    CasePricingTerms('補助市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
+                    CasePricingTerms('一般市民', IdentityRule.CITIZEN, Decimal(40), HourlyRates(300, 300), HourlyRates(300, 300)),
                     terms(),
                     CasePricingTerms('非市民', IdentityRule.NON_CITIZEN, Decimal(0), HourlyRates(320, 320), HourlyRates(320, 320)),
                 ),

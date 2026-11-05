@@ -14,6 +14,7 @@ import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_r
 const QUARTERLY_ENDPOINT = '/api/v1/finance-reports/subsidy-reconciliation/quarterly';
 const ANNUAL_ENDPOINT = '/api/v1/finance-reports/subsidy-reconciliation/annual';
 const WEEKLY_ENDPOINT = '/api/v1/operations-reports/weekly';
+const CASE_STATISTICS_ENDPOINT = '/api/v1/operations-reports/case-statistics';
 const SYSTEM_STATUS_ENDPOINT = '/api/v1/system/status/performance-snapshot';
 
 type FetchRecord = {
@@ -139,7 +140,22 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
       search: url.search,
     });
 
+    if (path === '/api/v1/staff/summaries') return jsonResponse({success:true,message:'ok',data:{items:[],next_cursor:null},error:null});
     if (path === SYSTEM_STATUS_ENDPOINT) return jsonResponse(systemStatusEnvelope());
+    if (path === CASE_STATISTICS_ENDPOINT) return jsonResponse({
+      success: true, message: 'ok', error: null, data: {
+        case_category: 'non_citizen', year: Number(url.searchParams.get('year')), quarter: null, month: null,
+        start_date: `${url.searchParams.get('year')}-01-01`, end_date: `${url.searchParams.get('year')}-12-31`,
+        timezone: 'Asia/Taipei', available_years: [Number(url.searchParams.get('year'))], annual_application_count: 0,
+        generated_at: '2026-11-03T00:00:00+08:00', summary: {
+          application_count: 0, general_eligible_count: 0, general_ineligible_count: 0,
+          subsidized_eligible_count: 0, subsidized_ineligible_count: 0,
+          order_established_count: 0, negotiating_count: 0, cancelled_count: 0, review_rejected_count: 0,
+          order_status_counts: { 待補件: 0, 洽談中: 0, 訂單成立: 0, 服務中: 0, 訂單完成: 0, 訂單取消: 0 },
+          unclassified_qualification_count: 0, other_status_count: 0,
+        },
+      },
+    });
     if (path === WEEKLY_ENDPOINT) {
       reportCalls += 1;
       const startDate = url.searchParams.get('start_date') ?? '';
@@ -198,7 +214,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode #reports 呈現週報三分頁並保留補助報表，不混入其他 owner', async () => {
+  it('actual StrictMode #reports only links to the accounting subsidy entry with existing GET boundaries', async () => {
     authenticate();
     const requests = installFetchStub();
 
@@ -208,19 +224,24 @@ describe('Reports #reports cross-owner entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText('CASE-WEEK-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('table', { name: '週報案件受理總表' })).toBeInTheDocument());
     expect(window.location.hash).toBe('#reports');
-    expect(screen.getByText('📊 工會營運與補助報表')).toBeInTheDocument();
+    expect(screen.getByText('📊 工會營運報表')).toBeInTheDocument();
     expect(screen.queryByText('🩺 系統狀態')).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="system-status.page"]')).toBeNull();
 
     expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(1);
-    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
     expect(document.querySelector('[data-control-id="reports.export.full-workbook"]')).toBeEnabled();
-    fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
+    expect(screen.queryByRole('tab', {name:'補助案件統計表'})).not.toBeInTheDocument();
+    const link=screen.getByRole('link',{name:'前往政府補助清單 →'});
+    expect(link).toHaveAttribute('href','#finance?tab=government-list');
+    act(()=>{window.history.replaceState(null,'','#finance?tab=government-list');window.dispatchEvent(new HashChangeEvent('hashchange'));});
+    await screen.findByRole('table',{name:'一般市民補助案件統計明細'});
+    expect(window.location.hash).toBe('#finance?tab=government-list');
     expect(screen.getAllByText(/NT\$ 12,000/).length).toBeGreaterThan(0);
     expect(screen.getByRole('table', { name: '一般市民補助案件統計明細' })).toBeInTheDocument();
-    expect(screen.getByText('(114)補助市民')).toBeInTheDocument();
+    expect(screen.getByText('(114)一般市民')).toBeInTheDocument();
     expect(screen.getByText('2026年第三季')).toBeInTheDocument();
     expect(screen.queryByText(/A\*+/)).not.toBeInTheDocument();
     expect(screen.getByText('此類別目前沒有資料。')).toBeInTheDocument();
@@ -237,12 +258,14 @@ describe('Reports #reports cross-owner entry static subgate', () => {
 
     expect(countPath(requests, QUARTERLY_ENDPOINT)).toBe(1);
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
-    expect(requests.every((request) => [
+    expect(requests.filter((request) => ![
+      '/api/v1/staff/summaries',
       QUARTERLY_ENDPOINT,
       ANNUAL_ENDPOINT,
       WEEKLY_ENDPOINT,
+      CASE_STATISTICS_ENDPOINT,
       SYSTEM_STATUS_ENDPOINT,
-    ].includes(request.path))).toBe(true);
+    ].includes(request.path))).toEqual([]);
   });
 
   it('無案件時維持明確空狀態，但仍可管理查詢期間涵蓋的週指標', async () => {
@@ -259,7 +282,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
 
     await waitFor(() => expect(screen.getByText('此期間沒有案件受理資料。')).toBeInTheDocument());
     expect(screen.getByRole('heading', { name: '每週推廣與詢問數值' })).toBeInTheDocument();
-    expect(screen.queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
+    expect(screen.queryByText('王**')).not.toBeInTheDocument();
     expect(countPath(emptyRequests, WEEKLY_ENDPOINT)).toBe(1);
     expect(emptyRequests.every((request) => request.method === 'GET')).toBe(true);
   });
@@ -283,7 +306,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     expect(countPath(unavailableRequests, WEEKLY_ENDPOINT)).toBe(1);
     retryRequested = true;
     fireEvent.click(screen.getByRole('button', { name: '重試' }));
-    await waitFor(() => expect(screen.getByText('CASE-WEEK-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('table', { name: '週報案件受理總表' })).toBeInTheDocument());
     expect(countPath(unavailableRequests, WEEKLY_ENDPOINT)).toBe(2);
     expect(unavailableRequests.every((request) => request.method === 'GET')).toBe(true);
   });

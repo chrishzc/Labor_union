@@ -115,6 +115,8 @@ class ClientFinanceTermsFacts:
     identity_status: str | None = None
     pricing: CasePricingTerms | None = None
     existing_subsidy_return_count: int = 0
+    subsidy_return_confirmed: bool = False
+    confirmed_subsidy_amount: MoneyNTD | None = None
 
     def __post_init__(self) -> None:
         _validate_identity(self.case_no, "case number")
@@ -132,6 +134,10 @@ class ClientFinanceTermsFacts:
         )
         if not isinstance(self.client_service_charge_waived, bool):
             raise TypeError("client service charge waived must be boolean")
+        if not isinstance(self.subsidy_return_confirmed, bool):
+            raise TypeError("subsidy return confirmation must be boolean")
+        if self.confirmed_subsidy_amount is not None:
+            _require_nonnegative_money(self.confirmed_subsidy_amount, "confirmed subsidy amount")
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +292,11 @@ def build_client_finance_terms_candidate(
         )
         for stage_plan in stage_plans
     )
-    return _candidate(facts, stage_plans, actions)
+    candidate = _candidate(facts, stage_plans, actions)
+    if _full_subsidy(facts) and (facts.existing_subsidy_return_count or any(
+            item.formal_history_exists and item.contracted_amount.amount > 0 for item in facts.existing_obligations)):
+        return replace(candidate, blockers=('full_subsidy_existing_financial_history_conflict',))
+    return candidate
 
 
 def build_client_finance_rate_correction_candidate(
@@ -432,28 +442,14 @@ def build_preassignment_client_finance_terms_impact(
 
 def automatic_subsidy_return_plan(facts: ClientFinanceTermsFacts, *, identity_status: str | None,
                                   completed_on: date | None, existing_return_count: int) -> ClientSubsidyReturnPlan | None:
-    if completed_on is None:
+    """A confirmed customer-return purpose and Government Subsidy's amount are required."""
+    if completed_on is None or _full_subsidy(facts) or not facts.subsidy_return_confirmed:
         return None
-    if facts.pricing is not None:
-        total = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
-        amount = facts.pricing.subsidy_return(total)
-        if amount == 0 and existing_return_count == 0 and facts.existing_subsidy_return_count == 0:
-            return None
-        return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal", MoneyNTD(amount), subsidy_advance_due_date(completed_on))
-    identity = normalize_subsidy_policy_identity(str(identity_status or ""))
-    if identity == '社福' and existing_return_count:
-        return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",MoneyNTD(0),subsidy_advance_due_date(completed_on))
-    if identity != "補助市民":
+    amount = facts.confirmed_subsidy_amount
+    if amount is None or amount.amount <= 0:
         return None
-    coverage = derive_subsidy_coverage(identity,
-        Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day)), Decimal(facts.floor_fee.amount))
-    if coverage.is_full_subsidy_order or coverage.subsidy_hours == 0:
-        return None
-    amount = coverage.subsidy_hours * facts.payment_terms.client_hourly_rate.amount
-    if amount <= 0 or amount != amount.to_integral_value():
-        raise ValueError("subsidy return amount must be positive whole NTD")
     return ClientSubsidyReturnPlan(f"client-subsidy-return:{facts.case_no}:terminal",
-                                 MoneyNTD(int(amount)), subsidy_advance_due_date(completed_on))
+                                 amount, subsidy_advance_due_date(completed_on))
 
 
 def _payment_terms_payload(terms):
@@ -555,6 +551,8 @@ def _cancellation_subsidy_return_plan(
     service_dates,
     candidate,
 ):
+    if not source_facts.existing_subsidy_return_count:
+        return None  # Cancellation does not prove that subsidy is payable to the customer.
     if not service_dates:
         if source_facts.existing_subsidy_return_count:
             return ClientSubsidyReturnPlan(f"client-subsidy-return:{source_facts.case_no}:terminal",MoneyNTD(0),
@@ -574,7 +572,7 @@ def _cancellation_subsidy_return_plan(
         str(source_facts.identity_status or "")
     )
     hour_cap = {
-        "補助市民": Decimal("40"),
+        "一般市民": Decimal("40"),
     }.get(identity_status)
     if hour_cap is None:
         return None
@@ -721,20 +719,32 @@ def _split_charge_days(facts):
 
 def _stage_plan(facts, payment_stage, charge_days, floor_fee):
     daily_amounts = tuple(_daily_charge(facts, item) for item in charge_days)
-    amount = MoneyNTD(sum(item.amount for item in daily_amounts)) + floor_fee
+    amount = MoneyNTD(0) if _full_subsidy(facts) else MoneyNTD(sum(item.amount for item in daily_amounts)) + floor_fee
+    due_date = _stage_due_date(facts.payment_terms, payment_stage, amount)
+    if _full_subsidy(facts):
+        prior = next((item for item in facts.existing_obligations if item.payment_stage is payment_stage), None)
+        if prior is not None and prior.due_date is not None:
+            due_date = prior.due_date
     return ClientStagePlan(
         payment_stage,
         tuple(item.service_date for item in charge_days),
         amount,
-        _stage_due_date(facts.payment_terms, payment_stage, amount),
+        due_date,
     )
+
+
+def _full_subsidy(facts: ClientFinanceTermsFacts) -> bool:
+    from domains.client_finance.subsidy_coverage import is_full_subsidy_case
+    hours = Decimal(len(facts.charge_days)) * Decimal(str(facts.service_hours_per_day))
+    return is_full_subsidy_case(facts.identity_status, hours,
+                               facts.pricing.subsidy_hours if facts.pricing else None) is True
 
 
 def _daily_charge(facts, charge_day):
     if facts.pricing is not None:
         consumed = Decimal(facts.charge_days.index(charge_day)) * Decimal(str(facts.service_hours_per_day))
         return MoneyNTD(facts.pricing.client_charge(Decimal(str(facts.service_hours_per_day)), consumed, double_pay=charge_day.is_double_pay))
-    if normalize_subsidy_policy_identity(facts.identity_status or '') == '社福':
+    if normalize_subsidy_policy_identity(facts.identity_status or '') == '補助市民':
         index = facts.charge_days.index(charge_day)
         remaining = max(0,120-index*facts.service_hours_per_day)
         billed = max(0,facts.service_hours_per_day-remaining)

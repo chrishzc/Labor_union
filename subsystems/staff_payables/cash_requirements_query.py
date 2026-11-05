@@ -6,7 +6,6 @@ from decimal import Decimal
 from typing import Literal, Protocol
 
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
-from domains.client_finance.subsidy_return_projection import project_subsidy_return
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem
 
 PaymentKind = Literal["staff_payable", "client_refund", "client_subsidy_return"]
@@ -40,6 +39,9 @@ class CashRequirementCase:
     has_subsidy_return: bool
     staff_items: tuple[CaseStaffPayableAuditItem, ...]
     refunds: tuple[CashRefundFact, ...]
+    confirmed_scheme: str = "unknown"
+    subsidy_ntd: int | None = None
+    scheme_conflict: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,9 +94,15 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             reasons.append("已有超付款，請至人員帳務處理追償")
         elif item.disposition == "blocked":
             reasons.append("月嫂付款狀態或受款資料待確認")
+            if item.reason and item.reason not in reasons:
+                reasons.append(item.reason)
         source = {"formal_obligation": "staff_obligation", "historical_projection": "historical_payroll", "order_facts": "missing_payroll"}[item.source]
         rows.append(CashRequirementRow(
-            (item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}") + (f":due:{item.effective_due_date.isoformat()}" if sum(other.obligation_identity == item.obligation_identity for other in case.staff_items) > 1 and item.effective_due_date else ""), case.case_no, item.recipient_name,
+            (item.obligation_identity or f"{case.case_no}:staff:{item.staff_id or 'unknown'}")
+            + (f":funding:{item.funding_kind}:due:{item.effective_due_date.isoformat() if item.effective_due_date else 'unknown'}"
+               if item.funding_kind is not None else f":due:{item.effective_due_date.isoformat()}"
+               if sum(other.obligation_identity == item.obligation_identity for other in case.staff_items) > 1 and item.effective_due_date else ""),
+            case.case_no, item.recipient_name,
             "staff_payable", "confirmed" if item.source == "formal_obligation" else "estimated", source,
             None if item.amount_due is None else item.amount_due.amount,
             None if item.balance is None else max(0, item.balance.amount), item.effective_due_date, False, tuple(reasons), item.staff_id,
@@ -108,25 +116,26 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
             reasons.append("退款付款日尚未確定")
         if not refund.recipient_ready and refund.payment_status not in {"paid", "settled"}:
             reasons.append("退款收款資料待確認")
+        if refund.kind == 'client_subsidy_return' and refund.payment_status not in {'paid', 'settled'}:
+            if case.scheme_conflict or case.confirmed_scheme in {'split', 'direct'}:
+                reasons.append('補助退款與本案正式方案或款項來源衝突，請核對原始依據')
+            elif case.confirmed_scheme != 'advance':
+                reasons.append('補助退款方案與對象待核對；既有款項保留')
         rows.append(CashRequirementRow(refund.identity, case.case_no, refund.recipient_name,
             refund.kind, "confirmed", "client_refund", refund.amount_ntd + refund.settled_amount_ntd, refund.amount_ntd,
             refund.payment_date, False, tuple(reasons), payment_status=refund.payment_status))
-    if case.has_subsidy_return or not case.has_arrangement or case.order_status == "訂單取消":
+    if (case.has_subsidy_return or not case.has_arrangement or case.order_status == "訂單取消"
+            or case.confirmed_scheme != 'advance' or case.scheme_conflict):
         return tuple(rows)
-    projection = project_subsidy_return(
-        identity_status=case.identity_status, service_hours=case.service_hours, floor_fee=case.floor_fee,
-        client_hourly_rate_ntd=case.client_hourly_rate_ntd, completed_on=None,
-        has_formal_return=False, formal_amount_ntd=None, formal_due_date=None, return_settled=False,
-    )
-    if projection is None or projection.amount_ntd == 0:
+    if case.subsidy_ntd == 0:
         return tuple(rows)
     reasons = ["補助退款計算資料待確認"]
-    if projection.amount_ntd is None:
-        reasons.append("補助退款金額缺少服務量、費用或凍結單價，待確認")
+    if case.subsidy_ntd is None:
+        reasons.append("正式補助金額來源待確認")
     due_date = subsidy_advance_due_date(case.planned_end_date) if case.planned_end_date else None
     if due_date is None:
         reasons.append("預計服務結束日尚未確定")
     rows.append(CashRequirementRow(f"{case.case_no}:subsidy:estimate", case.case_no, case.client_name,
-        "client_subsidy_return", "estimated", "subsidy_estimate", projection.amount_ntd,
-        projection.amount_ntd, due_date, due_date is not None, tuple(reasons)))
+        "client_subsidy_return", "estimated", "subsidy_estimate", case.subsidy_ntd,
+        case.subsidy_ntd, due_date, due_date is not None, tuple(reasons)))
     return tuple(rows)

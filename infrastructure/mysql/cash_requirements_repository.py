@@ -8,9 +8,10 @@ from subsystems.staff_payables.cash_requirements_query import CashRefundFact, Ca
 
 
 class MySqlCashRequirementsRepository:
-    def __init__(self, connection):
+    def __init__(self, connection, *, case_query=None):
         self._connection = connection
-        self._staff = MySqlStaffPayableExportSource(connection)
+        self._case_query = case_query
+        self._staff = MySqlStaffPayableExportSource(connection, case_query=case_query)
 
     def query_cases(self, after_case_no, limit):
         with self._connection.cursor() as cursor:
@@ -32,6 +33,7 @@ class MySqlCashRequirementsRepository:
                 int(r["amount_snapshot_ntd"]) if r["confirmation_kind"] else max(0, int(r["net_paid_ntd"])),
             ) for r in cursor.fetchall())
         staff_items = self._staff.load_case(case_no, date.min)
+        current = self._case_query(case_no) if self._case_query is not None else None
         hours = row["historical_hours"]
         if hours is None and row["work_day_count"] and row["service_hours_per_day"] is not None:
             hours = Decimal(str(row["work_day_count"])) * Decimal(str(row["service_hours_per_day"]))
@@ -43,6 +45,9 @@ class MySqlCashRequirementsRepository:
             row["client_hourly_rate_ntd"],
             None if not row["receivable_count"] else not bool(row["open_receivable_count"]),
             bool(row["return_count"]), staff_items, refunds,
+            current.scheme if current is not None else 'unknown',
+            current.subsidy_ntd if current is not None else None,
+            current.scheme_conflict if current is not None else False,
         )
 
 

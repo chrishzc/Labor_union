@@ -294,7 +294,7 @@ def _merge_caregiver_estimate(case, facts):
     else:
         due = case.get('staff_payment_due_date')
         payable = facts.get('total_employer_self_pay_payable')
-        full_subsidy = str(case.get('client_identity_status') or '').strip() == '社福' and days * Decimal(str(hours)) <= 120
+        full_subsidy = str(case.get('client_identity_status') or '').strip() in {'補助市民', '社福', '低收入戶', '中低收入戶'} and days * Decimal(str(hours)) <= 120
         if due is None and end is not None and payable is not None and (Decimal(str(payable)) > 0 or full_subsidy):
             due = calculate_staff_payment_due_date(end, payable, full_subsidy)
     if due is not None:
@@ -348,7 +348,7 @@ def _matching_plan_payroll_estimates(
         "matching_plan_client_payment_estimate_not_whole_ntd",
     )
     full_subsidy = (
-        str(case.get("client_identity_status") or "").strip() == "社福"
+        str(case.get("client_identity_status") or "").strip() in {"補助市民", "社福", "低收入戶", "中低收入戶"}
         and contracted_days * hours_per_day <= 120
         and client_payable == 0
     )

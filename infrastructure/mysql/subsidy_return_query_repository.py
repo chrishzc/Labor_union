@@ -1,6 +1,8 @@
 """Read customer subsidy-return case facts in one bounded snapshot query."""
 
 from decimal import Decimal
+from domains.client_finance.pricing_policy import CasePricingTerms, HourlyRates, IdentityRule
+from infrastructure.mysql.pricing_configuration_repository import CASE_PRICING_FACTS_SQL
 
 from subsystems.client_finance.subsidy_return_query import SubsidyReturnCaseFacts
 
@@ -10,7 +12,7 @@ class MySqlSubsidyReturnQueryRepository:
         self._connection = connection
 
     def query_facts(self, *, after_case_no, case_no, search, limit):
-        conditions = ["c.identity_status IN ('一般市民','補助市民','社福','低收入戶','中低收入戶')"]
+        conditions = ["(c.identity_status IN ('一般市民','補助市民','社福','低收入戶','中低收入戶') OR pricing.pricing_rule='citizen')"]
         values = []
         if after_case_no:
             conditions.append('o.case_no > %s')
@@ -42,11 +44,24 @@ def _facts(row):
         None if not row['open_return_count'] else int(row['formal_amount_ntd']),
         row['formal_due_date'] if row['due_date_count'] == 1 and not row['missing_due_count'] else None,
         bool(row['return_count']) and row['settled_return_count'] == row['return_count'],
+        _pricing(row),
     )
 
 
-_SELECT = """
+def _pricing(row):
+    if not row.get('pricing_active'):
+        return None
+    return CasePricingTerms(row['identity_status'], IdentityRule(row['pricing_rule']),
+        Decimal(str(row['pricing_subsidy_hours'])),
+        HourlyRates(int(Decimal(str(row['pricing_client_covered']))), int(Decimal(str(row['pricing_client_excess'])))),
+        HourlyRates(int(Decimal(str(row['pricing_payroll_covered']))), int(Decimal(str(row['pricing_payroll_excess'])))))
+
+
+_SELECT = f"""
 SELECT o.case_no,c.name AS client_name,o.status AS order_status,c.identity_status,
+       pricing.pricing_active,pricing.pricing_rule,pricing.pricing_subsidy_hours,
+       pricing.pricing_client_covered,pricing.pricing_client_excess,
+       pricing.pricing_payroll_covered,pricing.pricing_payroll_excess,
        o.service_days,o.service_hours_per_day,
        COALESCE(day_event.historical_floor_fee_ntd,o.floor_fee) AS floor_fee,
        day_projection.total_actual_service_hours AS actual_service_hours,
@@ -56,6 +71,7 @@ SELECT o.case_no,c.name AS client_name,o.status AS order_status,c.identity_statu
        COALESCE(payable.settled_return_count,0) AS settled_return_count,
        payable.formal_amount_ntd,payable.formal_due_date,payable.due_date_count,payable.missing_due_count
 FROM orders o JOIN clients c ON c.id=o.client_id
+LEFT JOIN ({CASE_PRICING_FACTS_SQL}) pricing ON pricing.case_no=o.case_no
 LEFT JOIN client_payment_terms terms ON terms.case_no=o.case_no
 LEFT JOIN historical_service_day_projections day_projection ON day_projection.case_no=o.case_no
 LEFT JOIN historical_service_day_events day_event ON day_event.id=day_projection.current_event_id

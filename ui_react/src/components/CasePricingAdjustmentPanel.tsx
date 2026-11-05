@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { accountingPricingClient, PricingTermsSchema, pricingTermsError, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
+import { accountingPricingClient, PricingTermsSchema, pricingTermsError, pricingIdentityLabel, type CasePricing, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges } from './UnsavedChanges';
 import '../pages/AccountingParametersPage.css';
@@ -80,7 +80,8 @@ export function CasePricingAdjustmentPanel({ caseNo, revision, disabled = false,
     <p className="pricing-notice">本案人工設定不受政策生效日或服務開始日影響。給付方式與訂金天數沿用原身分規則；變更時薪或補助上限，可能連動訂金與各期金額。</p>
     {message && <p className="pricing-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'}>{message}</p>}
     {status === 'loading' && <p role="status">正在讀取本案參數…</p>}
-    {current && draft && <><p className="pricing-note">計價身分：{current.terms.identity_name}；來源：{current.source === 'manual' ? '本案人工設定' : current.source === 'policy' ? '案件綁定政策' : '原案件規則'}（版本 {current.revision}）</p>
+    {current && draft && <><p className="pricing-note">計價身分：{pricingIdentityLabel(current.terms)}；來源：{current.source === 'manual' ? '本案人工設定' : current.source === 'policy' ? '案件綁定政策' : '原案件規則'}（版本 {current.revision}）</p>
+      {pricingIdentityLabel(current.terms) !== current.terms.identity_name && <p className="pricing-note">原版本名稱：{current.terms.identity_name}；本案仍依原版本的補助上限與給付規則計算。</p>}
       <fieldset disabled={busy || disabled} style={{ border: 0, padding: 0, margin: 0 }}><label className="pricing-field">補助時數上限（小時）<input type="number" min="0" step="0.5" value={draft.subsidy_hours} disabled={draft.rule === 'non_citizen'} onChange={event => update({ subsidy_hours: Number(event.target.value) })} /></label>
         <table className="pricing-table"><thead><tr><th>計價範圍</th><th>客戶時薪（元）</th><th>月嫂時薪（元）</th></tr></thead><tbody>{(['covered', 'excess'] as const).map(tier => <tr key={tier}><th scope="row">{tier === 'covered' ? '補助範圍內' : '補助用盡後'}</th>{(['client', 'payroll'] as const).map(owner => <td key={owner}><input aria-label={`${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min={tier === 'covered' && draft.subsidy_hours === 0 ? 0 : 1} step="1" value={draft[owner][tier]} disabled={draft.rule === 'non_citizen' && tier === 'covered'} onChange={event => update({ [owner]: { ...draft[owner], [tier]: Number(event.target.value) } })} /></td>)}</tr>)}</tbody></table>
         <p className="pricing-note">補助範圍內客戶與月嫂時薪須相等；補助用盡後可分別調整。非市民補助時數與補助內時薪均為 0。補助時數按整案累計。</p>

@@ -12,19 +12,21 @@
 - category client: `ui_react/src/api/client_finance/case_categories_client.ts` — strict 分類投影供收款／付款的補助（預設）、非市民、全部篩選；同一集合產生明細、件數及金額合計；來源不完整明示查詢失敗。
 - primary: `ui_react/src/components/HistoricalClientPaymentWorkbench.tsx`
 - client: `ui_react/src/api/client_finance/historical_client_payment_client.ts`
-- composition: `ui_react/src/pages/FinancePage.tsx` — 四個主工作區：收付款、案件帳務、銀行對帳、逾期提醒；月份統計與款項清單置於收付款，舊深連結解析至對應工作區／同案明細。歷史工具保留低頻入口；舊全域帳戶維護於 2026-11-02 依使用者指示完整退役。
+- composition: `ui_react/src/pages/FinancePage.tsx` — 四個主工作區：案件帳務（預設）、銀行對帳、政府補助清單、每月帳務；案件、銀行來源、清單及月報開同一右側案件抽屜，既有收款／付款／人員付款／待確認／通知／逾期工具保留在相關工具，舊深連結仍解析。歷史工具保留低頻入口；舊全域帳戶維護於 2026-11-02 依使用者指示完整退役。
 - workbench referral: Finance 客戶收款以 `case_no` 定位原案件，`from=workbench` 提供返回同案入口；所選案件已歷史服務完成時承接 Orders-owned `HistoricalCompletionPanel`，沿用既有 Query／Preview／Apply 與重新讀取，不改寫結清規則。
 - payable export adapter: `ui_react/src/api/accounts_payable/accounts_payable_export_client.ts` — FinancePage 既有應付帳款下載入口；呼叫既有 Staff Payables 匯出端點，保留登入檢查與 XLSX 回應驗證，不計算帳務事實。
 - shared collections: `ui_react/src/components/FinanceReceiptsWorkspace.tsx`、`ui_react/src/components/FinancePaymentsWorkspace.tsx` — 應收由 Finance Import workspace 組合 owner 月份款項 Query，政府整期及付款沿既有 owner projection／cash planning；未定應收另列待確認，正式與預估分開加總，原 XLSX 匯出條件不受列表篩選改寫。
 - overdue reminder composition: 主入口轉至 `FinanceWarningWorkspace.tsx` 的逾期款項頁，原 `FinanceReceiptsWorkspace.tsx` overdue props 保留；只移動入口，不改逾期資格、金額或寄送 writer。
 - government receipt grouping: `ui_react/src/components/SubsidyPeriodWorkbench.tsx` — 月／季／年整期入款、同單位總額、季度涵蓋月份及防重，歸 Government Subsidy owner。
-- shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — exact-case 補助金額、整期涵蓋與目前應退／實付；不提供逐案銷帳。
+- shared case subsidy detail: `ui_react/src/components/CaseSubsidyDetailDrawer.tsx` — exact-case 補助金額、整期涵蓋與目前應退／實付；不提供逐案銷帳；支援嵌入同一案件抽屜，不堆疊可操作彈窗。
 - immutable history: `ui_react/src/components/FinanceCaseHistory.tsx`、`ui_react/src/api/client_finance/client_finance_history_client.ts` — strict 解碼既有 `/api/v1/client-payments` 摘要／同案根事實與 immutable ledger，拒絕重複及跨案回應。
 - history adapter: `infrastructure/mysql/client_payments_query_repository.py`、`api/schemas/client_payments.py` — 既有 read model 接受已存在的 subsidy_return／subsidy_advance 類型，不改 writer 或歷史資料。
   - 摘要 `receipt_status` 組合 canonical receipt／reversal 淨額及 exact current historical payment overlay，分開呈現待收、部分收款、已收款、已結清；有效歷史 overlay 從未收／未付餘額扣除，不改 canonical receipt 計數。
 - receipt filter contract: `subsystems/client_finance/client_payments_query.py` → `api/routes/client_payments.py` → strict history client；摘要 `receipt_entry_count` 只計 canonical receipt，收款頁「已收款」依 `receipt_status` 包含已收／部分收款，其他 ledger 類型不作收款證據。跨層驗證：`tests/domains/client-finance/subsystems/client-finance/integration/test_client_receipt_summary_query.py`。
 - government read client: `ui_react/src/api/government_subsidy/period_reconciliation_client.ts` — current period query／receipt／case coverage；舊 Orders batch projection 僅歷史能力。
 - retained source clients: `ui_react/src/api/accounts_payable/cash_requirements_query_client.ts`、`ui_react/src/api/client_finance/client_subsidy_return_query_client.ts` — 預估與正式未退款仍由原 owner 投影。`ClientSubsidyReturnQueryPanel.tsx`、`CashRequirementsPanel.tsx` 不再是 Finance 主入口；不刪除其仍有效的來源測試。
+
+- payment reasons: `ui_react/src/components/FinancePaymentsWorkspace.tsx` — 原pending_reasons對未付款列亦直接可見；有缺件不標確認待付，篩選不改既有Excel下載條件。
 
 ## Contracts
 - `modules/client-subsidy-return-query.md` — 補助退款案件查詢 owner。

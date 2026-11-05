@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 
 from subsystems.reporting.weekly_report_metrics_service import (
     WeeklyReportMetric,
@@ -138,6 +139,10 @@ class CaseStatisticsSummary:
     order_status_counts: dict[str, int]
     unclassified_qualification_count: int
     other_status_count: int
+    order_established_count: int
+    negotiating_count: int
+    cancelled_count: int
+    review_rejected_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +376,10 @@ class WeeklyOperationsReportQuery:
                 order_status_counts={status: status_counts[status] for status in ORDER_STATUS_LABELS},
                 unclassified_qualification_count=0 if non_citizen else len(rows) - sum(qualifications),
                 other_status_count=len(rows) - sum(status_counts[status] for status in ORDER_STATUS_LABELS),
+                order_established_count=qualification_summary.order_established_count,
+                negotiating_count=qualification_summary.negotiating_count,
+                cancelled_count=qualification_summary.cancelled_count,
+                review_rejected_count=sum(row.review_rejected for row in rows),
             ),
             generated_at=generated_at,
             case_category=case_category,
@@ -515,8 +524,9 @@ class WeeklyOperationsReportQuery:
         if fact.planned_start_date is None or fact.planned_end_date is None:
             quality_codes.append("planned_service_period_missing")
 
-        is_general = fact.identity_status == GENERAL_CITIZEN
-        is_subsidized = fact.identity_status == SUBSIDIZED_CITIZEN
+        identity = normalize_subsidy_policy_identity(fact.identity_status or "")
+        is_general = identity == GENERAL_CITIZEN
+        is_subsidized = identity == SUBSIDIZED_CITIZEN
         is_rejected = bool(fact.reject_reason)
 
         if is_rejected:

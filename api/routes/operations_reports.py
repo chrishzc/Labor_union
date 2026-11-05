@@ -158,6 +158,19 @@ def export_weekly_operations_report_xlsx(
 
 def _case_row_view_dict(row) -> dict[str, object]:
     return {
+        "serial_number": row.serial_number,
+        "month_label": row.month_label,
+        "application_date_roc": row.application_date_roc,
+        "general_eligible": row.general_eligible,
+        "general_ineligible": row.general_ineligible,
+        "subsidized_eligible": row.subsidized_eligible,
+        "subsidized_ineligible": row.subsidized_ineligible,
+        "order_established": row.order_established,
+        "negotiating": row.negotiating,
+        "cancelled": row.cancelled,
+        "review_rejected": row.review_rejected,
+        "service_status": row.service_status,
+        "notes": row.notes,
         "case_no": row.case_no,
         "applicant_name": row.applicant_name,
         "application_date": row.application_date,

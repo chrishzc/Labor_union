@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infrastructure.mysql.beclass_refund_account import load_effective_refund_account
+
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date
@@ -1094,22 +1096,26 @@ _OVERAGE_DISPOSITION_INSERT_SQL = (
 )
 
 
-def _insert_refund_recipient_snapshot(cursor, refund_identity, case_no, source_kind) -> None:
+def _insert_refund_recipient_snapshot(cursor, refund_identity, case_no, source_kind, *, require_complete=True) -> bool:
+    cursor.execute('SELECT refund_obligation_identity FROM client_refund_recipient_snapshots WHERE refund_obligation_identity=%s', (refund_identity,))
+    if cursor.fetchone() is not None:
+        return False
+    account = load_effective_refund_account(cursor, case_no)
+    if account is None:
+        if require_complete:
+            raise ValueError("client_refund_recipient_snapshot_missing")
+        return False
     cursor.execute(
-        _REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL,
-        (refund_identity, source_kind, case_no),
+        'INSERT INTO client_refund_recipient_snapshots '
+        '(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) VALUES (%s,%s,%s,%s,%s)',
+        (refund_identity, case_no, account.bank_code,
+         account.account_no, source_kind),
     )
     if cursor.rowcount != 1:
         raise ValueError("client_refund_recipient_snapshot_missing")
+    return True
 
 
-_REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL = (
-    "INSERT INTO client_refund_recipient_snapshots "
-    "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
-    "SELECT %s,bound_case_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
-    "WHERE bound_case_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
-    "AND CHAR_LENGTH(TRIM(refund_account_no))>0"
-)
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO client_finance_apply_receipts "
     "(idempotency_key,command_fingerprint,preview_fingerprint,case_no,"

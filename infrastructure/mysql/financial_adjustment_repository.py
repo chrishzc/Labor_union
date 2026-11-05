@@ -670,21 +670,8 @@ _CLIENT_OBLIGATION_INSERT_SQL = (
 
 
 def _insert_refund_recipient_snapshot(cursor, obligation_identity, case_no, source_kind):
-    cursor.execute(
-        _REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL,
-        (obligation_identity, source_kind, case_no),
-    )
-    if cursor.rowcount != 1:
-        raise ValueError("client_refund_recipient_snapshot_missing")
-
-
-_REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL = (
-    "INSERT INTO client_refund_recipient_snapshots "
-    "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
-    "SELECT %s,query_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
-    "WHERE query_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
-    "AND CHAR_LENGTH(TRIM(refund_account_no))>0"
-)
+    from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot as save_snapshot
+    return save_snapshot(cursor, obligation_identity, case_no, source_kind)
 _PAYROLL_ADJUSTMENT_INSERT_SQL = (
     "INSERT INTO payroll_adjustment_events "
     "(case_no,adjustment_identity,amount_ntd,source_event_identity,"

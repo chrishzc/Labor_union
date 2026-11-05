@@ -36,6 +36,33 @@ def test_subsidy_return_is_a_payable_633_fact_when_no_ledger_payout_exists():
     assert fact.anomaly is False
 
 
+@pytest.mark.parametrize('scheme,portion,bank,payable', [
+    ('split', 'subsidy', '633', True), ('split', 'client', '31', True),
+    ('split', None, '31', False), ('unknown', 'subsidy', '31', False),
+    ('waiting', 'subsidy', '31', False), ('advance', 'subsidy', '31', True),
+    ('direct', None, '31', True),
+])
+def test_formal_scheme_is_required_before_a_funding_portion_routes_to_taishin(scheme, portion, bank, payable):
+    from types import SimpleNamespace
+    from infrastructure.mysql.accounts_payable_export_sources import _staff_payment_route
+    case = SimpleNamespace(scheme=scheme, scheme_conflict=False, customer_amount_ntd=18000,
+                           staff_receivable_ntd=30000, subsidy_ntd=12000)
+    row = {**_partially_paid_staff_row(), 'installment_funding': portion, 'union_no': '0007'}
+    fact = _staff_fact(_staff_payment_route(row, case))
+    assert fact.outgoing_bank == bank
+    assert fact.staff_union_no == '0007'
+    assert (fact.status is StaffPayableStatus.PARTIALLY_PAID) is payable
+
+
+def test_full_subsidy_routes_existing_staff_balance_without_creating_a_second_entitlement():
+    from types import SimpleNamespace
+    from infrastructure.mysql.accounts_payable_export_sources import _staff_payment_route
+    case = SimpleNamespace(scheme='split', scheme_conflict=False, customer_amount_ntd=0,
+                           staff_receivable_ntd=12000, subsidy_ntd=12000)
+    fact = _staff_fact(_staff_payment_route(_partially_paid_staff_row(), case))
+    assert fact.outgoing_bank == '633' and fact.amount.amount == 1500
+
+
 def test_reopened_refund_is_payable_again_after_a_refund_return_reversal():
     fact = _refund_fact(_row(obligation_type="refund", amount_due=300, net_refunded=0))
 
@@ -219,3 +246,52 @@ def test_partial_payment_does_not_bypass_other_payment_blockers(overrides):
     fact = _staff_fact(row)
     assert fact.status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}
     assert _formal_case_audit_item(row, date(2026, 3, 15)).disposition == "blocked"
+
+
+class _RecipientSnapshotCursor:
+    def __init__(self, sources, existing=False):
+        self.sources, self.existing = sources, existing
+        self.rows = ()
+        self.inserts = []
+        self.rowcount = 0
+
+    def execute(self, sql, params):
+        if sql.startswith('SELECT refund_obligation_identity'):
+            self.rows = ({'refund_obligation_identity': params[0]},) if self.existing else ()
+        elif sql.startswith('SELECT br.refund_bank_code,br.refund_account_no,cs.effective_values_json '):
+            self.rows = self.sources
+        elif sql.startswith('INSERT INTO client_refund_recipient_snapshots'):
+            self.inserts.append(params)
+            self.existing = True
+            self.rowcount = 1
+        else:
+            raise AssertionError('unexpected statement')
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
+
+
+def test_customer_refund_snapshot_uses_unique_bound_source_and_never_overwrites_on_replay():
+    from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot
+    # Synthetic numeric account satisfies the existing normalization contract.
+    cursor = _RecipientSnapshotCursor(({'refund_bank_code':'0040000','refund_account_no':'000001'},))
+    assert _insert_refund_recipient_snapshot(cursor,'refund:1','CASE-1','subsidy_return') is True
+    cursor.sources = ({'refund_bank_code':'9999999','refund_account_no':'different-account'},)
+    assert _insert_refund_recipient_snapshot(cursor,'refund:1','CASE-1','subsidy_return') is False
+    assert len(cursor.inserts) == 1
+    assert cursor.inserts[0] == ('refund:1','CASE-1','0040000','000001','subsidy_return')
+
+
+@pytest.mark.parametrize('sources', [(), ({'refund_bank_code':'0040000','refund_account_no':None},),
+    ({'refund_bank_code':'0040000','refund_account_no':'one'}, {'refund_bank_code':'0040000','refund_account_no':'two'})])
+def test_missing_or_ambiguous_customer_account_stays_pending_without_inventing_a_snapshot(sources):
+    from infrastructure.mysql.client_receipt_reconciliation_repository import _insert_refund_recipient_snapshot
+    cursor = _RecipientSnapshotCursor(sources)
+    assert _insert_refund_recipient_snapshot(cursor,'refund:1','CASE-1','subsidy_return',require_complete=False) is False
+    assert cursor.inserts == []
+    with pytest.raises(ValueError,match='client_refund_recipient_snapshot_missing'):
+        _insert_refund_recipient_snapshot(cursor,'refund:1','CASE-1','receipt_overage')
+    assert cursor.inserts == []
