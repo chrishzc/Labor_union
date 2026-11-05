@@ -29,33 +29,44 @@ class ClientFinanceCaseNotFound(ValueError):
     """The requested case has no canonical Client Finance account."""
 
 
-def query_case_funding(connection, case_no):
-    """Read the original service/pricing owner; absent facts never imply free service."""
+def query_case_payment_terms(connection, case_no):
+    """Use formal terms to prove zero stages without creating ledger or obligation rows."""
     from decimal import Decimal
+    from domains.client_finance.obligation_planning import confirmed_zero_payment_stages
     from domains.client_finance.pricing_policy import calculate_case_total_amount
     from infrastructure.mysql.order_terms_read_model import select_order, load_calculable_client_finance_facts
-    from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
-    from subsystems.client_finance.case_accounting_query import ClientCaseFunding
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
     with connection.cursor() as cursor:
         order = select_order(cursor, case_no, lock=False)
-        if str(order['status']).startswith('歷史') or any(order.get(key) is None for key in
-                ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee')):
-            return None
-        pricing = load_case_pricing(cursor, order, lock=False)
-        if pricing is None:
-            return None
-        cursor.execute('SELECT 1 FROM client_finance_accounts a JOIN client_payment_terms t ON t.case_no=a.case_no WHERE a.case_no=%s', (case_no,))
+        status = str(order['status'])
+        if status.startswith('歷史') or any(order.get(key) is None for key in
+                ('start_date', 'service_days', 'service_hours_per_day', 'floor_fee', 'client_identity_status')):
+            return ClientCasePaymentTerms()
+        if (order['pricing_policy_id'] is None and order['pricing_override_event_id'] is None
+                and order['client_identity_status'] not in {'一般市民', '非市民'}):
+            return ClientCasePaymentTerms()
+        cursor.execute('SELECT 1 FROM client_finance_accounts a JOIN client_payment_terms t ON t.case_no=a.case_no '
+            'JOIN client_payment_terms_events e ON e.id=t.current_event_id WHERE a.case_no=%s', (case_no,))
         if cursor.fetchone() is None:
-            return None
+            return ClientCasePaymentTerms()
         facts, _ = load_calculable_client_finance_facts(cursor, order, lock=False,
-            allow_planned=str(order['status']) not in ('訂單完成', '訂單取消'))
-        if facts is None:
-            return None
-    hours = Decimal(str(facts.service_hours_per_day))
-    return ClientCaseFunding(case_no, facts.identity_status, hours * len(facts.charge_days),
-        pricing.subsidy_hours, calculate_case_total_amount(pricing,
-            tuple((hours, day.is_double_pay) for day in facts.charge_days), facts.floor_fee.amount),
-        facts.existing_subsidy_return_count > 0)
+            allow_planned=status not in ('訂單完成', '訂單取消'))
+    if facts is None or not facts.charge_days:
+        return ClientCasePaymentTerms()
+    pricing = facts.pricing
+    funding = None
+    if pricing is not None:
+        hours = Decimal(str(facts.service_hours_per_day))
+        funding = ClientCaseFunding(case_no, facts.identity_status, hours * len(facts.charge_days),
+            pricing.subsidy_hours, calculate_case_total_amount(pricing,
+                tuple((hours, day.is_double_pay) for day in facts.charge_days), facts.floor_fee.amount),
+            facts.existing_subsidy_return_count > 0)
+
+    # Cancellation has separate actual-service terms. An incomplete service
+    # schedule or inconsistent amounts cannot establish a zero stage.
+    if status == '訂單取消' or len(facts.charge_days) != int(order['service_days']):
+        return ClientCasePaymentTerms(funding)
+    return ClientCasePaymentTerms(funding, confirmed_zero_payment_stages(facts))
 
 
 class MySqlClientFinanceQueryRepository:

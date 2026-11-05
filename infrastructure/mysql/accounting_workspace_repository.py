@@ -12,7 +12,7 @@ def build_accounting_workspace(connection):
     """One composition for the case page, payable export and original owner writers."""
     from functools import partial
     from infrastructure.mysql.case_staff_accounting_repository import query_case_staff_accounting
-    from infrastructure.mysql.client_payments_query_repository import query_case_accounting, query_case_funding
+    from infrastructure.mysql.client_payments_query_repository import query_case_accounting, query_case_payment_terms
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from infrastructure.mysql.government_subsidy_period_repository import MySqlGovernmentSubsidyPeriodRepository
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
@@ -20,7 +20,7 @@ def build_accounting_workspace(connection):
     return AccountingWorkspace(state, partial(query_case_accounting, connection),
         partial(query_case_staff_accounting, connection), MySqlMonthlyAccountingSource(connection).case_bank_facts,
         lambda case_no: MySqlGovernmentSubsidyPeriodRepository(connection).case_coverage(case_no)['amount_ntd'],
-        partial(query_case_funding, connection), plan=state.subsidy_plan)
+        partial(query_case_payment_terms, connection), plan=state.subsidy_plan)
 
 
 class MySqlAccountingWorkspaceState:
@@ -159,13 +159,10 @@ def query_subsidy_payable_handoff(connection, case_no):
     if row is None:
         raise LookupError('accounting_case_not_found')
     case = build_accounting_workspace(connection).query(case_no)
-    from infrastructure.mysql.client_payments_query_repository import query_case_funding
-    funding = query_case_funding(connection, case_no)
+    funding = case.funding
     total = case.staff_receivable_ntd if case.staff_receivable_ntd is not None else (funding.total_ntd if funding else None)
-    stages = tuple(item for item in case.client_items if item.payment_stage in {'deposit', 'first', 'second'})
     cash = case.cash_by_flow
-    customer_paid = (sum(item.actual_ntd for item in stages)
-                     if {item.payment_stage for item in stages} == {'deposit', 'first', 'second'} else None)
+    customer_paid = case.customer_paid_ntd
     if customer_paid is not None and cash is not None:
         customer_paid -= cash['RS']
     staff = tuple(item for item in case.staff_items if item.direction == 'payable' and item.summary_included)

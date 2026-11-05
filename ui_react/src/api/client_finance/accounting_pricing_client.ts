@@ -8,7 +8,8 @@ const rates = z.strictObject({ covered: z.number().int().nonnegative(), excess: 
 export const PricingTermsSchema = z.strictObject({ identity_name: z.string().min(1).max(100),
   rule: z.enum(['citizen', 'social', 'non_citizen']), subsidy_hours: z.number().nonnegative().multipleOf(0.5), client: rates, payroll: rates });
 export const PricingPolicySchema = z.strictObject({ effective_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  identities: z.array(PricingTermsSchema).min(1), twins_client: rates, twins_payroll: rates });
+  identities: z.array(PricingTermsSchema).min(1), twins_client: rates, twins_payroll: rates,
+  indigenous_deposit_service_days: z.number().int().min(0).max(2147483647).nullable().optional() });
 const version = z.strictObject({ revision: z.number().int().positive(), policy: PricingPolicySchema, actor: z.string(), reason: z.string() });
 const catalog = z.strictObject({ revision: z.number().int().nonnegative(), versions: z.array(version) });
 const amount = z.number().int().nonnegative();
@@ -36,7 +37,7 @@ export function pricingIdentityLabel(terms: PricingTerms): string {
 export function pricingPolicyDraft(policy: PricingPolicy): PricingPolicy {
   return { ...structuredClone(policy), identities: policy.identities.map(item => ({
     ...structuredClone(item), identity_name: pricingIdentityLabel(item),
-  })) };
+  })), indigenous_deposit_service_days: policy.indigenous_deposit_service_days ?? null };
 }
 
 export function pricingTermsError(terms: PricingTerms): string {

@@ -666,6 +666,16 @@ def _charge_days(service_dates, double_pay_dates):
     )
 
 
+def confirmed_zero_payment_stages(facts: ClientFinanceTermsFacts) -> frozenset[PaymentStage]:
+    """Accept zero only when formal terms agree with the recorded obligations."""
+    if facts.payment_terms.deposit_service_days > len(facts.charge_days):
+        return frozenset()
+    stages = {plan.payment_stage: plan.amount for plan in _build_stage_plans(facts)}
+    if any(stages[item.payment_stage] != item.contracted_amount for item in facts.existing_obligations):
+        return frozenset()
+    return frozenset(stage for stage, amount in stages.items() if amount.is_zero)
+
+
 def _build_stage_plans(
     facts: ClientFinanceTermsFacts,
 ) -> tuple[ClientStagePlan, ...]:
@@ -706,14 +716,18 @@ def _split_charge_days(facts):
     deposit_count = facts.payment_terms.deposit_service_days
     if deposit_count > len(facts.charge_days):
         raise ValueError("deposit service days exceed official service days")
-    first_end = min(
-        len(facts.charge_days),
-        deposit_count + _FIRST_PAYMENT_MAXIMUM_DAYS,
-    )
+    charge_days = facts.charge_days
+    uses_payable_days = (
+        deposit_count == 0
+        and normalize_subsidy_policy_identity(facts.identity_status or "") == "補助市民"
+    ) or (facts.pricing is not None and facts.pricing.deposit_service_days is not None)
+    if uses_payable_days:
+        charge_days = tuple(day for day in charge_days if not _daily_charge(facts, day).is_zero)
+    first_end = deposit_count + _FIRST_PAYMENT_MAXIMUM_DAYS
     return (
-        facts.charge_days[:deposit_count],
-        facts.charge_days[deposit_count:first_end],
-        facts.charge_days[first_end:],
+        charge_days[:deposit_count],
+        charge_days[deposit_count:first_end],
+        charge_days[first_end:],
     )
 
 

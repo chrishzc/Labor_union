@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
+from domains.client_finance.reconciliation import PaymentStage
 from domains.client_finance.subsidy_coverage import is_full_subsidy_case
 
 
@@ -17,6 +18,12 @@ class ClientCaseFunding:
     @property
     def full_subsidy(self) -> bool:
         return is_full_subsidy_case(self.identity_status, self.service_hours, self.subsidy_limit) is True
+
+
+@dataclass(frozen=True)
+class ClientCasePaymentTerms:
+    funding: ClientCaseFunding | None = None
+    zero_stages: frozenset[PaymentStage] = frozenset()
 
 
 @dataclass(frozen=True)

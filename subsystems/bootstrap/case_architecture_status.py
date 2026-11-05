@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
 from domains.bootstrap.case_architecture import CaseArchitectureBootstrapIntent
@@ -61,7 +61,8 @@ class CaseArchitectureBootstrapStatusService:
                 from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
                 pricing = load_case_pricing(cursor, row)
                 if pricing is not None:
-                    row = {**row, "pricing_identity_rule": pricing.rule.value}
+                    row = {**row, "pricing_identity_rule": pricing.rule.value,
+                           "configured_deposit_service_days": pricing.deposit_service_days}
         return row if isinstance(row, Mapping) else None
 
 
@@ -110,13 +111,19 @@ def _recommendation(row):
         or row.get("client_created_at") is None
     ):
         return None
-    return build_approved_case_architecture_bootstrap_intent(
+    intent = build_approved_case_architecture_bootstrap_intent(
         str(row["case_no"]),
         str(row["identity_status"]),
         row["client_created_at"],
         row["start_date"],
         row.get("pricing_identity_rule"),
     )
+    days = row.get("configured_deposit_service_days")
+    service_days = row.get("service_days")
+    if isinstance(days, int) and isinstance(service_days, int) and service_days > 0:
+        return replace(intent, client_payment_terms=replace(intent.client_payment_terms,
+            deposit_service_days=min(days, service_days)))
+    return intent
 
 
 def _integer_or_zero(value):

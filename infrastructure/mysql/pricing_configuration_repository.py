@@ -52,18 +52,27 @@ def terms_from_payload(value):
 def policy_from_payload(value):
     value = _object(value)
     return PricingPolicy(date.fromisoformat(value["effective_on"]), tuple(terms_from_payload(item) for item in value["identities"]),
-        HourlyRates(**value["twins_client"]), HourlyRates(**value["twins_payroll"]))
+        HourlyRates(**value["twins_client"]), HourlyRates(**value["twins_payroll"]),
+        value.get("indigenous_deposit_service_days"))
 
 
 def _json(value):
     return json.dumps(pricing_payload(value), ensure_ascii=False, sort_keys=True)
 
 
-def bind_initial_pricing(cursor, case_no):
-    """Called only immediately after first Orders insertion, including partial intake."""
+def select_initial_pricing(cursor):
     today = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Taipei")).date()
     cursor.execute("SELECT id,policy_json FROM accounting_pricing_policies WHERE effective_on<=%s ORDER BY effective_on DESC,id DESC LIMIT 1", (today,))
-    row = cursor.fetchone()
+    return cursor.fetchone()
+
+
+def bind_initial_pricing(cursor, case_no, *, policy_id=None):
+    """Called only immediately after first Orders insertion, including partial intake."""
+    if policy_id is None:
+        row = select_initial_pricing(cursor)
+    else:
+        cursor.execute("SELECT id,policy_json FROM accounting_pricing_policies WHERE id=%s", (policy_id,))
+        row = cursor.fetchone()
     if row is not None:
         policy = policy_from_payload(row["policy_json"])
         if policy.uses_legacy_identity_names:
@@ -114,6 +123,7 @@ def load_case_pricing(cursor, order_row, *, lock=False):
     """No write or latest-policy lookup: only the case's original immutable binding."""
     event_id = order_row.get("pricing_override_event_id")
     policy_id = order_row.get("pricing_policy_id")
+    identity = order_row.get("client_identity_status", order_row.get("identity_status"))
     suffix = " FOR UPDATE" if lock else ""
     if event_id is not None:
         cursor.execute("SELECT pricing_json FROM case_pricing_events WHERE id=%s AND case_no=%s" + suffix,
@@ -121,15 +131,19 @@ def load_case_pricing(cursor, order_row, *, lock=False):
         row = cursor.fetchone()
         if row is None:
             raise ValueError("case_pricing_override_missing")
-        return terms_from_payload(row["pricing_json"])
+        override = terms_from_payload(row["pricing_json"])
+        if policy_id is None or identity != "原住民":
+            return override
     if policy_id is None:
         return None
     cursor.execute("SELECT policy_json FROM accounting_pricing_policies WHERE id=%s" + suffix, (policy_id,))
     row = cursor.fetchone()
     if row is None:
         raise ValueError("case_pricing_bound_policy_missing")
-    identity = order_row.get("client_identity_status", order_row.get("identity_status"))
-    return policy_from_payload(row["policy_json"]).for_case(str(identity), twins=_is_twins(cursor, order_row["case_no"], lock))
+    policy = policy_from_payload(row["policy_json"])
+    if event_id is not None:
+        return replace(override, deposit_service_days=policy.indigenous_deposit_service_days)
+    return policy.for_case(str(identity), twins=_is_twins(cursor, order_row["case_no"], lock))
 
 
 def payroll_tiers(terms):

@@ -378,14 +378,14 @@ def test_scheme_gate_uses_independent_terms_and_never_infers_direct_from_absent_
 @pytest.mark.parametrize('identity,hours,limit', [('補助市民',11,12),('補助市民',12,12),('原住民',79,80),('原住民',80,80)])
 def test_full_subsidy_case_does_not_require_customer_receipts_or_three_zero_stage_records(identity,hours,limit):
     from decimal import Decimal
-    from subsystems.client_finance.case_accounting_query import ClientCaseFunding
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
     class State:
         def case_client(self, _): return 'Synthetic'
         def dismissed(self, _, **kwargs): return {}
     terms = ClientCaseFunding('CASE-FULL',identity,Decimal(hours),Decimal(limit),12000)
     result = AccountingWorkspace(State(),lambda *a,**kw:((),()),lambda *a,**kw:((),()),
-        subsidy=lambda _:None,funding=lambda _:terms).query('CASE-FULL')
+        subsidy=lambda _:None,payment_terms=lambda _:ClientCasePaymentTerms(terms)).query('CASE-FULL')
     assert result.scheme == 'split'
     assert result.customer_amount_ntd == 0 and result.customer_fully_received is True
     assert result.staff_receivable_ntd == result.subsidy_ntd == 12000
@@ -394,7 +394,7 @@ def test_full_subsidy_case_does_not_require_customer_receipts_or_three_zero_stag
 
 def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_review():
     from decimal import Decimal
-    from subsystems.client_finance.case_accounting_query import ClientCaseFunding,ClientAccountingItem
+    from subsystems.client_finance.case_accounting_query import ClientCaseFunding, ClientCasePaymentTerms, ClientAccountingItem
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace
     class State:
         def case_client(self, _): return 'Synthetic'
@@ -402,14 +402,15 @@ def test_full_subsidy_conflicting_existing_customer_charge_is_preserved_for_revi
     item=ClientAccountingItem('original','receivable','訂金','Synthetic',500,500,True,'1',None,payment_stage='deposit')
     terms=ClientCaseFunding('CASE-FULL','原住民',Decimal(80),Decimal(80),12000)
     result=AccountingWorkspace(State(),lambda *a,**kw:((item,),()),lambda *a,**kw:((),()),
-        funding=lambda _:terms).query('CASE-FULL')
+        payment_terms=lambda _:ClientCasePaymentTerms(terms)).query('CASE-FULL')
     assert result.scheme == 'unknown' and result.scheme_conflict
     assert result.client_items[0].expected_ntd == result.client_items[0].actual_ntd == 500
 
 
 def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_distinct():
     from dataclasses import replace
-    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+    from domains.client_finance.reconciliation import PaymentStage
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem, ClientCasePaymentTerms
     from subsystems.staff_payables.case_accounting_query import StaffAccountingItem
     from subsystems.finance_import.accounting_workspace import AccountingWorkspace, AccountingBankFact
     class State:
@@ -436,6 +437,17 @@ def test_case_cash_and_stage_progress_keep_partial_zero_stage_and_shared_source_
     assert query.query('CASE').scheme=='waiting'
     query.client=lambda *_,**__: (stages[1:],())
     assert query.query('CASE').customer_fully_received is None
+    query.payment_terms=lambda _: ClientCasePaymentTerms(zero_stages=frozenset({PaymentStage.DEPOSIT, PaymentStage.SECOND}))
+    query.client=lambda *_,**__: ((stages[1],),())
+    confirmed=query.query('CASE')
+    assert (confirmed.customer_amount_ntd, confirmed.customer_paid_ntd, confirmed.customer_fully_received) == (18000, 18000, True)
+    assert confirmed.collection_progress.stage == 'scheme'
+    assert confirmed.client_items == (stages[1],)
+    query.client=lambda *_,**__: ((),())
+    unknown=query.query('CASE')
+    assert unknown.customer_amount_ntd is None and unknown.customer_paid_ntd is None
+    assert unknown.collection_progress.stage == 'first' and not unknown.collection_progress.sources_complete
+    query.client=lambda *_,**__: ((stages[1],),())
     query.bank=lambda _: (replace(banks[1],cases=('CASE','OTHER')),)
     shared=query.query('CASE')
     assert shared.cash_by_flow is None and shared.cash_net_ntd is None

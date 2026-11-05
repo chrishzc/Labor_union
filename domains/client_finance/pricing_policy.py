@@ -31,6 +31,7 @@ class CasePricingTerms:
     subsidy_hours: Decimal
     client: HourlyRates
     payroll: HourlyRates
+    deposit_service_days: int | None = None
 
     def __post_init__(self):
         if not self.identity_name.strip() or len(self.identity_name) > 100:
@@ -83,11 +84,15 @@ class PricingPolicy:
     identities: tuple[CasePricingTerms, ...]
     twins_client: HourlyRates
     twins_payroll: HourlyRates
+    indigenous_deposit_service_days: int | None = None
 
     def __post_init__(self):
         if type(self.effective_on) is not date or not self.identities:
             raise ValueError("pricing_policy_date_and_identities_required")
         names = tuple(item.identity_name for item in self.identities)
+        days = self.indigenous_deposit_service_days
+        if days is not None and (type(days) is not int or not 0 <= days <= 2_147_483_647):
+            raise ValueError("pricing_indigenous_deposit_service_days_invalid")
         if len(set(names)) != len(names):
             raise ValueError("pricing_identity_names_must_be_unique")
         if {"低收入戶", "中低收入戶"}.intersection(names):
@@ -110,9 +115,12 @@ class PricingPolicy:
         result = next((item for item in self.identities if item.identity_name == identity), None)
         if result is None:
             raise ValueError("pricing_identity_not_in_bound_policy")
-        if not twins:
+        deposit_days = self.indigenous_deposit_service_days if identity == "原住民" else None
+        if not twins and deposit_days is None:
             return result
-        return CasePricingTerms(result.identity_name, result.rule, result.subsidy_hours, self.twins_client, self.twins_payroll)
+        return CasePricingTerms(result.identity_name, result.rule, result.subsidy_hours,
+            self.twins_client if twins else result.client, self.twins_payroll if twins else result.payroll,
+            deposit_days)
 
     @property
     def uses_legacy_identity_names(self) -> bool:

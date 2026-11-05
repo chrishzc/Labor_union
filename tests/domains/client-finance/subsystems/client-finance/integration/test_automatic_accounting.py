@@ -5,7 +5,9 @@ from datetime import date, timedelta
 from domains.client_finance.obligation_planning import (
     ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms, ExistingClientStageObligation,
     automatic_subsidy_return_plan, build_client_finance_terms_candidate,
+    confirmed_zero_payment_stages,
 )
+from domains.client_finance.reconciliation import PaymentStage
 from shared_kernel.money import MoneyNTD
 
 
@@ -45,6 +47,30 @@ def test_canonical_identity_caps_and_social_welfare_self_pay_excess():
     candidate=build_client_finance_terms_candidate(source,'social:terms')
     assert sum(stage.amount.amount for stage in candidate.stage_plans)==36000
     assert candidate.subsidy_return_plan is None
+
+
+def test_zero_deposit_subsidized_case_fills_first_installment_before_second():
+    source = facts(paid=False)
+    start = source.charge_days[0].service_date
+    for days, amounts in ((20, [0, 14000, 0]), (35, [0, 42000, 14000])):
+        case = replace(
+            source, identity_status="補助市民", existing_obligations=(),
+            payment_terms=replace(source.payment_terms, deposit_service_days=0,
+                                  client_hourly_rate=MoneyNTD(350)),
+            charge_days=tuple(ClientChargeDay(start + timedelta(days=i), False) for i in range(days)),
+        )
+        candidate = build_client_finance_terms_candidate(case, f"subsidized-installments:{days}")
+        assert [stage.amount.amount for stage in candidate.stage_plans] == amounts
+        assert candidate.stage_plans[-1].due_date == (start + timedelta(days=15) if amounts[-1] else None)
+
+
+def test_zero_stage_proof_excludes_positive_missing_and_conflicting_obligations():
+    source = facts(paid=False)
+    short_case = replace(source, charge_days=source.charge_days[:10], existing_obligations=())
+    assert confirmed_zero_payment_stages(short_case) == {PaymentStage.SECOND}
+
+    recorded_deposit = replace(source.existing_obligations[0], contracted_amount=MoneyNTD(100))
+    assert not confirmed_zero_payment_stages(replace(short_case, existing_obligations=(recorded_deposit,)))
 
 
 def test_pending_terms_candidate_contains_current_refund_and_tracks_end_date():

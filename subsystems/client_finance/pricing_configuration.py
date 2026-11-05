@@ -22,7 +22,13 @@ def pricing_payload(value):
     """Canonical representation for this pricing contract's dataclasses only."""
     def encode(item):
         if is_dataclass(item):
-            return asdict(item)
+            payload = asdict(item, dict_factory=lambda fields: {
+                key: value for key, value in fields if key != "deposit_service_days"
+            })
+            if isinstance(item, PricingPolicy) and item.indigenous_deposit_service_days is None:
+                # Keep the original hash for replays of policy commands without this setting.
+                del payload["indigenous_deposit_service_days"]
+            return payload
         if isinstance(item, date):
             return item.isoformat()
         if isinstance(item, Decimal):

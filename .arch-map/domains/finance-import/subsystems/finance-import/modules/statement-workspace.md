@@ -42,7 +42,7 @@
 - `db/schema_parts/244_finance_case_arrangements.sql`、`db/schema_parts/1066_finance_case_arrangements.sql` — append-only arrangement events，case/version 與 operation key 唯一，UPDATE／DELETE 禁止。
 - `db/schema_parts/241_finance_case_accounting_markers.sql`、`db/schema_parts/1063_finance_case_accounting_markers.sql`
 
-- shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原owner退款同步沿同一組typed queries；ClientCaseFunding提供全額免自備條件，零期款未建列不誤擋，既有金融歷史矛盾顯示conflict而不改寫。
+- shared composition: `infrastructure/mysql/accounting_workspace_repository.py::build_accounting_workspace` — 案件、清冊與原 owner 退款同步共用 Client Finance 正式繳款來源。僅略過確認為零的缺席期款，工作台與補助交接使用同一應繳、實收結果，既有金融歷史衝突保留。
 
 - `db/schema_parts/245_finance_case_subsidy_plans.sql`、`db/schema_parts/1067_finance_case_subsidy_plans.sql` — independent append-only manual plan events, not financial mutations or historical arrangement backfill.
 

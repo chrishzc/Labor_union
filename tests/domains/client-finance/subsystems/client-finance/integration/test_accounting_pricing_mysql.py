@@ -1,7 +1,7 @@
 """Synthetic localhost evidence through real HTTP, writers and MySQL transactions."""
 
 from argparse import Namespace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import os
 import json
@@ -435,5 +435,72 @@ def test_non_citizen_zero_subsidy_and_independent_self_pay_through_real_writers(
         assert (after['impact']['client_amount'], after['impact']['staff_total_amount']) == (52800, 49600)
         assert repository.query_staff_month(staff_id, 2026, 11).payable_total.amount == 49600
         assert repository.query_staff_month(staff_id, 2026, 12).payable_total.amount == 0
+    finally:
+        connection.close()
+
+
+def test_indigenous_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
+    from api.dependencies.case_import import build_case_import_application
+    from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.case_import.case_import_workflow import ApplyCaseImport
+    from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
+
+    def publish(days):
+        draft = policy()
+        draft["identities"].append({
+            **draft["identities"][1], "identity_name": "原住民", "subsidy_hours": 80,
+            "client": {"covered": 350, "excess": 350},
+        })
+        draft["indigenous_deposit_service_days"] = days
+        before = client.get("/api/v1/accounting-pricing").json()["data"]["revision"]
+        saved = post(client, "/api/v1/accounting-pricing/policies",
+                     {"policy": draft, "expected_revision": before}, f"indigenous-policy-{days}")
+        current = client.get("/api/v1/accounting-pricing").json()["data"]["versions"][0]
+        assert current["revision"] == saved["revision"]
+        assert current["policy"]["indigenous_deposit_service_days"] == days
+        return saved["revision"]
+
+    start = date(2026, 11, 16)
+
+    def import_case(case_no, service_days):
+        connection = mysql_adapter.get_connection()
+        try:
+            with connection.cursor() as cursor:
+                rule = initial_identity_rule(cursor, "原住民", case_no)
+            intent = build_hcm_case_import_intent({
+                "case_no": case_no, "name": f"Synthetic {case_no}", "identity_status": "原住民",
+                "created_at": datetime(2026, 11, 1), "service_start_date": start,
+                "service_days": service_days, "service_time": "8小時 09:00-17:00",
+                "service_type": "連續服務",
+            }, start + timedelta(days=service_days - 1), pricing_identity_rule=rule)
+            workflow = build_case_import_application(connection)
+            correlation = CorrelationId(f"indigenous-import:{case_no}")
+            preview = workflow.preview(intent, correlation)
+            workflow.apply(ApplyCaseImport(intent, ExpectedVersion(0), preview.fingerprint,
+                IdempotencyKey(correlation.value), ActorContext("pricing-test"), "synthetic deposit fixture", correlation))
+        finally:
+            connection.close()
+
+    zero_policy = publish(0)
+    import_case("115009911", 20)
+    five_policy = publish(5)
+    import_case("115009912", 31)
+    import_case("115009913", 10)
+    connection = mysql_adapter.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            for case_no, revision, days, amounts in (
+                ("115009911", zero_policy, 0, {"first": 28000}),
+                ("115009912", five_policy, 5, {"deposit": 14000, "first": 42000, "second": 2800}),
+                ("115009913", five_policy, 5, {}),
+            ):
+                cursor.execute("SELECT o.pricing_policy_id,t.deposit_service_days,t.second_payment_due_date "
+                    "FROM orders o JOIN client_payment_terms t ON t.case_no=o.case_no WHERE o.case_no=%s", (case_no,))
+                terms = cursor.fetchone()
+                assert (terms["pricing_policy_id"], terms["deposit_service_days"]) == (revision, days)
+                assert terms["second_payment_due_date"] == (start + timedelta(days=15) if "second" in amounts else None)
+                cursor.execute("SELECT obligation_type,amount_due_ntd FROM client_obligations WHERE case_no=%s", (case_no,))
+                assert {row["obligation_type"]: row["amount_due_ntd"] for row in cursor.fetchall()} == amounts
     finally:
         connection.close()

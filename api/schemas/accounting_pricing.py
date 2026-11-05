@@ -35,10 +35,12 @@ class PricingPolicyBody(PricingModel):
     identities: list[CasePricingTermsBody] = Field(min_length=1, max_length=100)
     twins_client: HourlyRatesBody
     twins_payroll: HourlyRatesBody
+    indigenous_deposit_service_days: int | None = Field(default=None, strict=True, ge=0, le=2_147_483_647)
 
     def domain(self):
         return PricingPolicy(self.effective_on, tuple(item.domain() for item in self.identities),
-            HourlyRates(**self.twins_client.model_dump()), HourlyRates(**self.twins_payroll.model_dump()))
+            HourlyRates(**self.twins_client.model_dump()), HourlyRates(**self.twins_payroll.model_dump()),
+            self.indigenous_deposit_service_days)
 
 
 class PolicyVersionView(PricingModel):

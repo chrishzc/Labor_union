@@ -154,7 +154,7 @@ def _load_facts(cursor, intent, *, lock):
     from infrastructure.mysql.pricing_configuration_repository import load_case_pricing
     pricing = load_case_pricing(cursor, order_row, lock=lock)
     if pricing is not None:
-        order = replace(order, pricing_identity_rule=pricing.rule.value)
+        order = replace(order, pricing_identity_rule=pricing.rule.value, pricing=pricing)
     policy_kind = payroll_policy_kind_for_case(
         order.source_identity_status,
         order.multi_birth_count,

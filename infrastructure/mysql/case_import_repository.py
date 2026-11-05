@@ -83,6 +83,7 @@ class MySqlCaseImportRepository:
 
     def load(self, intent, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
+            from infrastructure.mysql.pricing_configuration_repository import policy_from_payload, select_initial_pricing
             exists = _case_exists(cursor, intent.case_no, lock=for_update)
             multi_birth_count = _load_multi_birth_count(
                 cursor, intent, lock=for_update
@@ -95,12 +96,22 @@ class MySqlCaseImportRepository:
                 pricing_identity_rule=intent.pricing_identity_rule,
             )
             registration = _load_provisional_registration(cursor, intent, lock=for_update)
+            pricing_row = None if exists else select_initial_pricing(cursor)
+            identity = next((item.value for item in intent.client_attributes if item.name == "identity_status"), None)
+            pricing = None
+            if pricing_row and intent.is_complete and identity in {"原住民", "補助市民"}:
+                bound_policy = policy_from_payload(pricing_row["policy_json"])
+                if not bound_policy.uses_legacy_identity_names:
+                    if any(item.identity_name == identity for item in bound_policy.identities):
+                        pricing = bound_policy.for_case(identity, twins=multi_birth_count == "雙胞胎")
         return CaseImportFacts(
             exists,
             policy,
             registration,
             multi_birth_count,
             intent.pricing_identity_rule,
+            int(pricing_row["id"]) if pricing_row else None,
+            pricing,
         )
 
     def claim_command(self, command, command_fingerprint):
@@ -130,7 +141,8 @@ class MySqlCaseImportRepository:
             client_id = _upsert_case_client(cursor, candidate)
             _insert_order(cursor, candidate, client_id)
             from infrastructure.mysql.pricing_configuration_repository import bind_initial_pricing
-            bind_initial_pricing(cursor, candidate.case_no)
+            if candidate.pricing_policy_id is not None:
+                bind_initial_pricing(cursor, candidate.case_no, policy_id=candidate.pricing_policy_id)
         return client_id
 
     def consume_provisional_registration(self, command, candidate, client_id, import_event_id):

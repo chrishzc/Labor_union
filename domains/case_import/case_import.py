@@ -19,6 +19,7 @@ from domains.bootstrap.case_architecture import (
     RatePolicyFacts,
     build_case_architecture_bootstrap_candidate,
 )
+from domains.client_finance.pricing_policy import CasePricingTerms
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import (
     require_canonical_text,
@@ -199,6 +200,8 @@ class CaseImportFacts:
     provisional_registration: ProvisionalRegistrationFacts | None = None
     multi_birth_count: str | None = None
     pricing_identity_rule: str | None = None
+    pricing_policy_id: int | None = None
+    pricing: CasePricingTerms | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.case_exists, bool):
@@ -240,6 +243,7 @@ class CaseImportCandidate:
     fingerprint: PreviewFingerprint
     provisional_registration: ProvisionalRegistrationFacts | None = None
     partial_service_time: ImportedOrderServiceTime | None = None
+    pricing_policy_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +282,7 @@ def build_case_import_candidate(
         {
             "source_fingerprint": source_fingerprint.value,
             "bootstrap_fingerprint": None if bootstrap is None else bootstrap.fingerprint.value,
+            "pricing_policy_id": facts.pricing_policy_id,
         }
     )
     return CaseImportCandidate(
@@ -289,6 +294,7 @@ def build_case_import_candidate(
         fingerprint,
         facts.provisional_registration,
         intent.partial_service_time,
+        facts.pricing_policy_id,
     )
 
 
@@ -325,6 +331,7 @@ def _build_bootstrap_candidate(facts, intent):
             _required_attribute(intent.client_attributes, "identity_status"),
             facts.multi_birth_count,
             pricing_identity_rule=facts.pricing_identity_rule,
+            pricing=facts.pricing,
         ),
         facts.payroll_rate_policy,
         BootstrapPresence(),

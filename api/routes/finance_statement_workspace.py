@@ -62,6 +62,8 @@ def _subsidy_plan_view(plan):
 
 def _case_view(case):
     payload = asdict(case)
+    payload.pop("funding")
+    payload.pop("customer_paid_ntd")
     for field in ("client_items", "staff_items", "transactions", "warnings"):
         payload[field] = list(payload[field])
     for field in ("client_items", "staff_items"):

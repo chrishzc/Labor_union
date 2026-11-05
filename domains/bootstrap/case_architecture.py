@@ -18,6 +18,7 @@ from domains.client_finance.obligation_planning import (
     ClientChargeDay, ClientFinanceTermsFacts, ClientPaymentTerms,
     build_client_finance_terms_candidate,
 )
+from domains.client_finance.pricing_policy import CasePricingTerms
 from domains.client_finance.reconciliation import PaymentStage
 from domains.client_finance.subsidy_coverage import derive_subsidy_coverage
 
@@ -165,6 +166,7 @@ class CaseRootFacts:
     multi_birth_count: str | None = None
     floor_fee: MoneyNTD = MoneyNTD(0)
     pricing_identity_rule: str | None = None
+    pricing: CasePricingTerms | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.floor_fee, MoneyNTD) or self.floor_fee.amount < 0:
@@ -278,6 +280,10 @@ def build_case_architecture_bootstrap_candidate(
 ) -> CaseArchitectureBootstrapCandidate:
     _validate_case_identity(facts, intent)
     _validate_order_root_facts(facts.order)
+    pricing = facts.order.pricing
+    if pricing is not None and pricing.deposit_service_days is not None:
+        intent = replace(intent, client_payment_terms=replace(intent.client_payment_terms,
+            deposit_service_days=min(pricing.deposit_service_days, facts.order.service_days)))
     _validate_client_payment_terms(facts.order, intent.client_payment_terms)
     intent = replace(intent, client_payment_terms=_planned_payment_terms(
         facts.order, intent.client_payment_terms,
@@ -367,6 +373,8 @@ def _validate_client_payment_terms(order, payment_terms) -> None:
     expected_deposit_days = _deposit_days_for_identity(
         order.source_identity_status, order.pricing_identity_rule
     )
+    if order.pricing is not None and order.pricing.deposit_service_days is not None:
+        expected_deposit_days = min(order.pricing.deposit_service_days, order.service_days)
     if payment_terms.deposit_service_days != expected_deposit_days:
         _raise_invalid("deposit service days do not match identity policy")
     if payment_terms.deposit_due_date > payment_terms.first_payment_due_date:
@@ -381,6 +389,8 @@ def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
         Decimal(order.service_days) * Decimal(str(order.service_hours_per_day)),
         Decimal(order.floor_fee.amount),
     )
+    uses_payable_days = (order.source_identity_status == "補助市民" and terms.deposit_service_days == 0
+                        or order.pricing is not None and order.pricing.deposit_service_days is not None)
     finance = ClientFinanceTermsFacts(
         order.case_no, 0, order.service_hours_per_day, order.floor_fee,
         tuple(ClientChargeDay(order.planned_start_date + timedelta(days=i), False)
@@ -389,6 +399,8 @@ def _planned_payment_terms(order, terms) -> ClientPaymentTermsRootFacts:
                            terms.deposit_due_date, terms.first_payment_due_date,
                            terms.second_payment_due_date),
         (), client_service_charge_waived=coverage.is_full_subsidy_order,
+        identity_status=order.source_identity_status if uses_payable_days else None,
+        pricing=order.pricing if uses_payable_days else None,
     )
     candidate = build_client_finance_terms_candidate(finance, f"bootstrap:{order.case_no}")
     second = next(stage for stage in candidate.stage_plans

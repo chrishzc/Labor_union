@@ -56,6 +56,7 @@ describe('Standalone accounting parameter policy', () => {
     });
     render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
     const excess = await screen.findByLabelText('補助市民 客戶用盡後時薪');
+    fireEvent.change(screen.getByLabelText('原住民訂金天數'), { target: { value: '5' } });
     fireEvent.change(excess, { target: { value: '300' } });
     fireEvent.change(screen.getByLabelText('補助市民 月嫂用盡後時薪'), { target: { value: '310' } });
     expect(screen.getByLabelText('補助市民 客戶補助內時薪')).toHaveValue(350);
@@ -69,10 +70,14 @@ describe('Standalone accounting parameter policy', () => {
     await screen.findByText('版本 1 已儲存；依生效日期套用新案件。');
     expect(accountingPricingClient.savePolicy).toHaveBeenCalledTimes(1);
     const saved = vi.mocked(accountingPricingClient.savePolicy).mock.calls[0][0];
+    expect(saved.indigenous_deposit_service_days).toBe(5);
     expect(saved.identities.find(item => item.identity_name === '補助市民')?.payroll).toEqual({ covered: 350, excess: 310 });
     expect(screen.queryByRole('tab', { name: '收款帳戶' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '版本紀錄' }));
     await screen.findByText('synthetic-admin');
+    fireEvent.click(screen.getByRole('button', { name: '版本 1' }));
+    expect(screen.getByLabelText('原住民訂金天數')).toHaveValue(5);
+    expect(screen.getByLabelText('原住民訂金天數')).toBeDisabled();
   });
 });
 
