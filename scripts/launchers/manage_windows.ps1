@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 [CmdletBinding()]
 param(
     [ValidateSet('menu','start','stop','restart','update','frontend','status','prepare','check','setup','package','database-backup','database-upgrade','database-restore')]
@@ -282,7 +282,7 @@ function Invoke-DatabaseMaintenance {
     }
     & $PythonPath -m scripts.nas_database_maintenance $Mode
     if ($LASTEXITCODE -ne 0) {
-        throw '資料庫操作未完成；請保留備份與紀錄，依上方訊息處理。'
+        throw "資料庫維護 ($Mode) 未成功，請依上方顯示的問題診斷排查。"
     }
 }
 

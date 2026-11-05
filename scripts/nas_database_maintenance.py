@@ -133,7 +133,7 @@ class ConnectionConfig:
         options = ["--ssl-mode=" + self.settings["ssl_mode"]]
         for flag, path in self.settings["tls_files"].items():
             options.append(f"--{flag}={path}")
-        require(shutil.which(executable), "找不到 MySQL 維護工具；請維護人員安裝 MySQL 8 的 mysql 與 mysqldump。")
+        require(shutil.which(executable), f"找不到 MySQL 維護工具「{executable}」；請安裝 MySQL 8 客戶端工具 (含 mysql 與 mysqldump) 並加入系統 PATH。")
         return [executable, *options]
 
     def run_manifest_backfill(self, backfill, mode, candidate, plan_path, backup_path, receipt_path):
@@ -922,6 +922,56 @@ def choose_backup(settings):
     return paths[int(selection) - 1]
 
 
+def format_maintenance_error(error: Exception, settings: dict | None = None) -> str:
+    """提供清晰且具排查指引的維護錯誤診斷訊息。"""
+    if isinstance(error, MaintenanceBlocked):
+        return f"[環境與設定檢查未通過] {error}"
+
+    if isinstance(error, pymysql.MySQLError):
+        args = error.args
+        errno = args[0] if args and isinstance(args[0], int) else None
+        detail = args[1] if len(args) > 1 else str(error)
+        host = settings.get("host", "127.0.0.1") if settings else "127.0.0.1"
+        port = settings.get("port", 3306) if settings else 3306
+        user = settings.get("runtime", {}).get("DB_USER", "root") if settings else "root"
+        database = settings.get("database", "union_db") if settings else "union_db"
+
+        if errno in (2002, 2003):
+            return (
+                f"[連線失敗 (MySQL 錯誤碼 {errno})]\n"
+                f"無法連線至 MySQL 伺服器 ({host}:{port})。\n"
+                f"可能原因與建議排查：\n"
+                f"  1. MySQL 服務尚未啟動。若使用 Docker，請確認 Docker 容器已啟動 (例如: docker start mysql_db)；\n"
+                f"  2. 若為 Windows 系統服務或 NAS，請確認 MySQL 服務運作中且防火牆允許通訊埠 {port}；\n"
+                f"  3. 請確認 .env 中的 DB_HOST 與 DB_PORT 設定正確。"
+            )
+        if errno == 1045:
+            return (
+                f"[帳號驗證失敗 (MySQL 錯誤碼 1045)]\n"
+                f"登入 MySQL 伺服器失敗 (使用者: '{user}', 目標: {host}:{port})。\n"
+                f"可能原因：密碼或使用者名稱錯誤。\n"
+                f"建議排查：請檢查 .env 中的 DB_USER 與 DB_PASSWORD 是否與實際 MySQL 密碼相符。"
+            )
+        if errno == 1049:
+            return (
+                f"[資料庫不存在 (MySQL 錯誤碼 1049)]\n"
+                f"MySQL 伺服器上找不到指定的資料庫 '{database}'。\n"
+                f"建議排查：請檢查 .env 中的 DB_DATABASE 設定，或確認資料庫是否已建立。"
+            )
+        return f"[MySQL 資料庫錯誤 (錯誤碼 {errno})]: {detail}"
+
+    if isinstance(error, FileNotFoundError):
+        fn = getattr(error, "filename", "") or str(error)
+        return (
+            f"[找不到執行工具]\n"
+            f"系統找不到指定檔案或命令工具: {fn}\n"
+            f"建議排查：若為 mysql 或 mysqldump，請確認已安裝 MySQL 8 Client 並將其 bin 資料夾加入系統 PATH。"
+        )
+
+    err_name = type(error).__name__
+    return f"[資料庫維護未完成 ({err_name})]: {error}"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("backup", "upgrade", "restore"))
@@ -952,7 +1002,7 @@ def main(argv=None):
         print(f"NAS：{settings['host']}:{settings['port']}　資料庫：{settings['database']}")
         if args.mode == "backup" and not args.scheduled:
             print("1. 立即備份\n2. 設定每日備份（預設 18:00）\n直接 Enter 取消")
-            answer = input("請選擇：").strip()
+            answer = input("請選擇：").strip().strip("\ufeff")
             if answer == "2":
                 at = input("每日備份時間（Enter 使用 18:00）：").strip() or "18:00"
                 configure_daily_backup(at, environment_file=args.environment_file, settings_file=args.settings_file)
@@ -991,7 +1041,7 @@ def main(argv=None):
         print("已停止；若操作已開始，請保留紀錄並通知維護人員，不要重複執行。")
         return 2
     except Exception as error:
-        message = str(error) if isinstance(error, MaintenanceBlocked) else "操作未完成；請保留備份與紀錄，通知維護人員確認。"
+        message = format_maintenance_error(error, settings)
         if args.mode == "backup" and settings is not None and not args.dry_run:
             try:
                 record_backup_result(settings, "failed", message=message)
