@@ -218,3 +218,48 @@ def test_missing_debit_and_credit_is_warned_as_direction_missing(monkeypatch):
 
     assert row["direction"] == "unknown"
     assert row["warnings"] == ["direction_missing"]
+
+
+def test_sinopac_accepts_core_columns_only_without_all_fifteen_headers(tmp_path):
+    # Only 5 columns: 帳號, 交易日, 支出, 存入, 銷帳編號 (omits 票據號碼, 計息日, 入帳日, 幣別, 餘額, etc.)
+    headers = ["帳號", "交易日", "支出", "存入", "銷帳編號"]
+    values = ["03201800231313", "2026/10/01 12:00:00", 0, 15000, "99781699114099"]
+    path = tmp_path / "sinopac_core_only.xlsx"
+    pd.DataFrame([headers, values]).to_excel(path, index=False, header=False)
+
+    rows = normalize_sinopac_rows(path, "Sheet1", 1)
+    assert len(rows) == 1
+    assert rows[0]["source_bank_account"] == "03201800231313"
+    assert rows[0]["transaction_date"] == "2026-10-01"
+    assert rows[0]["credit"] == Decimal("15000")
+    assert rows[0]["direction"] == "incoming"
+    assert rows[0]["bank_references"]["銷帳編號"] == "99781699114099"
+    assert rows[0]["bank_references"]["票據號碼"] is None
+    assert rows[0]["posting_date"] is None
+
+
+def test_sinopac_accepts_extra_columns(tmp_path):
+    # 17 columns: has extra unknown columns like "經辦", "空白欄"
+    headers = list(sinopac.SINOPAC_HEADERS) + ["經辦", "自訂備註"]
+    values = [
+        "03201800231313", "2026-07-14", "2026-07-14", "2026-07-14", "摘要", "TWD",
+        None, Decimal("100"), Decimal("100"), None, None, None,
+        "備註", None, "存摺備註", "行員A", "自訂123",
+    ]
+    path = tmp_path / "sinopac_extra.xlsx"
+    pd.DataFrame([headers, values]).to_excel(path, index=False, header=False)
+
+    rows = normalize_sinopac_rows(path, "Sheet1", 1)
+    assert len(rows) == 1
+    assert rows[0]["raw_payload"]["經辦"] == "行員A"
+    assert rows[0]["raw_payload"]["自訂備註"] == "自訂123"
+
+
+def test_sinopac_rejects_missing_required_column_with_clear_message(tmp_path):
+    headers = ["帳號", "支出", "存入"]  # Missing 交易日
+    values = ["03201800231313", 0, 100]
+    path = tmp_path / "sinopac_missing_date.xlsx"
+    pd.DataFrame([headers, values]).to_excel(path, index=False, header=False)
+
+    with pytest.raises(ValueError, match="永豐對帳單缺少必要欄位：交易日"):
+        normalize_sinopac_rows(path, "Sheet1", 1)

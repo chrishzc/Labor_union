@@ -109,6 +109,26 @@ def test_ingestion_failure_http_error_contains_only_safe_attempt_fields() -> Non
     }
 
 
+def test_ingestion_failure_http_error_includes_actionable_cause_diagnostic() -> None:
+    attempt = ingestion.FinanceImportAttempt(
+        "finance-import-attempt:8", "a" * 64, "normalization",
+        "finance_import_validation_failed", "rolled_back",
+        datetime(2026, 8, 9, 8), datetime(2026, 8, 9, 8), None,
+    )
+    cause = ValueError("永豐對帳單缺少必要欄位：交易日")
+    attempt_err = ingestion.FinanceImportAttemptError(attempt)
+    attempt_err.__cause__ = cause
+
+    with pytest.raises(Exception) as error:
+        finance_import_route._raise_ingestion_attempt_error(
+            attempt_err, CorrelationId("attempt-error")
+        )
+
+    detail = error.value.detail
+    assert detail["error"]["code"] == "finance_import_validation_failed"
+    assert "永豐對帳單缺少必要欄位：交易日" in detail["error"]["message"]
+
+
 def test_attempt_schema_is_append_only_and_excludes_bank_row_content() -> None:
     source = (Path(__file__).resolve().parents[1] / "db/schema_parts/152_finance_import_ingestion_attempts.sql").read_text(encoding="utf-8")
 

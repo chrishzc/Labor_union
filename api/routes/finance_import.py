@@ -1005,10 +1005,37 @@ def _raise_ingestion_attempt_error(error, correlation_id):
         if error.attempt.error_code in validation_codes
         else ErrorCategory.INTERNAL
     )
+    message = "Finance Import 匯入未完成；請使用相同 Idempotency-Key 查看原嘗試紀錄。"
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and category is ErrorCategory.VALIDATION:
+        from scripts.imports.finance_formats.detector import (
+            StatementFormatDetectionError,
+        )
+
+        if isinstance(cause, StatementFormatDetectionError):
+            msg = str(cause).strip()
+            if getattr(cause, "diagnostics", None):
+                missing_parts = []
+                for d in cause.diagnostics:
+                    fmt = d.get("format_id", "")
+                    missing = d.get("missing_headers")
+                    if missing:
+                        missing_parts.append(f"{fmt}缺少必要欄位：{', '.join(missing)}")
+                if missing_parts:
+                    message = f"對帳單格式不符：{msg}（{'; '.join(missing_parts)}）"
+                else:
+                    message = f"對帳單格式不符：{msg}"
+            else:
+                message = f"對帳單格式不符：{msg}"
+        else:
+            cause_text = str(cause).strip()
+            if cause_text:
+                message = f"對帳單格式驗證失敗：{cause_text}"
+
     typed = TypedError(
         category,
         error.attempt.error_code or "finance_import_ingestion_failed",
-        "Finance Import 匯入未完成；請使用相同 Idempotency-Key 查看原嘗試紀錄。",
+        message,
         correlation_id,
     )
     raise HTTPException(

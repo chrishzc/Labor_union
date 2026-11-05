@@ -33,6 +33,12 @@ SINOPAC_HEADERS = (
     "更正註記",
     "存摺備註",
 )
+SINOPAC_REQUIRED_HEADERS = (
+    "帳號",
+    "交易日",
+    "支出",
+    "存入",
+)
 
 
 def _canonical_header(value: Any) -> str:
@@ -163,20 +169,34 @@ def normalize_sinopac_rows(
     ]
     canonical_headers = [_canonical_header(value) for value in source_headers]
     nonempty_headers = [value for value in canonical_headers if value]
-    if (
-        len(source_headers) != len(SINOPAC_HEADERS)
-        or len(nonempty_headers) != len(set(nonempty_headers))
-        or set(nonempty_headers) != set(SINOPAC_HEADERS)
-    ):
-        raise ValueError("永豐對帳單必須包含唯一且完整的十五個指定表頭")
 
-    column_index = {name: index for index, name in enumerate(canonical_headers)}
+    seen_headers: set[str] = set()
+    duplicates: list[str] = []
+    for h in nonempty_headers:
+        if h in seen_headers and h not in duplicates:
+            duplicates.append(h)
+        seen_headers.add(h)
+    if duplicates:
+        raise ValueError(f"永豐對帳單表頭包含重複欄位：{', '.join(duplicates)}")
+
+    missing_required = [h for h in SINOPAC_REQUIRED_HEADERS if h not in canonical_headers]
+    if missing_required:
+        raise ValueError(
+            f"永豐對帳單缺少必要欄位：{', '.join(missing_required)}（必要欄位為：帳號、交易日、支出、存入）"
+        )
+
+    column_index = {name: index for index, name in enumerate(canonical_headers) if name}
+
+    def _col_val(name: str, row_values: list[Any]) -> Any:
+        idx = column_index.get(name)
+        return row_values[idx] if idx is not None and idx < len(row_values) else None
+
     normalized_rows: list[dict[str, Any]] = []
     for row_index in range(header_index + 1, len(frame)):
         values = frame.iloc[row_index].tolist()
-        account_value = values[column_index["帳號"]]
-        transaction_value = values[column_index["交易日"]]
-        transaction_timestamp = _timestamp(values[column_index["交易日"]])
+        account_value = _col_val("帳號", values)
+        transaction_value = _col_val("交易日", values)
+        transaction_timestamp = _timestamp(transaction_value)
         account_text = _identifier(account_value)
         account_is_plausible = bool(
             account_text and account_text.isdigit() and len(account_text) >= 8
@@ -186,8 +206,8 @@ def normalize_sinopac_rows(
         warnings: list[str] = []
         if transaction_timestamp is None and not _is_missing(transaction_value):
             warnings.append("transaction_date_invalid")
-        debit = _decimal(values[column_index["支出"]], "debit", warnings)
-        credit = _decimal(values[column_index["存入"]], "credit", warnings)
+        debit = _decimal(_col_val("支出", values), "debit", warnings)
+        credit = _decimal(_col_val("存入", values), "credit", warnings)
         direction, direction_warnings = _direction(debit, credit)
         warnings.extend(direction_warnings)
         warnings = list(dict.fromkeys(warnings))
@@ -195,6 +215,7 @@ def normalize_sinopac_rows(
         raw_payload = {
             source_header: _json_scalar(values[index])
             for index, source_header in enumerate(source_headers)
+            if source_header and index < len(values)
         }
         json.dumps(raw_payload, ensure_ascii=False)
 
@@ -208,23 +229,23 @@ def normalize_sinopac_rows(
                 "source_reference": None,
                 "transaction_date": transaction_timestamp.strftime("%Y-%m-%d") if transaction_timestamp is not None else None,
                 "transaction_time": transaction_timestamp.strftime("%H:%M:%S") if transaction_timestamp is not None else None,
-                "posting_date": _iso_date(values[column_index["入帳日"]], "posting_date", warnings),
-                "value_date": _iso_date(values[column_index["計息日"]], "value_date", warnings),
+                "posting_date": _iso_date(_col_val("入帳日", values), "posting_date", warnings),
+                "value_date": _iso_date(_col_val("計息日", values), "value_date", warnings),
                 "debit": debit,
                 "credit": credit,
                 "direction": direction,
-                "balance": _decimal(values[column_index["餘額"]], "balance", warnings),
-                "currency": _identifier(values[column_index["幣別"]]),
-                "summary": _identifier(values[column_index["摘要"]]),
-                "memo": _verbatim_text(values[column_index["備註"]]),
+                "balance": _decimal(_col_val("餘額", values), "balance", warnings),
+                "currency": _identifier(_col_val("幣別", values)),
+                "summary": _identifier(_col_val("摘要", values)),
+                "memo": _verbatim_text(_col_val("備註", values)),
                 "counterparty_name": None,
                 "counterparty_account": None,
-                "cancellation_code": _identifier(values[column_index["更正註記"]]),
+                "cancellation_code": _identifier(_col_val("更正註記", values)),
                 "bank_references": {
-                    "票據號碼": _identifier(values[column_index["票據號碼"]]),
-                    "銷帳編號": _identifier(values[column_index["銷帳編號"]]),
-                    "交易參考編號": _identifier(values[column_index["交易參考編號"]]),
-                    "存摺備註": _verbatim_text(values[column_index["存摺備註"]]),
+                    "票據號碼": _identifier(_col_val("票據號碼", values)),
+                    "銷帳編號": _identifier(_col_val("銷帳編號", values)),
+                    "交易參考編號": _identifier(_col_val("交易參考編號", values)),
+                    "存摺備註": _verbatim_text(_col_val("存摺備註", values)),
                 },
                 "warnings": warnings,
                 "raw_payload": raw_payload,

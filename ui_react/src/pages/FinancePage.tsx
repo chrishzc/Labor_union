@@ -82,6 +82,8 @@ function financeErrorMessage(error: unknown, fallback: string): string {
   if (code.includes('file_too_large')) return '選擇的工作簿超過允許大小，請改用較小的檔案。';
   if (code.includes('file_changed')) return '工作簿內容已變更，請重新選擇並上傳。';
   if (code.includes('sha256_unavailable')) return '目前無法核對工作簿內容，請重新選擇檔案後再試。';
+  const message = typeof detail.message === 'string' && detail.message.trim() ? detail.message.trim() : '';
+  if (message && message !== fallback) return message;
   return fallback;
 }
 

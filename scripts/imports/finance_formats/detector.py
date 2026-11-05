@@ -42,19 +42,8 @@ FORMAT_SIGNATURES = {
         "required": {
             "帳號",
             "交易日",
-            "計息日",
-            "入帳日",
-            "摘要",
-            "幣別",
             "支出",
             "存入",
-            "餘額",
-            "票據號碼",
-            "銷帳編號",
-            "交易參考編號",
-            "備註",
-            "更正註記",
-            "存摺備註",
         },
         "forbidden": set(),
         "sheet_hints": {"交易明細報表"},
@@ -139,6 +128,11 @@ def detect_statement_format(excel_path: str | Path) -> dict[str, Any]:
                                 "forbidden_headers": blocked,
                             }
                         )
+
+    if len(candidates) > 1:
+        same_positions = {(c["sheet_name"], c["header_row"]) for c in candidates}
+        if len(same_positions) == 1 and {c["format_id"] for c in candidates} == {"legacy", "sinopac"}:
+            candidates = [c for c in candidates if c["format_id"] == "legacy"]
 
     if len(candidates) != 1:
         summary = "找不到支援的唯一銀行對帳單格式" if not candidates else "同時找到多個銀行對帳單格式"

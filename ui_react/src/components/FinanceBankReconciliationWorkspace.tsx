@@ -3,7 +3,7 @@
  * Description: 銀行對帳工作台（WF-03/04），整合雙銀行匯入、待核對與已核銷總表、KPI膠囊統計及逐筆核對抽屜。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './FinanceBankReconciliationWorkspace.css';
 import { Drawer } from './Drawer';
 import { FinanceImportCorrectionForm } from './FinanceImportCorrectionForm';
@@ -199,9 +199,12 @@ export function FinanceBankReconciliationWorkspace({
     (row) => !row.available_actions.some((a) => a === 'preview_manual_correction')
   );
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const triggerUpload = (bankId: 'sinopac' | 'taishin') => {
     setTargetBankFormat(bankId === 'sinopac' ? '永豐銀行' : '台新銀行');
     setShowImportPanel(true);
+    fileInputRef.current?.click();
   };
 
   return (
@@ -248,6 +251,7 @@ export function FinanceBankReconciliationWorkspace({
               </span>
             )}
             <input
+              ref={fileInputRef}
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               aria-label="選擇銀行交易明細工作簿"
