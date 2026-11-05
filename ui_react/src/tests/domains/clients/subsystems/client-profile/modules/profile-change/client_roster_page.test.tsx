@@ -88,17 +88,26 @@ describe('ClientRosterPage', () => {
   });
 
   it('requests server filters, displays roster fields, and exposes no mutation controls', async () => {
+    mocks.list.mockResolvedValueOnce({
+      items: [
+        item,
+        { ...item, case_no: 'CASE-002', imported_virtual_accounts: [], built_in_virtual_account: '99781699115002', name: null, service_days: null, service_type: null, district: null, multi_birth_count: null, requires_cooking: null },
+        { ...item, case_no: 'CASE-003', imported_virtual_accounts: [], built_in_virtual_account: null, name: null, service_days: null, service_type: null, district: null, multi_birth_count: null, requires_cooking: null },
+      ],
+      next_cursor: null, next_offset: null,
+    });
     render(<ClientRosterPage />);
     await waitFor(() => expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ sortBy: 'case_no', sortOrder: 'asc', limit: 100 })));
     expect(screen.getByText('雙胞胎')).toBeInTheDocument();
     expect(screen.getByText('26')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: '服務方式' })).toBeInTheDocument();
     expect(screen.getByText('週休2日')).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: '匯入虛擬帳號' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: '內建虛擬帳號' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: '虛擬帳號' })).toBeInTheDocument();
     expect(screen.getByText('009978160011500001')).toBeInTheDocument();
     expect(screen.getByText('009978160011500009')).toBeInTheDocument();
-    expect(screen.getByText('99781699115001')).toBeInTheDocument();
+    expect(screen.queryByText('99781699115001')).not.toBeInTheDocument();
+    expect(screen.getByText('99781699115002')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: '開啟案件 CASE-003 詳細資料' })).getAllByRole('cell')[1]).toHaveTextContent(/^—$/);
     expect(screen.getByText('東區')).toBeInTheDocument();
     expect(screen.queryByText('新竹市')).not.toBeInTheDocument();
     expect(screen.getByText('需要')).toBeInTheDocument();
@@ -189,7 +198,7 @@ describe('ClientRosterPage', () => {
     expect(detail).toHaveTextContent('每日服務時數');
     expect(detail).toHaveTextContent('服務方式');
     expect(detail).toHaveTextContent('週休2日');
-    expect(detail).toHaveTextContent('客戶帳務（唯讀）');
+    expect(within(detail).getByRole('heading', { name: '客戶帳務' })).toBeVisible();
     expect(detail).toHaveTextContent('客戶應付總額');
     expect(detail).toHaveTextContent('450');
     expect(within(detail).getAllByRole('button', { name: '儲存' })).toHaveLength(3);
@@ -348,6 +357,7 @@ describe('ClientRosterPage', () => {
     ['匯出訂單帳務', 'downloadOrderAccounting', '訂單帳務'],
     ['案件資料檢查匯出', 'downloadCaseInspection', '案件資料檢查'],
   ] as const)('downloads %s with the currently applied roster filters', async (button, method, label) => {
+    mocks.filterOptions.mockResolvedValue({ values: ['一般市民', '補助市民', null], next_offset: null });
     const createObjectURL = vi.fn().mockReturnValue('blob:order-accounting');
     const revokeObjectURL = vi.fn();
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
@@ -355,19 +365,21 @@ describe('ClientRosterPage', () => {
     render(<ClientRosterPage />);
     await screen.findByText('CASE-001');
 
-    fireEvent.click(screen.getByRole('button', { name: '案件／訂單狀態篩選' }));
-    const dialog = screen.getByRole('dialog', { name: '案件／訂單狀態篩選選項' });
-    await within(dialog).findByRole('checkbox', { name: '訂單成立' });
+    fireEvent.click(screen.getByRole('button', { name: '補助身分篩選' }));
+    const dialog = screen.getByRole('dialog', { name: '補助身分篩選選項' });
+    await within(dialog).findByRole('checkbox', { name: '補助市民' });
+    expect(mocks.filterOptions).toHaveBeenCalledWith('identity_status', '');
     fireEvent.click(within(dialog).getByRole('button', { name: '取消全選' }));
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: '訂單成立' }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '補助市民' }));
     fireEvent.click(within(dialog).getByRole('button', { name: '確定' }));
-    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ columnFilters: [{ field: 'order_status', operator: 'in', values: ['訂單成立'] }] })));
+    const columnFilters = [{ field: 'identity_status', operator: 'in', values: ['補助市民'] }];
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ columnFilters })));
     await waitFor(() => expect(screen.getByRole('button', { name: '匯出訂單帳務' })).toBeEnabled());
     fireEvent.change(screen.getByLabelText('搜尋客戶名冊清單'), { target: { value: '尚未套用的搜尋' } });
     fireEvent.click(screen.getByRole('button', { name: button }));
 
     await waitFor(() => expect(mocks[method]).toHaveBeenCalledWith({
-      query: '', columnFilters: [{ field: 'order_status', operator: 'in', values: ['訂單成立'] }],
+      query: '', columnFilters,
       sortBy: 'case_no', sortOrder: 'asc', limit: 100,
     }));
     expect(click).toHaveBeenCalledTimes(1);

@@ -158,7 +158,8 @@ def test_invalid_column_filter_rejected_before_query(payload):
 
 
 def test_http_options_route_and_typed_validation_use_same_reader(roster):
-    _, repository = roster
+    connection, repository = roster
+    connection.execute("UPDATE clients SET identity_status=' 補助市民 ' WHERE id IN (1, 205)")
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_registry_reader] = lambda: object()
@@ -167,10 +168,22 @@ def test_http_options_route_and_typed_validation_use_same_reader(roster):
         result = client.get("/api/v1/admin/registries/clients/filter-options", params={"field": "district"})
         assert result.status_code == 200
         assert result.json()["data"] == {"values": [None, "東區"], "next_offset": None}
+        identities = client.get("/api/v1/admin/registries/clients/filter-options", params={"field": "identity_status"})
+        assert identities.status_code == 200
+        assert identities.json()["data"] == {"values": [None, "補助市民"], "next_offset": None}
         invalid = client.get("/api/v1/admin/registries/clients", params={"column_filters": "{}"})
         assert invalid.status_code == 422 and invalid.json()["detail"]["error"]["category"] == "validation"
         valid = client.get("/api/v1/admin/registries/clients", params={"column_filters": json.dumps([{"field": "order_status", "operator": "in", "values": ["服務中"]}]), "limit": 100})
         assert valid.status_code == 200 and valid.json()["data"]["items"][0]["case_no"] == "TEST-101"
+        filtered = client.get("/api/v1/admin/registries/clients", params={
+            "column_filters": json.dumps([
+                {"field": "identity_status", "operator": "in", "values": ["補助市民"]},
+                {"field": "order_status", "operator": "in", "values": ["服務中"]},
+            ]),
+            "limit": 1,
+        })
+        assert filtered.status_code == 200
+        assert [item["case_no"] for item in filtered.json()["data"]["items"]] == ["TEST-205"]
 
 
 def test_export_preserves_the_same_typed_selection():

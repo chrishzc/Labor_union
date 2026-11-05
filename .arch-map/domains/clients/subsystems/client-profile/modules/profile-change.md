@@ -57,7 +57,7 @@
 
 ## Entrypoints
 - `GET /api/v1/admin/registries/clients` — bounded selector with optional query, BeClass effective multi-birth-count, order-status, cooking and allowlisted sort filters; the merged roster uses offset pagination across all supported sorts, with case／field deep links querying the selected detail independently of the current page.
-- `GET /api/v1/admin/registries/clients/filter-options` — authenticated, paginated distinct values for allowlisted roster columns. Typed column filters share the same server predicate across roster pagination and order-accounting export.
+- `GET /api/v1/admin/registries/clients/filter-options` — authenticated, paginated distinct values for allowlisted roster columns, including saved `clients.identity_status`. Typed column filters share the same server predicate across roster pagination and both exports.
 - `GET /api/v1/admin/registries/clients/{case_no}`
 - `GET /api/v1/admin/registries/clients/{case_no}/change-history` — 依時間／流程順序讀取主要人工變更事件保存的原因，不重複列出同次操作的衍生 projection events。
 - `GET /api/v1/admin/registries/clients/export/order-accounting` — 依客戶名冊 current filters 匯出每案件一列的 HCM／Orders／Client Finance XLSX。

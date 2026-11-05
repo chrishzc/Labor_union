@@ -83,7 +83,7 @@ export const ClientRegistryPageSchema = z.strictObject({
 export const ClientRegistryFilterOptionsSchema = z.strictObject({
   values: z.array(z.string().nullable()), next_offset: z.number().int().positive().nullable(),
 });
-export type ClientRegistryFilterField = 'case_no' | 'name' | 'phone' | 'district' | 'multi_birth_count' | 'order_status' | 'service_type' | 'requires_cooking' | 'service_days' | 'planned_start_date' | 'deposit_due_date' | 'first_due_date' | 'second_due_date' | 'subsidy_return_due_date' | 'staff_payment_due_date';
+export type ClientRegistryFilterField = 'case_no' | 'name' | 'identity_status' | 'phone' | 'district' | 'multi_birth_count' | 'order_status' | 'service_type' | 'requires_cooking' | 'service_days' | 'planned_start_date' | 'deposit_due_date' | 'first_due_date' | 'second_due_date' | 'subsidy_return_due_date' | 'staff_payment_due_date';
 export type ClientRegistryFilterOperator = 'in' | 'not_in' | 'contains' | 'starts_with' | 'equals' | 'gt' | 'lt' | 'between' | 'blank';
 export interface ClientRegistryColumnFilter { field: ClientRegistryFilterField; operator: ClientRegistryFilterOperator; values: (string | null)[] }
 export type ClientRegistryFilterOptions = z.infer<typeof ClientRegistryFilterOptionsSchema>;

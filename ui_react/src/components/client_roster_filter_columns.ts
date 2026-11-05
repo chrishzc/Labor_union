@@ -4,6 +4,7 @@ export interface RosterFilterColumn { field: ClientRegistryFilterField; label: s
 export const rosterFilterColumns: RosterFilterColumn[] = [
   { field: 'case_no', label: '案件編號', kind: 'text' },
   { field: 'name', label: '客戶姓名', kind: 'text' },
+  { field: 'identity_status', label: '補助身分', kind: 'text' },
   { field: 'phone', label: '電話', kind: 'text' },
   { field: 'district', label: '行政區', kind: 'text' },
   { field: 'multi_birth_count', label: 'BeClass 胎數', kind: 'text' },

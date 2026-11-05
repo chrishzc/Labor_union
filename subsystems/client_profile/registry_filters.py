@@ -9,13 +9,13 @@ from typing import Literal
 
 
 RegistryFilterField = Literal[
-    "case_no", "name", "phone", "district", "multi_birth_count", "order_status",
+    "case_no", "name", "identity_status", "phone", "district", "multi_birth_count", "order_status",
     "service_type", "requires_cooking", "service_days", "planned_start_date",
     "deposit_due_date", "first_due_date", "second_due_date",
     "subsidy_return_due_date", "staff_payment_due_date",
 ]
 FIELD_KINDS = {
-    "case_no": "text", "name": "text", "phone": "text", "district": "text",
+    "case_no": "text", "name": "text", "identity_status": "text", "phone": "text", "district": "text",
     "multi_birth_count": "text", "order_status": "text", "service_type": "text",
     "requires_cooking": "boolean", "service_days": "number",
     "planned_start_date": "date", "deposit_due_date": "date", "first_due_date": "date",

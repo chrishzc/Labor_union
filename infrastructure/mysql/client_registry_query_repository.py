@@ -511,7 +511,7 @@ _OBLIGATION_FILTER_STAGES = {
 
 def _scalar_filter_expression(field: str) -> str:
     columns = {
-        "case_no": "o.case_no", "name": "c.name", "phone": "c.phone",
+        "case_no": "o.case_no", "name": "c.name", "identity_status": "c.identity_status", "phone": "c.phone",
         "order_status": "o.status", "service_type": "c.service_type",
         "multi_birth_count": _BIRTH_COUNT_SQL, "service_days": "o.service_days",
         "planned_start_date": "o.start_date", "staff_payment_due_date": "o.staff_payment_due_date",

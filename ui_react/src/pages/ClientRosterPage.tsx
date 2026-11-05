@@ -1,7 +1,7 @@
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { RegistryDeletionPanel } from '../components/RegistryDeletionPanel';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
 import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter';
@@ -38,10 +38,6 @@ function hasActiveFilter(filters: RosterFilters): boolean {
 }
 
 const displayCooking = (value: boolean | null) => value === true ? '需要' : value === false ? '不需要' : '未登錄';
-const displayImportedVirtualAccounts = (values: string[]) => values.length
-  ? values.map((value) => <div key={value}>{value}</div>)
-  : '—';
-
 type RosterItem = ClientRegistryPageData['items'][number];
 const staffObligationLabels: Record<string, string> = {
   service_pay: '薪資', adjustment: '調整', reversal: '沖正',
@@ -67,6 +63,7 @@ export interface ClientRosterPageProps {
 export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = false, initialCaseNo = '', focusField = '', onEditStateChange, onReturnToCase, onOpenServiceArrangement }) => {
   const staffIdentity = useStaffIdentityLabels();
   const [filters, setFilters] = useState<RosterFilters>(defaultFilters);
+  const tableTitleId = useId();
   const [appliedFilters, setAppliedFilters] = useState<RosterFilters>(defaultFilters);
   const [page, setPage] = useState<ClientRegistryPageData | null>(null);
   const [pageOffset, setPageOffset] = useState(0);
@@ -226,7 +223,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     </nav>}
     <form className="client-roster-filters" onSubmit={applyFilters}>
       <label>搜尋<input aria-label="搜尋客戶名冊清單" value={filters.query} placeholder="案件編號、姓名或電話" onChange={(event) => setFilters((value) => ({ ...value, query: event.target.value }))} /></label>
-      <div className="client-roster-filter-actions"><button type="submit" disabled={loading}>搜尋</button><button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('order-accounting')}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('case-inspection')}>案件資料檢查匯出</button></div>
+      <div className="client-roster-filter-actions"><button type="submit" disabled={loading}>搜尋</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('order-accounting')}>{exporting ? '匯出中…' : '匯出訂單帳務'}</button><button type="button" disabled={exporting || loading || !!error} onClick={() => void exportWorkbook('case-inspection')}>案件資料檢查匯出</button></div>
     </form>
     <div className="client-roster-active-filters" aria-label="已套用篩選">
       <span className="client-roster-filter-help">點欄名旁的 ▾ 篩選；不同欄位的條件會同時套用。</span>
@@ -239,14 +236,17 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     {error && <p role="alert" className="client-roster-message">{error}</p>}
     {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
-    {!error && page && <div className="client-roster-table-frame"><div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table>
-      <caption>客戶名冊清單（第 {Math.floor(pageOffset / pageSize) + 1} 頁）</caption>
+    {(page || error) && <div className="client-roster-table-frame">
+      <div className="client-roster-table-title">
+        <span id={tableTitleId}>客戶名冊清單{page && `（第 ${Math.floor(pageOffset / pageSize) + 1} 頁）`}</span>
+        <button type="button" disabled={loading} onClick={clearFilters}>清除全部篩選</button>
+      </div>
+      {!error && page && <div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table aria-labelledby={tableTitleId}>
       <thead><tr>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'case_no' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('case_no', 'case_no')}</th>
-        <th scope="col">匯入虛擬帳號</th>
-        <th scope="col">內建虛擬帳號</th>
+        <th scope="col">虛擬帳號</th>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'customer_name' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('name', 'customer_name')}</th>
-        <th scope="col">補助身分</th><th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
+        <th scope="col">{columnHeading('identity_status')}</th><th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'service_days' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('service_days', 'service_days')}</th>
         <th scope="col">{columnHeading('service_type')}</th>
         <th scope="col">{columnHeading('requires_cooking')}</th>
@@ -275,7 +275,11 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           }
         }}
       >
-        <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.identity_status ?? '尚未登錄'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
+        <td>{item.case_no}</td>
+        <td>{item.imported_virtual_accounts.length
+          ? item.imported_virtual_accounts.map((value) => <div key={value}>{value}</div>)
+          : item.built_in_virtual_account ?? '—'}</td>
+        <td>{item.name ?? '—'}</td><td>{item.identity_status ?? '尚未登錄'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{item.service_type ?? '尚未登錄'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
         <td>{clientDueDates(item, 'deposit')}</td>
@@ -293,13 +297,15 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
           : '無值'}</td>
       </tr>)}</tbody>
-    </table></div>{scrollRail.max > 0 && <div className="client-roster-scroll-rail">
+    </table></div>}
+    {!error && page && scrollRail.max > 0 && <div className="client-roster-scroll-rail">
       <input type="range" aria-label="左右捲動客戶名冊" aria-controls="client-roster-table-viewport"
         aria-valuetext={`${Math.round(scrollRail.left / scrollRail.max * 100)}%`} min={0} max={scrollRail.max} step={1}
         value={Math.min(scrollRail.left, scrollRail.max)} style={{ '--roster-thumb-width': `${scrollRail.thumb}px` } as React.CSSProperties}
         onChange={event => { const left = Number(event.target.value); if (tableViewport.current) tableViewport.current.scrollLeft = left;
           setScrollRail(previous => ({ ...previous, left })); }} />
-    </div>}</div>}
+    </div>}
+    </div>}
     <Drawer
       isOpen={selectedCaseNo !== null}
       onClose={closeDetail}
