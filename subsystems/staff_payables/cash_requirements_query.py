@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Literal, Protocol
 
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
+from domains.staff_payables.subsidy_handoff import subsidy_refund_amount_reason
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem
 
 PaymentKind = Literal["staff_payable", "client_refund", "client_subsidy_return"]
@@ -42,6 +43,10 @@ class CashRequirementCase:
     confirmed_scheme: str = "unknown"
     subsidy_ntd: int | None = None
     scheme_conflict: bool = False
+    subsidy_refund_reason: str | None = None
+    manual_subsidy_plan: bool = False
+    manual_plan_required: bool = False
+    service_completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,19 +122,42 @@ def _case_rows(case: CashRequirementCase) -> tuple[CashRequirementRow, ...]:
         if not refund.recipient_ready and refund.payment_status not in {"paid", "settled"}:
             reasons.append("退款收款資料待確認")
         if refund.kind == 'client_subsidy_return' and refund.payment_status not in {'paid', 'settled'}:
-            if case.scheme_conflict or case.confirmed_scheme in {'split', 'direct'}:
+            amount_reason = (subsidy_refund_amount_reason(case.subsidy_ntd, refund.amount_ntd, refund.settled_amount_ntd)
+                             if case.manual_subsidy_plan else None)
+            if case.subsidy_refund_reason or amount_reason:
+                reasons.append(case.subsidy_refund_reason or amount_reason)
+            elif case.scheme_conflict or case.confirmed_scheme in {'split', 'direct'}:
                 reasons.append('補助退款與本案正式方案或款項來源衝突，請核對原始依據')
             elif case.confirmed_scheme != 'advance':
                 reasons.append('補助退款方案與對象待核對；既有款項保留')
         rows.append(CashRequirementRow(refund.identity, case.case_no, refund.recipient_name,
             refund.kind, "confirmed", "client_refund", refund.amount_ntd + refund.settled_amount_ntd, refund.amount_ntd,
             refund.payment_date, False, tuple(reasons), payment_status=refund.payment_status))
-    if (case.has_subsidy_return or not case.has_arrangement or case.order_status == "訂單取消"
-            or case.confirmed_scheme != 'advance' or case.scheme_conflict):
+    if case.has_subsidy_return or not case.has_arrangement or case.order_status == '訂單取消':
+        return tuple(rows)
+    if case.manual_plan_required:
+        if not case.service_completed or case.subsidy_ntd == 0:
+            return tuple(rows)
+        if not case.manual_subsidy_plan:
+            rows.append(CashRequirementRow(f"{case.case_no}:subsidy:pending", case.case_no, None,
+                'client_subsidy_return', 'estimated', 'subsidy_estimate', None, None, None, False,
+                (case.subsidy_refund_reason or '補助退款方案尚未人工保存，請先確認補助歸屬。',)))
+            return tuple(rows)
+        if case.confirmed_scheme != 'advance':
+            if case.subsidy_refund_reason and case.confirmed_scheme == 'direct' and case.subsidy_refund_reason.startswith('政府直付'):
+                rows.append(CashRequirementRow(f"{case.case_no}:subsidy:pending", case.case_no, None,
+                    'client_subsidy_return', 'estimated', 'subsidy_estimate', None, None, None, False,
+                    (case.subsidy_refund_reason,)))
+            return tuple(rows)
+    elif case.confirmed_scheme != 'advance' or case.scheme_conflict:
         return tuple(rows)
     if case.subsidy_ntd == 0:
         return tuple(rows)
     reasons = ["補助退款計算資料待確認"]
+    if case.manual_subsidy_plan:
+        reasons.append('尚未建立正式補助退款應付，請由原帳務流程處理')
+        if case.subsidy_refund_reason:
+            reasons.append(case.subsidy_refund_reason)
     if case.subsidy_ntd is None:
         reasons.append("正式補助金額來源待確認")
     due_date = subsidy_advance_due_date(case.planned_end_date) if case.planned_end_date else None

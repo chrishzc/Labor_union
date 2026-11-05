@@ -7,6 +7,7 @@ from calendar import monthrange
 from decimal import Decimal
 
 from domains.staff_payables.reconciliation import StaffPayableStatus
+from domains.staff_payables.subsidy_handoff import subsidy_refund_amount_reason
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import CaseStaffPayableAuditItem, ClientRefundExportFact, StaffPayableExportFact
 from infrastructure.mysql.order_terms_read_model import select_current_assignments, select_scheduling_aggregate
@@ -106,7 +107,9 @@ class MySqlClientRefundExportSource:
             if fact.refund_type == 'subsidy_return' and self._case_query is not None:
                 if fact.case_no not in cases:
                     cases[fact.case_no] = self._case_query(fact.case_no)
-                if cases[fact.case_no].scheme in {'split', 'direct'} or cases[fact.case_no].scheme_conflict:
+                handoff = cases[fact.case_no]
+                if handoff.client_subsidy_reason is not None or (handoff.manual and
+                    subsidy_refund_amount_reason(handoff.subsidy_ntd, fact.amount.amount, int(row['net_refunded_ntd'])) is not None):
                     from dataclasses import replace
                     fact = replace(fact, payable=False, anomaly=True)
             facts.append(fact)
@@ -114,30 +117,24 @@ class MySqlClientRefundExportSource:
 
 
 def _staff_payment_route(row, case):
-    """Funding labels are schedules; only confirmed case facts choose subsidy routing."""
+    """Only the affected subsidy portion consumes the shared handoff decision."""
     if row.get('historical_confirmation_kind') is not None or row.get('export_amount_ntd', 0) <= 0:
         return {**row, 'outgoing_bank': '31'}
     portion = row.get('installment_funding')
-    outgoing = '31'
-    blocked = False
-    reason = ''
-    if case is not None and case.scheme_conflict:
-        blocked = True
-        reason = '本案方案或金額來源互相衝突，出款銀行待確認。'
-    elif case is not None and case.scheme == 'split':
-        if case.customer_amount_ntd == 0 and case.staff_receivable_ntd == case.subsidy_ntd:
-            outgoing = '633'
-        elif portion == 'subsidy':
+    outgoing, reason = '31', None
+    if case is not None and not case.requires_manual_plan and case.staff_subsidy_reason is not None:
+        reason = case.staff_subsidy_reason
+    elif case is not None and (portion == 'subsidy' or case.full_subsidy or (case.scheme == 'split' and portion is None)):
+        reason = case.staff_subsidy_reason
+    if reason is None and case is not None and case.scheme == 'split':
+        if case.full_subsidy or portion == 'subsidy':
             outgoing = '633'
         elif portion != 'client':
-            blocked = True  # No formal allocation between the two outgoing banks.
             reason = '已確認補助轉交月嫂，但缺少永豐／台新正式付款分配。'
-    elif portion == 'subsidy' and (case is None or case.scheme not in {'advance', 'direct'}):
-        blocked = True
+    elif reason is None and portion == 'subsidy' and (case is None or case.scheme not in {'advance', 'direct'}):
         reason = '補助款的正式方案及出款對象尚未確認。'
-    return {**row, 'outgoing_bank': outgoing, **({'payout_status': 'anomaly', 'funding_reason': reason} if blocked else {})}
-
-
+    return {**row, 'outgoing_bank': outgoing,
+            **({'payout_status': 'anomaly', 'funding_reason': reason} if reason else {})}
 
 
 def _staff_fact(row) -> StaffPayableExportFact:

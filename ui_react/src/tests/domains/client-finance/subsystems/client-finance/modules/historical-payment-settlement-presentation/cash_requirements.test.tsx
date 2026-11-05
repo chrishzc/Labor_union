@@ -7,6 +7,7 @@ import { cashRequirementsQueryClient, type CashRequirementRow } from '../../../.
 import { accountsPayableQueryClient } from '../../../../../../../api/accounts_payable/accounts_payable_query_client';
 import { accountsPayableExportClient } from '../../../../../../../api/accounts_payable/accounts_payable_export_client';
 import { CashRequirementsPanel } from '../../../../../../../components/CashRequirementsPanel';
+import { FinancePaymentsWorkspace } from '../../../../../../../components/FinancePaymentsWorkspace';
 import { FinancePage } from '../../../../../../../pages/FinancePage';
 import { caseCategoriesClient } from '../../../../../../../api/client_finance/case_categories_client';
 import { ACCOUNTS_PAYABLE_RESPONSE } from '../../../../../../fixtures/finance/finance_query_contract_fixtures';
@@ -127,5 +128,34 @@ describe('existing payable composition', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
     await waitFor(() => expect(forecast).toHaveBeenCalledTimes(2));
     expect(confirmed).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('manual subsidy handoff visibility', () => {
+  it('keeps a confirmed but conflicted refund in pending work without counting it as payable or hiding a legal staff payment', async () => {
+    vi.spyOn(caseCategoriesClient, 'query').mockResolvedValue(new Map([['CASE-GOOD','subsidy'],['CASE-CHECK','subsidy']]));
+    vi.spyOn(cashRequirementsQueryClient,'queryAll').mockResolvedValue([
+      row({row_id:'staff:good',case_no:'CASE-GOOD'}),
+      row({row_id:'refund:conflict',case_no:'CASE-CHECK',payment_type:'client_subsidy_return',
+        recipient_name:'測試客戶',unpaid_amount_ntd:8000,source_amount_ntd:12000,
+        pending_reasons:['既有補助退款與人工安排不符，請由原帳務流程更正。']}),
+    ]);
+    const openCase=vi.fn();
+    const props={revision:1,targetMonth:'2026-11',onMonthChange:vi.fn(),onOpenStaff:vi.fn(),
+      onOpenCase:openCase,onOpenSubsidy:vi.fn(),onOpenBank:vi.fn()};
+    const view=render(<FinancePaymentsWorkspace {...props} pendingOnly />);
+    await screen.findByText('CASE-CHECK');
+    expect(screen.queryByText('CASE-GOOD')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'查看案件'}));
+    expect(openCase).toHaveBeenCalledWith('CASE-CHECK');
+    expect(screen.getByText('既有補助退款與人工安排不符，請由原帳務流程更正。')).toBeInTheDocument();
+    view.rerender(<FinancePaymentsWorkspace {...props} />);
+    expect(screen.getByText('CASE-GOOD')).toBeInTheDocument();
+    expect(screen.getByLabelText('付款摘要')).toHaveTextContent('確認待付 NT$ 18,000');
+    expect(screen.getByLabelText('付款摘要')).not.toHaveTextContent('NT$ 26,000');
+    fireEvent.change(screen.getByRole('combobox',{name:'付款狀態'}),{target:{value:'data_pending'}});
+    expect(screen.queryByText('CASE-GOOD')).not.toBeInTheDocument();
+    expect(screen.getByText('CASE-CHECK')).toBeInTheDocument();
   });
 });

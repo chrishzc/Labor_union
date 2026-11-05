@@ -1,0 +1,119 @@
+{
+  "contract": "manual-subsidy-payables-handoff-verification/v1",
+  "scenario": "HANDOFF-A01..A07",
+  "date": "2026-11-05",
+  "base_commit": "f552d684af119c5cb1a578dc3565f551525e60f2",
+  "result": {
+    "status": "PASS",
+    "scope_files": 21,
+    "backend": "195 passed, 1 existing skipped",
+    "ui": "14 passed",
+    "workspace_build": "PASS",
+    "isolated_build": "PASS",
+    "browser_groups": 6,
+    "architecture_closure": "passed",
+    "strict_utf8_and_diff_check": "PASS",
+    "schema_migration_changes": false,
+    "real_notifications": 0,
+    "problems": []
+  },
+  "browser": {
+    "checks": [
+      "提前保存方案仍保留未齊期款；12張金融與日期表完全不變",
+      "客戶款齊加已保存方案才移出；移出未代替正式服務結束或產生退款",
+      "方案一與原期款不符只待確認該月嫂補助款；缺方案保留未知；其他合法月嫂與客戶退款仍列出",
+      "付款列開同一案件抽屜更正方案；原應付餘額、版本、快照、日期與所有金融證據完全保留",
+      "Excel固定十欄；衝突退款不再匯出；舊封存檔原bytes保留；查詢下載零金融寫入",
+      "已有正式日期的衝突款仍出現在待處理；390px手機可開同一全寬案件抽屜"
+    ],
+    "page_errors": [],
+    "financial_tables_unchanged_during_plan_and_exports": true,
+    "old_archive_bytes_preserved": true,
+    "synthetic_eligibility_directory_and_future_clock": true
+  },
+  "native_test_database": "lu_test_handoff_20261105_3aacd68d",
+  "source_artifact_digests": [
+    {
+      "artifact": "final-verification.json",
+      "sha256": "cbc5b72e7b1ce93e691854cc61e52232df5e2da742410f5c6827c60c09dfe7e3"
+    },
+    {
+      "artifact": "browser-result.json",
+      "sha256": "84a280e29bbb33c7f538a6ff70c7f800e856ef645c3792128487487ccd50306b"
+    },
+    {
+      "artifact": "backend-final.log",
+      "sha256": "fe2b1558798a86b37c80326e13491a02c77fb88a63feebb6fa2df7a98f414d50"
+    },
+    {
+      "artifact": "closure.json",
+      "sha256": "f95c66da278d7316758fb1208922bb013af3c2a16873d3290ff8dcb2a66a39c8"
+    },
+    {
+      "artifact": "ui_react/scratch/manual-handoff-ui.log",
+      "sha256": "8fcd1070e3859948dffd542c088879faf7edc4f6fb204f31b487eeb001ee46be"
+    },
+    {
+      "artifact": "ui_react/scratch/manual-handoff-workspace-final-build.log",
+      "sha256": "d3e7cf78f99e8763ab8e4d4298d292e399e139f9f02609bc1347251773637c53"
+    }
+  ],
+  "retention": "Compact result replaces disposable raw runs; project regression tests remain canonical. Existing releases, preservation backups and historical receipts are retained.",
+  "real_notifications": 0,
+  "closed_prior_ui_runs": [
+    {
+      "producer": "ongoing_cases_page_20261105",
+      "result": "PASS",
+      "checks": [
+        "six formal columns; one current item; future/overdue/partial/scheme; reminder right of case button and disabled",
+        "opens existing shared drawer; tabs usable; close preserves active filter",
+        "390px page fits; table scrolls internally; both action buttons retained"
+      ],
+      "artifact_sha256": "fb3ed4b7f38d2279ff9344b0476e516270247da7aff70e063d1ee243ce7ff48a",
+      "successor": "Published finance implementation f552d684 and canonical frontend/report regression tests; historical conclusions remain in the finance work package."
+    },
+    {
+      "producer": "unified_subsidy_reports_20261104",
+      "result": "PASS",
+      "checks": [
+        "formal finance case list removes duplicate heading/tools row; two distinct summaries inside filter row",
+        "weekly 14-column UI, native workbook three sheets, quarter label and text-formatted case number",
+        "quarter 15-column native export; same drawer receipt check/return/history; quarter and focus preserved after close",
+        "annual separate 10-column UI and native Excel; quarterly personal-data columns not incorrectly copied",
+        "inverted and uncommitted date range cannot download a stale workbook",
+        "actual App navigation from reports to existing finance government-list; no duplicate subsidy tabs",
+        "390px report and compact case summaries fit page; wide report tables scroll in their own region"
+      ],
+      "artifact_sha256": "c1e80e4a305744ce24c08b8c3ee4965fa1d8de2789af51e9727a6d1aa0d3fc57",
+      "successor": "Published finance implementation f552d684 and canonical frontend/report regression tests; historical conclusions remain in the finance work package."
+    }
+  ],
+  "source_sha256_lf": {
+    "domains/staff_payables/subsidy_handoff.py": "3256c9016fe25788d256d756d5c75bacc85d9b54e57a156752f2c14108f226d8",
+    "infrastructure/mysql/accounting_workspace_repository.py": "f869554573967feed4c024ae4b5374b2fbfe3fcea7405ec05c1f11d3fe7ad148",
+    "api/dependencies/accounts_payable_export.py": "e9344f73b63615b1f9a818fa171a9f0f2f5ef72b65895a995cc3e56aa102803b",
+    "infrastructure/mysql/accounts_payable_export_sources.py": "58566bcc03b5c5267274fd50fc85b2eb33f9c6f4c549b5631180e6edf9c1ed0f",
+    "infrastructure/mysql/automatic_client_accounting.py": "5a308ac14461dda8d4300078349b5eeb8df2affee7ec8e67bc43e8fe311bf0b5",
+    "subsystems/staff_payables/cash_requirements_query.py": "3ba7f399f93ba0c1f4cc6734e0d90f453e44cbcc8b8e2a04b883d78405af299c",
+    "infrastructure/mysql/cash_requirements_repository.py": "cd23d0d2169c0d552af9d12ef052900c1a463474bb2ca840e7bb8ac90cb52e32",
+    "ui_react/src/components/FinancePaymentsWorkspace.tsx": "51f4d7f2bf8b49ae9b270e5dd75bce3a0c6bc97fb3e425431ba0bf9f51eac838",
+    "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_export_sources.py": "abc781978897ef6e8c4a02a0e45676671299286e073394be4acfb2e966ccfd04",
+    "tests/domains/staff-payables/subsystems/staff-payables/integration/test_manual_subsidy_handoff.py": "9956d0fefd67f949a11ed6fec9c631cbd1d22d575cd838c6dd6b9dedb960c330",
+    "tests/domains/client-finance/subsystems/client-finance/integration/test_automatic_accounting.py": "2ccfe10514c24ad4a1fa401b8f7e3d6924a887199caf1d65273b743b58c81fd7",
+    "ui_react/src/tests/domains/client-finance/subsystems/client-finance/modules/historical-payment-settlement-presentation/cash_requirements.test.tsx": "dcc4b97c2988aaa2b8c3c7628695e804b2e3c4cac10c446e08b64f7ad3522c66",
+    "tests/domains/staff-payables/subsystems/staff-payables/integration/test_accounts_payable_query_api.py": "9fbcbc3f11548fabbda0b13db57fb0586fa96ac216e505ddeeac11325b5b8e48"
+  },
+  "workspace_cleanup": {
+    "status": "PASS",
+    "bounded_artifacts": 65,
+    "closed_cache_directories": 105,
+    "removed_bytes": 252757567,
+    "removed_files": 15769,
+    "successor_verification": {
+      "backend": "195 passed, 1 existing skipped",
+      "frontend": "14 passed",
+      "deleted_artifact_references": "none in current finance source and specifications"
+    },
+    "preserved": "Canonical tests, production data, retained upgrade backups and qualification receipts, installed dependencies and active previews."
+  }
+}

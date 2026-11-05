@@ -7,10 +7,10 @@ import { financeMoney } from './FinanceReceiptsWorkspace';
 import { caseCategoriesClient, type FinanceCaseCategory, type FinanceCaseFilter } from '../api/client_finance/case_categories_client';
 
 const types = { staff_payable: '月嫂薪資', client_refund: '客戶退款', client_subsidy_return: '補助退款' };
-const awaitsSubsidyData = (row: CashRequirementRow) => row.certainty === 'estimated' && row.payment_type === 'client_subsidy_return';
+const awaitsSubsidyData = (row: CashRequirementRow) => row.pending_reasons.length > 0 || (row.certainty === 'estimated' && row.payment_type === 'client_subsidy_return');
 const paymentLabels = { pending: '待付款', partially_paid: '部分付款', paid: '已付款', settled: '已結清' };
 type Props = { pendingOnly?: boolean; revision: number; targetMonth: string; onMonthChange: (value: string) => void; onOpenStaff: (staffId?: number) => void; onOpenCase: (caseNo: string) => void; onOpenSubsidy: (caseNo: string) => void; onOpenBank: () => void };
-export function FinancePaymentsWorkspace({pendingOnly=false, revision, targetMonth, onMonthChange, onOpenStaff, onOpenCase, onOpenSubsidy, onOpenBank }: Props) {
+export function FinancePaymentsWorkspace({pendingOnly=false, revision, targetMonth, onMonthChange, onOpenStaff, onOpenCase, onOpenBank }: Props) {
   const staffIdentity = useStaffIdentityLabels();
   const [rows, setRows] = useState<CashRequirementRow[]>([]);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -37,11 +37,11 @@ export function FinancePaymentsWorkspace({pendingOnly=false, revision, targetMon
   }, [revision, refresh]);
   useEffect(() => () => downloadController.current?.abort(), []);
   useEffect(() => { downloadController.current?.abort(); setDownloading(false); setDownload(''); }, [targetMonth]);
-  const filtered = rows.filter(row => (!pendingOnly || row.certainty !== 'confirmed' || row.payment_date===null) && (caseCategory==='all'||categories.get(row.case_no)===caseCategory) && (type === 'all' || row.payment_type === type)
-    && (status === 'all' || (status === 'data_pending' ? awaitsSubsidyData(row) : status === 'confirmed' ? row.certainty === 'confirmed' && row.payment_status === 'pending' : row.payment_status === status))
+  const filtered = rows.filter(row => (!pendingOnly || row.certainty !== 'confirmed' || row.payment_date===null || row.pending_reasons.length > 0) && (caseCategory==='all'||categories.get(row.case_no)===caseCategory) && (type === 'all' || row.payment_type === type)
+    && (status === 'all' || (status === 'data_pending' ? awaitsSubsidyData(row) : status === 'confirmed' ? row.certainty === 'confirmed' && row.payment_status === 'pending' && row.pending_reasons.length === 0 : row.payment_status === status))
     && (!month || !row.payment_date || row.payment_date.startsWith(month))
     && `${row.case_no} ${row.payment_type === 'staff_payable' ? staffIdentity.label(row.staff_id, row.recipient_name) : row.recipient_name ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const total = (certainty: CashRequirementRow['certainty']) => filtered.filter(row => row.certainty === certainty).reduce((sum, row) => sum + (row.unpaid_amount_ntd ?? 0), 0);
+  const total = (certainty: CashRequirementRow['certainty']) => filtered.filter(row => row.certainty === certainty && (certainty !== 'confirmed' || row.pending_reasons.length === 0)).reduce((sum, row) => sum + (row.unpaid_amount_ntd ?? 0), 0);
   const exportXlsx = async () => {
     downloadController.current?.abort(); const controller = new AbortController(); downloadController.current = controller;
     setDownloading(true); setDownload('');
@@ -69,7 +69,7 @@ export function FinancePaymentsWorkspace({pendingOnly=false, revision, targetMon
       <div className="finance-table-container"><table className="finance-table"><thead><tr><th>受款人／案件</th><th>款項類型</th><th>待付金額</th><th>付款日期</th><th>狀態</th><th>操作</th></tr></thead><tbody>{filtered.map(row => <tr key={row.row_id}>
         <td><strong>{row.payment_type === 'staff_payable' ? staffIdentity.label(row.staff_id, row.recipient_name) : row.recipient_name ?? '待確認受款人'}</strong><small className="finance-secondary">{row.case_no}</small></td><td>{types[row.payment_type]}</td><td>{financeMoney(row.unpaid_amount_ntd)}</td><td>{row.payment_date ?? '待確認'}{row.date_is_estimate && <small className="finance-secondary">預估日期</small>}</td>
         <td><span className={`finance-badge ${row.payment_status === 'paid' || row.payment_status === 'settled' ? 'finance-badge-paid' : row.certainty === 'estimated' ? 'finance-badge-stage' : 'finance-badge-unpaid'}`}>{row.payment_status !== 'pending' ? paymentLabels[row.payment_status] : row.source === 'missing_payroll' ? '服務與薪資資料待確認' : row.pending_reasons.length > 0 ? '待確認' : row.certainty === 'confirmed' ? '確認待付' : awaitsSubsidyData(row) ? '計算資料待確認' : '待確認'}</span>{row.pending_reasons.length > 0 && <small className="finance-secondary">{row.pending_reasons.join('；')}</small>}</td>
-        <td className="finance-row-actions">{row.payment_type === 'client_subsidy_return' ? <button type="button" onClick={() => onOpenSubsidy(row.case_no)}>案件補助明細</button> : row.payment_type === 'staff_payable' ? row.staff_id ? <button type="button" onClick={() => onOpenStaff(row.staff_id!)}>人員付款明細</button> : <button type="button" onClick={() => onOpenStaff()}>選擇人員明細</button> : <button type="button" onClick={() => onOpenCase(row.case_no)}>案件付款紀錄</button>}</td>
+        <td className="finance-row-actions">{row.payment_type === 'client_subsidy_return' ? <button type="button" onClick={() => onOpenCase(row.case_no)}>查看案件</button> : row.payment_type === 'staff_payable' ? row.staff_id ? <button type="button" onClick={() => onOpenStaff(row.staff_id!)}>人員付款明細</button> : <button type="button" onClick={() => onOpenStaff()}>選擇人員明細</button> : <button type="button" onClick={() => onOpenCase(row.case_no)}>案件付款紀錄</button>}</td>
       </tr>)}</tbody></table></div>
       {!filtered.length && <p className="finance-state">沒有符合條件的付款項目。</p>}
       {month && <p className="subsidy-refund-note">付款日期尚未確認的項目仍列出，供後續核對。</p>}

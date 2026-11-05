@@ -9,7 +9,7 @@
 尚未排班且 Scheduling root 不存在的取消，以明確零服務量計算既有訂金退款，不補造 Scheduling generation。
 第二期有金額時，stage plan 預計繳款日由第一期預計入帳日加 15 個曆日計算；零金額不產生第二期日期。契約及訂單資訊重用此 owner 日期投影。
 原已收期款取消歸零而產生退款時，若 stage plan 不再產生日期，退款保留原義務的到期日；不把既有已知退款日期清空，原本未知則保留待確認。
-完整進件及計價條件保存時，在同一outer UoW同步各期應繳。全額免自備唯一沿規格22 §17.4.1：補助市民／原住民H≤本案有效L時各期為0，不以固定120／80或費用覆蓋作第二門檻；既有收付款／退款衝突回blocker，不自動轉換歷史。客戶補助退款只在原案件Query確認先墊後退及Government Subsidy正式金額後同步，不由身分或客戶費率另建；缺帳戶保留待補。原收款、政府整期及合法資料保存交易沿同一outer UoW接線，獨立child identity避免與前序期款自我衝突，沒有hidden commit。已形成日期／實付保留，歷史actual-service owner不變。
+完整進件及計價條件保存時，在同一outer UoW同步各期應繳。全額免自備唯一沿規格22 §17.4.1：補助市民／原住民H≤本案有效L時各期為0，不以固定120／80或費用覆蓋作第二門檻；既有收付款／退款衝突回blocker，不自動轉換歷史。客戶補助退款只在正式服務結束後，沿規格16 §2.5.5借用最後人工方案與真實墊款依據、Government Subsidy正式金額承接；無新人工方案的歷史案件不轉換。人工方案更正不自動改寫既有應付、快照及已形成日期；須由原合法更正流程處理。由原帳務writer同步，不由身分或客戶費率另建；缺帳戶保留待補。原收款、政府整期及合法資料保存交易沿同一outer UoW接線，獨立child identity避免與前序期款自我衝突，沒有hidden commit。已形成日期／實付保留，歷史actual-service owner不變。
 
 ## Implementation
 - subsidy policy: `domains/client_finance/subsidy_coverage.py` — canonical 一般市民 40／補助市民 120 小時，社福／低收入戶／中低收入戶為補助市民來源別名。

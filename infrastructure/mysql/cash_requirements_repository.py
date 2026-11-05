@@ -47,7 +47,11 @@ class MySqlCashRequirementsRepository:
             bool(row["return_count"]), staff_items, refunds,
             current.scheme if current is not None else 'unknown',
             current.subsidy_ntd if current is not None else None,
-            current.scheme_conflict if current is not None else False,
+            False,
+            current.client_subsidy_reason if current is not None else None,
+            current.manual if current is not None else False,
+            current.requires_manual_plan if current is not None else False,
+            current.service_completed if current is not None else False,
         )
 
 

@@ -57,8 +57,8 @@ class AccountsPayableExportApplication:
 def get_accounts_payable_export_application():
     archive_root = os.environ.get("ACCOUNTS_PAYABLE_ARCHIVE_ROOT")
     connection = get_connection()
-    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
-    case_query = build_accounting_workspace(connection).query
+    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+    case_query = lambda case_no: query_subsidy_payable_handoff(connection, case_no)
     workflow = AccountsPayableExportWorkflow(
         MySqlStaffPayableExportSource(connection, case_query=case_query),
         MySqlClientRefundExportSource(connection, case_query=case_query),
@@ -81,9 +81,9 @@ class CashRequirementsApplication:
 
     def query(self, *, page_size=100, after_case_no=None):
         with _ReadOnlySnapshotComposition(self.connection):
-            from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
+            from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
             return query_cash_requirements(MySqlCashRequirementsRepository(self.connection,
-                case_query=build_accounting_workspace(self.connection).query),
+                case_query=lambda case_no: query_subsidy_payable_handoff(self.connection, case_no)),
                 page_size=page_size, after_case_no=after_case_no)
 
 

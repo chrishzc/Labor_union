@@ -144,3 +144,37 @@ class MySqlAccountingWorkspaceState:
 
     def rollback(self):
         self.connection.rollback()
+
+
+def query_subsidy_payable_handoff(connection, case_no):
+    """Borrow current Orders, owner money facts and the last saved plan; query only."""
+    from domains.staff_payables.subsidy_handoff import SubsidyHandoffFacts, decide_subsidy_handoff
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT o.status,EXISTS(SELECT 1 FROM client_obligations b "
+            "WHERE b.case_no=o.case_no AND b.obligation_type='subsidy_return' "
+            "AND b.direction='payable_to_client' AND b.status='open' AND b.amount_due_ntd>0) "
+            "AS has_customer_subsidy_payable FROM orders o WHERE o.case_no=%s", (case_no,))
+        row = cursor.fetchone()
+    if row is None:
+        raise LookupError('accounting_case_not_found')
+    case = build_accounting_workspace(connection).query(case_no)
+    from infrastructure.mysql.client_payments_query_repository import query_case_funding
+    funding = query_case_funding(connection, case_no)
+    total = case.staff_receivable_ntd if case.staff_receivable_ntd is not None else (funding.total_ntd if funding else None)
+    stages = tuple(item for item in case.client_items if item.payment_stage in {'deposit', 'first', 'second'})
+    cash = case.cash_by_flow
+    customer_paid = (sum(item.actual_ntd for item in stages)
+                     if {item.payment_stage for item in stages} == {'deposit', 'first', 'second'} else None)
+    if customer_paid is not None and cash is not None:
+        customer_paid -= cash['RS']
+    staff = tuple(item for item in case.staff_items if item.direction == 'payable' and item.summary_included)
+    return decide_subsidy_handoff(SubsidyHandoffFacts(
+        case.subsidy_plan.selected_scheme if case.subsidy_plan is not None else None,
+        case.scheme, case.scheme_conflict, str(row['status']), total,
+        case.subsidy_ntd, case.customer_amount_ntd, customer_paid,
+        sum(item.actual_ntd for item in staff) if staff else None,
+        None if cash is None else cash['PT'], None if cash is None else cash['RT'],
+        None if cash is None else cash['G'], bool(row['has_customer_subsidy_payable']),
+        funding.full_subsidy if funding is not None else False,
+        funding is not None and case.staff_receivable_ntd is not None and funding.total_ntd != case.staff_receivable_ntd))

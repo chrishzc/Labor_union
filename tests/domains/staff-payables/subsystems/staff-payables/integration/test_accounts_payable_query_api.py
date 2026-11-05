@@ -171,9 +171,9 @@ def test_requery_reads_reduced_balance_and_removes_paid_items_without_changing_m
 
 @pytest.mark.parametrize("configured_archive", [False, True])
 def test_composed_export_download_matches_persistent_archive(tmp_path, monkeypatch, configured_archive):
-    from types import SimpleNamespace
-    monkeypatch.setattr('infrastructure.mysql.accounting_workspace_repository.build_accounting_workspace',
-        lambda connection: SimpleNamespace(query=lambda case_no: SimpleNamespace(scheme='unknown',scheme_conflict=False)))
+    from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
+    monkeypatch.setattr('infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff',
+        lambda connection, case_no: SubsidyPayableHandoff('unknown',False,True,None,False))
     from api.dependencies import accounts_payable_export as composition
     from infrastructure.archive.accounts_payable import LocalAccountsPayableArchive
 
@@ -222,9 +222,9 @@ def test_composed_export_download_matches_persistent_archive(tmp_path, monkeypat
 
 
 def test_composed_export_does_not_download_when_archive_is_unwritable(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    monkeypatch.setattr('infrastructure.mysql.accounting_workspace_repository.build_accounting_workspace',
-        lambda connection: SimpleNamespace(query=lambda case_no: SimpleNamespace(scheme='unknown',scheme_conflict=False)))
+    from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
+    monkeypatch.setattr('infrastructure.mysql.accounting_workspace_repository.query_subsidy_payable_handoff',
+        lambda connection, case_no: SubsidyPayableHandoff('unknown',False,True,None,False))
     from api.dependencies import accounts_payable_export as composition
 
     blocked_root = tmp_path / "not-a-directory"

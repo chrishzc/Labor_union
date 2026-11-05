@@ -43,7 +43,7 @@ def synchronize_client_charges(cursor, case_no, *, actor, key, correlation_id, s
 def synchronize_terminal_subsidy_return(cursor, case_no, *, actor, key, correlation_id,
                                        source_family, source_id, advance_version=True):
     order = select_order(cursor, case_no, lock=True)
-    if str(order['status']).startswith('歷史'):
+    if str(order['status']) not in ('訂單完成', '訂單取消'):
         return
     if any(order.get(name) is None for name in ('start_date','service_days','service_hours_per_day','floor_fee')):
         return
@@ -51,13 +51,15 @@ def synchronize_terminal_subsidy_return(cursor, case_no, *, actor, key, correlat
     if cursor.fetchone() is None:
         return
     facts, source = load_calculable_client_finance_facts(cursor, order, lock=True,
-        allow_planned=str(order['status']) not in ('訂單完成','訂單取消'))
+        allow_planned=False)
     if facts is None:
         return  # Actual service facts must exist; planned/signed dates cannot authorize a refund.
-    from infrastructure.mysql.accounting_workspace_repository import build_accounting_workspace
-    case = build_accounting_workspace(cursor.connection).query(case_no)
+    from infrastructure.mysql.accounting_workspace_repository import query_subsidy_payable_handoff
+    case = query_subsidy_payable_handoff(cursor.connection, case_no)
+    if case.manual and source.existing_subsidy_return_count:
+        return  # An arrangement change never rewrites a formed payable, snapshot or date.
     from shared_kernel.money import MoneyNTD
-    facts = replace(facts, subsidy_return_confirmed=case.scheme == 'advance' and not case.scheme_conflict,
+    facts = replace(facts, subsidy_return_confirmed=case.scheme == 'advance' and case.client_subsidy_reason is None,
         confirmed_subsidy_amount=MoneyNTD(case.subsidy_ntd) if case.subsidy_ntd is not None else None)
     plan = automatic_subsidy_return_plan(facts, identity_status=source.identity_status,
         completed_on=max(day.service_date for day in facts.charge_days), existing_return_count=source.existing_subsidy_return_count)

@@ -1,4 +1,5 @@
 from datetime import date
+from domains.staff_payables.subsidy_handoff import SubsidyPayableHandoff
 
 import pytest
 
@@ -43,10 +44,8 @@ def test_subsidy_return_is_a_payable_633_fact_when_no_ledger_payout_exists():
     ('direct', None, '31', True),
 ])
 def test_formal_scheme_is_required_before_a_funding_portion_routes_to_taishin(scheme, portion, bank, payable):
-    from types import SimpleNamespace
     from infrastructure.mysql.accounts_payable_export_sources import _staff_payment_route
-    case = SimpleNamespace(scheme=scheme, scheme_conflict=False, customer_amount_ntd=18000,
-                           staff_receivable_ntd=30000, subsidy_ntd=12000)
+    case = SubsidyPayableHandoff(scheme, False, True, 12000, False)
     row = {**_partially_paid_staff_row(), 'installment_funding': portion, 'union_no': '0007'}
     fact = _staff_fact(_staff_payment_route(row, case))
     assert fact.outgoing_bank == bank
@@ -55,10 +54,8 @@ def test_formal_scheme_is_required_before_a_funding_portion_routes_to_taishin(sc
 
 
 def test_full_subsidy_routes_existing_staff_balance_without_creating_a_second_entitlement():
-    from types import SimpleNamespace
     from infrastructure.mysql.accounts_payable_export_sources import _staff_payment_route
-    case = SimpleNamespace(scheme='split', scheme_conflict=False, customer_amount_ntd=0,
-                           staff_receivable_ntd=12000, subsidy_ntd=12000)
+    case = SubsidyPayableHandoff('split', False, True, 12000, True)
     fact = _staff_fact(_staff_payment_route(_partially_paid_staff_row(), case))
     assert fact.outgoing_bank == '633' and fact.amount.amount == 1500
 
