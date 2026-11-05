@@ -54,7 +54,12 @@ function connectionResultMessage(code: string | null): string {
 }
 
 
-export const LlmConfigurationPage: React.FC = () => {
+export interface LlmConfigurationPageProps {
+  /** 是否內嵌於其他工作區頁籤中；若為 true 則精簡頂層重複 Header。 */
+  embedded?: boolean;
+}
+
+export const LlmConfigurationPage: React.FC<LlmConfigurationPageProps> = ({ embedded = false }) => {
   const [apiKey, setApiKey] = useState('');
   const saveValidation = useSaveValidation();
   const saveFieldRef = useValidationRef<HTMLInputElement>(null);
@@ -145,31 +150,43 @@ export const LlmConfigurationPage: React.FC = () => {
   const updatedAt = status?.updated_at
     ? new Date(status.updated_at).toLocaleString('zh-TW')
     : null;
+  const statusIndicator = (
+    <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
+      <span className="llm-config-status-dot" aria-hidden="true" />
+      <span>
+        {loadingStatus
+          ? '查詢中'
+          : status?.configured
+            ? 'Gemini API Key 已設定'
+            : '尚未設定 Gemini API Key'}
+      </span>
+    </div>
+  );
 
   return (
-    <section className="llm-config-page" aria-labelledby="llm-config-title">
-      <header className="llm-config-header">
-        <div className="llm-config-heading">
-          <span className="llm-config-heading-icon" aria-hidden="true"><Bot /></span>
-          <div>
-            <p className="llm-config-eyebrow">LINE 專區</p>
-            <h1 id="llm-config-title">AI 模型設定</h1>
-            <p className="llm-config-description">
-              管理 Gemini 連線憑證，並確認目前模型是否可正常回應。
-            </p>
+    <section className="llm-config-page"
+      aria-label={embedded ? 'AI 模型設定' : undefined}
+      aria-labelledby={embedded ? undefined : 'llm-config-title'}
+    >
+      {!embedded ? (
+        <header className="llm-config-header">
+          <div className="llm-config-heading">
+            <span className="llm-config-heading-icon" aria-hidden="true"><Bot /></span>
+            <div>
+              <p className="llm-config-eyebrow">LINE 專區</p>
+              <h1 id="llm-config-title">AI 模型設定</h1>
+              <p className="llm-config-description">
+                管理 Gemini 連線憑證，並確認目前模型是否可正常回應。
+              </p>
+            </div>
           </div>
+          {statusIndicator}
+        </header>
+      ) : (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+          {statusIndicator}
         </div>
-        <div className={`llm-config-status ${status?.configured ? 'configured' : 'empty'}`}>
-          <span className="llm-config-status-dot" aria-hidden="true" />
-          <span>
-            {loadingStatus
-              ? '查詢中'
-              : status?.configured
-                ? 'Gemini API Key 已設定'
-                : '尚未設定 Gemini API Key'}
-          </span>
-        </div>
-      </header>
+      )}
 
       <div className="llm-config-card">
         <div className="llm-config-card-heading">

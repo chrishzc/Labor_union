@@ -616,6 +616,8 @@ function LiffVisualPreview({ item }: { item: LiffAssetItem }) {
 
 export interface LiffCardStudioProps {
   runtimeConfigClient?: LineIdentityRuntimeConfigClient;
+  /** 是否內嵌於其他頁籤工作區中；若為 true 則省略頂層重複的頁面 Header。 */
+  embedded?: boolean;
 }
 
 type RuntimeConfigState =
@@ -625,6 +627,7 @@ type RuntimeConfigState =
 
 export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
   runtimeConfigClient = lineIdentityRuntimeConfigClient,
+  embedded = false,
 }) => {
   const [selectedId, setSelectedId] = useState<string>(() => {
     const requested = liffHashParams().get('asset');
@@ -692,12 +695,16 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
 
   useEffect(() => {
     const route = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
-    if (route !== 'line-liff-studio' && route !== 'line-studio') return;
+    const isInterface = route === 'line-interface';
+    if (!isInterface && route !== 'line-liff-studio' && route !== 'line-studio') return;
     const params = liffHashParams();
     const setParam = (key: string, value: string, fallback: string) => {
       if (value === fallback || value === '') params.delete(key);
       else params.set(key, value);
     };
+    if (isInterface) {
+      params.set('tab', 'liff');
+    }
     setParam('asset', selectedId, 'gateway');
     params.delete('type');
     setParam('role', filterRole, 'all');
@@ -724,16 +731,18 @@ export const LiffCardStudio: React.FC<LiffCardStudioProps> = ({
 
   return (
     <div className="liff-studio-container liff-studio-clean">
-      <header className="line-hub-page-header liff-studio-page-header">
-        <div className="line-hub-page-heading">
-          <span className="line-hub-page-icon" aria-hidden="true"><PanelTop /></span>
-          <div>
-            <p className="line-hub-eyebrow">LINE 專區</p>
-            <h1>LINE 表單</h1>
-            <p>找到需要的功能，查看 LINE 上的使用畫面。</p>
+      {!embedded && (
+        <header className="line-hub-page-header liff-studio-page-header">
+          <div className="line-hub-page-heading">
+            <span className="line-hub-page-icon" aria-hidden="true"><PanelTop /></span>
+            <div>
+              <p className="line-hub-eyebrow">LINE 專區</p>
+              <h1>LINE 表單</h1>
+              <p>找到需要的功能，查看 LINE 上的使用畫面。</p>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
       <div className="liff-studio-workspace">
         <section className="liff-studio-sidebar" aria-label="表單清單">
           <div className="liff-sidebar-header">

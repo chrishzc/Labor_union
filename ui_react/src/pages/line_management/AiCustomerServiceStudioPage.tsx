@@ -62,7 +62,7 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
           <RealLlmSemanticTestPanel onOpenQa={openQa} onCreateQa={createQa} />
         )}
         {activeTab === 'feedback' && <KnowledgeFeedbackPanel onOpenQa={openQa} onCreateQa={createQa} />}
-        {activeTab === 'model' && <LlmConfigurationPage />}
+        {activeTab === 'model' && <LlmConfigurationPage embedded />}
       </div>
     </section>
   );

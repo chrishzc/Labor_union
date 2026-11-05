@@ -191,6 +191,75 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       unmount();
     }
   });
+
+  it('[Hash-7] LINE 專區新責任頁面 (#line-notifications, #line-interface) 正式導向與側欄 active 狀態', async () => {
+    authenticateSession();
+
+    window.location.hash = '#line-notifications';
+    const view1 = render(<App />);
+    await waitFor(() => {
+      const activeNav = screen.getByTitle('通知與寄送');
+      expect(activeNav).toHaveClass('active');
+    });
+    view1.unmount();
+
+    window.location.hash = '#line-interface';
+    const view2 = render(<App />);
+    await waitFor(() => {
+      const activeNav = screen.getByTitle('LINE 介面設定');
+      expect(activeNav).toHaveClass('active');
+    });
+    view2.unmount();
+
+    window.location.hash = '#line-interface?tab=liff&asset=register';
+    render(<App />);
+    expect(await screen.findByRole('heading', { level: 2, name: '需求調查' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /連結客戶資料/ }));
+    await waitFor(() => {
+      const params = new URLSearchParams(window.location.hash.split('?')[1]);
+      expect(params.get('tab')).toBe('liff');
+      expect(params.get('asset')).toBe('bind');
+    });
+  });
+
+  it('[Hash-8] LINE 專區舊深連結與分頁切換相容性解析', async () => {
+    authenticateSession();
+
+    // 1. 舊 AI 模型設定 -> 導向 AI 客服工作室
+    window.location.hash = '#line-llm-settings';
+    const view1 = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTitle('AI 客服工作室')).toHaveClass('active');
+    });
+    expect(await screen.findByRole('region', { name: 'AI 模型設定' })).toBeVisible();
+    expect(screen.queryByRole('heading', { level: 1, name: 'AI 模型設定' })).not.toBeInTheDocument();
+    view1.unmount();
+
+    // 2. 舊表單工作室 -> 導向 LINE 介面設定
+    window.location.hash = '#line-liff-studio';
+    const view2 = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTitle('LINE 介面設定')).toHaveClass('active');
+    });
+    expect(await screen.findByRole('region', { name: '表單清單' })).toBeVisible();
+    view2.unmount();
+
+    // 3. 舊 #line-management?tab=push_queue -> 導向通知與寄送
+    window.location.hash = '#line-management?tab=push_queue';
+    const view3 = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTitle('通知與寄送')).toHaveClass('active');
+    });
+    view3.unmount();
+
+    // 4. 舊 #line-management?tab=richmenu -> 導向 LINE 介面設定
+    window.location.hash = '#line-management?tab=richmenu';
+    const view4 = render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTitle('LINE 介面設定')).toHaveClass('active');
+    });
+    view4.unmount();
+  });
 });
 
 describe('Adversarial Challenge: ErrorBoundary Component', () => {
