@@ -36,6 +36,11 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
     .head { min-height: auto; background: #f4f4f5; text-align: center; font-weight: 700; }
     .day:nth-child(7n), .head:nth-child(7n) { border-right: 0; }
     .date { font-weight: 700; margin-bottom: 4px; }
+    button.day { border-radius: 0; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+    button.day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #be123c; }
+    .shift-label, .more-shifts { display: block; font-size: 11px; }
+    .more-shifts { color: #9f1239; }
+    .shift-detail { padding: 8px 0; border-bottom: 1px solid #fecdd3; }
     .work { background: #ffe4e6; }
     .rest { background: #dcfce7; }
     .waiting { background: #fef3c7; }
@@ -70,6 +75,7 @@ Description: 提供月嫂查班及提交已協調的請假、順延與代班結�
       <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>可排班</span>
     </div>
     <div id="calendar" class="calendar"></div>
+    <section id="calendarDayDetails" aria-label="當日班次" hidden></section>
     <button id="reauthenticate" class="secondary" type="button" hidden>重新登入 LINE</button>
   </section>
 
@@ -141,7 +147,7 @@ function reauthenticateLine() {
 
 const scheduleStatuses = new Set([
   "available", "working", "resting", "historical_assignment",
-  "waiting_deposit_lock", "staff_unavailability",
+  "waiting_deposit_lock", "staff_unavailability", "buffer",
 ]);
 
 function requireScheduleDay(value) {
@@ -176,7 +182,7 @@ function dayPresentation(items) {
     || items.find(value => value.status === "historical_assignment")
     || items.find(value => value.status === "resting")
     || items[0];
-  if (!item || item.status === "available") return {className: "available", text: "可排班"};
+  if (!item || item.status === "available") return {className: "available", text: ""};
   if (item.status === "working") {
     const subject = item.client_name || item.case_no || "服務案件";
     return {className: "work", text: `服務日｜${subject}`};
@@ -186,7 +192,60 @@ function dayPresentation(items) {
     return {className: "unavailable", text: item.unavailability_reason || "正式不可服務"};
   }
   if (item.status === "historical_assignment") return {className: "historical", text: "歷史指派"};
+  if (item.status === "buffer") return {className: "waiting", text: "緩衝提醒"};
   return {className: "rest", text: "休息日"};
+}
+
+function shiftTime(item) {
+  if (!item.starts_at || !item.ends_at) return "";
+  const startDay = item.starts_at.slice(0, 10);
+  const endDay = item.ends_at.slice(0, 10);
+  const end = item.ends_at.slice(11, 16);
+  if (item.work_date !== startDay) return `00:00–${end} 續班`;
+  return `${item.starts_at.slice(11, 16)}–${startDay === endDay ? "" : "翌日 "}${end}`;
+}
+
+function showCalendarDay(items, date) {
+  const details = document.getElementById("calendarDayDetails");
+  details.hidden = false;
+  details.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = `${date} 班次`;
+  details.append(title);
+  if (!items.length) appendCalendarCell(details, "", "當日沒有排班紀錄。");
+  for (const item of items) {
+    const block = appendCalendarCell(details, "shift-detail");
+    const state = dayPresentation([item]).text;
+    const time = shiftTime(item) || (item.is_work_day || item.status === "historical_assignment" ? "時段未確認" : "");
+    appendCalendarCell(block, "", [time, item.case_no, state].filter(Boolean).join(" · "));
+    if (item.service_date && item.service_date !== item.work_date && item.starts_at) {
+      appendCalendarCell(block, "hint", `原服務日 ${item.service_date} · ${item.starts_at.slice(11, 16)} 起`);
+    }
+    if (item.status !== "working" || !item.assignment_id || !item.case_no) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary";
+    button.textContent = "處理這一班";
+    button.onclick = async () => {
+      const targetDate = item.service_date || item.work_date;
+      const findField = () => Array.from(document.querySelectorAll("#leaveCases article")).find(
+        card => card.dataset.caseNo === item.case_no && Number(card.dataset.assignmentId) === item.assignment_id
+      )?.querySelector(`input[data-service-date="${targetDate}"]`);
+      let field = findField();
+      if (!field) {
+        await loadLeaveCases();
+        field = findField();
+      }
+      if (!field || field.disabled) {
+        appendCalendarCell(block, "hint", "這一班目前無法提交請假協調結果。");
+        return;
+      }
+      field.checked = true;
+      field.dispatchEvent(new Event("change"));
+      field.focus();
+    };
+    block.append(button);
+  }
 }
 
 function renderCalendar(schedule) {
@@ -203,14 +262,28 @@ function renderCalendar(schedule) {
     byDay[day].push(item);
   }
   root.replaceChildren();
+  document.getElementById("calendarDayDetails").hidden = true;
   weekNames.forEach(name => appendCalendarCell(root, "head", name));
   for (let i = 0; i < first.getDay(); i++) appendCalendarCell(root, "day available");
   for (let day = 1; day <= lastDay; day++) {
-    const items = byDay[day] || [];
+    const items = (byDay[day] || []).filter(item => item.status !== "available");
     const presentation = dayPresentation(items);
-    const cell = appendCalendarCell(root, `day ${presentation.className}`);
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = `day ${presentation.className}`;
+    cell.setAttribute("aria-pressed", "false");
+    cell.setAttribute("aria-label", `${month} 月 ${day} 日，${items.length} 筆紀錄`);
     appendCalendarCell(cell, "date", String(day));
-    appendCalendarCell(cell, "", presentation.text);
+    if (items.length) {
+      appendCalendarCell(cell, "shift-label", shiftTime(items[0]) || dayPresentation([items[0]]).text);
+    }
+    if (items.length > 1) appendCalendarCell(cell, "more-shifts", `另 ${items.length - 1} 筆`);
+    cell.onclick = () => {
+      root.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+      cell.setAttribute("aria-pressed", "true");
+      showCalendarDay(items, `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+    };
+    root.append(cell);
   }
 }
 
@@ -362,13 +435,13 @@ async function loadLeaveCases(){
     }
     status.textContent=data.items.length?'請選擇受影響的服務日，再填寫協調結果。':'目前沒有可提交請假的正式排班。';
     for(const item of data.items){
-      const card=document.createElement('article');card.className='panel';const h=document.createElement('h3');h.textContent='案件 '+item.case_no;card.append(h);
+      const card=document.createElement('article');card.className='panel';card.dataset.caseNo=item.case_no;card.dataset.assignmentId=item.assignment_id;const h=document.createElement('h3');h.textContent='案件 '+item.case_no;card.append(h);
       const form=document.createElement('form');const choice=document.createElement('select');choice.setAttribute('aria-label','請假協調結果');
       for(const [value,text] of [['defer','已協調順延'],['substitute','需要安排代班']]){const o=document.createElement('option');o.value=value;o.textContent=text;choice.append(o);}form.append(choice);
       const dayList=document.createElement('fieldset');const legend=document.createElement('legend');legend.textContent='選擇受影響的服務日';dayList.append(legend);dayList.style.maxHeight='360px';dayList.style.overflowY='auto';form.append(dayList);
       const fields=item.service_dates.map(day=>{
         const row=document.createElement('div');row.className='field';
-        const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','原服務日 '+day);check.style.width='auto';label.style.display='flex';label.style.gap='8px';label.append(check,document.createTextNode('原服務日 '+day));
+        const label=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.dataset.serviceDate=day;check.setAttribute('aria-label','原服務日 '+day);check.style.width='auto';label.style.display='flex';label.style.gap='8px';label.append(check,document.createTextNode('原服務日 '+day));
         const newLabel=document.createElement('label');newLabel.textContent='協議後日期';newLabel.hidden=true;const input=document.createElement('input');input.type='date';input.setAttribute('aria-label',day+' 協議後日期');input.disabled=true;newLabel.append(input);
         check.onchange=()=>{newLabel.hidden=!check.checked||choice.value!=='defer';input.disabled=!check.checked||choice.value!=='defer';input.required=check.checked&&choice.value==='defer';};
         row.append(label,newLabel);dayList.append(row);return {day,check,input,newLabel};

@@ -8,7 +8,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 import json
 from infrastructure.mysql.nas_mutations import call_mutation
+from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
 from typing import Any
+
+from domains.scheduling.assignment_plan import AssignmentPlanDomainError, AssignmentPlanIssue, first_shift_conflict
 
 from domains.scheduling.generation import (
     AssignmentIdentityResolution,
@@ -26,6 +29,17 @@ def persist_scheduling_replacement(
     command: SchedulingReplacementCommand,
 ) -> SchedulingReplacementResult:
     aggregate_row = _locked_aggregate(cursor, command)
+    candidate = command.candidate
+    if candidate.assignments:
+        staff_ids = tuple(sorted({assignment.staff_id for assignment in candidate.assignments}))
+        service_time = command.service_time or load_case_service_time(cursor, candidate.case_no, lock=True)
+        occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=True)
+        conflict = first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied)
+        if conflict is not None:
+            raise AssignmentPlanDomainError(
+                AssignmentPlanIssue.STAFF_OCCUPANCY_CONFLICT,
+                f"staff {conflict.staff_id}: {conflict.source_case_no} on {conflict.occupancy_date}",
+            )
     previous_generation_id = _previous_generation_id(aggregate_row)
     generation_id = _insert_generation(cursor, command)
     assignment_ids = _insert_assignments(cursor, command, generation_id)

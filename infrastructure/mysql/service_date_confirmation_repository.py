@@ -5,6 +5,9 @@ Description: 實作 confirmed service dates persistence 與 typed borrowed owner
 
 from __future__ import annotations
 
+from domains.scheduling.assignment_plan import first_shift_conflict
+from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
+
 import json
 from datetime import timedelta
 
@@ -134,70 +137,27 @@ class MySqlServiceDateConfirmationRepository:
         ):
             raise ValueError("historical_arrangement_staff_ineligible_blocked")
 
-    def validate_arrangement_availability(self, candidate, *, lock):
-        occupied = {
-            (assignment.staff_id, assignment.assigned_start_date + timedelta(days=offset))
-            for assignment in candidate.assignments
-            for offset in range(
-                (assignment.assigned_end_date - assignment.assigned_start_date).days + 1
-            )
-        }
-        occupied.update(
-            (buffer.staff_id, day)
-            for buffer in candidate.buffers if buffer.active
-            for day in buffer.dates
-        )
+    def validate_arrangement_availability(self, candidate, *, lock: bool) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
-        first = min(day for _, day in occupied)
-        last = max(day for _, day in occupied)
-        placeholders = ",".join("%s" for _ in staff_ids)
-        suffix = " FOR UPDATE" if lock else ""
-        queries = (
-            (
-                "SELECT o.staff_id,o.occupancy_date,g.case_no "
-                "FROM scheduling_effective_occupancy o "
-                "JOIN scheduling_generations g ON g.id=o.generation_id "
-                f"WHERE o.staff_id IN ({placeholders}) "
-                "AND o.occupancy_date BETWEEN %s AND %s" + suffix,
-            ),
-            (
-                "SELECT d.staff_id,d.lock_date AS occupancy_date,p.case_no "
-                "FROM caregiver_availability_lock_days d "
-                "JOIN caregiver_availability_locks l ON l.id=d.lock_id "
-                "JOIN caregiver_matching_plan_segments s ON s.id=d.segment_id "
-                "JOIN caregiver_matching_plans p ON p.id=s.plan_id "
-                f"WHERE d.staff_id IN ({placeholders}) "
-                "AND d.lock_date BETWEEN %s AND %s "
-                "AND d.active_marker=1 AND l.is_active=1" + suffix,
-            ),
-            (
-                "SELECT d.staff_id,d.occupancy_date,b.case_no "
-                "FROM scheduling_leave_occupancy_days d "
-                "JOIN scheduling_leave_substitution_batches b ON b.batch_key=d.batch_key "
-                f"WHERE d.staff_id IN ({placeholders}) "
-                "AND d.occupancy_date BETWEEN %s AND %s AND d.active_marker=1" + suffix,
-            ),
-        )
         with self._connection.cursor() as cursor:
+            placeholders = ",".join("%s" for _ in staff_ids)
             cursor.execute(
                 "SELECT s.id,s.status,COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
                 "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
-                f"WHERE s.id IN ({placeholders}) ORDER BY s.id" + suffix,
+                f"WHERE s.id IN ({placeholders}) ORDER BY s.id"
+                + (" FOR UPDATE" if lock else ""),
                 staff_ids,
             )
-            staff_rows = tuple(cursor.fetchall())
-            if tuple(int(row["id"]) for row in staff_rows) != staff_ids or any(
+            rows = tuple(cursor.fetchall())
+            if tuple(int(row["id"]) for row in rows) != staff_ids or any(
                 row["status"] != "active" or row["lifecycle_state"] == "retired"
-                for row in staff_rows
+                for row in rows
             ):
                 raise ValueError("historical_arrangement_staff_ineligible_blocked")
-            for (sql,) in queries:
-                cursor.execute(sql, (*staff_ids, first, last))
-                for row in cursor.fetchall():
-                    if (
-                        int(row["staff_id"]), row["occupancy_date"]
-                    ) in occupied and str(row["case_no"]) != candidate.case_no:
-                        raise ValueError("historical_arrangement_occupancy_conflict")
+            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
+            service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
+        if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
+            raise ValueError("historical_arrangement_occupancy_conflict")
 
     def arrangement_rate_fingerprint(self, candidate, *, lock):
         with self._connection.cursor() as cursor:

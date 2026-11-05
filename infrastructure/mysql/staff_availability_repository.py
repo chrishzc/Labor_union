@@ -458,19 +458,27 @@ _RECEIPT_INSERT_SQL = (
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _ASSIGNMENT_CONFLICT_SQL = (
-    "SELECT CAST(a.id AS CHAR) AS source_identity,a.assigned_start_date AS start_date,"
-    "a.assigned_end_date AS end_date FROM case_staff_assignments a "
+    "SELECT CAST(a.id AS CHAR) AS source_identity,s.work_date AS start_date,"
+    "DATE_ADD(s.work_date,INTERVAL IF(o.service_end_day_offset=1 AND o.service_end_time>'00:00:00',1,0) DAY) AS end_date "
+    "FROM case_staff_assignments a JOIN staff_schedule s ON s.assignment_id=a.id "
+    "JOIN orders o ON o.case_no=a.case_no "
     "JOIN scheduling_generations g ON g.id=a.generation_id "
     "AND g.status='effective' AND g.effective_marker=1 "
-    "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced') AND a.assigned_end_date>=%s "
-    "AND (%s IS NULL OR a.assigned_start_date<=%s) ORDER BY a.assigned_start_date,a.id"
+    "WHERE a.staff_id=%s AND a.status NOT IN ('cancelled','replaced','completed') "
+    "AND s.effective_marker=1 AND s.is_work_day=1 "
+    "AND DATE_ADD(s.work_date,INTERVAL IF(o.service_end_day_offset=1 AND o.service_end_time>'00:00:00',1,0) DAY)>=%s "
+    "AND (%s IS NULL OR s.work_date<=%s) ORDER BY s.work_date,a.id"
 )
 _WAITING_LOCK_CONFLICT_SQL = (
     "SELECT CONCAT(d.lock_id,':',d.segment_id,':',d.lock_date) AS source_identity,"
-    "d.lock_date AS start_date,d.lock_date AS end_date FROM caregiver_availability_lock_days d "
+    "d.lock_date AS start_date,"
+    "DATE_ADD(d.lock_date,INTERVAL IF(o.service_end_day_offset=1 AND o.service_end_time>'00:00:00',1,0) DAY) AS end_date "
+    "FROM caregiver_availability_lock_days d "
     "JOIN caregiver_availability_locks h ON h.id=d.lock_id "
+    "JOIN caregiver_matching_plans p ON p.id=h.plan_id JOIN orders o ON o.case_no=p.case_no "
     "WHERE d.staff_id=%s AND d.active_marker=1 AND h.status='active' AND h.is_active=1 "
-    "AND d.lock_date>=%s AND (%s IS NULL OR d.lock_date<=%s) ORDER BY d.lock_date,d.id"
+    "AND DATE_ADD(d.lock_date,INTERVAL IF(o.service_end_day_offset=1 AND o.service_end_time>'00:00:00',1,0) DAY)>=%s "
+    "AND (%s IS NULL OR d.lock_date<=%s) ORDER BY d.lock_date,d.id"
 )
 _BUFFER_CONFLICT_SQL = (
     "SELECT CONCAT(assignment_id,':',buffer_date) AS source_identity,"

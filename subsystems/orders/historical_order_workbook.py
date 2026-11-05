@@ -6,7 +6,7 @@ Description: 依版本化欄位契約解析歷史訂單 workbook、Excel date sy
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from hashlib import sha256
 from pathlib import Path
 import re
@@ -15,6 +15,7 @@ from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
 from domains.orders.historical_adoption import HistoricalOrderSourceStatus
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
 
@@ -24,6 +25,9 @@ _FIELD_ALIASES = {
     "case_no": {"case_no", "案件編號", "查詢序號", "訂單編號"},
     "start_date": {"start_date", "開始日期", "服務開始", "服務開始日", "實際服務開始日"},
     "end_date": {"end_date", "結束日期", "服務結束", "服務結束日", "實際服務結束日"},
+    "start_time": {"service_start_time", "每日服務開始時間", "服務開始時間"},
+    "end_time": {"service_end_time", "每日服務結束時間", "服務結束時間"},
+    "end_day_offset": {"service_end_day_offset", "跨日標記", "服務結束日偏移"},
     "status": {"status", "狀態", "訂單狀態", "訂單成立狀態"},
 }
 _STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)$")
@@ -56,6 +60,7 @@ class HistoricalOrderWorkbookRow:
     actual_end_date: date | None
     caregivers: tuple[HistoricalCaregiverSource, ...]
     issue_codes: tuple[str, ...]
+    service_time: ServiceTimeTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +167,20 @@ def _parse_row(values, positions, source_row, epoch, digest):
     end, bad_end = parse_excel_source_date(_value(values, positions.get("end_date")), epoch)
     issues = _row_issues(values, positions, bad_start, bad_end, start, end)
     caregivers = _caregivers(values, positions, epoch, start, end)
+    raw_time = tuple(_value(values, positions.get(key)) for key in (
+        "start_time", "end_time", "end_day_offset",
+    ))
+    service_time = None
+    if any(not _blank(value) for value in raw_time):
+        try:
+            service_time = ServiceTimeTerms(
+                _clock_time(raw_time[0]), _clock_time(raw_time[1]), int(str(raw_time[2]).strip())
+            )
+            if service_time.service_interval(date(2000, 1, 1)) is None:
+                raise ValueError("invalid historical service interval")
+        except (TypeError, ValueError):
+            service_time = None
+            issues += ("historical_service_time_unconfirmed",)
     payload = {
         "case_no": _text(_value(values, positions.get("case_no"))),
         "client_name": _text(_value(values, positions.get("client_name"))),
@@ -177,6 +196,8 @@ def _parse_row(values, positions, source_row, epoch, digest):
             for item in caregivers
         ),
     }
+    if service_time is not None:
+        payload["service_time"] = service_time.canonical_payload()
     return HistoricalOrderWorkbookRow(
         source_row,
         f"historical-orders:{digest}:row:{source_row}",
@@ -188,7 +209,16 @@ def _parse_row(values, positions, source_row, epoch, digest):
         end,
         caregivers,
         tuple(sorted(set(issues + tuple(code for item in caregivers for code in item.issue_codes)))),
+        service_time,
     )
+
+
+def _clock_time(value):
+    if isinstance(value, datetime):
+        return value.time()
+    if isinstance(value, time):
+        return value
+    return time.fromisoformat(str(value).strip())
 
 
 def _header_positions(headers):

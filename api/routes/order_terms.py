@@ -322,7 +322,7 @@ def _raise_mysql_error(error, correlation_id) -> None:
 
 
 def _raise_value_error(error, correlation_id) -> None:
-    code = str(error)
+    code = getattr(getattr(error, "issue", None), "value", str(error))
     if code == "order_not_found":
         category, status_code = ErrorCategory.NOT_FOUND, 404
     elif code.endswith("_required") or code == "service_data_locked":

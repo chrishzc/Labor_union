@@ -5,6 +5,11 @@ Description: 排班計畫 MySQL repository，於讀取最新事實時保護退�
 
 from __future__ import annotations
 
+from infrastructure.mysql.scheduling_occupancy_facts import (
+    _lock_suffix,
+    load_occupancy_snapshot,
+)
+
 from collections.abc import Mapping
 from datetime import date
 from dataclasses import replace
@@ -15,7 +20,6 @@ from domains.scheduling.assignment_plan import (
     AssignmentPlanFacts,
     AssignmentPlanIntent,
     EffectiveAssignmentFact,
-    StaffOccupancyFact,
 )
 from domains.scheduling.commitment_execution import (
     CommitmentExecutionMismatch,
@@ -417,6 +421,7 @@ def _assignment_facts(source, occupancy, waiting_lock_ids) -> AssignmentPlanFact
         effective_assignments=_effective_assignments(source),
         external_occupancy=occupancy,
         current_waiting_lock_ids=waiting_lock_ids,
+        service_time=source.order.terms.service_time,
     )
 
 
@@ -449,85 +454,6 @@ def impacted_staff_ids_from_source(source, intent) -> tuple[int, ...]:
     current = tuple(item.staff_id for item in source.scheduling.segments)
     proposed = tuple(item.staff_id for item in intent.segments)
     return tuple(sorted(set(current + proposed)))
-
-
-def load_occupancy_snapshot(cursor, staff_ids, case_no, *, lock):
-    if not staff_ids:
-        return (), ()
-    rows = _effective_occupancy_rows(cursor, staff_ids, lock)
-    rows += _leave_occupancy_rows(cursor, staff_ids, lock)
-    waiting_rows = _waiting_lock_rows(cursor, staff_ids, lock)
-    rows += waiting_rows
-    unique = {
-        (int(row["staff_id"]), row["occupancy_date"], str(row["case_no"]))
-        for row in rows
-    }
-    occupancy = tuple(
-        StaffOccupancyFact(*identity)
-        for identity in sorted(unique, key=lambda item: (item[0], item[1], item[2]))
-    )
-    lock_ids = tuple(
-        sorted(
-            {
-                int(row["lock_id"])
-                for row in waiting_rows
-                if str(row["case_no"]) == case_no
-            }
-        )
-    )
-    return occupancy, lock_ids
-
-
-def _effective_occupancy_rows(cursor, staff_ids, lock):
-    placeholders = ",".join("%s" for _ in staff_ids)
-    cursor.execute(
-        "SELECT o.staff_id,o.occupancy_date,g.case_no "
-        "FROM scheduling_effective_occupancy o "
-        "JOIN scheduling_generations g ON g.id=o.generation_id "
-        f"WHERE o.staff_id IN ({placeholders}) "
-        "AND o.occupancy_type='assignment_interval' "
-        "ORDER BY o.staff_id,o.occupancy_date,g.case_no"
-        + _lock_suffix(lock),
-        staff_ids,
-    )
-    return tuple(cursor.fetchall())
-
-
-def _waiting_lock_rows(cursor, staff_ids, lock):
-    placeholders = ",".join("%s" for _ in staff_ids)
-    cursor.execute(
-        "SELECT d.staff_id,d.lock_date AS occupancy_date,p.case_no,l.id AS lock_id "
-        "FROM caregiver_availability_lock_days d "
-        "JOIN caregiver_availability_locks l ON l.id=d.lock_id "
-        "JOIN caregiver_matching_plan_segments s ON s.id=d.segment_id "
-        "JOIN caregiver_matching_plans p ON p.id=s.plan_id "
-        f"WHERE d.staff_id IN ({placeholders}) "
-        "AND d.active_marker=1 AND l.is_active=1 "
-        "ORDER BY d.staff_id,d.lock_date,p.case_no"
-        + _lock_suffix(lock),
-        staff_ids,
-    )
-    return tuple(cursor.fetchall())
-
-
-def _leave_occupancy_rows(cursor, staff_ids, lock):
-    placeholders = ",".join("%s" for _ in staff_ids)
-    cursor.execute(
-        "SELECT d.staff_id,d.occupancy_date,b.case_no "
-        "FROM scheduling_leave_occupancy_days d "
-        "JOIN scheduling_leave_substitution_batches b "
-        "ON b.batch_key=d.batch_key "
-        f"WHERE d.staff_id IN ({placeholders}) "
-        "AND d.active_marker=1 "
-        "ORDER BY d.staff_id,d.occupancy_date,b.case_no"
-        + _lock_suffix(lock),
-        staff_ids,
-    )
-    return tuple(cursor.fetchall())
-
-
-def _lock_suffix(lock: bool) -> str:
-    return " FOR UPDATE" if lock else ""
 
 
 def _convert_waiting_locks(cursor, command, result, context) -> None:

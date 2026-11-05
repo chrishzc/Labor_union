@@ -6,9 +6,10 @@ Description: 以 MySQL 唯讀載入 Scheduling eligibility/collision projection 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 from typing import Any
+from infrastructure.mysql.order_terms_read_model import read_service_time_terms
 
 from subsystems.scheduling.eligibility_collision_query import (
     SchedulingAssignmentFact,
@@ -44,10 +45,11 @@ class MySqlSchedulingEligibilityCollisionRepository:
                 return SchedulingEligibilityCollisionFacts(case, ())
             window = _query_window(case)
             assignments = self._load_assignments(cursor, window, staff_ids)
-            schedules = self._load_schedules(cursor, window, staff_ids)
+            shift_window = (window[0] - timedelta(days=1), window[1] + timedelta(days=1)) if window else None
+            schedules = self._load_schedules(cursor, shift_window, staff_ids)
             buffers = self._load_buffers(cursor, window, staff_ids)
-            locks = self._load_locks(cursor, window, staff_ids)
-            unavailability = self._load_unavailability(cursor, window, staff_ids)
+            locks = self._load_locks(cursor, shift_window, staff_ids)
+            unavailability = self._load_unavailability(cursor, shift_window, staff_ids)
             self._attach_staff_collections(cursor, staff)
             return SchedulingEligibilityCollisionFacts(
                 case=case,
@@ -66,6 +68,7 @@ class MySqlSchedulingEligibilityCollisionRepository:
         cursor.execute(
             "SELECT o.case_no,o.status,o.start_date,o.end_date,o.service_days,"
             "o.service_hours_per_day,o.requires_cooking,"
+            "o.service_start_time,o.service_end_time,o.service_end_day_offset,"
             "NULLIF(TRIM(CONCAT_WS(' / ',c.city,c.address)),'') AS location_text,"
             "COALESCE(g.aggregate_version,0) AS scheduling_version "
             "FROM orders o JOIN clients c ON c.id=o.client_id "
@@ -76,6 +79,16 @@ class MySqlSchedulingEligibilityCollisionRepository:
         row = cursor.fetchone()
         if row is None:
             return None
+        cursor.execute(
+            "SELECT d.service_date FROM confirmed_service_date_versions v "
+            "JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id "
+            "WHERE v.case_no=%s AND v.is_current=1 ORDER BY d.ordinal",
+            (case_no,),
+        )
+        service_dates = tuple(
+            day for item in (cursor.fetchall() or ())
+            if (day := _as_date(item.get("service_date"))) is not None
+        )
         return SchedulingCaseFacts(
             case_no=str(row["case_no"]),
             status=str(row.get("status") or ""),
@@ -86,6 +99,8 @@ class MySqlSchedulingEligibilityCollisionRepository:
             requires_cooking=_as_optional_bool(row.get("requires_cooking")),
             location_text=_as_optional_text(row.get("location_text")),
             scheduling_version=_as_optional_int(row.get("scheduling_version")),
+            service_time=read_service_time_terms(row),
+            confirmed_service_dates=service_dates,
         )
 
     @staticmethod
@@ -188,8 +203,8 @@ class MySqlSchedulingEligibilityCollisionRepository:
             "FROM case_staff_assignments a "
             "LEFT JOIN scheduling_generations g ON g.id=a.generation_id "
             f"WHERE a.staff_id IN ({placeholders}) "
-            "AND a.status NOT IN ('cancelled','replaced') "
-            "AND (a.generation_id IS NULL OR (g.status='effective' AND g.effective_marker=1)) "
+            "AND a.status NOT IN ('cancelled','replaced','completed') "
+            "AND a.generation_id IS NULL "
             "AND (a.assigned_start_date IS NULL OR a.assigned_end_date IS NULL "
             "OR a.assigned_start_date>a.assigned_end_date "
             "OR (a.assigned_start_date<=%s AND a.assigned_end_date>=%s)) "
@@ -218,8 +233,10 @@ class MySqlSchedulingEligibilityCollisionRepository:
         placeholders = _placeholders(staff_ids)
         cursor.execute(
             "SELECT s.id,s.case_no,s.assignment_id,s.staff_id,s.work_date,"
-            "s.is_work_day,COALESCE(s.effective_marker,1) AS effective_marker "
-            f"FROM staff_schedule s WHERE s.staff_id IN ({placeholders}) "
+            "s.is_work_day,COALESCE(s.effective_marker,1) AS effective_marker,"
+            "o.service_start_time,o.service_end_time,o.service_end_day_offset "
+            "FROM staff_schedule s LEFT JOIN orders o ON o.case_no=s.case_no "
+            f"WHERE s.staff_id IN ({placeholders}) "
             "AND (s.work_date IS NULL OR s.work_date BETWEEN %s AND %s) "
             "ORDER BY s.staff_id,s.work_date,s.id",
             (*staff_ids, window[0], window[1]),
@@ -233,6 +250,7 @@ class MySqlSchedulingEligibilityCollisionRepository:
                 work_date=_as_date(row.get("work_date")),
                 is_work_day=bool(row.get("is_work_day")),
                 effective=bool(row.get("effective_marker")),
+                service_time=read_service_time_terms(row),
             )
             for row in (cursor.fetchall() or [])
         ]
@@ -278,11 +296,12 @@ class MySqlSchedulingEligibilityCollisionRepository:
         placeholders = _placeholders(staff_ids)
         cursor.execute(
             "SELECT d.id AS lock_day_id,l.id AS lock_id,d.segment_id,p.case_no,"
-            "d.staff_id,d.lock_date "
+            "d.staff_id,d.lock_date,o.service_start_time,o.service_end_time,o.service_end_day_offset "
             "FROM caregiver_availability_lock_days d "
             "JOIN caregiver_availability_locks l ON l.id=d.lock_id "
             "LEFT JOIN caregiver_matching_plan_segments segment ON segment.id=d.segment_id "
             "LEFT JOIN caregiver_matching_plans p ON p.id=segment.plan_id "
+            "LEFT JOIN orders o ON o.case_no=p.case_no "
             f"WHERE d.staff_id IN ({placeholders}) AND l.status='active' AND l.is_active=1 "
             "AND d.active_marker=1 "
             "AND (d.lock_date IS NULL OR d.lock_date BETWEEN %s AND %s) "
@@ -297,6 +316,7 @@ class MySqlSchedulingEligibilityCollisionRepository:
                 case_no=_as_optional_text(row.get("case_no")),
                 staff_id=int(row["staff_id"]),
                 lock_date=_as_date(row.get("lock_date")),
+                service_time=read_service_time_terms(row),
             )
             for row in (cursor.fetchall() or [])
         ]
@@ -333,6 +353,8 @@ class MySqlSchedulingEligibilityCollisionRepository:
 
 
 def _query_window(case: SchedulingCaseFacts) -> tuple[date, date] | None:
+    if case.confirmed_service_dates:
+        return min(case.confirmed_service_dates), max(case.confirmed_service_dates)
     if type(case.start_date) is not date or type(case.end_date) is not date:
         return None
     if case.start_date > case.end_date:

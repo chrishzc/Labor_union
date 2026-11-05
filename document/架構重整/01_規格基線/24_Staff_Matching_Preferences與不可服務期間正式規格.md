@@ -136,7 +136,7 @@ focused tests 與 React build 通過，畫面不含 raw workbook／JSON、來源
   `committed_schedule_exception`。Calendar必須同時顯示不可服務宣告與既有服務承諾，不得把任一方隱藏；
   如需改變既有服務，只能另走leave／substitution／cancellation正式流程。
 - 取消只追加事件，不刪除或改寫原期間。
-- 初步 Candidate Contact Pool 可保留與 current 不可服務期間或檔期重疊的人選並提示協調；這不是正式可用性或排班資格。正式 Matching Query 仍回傳 actual conflict，建立 matching plan／assignment 前須完成日期協調並 fresh-read，實際占用衝突仍 fail closed。七天 buffer overlap 只提醒。
+- 初步 Candidate Contact Pool 可保留與目前不可服務期間或檔期重疊的人選並提示協調。正式媒合與指派依規格 02 SHIFT-02／03 檢查實際需求班次與不可服務期間；七日 buffer 只提醒。
 - Calendar 顯示 `staff_unavailability`、kind、期間及原因；不可呈現為可接案、正式服務日、請假代班
   outcome 或七日 buffer。
 - 請假／代班是已有 assignment 後的服務異動；本功能是尚未指派前的個人 availability，兩者不可互相取代。
@@ -318,7 +318,7 @@ identity，例如 `4小時(09:00-13:00)`、`8小時(08:30-17:00)`、`24小時(09
 無 schema／migration 或第二份同步副本；沿既有 parent lock、fresh 六 relation snapshot、
 human Preview fingerprint、receipt 與 outer UoW。Matching read adapter 透過 Staff 既有
 時段解碼投影服務時數，8.5 小時跨度仍比對 8 小時服務，不能比成 8.5 小時。
-本步不增加案件與月嫂起迄重疊的 Matching eligibility 條件；MATCH-CAP-02 仍比對每日服務時數。
+MATCH-CAP-02 比對每日服務時數。案件檔期是否衝突依規格 02 的實際班次占用判定；名冊時段是能力資料。
 
 新增／移除／時間異動使 Preview 失效；未選的新列須選擇或移除後才能 Preview。
 UI 無新增或修改說明控制，不由 UI 判定服務時數是否合法；唯一驗證在 Staff Domain。

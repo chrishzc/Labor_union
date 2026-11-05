@@ -5,11 +5,12 @@ Description: 讀取分段媒合可用性事實，僅提供 lifecycle active 人�
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 from typing import Any, Callable, Protocol
 
 from domains.orders.actual_start import calculate_service_dates
+from infrastructure.mysql.order_terms_read_model import read_service_time_terms
 from domains.orders.terms import canonical_service_mode
 
 
@@ -73,13 +74,15 @@ class MySqlSegmentedAvailabilityFactsRepository:
         cursor.execute(
             "SELECT o.case_no, o.status, o.start_date, o.end_date,"
             "o.service_days,o.service_hours_per_day,o.requires_cooking,o.custom_rest_dates,c.city,c.address,c.service_type,"
+            "o.service_start_time,o.service_end_time,o.service_end_day_offset,"
             "COALESCE(g.aggregate_version, 0) AS scheduling_version "
             "FROM orders o JOIN clients c ON c.id=o.client_id "
             "LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
             "WHERE o.case_no = %s",
             (case_no,),
         )
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        return {**row, "service_time": read_service_time_terms(row)} if row else None
 
     def _load_negotiation_facts(self, cursor: Any, order: dict[str, Any]) -> dict[str, Any]:
         # end_date is an Orders projection, never an extra intake answer.
@@ -98,18 +101,20 @@ class MySqlSegmentedAvailabilityFactsRepository:
             )[-1]
         confirmed_service_dates = self._load_confirmed_service_dates(cursor, order["case_no"])
         window_start, window_end = _availability_window(order, confirmed_service_dates)
+        shift_start = (_as_date(window_start) - timedelta(days=1)).isoformat()
+        shift_end = (_as_date(window_end) + timedelta(days=1)).isoformat()
         return {
             "order": dict(order),
             "confirmed_service_dates": confirmed_service_dates,
             "staff_rows": self._load_active_staff(cursor),
             "assignments": self._load_assignments(cursor, window_start, window_end),
-            "schedule_rows": self._load_assignment_schedule_rows(cursor, window_start, window_end),
-            "legacy_schedule_rows": self._load_legacy_schedule_rows(cursor, window_start, window_end),
+            "schedule_rows": self._load_assignment_schedule_rows(cursor, shift_start, shift_end),
+            "legacy_schedule_rows": self._load_legacy_schedule_rows(cursor, shift_start, shift_end),
             "buffer_rows": self._load_buffer_rows(cursor, window_start, window_end),
-            "active_lock_rows": self._load_active_lock_rows(cursor, window_start, window_end),
+            "active_lock_rows": self._load_active_lock_rows(cursor, shift_start, shift_end),
             "waiting_buffer_rows": self._load_waiting_buffer_rows(cursor, window_start, window_end),
             "staff_unavailability_rows": self._load_staff_unavailability_rows(
-                cursor, window_start, window_end
+                cursor, shift_start, shift_end
             ),
         }
 
@@ -134,8 +139,9 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_assignments(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT a.id, a.staff_id, a.assigned_start_date, a.assigned_end_date FROM case_staff_assignments a "
-            "WHERE (a.status IS NULL OR a.status <> 'cancelled') "
+            "SELECT a.id, a.case_no, a.staff_id, a.assigned_start_date, a.assigned_end_date FROM case_staff_assignments a "
+            "WHERE (a.status IS NULL OR a.status NOT IN ('cancelled','replaced','completed')) "
+            "AND a.generation_id IS NULL "
             "AND a.assigned_start_date <= %s AND a.assigned_end_date >= %s "
             "AND NOT (a.generation_id IS NULL AND EXISTS ("
             "SELECT 1 FROM order_lifecycle_state_events restart "
@@ -147,18 +153,21 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_assignment_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT s.assignment_id, s.staff_id, s.work_date FROM staff_schedule s "
+            "SELECT s.assignment_id,s.case_no,s.staff_id,s.work_date,"
+            "o.service_start_time,o.service_end_time,o.service_end_day_offset FROM staff_schedule s "
             "INNER JOIN case_staff_assignments a ON a.id = s.assignment_id "
+            "JOIN orders o ON o.case_no=a.case_no "
             "WHERE s.assignment_id IS NOT NULL AND s.work_date BETWEEN %s AND %s "
-            "AND (a.status IS NULL OR a.status <> 'cancelled')",
+            "AND s.is_work_day=1 AND s.effective_marker=1 "
+            "AND (a.status IS NULL OR a.status NOT IN ('cancelled','replaced','completed'))",
             (window_start, window_end),
         )
-        return cursor.fetchall() or []
+        return [{**row, "service_time": read_service_time_terms(row)} for row in cursor.fetchall() or ()]
 
     def _load_legacy_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
             "SELECT staff_id, work_date FROM staff_schedule "
-            "WHERE assignment_id IS NULL AND work_date BETWEEN %s AND %s",
+            "WHERE assignment_id IS NULL AND is_work_day=1 AND effective_marker=1 AND work_date BETWEEN %s AND %s",
             (window_start, window_end),
         )
         return cursor.fetchall() or []
@@ -173,12 +182,14 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_active_lock_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(
-            "SELECT d.staff_id, d.lock_date, d.active_marker FROM caregiver_availability_lock_days d "
+            "SELECT d.staff_id,d.lock_date,d.active_marker,p.case_no,"
+            "o.service_start_time,o.service_end_time,o.service_end_day_offset FROM caregiver_availability_lock_days d "
             "INNER JOIN caregiver_availability_locks h ON h.id = d.lock_id "
+            "JOIN caregiver_matching_plans p ON p.id=h.plan_id JOIN orders o ON o.case_no=p.case_no "
             "WHERE h.status = 'active' AND h.is_active = 1 AND d.lock_date BETWEEN %s AND %s",
             (window_start, window_end),
         )
-        return cursor.fetchall() or []
+        return [{**row, "service_time": read_service_time_terms(row)} for row in cursor.fetchall() or ()]
 
     def _load_waiting_buffer_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
         cursor.execute(

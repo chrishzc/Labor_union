@@ -6,15 +6,34 @@ Description: 驗證訂單歷史 workbook claim、terminal replay、conflict 與�
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from datetime import time
 from types import SimpleNamespace
 
 import pytest
+from openpyxl import Workbook
 from api.schemas.historical_order_adoption import HistoricalOrderWorkbookReceiptView
 
 from domains.orders.historical_adoption import HistoricalOrderOutcome, HistoricalOrderSourceStatus
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.orders import historical_order_workbook_import as module
-from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, HistoricalOrderWorkbookRow
+from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, HistoricalOrderWorkbookRow, load_historical_order_workbook
+
+
+def test_workbook_reads_explicit_time_and_cross_day_evidence(tmp_path):
+    path = tmp_path / "historical-shifts.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append([
+        "案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂",
+        "每日服務開始時間", "每日服務結束時間", "跨日標記",
+    ])
+    sheet.append(["CASE-1", "示範客戶", "2026-08-01", "2026-08-01", 1, "示範月嫂", time(22), time(6), 1])
+    workbook.save(path)
+    workbook.close()
+    row, = load_historical_order_workbook(path).rows
+    assert row.service_time == ServiceTimeTerms(time(22), time(6), 1)
 
 
 class _Repository:
@@ -289,8 +308,8 @@ def test_overlapping_source_schedule_excludes_both_conflicting_rows_and_imports_
     from datetime import date
 
     rows = (
-        HistoricalOrderWorkbookRow(2, "source:2", "2" * 64, "CASE-1", "客戶甲", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 1), date(2026, 8, 10), (), ()),
-        HistoricalOrderWorkbookRow(3, "source:3", "3" * 64, "CASE-2", "客戶乙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 8), date(2026, 8, 15), (), ()),
+        HistoricalOrderWorkbookRow(2, "source:2", "2" * 64, "CASE-1", "客戶甲", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 1), date(2026, 8, 8), (), (), ServiceTimeTerms(time(8), time(12), 0)),
+        HistoricalOrderWorkbookRow(3, "source:3", "3" * 64, "CASE-2", "客戶乙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 8), date(2026, 8, 15), (), (), ServiceTimeTerms(time(11, 30), time(15, 30), 0)),
         HistoricalOrderWorkbookRow(4, "source:4", "4" * 64, "CASE-3", "客戶丙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 20), date(2026, 8, 25), (), ()),
     )
     workbook = HistoricalOrderWorkbook("4" * 64, "5" * 64, "歷史訂單", rows)
@@ -336,6 +355,7 @@ def test_overlapping_source_schedule_excludes_both_conflicting_rows_and_imports_
     assert [item.source_row for item in preview.row_issues] == [2, 3]
     assert [item.case_no for item in preview.row_issues] == ["CASE-1", "CASE-2"]
     assert all("historical_order_source_schedule_conflict" in item.issue_codes for item in preview.row_issues)
+    assert any("overlap=2026-08-08T11:30:00+08:00" in code for code in preview.row_issues[0].issue_codes)
     assert any("row=3;" in code and "case_no=CASE-2" in code for code in preview.row_issues[0].issue_codes)
     assert any("row=2;" in code and "case_no=CASE-1" in code for code in preview.row_issues[1].issue_codes)
 
@@ -398,7 +418,8 @@ def test_source_schedule_conflict_projection_is_order_independent_and_allows_sam
     )
 
 
-def test_source_schedule_handoff_on_shared_boundary_is_not_a_conflict():
+@pytest.mark.parametrize("afternoon_start", [12, 13])
+def test_source_schedule_handoff_on_shared_boundary_is_not_a_conflict(afternoon_start):
     from datetime import date
 
     rows = (
@@ -441,6 +462,12 @@ def test_source_schedule_handoff_on_shared_boundary_is_not_a_conflict():
         for row in rows
     )
 
+    missing = module.project_source_schedule_conflicts(previews, rows)
+    assert missing[0].issue_code == "historical_order_source_schedule_unconfirmed"
+    rows = (
+        replace(rows[0], service_time=ServiceTimeTerms(time(8), time(12), 0)),
+        replace(rows[1], service_time=ServiceTimeTerms(time(afternoon_start), time(17), 0)),
+    )
     assert module.project_source_schedule_conflicts(previews, rows) == ()
 
 
@@ -480,25 +507,9 @@ def test_preview_rejects_canonical_service_day_collision_hidden_by_source_ranges
     conflicts = module.project_source_schedule_conflicts(previews, rows)
 
     assert len(conflicts) == 1
-    assert conflicts[0].as_dict() == {
-        "staff_id": 1,
-        "left": {
-            "source_row": 110,
-            "pairing_ordinal": 1,
-            "case_identity": "***0006",
-            "staff_id": 1,
-            "start_date": "2026-05-21",
-            "end_date": "2026-05-21",
-        },
-        "right": {
-            "source_row": 115,
-            "pairing_ordinal": 1,
-            "case_identity": "***0010",
-            "staff_id": 1,
-            "start_date": "2026-05-21",
-            "end_date": "2026-05-21",
-        },
-    }
+    assert conflicts[0].issue_code == "historical_order_source_schedule_unconfirmed"
+    assert conflicts[0].as_dict()["left"]["case_identity"] == "***0006"
+    assert conflicts[0].as_dict()["right"]["case_identity"] == "***0010"
 
 
 def test_apply_uses_one_transaction_and_rolls_back_the_whole_workbook(monkeypatch):

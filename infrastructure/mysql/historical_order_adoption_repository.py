@@ -194,6 +194,8 @@ class MySqlHistoricalOrderAdoptionRepository:
             ),
             **_operational_baseline_snapshot(request, preview),
         }
+        if request.row.service_time is not None:
+            snapshot["historical_service_time"] = request.row.service_time.canonical_payload()
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "INSERT INTO historical_order_adoption_receipts "

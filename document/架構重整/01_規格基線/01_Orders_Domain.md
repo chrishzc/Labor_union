@@ -203,7 +203,7 @@ Apply：
 3. 以相同 candidate builder 重建 Preview。
 4. 驗證 fingerprint。
 5. 若變更不形成 Scheduling、confirmed service dates、Finance、Payroll 或 lifecycle 正式影響，走普通保存：只更新 Orders Terms 與 aggregate version，回傳當次 HTTP result；不要求 reason／idempotency key，不建立 command claim、Terms／lifecycle event、audit／outbox、snapshot／history 或永久 receipt，也不呼叫其他 owner writer。
-6. 若 `requires_formal_apply=true`，才要求 reason 與 idempotency key、追加 Terms event、按實際影響委派 Finance／Payroll、重評 lifecycle，並保存 audit／outbox／永久 receipt。只有 assignment identity／人員／日期／區間真的改變時才委派 Scheduling replacement；單純費用、每日時數、下廚需求等不改變排班形狀的正式異動沿用 current generation 與真實 assignment identity，不增加 Scheduling version、generation、rebuild event、通知失效 outbox 或 Scheduling receipt。
+6. 若 `requires_formal_apply=true`，才要求 reason 與 idempotency key、追加 Terms event、按實際影響委派 Finance／Payroll、重評 lifecycle，並保存 audit／outbox／永久 receipt。依規格 02，assignment identity、人員、日期、區段或班次占用起訖改變時委派 Scheduling replacement；同日改時段亦重新檢查檔期與有效保留。只改費用、計薪時數或下廚等且不改排班形狀的正式異動沿用 current generation 與真實 assignment identity，不增加 Scheduling version、generation、rebuild event、通知失效 outbox 或 Scheduling receipt。
    此時 Terms receipt 的 `scheduling_command_receipt_id` 為 `NULL`，但仍保存 current scheduling version／generation；不得建立空 generation 或虛構 Scheduling receipt 補舊格式。
 7. 兩種分支皆由同一 outer Unit of Work 單一 commit；普通保存若 transport 結果不明，client 必須重新 Query 比對 current Orders version／Terms，不得以同一或新 key 盲目重播。
 
@@ -645,18 +645,12 @@ lifecycle。狀態、日期、樓層費、雙邊結清、回歸精算、API／UI
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 Orders root、event、receipt、outbox及來源配對 evidence。
 
-2026-09-01 人工校正：Historical Orders 的本次用途是以空白 DB 一次性建立完整且真實的歷史
-排班基準，取代前述 `ROW_ATOMIC_RESUMABLE` 契約。Preview 必須先對整份工作簿完成所有可採納列、
-狀態機、實際期間與來源內月嫂區間的零寫入驗證；不同案件的同月嫂來源區間重疊固定為
-`historical_order_source_schedule_conflict`，不得以列順序覆寫。Apply 必須以單一 outer UoW 同時保存
-workbook claim、全部列的 Orders／歷史 assignment evidence 與 terminal receipt；任一列失敗即整份 rollback，
-不得留下 claim、row receipt、assignment、schedule、occupancy、event、outbox 或部分 Order 狀態。same
-key＋same canonical workbook 僅 replay terminal receipt；same key＋different workbook 固定 conflict。
+**HIST-SHIFT-01／同日分時。** Preview 對整份工作簿零寫入驗證採納資格、狀態機、實際期間及同一月嫂跨案班次。以可追溯的歷史來源時段或能證明當時約定的 Orders 完整時段為準，保留起訖及跨日標記。當期條款不能覆蓋已證實的歷史約定，兩種來源矛盾時列待確認。依規格 02 SHIFT-01 比較班次。同日已證實不重疊可並列採納；已證實重疊回 `historical_order_source_schedule_conflict`。日期有交集但缺少時段或服務日證據而無法判定時，回「時段待確認」，不以當前條款、每日時數或預設時間猜填，也不虛構逐日服務。
+
+Preview 與 Apply 將已證實衝突的雙方列排除至 `current_conflict`／未匯入；待確認問題列也進未匯入明細，使用可區分的原因。問題明細列出對造 Excel 列號、案件編號、日期及可證實的時段或重疊起訖，沿用 `not_imported_count`、`row_issues` 與適用的 `field_errors` 去敏回傳。更正後可重傳。Apply 不寫入排除列的 Orders、assignment 或逐列收據；其餘列以單一 outer UoW 原子保存 workbook claim、歷史證據及 terminal receipt，任一實際寫入失敗整批回滾。same key＋same canonical workbook 重播原收據；same key＋different workbook 回 conflict。匯入頁保留四種互斥筆數與問題列明細。
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
 Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與
 `evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。
-
-2026-11-05 最新人工裁決：跨案件同月嫂來源區間重疊（`historical_order_source_schedule_conflict`）不再因少數列衝突阻斷整份工作簿匯入。Preview 與 Apply 將重疊衝突雙方列同時排除至 `current_conflict`／未匯入明細（`not_imported_count` 與 `row_issues`），保留對造 Excel 列號、案件編號與服務期間說明，且不對排除列寫入 Orders、assignment 或逐列收據，供修正 Excel 後重傳補匯入；同份工作簿其餘無衝突列仍以單一 outer UoW 原子匯入。若驗證邊界回傳衝突錯誤，API `field_errors` 與匯入頁錯誤區塊亦直接顯示衝突列號與案件明細，但匯入頁維持只呈現四種互斥筆數與問題列明細，不顯示應收、應付、樓層費、單雙薪等正常帳務明細。
 
 HCM Current仍由Case Import編排whole-workbook outer UoW。HCM案件身分以非空且合法的案件編號為唯一鍵；
 不同案件編號即使姓名或IP相同仍建立新的Client／Order，姓名／IP重複只可形成非阻擋人工警示，不得自動

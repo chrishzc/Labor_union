@@ -34,6 +34,7 @@ readback. Sessions and non-root accounts are not preserved; no MFA seed is gener
   - `db/schema_parts/218_weekly_report_metrics.sql` (fresh bootstrap owner)
   - `db/cutover_releases/labor_union_validation_schema_v1.json`
   - `db/releases/labor_union_validation_schema_v1.sql`
+  - `db/releases/labor_union_validation_schema_scheduling_shift_v1.sql` — current full schema source for same-day shift occupancy indexes and compact bootstrap.
   - `db/releases/labor_union_validation_schema_registry_guards_v1.sql` — current registry-guard successor source snapshot.
   - `db/releases/labor_union_validation_schema_finance_case_accounting_v1.sql` — preserved v57 predecessor snapshot with historical accounting marker metadata.
   - `db/releases/labor_union_validation_schema_accounting_differences_v1.sql` — current v58 full source snapshot with owner-specific noncash events, amount modes and frozen government period balances; preserve artifact 1064 and its canonical descriptor/qualification are schema-only, no business backfill.

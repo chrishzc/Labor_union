@@ -409,6 +409,7 @@ def _scheduling_only_leave_facts(
         payroll_version=0,
         contracted_service_days=order.terms.service_days,
         service_hours_per_day=order.terms.service_hours_per_day,
+        service_time=order.terms.service_time,
         service_started=order_row["actual_start_date"] is not None,
         effective_assignments=tuple(
             EffectiveAssignmentFact(

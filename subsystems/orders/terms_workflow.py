@@ -177,6 +177,7 @@ class SchedulingReplacementCommand:
     reason: str
     correlation_id: Any
     preserve_leave_occupancy: bool = False
+    service_time: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,6 +476,7 @@ class OrderTermsWorkflow:
                     actor=request.actor,
                     reason=request.reason,
                     correlation_id=request.correlation_id,
+                    service_time=request.proposed_terms.service_time,
                 )
             )
             scheduling_receipt_id = scheduling_result.scheduling_receipt_id
@@ -651,7 +653,9 @@ def _preview_result(
         facts.order.terms,
         proposed_terms,
     )
-    scheduling_replacement_required = _scheduling_replacement_required(
+    scheduling_replacement_required = (
+        bool(scheduling.assignments) and proposed_terms.service_time != facts.order.terms.service_time
+    ) or _scheduling_replacement_required(
         facts.scheduling,
         scheduling,
         facts.planned_service_dates,

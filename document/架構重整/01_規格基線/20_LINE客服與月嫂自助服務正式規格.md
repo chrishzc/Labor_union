@@ -106,7 +106,7 @@ waiting → handling → resolved
 
 ### 5.2 排班查詢
 
-重用 `subsystems.scheduling.staff_monthly_calendar_query`，以 assignment-owned `staff_schedule` 與正式 availability lock 投影。不得新增另一套排班 SQL writer。
+重用 Scheduling 月曆的本人範圍投影，依規格 02 SHIFT-05 顯示同日多班及各自起訖、跨日續班、保留與唯讀歷史。請假或代班入口帶入本案與指派、服務日識別，避免選到同日其他案件。群組日期表只顯示本案班次。不得新增另一套排班 SQL writer。
 
 ### 5.2A 服務開始與代班結果
 

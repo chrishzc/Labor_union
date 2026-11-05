@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -18,6 +19,7 @@ from domains.orders.historical_adoption import (
     HistoricalOrderSourceStatus,
 )
 from domains.orders.lifecycle import OrderLifecycleStatus
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
 from subsystems.orders.historical_order_workbook import HistoricalOrderWorkbook, load_historical_order_workbook
@@ -275,11 +277,13 @@ class HistoricalOrderSourceScheduleInterval:
     pairing_ordinal: int
     case_no: str
     staff_id: int
-    start_date: object
-    end_date: object
+    start_date: date
+    end_date: date
+    service_time: ServiceTimeTerms | None = None
+    confirmed_dates: frozenset[date] = frozenset()
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "source_row": self.source_row,
             "pairing_ordinal": self.pairing_ordinal,
             "case_identity": _mask_case(self.case_no),
@@ -287,6 +291,9 @@ class HistoricalOrderSourceScheduleInterval:
             "start_date": _date_value(self.start_date),
             "end_date": _date_value(self.end_date),
         }
+        if self.service_time is not None:
+            result["service_time"] = self.service_time.canonical_payload()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,9 +302,19 @@ class HistoricalOrderSourceScheduleConflict:
 
     left: HistoricalOrderSourceScheduleInterval
     right: HistoricalOrderSourceScheduleInterval
+    overlap: tuple[datetime, datetime] | None = None
+
+    @property
+    def issue_code(self) -> str:
+        if self.overlap is None:
+            return "historical_order_source_schedule_unconfirmed"
+        return "historical_order_source_schedule_conflict"
 
     def as_dict(self) -> dict[str, object]:
-        return {"staff_id": self.left.staff_id, "left": self.left.as_dict(), "right": self.right.as_dict()}
+        result = {"staff_id": self.left.staff_id, "left": self.left.as_dict(), "right": self.right.as_dict()}
+        if self.overlap:
+            result["overlap"] = [instant.isoformat() for instant in self.overlap]
+        return result
 
 
 class HistoricalOrderSourceScheduleConflictError(ValueError):
@@ -305,7 +322,7 @@ class HistoricalOrderSourceScheduleConflictError(ValueError):
 
     def __init__(self, conflicts: tuple[HistoricalOrderSourceScheduleConflict, ...]) -> None:
         self.conflicts = conflicts
-        super().__init__("historical_order_source_schedule_conflict")
+        super().__init__(conflicts[0].issue_code)
 
 
 @dataclass(frozen=True, slots=True)
@@ -663,19 +680,22 @@ def _source_schedule_conflict_exclusions(
     for conflict in conflicts:
         for own, peer in ((conflict.left, conflict.right), (conflict.right, conflict.left)):
             detail_code = (
-                "historical_order_source_schedule_conflict_detail:"
+                f"{conflict.issue_code}_detail:"
                 f"row={peer.source_row};"
                 f"staff_id={own.staff_id};"
                 f"own={_date_value(own.start_date)}~{_date_value(own.end_date)};"
                 f"peer={_date_value(peer.start_date)}~{_date_value(peer.end_date)};"
                 f"case_no={peer.case_no}"
             )
+            if conflict.overlap:
+                start, end = conflict.overlap
+                detail_code += f";overlap={start.isoformat()}~{end.isoformat()}"
             for row_index in indices_by_row_case.get((own.source_row, own.case_no), ()):
                 issue_codes_by_index.setdefault(row_index, set()).update(
-                    ("historical_order_source_schedule_conflict", detail_code)
+                    (conflict.issue_code, detail_code)
                 )
                 fields_by_index.setdefault(row_index, set()).update(
-                    ("開始日期", "結束日期", f"第 {own.pairing_ordinal} 位月嫂姓名")
+                    ("服務時段", f"第 {own.pairing_ordinal} 位月嫂姓名")
                 )
 
     return {
@@ -764,8 +784,8 @@ def _historical_issue_fields(issue_code: str) -> tuple[str, ...]:
         return ("客戶姓名",)
     if issue_code == "historical_status_invalid":
         return ("訂單狀態",)
-    if issue_code.startswith("historical_order_source_schedule_conflict"):
-        return ("開始日期", "結束日期")
+    if issue_code.startswith("historical_order_source_schedule_") or issue_code == "historical_service_time_unconfirmed":
+        return ("服務時段",)
     if "staff" in issue_code:
         return ("月嫂姓名",)
     if issue_code.endswith("_start_date_invalid"):
@@ -888,172 +908,100 @@ def project_source_schedule_conflicts(
     row_previews,
     source_rows: tuple[object, ...] | None = None,
 ) -> tuple[HistoricalOrderSourceScheduleConflict, ...]:
-    """Project all cross-case overlaps using one deterministic interval rule.
-
-    Source intervals use a strict-overlap boundary: a later source start equal
-    to an earlier source end is a legal handoff.  A same-case repeat is allowed
-    because a workbook can contain multiple source assertions for one Order;
-    distinct cases conflict only when their source service ranges overlap
-    strictly (``next_start < previous_end``).
-    """
-
-    previews = tuple(row_previews)
-    rows = tuple(source_rows) if source_rows is not None else ()
+    """Distinguish proven collisions from source intervals requiring evidence."""
+    rows = source_rows or ()
     intervals_by_staff: dict[int, list[HistoricalOrderSourceScheduleInterval]] = {}
-    for index, preview in enumerate(previews):
-        source_row = getattr(rows[index], "source_row", index) if index < len(rows) else index
+    for index, preview in enumerate(row_previews):
+        row = rows[index] if index < len(rows) else None
+        source_row = getattr(row, "source_row", index)
         case_no = getattr(preview, "case_no", None)
         if case_no is None:
             continue
+        service_time = getattr(row, "service_time", None)
+        confirmed_dates = frozenset(getattr(preview, "canonical_service_dates", ()) or ())
         for pairing_index, pairing in enumerate(preview.pairings, start=1):
             resolution = getattr(pairing.resolution, "value", pairing.resolution)
-            preview_result = getattr(preview, "result", None)
-            eligible_service_evidence = (
-                resolution == "assignment_candidate" and preview_result is None
+            result = getattr(preview, "result", None)
+            eligible = (
+                resolution == "assignment_candidate" and result is None
             ) or (
-                resolution in {"assignment_candidate", "evidence_only"}
-                and preview_result
-                in {
+                resolution in {"assignment_candidate", "assignment_reused", "evidence_only"}
+                and result in {
                     HistoricalOrderResult.HISTORICAL_IN_SERVICE,
                     HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED,
                 }
             )
-            if (
-                eligible_service_evidence
-                and pairing.staff_id is not None
-                and pairing.start_date is not None
-                and pairing.end_date is not None
-            ):
-                interval = HistoricalOrderSourceScheduleInterval(
-                    source_row,
-                    getattr(pairing, "ordinal", pairing_index),
-                    case_no,
-                    pairing.staff_id,
-                    pairing.start_date,
-                    pairing.end_date,
-                )
-                intervals_by_staff.setdefault(pairing.staff_id, []).append(interval)
+            if not eligible or pairing.staff_id is None:
+                continue
+            start = min(confirmed_dates) if confirmed_dates else pairing.start_date
+            end = max(confirmed_dates) if confirmed_dates else pairing.end_date
+            if not isinstance(start, date) or not isinstance(end, date) or start > end:
+                continue
+            interval = HistoricalOrderSourceScheduleInterval(
+                source_row, getattr(pairing, "ordinal", pairing_index),
+                case_no, pairing.staff_id, start, end, service_time, confirmed_dates,
+            )
+            intervals_by_staff.setdefault(pairing.staff_id, []).append(interval)
 
     conflicts: list[HistoricalOrderSourceScheduleConflict] = []
-    for intervals in intervals_by_staff.values():
-        ordered = sorted(
-            intervals,
-            key=lambda item: (
-                item.start_date,
-                item.end_date,
-                item.case_no,
-                item.source_row,
-                item.pairing_ordinal,
-            ),
-        )
+    for staff_id in sorted(intervals_by_staff):
+        ordered = sorted(intervals_by_staff[staff_id], key=lambda item: (
+            item.start_date, item.end_date, item.case_no, item.source_row, item.pairing_ordinal,
+        ))
         for index, left in enumerate(ordered):
-            for right in ordered[index + 1 :]:
-                if right.start_date >= left.end_date:
+            for right in ordered[index + 1:]:
+                if (right.start_date - left.end_date).days > 1:
                     break
-                if left.case_no != right.case_no and right.start_date < left.end_date:
-                    conflicts.append(HistoricalOrderSourceScheduleConflict(left, right))
+                if left.case_no != right.case_no:
+                    conflict = _compare_source_intervals(left, right)
+                    if conflict is not None:
+                        conflicts.append(conflict)
+    return tuple(conflicts)
 
-    existing_pairs = {
-        _conflict_pair_key(item.left, item.right) for item in conflicts
-    }
-    canonical_by_staff: dict[
-        int, list[tuple[HistoricalOrderSourceScheduleInterval, frozenset[object]]]
-    ] = {}
-    for index, preview in enumerate(previews):
-        case_no = getattr(preview, "case_no", None)
-        service_dates = frozenset(
-            getattr(preview, "canonical_service_dates", ()) or ()
-        )
-        if case_no is None or not service_dates:
+
+def _compare_source_intervals(left, right):
+    if left.service_time is None or right.service_time is None:
+        left_end = left.end_date + timedelta(days=left.service_time.end_day_offset if left.service_time else 0)
+        right_end = right.end_date + timedelta(days=right.service_time.end_day_offset if right.service_time else 0)
+        if max(left.start_date, right.start_date) <= min(left_end, right_end):
+            return HistoricalOrderSourceScheduleConflict(left, right)
+        return None
+
+    pending = False
+    # A service anchored on one date can only touch that date and its successor.
+    for delta in (0, 1, -1):
+        shift = timedelta(days=delta)
+        start = max(left.start_date, right.start_date - shift)
+        end = min(left.end_date, right.end_date - shift)
+        if start > end:
             continue
-        source_row = getattr(rows[index], "source_row", index) if index < len(rows) else index
-        for pairing_index, pairing in enumerate(preview.pairings, start=1):
-            if (
-                getattr(pairing.resolution, "value", pairing.resolution)
-                != "assignment_candidate"
-                or pairing.staff_id is None
+        if left.confirmed_dates:
+            candidates = sorted(left.confirmed_dates)
+        elif right.confirmed_dates:
+            candidates = sorted(day - shift for day in right.confirmed_dates)
+        else:
+            candidates = sorted({start, end, left.start_date, left.end_date,
+                                 right.start_date - shift, right.end_date - shift})
+        for anchor in candidates:
+            other = anchor + shift
+            if not start <= anchor <= end or (
+                right.confirmed_dates and other not in right.confirmed_dates
             ):
                 continue
-            diagnostic = HistoricalOrderSourceScheduleInterval(
-                source_row,
-                getattr(pairing, "ordinal", pairing_index),
-                case_no,
-                pairing.staff_id,
-                min(service_dates),
-                max(service_dates),
-            )
-            canonical_by_staff.setdefault(pairing.staff_id, []).append(
-                (diagnostic, service_dates)
-            )
-
-    for entries in canonical_by_staff.values():
-        ordered = sorted(
-            entries,
-            key=lambda item: (
-                item[0].case_no,
-                item[0].source_row,
-                item[0].pairing_ordinal,
-            ),
-        )
-        for index, (left, left_dates) in enumerate(ordered):
-            for right, right_dates in ordered[index + 1 :]:
-                pair_key = _conflict_pair_key(left, right)
-                shared_dates = left_dates.intersection(right_dates)
-                if (
-                    left.case_no == right.case_no
-                    or not shared_dates
-                    or pair_key in existing_pairs
-                ):
-                    continue
-                collision_date = min(shared_dates)
-                conflicts.append(
-                    HistoricalOrderSourceScheduleConflict(
-                        HistoricalOrderSourceScheduleInterval(
-                            left.source_row,
-                            left.pairing_ordinal,
-                            left.case_no,
-                            left.staff_id,
-                            collision_date,
-                            collision_date,
-                        ),
-                        HistoricalOrderSourceScheduleInterval(
-                            right.source_row,
-                            right.pairing_ordinal,
-                            right.case_no,
-                            right.staff_id,
-                            collision_date,
-                            collision_date,
-                        ),
-                    )
-                )
-                existing_pairs.add(pair_key)
-
-    return tuple(
-        sorted(
-            conflicts,
-            key=lambda item: (
-                item.left.staff_id,
-                item.left.start_date,
-                item.left.end_date,
-                item.left.case_no,
-                item.left.source_row,
-                item.right.start_date,
-                item.right.end_date,
-                item.right.case_no,
-                item.right.source_row,
-            ),
-        )
-    )
-
-
-def _conflict_pair_key(left, right) -> tuple[tuple[object, ...], tuple[object, ...]]:
-    identities = sorted(
-        (
-            (left.case_no, left.source_row, left.pairing_ordinal),
-            (right.case_no, right.source_row, right.pairing_ordinal),
-        )
-    )
-    return identities[0], identities[1]
+            left_interval = left.service_time.service_interval(anchor)
+            right_interval = right.service_time.service_interval(other)
+            if left_interval is None or right_interval is None:
+                pending = True
+                continue
+            overlap = max(left_interval[0], right_interval[0]), min(left_interval[1], right_interval[1])
+            if overlap[0] >= overlap[1]:
+                continue
+            proven_left = left.confirmed_dates or {left.start_date, left.end_date}
+            proven_right = right.confirmed_dates or {right.start_date, right.end_date}
+            if anchor in proven_left and other in proven_right:
+                return HistoricalOrderSourceScheduleConflict(left, right, overlap)
+            pending = True
+    return HistoricalOrderSourceScheduleConflict(left, right) if pending else None
 
 
 def _assert_source_schedule_consistency(row_previews, source_rows=None) -> None:

@@ -8,6 +8,11 @@ from __future__ import annotations
 import json
 from datetime import date
 from typing import Any, Callable
+from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
+from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+from infrastructure.mysql.scheduling_occupancy_facts import (
+    _effective_occupancy_rows, _legacy_assignment_rows, _unavailability_rows, _waiting_lock_rows, load_case_service_time,
+)
 
 from domains.scheduling.waiting_deposit_lock import (
     WaitingDepositOccupancyKind,
@@ -76,21 +81,6 @@ def reserve_confirmed_matching_plan(connection: Any, case_no: str, actor: str,
         if tuple(snapshot["staff_ids"]) != locked_staff_ids:
             raise ValueError("automatic_waiting_deposit_stale_plan")
         snapshot = _with_current_confirmed_service_dates(cursor, case_no, snapshot, for_update=True)
-        staff_ids = tuple(snapshot["staff_ids"])
-        placeholders = ",".join("%s" for _ in staff_ids)
-        cursor.execute(
-            "SELECT staff_id,start_date,end_date FROM scheduling_staff_unavailability_blocks "
-            "WHERE status='effective' AND staff_id IN (" + placeholders + ") "
-            "AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) FOR UPDATE",
-            (*staff_ids, max(row["lock_date"] for row in snapshot["lock_rows"]),
-             min(row["lock_date"] for row in snapshot["lock_rows"])),
-        )
-        for block in cursor.fetchall():
-            if any(row["staff_id"] == block["staff_id"]
-                   and block["start_date"].isoformat() <= row["lock_date"]
-                   and (block["end_date"] is None or row["lock_date"] <= block["end_date"].isoformat())
-                   for row in snapshot["lock_rows"]):
-                raise ValueError("automatic_waiting_deposit_occupancy_conflict")
         request = normalize_lock_acquisition_request(
             case_no, plan_id, f"auto-waiting-deposit:{plan_id}:{ready['confirmed_version']}", actor, 1,
         )
@@ -313,69 +303,44 @@ def _require_customer_pre_execution_commitment(
     _require_customer_matching_acceptance(cursor, plan_id)
 
 
-def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any], *, lock: bool = True) -> list[dict[str, Any]]:
     """Read every occupancy owner under the mutex; each result is row-level."""
     staff_ids = tuple(snapshot["staff_ids"])
     wanted_rows = _proposed_occupancy_rows(snapshot)
-    dates = tuple(row["lock_date"] for row in wanted_rows)
-    staff_placeholders = ", ".join(["%s"] * len(staff_ids))
-    date_placeholders = ", ".join(["%s"] * len(dates))
-    params = staff_ids + dates
+    service_time = load_case_service_time(cursor, snapshot["case_no"], lock=lock)
+    if service_time is None:
+        raise ValueError("service_time_terms_incomplete")
+    schedule_rows = _effective_occupancy_rows(cursor, staff_ids, lock)
+    waiting_rows = _waiting_lock_rows(cursor, staff_ids, lock)
+    legacy_assignments = _legacy_assignment_rows(cursor, staff_ids, lock)
+    blocks = _unavailability_rows(cursor, staff_ids, lock)
     fixed_staff_params = _fixed_staff_params(staff_ids)
     conflicts: list[dict[str, Any]] = []
-    cursor.execute(
-        "SELECT assignment.id AS source_id, assignment.staff_id, "
-        "assignment.assigned_start_date, assignment.assigned_end_date "
-        "FROM case_staff_assignments assignment WHERE assignment.staff_id IN (" + staff_placeholders + ") "
-        "AND assignment.status <> 'cancelled' "
-        "AND NOT (assignment.generation_id IS NULL AND EXISTS ("
-        "SELECT 1 FROM order_lifecycle_state_events restart "
-        "WHERE restart.case_no=assignment.case_no "
-        "AND restart.trigger_event='orders_historical_precision_restart')) FOR UPDATE",
-        staff_ids,
-    )
-    for row in _rows(cursor, "invalid assignment occupancy row"):
-        if set(row) != {"source_id", "staff_id", "assigned_start_date", "assigned_end_date"}:
-            raise ValueError("invalid assignment occupancy row")
-        if (
-            isinstance(row["source_id"], bool)
-            or not isinstance(row["source_id"], int)
-            or row["source_id"] <= 0
-            or isinstance(row["staff_id"], bool)
-            or not isinstance(row["staff_id"], int)
-            or row["staff_id"] <= 0
-            or row["assigned_start_date"].__class__ is not date
-            or row["assigned_end_date"].__class__ is not date
-            or row["assigned_start_date"] > row["assigned_end_date"]
-        ):
-            raise ValueError("invalid assignment occupancy row")
-        for wanted in wanted_rows:
-            wanted_date = wanted["lock_date"]
-            if wanted["staff_id"] == row["staff_id"] and row["assigned_start_date"] <= wanted_date <= row["assigned_end_date"]:
-                conflicts.append({"staff_id": wanted["staff_id"], "lock_date": wanted_date, "source_type": "assignment", "source_id": row["source_id"]})
-    cursor.execute(
-        "SELECT id AS source_id, staff_id, work_date, assignment_id FROM staff_schedule "
-        "WHERE staff_id IN (" + staff_placeholders + ") AND work_date IN (" + date_placeholders + ") FOR UPDATE",
-        params,
-    )
-    for row in _rows(cursor, "invalid schedule occupancy row"):
-        if set(row) != {"source_id", "staff_id", "work_date", "assignment_id"}:
-            raise ValueError("invalid schedule occupancy row")
-        if (
-            isinstance(row["source_id"], bool)
-            or not isinstance(row["source_id"], int)
-            or row["source_id"] <= 0
-            or isinstance(row["staff_id"], bool)
-            or not isinstance(row["staff_id"], int)
-            or row["staff_id"] <= 0
-            or row["work_date"].__class__ is not date
-        ):
-            raise ValueError("invalid schedule occupancy row")
-        if row["assignment_id"] is not None and (isinstance(row["assignment_id"], bool) or not isinstance(row["assignment_id"], int) or row["assignment_id"] <= 0):
-            raise ValueError("invalid schedule assignment_id")
-        # A NULL assignment_id is deliberately not exempt: its ownership is
-        # unknown, so it is reported using the canonical schedule source type.
-        conflicts.append({"staff_id": row["staff_id"], "lock_date": row["work_date"], "source_type": "schedule", "source_id": row["source_id"]})
+    for wanted in wanted_rows:
+        if wanted["lock_kind"] == "buffer":
+            continue
+        staff_id, day = wanted["staff_id"], wanted["lock_date"]
+        for source, rows in (("schedule", schedule_rows), ("active_lock", waiting_rows)):
+            for row in rows:
+                if int(row["staff_id"]) != staff_id:
+                    continue
+                fact = StaffOccupancyFact(staff_id, row["occupancy_date"], row["case_no"], read_service_time_terms(row))
+                if service_shift_may_overlap(day, service_time, fact):
+                    conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": source, "source_id": row["source_id"]})
+        for row in blocks:
+            if int(row["staff_id"]) != staff_id:
+                continue
+            fact = StaffOccupancyFact(staff_id, row["start_date"], "staff_unavailability",
+                                      all_day=True, block_end=row["end_date"])
+            if service_shift_may_overlap(day, service_time, fact):
+                conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "staff_unavailability", "source_id": row["id"]})
+        for row in legacy_assignments:
+            if int(row["staff_id"]) != staff_id:
+                continue
+            fact = StaffOccupancyFact(staff_id, row["assigned_start_date"], row["case_no"],
+                                      possible_end=row["assigned_end_date"])
+            if service_shift_may_overlap(day, service_time, fact):
+                conflicts.append({"staff_id": staff_id, "lock_date": day, "source_type": "assignment", "source_id": row["id"]})
     cursor.execute(
         "SELECT id AS source_id, staff_id, buffer_date AS lock_date "
         "FROM scheduling_buffer_days "
@@ -389,51 +354,6 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str
     }
     for row in _rows(cursor, "invalid assignment buffer occupancy row"):
         _append_buffer_conflict(conflicts, row, wanted_keys)
-    cursor.execute(
-        "SELECT l.id FROM caregiver_availability_locks l "
-        "INNER JOIN caregiver_availability_lock_days d ON d.lock_id = l.id "
-        "WHERE l.status = 'active' AND l.is_active = 1 AND d.active_marker = 1 "
-        "AND d.staff_id IN (" + staff_placeholders + ") AND d.lock_date IN (" + date_placeholders + ") "
-        "ORDER BY l.id, d.id FOR UPDATE",
-        params,
-    )
-    active_headers = _rows(cursor, "invalid active lock header rows")
-    header_ids: list[int] = []
-    for row in active_headers:
-        if (
-            set(row) != {"id"}
-            or isinstance(row["id"], bool)
-            or not isinstance(row["id"], int)
-            or row["id"] <= 0
-        ):
-            raise ValueError("invalid active lock header rows")
-        if row["id"] not in header_ids:
-            header_ids.append(row["id"])
-    cursor.execute(
-        "SELECT d.id AS source_id, d.lock_id, d.staff_id, d.lock_date FROM caregiver_availability_lock_days d "
-        "INNER JOIN caregiver_availability_locks l ON l.id = d.lock_id "
-        "WHERE d.staff_id IN (" + staff_placeholders + ") AND d.lock_date IN (" + date_placeholders + ") "
-        "AND l.status = 'active' AND l.is_active = 1 AND d.active_marker = 1 FOR UPDATE",
-        params,
-    )
-    for row in _rows(cursor, "invalid active lock occupancy row"):
-        if set(row) != {"source_id", "lock_id", "staff_id", "lock_date"}:
-            raise ValueError("invalid active lock occupancy row")
-        if (
-            isinstance(row["source_id"], bool)
-            or not isinstance(row["source_id"], int)
-            or row["source_id"] <= 0
-            or isinstance(row["lock_id"], bool)
-            or not isinstance(row["lock_id"], int)
-            or row["lock_id"] <= 0
-            or row["lock_id"] not in header_ids
-            or isinstance(row["staff_id"], bool)
-            or not isinstance(row["staff_id"], int)
-            or row["staff_id"] <= 0
-            or row["lock_date"].__class__ is not date
-        ):
-            raise ValueError("invalid active lock occupancy row")
-        conflicts.append({"staff_id": row["staff_id"], "lock_date": row["lock_date"], "source_type": "active_lock", "source_id": row["source_id"]})
     cursor.execute(
         "SELECT d.id AS source_id, d.lock_id, d.segment_id, d.staff_id, "
         "segment.assigned_end_date "
@@ -825,7 +745,7 @@ def preview_caregiver_availability_lock(
         _require_customer_pre_execution_commitment(
             cursor, request["case_no"], request["plan_id"],
         )
-        conflicts = _occupancy_conflicts(cursor, snapshot)
+        conflicts = _occupancy_conflicts(cursor, snapshot, lock=False)
         return _build_acquire_preview(snapshot, conflicts)
     finally:
         _close_once(cursor, cursor_closed)

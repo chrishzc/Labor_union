@@ -8,7 +8,7 @@ from enum import StrEnum
 
 from domains.scheduling.assignment_plan import (
     AssignmentPlanFacts,
-    StaffOccupancyFact,
+    first_shift_conflict,
 )
 from domains.scheduling.generation import (
     AssignmentCandidate,
@@ -172,13 +172,14 @@ def build_leave_substitution_candidate(
     )
     assignments = _build_assignments(facts, intent, transformed)
     buffers = _build_buffers(assignments, facts.assignment_plan.service_started)
-    _validate_external_occupancy(
+    conflict = first_shift_conflict(
         facts.assignment_plan.case_no,
-        facts.assignment_plan.external_occupancy,
+        facts.assignment_plan.service_time,
         assignments,
-        buffers,
-        _leave_occupancy_keys(intent, selected),
+        facts.assignment_plan.external_occupancy,
     )
+    if conflict is not None:
+        _raise_occupancy(f"staff {conflict.staff_id}: {conflict.source_case_no} on {conflict.occupancy_date}")
     scheduling = _build_generation(facts.assignment_plan, assignments, buffers)
     outcomes = _build_outcomes(intent, selected, transformed, assignments)
     fingerprint = fingerprint_payload(
@@ -597,55 +598,6 @@ def _build_buffers(
         )
         for assignment in assignments
     )
-
-
-# Assignment intervals, buffers, and leave days form one occupancy invariant.
-def _validate_external_occupancy(
-    case_no: str,
-    external: tuple[StaffOccupancyFact, ...],
-    assignments: tuple[AssignmentCandidate, ...],
-    buffers: tuple[BufferCandidate, ...],
-    leave_occupancy: set[tuple[int, date]],
-) -> None:
-    external_keys = {
-        (item.staff_id, item.occupancy_date)
-        for item in external
-        if item.source_case_no != case_no
-    }
-    proposed = {
-        (assignment.staff_id, occupied_date)
-        for assignment in assignments
-        for occupied_date in _inclusive_dates(
-            assignment.assigned_start_date,
-            assignment.assigned_end_date,
-        )
-    }
-    proposed.update(
-        (buffer.staff_id, buffer_date)
-        for buffer in buffers
-        if buffer.active
-        for buffer_date in buffer.dates
-    )
-    proposed.update(leave_occupancy)
-    if external_keys.intersection(proposed):
-        _raise_occupancy("leave transition conflicts with caregiver occupancy")
-
-
-def _leave_occupancy_keys(
-    intent: LeaveSubstitutionBatchIntent,
-    selected: dict[date, OfficialScheduleFact],
-) -> set[tuple[int, date]]:
-    if intent.handover_date is not None:
-        return set()
-    deferred_dates = _deferred_dates(intent)
-    return {
-        (
-            selected[item.work_date].staff_id,
-            item.work_date
-            + timedelta(days=sum(value < item.work_date for value in deferred_dates)),
-        )
-        for item in intent.items
-    }
 
 
 def _build_generation(

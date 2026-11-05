@@ -376,6 +376,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_03_historical_order_reused_pairing_check_v1.json",
     "labor_union_2026_11_04_finance_case_arrangements_v1.json",
     "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
+    "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1279,6 +1280,24 @@ def database_exists(
             return int(cursor.fetchone()["n"]) == 1
     finally:
         connection.close()
+
+
+def _database_character_defaults(config, database: str) -> tuple[str, str]:
+    connection = config.connect(database)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DEFAULT_CHARACTER_SET_NAME AS charset,DEFAULT_COLLATION_NAME AS collation "
+                "FROM information_schema.schemata WHERE SCHEMA_NAME=%s",
+                (database,),
+            )
+            row = cursor.fetchone() or {}
+    finally:
+        connection.close()
+    charset, collation = str(row.get("charset", "")), str(row.get("collation", ""))
+    if not IDENTIFIER.fullmatch(charset) or not IDENTIFIER.fullmatch(collation):
+        raise UpgradeBlocked("source character set or collation is unavailable")
+    return charset, collation
 
 
 def _show_create_owned_table_names() -> set[str]:
@@ -2668,6 +2687,8 @@ def _metadata_state_for_artifact(
         return _client_zero_obligation_establishment_state(snapshot, descriptor)
     if artifact == "1047_scheduling_buffer_advisory.sql":
         return _scheduling_buffer_advisory_state(snapshot, descriptor)
+    if artifact == "1068_scheduling_shift_occupancy_indexes.sql":
+        return _scheduling_shift_index_state(snapshot)
     if artifact == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -4050,6 +4071,12 @@ def _local_classify_statement(statement: str) -> str:
         }
         if normalized in buffer_advisory_alters:
             return "scheduling_buffer_advisory_index_widen"
+        shift_index_alters = {
+            re.sub(r"\s+", " ", value.strip()).casefold()
+            for value in split_sql((ROOT / "db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql").read_text(encoding="utf-8"))
+        }
+        if normalized in shift_index_alters:
+            return "scheduling_shift_index_widen"
         if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
             raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
         if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
@@ -5096,6 +5123,7 @@ def restore_candidate(
         raise UpgradeBlocked("candidate must not exist before restore")
     identity = server_identity(config, source)
     dump = validate_dump(dump_path, backup_receipt_path, source, identity)
+    charset, collation = _database_character_defaults(config, source)
     prepared = {
         "kind": "preserved_database_upgrade",
         "status": "prepared",
@@ -5103,13 +5131,14 @@ def restore_candidate(
         "created_at": _now(),
         "source": identity,
         "candidate_database": candidate,
+        "database_defaults": {"charset": charset, "collation": collation},
         "source_dump": dump,
     }
     write_receipt(operation_receipt_path, prepared)
     connection = candidate_config.connect()
     try:
         with connection.cursor() as cursor:
-            cursor.execute(f"CREATE DATABASE `{candidate}` CHARACTER SET utf8mb4")
+            cursor.execute(f"CREATE DATABASE `{candidate}` CHARACTER SET {charset} COLLATE {collation}")
     finally:
         connection.close()
     command = _mysql_base(
@@ -6026,6 +6055,8 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 if (key if kind == "tables" else key[0]) in tables
             }
         descriptor["indexes"].update(_buffer_advisory_indexes())
+    if part_name == "1068_scheduling_shift_occupancy_indexes.sql":
+        descriptor["indexes"].update(_scheduling_shift_indexes())
     if part_name == "1041_historical_manual_beclass_origin.sql":
         descriptor["parent_columns"]["beclass_records"] = {
             "record_origin": _column_contract(
@@ -6716,6 +6747,8 @@ def _release_descriptor_metadata_state(
         return _client_zero_obligation_establishment_state(snapshot, canonical)
     if part_name == "1047_scheduling_buffer_advisory.sql":
         return _scheduling_buffer_advisory_state(snapshot, canonical)
+    if part_name == "1068_scheduling_shift_occupancy_indexes.sql":
+        return _scheduling_shift_index_state(snapshot)
     if part_name == "1013_order_lifecycle_pending_status_constraint.sql":
         return _order_lifecycle_pending_status_constraint_state(
             snapshot,
@@ -7673,7 +7706,7 @@ def _scheduling_buffer_advisory_state(snapshot, descriptor) -> str:
     matched["indexes"] = dict(descriptor["indexes"])
     for key, successor in _buffer_advisory_indexes().items():
         actual = indexes.get(key)
-        if actual == successor:
+        if actual == successor or actual == _scheduling_shift_indexes().get(key):
             modes.append("successor")
         elif actual == predecessor[key]:
             modes.append("predecessor")
@@ -7692,12 +7725,55 @@ def _scheduling_buffer_advisory_state(snapshot, descriptor) -> str:
     return "partial"
 
 
+def _scheduling_shift_indexes():
+    return {
+        ("staff_schedule", "uq_staff_schedule_effective_date"): {
+            "non_unique": 1, "columns": ("staff_id", "work_date", "effective_marker"),
+        },
+        ("caregiver_availability_lock_days", "uq_availability_lock_staff_date_active"): {
+            "non_unique": 1, "columns": ("staff_id", "lock_date", "active_marker"),
+        },
+        ("scheduling_effective_occupancy", "PRIMARY"): {
+            "non_unique": 0, "columns": ("staff_id", "occupancy_date", "occupancy_type", "assignment_id"),
+        },
+        ("scheduling_leave_occupancy_days", "uq_scheduling_leave_occupancy_staff_date"): {
+            "non_unique": 1, "columns": ("staff_id", "occupancy_date", "active_marker"),
+        },
+    }
+
+
+def _scheduling_shift_index_state(snapshot):
+    successors = _scheduling_shift_indexes()
+    actual = {
+        (row["table_name"], row["index_name"]): {
+            "non_unique": int(row["non_unique"]),
+            "columns": tuple(str(row["columns"]).casefold().split(",")),
+        } for row in snapshot["indexes"]
+    }
+    predecessor = {key: {**spec, "non_unique": 0} for key, spec in successors.items()}
+    occupancy = ("scheduling_effective_occupancy", "PRIMARY")
+    predecessor[occupancy]["columns"] = ("staff_id", "occupancy_date", "occupancy_type")
+    matches = [actual.get(key) == spec for key, spec in successors.items()]
+    if all(matches):
+        return "exact"
+    if any(actual.get(key) not in (spec, predecessor[key]) for key, spec in successors.items()):
+        return "drift"
+    return "partial" if any(matches) else "absent"
+
+
 def _allowed_later_artifact_indexes(
     part_name: str,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Return exact successor index contracts valid on an earlier artifact."""
     if part_name == "109_scheduling_generations.sql":
-        return _buffer_advisory_indexes()
+        return {**_buffer_advisory_indexes(), **{
+            key: spec for key, spec in _scheduling_shift_indexes().items()
+            if key[0] in {"staff_schedule", "scheduling_effective_occupancy"}
+        }}
+    if part_name == "99a_caregiver_availability_locks.sql":
+        return {key: spec for key, spec in _scheduling_shift_indexes().items() if key[0] == "caregiver_availability_lock_days"}
+    if part_name == "120_leave_substitution_workflow.sql":
+        return {key: spec for key, spec in _scheduling_shift_indexes().items() if key[0] == "scheduling_leave_occupancy_days"}
     if part_name == "104_order_lifecycle_state_history.sql":
         return {
             (
@@ -9436,6 +9512,11 @@ def verify_candidate(
     receipt = read_receipt(operation_receipt_path)
     if receipt.get("status") not in VERIFYABLE_CANDIDATE_STATUSES:
         raise UpgradeBlocked("candidate has not completed schema/backfill")
+    defaults = receipt.get("database_defaults")
+    if defaults is not None:
+        expected = (defaults["charset"], defaults["collation"])
+        if any(_database_character_defaults(config, database) != expected for database in (source, candidate)):
+            raise UpgradeBlocked("database character set or collation changed during restore")
     if any(item.get("backfill_id") == RETIRED_SUBSIDY_BACKFILL_ID
            for item in (receipt.get("backfills") or ())):
         raise UpgradeBlocked(
@@ -9482,6 +9563,18 @@ def verify_candidate(
             or actual.get("primary_key_sha256")
             != evidence.get("primary_key_sha256")
         ):
+            if (
+                table == "scheduling_effective_occupancy"
+                and source_objects.get("1068_scheduling_shift_occupancy_indexes.sql") == "absent"
+                and _scheduling_shift_index_state(candidate_snapshot) == "exact"
+            ):
+                additive_projection_preservation[table] = {
+                    "mode": "verified_shift_occupancy_primary_key_widen",
+                    **_verify_source_column_projection_preserved(
+                        config, source, candidate, table, source_snapshot,
+                    ),
+                }
+                continue
             if (
                 table == "scheduling_effective_occupancy"
                 and source_objects.get("1047_scheduling_buffer_advisory.sql") == "absent"

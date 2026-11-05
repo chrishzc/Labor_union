@@ -109,6 +109,27 @@ describe('SchedulingPage query-only presentation', () => {
     }));
   });
 
+  it('在同一位月嫂的列中上下顯示兩個同日班次', async () => {
+    vi.mocked(staffMonthlyScheduleClient.query).mockImplementation(async (staffId, year, month) => {
+      const day = `${year}-${String(month).padStart(2, '0')}-12`;
+      return {
+        staff_id: staffId, year, month, schedule_map: {},
+        days: staffId === 11 ? [
+          { work_date: day, service_date: day, starts_at: `${day}T08:00:00+08:00`, ends_at: `${day}T12:00:00+08:00`, case_no: 'MORNING', assignment_id: 101, staff_id: staffId, status: 'working', is_work_day: true, is_double_pay: false },
+          { work_date: day, service_date: day, starts_at: `${day}T13:00:00+08:00`, ends_at: `${day}T17:00:00+08:00`, case_no: 'AFTERNOON', assignment_id: 102, staff_id: staffId, status: 'working', is_work_day: true, is_double_pay: false },
+        ] : [],
+      };
+    });
+    render(<SchedulingPage />);
+    const morning = await screen.findByRole('button', { name: /MORNING.*08:00–12:00/ });
+    const afternoon = screen.getByRole('button', { name: /AFTERNOON.*13:00–17:00/ });
+    expect(morning).toHaveAttribute('data-start-day', '12');
+    expect(afternoon).toHaveAttribute('data-start-day', '12');
+    expect(morning.style.top).not.toBe(afternoon.style.top);
+    fireEvent.click(afternoon);
+    expect(await screen.findByText('指派 102')).toBeInTheDocument();
+  });
+
   it('排班月曆讀取當月假日，返回分頁後更新標示且不改正式排班', async () => {
     let holidayName = '測試國定假日';
     vi.mocked(holidayClient.query).mockImplementation(async query => {
@@ -709,7 +730,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.body.textContent).not.toMatch(/service_qualification|data_integrity|service_time_terms_incomplete/);
   });
 
-  it('選案後以完整檔期顯示衝突，不把投影切成零碎衝突日期', async () => {
+  it('保留完整需求期間並只標示已確認衝突的需求日', async () => {
     vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
       items: [{
         case_no: '115000003', client_name: '排查客戶乙', order_status: '洽談中',
@@ -736,10 +757,10 @@ describe('SchedulingPage query-only presentation', () => {
           start_date: '2026-08-01',
           end_date: '2026-08-03',
           required_day_count: 3,
-          available_day_count: 1,
-          missing_dates: [],
+          available_day_count: 2,
+          missing_dates: ['2026-08-02'],
           review_dates: [],
-          status: 'unavailable',
+          status: 'incomplete',
         },
         partial_data: [],
       }],
@@ -752,17 +773,16 @@ describe('SchedulingPage query-only presentation', () => {
       target: { value: '115000003' },
     });
 
-    await waitFor(() => expect(screen.getAllByText('整段檔期有衝突').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText('115000003 · 時段衝突').length).toBeGreaterThan(0));
     const conflictSpans = [...document.querySelectorAll('.gantt-span-bar.span-conflict')];
     expect(conflictSpans.length).toBeGreaterThan(0);
     conflictSpans.forEach((span) => {
-      expect(span).toHaveAttribute('data-start-day', '1');
-      expect(span).toHaveAttribute('data-end-day', '3');
-      expect(span).toHaveTextContent(/完整檔期 2026-08-01 ～ 2026-08-03 均標示衝突/);
+      expect(span).toHaveAttribute('data-start-day', '2');
+      expect(span).toHaveAttribute('data-end-day', '2');
     });
   });
 
-  it('衝突發生在跨月檔期後段時，前後月份的可見整段都標示衝突', async () => {
+  it('跨月案件只在發生衝突的月份和需求日顯示衝突', async () => {
     vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue({
       items: [{
         case_no: '115000003', client_name: '跨月排查客戶', order_status: '洽談中',
@@ -809,9 +829,9 @@ describe('SchedulingPage query-only presentation', () => {
           end_date: '2026-09-03',
           required_day_count: 5,
           available_day_count: query.staffId === 11 ? 4 : 5,
-          missing_dates: [],
+          missing_dates: query.staffId === 11 ? ['2026-09-02'] : [],
           review_dates: [],
-          status: 'complete',
+          status: query.staffId === 11 ? 'incomplete' : 'complete',
         },
         partial_data: [],
       }],
@@ -831,15 +851,14 @@ describe('SchedulingPage query-only presentation', () => {
     await waitFor(() => expect(document.querySelector('[data-staff-id="11"]')).toHaveAttribute('data-case-outcome', 'hard_conflict'));
     expect(document.querySelector('[data-staff-id="11"]')).toHaveAttribute('data-case-start-day', '30');
     expect(document.querySelector('[data-staff-id="11"]')).toHaveAttribute('data-case-end-day', '31');
-    await waitFor(() => expect(staffSpan(11, '.span-conflict')).not.toBeNull());
-    expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-start-day', '30');
-    expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-end-day', '31');
+    expect(staffSpan(11, '.span-conflict')).toBeNull();
+    expect(staffSpan(11, '.span-free')).toHaveAttribute('data-start-day', '30');
     expect(staffSpan(12, '.span-free')).toHaveAttribute('data-start-day', '30');
     expect(staffSpan(12, '.span-free')).toHaveAttribute('data-end-day', '31');
 
     fireEvent.click(screen.getByRole('button', { name: '查看下個月' }));
-    await waitFor(() => expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-start-day', '1'));
-    expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-end-day', '3');
+    await waitFor(() => expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-start-day', '2'));
+    expect(staffSpan(11, '.span-conflict')).toHaveAttribute('data-end-day', '2');
     expect(staffSpan(12, '.span-free')).toHaveAttribute('data-start-day', '1');
     expect(staffSpan(12, '.span-free')).toHaveAttribute('data-end-day', '3');
   });

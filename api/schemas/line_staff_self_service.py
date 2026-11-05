@@ -59,6 +59,7 @@ class StaffScheduleDayView(BaseModel):
         "historical_assignment",
         "waiting_deposit_lock",
         "staff_unavailability",
+        "buffer",
     ]
     assignment_id: int | None = None
     case_no: str | None = None
@@ -69,6 +70,9 @@ class StaffScheduleDayView(BaseModel):
     is_work_day: bool
     is_double_pay: bool
     notes: str | None = None
+    service_date: date | None = None
+    starts_at: str | None = None
+    ends_at: str | None = None
     lock_id: int | None = None
     plan_id: int | None = None
     unavailability_block_id: int | None = None

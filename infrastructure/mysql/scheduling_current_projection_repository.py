@@ -5,6 +5,8 @@ Description: 從 MySQL 載入 current Scheduling assignment、全案首個服務
 
 from __future__ import annotations
 
+from infrastructure.mysql.order_terms_read_model import read_service_time_terms
+
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -281,6 +283,7 @@ def _waiting_lock_fact(row, locked_dates):
         _as_date(row["assigned_start_date"], "lock start date"),
         assigned_end_date,
         tuple(item for item in locked_dates if item <= assigned_end_date),
+        read_service_time_terms(row),
     )
 
 
@@ -365,10 +368,12 @@ _OCCUPANCY_SELECT_SQL = (
 )
 _WAITING_SEGMENT_SELECT_SQL = (
     "SELECT l.id AS lock_id,s.id AS segment_id,p.case_no,s.staff_id,"
-    "s.assigned_start_date,s.assigned_end_date "
+    "s.assigned_start_date,s.assigned_end_date,"
+    "o.service_start_time,o.service_end_time,o.service_end_day_offset "
     "FROM caregiver_availability_locks l "
     "JOIN caregiver_matching_plans p ON p.id=l.plan_id "
     "JOIN caregiver_matching_plan_segments s ON s.plan_id=p.id "
+    "JOIN orders o ON o.case_no=p.case_no "
     "WHERE l.status='active' AND l.is_active=1 AND s.staff_id=%s "
     "AND s.assigned_start_date<=%s "
     "AND DATE_ADD(s.assigned_end_date,INTERVAL 7 DAY)>=%s "

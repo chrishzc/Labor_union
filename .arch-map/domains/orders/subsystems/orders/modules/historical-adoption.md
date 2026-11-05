@@ -45,7 +45,7 @@
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
-- 跨案件同月嫂來源服務期間重疊（`historical_order_source_schedule_conflict`）採雙邊衝突列排除容錯：Preview／Apply 將重疊雙方標記為 `current_conflict`／`not_imported` 並在 `row_issues` 投影對造 Excel 列號、案件編號與期間明細（不寫入該列 Orders／assignment／row receipt），其餘無衝突列仍於同一 outer UoW 原子匯入；若嚴格驗證邊界拋出 `HistoricalOrderSourceScheduleConflictError`，API 於 HTTP 422 `field_errors` 投影去敏列號與案件明細，不含客戶個資與正常帳務明細。
+- Preview／Apply 依工作簿可追溯的每日時段區分已證實重疊與時段待確認，將問題列排除並在 `row_issues` 顯示對造 Excel 列號與案件；其餘列在同一 outer UoW 原子匯入。可採納時段保留於 immutable receipt snapshot，供歷史指派唯讀顯示。
 - MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。
 - 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.

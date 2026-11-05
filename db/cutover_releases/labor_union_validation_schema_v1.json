@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-11-05-v61",
+  "release_id": "labor-union-validation-schema-scheduling-shift-v1",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
@@ -8,16 +8,16 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 190,
-    "ordered_digest_sha256": "a12b3e163686d3858764bf655eccae295531403dc27882fd63fba64d68e4c220",
-    "terminal_artifact": "245_finance_case_subsidy_plans.sql"
+    "expected_count": 191,
+    "ordered_digest_sha256": "3acef88717bdd497040ca2e942cbb33d926788308d263125ec753300e2f480cd",
+    "terminal_artifact": "1068_scheduling_shift_occupancy_indexes.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "522df06d44023e0cafd80206bc88f32935a65634e178442c4f8e2bcc0737de94"
+    "sha256": "7497775a8ff743af5d95685123a9c68ac4179e6aed696e9126ab7659c6bd4a4c"
   },
   "full_release": {
-    "path": "db/releases/labor_union_validation_schema_case_subsidy_plans_v1.sql",
+    "path": "db/releases/labor_union_validation_schema_scheduling_shift_v1.sql",
     "database_token": "__LU_TEST_DATABASE__",
     "generation": "base_schema_then_ordered_schema_parts"
   },

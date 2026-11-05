@@ -18,6 +18,7 @@ class MonthlyScheduleDayView(_ClosedModel):
         "historical_assignment",
         "waiting_deposit_lock",
         "staff_unavailability",
+        "buffer",
     ]
     assignment_id: int | None = Field(default=None, gt=0)
     case_no: str | None = None
@@ -28,6 +29,9 @@ class MonthlyScheduleDayView(_ClosedModel):
     is_work_day: bool
     is_double_pay: bool
     notes: str | None = None
+    service_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    starts_at: str | None = None
+    ends_at: str | None = None
     lock_id: int | None = Field(default=None, gt=0)
     plan_id: int | None = Field(default=None, gt=0)
     unavailability_block_id: int | None = Field(default=None, gt=0)

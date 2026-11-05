@@ -6,7 +6,9 @@ uses its actual application/API. No provider or application lifespan worker is r
 import json
 import os
 import runpy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from threading import Barrier
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -70,10 +72,10 @@ def checked(response):
     return response.json()['data']
 
 
-def seed_case(http,*,count=1):
+def seed_case(http,*,count=1, shared_staff=None, clock=("08:00:00", "17:00:00"), hours=8):
     case='116'+str(rows('SELECT COUNT(*) n FROM orders')[0]['n']+1).zfill(6)
     client=write("INSERT INTO clients(case_no,name,identity_status,service_type,created_at) VALUES (%s,'Synthetic service start','一般市民','連續服務','2026-10-01')",(case,))
-    write("INSERT INTO orders(case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day,floor_fee,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,'待補件',0,'2027-01-01',%s,8,0,'08:00:00','17:00:00',0)",(case,client,count*30))
+    write("INSERT INTO orders(case_no,client_id,status,lifecycle_version,start_date,service_days,service_hours_per_day,floor_fee,service_start_time,service_end_time,service_end_day_offset) VALUES (%s,%s,'待補件',0,'2027-01-01',%s,%s,0,%s,%s,0)",(case,client,count*30,hours,*clock))
     base=f'/api/v1/orders/{case}/intake-completion'
     p=checked(http.post(base+'/preview',json={}))
     checked(http.post(base+'/apply',json={'expected_lifecycle_version':p['lifecycle_version'],'preview_fingerprint':p['preview_fingerprint'],'reason':''},headers={'Idempotency-Key':case+':init'}))
@@ -82,6 +84,9 @@ def seed_case(http,*,count=1):
     h['bank'](http,case,amount,1)
     staff=[]
     for index in range(count+2):
+        if index == 0 and shared_staff is not None:
+            staff.append(shared_staff)
+            continue
         line='U'+uuid4().hex
         identity=write("INSERT INTO staff(name,status,line_user_id) VALUES (%s,'active',%s)",(f'Synthetic {case} {index}',line))
         write("INSERT INTO line_platform_users(line_user_id,friend_status) VALUES (%s,'active')",(line,))
@@ -122,6 +127,75 @@ def test_normal_start_atomic_dates_finance_group_result_and_replay(http):
     assert checked(http.post('/api/v1/line/staff-self-service/service-start/submit',json=body))['request_id']==result['request_id']
     assert rows("SELECT COUNT(*) n FROM scheduling_service_start_requests WHERE case_no=%s",(case,))[0]['n']==1
     assert checked(http.get('/api/v1/scheduling/service-start/todos',params={'case_no':case}))['total']==0
+
+
+def test_same_staff_same_day_nonoverlapping_shifts_commit_and_read_back(http):
+    morning, staff, morning_segments = seed_case(http, clock=("08:00", "12:00"), hours=4)
+    afternoon, _, afternoon_segments = seed_case(http, shared_staff=staff[0], clock=("13:00", "17:00"), hours=4)
+    responses = _concurrent_starts(http, staff[0], ((morning, morning_segments[0]), (afternoon, afternoon_segments[0])))
+    assert [checked(response)["status"] for response in responses] == ["applied", "applied"]
+    calendar = checked(http.post(
+        "/api/v1/line/staff-self-service/schedule",
+        params={"year": 2027, "month": 1}, json={"line_id_token": staff[0][1]},
+    ))
+    shifts = [entry for entry in calendar["days"] if entry["work_date"] == "2027-01-05" and entry["status"] == "working"]
+    assert [(entry["case_no"], entry["starts_at"][11:16], entry["ends_at"][11:16]) for entry in shifts] == [
+        (morning, "08:00", "12:00"), (afternoon, "13:00", "17:00"),
+    ]
+    from api.routes.staff_leave_intake import router
+    if not getattr(http.app.state, "leave_results_registered", False):
+        http.app.include_router(router)
+        http.app.state.leave_results_registered = True
+    options = checked(http.post(
+        "/api/v1/line/staff-self-service/leave-results/cases",
+        json={"line_id_token": staff[0][1]},
+    ))["items"]
+    target = next(item for item in options if item["case_no"] == afternoon)
+    result = checked(http.post(
+        "/api/v1/line/staff-self-service/leave-results/submit",
+        json={
+            "line_id_token": staff[0][1], "case_no": afternoon,
+            "assignment_id": target["assignment_id"], "decision": "defer",
+            "expected_order_version": target["order_version"],
+            "expected_scheduling_version": target["scheduling_version"],
+            "dates": [{"original_date": "2027-01-05", "new_date": "2027-02-10"}],
+            "idempotency_key": uuid4().hex,
+        },
+    ))
+    assert result["status"] == "applied"
+    after = rows(
+        "SELECT case_no FROM staff_schedule WHERE staff_id=%s AND work_date='2027-01-05' "
+        "AND effective_marker=1 AND is_work_day=1",
+        (staff[0][0],),
+    )
+    assert [entry["case_no"] for entry in after] == [morning]
+
+
+def test_concurrent_overlapping_service_starts_leave_one_effective_shift(http):
+    first, staff, first_segments = seed_case(http, clock=("08:00", "12:00"), hours=4)
+    second, _, second_segments = seed_case(http, shared_staff=staff[0], clock=("11:30", "15:30"), hours=4)
+    responses = _concurrent_starts(http, staff[0], ((first, first_segments[0]), (second, second_segments[0])))
+    assert all(response.status_code == 200 for response in responses), [response.text for response in responses]
+    results = [response.json()["data"]["status"] for response in responses]
+    assert sorted(results) == ["applied", "substitute_required"]
+    effective = rows(
+        "SELECT case_no FROM staff_schedule WHERE staff_id=%s AND work_date='2027-01-05' "
+        "AND effective_marker=1 AND is_work_day=1 AND case_no IN (%s,%s)",
+        (staff[0][0], first, second),
+    )
+    assert len(effective) == 1
+
+
+def _concurrent_starts(http, staff, pairs):
+    barrier = Barrier(2)
+
+    def attempt(value):
+        case, segment = value
+        barrier.wait(timeout=10)
+        return submit(http, case, staff, segment)[0]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        return tuple(executor.map(attempt, pairs))
 
 
 def test_refusal_is_todo_and_does_not_change_official_dates(http):

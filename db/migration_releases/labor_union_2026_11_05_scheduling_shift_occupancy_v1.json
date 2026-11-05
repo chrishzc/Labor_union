@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-scheduling-shift-occupancy-2026-11-05-v1",
+  "release_metadata": {
+    "release_name": "Scheduling shift occupancy indexes",
+    "application_version": "scheduling-shift-occupancy-v1",
+    "published_at": "2026-11-05",
+    "description": "Preserve all scheduling evidence and widen the four staff/day occupancy indexes. Staff mutex and interval validation remain the write authority."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-finance-case-subsidy-plans-2026-11-05-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1068_scheduling_shift_occupancy_indexes.sql",
+      "relative_path": "db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql",
+      "sha256": "56ce6aa2161a73e69079fb42b0bb59f422a1d95228ceca1ed009552d3fe4905f",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "forward-only-retain-all-shifts",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "scheduling-shift-occupancy-indexes-exact",
+      "phase": "post-schema",
+      "policy": "Compare all four exact index successors; preserve all scheduling rows",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "scheduling-shift-occupancy-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "scheduling-shift-occupancy-indexes-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_05_scheduling_shift_occupancy_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_05_scheduling_shift_occupancy_v1.descriptors.json",
+    "sha256": "5fab5901555fbc3a0980c9e8729b4073416f60d61fc7aa5d0d412327d22a2baf",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

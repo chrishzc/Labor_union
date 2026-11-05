@@ -59,3 +59,30 @@ def test_buffer_descriptor_accepts_exact_predecessor_and_successor_only():
         drift = deepcopy(successor)
         drift[kind][0][field] = wrong
         assert migration.local_additive_descriptor_state(drift, descriptor, ARTIFACT) == "drift"
+
+
+def test_shift_release_only_accepts_exact_four_index_replacements():
+    name = "1068_scheduling_shift_occupancy_indexes.sql"
+    manifest = load_migration_release_manifest(
+        ROOT / "db/migration_releases/labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
+        ROOT,
+    )
+    expected = manifest.owned_object_descriptors(ROOT)[name]["indexes"]
+    assert migration._canonical_artifact_descriptor(name)["indexes"] == expected
+    for sql in split_sql((ROOT / "db/schema_parts" / name).read_text(encoding="utf-8")):
+        assert migration._local_classify_statement(sql) == "scheduling_shift_index_widen"
+    snapshot = {"indexes": [
+        {"table_name": table, "index_name": index, "non_unique": spec["non_unique"], "columns": ",".join(spec["columns"])}
+        for (table, index), spec in expected.items()
+    ]}
+    assert migration._scheduling_shift_index_state(snapshot) == "exact"
+    predecessor = deepcopy(snapshot)
+    for row in predecessor["indexes"]:
+        row["non_unique"] = 0
+        if row["index_name"] == "PRIMARY":
+            row["columns"] = "staff_id,occupancy_date,occupancy_type"
+    assert migration._scheduling_shift_index_state(predecessor) == "absent"
+    predecessor["indexes"][0] = snapshot["indexes"][0]
+    assert migration._scheduling_shift_index_state(predecessor) == "partial"
+    predecessor["indexes"][0] = {**snapshot["indexes"][0], "columns": "staff_id"}
+    assert migration._scheduling_shift_index_state(predecessor) == "drift"

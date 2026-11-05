@@ -4,9 +4,10 @@ Description: 驗證媒合候選覆蓋率使用已確認服務日與後端日期�
 """
 
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 import pytest
+from domains.orders.terms import ServiceTimeTerms
 
 from domains.scheduling.matching_communication import (
     CaregiverWillingness, CustomerMatchingDecision, MatchingDecisionNotReadyError, MatchingPlanReference,
@@ -32,6 +33,7 @@ class _Facts:
                 "scheduling_version": 9,
                 "service_days": 2,
                 "requires_cooking": False,
+                "service_time": ServiceTimeTerms(time(8), time(12), 0),
             },
             "confirmed_service_dates": [
                 {"service_date": "2026-08-02"},
@@ -141,9 +143,8 @@ def test_single_recommendation_uses_all_saved_dates_without_rewriting_inquiry():
 
 
 @pytest.mark.parametrize("source,row", [
-    ("assignments", {"id": 90, "staff_id": 7, "assigned_start_date": "2026-12-02", "assigned_end_date": "2026-12-02"}),
-    ("schedule_rows", {"assignment_id": 90, "staff_id": 7, "work_date": "2026-12-02"}),
-    ("active_lock_rows", {"staff_id": 7, "lock_date": "2026-12-02", "active_marker": 1}),
+    ("schedule_rows", {"assignment_id": 90, "staff_id": 7, "work_date": "2026-12-02", "service_time": ServiceTimeTerms(time(11), time(15), 0)}),
+    ("active_lock_rows", {"staff_id": 7, "lock_date": "2026-12-02", "active_marker": 1, "service_time": ServiceTimeTerms(time(11), time(15), 0)}),
     ("staff_unavailability_rows", {"id": 90, "staff_id": 7, "start_date": "2026-12-02", "end_date": "2026-12-02"}),
 ])
 def test_actual_occupancy_after_original_inquiry_end_still_blocks(source, row):
@@ -152,6 +153,17 @@ def test_actual_occupancy_after_original_inquiry_end_still_blocks(source, row):
     with pytest.raises(MatchingDecisionNotReadyError) as caught:
         _validate_availability(_recommendation(), facts)
     assert "檔期已有衝突" in _availability_blocker(caught.value)
+
+
+def test_disjoint_same_day_shift_and_reservation_keep_recommendation_available():
+    facts = _ExtendedDates()
+    afternoon = ServiceTimeTerms(time(13), time(17), 0)
+    facts.facts["schedule_rows"] = [{"assignment_id": 90, "staff_id": 7, "work_date": "2026-12-02", "service_time": afternoon}]
+    facts.facts["active_lock_rows"] = [{"staff_id": 7, "lock_date": "2026-12-03", "active_marker": 1, "service_time": afternoon}]
+    _validate_availability(_recommendation(), facts)
+    facts.facts["assignments"] = [{"id": 90, "staff_id": 7, "assigned_start_date": "2026-12-02", "assigned_end_date": "2026-12-02"}]
+    with pytest.raises(ValueError, match="requires review"):
+        _validate_availability(_recommendation(), facts)
 
 
 def test_buffer_is_advisory_but_unowned_schedule_is_not_reported_as_proven_occupancy():

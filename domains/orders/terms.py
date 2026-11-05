@@ -74,6 +74,13 @@ class ServiceTimeTerms:
             tzinfo=_TAIPEI,
         )
 
+    def service_interval(self, service_date: date) -> tuple[datetime, datetime] | None:
+        if not self.complete:
+            return None
+        start = self.service_start_instant(service_date)
+        end = self.completion_instant(service_date)
+        return (start, end) if start < end else None
+
     def canonical_payload(self) -> dict[str, object]:
         return {
             "start_time": self.start_time.isoformat() if self.start_time else None,

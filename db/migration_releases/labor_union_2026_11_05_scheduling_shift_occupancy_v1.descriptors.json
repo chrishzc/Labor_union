@@ -1,0 +1,49 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-scheduling-shift-occupancy-2026-11-05-v1",
+  "descriptors": {
+    "1068_scheduling_shift_occupancy_indexes.sql": {
+      "tables": {},
+      "indexes": {
+        "staff_schedule.uq_staff_schedule_effective_date": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "work_date",
+            "effective_marker"
+          ]
+        },
+        "caregiver_availability_lock_days.uq_availability_lock_staff_date_active": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "lock_date",
+            "active_marker"
+          ]
+        },
+        "scheduling_effective_occupancy.PRIMARY": {
+          "non_unique": 0,
+          "columns": [
+            "staff_id",
+            "occupancy_date",
+            "occupancy_type",
+            "assignment_id"
+          ]
+        },
+        "scheduling_leave_occupancy_days.uq_scheduling_leave_occupancy_staff_date": {
+          "non_unique": 1,
+          "columns": [
+            "staff_id",
+            "occupancy_date",
+            "active_marker"
+          ]
+        }
+      },
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "parent_columns": {},
+      "views": {}
+    }
+  }
+}

@@ -4,7 +4,9 @@ from datetime import date
 from dataclasses import replace
 import json
 
-from domains.scheduling.assignment_plan import AssignmentPlanIntent, AssignmentPlanSegmentIntent
+from domains.scheduling.assignment_plan import (
+    AssignmentPlanIntent, AssignmentPlanSegmentIntent, StaffOccupancyFact, service_shift_may_overlap,
+)
 from domains.scheduling.leave_substitution import LeaveResolutionType, LeaveSubstitutionBatchIntent, LeaveSubstitutionItem
 from domains.scheduling.service_start import ServiceStartConflict
 from infrastructure.mysql.automatic_client_accounting import synchronize_client_charges
@@ -16,6 +18,7 @@ from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanApplyRe
 from subsystems.scheduling.leave_substitution_workflow import LeaveSubstitutionApplyRequest, LeaveSubstitutionPreviewRequest
 from infrastructure.mysql.leave_result_repository import leave_context
 from infrastructure.mysql.service_handover_repository import handover_context
+from infrastructure.mysql.scheduling_occupancy_facts import _unavailability_rows, load_case_service_time
 from shared_kernel.clock import SystemBusinessClock
 
 
@@ -34,6 +37,19 @@ class MySqlServiceStartArrangement:
             'service_ownership_conflict', 'scheduling.staff_effective_date_conflict',
             'availability_lock_staff_occupancy_conflict', 'staff_unavailable', 'actual_start_unavailability_conflict',
             'automatic_waiting_deposit_occupancy_conflict'})
+
+    def _require_available_days(self, case_no, staff_id, dates, message):
+        dates = tuple(dates)
+        with self.connection.cursor() as cursor:
+            service_time = load_case_service_time(cursor, case_no, lock=True)
+            blocks = _unavailability_rows(cursor, (staff_id,), True)
+        for row in blocks:
+            block = StaffOccupancyFact(
+                staff_id, row['start_date'], 'staff_unavailability',
+                all_day=True, block_end=row['end_date'],
+            )
+            if any(service_shift_may_overlap(day, service_time, block) for day in dates):
+                raise ServiceStartConflict('staff_unavailable', message)
 
     def apply(self, request_id, start_date, actor, key):
         request = self.repository.request(request_id, lock=True)
@@ -90,13 +106,10 @@ class MySqlServiceStartArrangement:
             days = c.fetchall()
         if not days:
             raise ServiceStartConflict('handover_dates_missing', '交接日起沒有可接任的原區段服務日，請核對交接日。')
-        with self.connection.cursor() as c:
-            c.execute("SELECT start_date,end_date FROM scheduling_staff_unavailability_blocks WHERE staff_id=%s "
-                "AND status='effective' AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) FOR UPDATE",
-                (candidate['staff_id'],days[-1]['work_date'],days[0]['work_date']))
-            if any(block['start_date'] <= day['work_date'] and (block['end_date'] is None or day['work_date'] <= block['end_date'])
-                   for block in c.fetchall() for day in days):
-                raise ServiceStartConflict('staff_unavailable', '接任月嫂在交接後有不可排班紀錄。')
+        self._require_available_days(
+            request['case_no'], candidate['staff_id'], (day['work_date'] for day in days),
+            '接任月嫂在交接後有不可排班紀錄。',
+        )
         # The formal handover writer owns all remaining days, paid-history preservation and accounting.
         intent = LeaveSubstitutionBatchIntent(request['assignment_id'], tuple(LeaveSubstitutionItem(
             day['id'],day['work_date'],LeaveResolutionType.SUBSTITUTE,candidate['staff_id'],bool(day['is_double_pay']))
@@ -126,13 +139,7 @@ class MySqlServiceStartArrangement:
         if context['decision'] == 'substitute' and candidate is None:
             raise ServiceStartConflict('substitute_selection_required', '請先選定願意代班且已加入案件群組的月嫂。')
         staff_id = candidate['staff_id'] if candidate else request['staff_id']
-        with self.connection.cursor() as c:
-            c.execute("SELECT start_date,end_date FROM scheduling_staff_unavailability_blocks WHERE staff_id=%s "
-                "AND status='effective' AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) FOR UPDATE",
-                (staff_id,max(replacements),min(replacements)))
-            if any(block['start_date'] <= day and (block['end_date'] is None or day <= block['end_date'])
-                   for block in c.fetchall() for day in replacements):
-                raise ServiceStartConflict('staff_unavailable', '新的服務日期有不可排班紀錄。')
+        self._require_available_days(request['case_no'], staff_id, replacements, '新的服務日期有不可排班紀錄。')
         intent = LeaveSubstitutionBatchIntent(rows[originals[0]]['assignment_id'], tuple(
             LeaveSubstitutionItem(rows[old]['id'], old,
                 LeaveResolutionType.SUBSTITUTE if candidate else LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
@@ -188,10 +195,7 @@ class MySqlServiceStartArrangement:
             calendar=calculate_attendance_schedule(day,int(segment['service_days']),mode)
             dates=tuple(item['date'] if isinstance(item['date'],date) else date.fromisoformat(str(item['date']))
                 for item in calendar['day_by_day'] if item['is_work_day'])
-            with self.connection.cursor() as c:
-                c.execute("SELECT start_date,end_date FROM scheduling_staff_unavailability_blocks WHERE staff_id=%s AND status='effective' AND start_date<=%s AND (end_date IS NULL OR end_date>=%s) FOR UPDATE",(staff_id,dates[-1],day))
-                if any(block['start_date']<=dates[-1] and (block['end_date'] is None or block['end_date']>=day) for block in c.fetchall()):
-                    raise ServiceStartConflict('staff_unavailable','服務期間有不可排班紀錄，需由工會安排代班。')
+            self._require_available_days(request['case_no'], staff_id, dates, '服務時段有不可排班紀錄，需由工會安排代班。')
             intents.append(AssignmentPlanSegmentIntent(int(staff_id),day,dates[-1],dates))
         start=min(item.assigned_start_date for item in intents)
         facts=self.actual_start._repository.load_actual_start_query(request['case_no'],for_update=True)

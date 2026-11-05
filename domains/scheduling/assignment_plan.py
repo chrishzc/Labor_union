@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domains.orders.terms import ServiceTimeTerms
+
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
@@ -124,6 +126,10 @@ class StaffOccupancyFact:
     staff_id: int
     occupancy_date: date
     source_case_no: str
+    service_time: ServiceTimeTerms | None = None
+    all_day: bool = False
+    block_end: date | None = None
+    possible_end: date | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff id")
@@ -182,6 +188,7 @@ class AssignmentPlanFacts:
     external_occupancy: tuple[StaffOccupancyFact, ...] = ()
     current_waiting_lock_ids: tuple[int, ...] = ()
     explicit_service_start_result: bool = False
+    service_time: ServiceTimeTerms | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -413,25 +420,50 @@ def _validate_external_occupancy(
     facts: AssignmentPlanFacts,
     assignments: tuple[AssignmentCandidate, ...],
 ) -> None:
-    external = {
-        (item.staff_id, item.occupancy_date)
-        for item in facts.external_occupancy
-        if item.source_case_no != facts.case_no
-    }
-    proposed = _proposed_occupancy(assignments)
-    if external.intersection(proposed):
-        _raise_occupancy("assignment interval is occupied")
+    conflict = first_shift_conflict(facts.case_no, facts.service_time, assignments, facts.external_occupancy)
+    if conflict is not None:
+        _raise_occupancy(f"staff {conflict.staff_id}: {conflict.source_case_no} on {conflict.occupancy_date}")
 
 
-def _proposed_occupancy(
-    assignments: tuple[AssignmentCandidate, ...],
-) -> set[tuple[int, date]]:
-    occupied = {
-        (item.staff_id, value)
-        for item in assignments
-        for value in _assignment_interval(item)
-    }
-    return occupied
+def first_shift_conflict(case_no, service_time, assignments, occupancy):
+    by_staff: dict[int, list[StaffOccupancyFact]] = {}
+    for fact in occupancy:
+        if fact.source_case_no != case_no:
+            by_staff.setdefault(fact.staff_id, []).append(fact)
+    for assignment in assignments:
+        for day in assignment.service_dates:
+            for fact in by_staff.get(assignment.staff_id, ()):
+                if service_shift_may_overlap(day, service_time, fact):
+                    return fact
+    return None
+
+
+def service_shift_may_overlap(service_date, service_time, occupied: StaffOccupancyFact) -> bool:
+    """Keep ambiguous occupancy closed; compare known windows as half-open."""
+    delta = (occupied.occupancy_date - service_date).days
+    wanted = service_time.service_interval(service_date) if service_time else None
+    if occupied.possible_end is not None:
+        last_touched = (wanted[1] - timedelta(microseconds=1)).date() if wanted else service_date
+        return occupied.occupancy_date <= last_touched and service_date <= occupied.possible_end
+    if occupied.all_day:
+        first = occupied.occupancy_date
+        last = occupied.block_end or date.max
+        if wanted is None:
+            return first <= service_date + timedelta(days=1) and service_date <= last
+        last_touched = (wanted[1] - timedelta(microseconds=1)).date()
+        return first <= last_touched and service_date <= last
+    if abs(delta) > 1:
+        return False
+    existing = occupied.service_time.service_interval(occupied.occupancy_date) if occupied.service_time else None
+    if wanted is not None and existing is not None:
+        return wanted[0] < existing[1] and existing[0] < wanted[1]
+    if delta == 0:
+        return True
+    if delta > 0 and wanted is not None:
+        return wanted[1] > wanted[0].replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    if delta < 0 and existing is not None:
+        return existing[1] > existing[0].replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return False
 
 
 def _claim_dates(

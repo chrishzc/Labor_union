@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
+from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
+
 from domains.scheduling.staff_matching_preferences import (
     region_condition,
     weekly_service_condition,
@@ -188,16 +190,22 @@ def _search_availability(
 
     assignment_schedule_days: list[dict[str, Any]] = []
     for assignment in assignments:
-        assignment_schedule_days.extend(_expand_assignment_days(assignment, planned_start, planned_end))
+        if assignment.get("case_no") != case_no:
+            assignment_schedule_days.extend(
+                {**item, "assignment_id": None}
+                for item in _expand_assignment_days(assignment, planned_start, planned_end)
+            )
+    wanted_time = order_row.get("service_time")
     for row in loaded_facts["schedule_rows"]:
-        assignment_schedule_days.append(
-            {
-                "assignment_id": row["assignment_id"],
+        if row.get("case_no") == case_no:
+            continue
+        for day in _matching_shift_dates(row, "work_date", wanted_time, planned_start, planned_end):
+            assignment_schedule_days.append({
+                "assignment_id": row["assignment_id"] if wanted_time and row.get("service_time") else None,
                 "staff_id": row["staff_id"],
-                "work_date": _as_optional_date(row["work_date"], "staff_schedule.work_date").isoformat(),
+                "work_date": day.isoformat(),
                 "reason_code": "schedule",
-            }
-        )
+            })
     for row in loaded_facts["legacy_schedule_rows"]:
         assignment_schedule_days.append(
             {
@@ -219,19 +227,18 @@ def _search_availability(
         )
     for row in loaded_facts.get("staff_unavailability_rows") or []:
         assignment_schedule_days.extend(
-            _expand_staff_unavailability_days(row, planned_start, planned_end)
+            _expand_staff_unavailability_days(row, planned_start, planned_end, wanted_time)
         )
 
-    active_lock_days = [
-        {
-            "staff_id": row["staff_id"],
-            "lock_date": _as_optional_date(
-                row["lock_date"], "caregiver_availability_lock_days.lock_date"
-            ).isoformat(),
-            "active_marker": row["active_marker"],
-        }
-        for row in loaded_facts["active_lock_rows"]
-    ]
+    active_lock_days = []
+    for row in loaded_facts["active_lock_rows"]:
+        if row.get("case_no") == case_no or not row["active_marker"]:
+            continue
+        for day in _matching_shift_dates(row, "lock_date", wanted_time, planned_start, planned_end):
+            if wanted_time and row.get("service_time"):
+                active_lock_days.append({"staff_id": row["staff_id"], "lock_date": day.isoformat(), "active_marker": row["active_marker"]})
+            else:
+                assignment_schedule_days.append({"staff_id": row["staff_id"], "work_date": day.isoformat(), "assignment_id": None})
     active_lock_days.extend(
         _active_waiting_buffer_days(
             loaded_facts["waiting_buffer_rows"], planned_start, planned_end
@@ -297,20 +304,28 @@ def _required_service_dates(confirmed_rows, planned_start, planned_end):
     raise ValueError("official_service_dates_incomplete")
 
 
-def _expand_staff_unavailability_days(row, window_start, window_end):
-    start = max(
-        _as_optional_date(row["start_date"], "staff_unavailability.start_date"),
-        window_start,
+def _matching_shift_dates(row, date_field, wanted_time, first, last):
+    service_date = _as_optional_date(row[date_field], date_field)
+    fact = StaffOccupancyFact(
+        int(row["staff_id"]), service_date, str(row.get("case_no") or "legacy_schedule"), row.get("service_time")
     )
+    for offset in (-1, 0, 1):
+        day = service_date + timedelta(days=offset)
+        if first <= day <= last and service_shift_may_overlap(day, wanted_time, fact):
+            yield day
+
+
+def _expand_staff_unavailability_days(row, window_start, window_end, wanted_time=None):
+    block_start = _as_optional_date(row["start_date"], "staff_unavailability.start_date")
+    start = max(block_start - timedelta(days=1 if wanted_time else 0), window_start)
     raw_end = row.get("end_date")
-    end = min(
-        window_end
-        if raw_end is None
-        else _as_optional_date(raw_end, "staff_unavailability.end_date"),
-        window_end,
-    )
+    block_end = _as_optional_date(raw_end, "staff_unavailability.end_date") if raw_end is not None else None
+    end = min(block_end or window_end, window_end)
     if start > end:
         return []
+    block = StaffOccupancyFact(
+        int(row["staff_id"]), block_start, "staff_unavailability", all_day=True, block_end=block_end,
+    )
     return [
         {
             "availability_block_id": int(row["id"]),
@@ -319,6 +334,7 @@ def _expand_staff_unavailability_days(row, window_start, window_end):
             "reason_code": "staff_unavailability",
         }
         for offset in range((end - start).days + 1)
+        if service_shift_may_overlap(start + timedelta(days=offset), wanted_time, block)
     ]
 
 

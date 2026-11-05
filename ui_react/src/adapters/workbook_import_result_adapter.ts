@@ -35,17 +35,23 @@ const REASON_LABELS: Record<string, string> = {
   historical_calendar_staff_missing: '缺少可採納的月嫂指派',
   historical_calendar_valid_dates_missing: '缺少有效的歷史服務起迄日期',
   historical_calendar_completed_assignment_missing: '缺少已完成的歷史服務指派',
-  historical_order_source_schedule_conflict: '與同檔案其他案件的月嫂服務期間重疊',
+  historical_order_source_schedule_conflict: '與同檔案其他案件的月嫂服務時段重疊',
+  historical_order_source_schedule_unconfirmed: '同一月嫂的服務時段待確認',
+  historical_service_time_unconfirmed: '每日服務起訖或跨日標記不完整',
 };
 
 const SCHEDULE_CONFLICT_DETAIL_PREFIX = 'historical_order_source_schedule_conflict_detail:';
+const SCHEDULE_UNCONFIRMED_DETAIL_PREFIX = 'historical_order_source_schedule_unconfirmed_detail:';
 
 function parseScheduleConflictDetail(code: string): string | null {
-  if (!code.startsWith(SCHEDULE_CONFLICT_DETAIL_PREFIX)) return null;
-  const payload = code.slice(SCHEDULE_CONFLICT_DETAIL_PREFIX.length);
-  const match = /^row=(\d+);staff_id=(\d+);own=([^~;]+)~([^;]+);peer=([^~;]+)~([^;]+);case_no=(.*)$/.exec(payload);
+  const unconfirmed = code.startsWith(SCHEDULE_UNCONFIRMED_DETAIL_PREFIX);
+  if (!unconfirmed && !code.startsWith(SCHEDULE_CONFLICT_DETAIL_PREFIX)) return null;
+  const payload = code.slice((unconfirmed ? SCHEDULE_UNCONFIRMED_DETAIL_PREFIX : SCHEDULE_CONFLICT_DETAIL_PREFIX).length);
+  const match = /^row=(\d+);staff_id=(\d+);own=([^~;]+)~([^;]+);peer=([^~;]+)~([^;]+);case_no=([^;]*)(?:;overlap=([^~;]+)~([^;]+))?$/.exec(payload);
   if (!match) return REASON_LABELS.historical_order_source_schedule_conflict;
-  const [, peerRow, staffId, ownStart, ownEnd, peerStart, peerEnd, peerCaseNo] = match;
+  const [, peerRow, staffId, ownStart, ownEnd, peerStart, peerEnd, peerCaseNo, overlapStart, overlapEnd] = match;
+  if (unconfirmed) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}，${peerStart}～${peerEnd}）的月嫂服務時段待確認。`;
+  if (overlapStart && overlapEnd) return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo}）重疊 ${overlapStart.slice(0, 16).replace('T', ' ')}～${overlapEnd.slice(0, 16).replace('T', ' ')}。`;
   return `與 Excel 第 ${peerRow} 列（案件 ${peerCaseNo || '未提供'}，${peerStart}～${peerEnd}）同一月嫂（ID ${staffId}）服務期間（${ownStart}～${ownEnd}）重疊`;
 }
 

@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from typing import Any, Mapping, Protocol
+from domains.orders.terms import ServiceTimeTerms
 
 from subsystems.scheduling.matching_recommendation_query import (
     RecommendationFilters,
@@ -13,7 +14,7 @@ from subsystems.scheduling.matching_recommendation_query import (
 class MatchingRecommendationRepository(Protocol):
     def load_request_facts(self, case_no: str) -> Mapping[str, object] | None: ...
 
-    def load_candidates(self, service_dates: tuple[date, ...]) -> tuple[Any, ...]: ...
+    def load_candidates(self, service_dates: tuple[date, ...], *, case_no: str, service_time: ServiceTimeTerms | None) -> tuple[Any, ...]: ...
 
 
 def _unconfigured_connection() -> Any:
@@ -43,7 +44,12 @@ def query_matching_recommendations(
         if facts is None:
             return []
         request = _recommendation_request(facts, filter_region, filter_schedule, filter_babies, filter_time)
-        return [item.as_legacy_payload() for item in recommend_staff(request, repository.load_candidates(request.service_dates))]
+        service_time = facts.get("service_time_terms")
+        candidates = repository.load_candidates(
+            request.service_dates, case_no=case_no,
+            service_time=service_time if isinstance(service_time, ServiceTimeTerms) else None,
+        )
+        return [item.as_legacy_payload() for item in recommend_staff(request, candidates)]
     finally:
         connection.close()
 

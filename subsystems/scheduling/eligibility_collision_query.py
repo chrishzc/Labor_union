@@ -5,6 +5,9 @@ Description: 產生 Scheduling 月嫂資格、占用衝突與覆蓋的唯讀 typ
 
 from __future__ import annotations
 
+from domains.orders.terms import ServiceTimeTerms
+from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -102,6 +105,8 @@ class SchedulingCaseFacts:
     location_text: str | None
     scheduling_version: int | None
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
+    service_time: ServiceTimeTerms | None = None
+    confirmed_service_dates: tuple[date, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +139,7 @@ class SchedulingScheduleFact:
     is_work_day: bool
     effective: bool
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
+    service_time: ServiceTimeTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +161,7 @@ class SchedulingLockFact:
     staff_id: int
     lock_date: date | None
     temporal_state: TemporalFactState | str = TemporalFactState.VALID
+    service_time: ServiceTimeTerms | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,7 +372,7 @@ class SchedulingEligibilityCollisionQueryWorkflow:
                 partial_data=tuple(sorted(local_partial)),
             )
         collisions = _collisions(staff.staff_id, case_no, period, facts, local_partial)
-        coverage = _coverage(period, collisions, bool(local_partial))
+        coverage = _coverage(period, collisions, bool(local_partial), facts.case.confirmed_service_dates)
         if period is None:
             availability = AvailabilityState.UNKNOWN
         elif any(item.severity is CollisionSeverity.HARD_BLOCK for item in collisions):
@@ -471,6 +478,11 @@ def _case_period(
     case: SchedulingCaseFacts,
 ) -> tuple[tuple[date, date] | None, tuple[str, ...]]:
     issues: set[str] = set()
+    if case.confirmed_service_dates:
+        start, end = min(case.confirmed_service_dates), max(case.confirmed_service_dates)
+        if case.service_time is None or case.service_time.service_interval(start) is None:
+            issues.add("case_service_time_unconfirmed")
+        return (start, end), tuple(sorted(issues))
     if case.start_date is None or case.end_date is None:
         return None, ("case_service_period_missing",)
     if type(case.start_date) is not date or type(case.end_date) is not date:
@@ -482,6 +494,8 @@ def _case_period(
         issues.add("case_service_period_exceeds_projection_window")
     if case.service_days is None or case.service_days <= 0:
         issues.add("case_service_days_missing")
+    if case.service_time is None or case.service_time.service_interval(case.start_date) is None:
+        issues.add("case_service_time_unconfirmed")
     return (case.start_date, case.end_date), tuple(sorted(issues))
 
 
@@ -704,7 +718,7 @@ def _collisions(
             collisions.append(
                 CollisionResult(
                     CollisionKind.ASSIGNMENT_INTERVAL,
-                    CollisionSeverity.HARD_BLOCK,
+                    CollisionSeverity.REQUIRES_REVIEW,
                     staff_id,
                     assignment.case_no,
                     assignment.assignment_id,
@@ -714,7 +728,7 @@ def _collisions(
                     end,
                     "Scheduling",
                     f"assignment:{assignment.assignment_id}",
-                    "其他案件正式指派檔期占用",
+                    "其他案件指派缺少可核對的逐日班次",
                 )
             )
 
@@ -726,7 +740,7 @@ def _collisions(
             or schedule.case_no == case_no
         ):
             continue
-        if schedule.work_date is None or not window_start <= schedule.work_date <= window_end:
+        if schedule.work_date is None:
             partial_data.add("schedule_date_missing_or_invalid")
             collisions.append(
                 _data_integrity_collision(
@@ -742,27 +756,12 @@ def _collisions(
             if schedule.assignment_id is None
             else CollisionKind.OFFICIAL_SCHEDULE
         )
-        severity = (
-            CollisionSeverity.REQUIRES_REVIEW
-            if kind is CollisionKind.LEGACY_SCHEDULE
-            else CollisionSeverity.HARD_BLOCK
-        )
-        collisions.append(
-            CollisionResult(
-                kind,
-                severity,
-                staff_id,
-                schedule.case_no,
-                schedule.assignment_id,
-                schedule.schedule_id,
-                schedule.work_date,
-                schedule.work_date,
-                schedule.work_date,
-                "Scheduling",
-                f"staff_schedule:{schedule.schedule_id}",
-                "其他案件正式工作日占用" if kind is CollisionKind.OFFICIAL_SCHEDULE else "缺少 assignment lineage 的歷史排班需人工覆核",
-            )
-        )
+        collisions.extend(_shift_collisions(
+            facts.case.service_time, period, schedule.work_date,
+            schedule.service_time if schedule.assignment_id is not None else None,
+            kind, staff_id, schedule.case_no, schedule.assignment_id,
+            schedule.schedule_id, f"staff_schedule:{schedule.schedule_id}",
+        ))
 
     for buffer in facts.buffers:
         if buffer.staff_id != staff_id or buffer.case_no == case_no:
@@ -798,7 +797,7 @@ def _collisions(
     for lock in facts.locks:
         if lock.staff_id != staff_id or lock.case_no == case_no:
             continue
-        if lock.lock_date is None or not window_start <= lock.lock_date <= window_end:
+        if lock.lock_date is None:
             partial_data.add("waiting_lock_date_missing_or_invalid")
             collisions.append(
                 _data_integrity_collision(
@@ -809,22 +808,11 @@ def _collisions(
                 )
             )
             continue
-        collisions.append(
-            CollisionResult(
-                CollisionKind.WAITING_DEPOSIT_LOCK,
-                CollisionSeverity.HARD_BLOCK,
-                staff_id,
-                lock.case_no,
-                None,
-                lock.lock_day_id,
-                lock.lock_date,
-                lock.lock_date,
-                lock.lock_date,
-                "Scheduling",
-                f"caregiver_availability_lock_days:{lock.lock_day_id}",
-                "其他案件等待訂金檔期鎖占用",
-            )
-        )
+        collisions.extend(_shift_collisions(
+            facts.case.service_time, period, lock.lock_date, lock.service_time,
+            CollisionKind.WAITING_DEPOSIT_LOCK, staff_id, lock.case_no, None,
+            lock.lock_day_id, f"caregiver_availability_lock_days:{lock.lock_day_id}",
+        ))
 
     for block in facts.unavailability:
         if block.staff_id != staff_id:
@@ -840,11 +828,16 @@ def _collisions(
                 )
             )
             continue
-        overlap = _overlap(block.start_date, block.end_date, period)
+        overlap = _overlap(block.start_date - timedelta(days=1), block.end_date, period)
         if overlap is None:
             continue
         start, end = overlap
+        block_fact = StaffOccupancyFact(
+            staff_id, block.start_date, "staff_unavailability", all_day=True, block_end=block.end_date,
+        )
         for collision_date in _iter_dates(start, end):
+            if not service_shift_may_overlap(collision_date, facts.case.service_time, block_fact):
+                continue
             collisions.append(
                 CollisionResult(
                     CollisionKind.STAFF_UNAVAILABILITY,
@@ -862,7 +855,36 @@ def _collisions(
                 )
             )
 
-    return _dedupe_collisions(collisions)
+    service_dates = frozenset(facts.case.confirmed_service_dates)
+    return _dedupe_collisions(
+        item for item in collisions
+        if not service_dates or item.collision_date is None or item.collision_date in service_dates
+    )
+
+
+def _shift_collisions(wanted_time, period, occupied_date, occupied_time,
+                      kind, staff_id, case_no, assignment_id, source_id, source):
+    occupied = occupied_time.service_interval(occupied_date) if occupied_time else None
+    for offset in (-1, 0, 1):
+        day = occupied_date + timedelta(days=offset)
+        if not period[0] <= day <= period[1]:
+            continue
+        wanted = wanted_time.service_interval(day) if wanted_time else None
+        if wanted is None or occupied is None:
+            if day != occupied_date:
+                continue
+            severity = CollisionSeverity.REQUIRES_REVIEW
+            detail = "服務時段待確認"
+        else:
+            start, end = max(wanted[0], occupied[0]), min(wanted[1], occupied[1])
+            if start >= end:
+                continue
+            severity = CollisionSeverity.HARD_BLOCK
+            detail = f"重疊時段 {start:%m/%d %H:%M}–{end:%m/%d %H:%M}"
+        yield CollisionResult(
+            kind, severity, staff_id, case_no, assignment_id, source_id,
+            day, occupied_date, occupied_date, "Scheduling", source, detail,
+        )
 
 
 def _data_integrity_collision(
@@ -922,6 +944,7 @@ def _coverage(
     period: tuple[date, date] | None,
     collisions: tuple[CollisionResult, ...],
     partial_data: bool = False,
+    confirmed_service_dates: tuple[date, ...] = (),
 ) -> CoverageResult:
     if period is None:
         return CoverageResult(
@@ -934,7 +957,7 @@ def _coverage(
             CoverageState.UNAVAILABLE,
         )
     start, end = period
-    required = tuple(_iter_dates(start, end))
+    required = confirmed_service_dates or tuple(_iter_dates(start, end))
     hard = {
         item.collision_date
         for item in collisions

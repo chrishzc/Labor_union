@@ -12,6 +12,7 @@ from typing import Any
 from pymysql.err import IntegrityError
 
 from domains.orders.terms import OrderCookingRequirementFacts
+from domains.scheduling.assignment_plan import service_shift_may_overlap
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.terms_workflow import (
@@ -43,6 +44,7 @@ from .order_terms_read_model import (
 )
 from .order_lifecycle_impact_writer import persist_order_lifecycle_impact
 from .scheduling_replacement_writer import persist_scheduling_replacement
+from .scheduling_occupancy_facts import _waiting_lock_rows, load_occupancy_snapshot
 from .payroll_terms_writer import persist_payroll_terms_impact
 
 
@@ -56,7 +58,12 @@ class MySqlOrderTermsRepository:
 
     def load_for_preview(self, case_no: str, *, proposed_terms=None) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
-            return load_terms_preview_facts(cursor, case_no, proposed_terms)
+            facts = load_terms_preview_facts(cursor, case_no, proposed_terms)
+            if proposed_terms is not None and facts.order.terms.service_time != proposed_terms.service_time:
+                _validate_active_reservation_time(
+                    cursor, case_no, proposed_terms.service_time, preflight_staff_ids(cursor, case_no), lock=False,
+                )
+            return facts
 
     def load_for_registry(self, case_no: str) -> OrderTermsRegistryFacts:
         with self._connection.cursor() as cursor:
@@ -112,9 +119,14 @@ class MySqlOrderTermsRepository:
         *, proposed_terms=None,
     ) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
-            return load_terms_locked_facts(
+            facts = load_terms_locked_facts(
                 cursor, case_no, preflight_staff_ids, proposed_terms=proposed_terms,
             )
+            if proposed_terms is not None and facts.order.terms.service_time != proposed_terms.service_time:
+                _validate_active_reservation_time(
+                    cursor, case_no, proposed_terms.service_time, preflight_staff_ids, lock=True,
+                )
+            return facts
 
     def claim_command(
         self,
@@ -289,6 +301,23 @@ def _terms_event_values(request, preview) -> tuple[object, ...]:
         _canonical_json(preview.before.canonical_payload()),
         _canonical_json(preview.after.canonical_payload()),
     )
+
+
+def _validate_active_reservation_time(cursor, case_no, service_time, staff_ids, *, lock):
+    if not staff_ids:
+        return
+    reservations = tuple(row for row in _waiting_lock_rows(cursor, staff_ids, lock) if row["case_no"] == case_no)
+    if not reservations:
+        return
+    if not service_time.complete:
+        raise ValueError("service_time_terms_required")
+    external, _ = load_occupancy_snapshot(cursor, staff_ids, case_no, lock=lock)
+    if any(
+        fact.source_case_no != case_no and fact.staff_id == row["staff_id"]
+        and service_shift_may_overlap(row["occupancy_date"], service_time, fact)
+        for row in reservations for fact in external
+    ):
+        raise ValueError("staff_occupancy_conflict")
 
 
 def _order_update_values(command) -> tuple[object, ...]:

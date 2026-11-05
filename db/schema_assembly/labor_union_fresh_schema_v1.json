@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "a12b3e163686d3858764bf655eccae295531403dc27882fd63fba64d68e4c220",
+  "active_artifacts_sha256": "3acef88717bdd497040ca2e942cbb33d926788308d263125ec753300e2f480cd",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -196,7 +196,8 @@
     "db/schema_parts/242_accounting_difference_resolution.sql",
     "db/schema_parts/243_historical_order_reused_pairing_check.sql",
     "db/schema_parts/244_finance_case_arrangements.sql",
-    "db/schema_parts/245_finance_case_subsidy_plans.sql"
+    "db/schema_parts/245_finance_case_subsidy_plans.sql",
+    "db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql"
   ],
   "classifications": {
     "db/schema_parts/1012_service_before_replacement.sql": "migration-only",

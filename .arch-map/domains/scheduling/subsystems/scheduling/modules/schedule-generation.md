@@ -9,6 +9,7 @@
 
 ## Implementation
 - primary:
+  - `db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql` — 保留排班、檔期鎖、有效占用及請假血緣資料，允許同人同日多筆；正式寫入仍依月嫂 mutex 與時段重疊規則驗證。
   - `domains/scheduling/generation.py`
   - `domains/scheduling/assignment_plan.py`
   - `domains/scheduling/bootstrap.py`

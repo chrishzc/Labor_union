@@ -31,7 +31,8 @@
     - 單一已願意初步候選的推薦建立借用 inquiry availability 檢查原詢問期間，預計說明日期不成為阻擋；多月嫂正式分段與後續真正排班仍沿既有正式日期檢查。
   - `subsystems/scheduling/matching_communication_workflow.py` — 正式媒合方案的 LINE 意願、暫停、恢復與取消溝通事件。
   - `subsystems/scheduling/segmented_availability_query.py`
-  - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；actual conflict 阻擋完整組合，buffer 只提醒。
+  - `subsystems/scheduling/matching_recommendation_application.py` — 以有效班次及需求時段協調候選檔期判定。
+  - `subsystems/scheduling/segmented_availability.py` — 純分段 availability；以需求班次對應的日期投影 actual conflict、待確認與 buffer，分時比較由 query 使用 Scheduling 的占用規則。
   - `subsystems/scheduling/candidate_contact_pool_workflow.py` — 初步候選加入及聯絡 fresh-read 預計期間 availability；一般寄送與重聯絡都使用 current Orders 起訖日，期間變動時借用既有 contact period／fingerprint 更新及前後事件，與預覽使用同一範圍並保留歷史，不建立正式服務日期。衝突候選仍可協調。每週 Preview 核對約定天數並顯示 actual／buffer 提醒。
   - `subsystems/scheduling/matching_line_cards.py` — 候選資訊與正式媒合的 pure Flex renderer。
   - `subsystems/scheduling/proposed_weekly_service_projection.py` — 候選與 proposed formal plan 的 Monday–Sunday 工作日投影；current confirmed service dates 優先於偏好週休，不讀 effective schedule。

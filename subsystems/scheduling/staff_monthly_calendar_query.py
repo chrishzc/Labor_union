@@ -5,7 +5,9 @@ Description: 查詢月嫂月份排班、正式占用與尚未開始服務的防�
 
 from typing import Dict, Any, List
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
+import json
+from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import StaffUnavailabilityCurrentFact
 from subsystems.scheduling.ports import unconfigured_connection_factory
 
@@ -43,6 +45,41 @@ def _priority_status(status: str) -> int:
         "yellow": 1,
         "historical": 1,
     }.get(status, 0)
+
+
+def _append_shift(grouped_rows, item, row, service_date, month_start, month_end):
+    if item["status"] in {"working", "waiting_deposit_lock", "historical_assignment"}:
+        try:
+            raw_start, raw_end = row.get("service_start_time"), row.get("service_end_time")
+            offset = row.get("service_end_day_offset")
+            terms = ServiceTimeTerms(_clock_time(raw_start), _clock_time(raw_end), offset)
+            interval = terms.service_interval(service_date)
+        except (TypeError, ValueError):
+            interval = None
+        if interval is not None:
+            start, end = interval
+            day = max(service_date, month_start)
+            while day <= month_end:
+                midnight = datetime.combine(day, time.min, tzinfo=TAIPEI_TIME_ZONE)
+                if midnight >= end:
+                    break
+                grouped_rows.setdefault(day.day, []).append({
+                    **item, "work_date": day.isoformat(), "service_date": service_date.isoformat(),
+                    "starts_at": start.isoformat(), "ends_at": end.isoformat(),
+                })
+                day += timedelta(days=1)
+            return
+    if month_start <= service_date <= month_end:
+        grouped_rows.setdefault(service_date.day, []).append(item)
+
+
+def _clock_time(value):
+    if value is None or isinstance(value, time):
+        return value
+    if isinstance(value, timedelta) and timedelta(0) <= value < timedelta(days=1):
+        return (datetime.combine(date.min, time.min) + value).time()
+    return time.fromisoformat(str(value))
+
 
 def get_staff_monthly_calendar_schedule(
     staff_id: int,
@@ -85,6 +122,7 @@ def get_staff_monthly_calendar_schedule(
                     csa.id AS assignment_id,
                     c.name AS client_name,
                     o.status AS order_status,
+                    o.service_start_time,o.service_end_time,o.service_end_day_offset,
                     s.name AS staff_name
                 FROM staff_schedule ss
                 JOIN case_staff_assignments csa ON ss.assignment_id = csa.id
@@ -96,7 +134,7 @@ def get_staff_monthly_calendar_schedule(
                   AND (csa.status IS NULL OR csa.status <> 'cancelled')
                   AND ss.work_date BETWEEN %s AND %s
                 ORDER BY ss.work_date, ss.id
-            """, (staff_id, month_start, month_end))
+            """, (staff_id, month_start - timedelta(days=1), month_end))
             schedule_rows = cursor.fetchall()
 
             for row in schedule_rows:
@@ -124,7 +162,9 @@ def get_staff_monthly_calendar_schedule(
                     "is_double_pay": is_double_pay,
                     "notes": row.get("notes"),
                 }
-                grouped_rows.setdefault(day, []).append(item)
+                _append_shift(grouped_rows, item, row, work_date, month_start, month_end)
+                if work_date < month_start:
+                    continue
 
                 day_status = "red" if is_work_day else "green"
                 candidate = {
@@ -148,7 +188,12 @@ def get_staff_monthly_calendar_schedule(
                 """
                 SELECT csa.id AS assignment_id,csa.case_no,csa.staff_id,
                        csa.assigned_start_date,csa.assigned_end_date,
-                       c.name AS client_name,o.status AS order_status,s.name AS staff_name
+                       c.name AS client_name,o.status AS order_status,s.name AS staff_name,
+                       (SELECT JSON_EXTRACT(receipt.result_snapshot,'$.historical_service_time')
+                        FROM historical_order_pairing_evidence evidence
+                        JOIN historical_order_adoption_receipts receipt ON receipt.id=evidence.receipt_id
+                        WHERE evidence.assignment_id=csa.id AND receipt.outcome='adopted'
+                        ORDER BY receipt.id DESC LIMIT 1) AS historical_service_time
                 FROM case_staff_assignments csa
                 JOIN orders o ON o.case_no=csa.case_no
                 JOIN clients c ON c.id=o.client_id
@@ -174,7 +219,10 @@ def get_staff_monthly_calendar_schedule(
                 end = min(assigned_end, month_end)
                 while start <= end:
                     day = start.day
-                    if not grouped_rows.get(day):
+                    if not any(
+                        item.get("assignment_id") == row["assignment_id"]
+                        for item in grouped_rows.get(day, ())
+                    ):
                         item = {
                             "work_date": start.strftime("%Y-%m-%d"),
                             "status": "historical_assignment",
@@ -188,15 +236,22 @@ def get_staff_monthly_calendar_schedule(
                             "is_double_pay": False,
                             "notes": "歷史指派區段",
                         }
-                        grouped_rows[day] = [item]
-                        schedule_map[day] = {
+                        raw = row.get("historical_service_time")
+                        evidence = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+                        evidence = evidence if isinstance(evidence, dict) else {}
+                        _append_shift(grouped_rows, item, {
+                            "service_start_time": evidence.get("start_time"),
+                            "service_end_time": evidence.get("end_time"),
+                            "service_end_day_offset": evidence.get("end_day_offset"),
+                        }, start, month_start, month_end)
+                        schedule_map.setdefault(day, {
                             "status": "historical",
                             "case_no": row["case_no"],
                             "client_name": row["client_name"],
                             "is_work_day": False,
                             "is_double_pay": False,
                             "assignment_id": row["assignment_id"],
-                        }
+                        })
                     start += timedelta(days=1)
 
             cursor.execute(
@@ -209,6 +264,7 @@ def get_staff_monthly_calendar_schedule(
                     p.case_no,
                     c.name AS client_name,
                     o.status AS order_status,
+                    o.service_start_time,o.service_end_time,o.service_end_day_offset,
                     s.name AS staff_name
                 FROM caregiver_availability_lock_days d
                 JOIN caregiver_availability_locks l ON l.id = d.lock_id
@@ -223,7 +279,7 @@ def get_staff_monthly_calendar_schedule(
                   AND d.lock_date BETWEEN %s AND %s
                 ORDER BY d.lock_date, d.id
                 """,
-                (staff_id, month_start, month_end),
+                (staff_id, month_start - timedelta(days=1), month_end),
             )
             lock_rows = cursor.fetchall()
             for row in lock_rows:
@@ -246,7 +302,9 @@ def get_staff_monthly_calendar_schedule(
                     "lock_id": row.get("lock_id"),
                     "plan_id": row.get("plan_id"),
                 }
-                grouped_rows.setdefault(day, []).append(item)
+                _append_shift(grouped_rows, item, row, work_date, month_start, month_end)
+                if work_date < month_start:
+                    continue
                 if day not in schedule_map:
                     schedule_map[day] = {
                         "status": "yellow",
@@ -299,7 +357,7 @@ def get_staff_monthly_calendar_schedule(
                         day = buffer_date.day
                         item = {
                             "work_date": buffer_date.strftime("%Y-%m-%d"),
-                            "status": "waiting_deposit_lock",
+                            "status": "buffer",
                             "assignment_id": row.get("assignment_id"),
                             "case_no": row.get("case_no"),
                             "staff_id": row.get("staff_id", staff_id),
@@ -425,7 +483,7 @@ def get_staff_monthly_calendar_schedule(
                         "assignment_id": None,
                     }
                 else:
-                    days_list.extend(day_rows)
+                    days_list.extend(sorted(day_rows, key=lambda row: row.get("starts_at", "~")))
 
         return {
             "staff_id": staff_id,

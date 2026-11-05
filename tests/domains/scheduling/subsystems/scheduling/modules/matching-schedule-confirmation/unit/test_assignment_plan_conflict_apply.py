@@ -1,5 +1,6 @@
 from dataclasses import replace
-from datetime import date
+from datetime import date, time
+from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
 import pytest
 from domains.scheduling.assignment_plan import StaffOccupancyFact
@@ -53,3 +54,24 @@ def test_proposed_buffer_overlapping_other_actual_service_does_not_block_preview
     workflow = AssignmentPlanWorkflow(_ReplayRepository(facts, None), client, payroll, orders, _UnitOfWork)
     preview = workflow.preview(AssignmentPlanPreviewRequest("CASE-1", _intent(), CorrelationId("buffer-preview")))
     assert preview.candidate.scheduling.buffers[0].active is True
+
+
+@pytest.mark.parametrize(("start_hour", "blocked"), [(12, False), (13, False), (11, True)])
+def test_assignment_plan_checks_the_actual_same_day_shift(start_hour, blocked):
+    client, payroll, orders = _ports()
+    facts = _facts()
+    facts = replace(facts, assignment_plan=replace(
+        facts.assignment_plan,
+        service_time=ServiceTimeTerms(time(start_hour), time(start_hour + 4), 0),
+        external_occupancy=(StaffOccupancyFact(
+            1, date(2026, 8, 3), "MORNING", ServiceTimeTerms(time(8), time(12), 0),
+        ),),
+    ))
+    workflow = AssignmentPlanWorkflow(_ReplayRepository(facts, None), client, payroll, orders, _UnitOfWork)
+    request = AssignmentPlanPreviewRequest("CASE-1", _intent(), CorrelationId("shift-preview"))
+    if blocked:
+        with pytest.raises(AssignmentPlanWorkflowError) as error:
+            workflow.preview(request)
+        assert error.value.error.code == "staff_occupancy_conflict"
+    else:
+        assert workflow.preview(request).candidate.scheduling.assignments

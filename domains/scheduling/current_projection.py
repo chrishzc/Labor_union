@@ -5,6 +5,8 @@ Description: 依正式服務日投影目前排班狀態、占用與已開工案�
 
 from __future__ import annotations
 
+from domains.scheduling.assignment_plan import StaffOccupancyFact, service_shift_may_overlap
+
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
@@ -103,6 +105,7 @@ class WaitingDepositLockCurrentFact:
     assigned_start_date: date
     assigned_end_date: date
     locked_service_dates: tuple[date, ...]
+    service_time_terms: ServiceTimeTerms | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.lock_id, "waiting lock id")
@@ -363,7 +366,7 @@ def _project_assignment(assignment, evaluated_at):
 
 def _build_entries(facts, status_by_assignment, query_dates, evaluated_at):
     entries: dict[date, list[SchedulingDayEntry]] = {}
-    occupied_dates: dict[date, SchedulingDayEntry] = {}
+    occupied_dates = {}
     started_case_numbers = {
         assignment.case_no
         for assignment in facts.assignments
@@ -470,7 +473,7 @@ def _append_assignment_interval_entry(
         assignment_id=assignment.assignment_id,
         assignment_status=assignment_status,
     )
-    _claim_entry(entries, occupied_dates, occupied_date, entry)
+    _claim_entry(entries, occupied_dates, occupied_date, entry, assignment.service_time_terms, assignment.staff_id)
 
 
 def _append_assignment_buffer_entry(
@@ -497,7 +500,7 @@ def _append_waiting_lock_entries(entries, occupied_dates, waiting_lock):
             lock_id=waiting_lock.lock_id,
             segment_id=waiting_lock.segment_id,
         )
-        _claim_entry(entries, occupied_dates, lock_date, entry)
+        _claim_entry(entries, occupied_dates, lock_date, entry, waiting_lock.service_time_terms, waiting_lock.staff_id)
     for buffer_date in _expected_buffer_dates(
         waiting_lock.assigned_end_date
     ):
@@ -524,32 +527,39 @@ def _append_staff_unavailability_entries(
             unavailability_kind=block.kind,
             unavailability_reason=block.reason,
         )
-        _claim_entry(entries, occupied_dates, blocked_date, entry)
+        _claim_entry(entries, occupied_dates, blocked_date, entry, staff_id=block.staff_id)
 
 
-def _claim_entry(entries, occupied_dates, occupied_date, entry):
+def _claim_entry(entries, occupied_dates, occupied_date, entry, service_time=None, staff_id=None):
     if entry.occupancy_kind in {
         SchedulingOccupancyKind.ASSIGNMENT_BUFFER,
         SchedulingOccupancyKind.WAITING_DEPOSIT_BUFFER,
+        SchedulingOccupancyKind.ASSIGNMENT_REST,
     }:
         entries.setdefault(occupied_date, []).append(entry)
         return
-    existing = occupied_dates.get(occupied_date)
-    if existing is not None:
-        blockers = tuple(
-            sorted(
-                {
+    fact = _entry_occupancy_fact(occupied_date, entry, service_time, staff_id)
+    for offset in (-1, 0, 1):
+        for existing, prior in occupied_dates.get(occupied_date + timedelta(days=offset), ()):
+            if fact.all_day and prior.all_day:
+                overlaps = offset == 0
+            elif fact.all_day:
+                overlaps = service_shift_may_overlap(prior.occupancy_date, prior.service_time, fact)
+            else:
+                overlaps = service_shift_may_overlap(occupied_date, service_time, prior)
+            if overlaps:
+                blockers = tuple(sorted({
                     f"{existing.case_no or 'staff'}:{existing.occupancy_kind.value}",
                     f"{entry.case_no or 'staff'}:{entry.occupancy_kind.value}",
-                }
-            )
-        )
-        raise SchedulingCurrentDomainError(
-            SchedulingCurrentErrorCode.OCCUPANCY_CONFLICT,
-            blockers,
-        )
-    occupied_dates[occupied_date] = entry
+                }))
+                raise SchedulingCurrentDomainError(SchedulingCurrentErrorCode.OCCUPANCY_CONFLICT, blockers)
+    occupied_dates.setdefault(occupied_date, []).append((entry, fact))
     entries.setdefault(occupied_date, []).append(entry)
+
+
+def _entry_occupancy_fact(day, entry, service_time, staff_id):
+    all_day = entry.occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
+    return StaffOccupancyFact(staff_id, day, entry.case_no or "staff", service_time, all_day, day if all_day else None)
 
 
 def _validate_stored_occupancy(facts):
@@ -674,6 +684,7 @@ def _waiting_lock_payload(item):
         "locked_service_dates": tuple(
             value.isoformat() for value in item.locked_service_dates
         ),
+        "service_time": item.service_time_terms.canonical_payload() if item.service_time_terms else None,
     }
 
 

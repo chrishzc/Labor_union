@@ -1181,6 +1181,19 @@ def _mysql_time(value: Any) -> time | None:
     return time(seconds // 3600, seconds % 3600 // 60, seconds % 60)
 
 
+def read_service_time_terms(row) -> ServiceTimeTerms | None:
+    """Decode an optional complete Orders clock tuple from a joined fact."""
+    try:
+        terms = ServiceTimeTerms(
+            _mysql_time(row.get("service_start_time")),
+            _mysql_time(row.get("service_end_time")),
+            row.get("service_end_day_offset"),
+        )
+        return terms if terms.complete else None
+    except (TypeError, ValueError):
+        return None
+
+
 _ORDER_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.end_date,o.actual_end_date,o.service_days,"
     "o.service_hours_per_day,o.requires_cooking,o.floor_fee,o.service_start_time,"

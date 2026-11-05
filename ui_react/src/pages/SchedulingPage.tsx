@@ -15,7 +15,7 @@ import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } 
 import type { StaffDirectoryCardViewModel } from '../adapters/staff/staff_directory_adapter';
 import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_client';
 import { holidayClient } from '../api/scheduling/holiday_client';
-import { staffMonthlyScheduleClient } from '../api/scheduling/staff_monthly_schedule_client';
+import { staffMonthlyScheduleClient, type StaffMonthlySchedule } from '../api/scheduling/staff_monthly_schedule_client';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
@@ -1766,6 +1766,62 @@ interface GanttSpan {
   icon?: string;
   caseText: string;
   statusLabel?: string;
+  lane?: number;
+  shift?: StaffMonthlySchedule['days'][number];
+}
+
+function monthlyShiftSpans(schedule: StaffMonthlySchedule): GanttSpan[] {
+  const spans: GanttSpan[] = [];
+  const previous = new Map<string, GanttSpan>();
+  const lanes = new Map<number, number>();
+  for (const shift of schedule.days) {
+    if (shift.status === 'available') continue;
+    const day = Number(shift.work_date.slice(8));
+    const lane = lanes.get(day) ?? 0;
+    lanes.set(day, lane + 1);
+    const continuation = !!shift.service_date && shift.service_date !== shift.work_date;
+    const time = shift.starts_at && shift.ends_at
+      ? `${continuation ? '00:00' : shift.starts_at.slice(11, 16)}–${shift.ends_at.slice(0, 10) > shift.work_date ? '翌日 ' : ''}${shift.ends_at.slice(11, 16)}${continuation ? ' 續班' : ''}`
+      : ['working', 'historical_assignment', 'waiting_deposit_lock'].includes(shift.status) ? '時段未確認' : '';
+    const tones = { working: 'active', resting: 'rest', historical_assignment: 'historical', waiting_deposit_lock: 'waiting', staff_unavailability: 'leave', buffer: 'buffer' } as const;
+    const labels = { working: '排班', resting: '休息日', historical_assignment: '歷史指派', waiting_deposit_lock: '等待訂金', staff_unavailability: '不可服務', buffer: '緩衝提醒' } as const;
+    const key = [shift.case_no, shift.assignment_id, shift.lock_id, shift.unavailability_block_id, shift.status, lane, time].join(':');
+    const prior = previous.get(key);
+    if (prior?.endDay === day - 1) {
+      prior.endDay = day;
+      continue;
+    }
+    const span: GanttSpan = {
+      id: `${key}:${day}`, startDay: day, endDay: day, lane,
+      tone: tones[shift.status], caseText: [shift.case_no, time].filter(Boolean).join('　') || labels[shift.status],
+      statusLabel: labels[shift.status], shift,
+    };
+    spans.push(span);
+    previous.set(key, span);
+  }
+  return spans;
+}
+
+function caseShiftSpans(config: GhostProjectionConfig, state: CaseEligibilityRowState | undefined, lane: number, month: string): GanttSpan[] {
+  const result: GanttSpan[] = [];
+  for (let day = config.startDay; day <= config.endDay; day += 1) {
+    let outcome = config.outcome;
+    if (state?.kind === 'ready') {
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      const blocked = state.data.coverage.missing_dates.includes(date)
+        || state.data.collisions.some(item => item.severity === 'hard_block' && item.collision_date === date);
+      const review = state.data.coverage.review_dates.includes(date);
+      if (blocked) outcome = 'hard_conflict';
+      else if (review || state.data.availability === 'requires_review') outcome = 'requires_review';
+      else if (state.data.availability === 'available' || state.data.coverage.missing_dates.length > 0) outcome = 'available';
+      else if (state.data.availability === 'blocked') outcome = 'requires_review';
+    }
+    const prior = result.at(-1);
+    const span = ghostCaseSpan({ ...config, outcome }, day, day);
+    if (prior?.tone === span.tone) prior.endDay = day;
+    else result.push({ ...span, lane, caseText: `${config.caseNo} · ${{ available: '可排', hard_conflict: '時段衝突', reservation_conflict: '時段衝突', requires_review: '時段待確認', checking: '確認中', unknown: '時段待確認' }[outcome]}`, statusLabel: undefined });
+  }
+  return result;
 }
 
 function ghostCaseSpan(
@@ -1931,6 +1987,8 @@ const SchedulingWorkbench: React.FC = () => {
 
   const [calendarRows, setCalendarRows] = useState<Record<number, CalendarRowState>>({});
   const [historicalOverlaysByStaff, setHistoricalOverlaysByStaff] = useState<Record<number, HistoricalAssignmentOverlay[]>>({});
+  const [monthlyRowsByStaff, setMonthlyRowsByStaff] = useState<Record<number, StaffMonthlySchedule | undefined>>({});
+  const [selectedShift, setSelectedShift] = useState<GanttSpan | null>(null);
   const [historicalOverlayErrors, setHistoricalOverlayErrors] = useState<Record<number, string>>({});
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
   const [calendarError, setCalendarError] = useState<Error | null>(null);
@@ -2291,14 +2349,14 @@ const SchedulingWorkbench: React.FC = () => {
           const state: CalendarRowState = projection.days.length === 0
             ? { kind: 'empty' }
             : { kind: 'loaded', row: adaptSchedulingProjection(staff, projection) };
-          return { staffId: staff.id, state, overlays, historicalError, error: null };
+          return { staffId: staff.id, state, overlays, historicalError, monthly: historical.status === 'fulfilled' ? historical.value : undefined, error: null };
         } catch (caught) {
           const error = caught instanceof Error ? caught : new Error('排班日曆查詢失敗');
           const state: CalendarRowState = caught instanceof SchedulingCurrentError
             && caught.publicCode === 'service_time_terms_incomplete'
             ? { kind: 'terms_incomplete' }
             : { kind: 'error', message: renderError(error) };
-          return { staffId: staff.id, state, overlays, historicalError, error: state.kind === 'error' ? error : null };
+          return { staffId: staff.id, state, overlays, historicalError, monthly: historical.status === 'fulfilled' ? historical.value : undefined, error: state.kind === 'error' ? error : null };
         }
       };
       const results = await loadStaffQueries(staffToLoad, controller.signal, async staff => {
@@ -2309,6 +2367,7 @@ const SchedulingWorkbench: React.FC = () => {
           calendarRetryStaffIdsRef.current.delete(result.staffId);
           setCalendarRows(current => ({ ...current, [result.staffId]: result.state }));
           setHistoricalOverlaysByStaff(current => ({ ...current, [result.staffId]: result.overlays }));
+          setMonthlyRowsByStaff(current => ({ ...current, [result.staffId]: result.monthly }));
           setHistoricalOverlayErrors(current => {
             const next = { ...current };
             if (result.historicalError) next[result.staffId] = result.historicalError;
@@ -2848,7 +2907,13 @@ const SchedulingWorkbench: React.FC = () => {
                       }
                     : null;
                   const diagnostic = getStaffDiagnosticBadge(row ?? undefined, ghostConfig);
-                  const spans = buildGanttSpans(row ?? undefined, daysList.length, ghostConfig, historicalOverlaysByStaff[staff.id]);
+                  const monthly = monthlyRowsByStaff[staff.id];
+                  const hasShiftRows = monthly?.days.some(day => day.starts_at || (day.status !== 'available' && day.status !== 'historical_assignment'));
+                  const spans = hasShiftRows && monthly?.year === month.year && monthly.month === month.month
+                    ? monthlyShiftSpans(monthly)
+                    : buildGanttSpans(row ?? undefined, daysList.length, null, historicalOverlaysByStaff[staff.id]);
+                  if (ghostConfig) spans.push(...caseShiftSpans(ghostConfig, caseEligibilityRows[staff.id], Math.max(-1, ...spans.map(span => span.lane ?? 0)) + 1, `${month.year}-${String(month.month).padStart(2, '0')}`));
+                  const spanHeight = Math.max(52, ...spans.map(span => ((span.lane ?? 0) + 1) * 44 + 8));
                   const historicalOverlayError = historicalOverlayErrors[staff.id];
 
                   return (
@@ -2909,13 +2974,14 @@ const SchedulingWorkbench: React.FC = () => {
                         </div>
 
                         {/* Continuous Visual Gantt Blocks */}
-                        <div className="gantt-spans-layer">
+                        <div className="gantt-spans-layer" style={{ height: spanHeight }}>
                           {spans.map((sp) => {
                             const leftPercent = ((sp.startDay - 1) / daysList.length) * 100;
                             const widthPercent =
                               (Math.max(1, sp.endDay - sp.startDay + 1) / daysList.length) * 100;
                             return (
-                              <div
+                              <button
+                                type="button"
                                 key={sp.id}
                                 className={`gantt-span-bar span-${sp.tone} ${selectedCaseNo && sp.tone !== 'historical' ? 'span-ghost-clickable' : ''}`}
                                 data-start-day={sp.startDay}
@@ -2923,11 +2989,14 @@ const SchedulingWorkbench: React.FC = () => {
                                 style={{
                                   left: `${leftPercent}%`,
                                   width: `${widthPercent}%`,
+                                  top: `${(sp.lane ?? 0) * 44 + 7}px`,
                                 }}
                                 title={`${sp.caseText}${sp.statusLabel ? ` (${sp.statusLabel})` : ''}${selectedCaseNo && sp.tone !== 'historical' ? ' — 點擊開啟詳細排查抽屜' : ''}`}
                                 onClick={(e) => {
-                                  if (selectedCaseNo && sp.tone !== 'historical') {
-                                    e.stopPropagation();
+                                  e.stopPropagation();
+                                  if (sp.shift) {
+                                    setSelectedShift(sp);
+                                  } else if (selectedCaseNo && sp.tone !== 'historical') {
                                     handleOpenStaffGhostDrawer(staff);
                                   }
                                 }}
@@ -2937,7 +3006,7 @@ const SchedulingWorkbench: React.FC = () => {
                                 {sp.statusLabel && (
                                   <small className="span-status-sub"> ({sp.statusLabel})</small>
                                 )}
-                              </div>
+                              </button>
                             );
                           })}
                         </div>
@@ -2971,6 +3040,16 @@ const SchedulingWorkbench: React.FC = () => {
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
+      <Drawer isOpen={selectedShift !== null} onClose={() => setSelectedShift(null)} title="班次明細">
+        {selectedShift?.shift && (
+          <div className="collision-drawer-content">
+            <strong>{selectedShift.caseText} · {selectedShift.statusLabel}</strong>
+            <p>日曆日期 {selectedShift.shift.work_date}{selectedShift.endDay !== selectedShift.startDay ? ` 至當月 ${selectedShift.endDay} 日` : ''}</p>
+            {selectedShift.shift.service_date && <p>首個服務日 {selectedShift.shift.service_date}</p>}
+            {selectedShift.shift.assignment_id && <p>指派 {selectedShift.shift.assignment_id}</p>}
+          </div>
+        )}
+      </Drawer>
       {/* 🔮 洽談檔期衝突檢測 暨 媒合排查 Slide-over Drawer (Unified wide size) */}
       <Drawer
         isOpen={collisionDrawerOpen}

@@ -134,17 +134,36 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
     assert query == "SELECT 1 AS staff_exists FROM staff WHERE id = %s"
     assert params == (7,)
 
+
+def test_same_day_shifts_and_overnight_continuation_are_distinct(monkeypatch):
+    rows = [
+        row(work_date=date(2026, 6, 30), assignment_id=10, service_start_time="22:00",
+            service_end_time="06:00", service_end_day_offset=1),
+        row(work_date=date(2026, 7, 1), assignment_id=11, service_start_time="08:00",
+            service_end_time="12:00", service_end_day_offset=0),
+        row(work_date=date(2026, 7, 1), assignment_id=12, service_start_time="13:00",
+            service_end_time="17:00", service_end_day_offset=0),
+    ]
+    connection = FakeConnection([{"id": 7}, rows, [], [], [], []])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(7, 2026, 7)
+    first_day = [item for item in result["days"] if item["work_date"] == "2026-07-01"]
+    assert [item["assignment_id"] for item in first_day] == [10, 11, 12]
+    assert first_day[0]["service_date"] == "2026-06-30"
+    assert first_day[0]["ends_at"] == "2026-07-01T06:00:00+08:00"
+    assert first_day[2]["starts_at"] == "2026-07-01T13:00:00+08:00"
+
     query, params = connection.cursor_obj.executed[1]
     assert "JOIN case_staff_assignments" in query
     assert "o.status AS order_status" in query
     assert "o.order_status" not in query
     assert "csa.status <> 'cancelled'" in query
-    assert params == (7, date(2026, 7, 1), date(2026, 7, 31))
+    assert params == (7, date(2026, 6, 30), date(2026, 7, 31))
     query, params = connection.cursor_obj.executed[3]
     assert "JOIN caregiver_availability_locks" in query
     assert "o.status AS order_status" in query
     assert "o.order_status" not in query
-    assert params == (7, date(2026, 7, 1), date(2026, 7, 31))
+    assert params == (7, date(2026, 6, 30), date(2026, 7, 31))
     query, params = connection.cursor_obj.executed[4]
     assert "COALESCE(o.actual_end_date, csa.assigned_end_date) AS calc_end_date" in query
     assert "assignment_id" in query
@@ -266,7 +285,7 @@ def test_future_service_keeps_its_post_assignment_collision_buffer(monkeypatch):
 
     for day in range(1, 8):
         item = result["days"][day - 1]
-        assert item["status"] == "waiting_deposit_lock"
+        assert item["status"] == "buffer"
         assert item["assignment_id"] == 56
 
 

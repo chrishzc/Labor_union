@@ -17,7 +17,7 @@
 | assignment 歸屬與區段歷史 | `case_staff_assignments` 的版本化有效紀錄 |
 | 每日正式服務 owner | effective `staff_schedule.assignment_id` |
 | completed assignment 的歷史區段 | `case_staff_assignments.status=completed` 與其正式起訖日 |
-| assignment 檔期占用 | 有效 assignment 的完整連續區間，包含排休與請假日 |
+| assignment 檔期占用 | 有效逐日服務班次的實際起訖時刻 |
 | actual hours | 正式服務日數 × Orders 每日服務時數 |
 | assignment status | 第一／最後正式服務時刻與 Global Clock |
 | leave／substitution lineage | batch header＋append-only 每日 outcome events |
@@ -35,28 +35,34 @@ Assignment Plan Query 與付款查核共用 current assignment 選取：有效 g
 
 - assignment／schedule 改動一律 Preview，Apply 時 cancel-old／create-new，不原地截短、換人或覆寫。
 - cancelled assignment 保留歷史但完全排除目前投影。
-- 同案同日只有一個正式服務 owner；不支援半日或分時交接。
+- 同案同一服務日只有一個正式服務 owner；同一月嫂可在同日承接不同案件的非重疊班次。
 - 全案有效正式服務量必須等於 Orders 契約服務量。
-- 全案條款變更只有在 current effective assignment 的 identity／人員／日期／區間形狀改變時才重建全部有效 assignments；費用、每日時數、下廚需求等不改變排班形狀的異動保留 current generation、assignment、schedule、buffer 與 occupancy。局部請假／代班只重建受影響 family，但仍重驗全案。
-- assignment 的整段連續區間都占用月嫂，休假不能被誤判為可接其他案件。
+- 全案條款變更只有在 current effective assignment 的 identity、人員、日期、區段或每日占用起訖改變時才重建全部有效 assignments；僅改費用、計薪時數或下廚等且不改排班形狀時保留 current generation。局部請假／代班只重建受影響 family，但仍重驗全案。
 - 一般洽談不占檔期；月嫂只表示承接意願。依規格 21 的自動保留裁決，客戶接受及 current
   confirmed service dates 齊備後，由最後條件的 Apply 在原 outer UoW 自動建立 waiting-deposit lock，
   不另要求人員按保留；衝突時該次 Apply 整筆 rollback。鎖定不要求月嫂先簽約或先形成
   precontract service commitment。
 - 訂金逾期只形成異常，不自動釋放。
 - 每個尚未開始服務的 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。Current Query 亦須以全案第一個正式服務時刻排除已開始／已完成案件的 stale active buffer root，不得讓 persistence marker 覆蓋 `planned／active／completed` lifecycle。
-- 七天 buffer 只作協調提醒；與其他案件 buffer 或實際服務重疊不阻擋 Query、聯繫、等待訂金鎖或正式排班。正式寫入仍須 fresh-lock 驗證完整 assignment interval／實際服務／有效 lock／不可服務事實；實際占用衝突必須零寫入，不提供強制重疊放行。buffer facts 與歷史 projection 保留，buffer 不再混入新的 hard occupancy projection。
+- 七天 buffer 只作協調提醒。正式寫入依下列班次占用規則 fresh-lock 重驗；實際占用衝突時排班變更零寫入。
 - 國定假日不自動雙倍薪；只接受明確 special-pay event。
 - 全部服務完成後不得取消訂單或縮減月嫂完整履約薪資。
 
 ## 4. Subsystems
 
+### 同日分時占用（2026-11-05 採用）
+
+- **SHIFT-01／班次。** Orders 擁有每日服務開始、結束、跨日標記。Scheduling 以有效服務日和其已確認的時段建立班次占用，以台北時區比較「含開始、不含結束」的時間區間。首尾相接可排，由人員確認通勤。跨午夜班占用兩個曆日，班次與工時只歸開始的服務日一次；完整排定時段參與占用，計薪仍使用約定工時。
+- **SHIFT-02／可用性。** 跨案重疊以有效班次、等待訂金保留的班次及月嫂不可服務期間計算。案件區段可跨休息日，但週休、未上班的國定假日、停班及核准後未服務的班次不占用原月嫂；代班占用實際承接者。月嫂本人全日不可服務期間仍阻擋該日相交的服務。資料缺漏且可能影響安排時回「時段待確認」，正式寫入暫停；不得將歷史唯讀指派當成現役占用。提醒、待確認和已證實衝突為不同結果。
+- **SHIFT-03／查詢與寫入。** 候選、案件排查、分段媒合、等待訂金、正式排班、開工、改期、請假／順延／代班及換人共用班次占用判定。對正式安排以 current owner 服務日、時段、現役占用和不可服務資料重驗；日期相同但改時段也須重驗。沿既有月嫂 mutex、版本與 outer UoW 保存。有效占用衝突須帶對造案件或占用來源、日期和重疊起訖；同案轉換鎖或重建只排除本次實際被替換的來源。既有待辦、冪等與零部分寫入契約照常適用。
+- **SHIFT-04／下游。** 班次的穩定案件、指派、服務日識別供更正及工時、Payroll、Client Finance、週報與通知消費。兩案各保留服務量與帳務歸屬；月嫂工時匯總可累加兩案，不能依月嫂及日期去重。開工、完工、日誌提醒及本案群組日期表使用該案有效班次時刻，沿各 owner 的凍結、通知及更正規則。
+
 ### Availability Query
 
-從 assignment interval、waiting lock、buffer 及其他案件占用推導可用日期。Staff holiday preference 只作排序，不是硬性淘汰；Query 不寫入。
+以案件需求的服務日及時段和 SHIFT-02 占用推導可用班次；初步詢問可沿預計服務期間做估算，並明示時段未知及衝突。Query 不寫入。
 
 依第 `24` 份正式規格，Availability Query 亦讀取 current `long_leave`／
-`temporarily_unavailable` 期間。與服務需求日期重疊時屬 actual conflict；七日 buffer 必須獨立回傳
+`temporarily_unavailable` 期間。與服務班次占用重疊時屬 actual conflict；七日 buffer 必須獨立回傳
 `buffer` 提醒，無需額外放行命令，不得與不可服務期間或正式占用混成同一 hard block。不可服務期間
 由 Scheduling 的 versioned Query 同時供 Matching 與 Calendar 使用。
 
@@ -67,9 +73,9 @@ Assignment Plan Query 與付款查核共用 current assignment 選取：有效 g
 ### Waiting Deposit Lock
 
 只提供 Acquire、Release-to-unbound、Cancel、Convert。訂金有效性由 Client Finance typed port 提供。服務區間與 buffer 同時查衝突，每次轉移保存事件。
-lock day 只對應該分段的正式服務日；固定週休不是 lock day。七日 buffer 是獨立衍生占用，
+每筆鎖保留該分段已確認服務日上的實際班次時段；固定週休不形成保留。七日 buffer 是獨立提醒，
 不得被 current projection 當成正式服務日，亦不得要求固定週休有 lock day。
-Preview 的 buffer conflict 是非阻擋提醒；只有 actual service／assignment／active lock conflict 阻擋 Acquire。buffer 不使用跨 assignment 的 staff/date 唯一限制；實際服務保留唯一限制。
+Preview 的 buffer conflict 是非阻擋提醒；按 SHIFT-02／03 阻擋重疊占用或待確認來源。同一月嫂可同日保留多個非重疊班次，轉正式排班與解除對應保留須在同一交易。
 
 ### Assignment Plan
 
@@ -89,7 +95,7 @@ Preview 的 buffer conflict 是非阻擋提醒；只有 actual service／assignm
    直到該段取得與 source segment 相同的 official-service-day count；最後一個 official service date 為該段
    `assigned_end_date`。
 3. 後續每段的 `assigned_start_date` 固定為前一段 `assigned_end_date + 1 day`，再依相同規則取得該段原有
-   service-day count。落在段首至第一服務日之間的休息日屬該段完整占用，不得形成未歸屬 gap。
+   service-day count。段首至第一服務日之間的休息日仍屬該段日期範圍，檔期占用依 SHIFT-02 判定。
 4. replacement 必須保留 segment 順序、staff identity、逐段服務量及一對一 source assignment lineage；
    不得換人、重新媒合、跨段挪用服務量或沿用只綁舊日期的假日上班同意。
 5. 全部 segments 的連續區間、每日唯一 ownership、總服務量、actual hours、人員占用、七日 buffer 與
@@ -336,23 +342,25 @@ Batch replay：
 
 「尋找月嫂與詢問意願」中的每週服務說明不是日曆排班來源。日曆可顯示歷史區間，不表示該區間可計入「每週服務中與工時」；工時表另要求目前有效逐日排班。來源修改套用後，重新查詢取得最新投影。
 
-#### 日曆顯示優先順序與排班替換標準（2026-10-15 澄清）
+#### 同日多班顯示與排班替換
 
-日曆查詢只讀取、組合目前資料，不寫入或覆寫排班。顯示優先順序與業務操作造成的排班替換分開判定：
+**SHIFT-05／月曆。** Scheduling 逐月、逐人回傳每個曆日的班次列表及各自的來源識別、狀態與起訖。工會端沿用「排班日曆與調度」的多人甘特月曆，左側固定月嫂、橫向是日期。同人同日的班次在同一人員列內按起始時間上下並列，顯示案件、時段和狀態。連續日期可合併成一條的前提是班次來源、每日時段與狀態一致；排休或時段改變須分開。案件排查的需求班次與既有班次分層顯示，逐月嫂呈現可排、重疊時段或待確認，可定位到該班次的案件、指派與服務日。窄畫面可橫向捲動，保留人員辨識及班次明細入口。
+
+月嫂本人 LINE 查詢只顯示本人班次，窄日格可顯示第一筆及「另 N 筆」，點開可看完整明細。兩個介面的跨日班均於相交曆日分段顯示，後一日標示續班，明細共用原班次識別及完整起訖。休假、緩衝、不可服務與唯讀歷史各自標示；可證實的撞班保留雙方並標出重疊起訖。空白不推導可用性；查詢零寫入。
 
 | 情況 | 處理標準 |
 |---|---|
 | 新的每週服務說明或只保存服務日期 | 不替換已存在的排班；後續仍須經排班建立／調整操作及相關 gate 驗證 |
-| 同案人員、日期或指派區間有變更 | 經相應改期、換人、請假／順延／代班的 Preview／Apply，通過版本、服務量及占用檢查後，以新有效排班取代舊有效排班；舊紀錄與變更血緣保留，不原地改寫 |
-| 只改費用、每日時數或其他不改人員／日期／區間的條件 | 保留原排班版本；相關帳務或工時依其 owner 更新，不因此另建排班 |
+| 同案人員、日期、指派區段或班次起訖有變更 | 經相應 owner 的 Preview／Apply，通過版本、服務量及占用檢查後，以新有效排班取代舊有效排班；保留舊紀錄與變更血緣 |
+| 只改費用、計薪時數或其他不改排班形狀的條件 | 保留原排班版本；相關帳務或工時依其 owner 更新 |
 | 等待訂金檔期轉成排班 | 契約、訂金與日期確認等關卡符合，排班建立成功後由同一交易轉換檔期保留；不能在日曆查詢時自動轉換 |
-| 目前資料與歷史指派區間重疊 | 目前有效排班、檔期保留、緩衝或不可服務資料優先；歷史區間只補沒有目前資料的日期。已重啟精算而失效的舊歷史指派不再補顯示 |
+| 目前班次與歷史指派在同日 | 分別顯示。目前班次決定現役占用，歷史維持唯讀；已重啟精算而失效的歷史來源不再顯示 |
 | 多筆目前占用互相衝突 | 排班、等待訂金服務日與不可服務期間不得靠顯示順序互相覆蓋；回 typed conflict，修改操作零寫入，由人員依相應流程調整 |
 | 緩衝提醒與其他資料重疊 | 緩衝是提醒，可與排班等資料並列；不取代工作日、不改月嫂服務狀態，也不以緩衝重疊阻擋安排 |
 
 替換後只讀新的有效排班作為目前排班，重新查詢日曆顯示結果；保留歷史不代表舊排班仍同時有效。
 
-逐日顯示 waiting lock、buffer、assignment interval、排班工作日與休假。只組合 typed ViewModel，不在 Query 或 render 時轉移狀態。
+逐日組合型別化班次、等待訂金保留、緩衝與休假資料；Query 和畫面皆不轉移狀態。
 
 Calendar 亦顯示 current 長假／暫停接案的日期、kind 與原因。這些日期不可標為可接案、排班服務日、
 assignment leave outcome 或七日 buffer；取消後保留歷史但不再出現在 current availability projection。
@@ -380,15 +388,7 @@ Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一�
   `case_no`，也不得使用 `orders.staff_id`／`staff_name` fallback 或逐案 N+1 查詢補選項。
 - 下拉選單須有 loading、合法空、error、retry、stale request cancellation 與 identity-preserving refresh；
   options query 失敗時不掛載 Preview／Apply，且不得保留上一位月嫂的 stale 案件。
-- 選定排查案件後，每位月嫂的月曆列須以一個連續區間顯示該案件的完整排班服務檔期；若完整檔期內
-  任一天與 assignment、lock、buffer 或不可服務期間衝突，仍顯示整段案件檔期並將整段標示為有衝突，
-  衝突天數與原因留在狀態文字／詳細排查中。不得只渲染零碎衝突日期而隱藏同案其餘服務日期。
-
-驗收狀態（2026-08-25）：`completed`。Calendar 已以 typed 下拉選案，並依同日最新人工裁決改為
-完整服務檔期連續投影；任一日期衝突時，整段檔期顯示衝突。Focused tests／React build 已通過；
-最新 Chrome 實選跨月案件 `115000008`（`2026-09-05 ～ 2026-10-13`），九月投影為 9/5～9/30、
-十月投影為 10/1～10/13；同一月嫂若任一天有 typed 衝突，兩個月的可見區段皆顯示整段受影響。
-月份切換與清除案件後無 stale 投影或 API error。
+- 排查案件後保留完整需求期間，分別標出可排的需求班次、實際衝突的班次和重疊起訖；同日其他時段不得使整段需求變成衝突。沒有需求時段時顯示「待確認服務時段」；七日 buffer 另列提醒。切換月份或清除案件時同步更新排查投影。
 
 #### Completed assignment historical projection（2026-08-12）
 
@@ -396,12 +396,11 @@ Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一�
 leave／substitution 等 mutation，不得使歷史區段消失。Query 優先顯示
 assignment-owned `staff_schedule.assignment_id` 的每日 ownership；若 historical／legacy
 資料缺少該 daily ownership，但 `case_staff_assignments` 保有 completed assignment 的起訖日，
-Calendar 必須以該區段顯示 `historical_assignment`／「歷史指派」。此 fallback 是歷史占用
-view，不能宣稱為排班工作日、不能重算 actual hours、不能產生薪資、不能變更 availability
+Calendar 必須以該區段顯示 `historical_assignment`／「歷史指派」。此投影可在同日與現役班次並列；
+可證實的時段照實顯示，缺時段時明示未確認。歷史投影不形成排班工作日、actual hours、薪資、availability
 current projection，也不能授權任何 Apply。
 
-同一天若同時存在 assignment-owned daily schedule、waiting lock、buffer 或其他 current fact，
-該 current fact 優先；historical fallback 只填補沒有較高權威逐日事實的日期。Calendar 不得使用
+已有同一指派同一服務日的正式班次時，避免再顯示重複的歷史摘要。Calendar 不得使用
 `orders.actual_start_date`、`orders.staff_id`、legacy 無 `assignment_id` 的 `staff_schedule` 或 UI
 自行推算，將完成案歷史誤標為「可接案」或「服務工作日」。
 
@@ -471,7 +470,7 @@ fingerprint。任一不同均零 mutation 回 conflict；不得信任 Preview sn
 
 - **已確認採用 `generation + effective` 模型**：每次正式 Apply 取消舊有效 generation、完整保留其 assignment／schedule 歷史，並建立新的 effective generation；目前排班、工時、檔期與薪資只讀 effective generation。
 - 同一個 `case_no` 同一時間只能有一個 effective scheduling generation；切換 effective generation 必須與新 assignments、schedules、重建事件及 aggregate version 在同一交易完成。
-- `UNIQUE(staff_id, work_date)` 與 `UNIQUE(case_no, assignment_sequence)` 必須納入 generation／effective 語意，使歷史 generation 與目前 generation 可共存，同時仍禁止 effective generation 內重複 ownership。
+- 保留每案每有效 generation 的逐日 ownership 與 assignment sequence 唯一性。排班、等待訂金及有效占用的資料識別須容許同人同日多筆，按 SHIFT-01～03 排除時段重疊。既有時段無法證實的有效資料保留待確認，不猜填。
 - 建立通用 rebuild command/event，保存 old/new sets、actor、reason、version、fingerprint 及 idempotency key。
 - lock day 必須區分 `service` 與 `buffer`；buffer 有獨立 lifecycle。
 - `staff_schedule.assignment_id` 必須進入 base schema，正式歷史不得 `ON DELETE CASCADE`。
@@ -485,7 +484,10 @@ fingerprint。任一不同均零 mutation 回 conflict；不得信任 Preview sn
 
 ## 8. 驗收
 
-Module 驗證 coverage、full-interval occupancy、七日 buffer、時區、hours 與 fingerprint。
+Module 驗證服務量、同日非重疊、首尾相接、部分重疊、跨午夜與跨月、空時段、排休／代班、不可服務、七日 buffer 及占用時間與工時分離。
+Subsystem 另驗證查詢、等待訂金、正式排班與月曆結果一致；非重疊兩班均成立，並行重疊只成立一筆。
+工會端以桌面及窄畫面驗證多人甘特同日多班、連續班條、固定人員欄、明細、逐人案件排查、真衝突、續班與歷史並列；LINE 驗證本人範圍及同日多班。
+保留資料升級與 fresh bootstrap 依規格 10 各自驗證。所有讀寫入口可處理多筆後再開放同日多班；需回退時先停止新增並保留已成立的班次及多筆讀取能力。
 Subsystem 使用隔離 MySQL 驗證 Preview 零寫入、cancel/create、exact batch replay、
 batch-key payload mismatch、partial replay corruption、鎖後 impacted-staff set 擴張、
 相反 staff 順序的並行命令、stale、占用衝突及 rollback。Domain 覆蓋單／多月嫂、
@@ -504,7 +506,7 @@ receipt／outbox 一併寫入 bounded `anomaly.recheck` intent。readback 不完
 | Code／subject | Active predicate（current roots） | 唯一合法 owner operation | Completion predicate | Closed unresolved reasons |
 |---|---|---|---|---|
 | `SCHEDULE-002` / `assignment_id` | current replacement／substitution lineage 不完整：既有 assignment 已失效，但 exact successor、受影響每日 outcome、official ownership 或必要 Payroll／Finance impact 仍有缺口 | 未有任何正式服務日時使用 `Preview／ApplyAssignmentPlan`建立新 effective generation；已有正式服務日時使用 `Preview／ApplyLeaveSubstitutionBatch`只重建受影響 family | exact old/new lineage 存在，每日 outcome、official ownership、全案 coverage／hours 與必要 Payroll／Finance impacts 全部完整 | `replacement_successor_missing`, `daily_outcome_incomplete`, `service_ownership_incomplete`, `payroll_impact_incomplete`, `finance_impact_incomplete`, `owner_readback_incomplete` |
-| `SCHEDULE-003` / sorted `assignment_id_a + assignment_id_b` | 兩個 current effective assignments 使同一 staff 的完整占用區間重疊 | 人員在 `Preview／ApplyAssignmentPlan` 明確選定受修正案件與 candidate；Apply 仍以 cancel-old／create-new 重建該案 current generation，並 fresh 驗證另一 assignment 的占用 | 該 canonical pair 在 current effective generations 不再重疊，兩案 coverage／ownership／hours 仍合法 | `correction_target_not_selected`, `staff_occupancy_conflict`, `coverage_incomplete`, `owner_readback_incomplete` |
+| `SCHEDULE-003` / sorted `assignment_id_a + assignment_id_b` | 兩個 current effective assignments 的班次占用在同一月嫂時間軸上實際重疊 | 人員在 `Preview／ApplyAssignmentPlan` 明確選定受修正案件與 candidate；Apply 以 cancel-old／create-new 重建該案 current generation，並 fresh 驗證另一 assignment 的占用 | 該 canonical pair 的有效班次不再重疊，兩案 coverage／ownership／hours 仍合法 | `correction_target_not_selected`, `staff_occupancy_conflict`, `coverage_incomplete`, `owner_readback_incomplete` |
 | `SCHEDULE-006` / `case_no + generation` | current effective generation 的 official service dates、daily ownership、coverage、hours 或 staff occupancy 任一違反本規格，或有效服務量不等於 Orders 契約服務量 | `Preview／ApplyAssignmentPlan` 以 current Orders terms 與 Scheduling roots 重建完整 generation | 同一 current snapshot 下 official dates、ownership、coverage、hours、occupancy 與唯一 effective generation 全部合法 | `official_service_dates_invalid`, `service_ownership_conflict`, `coverage_incomplete`, `hours_mismatch`, `staff_occupancy_conflict`, `generation_conflict`, `owner_readback_incomplete` |
 
 ```yaml
@@ -596,7 +598,7 @@ Stable errors：
 Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候選月嫂聯繫事實：候選人、完整 coverage evidence、資訊-1／資訊-2 發送事件與 delivery 狀態、月嫂意願、拒絕理由、人工補登 actor／時間。它不是 `caregiver_matching_plans` 或 `caregiver_matching_plan_segments`，不得建立 availability lock、正式 assignment、staff schedule、日期表 snapshot、客戶履歷傳送或正式指派資格。
 
 - 一次可加入多位候選人；對預計服務日期有部分或全部檔期衝突的人選仍可聯繫協調。加入與每次資訊發送皆須 fresh-read availability，保留目前 coverage evidence，不得把有衝突的人選標示成完整無衝突。
-- 初步意願詢問以預計起訖期間檢查檔期，不要求 BeClass 或正式服務日期精算完成；未填需求仍為未知、顯示待確認，不得寫成 false。已填需求才參與啟用的查詢篩選；「偏好服務日」與「每日服務時數」勾選時，只列出符合已填需求的月嫂，未勾選時不以該項排除。查詢畫面每人只顯示空閒／總天數及彙總衝突提醒，不逐日列出衝突。加入／聯絡時重新檢查占用與不可服務期間，不重新套用使用者查詢偏好；詢問 coverage 不形成正式服務日、工時、薪資、assignment 或方案資格。單月嫂推薦沿下述「推薦、客戶決定與結果核對」的詢問／說明日期分工；多月嫂分段與實際保留／正式安排仍須其完整日期及 fresh-fact gates。
+- 初步詢問依預計期間及已知時段估算檔期，不要求 BeClass 或正式日期精算完成。時段缺漏顯示待確認；每人摘要顯示可承接、衝突或待確認的需求班次，明細可查實際重疊。偏好提示沿規格 24，加入／聯絡須重新讀取占用及不可服務。詢問 coverage 不建立正式服務日、工時、薪資、指派或方案資格。正式分段、保留與排班須依 SHIFT-03 核對 current 班次。
 - 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
 - 每位候選人的意願及資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
 - 2026-10-14 人工裁決：候選與詢問使用同一個案件共用資訊入口，未有候選也能查閱；服務條件與費用、照護與飲食需求、每週服務說明三份內容可各自選擇候選月嫂並分開寄送。收件人確認與 Apply 仍逐人核對 canonical bound LINE identity、current facts、preview fingerprint 及 event key，同一份內容與每人的投遞回條分别保留；共用畫面不建立虛構 candidate／assignment。
@@ -706,9 +708,9 @@ version、idempotency identity 與正式回讀；不得為填滿依據捏造聯�
 
 | 條件 | 正式意義與行為 |
 |---|---|
-| 有效 assignment／實際班表、有效等待鎖或不可服務期間與本次需求重疊 | 實際檔期衝突；阻擋保留／正式安排，回可辨識的 typed blocker，沿既有權限呈現衝突日期及來源 |
+| 有效服務班次、等待訂金保留班次或不可服務期間與需求班次的實際時段重疊 | 實際檔期衝突；阻擋保留／正式安排，回可辨識的 typed blocker，沿既有權限呈現日期、重疊起訖及來源 |
 | 日期不齊、服務量不符、分段 gap／overlap／超出合法範圍 | 日期或方案問題；回對應 typed validation／domain blocker，指出應調整的資料，不稱為月嫂已有排班衝突 |
-| 無法追溯 owner 的舊班表或來源不完整 | 資料待查核；不得宣稱已證實占用，也不得當成空閒放行正式保留 |
+| 需求或可能相交的有效占用缺少可追溯時段 | 時段待確認；不得宣稱已證實占用，也不得當成空閒放行正式保留 |
 | 七日 buffer 重疊 | 獨立協調提醒；沿既有規則不作 hard blocker |
 | owner version 已變 | typed conflict；重新讀取，不以 generic 500 或自動換鍵重送掩蓋 |
 

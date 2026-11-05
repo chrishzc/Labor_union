@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from domains.scheduling.assignment_plan import first_shift_conflict
+from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
+
 import json
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from infrastructure.mysql.assignment_plan_repository import load_occupancy_snapshot
+
 from infrastructure.mysql.order_terms_read_model import (
     lock_staff_mutexes,
     preflight_staff_ids,
@@ -147,23 +150,11 @@ class MySqlOfficialServiceDateCorrectionRepository:
         )
 
     def validate_availability(self, candidate, *, lock: bool) -> None:
-        staff_ids = tuple(sorted({assignment.staff_id for assignment in candidate.assignments}))
+        staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
         with self._connection.cursor() as cursor:
-            occupied, _ = load_occupancy_snapshot(
-                cursor, staff_ids, candidate.case_no, lock=lock,
-            )
-        proposed = {
-            (assignment.staff_id, assignment.assigned_start_date + timedelta(days=offset))
-            for assignment in candidate.assignments
-            for offset in range(
-                (assignment.assigned_end_date - assignment.assigned_start_date).days + 1
-            )
-        }
-        if any(
-            (fact.staff_id, fact.occupancy_date) in proposed
-            and fact.source_case_no != candidate.case_no
-            for fact in occupied
-        ):
+            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
+            service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
+        if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
             raise ValueError("official_date_occupancy_conflict")
 
     def load_history(self, case_no: str) -> tuple[OfficialDateHistoryRecord, ...]:

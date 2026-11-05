@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from domains.scheduling.assignment_plan import first_shift_conflict
+from infrastructure.mysql.scheduling_occupancy_facts import load_case_service_time, load_occupancy_snapshot
+
 from collections.abc import Mapping
 from datetime import date, timedelta
 import json
@@ -58,11 +61,6 @@ from .order_terms_read_model import (
 from .scheduling_replacement_writer import persist_scheduling_replacement
 from .scheduling_holiday_query import MySqlSchedulingHolidayQuery
 from .historical_actual_start_date_planner import _canonical_service_mode
-from .assignment_plan_repository import (
-    _effective_occupancy_rows,
-    _waiting_lock_rows,
-    _leave_occupancy_rows,
-)
 from .payroll_terms_writer import (
     load_actual_start_source_rate_snapshots,
     persist_actual_start_rate_snapshot_carry,
@@ -324,14 +322,7 @@ class MySqlOrderActualStartRepository:
                 cursor, assignments, lock=lock,
             )
 
-    def validate_replacement_availability(self, candidate, *, lock):
-        occupied = {
-            (assignment.staff_id, assignment.assigned_start_date + timedelta(days=offset))
-            for assignment in candidate.assignments
-            for offset in range(
-                (assignment.assigned_end_date - assignment.assigned_start_date).days + 1
-            )
-        }
+    def validate_replacement_availability(self, candidate, *, lock: bool) -> None:
         staff_ids = tuple(sorted({item.staff_id for item in candidate.assignments}))
         with self._connection.cursor() as cursor:
             placeholders = ",".join("%s" for _ in staff_ids)
@@ -342,22 +333,15 @@ class MySqlOrderActualStartRepository:
                 + (" FOR UPDATE" if lock else ""),
                 staff_ids,
             )
-            staff_rows = tuple(cursor.fetchall())
-            if tuple(int(row["id"]) for row in staff_rows) != staff_ids or any(
+            rows = tuple(cursor.fetchall())
+            if tuple(int(row["id"]) for row in rows) != staff_ids or any(
                 row["status"] != "active" or row["lifecycle_state"] == "retired"
-                for row in staff_rows
+                for row in rows
             ):
                 raise ValueError("actual_start_staff_ineligible_blocked")
-            rows = (
-                *_effective_occupancy_rows(cursor, staff_ids, lock),
-                *_waiting_lock_rows(cursor, staff_ids, lock),
-                *_leave_occupancy_rows(cursor, staff_ids, lock),
-            )
-        if any(
-            (int(row["staff_id"]), row["occupancy_date"]) in occupied
-            and str(row["case_no"]) != candidate.case_no
-            for row in rows
-        ):
+            occupied, _ = load_occupancy_snapshot(cursor, staff_ids, candidate.case_no, lock=lock)
+            service_time = load_case_service_time(cursor, candidate.case_no, lock=lock)
+        if first_shift_conflict(candidate.case_no, service_time, candidate.assignments, occupied):
             raise ValueError("actual_start_staff_schedule_conflict")
 
     def claim_actual_start_command(

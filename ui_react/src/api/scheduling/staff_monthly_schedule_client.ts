@@ -6,7 +6,7 @@ import { ApiDecodeError } from '../shared/typed_errors';
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const DaySchema = z.strictObject({
   work_date: DateSchema,
-  status: z.enum(['available', 'working', 'resting', 'historical_assignment', 'waiting_deposit_lock', 'staff_unavailability']),
+  status: z.enum(['available', 'working', 'resting', 'historical_assignment', 'waiting_deposit_lock', 'staff_unavailability', 'buffer']),
   assignment_id: z.number().int().positive().nullable().optional(),
   case_no: z.string().nullable().optional(),
   staff_id: z.number().int().positive(),
@@ -16,6 +16,9 @@ const DaySchema = z.strictObject({
   is_work_day: z.boolean(),
   is_double_pay: z.boolean(),
   notes: z.string().nullable().optional(),
+  service_date: DateSchema.nullable().optional(),
+  starts_at: z.string().nullable().optional(),
+  ends_at: z.string().nullable().optional(),
   lock_id: z.number().int().positive().nullable().optional(),
   plan_id: z.number().int().positive().nullable().optional(),
   unavailability_block_id: z.number().int().positive().nullable().optional(),
