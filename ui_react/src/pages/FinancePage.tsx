@@ -27,7 +27,8 @@ import { HistoricalCompletionPanel } from '../components/HistoricalCompletionPan
 
 import { FinanceReceiptsWorkspace } from '../components/FinanceReceiptsWorkspace';
 import { FinancePaymentsWorkspace } from '../components/FinancePaymentsWorkspace';
-import { CaseSubsidyDetailDrawer } from '../components/CaseSubsidyDetailDrawer';
+import { FinanceCaseList } from '../components/FinanceCaseList';
+import { FinanceGovernmentSubsidyList } from '../components/FinanceGovernmentSubsidyList';
 import { FinanceCaseHistory } from '../components/FinanceCaseHistory';
 import { FinanceMonthlyAccounting } from '../components/FinanceMonthlyAccounting';
 import type { AccountingRange } from '../api/finance_import/monthly_accounting_client';
@@ -35,9 +36,10 @@ import { FinanceReceivableItems, type ReceivableFilters } from '../components/Fi
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
 import { FinanceWarningWorkspace } from '../components/FinanceWarningWorkspace';
 import { PaymentReceiptNoticeWorkbench } from '../components/PaymentReceiptNoticeWorkbench';
+import { FinancePostedBankTransactions } from '../components/FinancePostedBankTransactions';
 import { FinanceStatementArchive } from '../components/FinanceStatementArchive';
 
-type FinanceTab = 'monthly' | 'receipt-notices' | 'pending' | 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'case-accounting' | 'accounting-warnings';
+type FinanceTab = 'government-list' | 'monthly' | 'receipt-notices' | 'pending' | 'receipts' | 'payments' | 'client-receipts' | 'staff-payables' | 'finance-import' | 'case-accounting' | 'accounting-warnings';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
 type FinanceImportReviewSnapshot = {
   batchIdentity: string;
@@ -105,13 +107,15 @@ export const FinancePage: React.FC = () => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return { tab: params.get('tab'), overdue: params.get('view') === 'overdue', caseNo: (params.get('case_no') ?? '').slice(0, 50), fromWorkbench: params.get('from') === 'workbench' };
   });
-  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.overdue ? 'accounting-warnings' : entry.tab === 'case-accounting' || entry.tab === 'client-receipts' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'receipt-notices' ? 'receipt-notices' : entry.tab === 'pending' ? 'pending' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'case-accounting' : entry.tab === 'receipts' || entry.tab === 'subsidy-advance' ? 'receipts' : 'monthly');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(entry.overdue ? 'accounting-warnings' : entry.tab === 'case-accounting' || entry.tab === 'client-receipts' ? 'case-accounting' : entry.tab === 'accounting-warnings' ? 'accounting-warnings' : entry.tab === 'finance-import' || entry.tab === 'bank' ? 'finance-import' : entry.tab === 'receipt-notices' ? 'receipt-notices' : entry.tab === 'pending' ? 'pending' : entry.tab === 'staff-payables' ? 'staff-payables' : entry.tab === 'payments' || entry.tab === 'accounts-payable' || entry.tab === 'cross-order' ? 'payments' : entry.caseNo && entry.tab !== 'subsidy-advance' ? 'case-accounting' : entry.tab === 'receipts' || entry.tab === 'subsidy-advance' ? 'receipts' : entry.tab === 'government-list' ? 'government-list' : entry.tab === 'monthly' ? 'monthly' : 'case-accounting');
   const [detailReturn, setDetailReturn] = useState<'receipts' | 'payments' | 'monthly' | 'pending'>('monthly');
-  const [subsidyCase, setSubsidyCase] = useState(entry.tab === 'subsidy-advance' || entry.tab === 'cross-order' ? entry.caseNo : '');
-  const activeWorkspace = ['monthly','receipts','payments','staff-payables','pending','receipt-notices'].includes(activeTab) ? 'receipts' : activeTab === 'client-receipts' ? 'case-accounting' : activeTab;
-  const [monthlyRange,setMonthlyRange] = useState<AccountingRange>(()=>({start_month:currentMonth(),end_month:currentMonth(),category:'subsidy'}));
+  const [caseDrawer,setCaseDrawer]=useState(entry.caseNo);
+  const [caseNotice,setCaseNotice]=useState<'deposit'|'first'|'second'|undefined>();
+  const setSubsidyCase=(caseNo:string)=>{if(caseNo)openCase(caseNo);};
+  const activeWorkspace = activeTab === 'client-receipts' ? 'case-accounting' : activeTab;
+  const [monthlyRange,setMonthlyRange] = useState<AccountingRange>(()=>({start_month:currentMonth(),end_month:currentMonth(),category:'all'}));
   const [receivableFilters,setReceivableFilters] = useState<ReceivableFilters>(()=>({month:currentMonth(),category:'subsidy',status:'all',search:''}));
-  const openCase = (caseNo: string) => { setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeTab === 'pending' ? 'pending' : activeTab === 'monthly' ? 'monthly' : activeTab === 'payments' || activeTab === 'staff-payables' ? 'payments' : 'receipts'); setActiveTab('case-accounting'); };
+  const openCase = (caseNo: string,noticeStage?:'deposit'|'first'|'second') => { setCaseNotice(noticeStage); setSelectedCase(caseNo); setCaseQuery(caseNo); setDetailReturn(activeTab === 'pending' ? 'pending' : activeTab === 'monthly' ? 'monthly' : activeTab === 'payments' || activeTab === 'staff-payables' ? 'payments' : 'receipts'); setCaseDrawer(caseNo); };
   const openBank = () => { setSubsidyCase(''); setActiveTab('finance-import'); };
 
   const [cases, setCases] = useState<{ id: string; label: string; orderStatus: string }[]>([]);
@@ -358,7 +362,7 @@ export const FinancePage: React.FC = () => {
     setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
-      const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${snapshot.sha256}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
+      const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${crypto.randomUUID()}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
       setIngestion({ kind: 'ready', data: receipt });
       await previewImportedBatch(receipt);
     } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請重新選擇檔案。') }); }
@@ -440,20 +444,19 @@ export const FinancePage: React.FC = () => {
     <div data-surface-id="finance.page">
       {entry.fromWorkbench && entry.caseNo && <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>← 返回案件處理</a>}
       <header className="page-header-banner finance-page-header">
-        <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">收付款按月份總覽，單案帳務集中查閱與處理。</p></div>
+        <div><h1 className="page-title">帳務工作台</h1><p className="page-subtitle">第8步起追蹤客戶收款與補助退款方案確認，銀行對帳及月報沿原作業處理。</p></div>
 
       </header>
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
-        {([['receipts', '收付款'], ['case-accounting', '案件帳務'], ['finance-import', '銀行對帳'], ['accounting-warnings', '逾期提醒']] as const).map(([id, label]) => <button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace === id ? 'active' : ''} aria-current={activeWorkspace === id ? 'page' : undefined} onClick={() => { if ((id) !== activeTab) requestLeave(() => setActiveTab(id==='receipts'?'monthly':id)); }}>{label}</button>)}
+        {([['case-accounting','進行中案件'],['finance-import','銀行對帳'],['government-list','政府補助清單'],['monthly','每月帳務']] as const).map(([id,label])=><button key={id} type="button" data-surface-id={`finance.tab.${id}`} className={activeWorkspace===id?'active':''} aria-current={activeWorkspace===id?'page':undefined} onClick={()=>requestLeave(()=>setActiveTab(id))}>{label}</button>)}
       </nav>
-      {activeWorkspace==='receipts'&&<nav className="finance-tab-bar" aria-label="收付款功能">{([['monthly','每月帳務'],['receipts','應收款'],['payments','應付款'],['staff-payables','人員付款'],['pending','待確認與預估'],['receipt-notices','入帳通知']] as const).map(([id,label])=><button type="button" key={id} aria-current={activeTab===id?'page':undefined} className={activeTab===id?'active':''} onClick={()=>requestLeave(()=>setActiveTab(id))}>{label}</button>)}</nav>}
       {activeTab==='receipt-notices'&&<PaymentReceiptNoticeWorkbench revision={reload} expanded/>}
-      {activeTab==='monthly'&&<FinanceMonthlyAccounting initialRange={monthlyRange} onRangeChange={setMonthlyRange} onCase={openCase}/>}
+      {activeTab==='monthly'&&<FinanceMonthlyAccounting revision={reload} initialRange={monthlyRange} onRangeChange={setMonthlyRange} onCase={openCase}/>}
       {activeTab==='pending'&&<><FinanceReceivableItems revision={reload} undatedOnly onCase={openCase}/><FinancePaymentsWorkspace pendingOnly revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId=>{if(staffId!==undefined)setSelectedStaff(staffId);setActiveTab('staff-payables');}} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank}/></>}
       {(activeTab === 'client-receipts' || activeTab === 'staff-payables') && <div className="finance-toolbar"><button type="button" className="finance-reload-btn" onClick={() => { requestLeave(() => setActiveTab(activeTab === 'staff-payables' ? 'payments' : detailReturn)); }}>← 返回{activeTab === 'staff-payables' || detailReturn === 'payments' ? '付款' : '收款'}清單</button><div className="finance-row-actions">{selectedCase && activeTab === 'client-receipts' && <button type="button" onClick={() => setSubsidyCase(selectedCase)}>案件補助明細</button>}<button type="button" onClick={() => setReload(value => value + 1)}>重新整理</button></div></div>}
       {activeTab === 'receipts' && <FinanceReceiptsWorkspace revision={reload} initialFilters={receivableFilters} onFiltersChange={setReceivableFilters} initialView={entry.overdue?'overdue':'all'} onOpenBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} initialSource={entry.tab === 'subsidy-advance' ? 'government' : 'client'} initialRecovery={entry.tab === 'subsidy-advance'} onOpenCase={openCase} onOpenSubsidy={setSubsidyCase} />}
       {activeTab === 'payments' && <FinancePaymentsWorkspace revision={reload} targetMonth={targetMonth} onMonthChange={setTargetMonth} onOpenCase={openCase} onOpenStaff={staffId => { if (staffId !== undefined) setSelectedStaff(staffId); setActiveTab('staff-payables'); }} onOpenSubsidy={setSubsidyCase} onOpenBank={openBank} />}
-      {subsidyCase && <CaseSubsidyDetailDrawer key={subsidyCase} caseNo={subsidyCase} onClose={() => setSubsidyCase('')} onOpenBank={openBank} onChanged={() => setReload(value => value + 1)} />}
+
       {activeTab === 'client-receipts' && (
         <section className="finance-workspace">
           <div className="finance-section-heading">
@@ -667,8 +670,10 @@ export const FinancePage: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'case-accounting' && <><button type="button" className="finance-btn-link" onClick={()=>requestLeave(()=>setActiveTab(detailReturn))}>← 返回收付款</button><FinanceCaseAccounting key={selectedCase} initialCase={selectedCase} onBank={openBank} onSubsidy={setSubsidyCase} onLegacy={caseNo=>requestLeave(()=>{setSelectedCase(caseNo);setCaseQuery(caseNo);setActiveTab('client-receipts');})}/></>}
-      {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={caseNo => { setSelectedCase(caseNo); setActiveTab('case-accounting'); }} onBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} />}
+      {activeTab==='case-accounting'&&<FinanceCaseList revision={reload} onCase={openCase} onNotice={(caseNo,stage)=>openCase(caseNo,stage)}/>}
+      {activeTab==='government-list'&&<FinanceGovernmentSubsidyList revision={reload} onCase={openCase}/>}
+
+      {activeTab === 'accounting-warnings' && <FinanceWarningWorkspace onCase={openCase} onBank={caseNo=>{setSelectedCase(caseNo);setCaseQuery(caseNo);openBank();}} />}
       {activeTab === 'finance-import' && (
         <section className="finance-workspace" data-surface-id="finance.finance-import.workflow">
           {/* 1. 緊湊型頂部工具列 */}
@@ -762,6 +767,7 @@ export const FinancePage: React.FC = () => {
           {ingestion.kind === 'error' && <StateMessage state={ingestion} empty="" />}
           {batchPreview.kind === 'error' && <StateMessage state={batchPreview} empty="" />}
 
+          <FinancePostedBankTransactions onCase={openCase} revision={reload}/>
           {/* 3. 核心未銷帳明細工作台 (常駐呈現) */}
           <div style={{ marginTop: '10px' }}>
             {(confirmedImportReceipt || (batchPreview.kind === 'ready' && !importBusy && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch === 0))) && (
@@ -910,6 +916,10 @@ export const FinancePage: React.FC = () => {
           </div>
         </section>
       )}
+      <details className="finance-related-tools"><summary>其他帳務作業</summary><nav className="finance-tab-bar" aria-label="帳務相關工具">{([['receipts','應收款'],['payments','應付款'],['staff-payables','人員付款'],['pending','待確認與預估'],['receipt-notices','入帳通知'],['accounting-warnings','逾期提醒']] as const).map(([id,label])=><button type="button" key={id} aria-current={activeTab===id?'page':undefined} onClick={()=>requestLeave(()=>setActiveTab(id))}>{label}</button>)}</nav></details>
+      {caseDrawer&&<Drawer isOpen title={'案件帳務 · '+caseDrawer} ariaLabel={'案件帳務 · '+caseDrawer} closeLabel="關閉案件" size="xl" className="finance-accounting-drawer" onClose={()=>setCaseDrawer('')} footer={<button type="button" className="finance-btn-secondary" onClick={()=>requestLeave(()=>setCaseDrawer(''))}>關閉案件</button>}>
+        <FinanceCaseAccounting key={caseDrawer} embedded initialCase={caseDrawer} initialNoticeStage={caseNotice} onChanged={()=>setReload(value=>value+1)}/>
+      </Drawer>}
     </div>
   );
 };
