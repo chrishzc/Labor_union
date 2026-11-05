@@ -151,6 +151,8 @@ React adapter 不再自行解讀中文狀態縮減集合；focused tests 與 pro
 
 ### 3.1.4 非市民案件沿用訂單推進（2026-10-29 人工確認）
 
+2026-11-03 人工補充（僅規格，尚未實作）：非市民是補助資格不符合，不是服務受理不符合。原 HCM 報名作廢後，自費服務只能另走 `17` §5.1.1 的非市民專用報名、核准及 A 字頭配號；不得沿原 HCM 報名／案號繼續推進。HCM 原申請的「審核不符合」與 A 字頭案件的生命週期分開，不能據此前者把已核准自費案件判成取消／審核不符合。實際 HCM 作廢及既有正式案件狀態銜接不在本輪施工範圍。
+
 狀態：`implemented / repository-local-verified`。使用者已於 2026-10-29 核准七階段實作與逐階段驗收；執行範圍及實際證據見 [非市民案件實作工作包](../非市民案件實作工作包.md)。此狀態不代表已部署、使用正式資料或完成外部 provider 驗收。
 
 使用者已逐項確認下列流程。沿用是沿用各步驟既有 owner、正式條件、事件、操作及回讀，不代表畫面切換即可推進，也不新增非市民專用 lifecycle。
@@ -653,6 +655,8 @@ key＋same canonical workbook 僅 replay terminal receipt；same key＋different
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
 Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與
 `evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。
+
+2026-11-05 最新人工裁決：跨案件同月嫂來源區間重疊（`historical_order_source_schedule_conflict`）不再因少數列衝突阻斷整份工作簿匯入。Preview 與 Apply 將重疊衝突雙方列同時排除至 `current_conflict`／未匯入明細（`not_imported_count` 與 `row_issues`），保留對造 Excel 列號、案件編號與服務期間說明，且不對排除列寫入 Orders、assignment 或逐列收據，供修正 Excel 後重傳補匯入；同份工作簿其餘無衝突列仍以單一 outer UoW 原子匯入。若驗證邊界回傳衝突錯誤，API `field_errors` 與匯入頁錯誤區塊亦直接顯示衝突列號與案件明細，但匯入頁維持只呈現四種互斥筆數與問題列明細，不顯示應收、應付、樓層費、單雙薪等正常帳務明細。
 
 HCM Current仍由Case Import編排whole-workbook outer UoW。HCM案件身分以非空且合法的案件編號為唯一鍵；
 不同案件編號即使姓名或IP相同仍建立新的Client／Order，姓名／IP重複只可形成非阻擋人工警示，不得自動

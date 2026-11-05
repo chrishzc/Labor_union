@@ -51,6 +51,35 @@ describe('Historical Orders workbook Preview client', () => {
     expect(error.message).toContain(message);
     expect(error.message).toContain('本次匯入未完成');
   });
+
+  it('保留排程重疊衝突的列號與案件明細field_errors', () => {
+    const raw = {
+      detail: {
+        error: {
+          category: 'validation',
+          code: 'historical_order_source_schedule_conflict',
+          message: '歷史訂單工作簿存在跨案件月嫂排程重疊衝突。',
+          field_errors: [
+            {
+              field: 'rows[15,28]',
+              code: 'historical_order_source_schedule_conflict',
+              message: 'Excel 第 15 列（案件 CASE-015，2026-08-01～2026-08-10）與第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂（ID 11）服務期間重疊。',
+            },
+          ],
+          domain_blockers: [],
+          retryable: false,
+          correlation_id: 'corr-1',
+          current_version: null,
+        },
+      },
+    };
+    const source = new ApiHttpError(422, 'historical_order_source_schedule_conflict', '歷史訂單工作簿資料未通過驗證。', false, raw);
+    for (const mapped of [mapHistoricalOrderWorkbookPreviewError(source), mapHistoricalOrderWorkbookApplyError(source)]) {
+      expect(mapped).toBeInstanceOf(HistoricalOrderWorkbookPreviewError);
+      expect((mapped as HistoricalOrderWorkbookPreviewError).fieldErrors).toEqual(raw.detail.error.field_errors);
+      expect(mapped.message).toContain('排程重疊衝突');
+    }
+  });
   beforeEach(() => { vi.restoreAllMocks(); setSession(); });
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 

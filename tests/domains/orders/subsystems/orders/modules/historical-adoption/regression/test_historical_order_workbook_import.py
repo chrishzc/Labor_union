@@ -285,14 +285,16 @@ def test_row_stale_is_exposed_as_a_workbook_conflict_instead_of_an_internal_erro
         )
 
 
-def test_preview_rejects_an_overlapping_source_schedule_before_apply(monkeypatch):
+def test_overlapping_source_schedule_excludes_both_conflicting_rows_and_imports_healthy_rows(monkeypatch):
     from datetime import date
 
     rows = (
         HistoricalOrderWorkbookRow(2, "source:2", "2" * 64, "CASE-1", "客戶甲", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 1), date(2026, 8, 10), (), ()),
         HistoricalOrderWorkbookRow(3, "source:3", "3" * 64, "CASE-2", "客戶乙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 8), date(2026, 8, 15), (), ()),
+        HistoricalOrderWorkbookRow(4, "source:4", "4" * 64, "CASE-3", "客戶丙", HistoricalOrderSourceStatus.DEPOSIT_PAID, date(2026, 8, 20), date(2026, 8, 25), (), ()),
     )
     workbook = HistoricalOrderWorkbook("4" * 64, "5" * 64, "歷史訂單", rows)
+    applied_cases: list[str] = []
 
     class Workflow(_Workflow):
         def preview(self, row):
@@ -302,43 +304,54 @@ def test_preview_rejects_an_overlapping_source_schedule_before_apply(monkeypatch
                 outcome=HistoricalOrderOutcome.ADOPTED,
                 case_no=row.case_no,
                 pairings=(SimpleNamespace(
+                    ordinal=1,
                     resolution=SimpleNamespace(value="assignment_candidate"),
                     staff_id=11,
                     start_date=row.actual_start_date,
                     end_date=row.actual_end_date,
+                    issue_codes=(),
                 ),),
-                fingerprint=PreviewFingerprint("1" * 64),
+                issue_codes=(),
+                fingerprint=PreviewFingerprint(f"{row.source_row:064x}"),
+            )
+
+        def apply(self, request):
+            self.apply_calls += 1
+            applied_cases.append(str(request.row.case_no))
+            return SimpleNamespace(
+                outcome=HistoricalOrderOutcome.ADOPTED,
+                replayed=False,
+                assignment_count=1,
+                review_identity=None,
             )
 
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
+    service = module.HistoricalOrderWorkbookImportService(_Repository(), Workflow(), _UnitOfWork)
 
-    with pytest.raises(
-        module.HistoricalOrderSourceScheduleConflictError,
-        match="historical_order_source_schedule_conflict",
-    ) as error:
-        module.HistoricalOrderWorkbookImportService(
-            _Repository(), Workflow(), _UnitOfWork
-        ).preview("overlap.xlsx")
+    preview = service.preview("overlap.xlsx")
+    assert preview.source_row_count == 3
+    assert preview.adopted_count == 1
+    assert preview.current_conflict_count == 2
+    assert preview.assignment_candidate_count == 1
+    assert [item.source_row for item in preview.row_issues] == [2, 3]
+    assert [item.case_no for item in preview.row_issues] == ["CASE-1", "CASE-2"]
+    assert all("historical_order_source_schedule_conflict" in item.issue_codes for item in preview.row_issues)
+    assert any("row=3;" in code and "case_no=CASE-2" in code for code in preview.row_issues[0].issue_codes)
+    assert any("row=2;" in code and "case_no=CASE-1" in code for code in preview.row_issues[1].issue_codes)
 
-    assert error.value.conflicts[0].as_dict() == {
-        "staff_id": 11,
-        "left": {
-            "source_row": 2,
-            "pairing_ordinal": 1,
-            "case_identity": "***SE-1",
-            "staff_id": 11,
-            "start_date": "2026-08-01",
-            "end_date": "2026-08-10",
-        },
-        "right": {
-            "source_row": 3,
-            "pairing_ordinal": 1,
-            "case_identity": "***SE-2",
-            "staff_id": 11,
-            "start_date": "2026-08-08",
-            "end_date": "2026-08-15",
-        },
+    receipt = service.apply("overlap.xlsx", "overlap-key", preview.preview_fingerprint, "operator", "correlation")
+    assert applied_cases == ["CASE-3"]
+    assert receipt.adopted_count == 1
+    assert receipt.current_conflict_count == 2
+    assert receipt.assignments_created == 1
+    assert receipt.import_counts.as_dict() == {
+        "imported_count": 1,
+        "duplicate_skipped_count": 0,
+        "not_imported_count": 2,
     }
+    assert [item.source_row for item in receipt.row_issues] == [2, 3]
+    assert [item.case_no for item in receipt.row_issues] == ["CASE-1", "CASE-2"]
+    HistoricalOrderWorkbookReceiptView.model_validate(receipt.as_dict())
 
 
 def test_source_schedule_conflict_projection_is_order_independent_and_allows_same_case_repeats():

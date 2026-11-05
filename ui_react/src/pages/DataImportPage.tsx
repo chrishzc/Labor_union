@@ -1,5 +1,8 @@
+/**
+ * File: DataImportPage.tsx
+ * Description: 提供四種工作簿匯入選檔、互斥結果筆數、未匯入明細與錯誤列號案件明細呈現。
+ */
 import { useUnsavedDraft } from '../components/UnsavedChanges';
-/** 四種工作簿匯入共用選檔、確認與互斥的結果筆數呈現。 */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptClientBeClassWorkbookPreview } from '../adapters/case_import/client_beclass_workbook_adapter';
 import { adaptHcmWorkbookPreview } from '../adapters/case_import/hcm_workbook_adapter';
@@ -12,18 +15,24 @@ import { StaffHistoricalWorkbookSnapshot, staffHistoricalWorkbookPreviewClient }
 import { HistoricalOrderWorkbookSnapshot, historicalOrderWorkbookPreviewClient } from '../api/orders/historical_order_workbook/client';
 import './DataImportPage.css';
 
+interface WorkbookErrorDetail {
+  rowLabel: string;
+  caseLabel: string;
+  message: string;
+}
+
 type CasePreviewState<T> =
   | { kind: 'idle' }
   | { kind: 'reading' }
   | { kind: 'loading' }
   | { kind: 'ready'; preview: T }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; details: ReadonlyArray<WorkbookErrorDetail> };
 
 type ApplyState =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'ready'; result: WorkbookImportResult }
-  | { kind: 'error'; message: string; outcomeUnknown: boolean; autoConfirm: boolean };
+  | { kind: 'error'; message: string; details: ReadonlyArray<WorkbookErrorDetail>; outcomeUnknown: boolean; autoConfirm: boolean };
 
 function isOutcomeUnknown(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
@@ -40,6 +49,33 @@ function canConfirmAutomatically(error: unknown): boolean {
 function workbookErrorMessage(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : fallback;
   return typeof error === 'object' && error !== null && 'code' in error ? `${message}（錯誤代碼：${String(error.code)}）` : message;
+}
+
+function formatRowFieldLabel(field: string): string {
+  const match = /^rows?\[([\d,\s]+)\]$/.exec(field.trim());
+  if (!match) return field.trim() || '—';
+  const rows = match[1].split(',').map(item => item.trim()).filter(Boolean);
+  return rows.length > 0 ? `第 ${rows.join('、')} 列` : field.trim();
+}
+
+function extractCaseLabel(message: string): string {
+  const cases = Array.from(message.matchAll(/案件\s+([^，）\s]+)/g), item => item[1]).filter(Boolean);
+  return cases.length > 0 ? [...new Set(cases)].join('、') : '—';
+}
+
+function workbookErrorDetails(error: unknown): ReadonlyArray<WorkbookErrorDetail> {
+  if (typeof error !== 'object' || error === null || !('fieldErrors' in error) || !Array.isArray(error.fieldErrors)) {
+    return [];
+  }
+  return error.fieldErrors
+    .filter((item): item is { field: string; message: string } =>
+      typeof item === 'object' && item !== null && 'field' in item && 'message' in item
+      && typeof item.field === 'string' && typeof item.message === 'string')
+    .map(item => ({
+      rowLabel: formatRowFieldLabel(item.field),
+      caseLabel: extractCaseLabel(item.message),
+      message: item.message,
+    }));
 }
 
 function previewControlGuidance(
@@ -135,7 +171,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   const previewWorkbook = async () => {
     if (mutationLocked) return;
     if (selectedWorkbook === null) {
-      setPreviewState({ kind: 'error', message: '請先選擇 .xlsx 檔案。' });
+      setPreviewState({ kind: 'error', message: '請先選擇 .xlsx 檔案。', details: [] });
       return;
     }
     previewAbortRef.current?.abort();
@@ -160,7 +196,11 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
         await applyWorkbook();
     } catch (error) {
       if (controller.signal.aborted || generation !== generationRef.current) return;
-      setPreviewState({ kind: 'error', message: workbookErrorMessage(error, fallbackError) });
+      setPreviewState({
+        kind: 'error',
+        message: workbookErrorMessage(error, fallbackError),
+        details: workbookErrorDetails(error),
+      });
     } finally {
       if (previewAbortRef.current === controller) previewAbortRef.current = null;
     }
@@ -184,6 +224,7 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
       setApplyState({
         kind: 'error',
         message: workbookErrorMessage(error, '工作簿套用失敗。'),
+        details: workbookErrorDetails(error),
         outcomeUnknown: isOutcomeUnknown(error),
         autoConfirm: canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
       });
@@ -205,6 +246,34 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
 
   return { selectedWorkbook, previewState, applyState, mutationLocked, selectWorkbook, clearWorkbook, previewWorkbook, applyWorkbook };
 }
+
+const WorkbookErrorAlert: React.FC<{ message: string; details: ReadonlyArray<WorkbookErrorDetail> }> = ({ message, details }) => (
+  <div className="import-error" role="alert">
+    {details.length === 0 ? message : <>
+      <span>{message}</span>
+      <div className="import-details-scroll">
+        <table className="import-error-details-table" aria-label="衝突與錯誤明細">
+          <thead>
+            <tr>
+              <th scope="col">Excel 列號</th>
+              <th scope="col">案件明細</th>
+              <th scope="col">衝突／錯誤說明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {details.map((detail, index) => (
+              <tr key={`${detail.rowLabel}-${detail.caseLabel}-${index}`}>
+                <td>{detail.rowLabel}</td>
+                <td>{detail.caseLabel}</td>
+                <td>{detail.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>}
+  </div>
+);
 
 interface CaseWorkbookPreviewCardProps {
   id: string;
@@ -256,7 +325,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
         {selectedWorkbook && !done && !mutationLocked && <button type="button" className="import-simple-clear" onClick={() => { if (fileInputRef.current) fileInputRef.current.value = ''; onClear(); }}>取消選取檔案</button>}
       </div>
       {!ready && <p id={previewGuidanceId} className="import-control-guidance">{previewControlGuidance(selectedWorkbook, previewState)}</p>}
-      {previewState.kind === 'error' && <div className="import-error" role="alert">{previewState.message}</div>}
+      {previewState.kind === 'error' && <WorkbookErrorAlert message={previewState.message} details={previewState.details} />}
       {ready && !loading && !unknown && <section data-surface-id={`imports.${id}.${done ? 'result' : 'preview-result'}`} className="import-simple-result" aria-label={done ? '匯入結果' : '預覽結果'} aria-live="polite">
         <header className="import-simple-result-heading"><h3>{done ? '匯入結果' : '預覽結果'}</h3><span>{result?.replayedWorkbook ? '已處理過，以下為原處理結果' : done && result?.importedCount === null ? '舊紀錄未提供完整筆數' : done ? '本次處理筆數' : '匯入後顯示實際結果'}</span></header>
         <dl className="import-simple-metrics">{metrics.map(([label, value, className]) => <div key={label} className={className}><dt>{label}</dt><dd><span>{value ?? '—'}</span>{value !== null && <small>筆</small>}</dd></div>)}</dl>
@@ -276,7 +345,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
         </>}
       </footer>}
       {!ready && <p className="import-control-guidance">選擇檔案後即可匯入。</p>}
-      {applyState.kind === 'error' && !applyState.outcomeUnknown && <div className="import-error" role="alert">{applyState.message}</div>}
+      {applyState.kind === 'error' && !applyState.outcomeUnknown && <WorkbookErrorAlert message={applyState.message} details={applyState.details} />}
       {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} 目前尚未取得最終結果，這不代表匯入失敗。可以切換至其他頁面，或稍後點選「查詢這次匯入結果」。離開匯入頁後需重新選取原檔案查詢。</p>}
     </section>
   );

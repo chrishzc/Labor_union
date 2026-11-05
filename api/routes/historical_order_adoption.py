@@ -1,6 +1,6 @@
 """
 File: historical_order_adoption.py
-Description: 提供 authenticated Orders historical workbook Preview／Apply 與暫存檔清理邊界。
+Description: 提供歷史訂單 workbook Preview／Apply 路由、排程衝突列號明細投影與暫存檔清理。
 """
 
 import logging
@@ -17,11 +17,15 @@ from api.dependencies.historical_order_adoption import get_historical_order_work
 from api.exception_handlers.historical_order_database import historical_database_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.historical_order_adoption import HistoricalOrderWorkbookPreviewView, HistoricalOrderWorkbookReceiptView
-from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.errors import ErrorCategory, FieldError, TypedError
 from shared_kernel.identities import CorrelationId
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.orders.actual_start_workflow import ActualStartWorkflowError
-from subsystems.orders.historical_order_workbook_import import HistoricalOrderWorkbookConflict, HistoricalOrderWorkbookUnavailable
+from subsystems.orders.historical_order_workbook_import import (
+    HistoricalOrderSourceScheduleConflictError,
+    HistoricalOrderWorkbookConflict,
+    HistoricalOrderWorkbookUnavailable,
+)
 
 
 router = APIRouter(prefix="/api/v1/orders/historical-adoption/workbooks", tags=["Orders Historical Adoption"])
@@ -77,6 +81,22 @@ async def _with_workbook(
         upload_path = await _persist_uploaded_workbook(workbook)
         result = await run_in_threadpool(operation, upload_path)
         return BaseResponse(data=result.as_dict(), message=message)
+    except HistoricalOrderSourceScheduleConflictError as error:
+        logger.warning(
+            "歷史訂單工作簿跨案件排程衝突: conflict_count=%s correlation_id=%s",
+            len(error.conflicts),
+            correlation.value,
+        )
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            TypedError(
+                ErrorCategory.VALIDATION,
+                "historical_order_source_schedule_conflict",
+                "歷史訂單工作簿存在跨案件月嫂排程重疊衝突。",
+                correlation,
+                field_errors=_schedule_conflict_field_errors(error),
+            ),
+        ) from error
     except ValueError as error:
         logger.exception("歷史訂單工作簿處理驗證失敗: %s", error)
         raise _http_error(
@@ -145,6 +165,44 @@ def _with_correlation(error: TypedError, correlation: CorrelationId) -> TypedErr
         retryable=error.retryable,
         current_version=error.current_version,
     )
+
+
+def _schedule_conflict_field_errors(
+    error: HistoricalOrderSourceScheduleConflictError,
+) -> tuple[FieldError, ...]:
+    items: list[FieldError] = []
+    for conflict in error.conflicts[:100]:
+        left = conflict.left
+        right = conflict.right
+        left_start = _format_conflict_date(left.start_date)
+        left_end = _format_conflict_date(left.end_date)
+        right_start = _format_conflict_date(right.start_date)
+        right_end = _format_conflict_date(right.end_date)
+        left_case = _safe_case_no(left.case_no)
+        right_case = _safe_case_no(right.case_no)
+        message = (
+            f"Excel 第 {left.source_row} 列（案件 {left_case}，{left_start}～{left_end}）"
+            f"與第 {right.source_row} 列（案件 {right_case}，{right_start}～{right_end}）"
+            f"的月嫂（ID {left.staff_id}）服務期間重疊。"
+        )[:500]
+        items.append(
+            FieldError(
+                f"rows[{left.source_row},{right.source_row}]",
+                "historical_order_source_schedule_conflict",
+                message,
+            )
+        )
+    return tuple(items)
+
+
+def _format_conflict_date(value: object) -> str:
+    text = value.isoformat() if hasattr(value, "isoformat") else str(value or "未知")
+    return " ".join(text.split())[:32] or "未知"
+
+
+def _safe_case_no(value: str | None) -> str:
+    cleaned = " ".join(str(value or "").split())[:64]
+    return cleaned or "未提供"
 
 
 def _error_code(error: Exception, fallback: str) -> str:

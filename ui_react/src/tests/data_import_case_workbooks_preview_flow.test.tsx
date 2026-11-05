@@ -1,4 +1,7 @@
-/** Import receipts expose conserved counts, non-imported rows and bounded same-key confirmation. */
+/**
+ * File: data_import_case_workbooks_preview_flow.test.tsx
+ * Description: 驗證匯入頁工作簿流程、互斥結果筆數、未匯入明細與排程衝突列號案件錯誤呈現。
+ */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -423,5 +426,104 @@ describe('Data Import simple result flows', () => {
     expect(within(card).queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
     const calls = vi.mocked(clientBeClassWorkbookPreviewClient.preview).mock.calls;
     expect(calls[0]?.[0].sha256).not.toBe(calls[1]?.[0].sha256);
+  });
+
+  it('shows conflicting row numbers and case details when preview fails without exposing normal accounting details', async () => {
+    const raw = {
+      detail: {
+        error: {
+          category: 'validation',
+          code: 'historical_order_source_schedule_conflict',
+          message: '歷史訂單工作簿存在跨案件月嫂排程重疊衝突。',
+          field_errors: [
+            {
+              field: 'rows[15,28]',
+              code: 'historical_order_source_schedule_conflict',
+              message: 'Excel 第 15 列（案件 CASE-015，2026-08-01～2026-08-10）與第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的月嫂（ID 11）服務期間重疊。',
+            },
+          ],
+          domain_blockers: [],
+          retryable: false,
+          correlation_id: 'corr-conflict',
+          current_version: null,
+        },
+      },
+    };
+    vi.mocked(historicalOrderWorkbookPreviewClient.preview).mockRejectedValueOnce(
+      mapHistoricalOrderWorkbookPreviewError(new ApiHttpError(422, 'historical_order_source_schedule_conflict', '驗證失敗', false, raw))
+    );
+    render(<DataImportPage />);
+    const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+    fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
+    const alert = await within(card).findByRole('alert');
+    expect(alert).toHaveTextContent('historical_order_source_schedule_conflict');
+    expect(within(alert).getByRole('table', { name: '衝突與錯誤明細' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent('第 15、28 列');
+    expect(alert).toHaveTextContent('CASE-015、CASE-028');
+    expect(alert).toHaveTextContent('2026-08-01～2026-08-10');
+    expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
+  });
+
+  it('shows excluded conflicting rows in not-imported details while importing healthy historical orders without accounting details', async () => {
+    vi.mocked(historicalOrderWorkbookPreviewClient.preview).mockResolvedValueOnce({
+      source_content_digest: digest,
+      sheet_identity: identity,
+      source_row_count: 3,
+      adopted_count: 1,
+      unmatched_case_count: 0,
+      review_required_count: 0,
+      current_conflict_count: 2,
+      assignment_candidate_count: 1,
+      evidence_only_pairing_count: 0,
+      absent_order_cancellation_count: 0,
+      status_counts: { cancelled_0: 0, deposit_paid_1: 3, discussion_2: 0, invalid_or_blank: 0 },
+      result_counts: { not_adopted: 2, matching_pending_deposit: 0, historical_unserved: 0, historical_in_service: 0, historical_service_completed: 1 },
+      preview_fingerprint: fingerprint,
+      row_issues: [],
+    });
+    vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({
+      source_content_digest: digest,
+      source_row_count: 3,
+      adopted_count: 1,
+      unmatched_case_count: 0,
+      review_required_count: 0,
+      current_conflict_count: 2,
+      assignments_created: 1,
+      replayed_rows: 0,
+      replayed_workbook: false,
+      absent_order_cancellation_count: 0,
+      status_counts: { cancelled_0: 0, deposit_paid_1: 3, discussion_2: 0, invalid_or_blank: 0 },
+      result_counts: { not_adopted: 2, matching_pending_deposit: 0, historical_unserved: 0, historical_in_service: 0, historical_service_completed: 1 },
+      review_references: [],
+      import_counts: { imported_count: 1, duplicate_skipped_count: 0, not_imported_count: 2 },
+      row_issues: [
+        {
+          source_row: 15,
+          case_no: 'CASE-015',
+          fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
+          issue_codes: [
+            'historical_order_source_schedule_conflict',
+            'historical_order_source_schedule_conflict_detail:row=28;staff_id=11;own=2026-08-01~2026-08-10;peer=2026-08-08~2026-08-15;case_no=CASE-028',
+          ],
+        },
+        {
+          source_row: 28,
+          case_no: 'CASE-028',
+          fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
+          issue_codes: [
+            'historical_order_source_schedule_conflict',
+            'historical_order_source_schedule_conflict_detail:row=15;staff_id=11;own=2026-08-08~2026-08-15;peer=2026-08-01~2026-08-10;case_no=CASE-015',
+          ],
+        },
+      ],
+    });
+    render(<DataImportPage />);
+    const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+    await apply(card);
+    expect(metrics(card)).toEqual(['3', '1', '0', '2']);
+    const details = within(card).getByLabelText('未匯入明細');
+    expect(details).toHaveTextContent('CASE-015');
+    expect(details).toHaveTextContent('與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）同一月嫂（ID 11）服務期間（2026-08-01～2026-08-10）重疊');
+    expect(within(card).queryByText(/應收|應付|樓層費|單薪|雙薪/)).not.toBeInTheDocument();
   });
 });

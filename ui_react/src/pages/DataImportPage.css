@@ -156,9 +156,12 @@
 .import-not-imported-details { margin-top: 20px; font-size: 14px; }
 .import-not-imported-details h4 { margin: 0 0 12px; color: #9a3412; }
 .import-details-scroll { overflow-x: auto; }
-.import-not-imported-details table { width: 100%; border-collapse: collapse; text-align: left; }
-.import-not-imported-details :is(th, td) { padding: 10px; border-bottom: 1px solid #f2e2dc; vertical-align: top; overflow-wrap: anywhere; }
+.import-not-imported-details table, .import-error-details-table { width: 100%; border-collapse: collapse; text-align: left; }
+.import-not-imported-details :is(th, td), .import-error-details-table :is(th, td) { padding: 10px; border-bottom: 1px solid #f2e2dc; vertical-align: top; overflow-wrap: anywhere; }
 .import-not-imported-details th { background: #fffaf7; white-space: nowrap; }
+.import-error-details-table { margin-top: 6px; background: #fff; border-radius: 6px; }
+.import-error-details-table th { background: #fee2e2; color: #7f1d1d; white-space: nowrap; }
+.import-error-details-table :is(th, td) { border-bottom-color: #fecaca; }
 @media (max-width: 650px) {
   .import-simple-page-heading h1 { font-size: 23px; }
   .import-simple-page .import-kind-selector > div { display: grid; grid-template-columns: 1fr 1fr; }

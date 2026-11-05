@@ -1,25 +1,51 @@
 /**
  * File: errors.ts
- * Description: 將Historical Orders Preview／Apply失敗分流為去敏typed錯誤，標示安全重試狀態。
+ * Description: 將歷史訂單工作簿 Preview／Apply 失敗分流為去敏 typed 錯誤，保留衝突列號與案件明細。
  */
+import { z } from 'zod';
 import { ApiAbortError, ApiDecodeError, ApiHttpError, ApiNetworkError, ApiTimeoutError } from '../../shared/typed_errors';
+
+export interface HistoricalOrderWorkbookFieldError {
+  field: string;
+  code: string;
+  message: string;
+}
+const scheduleConflictResponse = z.object({
+  detail: z.object({
+    error: z.object({
+      code: z.literal('historical_order_source_schedule_conflict'),
+      field_errors: z.array(z.strictObject({
+        field: z.string(),
+        code: z.literal('historical_order_source_schedule_conflict'),
+        message: z.string(),
+      })),
+    }),
+  }),
+});
+function scheduleConflictFields(error: ApiHttpError): HistoricalOrderWorkbookFieldError[] {
+  const result = scheduleConflictResponse.safeParse(error.raw);
+  return result.success ? result.data.detail.error.field_errors : [];
+}
 
 export class HistoricalOrderWorkbookPreviewError extends Error {
   public readonly code: string;
   public readonly retryable: boolean;
   public readonly status: number | null;
+  public readonly fieldErrors: ReadonlyArray<HistoricalOrderWorkbookFieldError>;
 
   constructor(
     code: string,
     message: string,
     retryable = false,
-    status: number | null = null
+    status: number | null = null,
+    fieldErrors: ReadonlyArray<HistoricalOrderWorkbookFieldError> = []
   ) {
     super(message);
     this.name = 'HistoricalOrderWorkbookPreviewError';
     this.code = code;
     this.retryable = retryable;
     this.status = status;
+    this.fieldErrors = fieldErrors.map(row=>({...row}));
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -28,8 +54,8 @@ export class HistoricalOrderWorkbookContractError extends HistoricalOrderWorkboo
 export class HistoricalOrderWorkbookFileError extends HistoricalOrderWorkbookPreviewError {}
 
 export class HistoricalOrderWorkbookApplyError extends HistoricalOrderWorkbookPreviewError {
-  constructor(code: string, message: string, retryable = false, status: number | null = null) {
-    super(code, message, retryable, status);
+  constructor(code: string, message: string, retryable = false, status: number | null = null, fieldErrors: ReadonlyArray<HistoricalOrderWorkbookFieldError> = []) {
+    super(code, message, retryable, status, fieldErrors);
     this.name = 'HistoricalOrderWorkbookApplyError';
   }
 }
@@ -85,6 +111,7 @@ export function mapHistoricalOrderWorkbookPreviewError(error: unknown): Error {
   if (error instanceof HistoricalOrderWorkbookPreviewError || error instanceof ApiDecodeError) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError();
+    if (error.status===422 && error.code==='historical_order_source_schedule_conflict') return new HistoricalOrderWorkbookPreviewError(error.code,'歷史訂單工作簿存在跨案件月嫂排程重疊衝突，請依列號與案件明細修正後重新預覽。',false,error.status,scheduleConflictFields(error));
     const databaseMessage = databaseErrorMessage(error);
     if (databaseMessage) return new HistoricalOrderWorkbookPreviewError(error.code, databaseMessage, error.retryable, error.status);
     const message = error.code === 'historical_assignment_required_for_actual_start'
@@ -112,6 +139,7 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
   ) return error;
   if (error instanceof ApiHttpError) {
     if (error.status === 401) return new HistoricalOrderWorkbookUnauthenticatedError('apply');
+    if (error.status===422 && error.code==='historical_order_source_schedule_conflict') return new HistoricalOrderWorkbookApplyError(error.code,'歷史訂單工作簿存在跨案件月嫂排程重疊衝突，請依列號與案件明細修正後重新預覽。',false,error.status,scheduleConflictFields(error));
     const databaseMessage = databaseErrorMessage(error);
     // A row-atomic import may already contain committed rows even for a configuration error.
     if (databaseMessage) return new HistoricalOrderWorkbookApplyError(error.code, databaseMessage, true, error.status);

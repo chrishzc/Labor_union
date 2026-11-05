@@ -331,6 +331,50 @@ def test_preview_rejects_source_schedule_overlap_as_a_validation_error():
     )
 
 
+def test_preview_projects_schedule_conflict_rows_and_cases_in_field_errors():
+    from datetime import date
+    from subsystems.orders.historical_order_workbook_import import (
+        HistoricalOrderSourceScheduleConflict,
+        HistoricalOrderSourceScheduleConflictError,
+        HistoricalOrderSourceScheduleInterval,
+    )
+
+    service = _Service()
+
+    def fail_preview(*_args):
+        raise HistoricalOrderSourceScheduleConflictError(
+            (
+                HistoricalOrderSourceScheduleConflict(
+                    HistoricalOrderSourceScheduleInterval(
+                        2, 1, "CASE-1", 11, date(2026, 8, 1), date(2026, 8, 10)
+                    ),
+                    HistoricalOrderSourceScheduleInterval(
+                        3, 1, "CASE-2", 11, date(2026, 8, 8), date(2026, 8, 15)
+                    ),
+                ),
+            )
+        )
+
+    service.preview = fail_preview
+    response = _client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/preview",
+        headers={"X-Correlation-ID": "historical-source-overlap-details"},
+        files=_file(),
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "historical_order_source_schedule_conflict"
+    assert len(error["field_errors"]) == 1
+    assert error["field_errors"][0]["field"] == "rows[2,3]"
+    assert error["field_errors"][0]["code"] == "historical_order_source_schedule_conflict"
+    assert "第 2 列" in error["field_errors"][0]["message"]
+    assert "CASE-1" in error["field_errors"][0]["message"]
+    assert "第 3 列" in error["field_errors"][0]["message"]
+    assert "CASE-2" in error["field_errors"][0]["message"]
+    assert "客戶" not in error["field_errors"][0]["message"]
+
+
 def test_actual_xlsx_preview_keeps_bad_rows_reviewable_without_aborting_good_rows():
     repository = _WorkbookRepository()
     service = HistoricalOrderWorkbookImportService(

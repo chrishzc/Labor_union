@@ -79,4 +79,47 @@ describe('Four mutually exclusive import result counters', () => {
   it('Result lookup keeps the immutable original counts and identifies the replay', () => {
     expect(adaptHistoricalOrderImportResult({ ...historical, replayed_workbook: true, import_counts: { imported_count: 1, duplicate_skipped_count: 2, not_imported_count: 1 } })).toMatchObject({ importedCount: 1, duplicateCount: 2, notImportedCount: 1, replayedWorkbook: true });
   });
+
+  it('Historical Orders schedule conflict row issues display peer row and case details without duplicate generic label', () => {
+    const receipt = {
+      ...historical,
+      source_row_count: 3,
+      adopted_count: 1,
+      unmatched_case_count: 0,
+      review_required_count: 0,
+      current_conflict_count: 2,
+      replayed_rows: 0,
+      status_counts: { cancelled_0: 0, deposit_paid_1: 3, discussion_2: 0, invalid_or_blank: 0 },
+      result_counts: { not_adopted: 2, matching_pending_deposit: 0, historical_unserved: 0, historical_in_service: 0, historical_service_completed: 1 },
+      import_counts: { imported_count: 1, duplicate_skipped_count: 0, not_imported_count: 2 },
+      row_issues: [
+        {
+          source_row: 15,
+          case_no: 'CASE-015',
+          fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
+          issue_codes: [
+            'historical_order_source_schedule_conflict',
+            'historical_order_source_schedule_conflict_detail:row=28;staff_id=11;own=2026-08-01~2026-08-10;peer=2026-08-08~2026-08-15;case_no=CASE-028',
+          ],
+        },
+        {
+          source_row: 28,
+          case_no: 'CASE-028',
+          fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
+          issue_codes: [
+            'historical_order_source_schedule_conflict',
+            'historical_order_source_schedule_conflict_detail:row=15;staff_id=11;own=2026-08-08~2026-08-15;peer=2026-08-01~2026-08-10;case_no=CASE-015',
+          ],
+        },
+      ],
+    };
+    const adapted = adaptHistoricalOrderImportResult(receipt);
+    expect(adapted).toMatchObject({ sourceCount: 3, importedCount: 1, duplicateCount: 0, notImportedCount: 2 });
+    expect(adapted.notImportedRows?.[0]).toEqual({
+      sourceRow: 15,
+      identifier: 'CASE-015',
+      fields: ['第 1 位月嫂姓名', '結束日期', '開始日期'],
+      reasons: ['與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）同一月嫂（ID 11）服務期間（2026-08-01～2026-08-10）重疊'],
+    });
+  });
 });

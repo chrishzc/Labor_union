@@ -1,6 +1,6 @@
 """
 File: historical_order_workbook_import.py
-Description: 協調訂單歷史 workbook Preview、Apply、replay 與逐列 Orders 採納。
+Description: 協調訂單歷史 workbook Preview、Apply、replay、跨案件排程衝突排除與逐列採納。
 """
 
 from __future__ import annotations
@@ -12,7 +12,11 @@ import json
 from pathlib import Path
 from typing import Callable, Protocol
 
-from domains.orders.historical_adoption import HistoricalOrderResult, HistoricalOrderSourceStatus
+from domains.orders.historical_adoption import (
+    HistoricalOrderOutcome,
+    HistoricalOrderResult,
+    HistoricalOrderSourceStatus,
+)
 from domains.orders.lifecycle import OrderLifecycleStatus
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from subsystems.orders.historical_adoption_workflow import HistoricalOrderAdoptionRequest, HistoricalOrderAdoptionWorkflow
@@ -304,6 +308,25 @@ class HistoricalOrderSourceScheduleConflictError(ValueError):
         super().__init__("historical_order_source_schedule_conflict")
 
 
+@dataclass(frozen=True, slots=True)
+class _ConflictExclusion:
+    fields: tuple[str, ...]
+    issue_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ConflictExcludedRowPreview:
+    source_identity: str
+    source_fingerprint: str
+    outcome: HistoricalOrderOutcome
+    result: HistoricalOrderResult
+    case_no: str | None
+    pairings: tuple[object, ...]
+    issue_codes: tuple[str, ...]
+    conflict_fields: tuple[str, ...]
+    fingerprint: PreviewFingerprint
+
+
 class HistoricalOrderWorkbookImportService:
     def __init__(self, repository: HistoricalOrderWorkbookRepository, workflow: HistoricalOrderAdoptionWorkflow, unit_of_work_factory: Callable[[], object]) -> None:
         self._repository = repository
@@ -344,6 +367,7 @@ class HistoricalOrderWorkbookImportService:
                 absent_orders,
                 supplied_preview_fingerprint,
             )
+            preview_exclusions = _source_schedule_conflict_exclusions(workbook, row_previews)
             try:
                 with self._unit_of_work_factory() as unit_of_work:
                     if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
@@ -363,6 +387,7 @@ class HistoricalOrderWorkbookImportService:
                         actor,
                         correlation_id,
                         locked_absent_orders,
+                        preview_exclusions,
                     )
                     self._repository.save_receipt(
                         key,
@@ -403,6 +428,7 @@ class HistoricalOrderWorkbookImportService:
         actor,
         correlation_id,
         absent_orders,
+        preview_exclusions=None,
     ) -> HistoricalOrderWorkbookReceipt:
         outcomes: Counter[str] = Counter()
         locked_previews: list[object] = []
@@ -412,10 +438,57 @@ class HistoricalOrderWorkbookImportService:
         review_references: list[str] = []
         import_counts: Counter[str] = Counter()
         row_issues: list[HistoricalOrderWorkbookRowIssue] = []
-        for row in workbook.rows:
-            locked_preview = self._workflow.preview_in_current_unit_of_work(
-                row, for_update=True
+        if workbook.rows:
+            initial_locked = [
+                self._workflow.preview_in_current_unit_of_work(row, for_update=True)
+                for row in workbook.rows
+            ]
+            locked_exclusions = _source_schedule_conflict_exclusions(
+                workbook, initial_locked
             )
+            expected_exclusions = (
+                preview_exclusions
+                if preview_exclusions is not None
+                else locked_exclusions
+            )
+            if locked_exclusions != expected_exclusions:
+                raise RuntimeError("historical_order_candidate_stale")
+        else:
+            initial_locked = []
+            locked_exclusions = {}
+
+        mutated_cases: set[str] = set()
+        for index, row in enumerate(workbook.rows):
+            if index in locked_exclusions:
+                excluded_preview = _project_excluded_row_preview(
+                    initial_locked[index], locked_exclusions[index]
+                )
+                locked_previews.append(excluded_preview)
+                outcomes["current_conflict"] += 1
+                import_counts["not_imported_count"] += 1
+                issues = _historical_row_issues(
+                    replace(workbook, rows=(row,)),
+                    (excluded_preview,),
+                )
+                row_issues.extend(
+                    issues
+                    or (
+                        HistoricalOrderWorkbookRowIssue(
+                            row.source_row,
+                            row.case_no,
+                            ("來源資料",),
+                            ("historical_order_source_schedule_conflict",),
+                        ),
+                    )
+                )
+                continue
+
+            if row.case_no is not None and row.case_no in mutated_cases:
+                locked_preview = self._workflow.preview_in_current_unit_of_work(
+                    row, for_update=True
+                )
+            else:
+                locked_preview = initial_locked[index]
             locked_previews.append(locked_preview)
             receipt = self._workflow.apply_in_current_unit_of_work(
                 _row_request(
@@ -426,6 +499,8 @@ class HistoricalOrderWorkbookImportService:
                     correlation_id,
                 )
             )
+            if row.case_no is not None:
+                mutated_cases.add(row.case_no)
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
             replayed_rows += int(receipt.replayed)
@@ -525,7 +600,7 @@ def _preview(
     row_previews,
     absent_orders=(),
 ) -> HistoricalOrderWorkbookPreview:
-    _assert_source_schedule_consistency(row_previews, workbook.rows)
+    row_previews = _exclude_source_schedule_conflicts(workbook, row_previews)
     absent_orders = _canonical_absent_orders(absent_orders)
     outcomes = Counter(item.outcome.value for item in row_previews)
     candidates = sum(
@@ -569,6 +644,92 @@ def _preview(
     )
 
 
+def _source_schedule_conflict_exclusions(
+    workbook: HistoricalOrderWorkbook,
+    row_previews,
+) -> dict[int, _ConflictExclusion]:
+    previews = tuple(row_previews)
+    conflicts = project_source_schedule_conflicts(previews, workbook.rows)
+    if not conflicts:
+        return {}
+    indices_by_row_case: dict[tuple[int, str], list[int]] = {}
+    for index, (row, preview) in enumerate(zip(workbook.rows, previews, strict=True)):
+        case_no = getattr(preview, "case_no", None)
+        if isinstance(case_no, str) and case_no:
+            indices_by_row_case.setdefault((row.source_row, case_no), []).append(index)
+
+    issue_codes_by_index: dict[int, set[str]] = {}
+    fields_by_index: dict[int, set[str]] = {}
+    for conflict in conflicts:
+        for own, peer in ((conflict.left, conflict.right), (conflict.right, conflict.left)):
+            detail_code = (
+                "historical_order_source_schedule_conflict_detail:"
+                f"row={peer.source_row};"
+                f"staff_id={own.staff_id};"
+                f"own={_date_value(own.start_date)}~{_date_value(own.end_date)};"
+                f"peer={_date_value(peer.start_date)}~{_date_value(peer.end_date)};"
+                f"case_no={peer.case_no}"
+            )
+            for row_index in indices_by_row_case.get((own.source_row, own.case_no), ()):
+                issue_codes_by_index.setdefault(row_index, set()).update(
+                    ("historical_order_source_schedule_conflict", detail_code)
+                )
+                fields_by_index.setdefault(row_index, set()).update(
+                    ("開始日期", "結束日期", f"第 {own.pairing_ordinal} 位月嫂姓名")
+                )
+
+    return {
+        row_index: _ConflictExclusion(
+            fields=tuple(sorted(fields_by_index[row_index])),
+            issue_codes=tuple(sorted(issue_codes_by_index[row_index])),
+        )
+        for row_index in sorted(issue_codes_by_index)
+    }
+
+
+def _project_excluded_row_preview(
+    preview: object,
+    exclusion: _ConflictExclusion,
+) -> _ConflictExcludedRowPreview:
+    merged_issues = tuple(
+        sorted(set(getattr(preview, "issue_codes", ())) | set(exclusion.issue_codes))
+    )
+    excluded_fingerprint = fingerprint_payload(
+        {
+            "base": preview.fingerprint.value,
+            "excluded_conflict": exclusion.issue_codes,
+            "excluded_fields": exclusion.fields,
+        }
+    )
+    return _ConflictExcludedRowPreview(
+        source_identity=preview.source_identity,
+        source_fingerprint=preview.source_fingerprint,
+        outcome=HistoricalOrderOutcome.CURRENT_CONFLICT,
+        result=HistoricalOrderResult.NOT_ADOPTED,
+        case_no=getattr(preview, "case_no", None),
+        pairings=(),
+        issue_codes=merged_issues,
+        conflict_fields=exclusion.fields,
+        fingerprint=excluded_fingerprint,
+    )
+
+
+def _exclude_source_schedule_conflicts(
+    workbook: HistoricalOrderWorkbook,
+    row_previews,
+) -> tuple[object, ...]:
+    previews = tuple(row_previews)
+    exclusions = _source_schedule_conflict_exclusions(workbook, previews)
+    if not exclusions:
+        return previews
+    return tuple(
+        _project_excluded_row_preview(preview, exclusions[index])
+        if index in exclusions
+        else preview
+        for index, preview in enumerate(previews)
+    )
+
+
 def _historical_row_issues(
     workbook: HistoricalOrderWorkbook,
     row_previews: tuple[object, ...],
@@ -580,7 +741,7 @@ def _historical_row_issues(
             field
             for issue in issues
             for field in _historical_issue_fields(issue)
-        }
+        } | set(getattr(preview, "conflict_fields", ()))
         for pairing in getattr(preview, "pairings", ()):
             if getattr(pairing, "issue_codes", ()):
                 fields.add(f"第 {pairing.ordinal} 位月嫂姓名")
@@ -603,6 +764,8 @@ def _historical_issue_fields(issue_code: str) -> tuple[str, ...]:
         return ("客戶姓名",)
     if issue_code == "historical_status_invalid":
         return ("訂單狀態",)
+    if issue_code.startswith("historical_order_source_schedule_conflict"):
+        return ("開始日期", "結束日期")
     if "staff" in issue_code:
         return ("月嫂姓名",)
     if issue_code.endswith("_start_date_invalid"):
