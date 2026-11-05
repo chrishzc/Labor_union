@@ -7,6 +7,8 @@ from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
+from fastapi.routing import APIRoute
+from fastapi.exceptions import RequestValidationError
 from pymysql.err import OperationalError, ProgrammingError
 
 from api.dependencies.admin_auth import (
@@ -38,6 +40,7 @@ from api.schemas.client_registry import (
     RegistryMutationReceiptView,
 )
 from api.schemas.order_terms import OrderTermsQueryView
+from domains.case_import.refund_account import mask_refund_values
 from domains.case_import.beclass_correction import BeClassCorrectionError
 from domains.case_import.beclass_correction import VALID_MULTI_BIRTH_COUNTS
 from domains.clients.profile import (
@@ -75,7 +78,19 @@ from subsystems.client_profile.order_accounting_export import (
 from subsystems.client_profile.case_inspection_export import ClientRegistryCaseInspectionExportApplication
 
 
-router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"])
+class _RegistryRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        async def safe_validation(request):
+            try:
+                return await handler(request)
+            except RequestValidationError:
+                raise typed_http_error(422, "validation", "client_registry_input_invalid",
+                    "客戶名冊欄位未通過驗證。", uuid4().hex) from None
+        return safe_validation
+
+
+router = APIRouter(prefix="/api/v1/admin/registries/clients", tags=["Client Registry"], route_class=_RegistryRoute)
 
 router.include_router(_case_deletion_router)
 
@@ -288,6 +303,7 @@ def get_client_registry(
         detail = application.query(case_no)
         payload = {
             "case_no": detail.case_no,
+            "order_dates": detail.order_dates,
             "service_type": detail.service_type,
             "client": {
                 "client_id": detail.client.client_id,
@@ -346,7 +362,7 @@ def preview_client_profile(
             owner="client_profile",
             aggregate_identity=case_no,
             current_version=preview.current_version,
-            before=dict(preview.before),
+            before=mask_refund_values(preview.before),
             after=dict(preview.requested),
             preview_fingerprint=preview.preview_fingerprint.value,
         ), message="成功產生客戶主檔變更預覽")
@@ -407,8 +423,8 @@ def preview_beclass_correction(
             owner="client_beclass",
             aggregate_identity=case_no,
             current_version=preview.current_version,
-            before=dict(preview.before),
-            after=dict(preview.after),
+            before=mask_refund_values(preview.before),
+            after=mask_refund_values(preview.after),
             preview_fingerprint=preview.preview_fingerprint.value,
         ), message="成功產生 BeClass 修正預覽")
     except Exception as error:
@@ -443,7 +459,7 @@ def apply_beclass_correction(
             preview_fingerprint=receipt.preview_fingerprint.value,
             idempotency_key=receipt.idempotency_key.value,
             replayed=receipt.replayed,
-            readback=dict(receipt.readback.effective),
+            readback=mask_refund_values(receipt.readback.effective),
         ), message="BeClass 有效資料已修正")
     except Exception as error:
         _raise_owner_error(error, correlation_id, "BeClass 修正失敗。")
@@ -489,12 +505,16 @@ def _field_capabilities(
     return {
         str(field): {
             "owner": owner,
-            "editable": editable,
-            "reason": reason,
+            "editable": editable and field not in _readonly_fields(owner),
+            "reason": "read_only_source" if field in _readonly_fields(owner) else reason,
             "options": _FIELD_OPTIONS.get(owner, {}).get(str(field)),
         }
         for field in values
     }
+
+
+def _readonly_fields(owner):
+    return {"identity_status", "admin_notes"} if owner == "client_profile" else {"birth_date", "refund_account_status"}
 
 
 def _beclass_field_capabilities(detail) -> dict[str, dict[str, Any]]:

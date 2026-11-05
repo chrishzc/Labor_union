@@ -363,7 +363,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_10_19_nas_registration_approval_v1.json",
     "labor_union_2026_10_22_line_order_group_invitation_url_v1.json",
     "labor_union_2026_10_23_scheduling_service_start_v1.json",
-    "labor_union_2026_10_29_subsidy_policy_replay_v4.json",
+    "labor_union_2026_11_05_subsidy_identity_preservation_v5.json",
     "labor_union_2026_10_29_accounting_pricing_v1.json",
     "labor_union_2026_10_29_finance_statement_workspace_v1.json",
     "labor_union_2026_10_29_client_refund_overage_receipt_v1.json",
@@ -539,6 +539,16 @@ def _legacy_release_selection() -> ReleaseSelection:
 
 
 RELEASE_MANIFEST = _legacy_release_selection()
+RETIRED_SUBSIDY_BACKFILL_ID = "subsidy-period-policy-v1"
+
+
+def _reject_retired_subsidy_backfill(backfills: Iterable[Any]) -> None:
+    for item in backfills:
+        if (item.backfill_id == RETIRED_SUBSIDY_BACKFILL_ID
+                or item.artifact.relative_path == "scripts/migrate_subsidy_period_policy.py"):
+            raise UpgradeBlocked(
+                "subsidy_identity_backfill_retired: use the current identity-preserving release"
+            )
 
 
 def configure_release_manifests(
@@ -554,6 +564,9 @@ def configure_release_manifests(
         return
     manifests = tuple(
         load_migration_release_manifest(path, ROOT) for path in paths
+    )
+    _reject_retired_subsidy_backfill(
+        item for manifest in manifests for item in manifest.backfills
     )
     _validate_release_chain(manifests)
     schema_paths = tuple(
@@ -673,8 +686,7 @@ def _configure_default_release_manifests() -> None:
         (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
         include_backfills=True,
         backfill_release_ids=frozenset(
-            {"labor-union-twins-payroll-policy-2026-09-12-v2",
-             "labor-union-subsidy-policy-replay-2026-10-29-v4"}
+            {"labor-union-twins-payroll-policy-2026-09-12-v2"}
         ),
     )
 
@@ -8770,6 +8782,7 @@ def _run_manifest_backfills(
     mysql_container: str | None,
 ) -> tuple[dict[str, Any], ...]:
     backfills = tuple(getattr(RELEASE_MANIFEST, "backfills", ()))
+    _reject_retired_subsidy_backfill(backfills)
     if not backfills:
         return ()
     artifact_dir = operation_receipt_path.expanduser().resolve().parent
@@ -9339,7 +9352,7 @@ def _verified_manifest_backfill_receipt(
         raise UpgradeBlocked("verified backfill receipt changed")
     result = read_receipt(path)
     if (
-        result.get("contract") != ({'subsidy-period-policy-v1':'subsidy-period-policy-migration/v1'}.get(backfill_id,'twins-payroll-rate-snapshot-backfill/v1'))
+        result.get("contract") != "twins-payroll-rate-snapshot-backfill/v1"
         or result.get("mode") != "verify"
         or result.get("receipt_status") != "verified"
         or result.get("unresolved")
@@ -9423,6 +9436,11 @@ def verify_candidate(
     receipt = read_receipt(operation_receipt_path)
     if receipt.get("status") not in VERIFYABLE_CANDIDATE_STATUSES:
         raise UpgradeBlocked("candidate has not completed schema/backfill")
+    if any(item.get("backfill_id") == RETIRED_SUBSIDY_BACKFILL_ID
+           for item in (receipt.get("backfills") or ())):
+        raise UpgradeBlocked(
+            "subsidy_identity_backfill_retired: restore a new candidate from the source"
+        )
     source_snapshot = _schema_snapshot(config, source)
     source_objects = _owned_classification(
         source_snapshot, defer_missing_triggers=True
@@ -9446,17 +9464,8 @@ def verify_candidate(
         and int(backfill_result.get("review_required", -1)) == 0
     )
     additive_projection_preservation: dict[str, Any] = {}
-    subsidy_policy_verify = _verified_manifest_backfill_receipt(receipt, 'subsidy-period-policy-v1')
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
-        if subsidy_policy_verify is not None:
-            from scripts.migrate_subsidy_period_policy import PRESERVED_POLICY_TABLES, verify_preserved_policy_table
-            if table in PRESERVED_POLICY_TABLES:
-                try:
-                    additive_projection_preservation[table]=verify_preserved_policy_table(config,source,candidate,table)
-                except ValueError as error:
-                    raise UpgradeBlocked(str(error)) from error
-                continue
         if not actual:
             if (
                 table in INTENTIONALLY_RETIRED_EMPTY_TABLES

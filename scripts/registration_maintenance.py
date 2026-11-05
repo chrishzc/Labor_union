@@ -18,12 +18,13 @@ def main():
     from infrastructure.redis.registration_maintenance import RegistrationAofMaintenance
     from subsystems.case_import.registration_staging import RegistrationReviewApplication
     from subsystems.case_import.registration_maintenance import RegistrationMaintenanceRunner
+    from api.dependencies.line_runtime import publish_line_wakeup_best_effort
     formal = get_line_identity_application()
     staging = RedisRegistrationStagingRepository(registration_redis_client(role="admin"))
     staging.initialize(formal.registration_id_high_water(), new_empty_instance=args.initialize_new_instance)
     review = RegistrationReviewApplication(staging, formal)
     maintenance = RegistrationAofMaintenance(staging)
-    runner = RegistrationMaintenanceRunner(staging, review, maintenance)
+    runner = RegistrationMaintenanceRunner(staging, review, maintenance, after_recovery=publish_line_wakeup_best_effort)
     while True:
         if not runner.tick():
             print("registration_maintenance_incomplete", file=sys.stderr)

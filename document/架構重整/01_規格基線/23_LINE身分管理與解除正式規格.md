@@ -101,7 +101,7 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 ## 2026-08-21 M1 ownership amendment
 
 - `line_identity_role_bindings` 與 role binding events 由 LINE Identity application 作唯一 writer；舊單一 binding 表僅作 migration／歷史相容輸入；`clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 只作 owner projection。
-- `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF 新登記成功只表示需求申請已保存、待工會核准；既有身分綁定才表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
+- 需求問卷registration由Case Import擁有；2026-11-05最新儲存／清除契約依17 §5.1.1.1 REG-BOUNDARY／REG-REDIS／REG-EXPIRY：核准前只存專用Redis、不得把問卷寫入MySQL，成功提交後待工會核准，滿14天到期自動清除，核准完成／拒絕立即清除。原`provisional_client_registrations`只作舊流程證據及核准後必要正式關聯，不再定義新版待審儲存。既有身分綁定才表示binding／projection outcome，不得直接promotion customer／staff／admin role或覆蓋其他Domain root。問卷拒絕／過期不等於解除既有LINE角色；LINE身分改綁review維持原生命週期，不套問卷14天期限。此處僅規格同步，新儲存未實作／驗收。
 - legacy direct writers 與舊 approve writer 保持 guarded／readonly 或 `410`；現行 `/line-bind` 以 `bind.html` 作 presentation，所有核對、綁定及重新綁定申請均經 canonical Customer Preview／Apply。雙角色依 §9.2 明確選擇；失敗依 §9.3 只記錄 bounded count，不自動轉人工、開單或告警，不把雙角色投影為 `LINE-004`。
 - 真實 verified-token／LIFF browser／registration／binding／Rich Menu E2E 仍需 sandbox config；本正式規格同步不把現況 evidence 宣稱為 PASS，也不授權 provider、schema／DB 或 route cutover。
 

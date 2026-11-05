@@ -16,6 +16,12 @@ class RegistrationApprovalReceipt(TypedDict):
     approved_at_utc: str
 
 
+@dataclass(frozen=True, slots=True)
+class RegistrationRecoveryResult:
+    recovered: int
+    failed: int
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class StagedRegistration:
     registration_id: int
@@ -31,6 +37,7 @@ class StagedRegistration:
     beclass_record_id: int | None = None
     case_no: str | None = None
     approved_at_utc: datetime | None = None
+    replayed: bool = False
 
 
 class RegistrationStagingPort(Protocol):
@@ -79,15 +86,19 @@ class RegistrationReviewApplication:
         return self._staging.reject(registration_id, expected_version, actor)
 
     def recover(self, *, limit=100):
-        recovered = 0
+        recovered = failed = 0
         for registration_id in self._staging.processing_ids(limit=limit):
-            snapshot = self._staging.get(registration_id)
-            receipt = self._formal.registration_approval_receipt(registration_id, snapshot.operation_id)
-            if snapshot.status == "approving" and receipt is None:
-                receipt = self._formal.approve_staged_registration(snapshot,
-                    CorrelationId(f"registration-recovery:{registration_id}"))
-            if receipt is not None:
-                snapshot = self._staging.complete(registration_id, snapshot.operation_id, receipt)
-            if snapshot.status == "approved":
-                recovered += 1
-        return recovered
+            try:
+                snapshot = self._staging.get(registration_id)
+                receipt = self._formal.registration_approval_receipt(registration_id, snapshot.operation_id)
+                if snapshot.status == "approving" and receipt is None:
+                    receipt = self._formal.approve_staged_registration(snapshot,
+                        CorrelationId(f"registration-recovery:{registration_id}"))
+                if receipt is not None:
+                    snapshot = self._staging.complete(registration_id, snapshot.operation_id, receipt)
+                if snapshot.status == "approved":
+                    recovered += 1
+            except Exception:
+                # One blocked approval must not retain other committed questionnaires.
+                failed += 1
+        return RegistrationRecoveryResult(recovered, failed)

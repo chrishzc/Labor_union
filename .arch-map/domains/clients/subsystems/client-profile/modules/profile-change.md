@@ -5,6 +5,8 @@
 - subsystem: `client-profile`
 
 ## Implementation
+- `ui_react/src/components/ClientRegistryAccountingSummary.tsx` — 唯讀組合原 finance typed case Query，歷史辨識與人工設定分開。
+- 客戶身分及行政註記／BeClass 生日／整案日期為唯讀；退款欄位沿 BeClass correction writer，名冊表格使用可聚焦的有界捲動區。
 - `ui_react/src/components/ClientProfileRequestWorkbench.tsx`、`ui_react/src/components/ClientProfileRequestReview.tsx` — 待審核清單與獨立單筆 Query；核准／退回仍用原 Preview／Apply、版本及冪等識別。名冊 `tab=applications&registration=<id>` 開啟指定需求申請，`tab=profile-requests&request=<id>` 開啟資料異動；不依賴清單第一頁，通知頁不再提供審核操作。
 - `domains/clients/profile.py`
 - `subsystems/client_profile/`
@@ -43,6 +45,7 @@
 - `ui_react/src/components/CaseArchitectureBootstrapRepairPanel.tsx` — 僅組合 Case Import-owned bootstrap Q/P/A，完成後重讀名冊 owner facts。
 
 ## Dependencies
+- outbound: `case-import/pairing-current-facts` — 有效退款帳戶及原問卷補正沿既有BeClass correction writer；一般查閱與事件／回執遮蔽帳號。
 - outbound: Global `registry-deletion` — ClientRosterPage／client_registry router 組合 root-only 案件永久刪除；共用 owner fresh-lock 並檢查任一相關簽回；未簽約時一併移除 case-owned 關聯，共用 Client／其他案件／月嫂保留，不借用 Client Profile 更新 writer 刪除。
 - inbound: `case-import/hcm-current-workbook-import` — Client Profile email-only 命令 fresh-lock 空白資格並保存 version／事件／receipt；借用 workbook outer UoW，無自有 commit。
 - Client-owned `clients.phone` 接受手機／含區碼的市話；Client Profile 與 HCM 匯入共用 `domains/clients/profile.py` 的格式規則與正規化。欄位、writer、版本及 BeClass 獨立聯絡欄位保持既有契約。

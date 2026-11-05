@@ -1,7 +1,7 @@
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 import { RegistryDeletionPanel } from '../components/RegistryDeletionPanel';
 import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { clientRegistryClient, type ClientRegistryListQuery } from '../api/client_registry/client_registry_client';
 import type { ClientRegistryColumnFilter, ClientRegistryDetail, ClientRegistryFilterField, ClientRegistryPage as ClientRegistryPageData, ClientRegistrySortBy, ClientRegistrySortOrder } from '../api/client_registry/client_registry_schemas';
 import { ClientRosterColumnFilter } from '../components/ClientRosterColumnFilter';
@@ -84,6 +84,24 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
   useEffect(() => { onEditStateChange?.({ ...editState, busy: editState.busy || deletionBusy }); }, [editState, deletionBusy, onEditStateChange]);
   const detailRequest = useRef(0);
   const listRequest = useRef(0);
+  const tableViewport = useRef<HTMLDivElement>(null);
+  const [scrollRail, setScrollRail] = useState({ left: 0, max: 0, thumb: 100 });
+  const syncScrollRail = useCallback(() => {
+    const viewport = tableViewport.current;
+    if (!viewport) return;
+    const next = { left: viewport.scrollLeft, max: Math.max(0, viewport.scrollWidth - viewport.clientWidth),
+      thumb: viewport.scrollWidth ? Math.max(24, Math.min(viewport.clientWidth - 24, viewport.clientWidth * viewport.clientWidth / viewport.scrollWidth)) : 24 };
+    setScrollRail(previous => previous.left === next.left && previous.max === next.max && previous.thumb === next.thumb ? previous : next);
+  }, []);
+  useEffect(() => {
+    const viewport = tableViewport.current;
+    if (!viewport) return;
+    const observer = new ResizeObserver(syncScrollRail);
+    observer.observe(viewport);
+    if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
+    syncScrollRail();
+    return () => observer.disconnect();
+  }, [page, error, syncScrollRail]);
 
   const load = async (nextFilters: RosterFilters, nextOffset = 0) => {
     const requestId = ++listRequest.current;
@@ -221,14 +239,14 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
     {error && <p role="alert" className="client-roster-message">{error}</p>}
     {loading && <p role="status" className="client-roster-message">正在載入客戶名冊清單…</p>}
     {!loading && !error && page?.items.length === 0 && <p role="status" className="client-roster-message">{hasActiveFilter(appliedFilters) ? '沒有符合篩選條件的案件。' : '目前沒有可顯示的案件。'}</p>}
-    {!error && page && <div className="client-roster-table-wrap" aria-busy={loading}><table>
+    {!error && page && <div className="client-roster-table-frame"><div ref={tableViewport} id="client-roster-table-viewport" className="client-roster-table-wrap" role="region" aria-label="客戶名冊，可上下及左右捲動" tabIndex={0} aria-busy={loading} onScroll={syncScrollRail}><table>
       <caption>客戶名冊清單（第 {Math.floor(pageOffset / pageSize) + 1} 頁）</caption>
       <thead><tr>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'case_no' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('case_no', 'case_no')}</th>
         <th scope="col">匯入虛擬帳號</th>
         <th scope="col">內建虛擬帳號</th>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'customer_name' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('name', 'customer_name')}</th>
-        <th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
+        <th scope="col">補助身分</th><th scope="col">{columnHeading('phone')}</th><th scope="col">{columnHeading('district')}</th><th scope="col">{columnHeading('multi_birth_count')}</th>
         <th scope="col" aria-sort={appliedFilters.sortBy === 'service_days' ? appliedFilters.sortOrder === 'asc' ? 'ascending' : 'descending' : undefined}>{columnHeading('service_days', 'service_days')}</th>
         <th scope="col">{columnHeading('service_type')}</th>
         <th scope="col">{columnHeading('requires_cooking')}</th>
@@ -257,7 +275,7 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           }
         }}
       >
-        <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
+        <td>{item.case_no}</td><td>{displayImportedVirtualAccounts(item.imported_virtual_accounts)}</td><td>{item.built_in_virtual_account ?? '—'}</td><td>{item.name ?? '—'}</td><td>{item.identity_status ?? '尚未登錄'}</td><td>{item.phone ?? '—'}</td><td>{item.district ?? ''}</td>
         <td>{item.multi_birth_count ?? '—'}</td><td>{item.service_days ?? '—'}</td><td>{item.service_type ?? '尚未登錄'}</td><td>{displayCooking(item.requires_cooking)}</td>
         <td>{item.planned_start_date ?? '—'}</td><td>{item.order_status ?? '—'}</td>
         <td>{clientDueDates(item, 'deposit')}</td>
@@ -275,7 +293,13 @@ export const ClientRosterPage: React.FC<ClientRosterPageProps> = ({ embedded = f
           ? `${item.claim_application_year}-${String(item.claim_application_month).padStart(2, '0')}`
           : '無值'}</td>
       </tr>)}</tbody>
-    </table></div>}
+    </table></div>{scrollRail.max > 0 && <div className="client-roster-scroll-rail">
+      <input type="range" aria-label="左右捲動客戶名冊" aria-controls="client-roster-table-viewport"
+        aria-valuetext={`${Math.round(scrollRail.left / scrollRail.max * 100)}%`} min={0} max={scrollRail.max} step={1}
+        value={Math.min(scrollRail.left, scrollRail.max)} style={{ '--roster-thumb-width': `${scrollRail.thumb}px` } as React.CSSProperties}
+        onChange={event => { const left = Number(event.target.value); if (tableViewport.current) tableViewport.current.scrollLeft = left;
+          setScrollRail(previous => ({ ...previous, left })); }} />
+    </div>}</div>}
     <Drawer
       isOpen={selectedCaseNo !== null}
       onClose={closeDetail}

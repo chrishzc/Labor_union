@@ -86,3 +86,39 @@ def test_small_deletion_batch_is_removed_from_native_aof_after_maintenance(store
     marker = value.line_user_id.encode("utf-8")
     assert all(marker not in path.read_bytes() for path in destination.iterdir() if path.is_file())
     assert maintenance.run_once() == "clean"
+
+
+def test_truncated_aof_copy_refuses_startup_instead_of_accepting_partial_history(stores, tmp_path):
+    import re
+    admin, _ = stores
+    source_name = container()
+    data = tmp_path / "truncated-data"
+    data.mkdir()
+    subprocess.run(["docker", "cp", f"{source_name}:/data/appendonlydir", str(data / "appendonlydir")], check=True, capture_output=True)
+    manifest = (data / "appendonlydir" / "appendonly.aof.manifest").read_text()
+    increments = [line.split()[1] for line in manifest.splitlines() if " type i" in line]
+    assert increments
+    with (data / "appendonlydir" / increments[-1]).open("ab") as stream:
+        stream.write(b"*3\r\n$3\r\nSET\r\n$20\r\nsynthetic")
+    root = Path.cwd()
+    secrets = Path(os.environ["REGISTRATION_REDIS_TEST_SECRET_DIR"]).resolve()
+    name = "lu-test-registration-truncated-" + uuid4().hex[:12]
+    command = ["docker", "run", "-d", "--name", name, "--network", "none",
+        "--mount", f"type=bind,source={data.resolve().as_posix()},target=/data",
+        "--mount", f"type=bind,source={(root/'deploy/registration/redis.conf').as_posix()},target=/usr/local/etc/redis/redis.conf,readonly",
+        "--mount", f"type=bind,source={(root/'deploy/registration/redis-entrypoint.sh').as_posix()},target=/entrypoint.sh,readonly",
+        "--mount", f"type=bind,source={(secrets/'intake.secret').as_posix()},target=/run/secrets/registration_intake_password,readonly",
+        "--mount", f"type=bind,source={(secrets/'admin.secret').as_posix()},target=/run/secrets/registration_admin_password,readonly",
+        "--tmpfs", "/run/registration:mode=0700", "--entrypoint", "/bin/sh",
+        "redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499", "/entrypoint.sh"]
+    identity = subprocess.check_output(command, text=True).strip()
+    assert re.fullmatch(r"[0-9a-f]{64}", identity)
+    try:
+        exit_code = subprocess.check_output(["docker", "wait", identity], text=True, timeout=20).strip()
+        assert exit_code != "0"
+        logs = subprocess.check_output(["docker", "logs", identity], text=True, stderr=subprocess.STDOUT)
+        assert "Unexpected end of file" in logs or "Bad file format" in logs
+        assert admin.client.ping() and admin.client.get(PREFIX + "ready") is not None
+    finally:
+        # Only the exact container created above, never the source volume or another service.
+        subprocess.run(["docker", "rm", "--force", identity], check=True, capture_output=True)

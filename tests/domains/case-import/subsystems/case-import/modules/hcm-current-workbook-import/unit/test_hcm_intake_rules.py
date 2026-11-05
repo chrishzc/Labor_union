@@ -28,6 +28,22 @@ def valid_hcm_row():
     }
 
 
+@pytest.mark.parametrize('identity', ['一般市民', '補助市民'])
+def test_hcm_preview_and_apply_preserve_distinct_formal_identities(monkeypatch, valid_hcm_row, identity):
+    row = pd.Series({**valid_hcm_row, '身分資格': identity})
+    preview, outcome, applied, _reviews, _reconciled = _exercise_hcm_row(monkeypatch, row)
+    assert preview['ready'] == 1
+    assert outcome == 'inserted'
+    attributes = {item.name: item.value for item in applied[0].client_attributes}
+    assert attributes['identity_status'] == identity
+
+
+@pytest.mark.parametrize('identity', ['一般市民', '原住民', '補助市民'])
+def test_partial_hcm_preserves_identity_without_deriving_it_from_pricing(identity):
+    intent = build_hcm_partial_case_import_intent({'case_no': 'SYNTH-IDENTITY', 'identity_status': identity})
+    assert {item.name: item.value for item in intent.client_attributes}['identity_status'] == identity
+
+
 def _exercise_hcm_row(monkeypatch, row):
     import infrastructure.mysql.pricing_configuration_repository as pricing
     monkeypatch.setattr(pricing, 'initial_identity_rule', lambda *_args: None)

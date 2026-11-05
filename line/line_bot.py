@@ -208,32 +208,8 @@ class LineRegisterPayload(BaseModel):
 
 @router.post("/api/line/register")
 async def line_register(payload: LineRegisterPayload):
-    _require_legacy_line_surface("/api/v1/line/identity/customer/apply")
-    line_user_id = await _trusted_line_user_id(
-        payload.line_id_token,
-        payload.line_user_id,
-    )
-    conn = get_db_connection()
-    try:
-        receipt = build_provisional_registration_application(conn).apply(
-            _provisional_registration_intent(payload, line_user_id)
-        )
-        if receipt.worker_wakeup_required:
-            wake_worker()
-        return {
-            "status": "success",
-            "client_id": receipt.client_id,
-            "client_name": receipt.client_name,
-            "case_no": None,
-            "replayed": receipt.replayed,
-        }
-    except ProvisionalRegistrationConflictError:
-        return {"status": "error", "message": "已有不同內容的待核發登記，請聯絡工會行政人員核對。"}
-    except (ProvisionalRegistrationDomainError, ProvisionalRegistrationStorageError) as error:
-        print(f"[API Register] Error: {error}")
-        return {"status": "error", "message": f"建檔失敗: {error}"}
-    finally:
-        conn.close()
+    raise HTTPException(status_code=410, detail={"code": "registration_intake_required",
+        "message": "請由新的 LINE 需求表單送出申請。"})
 
 
 def _provisional_registration_intent(payload, line_user_id):

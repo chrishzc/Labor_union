@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 import hashlib
 import json
 import time
@@ -30,7 +31,16 @@ if not ready or not counter or counter<ready then return {'uninitialized'} end
 local old=redis.call('GET',KEYS[3])
 if old then return {'existing',old} end
 local active=redis.call('GET',KEYS[4])
-if active then return {'active',active} end
+if active then
+ local raw=redis.call('GET',ARGV[1]..'meta:'..active)
+ if raw then
+  local saved=cjson.decode(raw);local incoming=cjson.decode(ARGV[2])
+  if saved.fingerprint==incoming.fingerprint and saved.subject==incoming.subject then
+   redis.call('SET',KEYS[3],active)
+  end
+ end
+ return {'active',active}
+end
 local id=redis.call('INCR',KEYS[2])
 if id>9007199254740991 then return {'uninitialized'} end
 local suffix=tostring(id)
@@ -158,7 +168,7 @@ class RedisRegistrationStagingRepository:
         saved = self._metadata(registration_id)
         if saved["subject"] != subject or saved["fingerprint"] != candidate.payload_fingerprint.value:
             raise ProvisionalRegistrationConflictError("registration_active_application_conflict")
-        return self.get(registration_id, public=True)
+        return replace(self.get(registration_id, public=True), replayed=result[0] != "created")
 
     def _metadata(self, registration_id):
         self.ensure_initialized()

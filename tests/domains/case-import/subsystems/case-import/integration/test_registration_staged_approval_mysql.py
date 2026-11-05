@@ -79,7 +79,38 @@ def test_downstream_failure_rolls_back_parent_roots_and_receipt(nc_database, mon
     with pymysql.connect(**nc_database) as connection, connection.cursor() as cursor:
         cursor.execute("SELECT COUNT(*) n FROM provisional_client_registrations WHERE id=%s", (item.registration_id,))
         assert cursor.fetchone()["n"] == 0
+
         cursor.execute("SELECT COUNT(*) n FROM clients WHERE line_user_id=%s", (item.candidate.line_user_id,))
         assert cursor.fetchone()["n"] == 0
         cursor.execute("SELECT COUNT(*) n FROM admin_command_receipts WHERE command_family='registration_approval/v1' AND idempotency_key=%s", (item.operation_id,))
         assert cursor.fetchone()["n"] == 0
+
+
+def test_refund_correction_keeps_original_and_masks_events_and_receipts(nc_database):
+    from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+    from infrastructure.mysql.beclass_refund_account import load_effective_refund_account
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.case_import.beclass_correction_workflow import BeClassCorrectionWorkflow
+    from shared_kernel.identities import ActorContext, ExpectedVersion, IdempotencyKey
+    item = staged()
+    approved = application(nc_database).approve_staged_registration(item, CorrelationId("synthetic-refund-source"))
+    new_account = "000011112222"
+    with pymysql.connect(**nc_database) as connection:
+        repository = MySqlBeClassCorrectionRepository(connection)
+        workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection))
+        snapshot = workflow.query(approved["case_no"])
+        preview = workflow.preview(approved["case_no"], {"refund_account_no":new_account}, ExpectedVersion(snapshot.version))
+        receipt = workflow.apply(approved["case_no"], {"refund_account_no":new_account}, ExpectedVersion(snapshot.version),
+            preview.preview_fingerprint, IdempotencyKey("synthetic-refund-"+uuid4().hex), ActorContext("synthetic-admin"),
+            "合成帳戶更正", CorrelationId("synthetic-refund-correction"))
+        with connection.cursor() as cursor:
+            account = load_effective_refund_account(cursor, approved["case_no"])
+            assert account.account_no == new_account
+            cursor.execute("SELECT refund_account_no FROM beclass_records WHERE id=%s", (approved["beclass_record_id"],))
+            assert cursor.fetchone()["refund_account_no"] == item.candidate.beclass_payload["refund_account_no"]
+            cursor.execute("SELECT before_values_json,after_values_json FROM beclass_record_correction_events WHERE beclass_record_id=%s", (approved["beclass_record_id"],))
+            event = cursor.fetchone()
+            assert new_account not in str(event)
+            assert item.candidate.beclass_payload["refund_account_no"] not in str(event)
+            cursor.execute("SELECT result_snapshot FROM admin_command_receipts WHERE command_family='client_beclass_correction/v1' AND idempotency_key=%s", (receipt.idempotency_key.value,))
+            assert new_account not in str(cursor.fetchone())

@@ -57,6 +57,10 @@ def test_submission_is_immutable_idempotent_and_retains_original_deadline(stores
     first = intake.submit(value, key)
     second = intake.submit(value, key)
     assert first.registration_id == second.registration_id > 100
+    assert not first.replayed and second.replayed
+    alias = str(uuid4())
+    assert intake.submit(value, alias).registration_id == first.registration_id
+    assert intake.status_for_submission(value.line_user_id, alias).registration_id == first.registration_id
     assert first.submitted_at_utc == second.submitted_at_utc
     assert (first.expires_at_utc - first.submitted_at_utc).total_seconds() == 14 * 24 * 60 * 60
     loaded = admin.get(first.registration_id)
@@ -136,7 +140,7 @@ def test_sql_committed_cleanup_failure_only_replays_original_receipt(stores):
     readback = review.registration_application(submitted.registration_id)
     assert readback.status == "approving" and readback.client_id == saved["client_id"]
     assert admin.client.exists(PREFIX + f"content:{submitted.registration_id}")
-    assert review.recover() >= 1
+    assert review.recover().recovered >= 1
     assert review.registration_application(submitted.registration_id).status == "approved"
 
 
@@ -149,7 +153,7 @@ def test_processing_before_commit_resumes_same_operation(stores):
         def approve_staged_registration(self, staged, _):
             assert staged.operation_id == claimed.operation_id and staged.actor == claimed.actor
             return receipt()
-    assert RegistrationReviewApplication(admin, Formal()).recover() >= 1
+    assert RegistrationReviewApplication(admin, Formal()).recover().recovered >= 1
     assert admin.get(submitted.registration_id).status == "approved"
 
 
@@ -205,6 +209,33 @@ def test_unknown_acknowledgement_can_only_be_resolved_by_original_submission(sto
     assert intake.submit(value, key).registration_id == saved.registration_id
     assert intake.status_for_submission("U-other-synthetic", key) is None
     admin.reject(saved.registration_id, 1, "synthetic-admin")
+
+
+def test_configured_internal_host_starts_and_stops_durable_maintenance(stores, monkeypatch):
+    from threading import Event
+    from api.dependencies import line_identity, registration_applications
+    from api.dependencies.registration_runtime import registration_maintenance_runtime
+    admin, _ = stores
+    assert admin.processing_ids() == ()
+    started = Event()
+    class Formal:
+        def registration_id_high_water(self):
+            started.set()
+            return 100
+        def registration_approval_receipt(self, *_): pytest.fail("no processing rows were seeded")
+    monkeypatch.setenv("REGISTRATION_REDIS_ADMIN_PASSWORD_FILE", str(Path(os.environ["REGISTRATION_REDIS_TEST_SECRET_DIR"]) / "admin.secret"))
+    monkeypatch.setenv("REGISTRATION_REDIS_HOST", "127.0.0.1")
+    monkeypatch.setenv("REGISTRATION_REDIS_PORT", os.environ["REGISTRATION_REDIS_TEST_PORT"])
+    monkeypatch.setattr(line_identity, "get_line_identity_application", lambda: Formal())
+    monkeypatch.setattr(registration_applications, "get_line_identity_application", lambda: Formal())
+    registration_applications.get_registration_review_application.cache_clear()
+    registration_applications.get_registration_staging_repository.cache_clear()
+    try:
+        with registration_maintenance_runtime():
+            assert started.wait(3)
+    finally:
+        registration_applications.get_registration_review_application.cache_clear()
+        registration_applications.get_registration_staging_repository.cache_clear()
 
 
 def test_redis_failure_never_falls_back_to_memory_or_sql():

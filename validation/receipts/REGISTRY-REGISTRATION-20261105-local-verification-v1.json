@@ -1,0 +1,264 @@
+{
+  "receipt_id": "REGISTRY-REGISTRATION-20261105-local-verification-v1",
+  "created_at_utc": "2026-11-05T04:05:08.611769+00:00",
+  "status": "local_implementation_verified_not_deployed",
+  "authority": "使用者：按照新規格執行程式實作",
+  "task_base": "ed8ab8d4a84e300f6299675ae9b7210ea3d6ea2b",
+  "observed_head": "f552d684af119c5cb1a578dc3565f551525e60f2",
+  "specs": [
+    "33 §5.1 CRX",
+    "17 REG-BOUNDARY / REG-REDIS / REG-EXPIRY / REG-REFUND"
+  ],
+  "verification": {
+    "backend_focused": {
+      "status": "passed",
+      "passed": 139
+    },
+    "redis_engine_and_durability": {
+      "status": "passed",
+      "passed": 16,
+      "engine": "Redis 7.4.11",
+      "evidence": "15 lifecycle/durability cases plus 1 configured ASGI maintenance lifecycle case"
+    },
+    "mysql_isolated_approval_and_correction": {
+      "status": "passed",
+      "passed": 4,
+      "target": "fresh disposable lu_test_non_citizen_*; fixture-owned teardown"
+    },
+    "frontend": {
+      "status": "passed",
+      "passed": 98
+    },
+    "typescript_vite_build": {
+      "status": "passed"
+    },
+    "browser": {
+      "passed": true,
+      "checks": [
+        "desktop: upper/middle/lower persistent rail, drag, Home/End, resize synchronization and header alignment",
+        "mobile: upper/middle/lower persistent rail, drag, Home/End, resize synchronization and header alignment",
+        "no redundant horizontal control when the table fits",
+        "readonly identity/birthday, distinct notes, masked editable refund account, responsive drawer"
+      ],
+      "page_errors": [],
+      "mutations": []
+    },
+    "container_isolation": {
+      "status": "passed",
+      "non_root": true,
+      "read_only_root": true,
+      "health": true,
+      "validation_redacted": true,
+      "redis_reachable": true,
+      "decision_write_denied": true,
+      "no_mysql_driver_or_settings": true,
+      "host_mysql_blocked": true,
+      "direct_internet_blocked": true
+    },
+    "capacity": {
+      "status": "passed",
+      "probes": [
+        {
+          "mode": "memory",
+          "acknowledged": 30,
+          "refused": true,
+          "false_success": false,
+          "prior_contents_retained": true,
+          "aof_write_status": "ok",
+          "stopped": false,
+          "disk_full_confirmed": false
+        },
+        {
+          "mode": "disk",
+          "acknowledged": 60,
+          "refused": true,
+          "false_success": false,
+          "prior_contents_retained": null,
+          "aof_write_status": "service_stopped",
+          "stopped": true,
+          "disk_full_confirmed": true
+        }
+      ],
+      "limits": "Synthetic reduced-size memory/disk probes; target-host capacity benchmark and full-disk recovery were not performed."
+    },
+    "architecture": {
+      "status": "passed",
+      "scope_files": 68,
+      "fingerprint": "7b355cee3a4fbb3e20a2bbdacd35c1017150bf735150c3ca44c9378fdf66443f",
+      "outside_scope_errors": 0
+    },
+    "strict_utf8": "passed",
+    "git_diff_check": "passed"
+  },
+  "existing_data": {
+    "status": "read_only_verified",
+    "business_data_mutations": 0,
+    "legacy_repairs_applied": 0,
+    "A115001": {
+      "unique_original_source": true,
+      "formal_columns_empty": true,
+      "correction_preview": "passed",
+      "apply": "not_run"
+    },
+    "seven_old_cases": [
+      {
+        "case_no": "115000001",
+        "unique_beclass": true,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": true,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000002",
+        "unique_beclass": true,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": true,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000003",
+        "unique_beclass": true,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": true,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000179",
+        "unique_beclass": false,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": false,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000180",
+        "unique_beclass": false,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": false,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000181",
+        "unique_beclass": false,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": false,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      },
+      {
+        "case_no": "115000182",
+        "unique_beclass": false,
+        "effective_account_complete": false,
+        "survey_can_project_account": false,
+        "formal_columns_empty": false,
+        "subsidy_return_roots": 1,
+        "refund_snapshots": 0
+      }
+    ],
+    "source_unchanged_during_read_audit": true,
+    "scope": "Recipient/financial basis must be confirmed through original owners before old refund snapshot repair; missing accounts are never guessed."
+  },
+  "not_run": [
+    "production or existing-service deployment/cutover",
+    "existing NAS grants apply and target-specific qualification",
+    "real LINE provider login or send",
+    "legacy SQL application migration/deletion",
+    "A115001 or seven-case data Apply",
+    "target-host capacity/restore qualification"
+  ],
+  "test_resource_cleanup": {
+    "status": "passed",
+    "removed_containers": [
+      "lu-registration-isolation-20261105-registration-intake-1",
+      "lu-registration-isolation-20261105-registration-token-verifier-1",
+      "lu-registration-isolation-20261105-registration-redis-1",
+      "lu-test-registration-20261105"
+    ],
+    "removed_volumes": [
+      "lu-registration-isolation-20261105_registration-data",
+      "lu-test-registration-data-20261105"
+    ],
+    "removed_networks": 4,
+    "existing_services_untouched": true
+  },
+  "security_boundary": "APPROVE for verified local implementation boundary; no production rollout approval claimed",
+  "source_sha256": {
+    "api/dependencies/registration_applications.py": "b9c0d4e9de0a06d8e5e903fdc4578bd81aa6cd045211682a668ebdc168bba6e5",
+    "api/dependencies/registration_runtime.py": "94f2cc03d4eb965589eba5a9b1e63e02106db566a090e68e6f60f232d3607de1",
+    "api/main.py": "a7777f4b0af085db4ac5af9f85aebee3885f90e0be9077d929565a97a68d46a2",
+    "api/nas_apps.py": "a88d9ef3cf862ec70980539f8f8cd01ba16bbd4797f508460c3585b48e3109bb",
+    "api/registration_contracts.py": "656c6dc3563635c6d9df6ec505d558508d917cc5e2a911163be7f80c25643830",
+    "api/registration_intake.py": "a39d5e0d3af30de48ef48b754283cdb8c5a82c11474ff3547ef61ef57d8f0c5c",
+    "api/registration_token_verification.py": "c5ca5be5b2602475b20b2e3759bc7c4a568fd557f4a410061e9bc2633d89e0be",
+    "api/routes/client_registry.py": "6f7ddf52e0758a02c236a09bda357892f49a84f69109c2b60949e71c0c3621eb",
+    "api/routes/line_identity.py": "7ec60ac81b6e6c69316c6e4b3916353c2f3d5eb0e9d0bb487a025f53b604fb16",
+    "api/routes/registration_applications.py": "39957a77d5aadedbd9e3614a98fef67c0a2333f7db82c663e3df778aaaaabfc4",
+    "api/schemas/client_registry.py": "6a2576bfc0ac19580fa1a1a4aa2126f0ef4338f6b1d07b1486e829232875703b",
+    "deploy/registration/Dockerfile": "7893049d6ad1112b4fab60f1f4474b9f89d8ae5a37207575be37c36aa58faa41",
+    "deploy/registration/Dockerfile.dockerignore": "27c1a3e0492bca44de189016405f2d8d0b06d85732db1675a18784d75a221046",
+    "deploy/registration/proxy-location.conf": "a62d5471c401442d80889d9903e8fe474ca4d30144661b1767014cae67bd1503",
+    "deploy/registration/redis-entrypoint.sh": "dfb281788f05ea5af5cda1fc07e7d106cc5bf46e66eb973406c4bef4c75a1967",
+    "deploy/registration/redis.conf": "ed7295b99558eacaf9d24e1c10de454f151a2176e39f78874dc48c031ebfbee4",
+    "docker-compose.registration.yml": "a297590a1bbd68d03ee596b6a06ff5807a4498390fccb0368dff937a89fb3c61",
+    "domains/case_import/beclass_correction.py": "fe6802627269ec37ceb9d5df1d576df91dd7d5d86cab90320609d35cf88a085e",
+    "domains/case_import/provisional_registration.py": "7f893a75f2eaa48843685f65cd3718272aeb692d89257ed6040c3a242849edb3",
+    "domains/case_import/refund_account.py": "dc6ac8deed85b137e4d51c78d5c543803c05fa76eabc0ae2a71e2b55209e2b60",
+    "infrastructure/line/registration_token_verifier.py": "a6dee31919a71c3b4ee93b0483d574c6045e868429a286c82b18ccbed46b5848",
+    "infrastructure/mysql/beclass_correction_repository.py": "45363db50a81a98ecd380dfacc94753ae5f68c02b991cdad1e542c21e962006c",
+    "infrastructure/mysql/beclass_refund_account.py": "6c72fad4e7aef32a43fca30ae421f2e9562a08aa9540dfab77675f64583e8566",
+    "infrastructure/mysql/client_receipt_reconciliation_repository.py": "129e0a74ae286e7732983a72a8bd0d3f8df0e6e44b8cdb3846842ef9459a9551",
+    "infrastructure/mysql/client_registry_query_repository.py": "6efe8768cf33473f9d4b8d2f7b12ed68e21f0ff4708e7f16bdf125631b0855d4",
+    "infrastructure/mysql/nas_permissions.py": "7f3005502ce4a3eb6cc11c8f13f8ac6443a5e7297614e26defc3fab33a60488a",
+    "infrastructure/mysql/provisional_registration_repository.py": "7fc0b852e31fec827df66dd14a5cce9deb8e55600f91bdafad273b9a9f3f450a",
+    "infrastructure/redis/registration_connection.py": "405db28ea8f23a863374fdf66ea90acde98de5dc3bfc21e3b607aac54d413424",
+    "infrastructure/redis/registration_maintenance.py": "ad974f2a1505b145e446c8afff0790c153847caf149607ee9fe1d67990c6fe41",
+    "infrastructure/redis/registration_staging_repository.py": "1b34520eeda46d3fc9400d8ff1730109e8f5cf6027b489b2b450bbef22933eaa",
+    "scripts/registration_maintenance.py": "b613b1ab84319112618355cb74f15e6330bf75ac35e06f0a6e3deaa2a3207fd9",
+    "scripts/repair_registration_refund_accounts.py": "74ac7376e41791e36a41c1c0e3a68551c58b7a4e8785aa989a15e8711cf20423",
+    "subsystems/case_import/registration_maintenance.py": "e2b2ed0e66edbde26b41f5cca2d3a2d7d59997c647ee7ea505cb639ac4ad0a70",
+    "subsystems/case_import/registration_staging.py": "429eb9df3f47fbe0237fbb6a847c1ccc7d5faa9b9576b4900174f99e773117d3",
+    "subsystems/client_profile/registry_query.py": "ec433669ce0e2147f846911c1ef89cb5e56ced856a15ec2638629cd9ab4b6b99",
+    "subsystems/line/identity_application.py": "12b242f1931671d3673ea243e4e082c0cfc3cd62e0299bbd2b7998d6412b32f9",
+    "tests/domains/case-import/subsystems/case-import/integration/test_registration_staged_approval_mysql.py": "78afb161592ab8fc16bf1ba29c7555b964d001f63e582dbd4c496cc00b376ee1",
+    "tests/domains/case-import/subsystems/case-import/modules/pairing-current-facts/test_beclass_correction_workflow.py": "82af4058a47c8bb8de4d8c1f8cd093f6fd3fe25855aa8f68d67e21a13a1f2ce2",
+    "tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_durability.py": "e43d92271cb54e98c542f78fe41d178950e00fd5a2f53b6900df607fe5d8dd0c",
+    "tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_intake.py": "4cb48562565591334c9cb592fdb5f6df969881012d372ef8e31e8dc7ee31bd42",
+    "tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_maintenance.py": "5e008103cdf871dce9c59e699136c15abf0c93baa8782a1aaf6346256aceea40",
+    "tests/domains/case-import/subsystems/case-import/modules/provisional-registration/test_registration_redis.py": "485409bbc78db177a2893814ed54900658b4e397900b3447e7929c5a5192ed95",
+    "tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_client_registry_query.py": "28aab8adb55fa3fdfbc341bae0860730b5d7c1a7f85f0029bb221690b0be47b5",
+    "tests/domains/clients/subsystems/client-profile/modules/profile-change/contract/test_registry_refund_fields.py": "0164c519e7115fba699e5ac31fc820f26476d1cf48dc462f24a2753725418fb0",
+    "tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_nas_permissions_contract.py": "1d33bbad55e6ed2bb082496bfabcbe94e43a0b3481a527f54eead6c9087bd348",
+    "tests/domains/global/subsystems/migration/modules/nas-runtime-permissions/test_nas_permissions_mysql.py": "76db113488e870e1fc0daf80a0448b1a72a57771cfc988fcc68878ae04c643b2",
+    "tests/test_provisional_line_registration.py": "e7e11f2ff7db5e6393925fc968b02197cc05904c66662d84b1020e9278dbb978",
+    "ui_react/src/api/client_registry/client_registry_schemas.ts": "dc3c1f2ffb00c049d55057f4c5624152bf149e4ef9c7e366ecd2f22b78a1786d",
+    "ui_react/src/api/registration_applications/client.ts": "f333fc04de8b485a9f91cdeeb1a5899626bfa2bb78f74cf5d0f59b1c13a9586f",
+    "ui_react/src/components/ClientRegistryAccountingSummary.tsx": "cde59584fc1dc83050918ab3d6d650f756699938bc0664172784d48f3960b5b9",
+    "ui_react/src/components/ClientRegistryDetailEditor.tsx": "90347574034140816b2b24d5e94c4c681ebc10d53a892838835f0a532aed9db3",
+    "ui_react/src/components/RegistrationApplications.tsx": "df91723f1c5d3d994736a79fb3fa229517b49746457509325ceef44c8515ff3b",
+    "ui_react/src/pages/ClientRosterPage.css": "b07b73b7cd58efbd1b5ba83d7761d8a56af5fa57fb8a16294df135773ec9af97",
+    "ui_react/src/pages/ClientRosterPage.tsx": "20ecf9c3097e9b6b6f07f9294c28d80c3b3817f2f32ff311c4a6a45b672e03f0",
+    "ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_profile_request_workbench.test.tsx": "f7d87076cfe5b040546cb3991c7a6cf63558855bcc4d305cbab42029011f059b",
+    "ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_accounting_summary.test.tsx": "37a128600492d63f0ea3717289b6ce1569529accf1574c7160776b9eacb7f037",
+    "ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_registry_page.test.tsx": "5ce78fb45b035d8a1adabe952c755db87cfbb28d8a370675cce3408523621ff4",
+    "ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_roster_accounting_dates.test.tsx": "c4680ba4331ea5905fc1e5936768e8ed4d81acaa7daabbf3ff66785fe137c3bd",
+    "ui_react/src/tests/domains/clients/subsystems/client-profile/modules/profile-change/client_roster_page.test.tsx": "7ac196b40761546aa962b21b6bf0bd7add7e04eb69b58f10337b9526e4b887f8",
+    "ui_react/src/tests/registration_applications.test.tsx": "3e99f8788effb61a33ca0be420bc7a48fdcaaa317ea8a9883ab0ef2b158e24ed"
+  },
+  "evidence_root": "scratch/client_registry_redis_20261105 (ignored; synthetic screenshots, redacted results and original dirty source baseline)",
+  "git_mutations": {
+    "stage": false,
+    "commit": false,
+    "push": false,
+    "branch_switch": false
+  }
+}

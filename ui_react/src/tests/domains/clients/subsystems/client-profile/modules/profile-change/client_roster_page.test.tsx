@@ -177,7 +177,7 @@ describe('ClientRosterPage', () => {
     expect(screen.getByRole('dialog', { name: '案件 CASE-001 詳細資料' })).toBeInTheDocument();
     const detail = await screen.findByLabelText('CASE-001 案件資料編輯');
     expect(detail).toHaveTextContent('客戶主檔');
-    expect(within(detail).getByLabelText('行政註記')).toHaveValue('主檔註記');
+    expect(within(detail).getByLabelText('客戶備註（主檔）')).toHaveValue('主檔註記');
     expect(detail).toHaveTextContent('HCM Email');
     expect(within(detail).getByLabelText('HCM Email')).toHaveValue('hcm@example.com');
     expect(detail).toHaveTextContent('報名問卷資料（BeClass）');
@@ -468,3 +468,5 @@ describe('ClientRosterPage', () => {
     expect(mocks.list).toHaveBeenCalledTimes(1);
   });
 });
+
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client', () => ({financeAccountingClient: {query: vi.fn().mockRejectedValue(new Error('synthetic unavailable summary'))}}));

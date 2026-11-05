@@ -8,6 +8,9 @@
 只承認HCM case、Client BeClass source、review lineage、row receipt與`bound_case_no`，不以姓名／電話相似度配對，且不建立 anomaly recheck。
 
 ## Implementation
+- `domains/case_import/refund_account.py` — 共用退款欄位正規化、typed有效來源及遮蔽。
+- `infrastructure/mysql/beclass_refund_account.py` — 一般／補助退款快照委派的唯一有效帳戶Query，無寫入。
+- `scripts/repair_registration_refund_accounts.py` — 預設唯讀採納預覽，唯一bound原問卷才可由原correction Q/P/A補正；真實Apply須另行授權，不重寫原問卷或既有金融快照。
 - `subsystems/case_import/pairing_current_facts.py`
 - `infrastructure/mysql/case_pairing_anomaly_recheck_sink.py`
 - `domains/case_import/beclass_import_review.py`

@@ -19,6 +19,7 @@ from subsystems.case_import.beclass_correction_workflow import allows_manual_bec
 from subsystems.client_finance.virtual_account_resolution import build_client_virtual_account, resolve_case_virtual_account
 from domains.client_finance.obligation_planning import build_client_finance_terms_candidate
 from domains.client_finance.order_amount_calculation import _claim_schedule
+from domains.case_import.refund_account import mask_refund_values, effective_refund_account
 from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from domains.client_finance.subsidy_advance import subsidy_advance_due_date
 from domains.payroll.payment_due_date import calculate_staff_payment_due_date
@@ -38,10 +39,10 @@ from subsystems.government_subsidy.reconciliation_register_query import (
 
 _CLIENT_FIELDS = (
     "name", "gender", "phone", "email", "city", "address", "residence_type",
-    "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type",
+    "delivery_type", "baby_info", "notes", "due_month", "reject_reason", "service_type", "identity_status", "admin_notes",
 )
 _BECLASS_FIELDS = (
-    "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
+    "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes", "birth_date", "refund_bank_code", "refund_account_no",
 )
 _SORT_COLUMNS = {
     "case_no": "o.case_no",
@@ -257,7 +258,7 @@ class MySqlClientRegistryQueryRepository:
                 customer_payable,
                 normalize_subsidy_policy_identity(
                     str(row.get("identity_status") or "")
-                ) == "社福" and Decimal(str(customer_payable)) == 0,
+                ) == "補助市民" and Decimal(str(customer_payable)) == 0,
             )
         claim = _claim_application_month(row)
         baby_info = str(row.get("baby_info") or "")
@@ -305,6 +306,7 @@ class MySqlClientRegistryQueryRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT c.id AS client_id,o.case_no,o.status AS order_status,c.client_profile_version,"
+                "o.start_date AS planned_start_date,o.end_date AS planned_end_date,o.actual_start_date,o.actual_end_date,"
                 "EXISTS(SELECT 1 FROM order_service_data_locks service_lock "
                 "WHERE service_lock.case_no=o.case_no) AS service_data_locked,"
                 + ",".join(f"c.{field}" for field in _CLIENT_FIELDS)
@@ -354,7 +356,7 @@ class MySqlClientRegistryQueryRepository:
             beclass_values.update({
                 field: effective_values[field]
                 for field in _BECLASS_FIELDS
-                if field in effective_values
+                if field in effective_values and field != "birth_date"
             })
         if beclass_status == "ready":
             order_information = project_order_information(
@@ -370,6 +372,12 @@ class MySqlClientRegistryQueryRepository:
                     order_information_values[field] = effective_values[field]
                     order_information_issues.pop(field, None)
             beclass_values["multi_birth_count"] = order_information_values.get("multi_birth_count")
+            if beclass_values.get("birth_date") is not None:
+                beclass_values["birth_date"] = str(beclass_values["birth_date"])
+            beclass_values["refund_account_status"] = (
+                "complete" if effective_refund_account(beclass_values, {}) else "incomplete"
+            )
+            beclass_values = mask_refund_values(beclass_values)
         else:
             order_information_values = None
             order_information_issues = {}
@@ -382,6 +390,7 @@ class MySqlClientRegistryQueryRepository:
             "client_id": int(client["client_id"]),
             "client_profile_version": int(client.get("client_profile_version") or 0),
             "client_values": {field: client.get(field) for field in _CLIENT_FIELDS},
+            "order_dates": {key: client.get(key) for key in ("planned_start_date", "planned_end_date", "actual_start_date", "actual_end_date")},
             "beclass_status": beclass_status,
             "beclass_record_id": beclass_record_id,
             "beclass_source_kind": beclass_source_kind,
@@ -630,7 +639,7 @@ def _claim_application_month(row) -> dict[str, int | None]:
     # planned date to fill a missing actual end date in this diagnostic list.
     eligible = normalize_subsidy_policy_identity(
         str(row.get("identity_status") or "")
-    ) in {"補助市民", "社福"}
+    ) in {"一般市民", "補助市民"}
     schedule = _claim_schedule(row.get("actual_end_date") if eligible else None)
     return {
         "claim_application_year": schedule["claim_application_year"],

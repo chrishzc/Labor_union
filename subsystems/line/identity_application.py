@@ -341,28 +341,53 @@ class LineIdentityApplication:
 
     def approve_registration(self, registration_id, expected_version, actor, correlation_id):
         with self._unit_of_work_factory() as unit_of_work:
-            # Read the binding first; the registration row lock and the binding
-            # owner's version check preserve the existing outer transaction.
-            application = unit_of_work.provisional_registrations.load_application(registration_id)
-            line_user_id = LineUserId(application.candidate.line_user_id)
-            binding = unit_of_work.identities.get(line_user_id, LineBindingSubjectType.CUSTOMER)
-            if binding and binding.status is LineIdentityBindingStatus.BOUND and (
-                application.client_id is None or binding.subject_reference != str(application.client_id)
-            ):
-                raise LineIdentityConflictError("registration_customer_binding_changed")
-            outcome = unit_of_work.provisional_registrations.approve(registration_id, expected_version, actor)
-            customer = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, str(outcome.client_id),
-                                             line_user_id if binding and binding.status is LineIdentityBindingStatus.BOUND else None)
-            preview = _customer_preview(unit_of_work, line_user_id, customer)
-            result = self._apply_customer_candidate(
-                unit_of_work, LineIdentityFlowId(f"registration-approval:{registration_id}"), preview,
-                CustomerIdentityProof(str(application.candidate.client_payload["name"]),
-                                      str(application.candidate.client_payload["phone"])),
-                correlation_id, owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
-            )
-            if result.status not in {LineIdentityApplyStatus.BOUND, LineIdentityApplyStatus.EXISTING}:
-                raise LineIdentityConflictError("registration_customer_binding_changed")
+            application = unit_of_work.provisional_registrations.load_application(registration_id, for_update=True)
+            outcome, result = self._approve_registration_in_uow(unit_of_work, application, expected_version, actor, correlation_id)
             unit_of_work.commit()
+        return outcome, result
+
+    def registration_id_high_water(self):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.provisional_registrations.registration_id_high_water()
+
+    def registration_approval_receipt(self, registration_id, operation_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.provisional_registrations.approval_receipt(registration_id, operation_id)
+
+    def approve_staged_registration(self, staged, correlation_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            repository = unit_of_work.provisional_registrations
+            # Lock the minimal parent first: concurrent recoveries share this one transaction owner.
+            application = repository.prepare_staged_approval(staged)
+            existing = repository.approval_receipt(staged.registration_id, staged.operation_id)
+            if existing is not None:
+                return existing
+            unit_of_work.platform_users.ensure_verified_user(LineUserId(staged.candidate.line_user_id))
+            outcome, _ = self._approve_registration_in_uow(unit_of_work, application, 1, staged.actor, correlation_id)
+            receipt = repository.save_approval_receipt(staged, outcome)
+            unit_of_work.commit()
+        return receipt
+
+    def _approve_registration_in_uow(self, unit_of_work, application, expected_version, actor, correlation_id):
+        registration_id = application.registration_id
+        line_user_id = LineUserId(application.candidate.line_user_id)
+        binding = unit_of_work.identities.get(line_user_id, LineBindingSubjectType.CUSTOMER)
+        if binding and binding.status is LineIdentityBindingStatus.BOUND and (
+            application.client_id is None or binding.subject_reference != str(application.client_id)
+        ):
+            raise LineIdentityConflictError("registration_customer_binding_changed")
+        outcome = unit_of_work.provisional_registrations.approve(registration_id, expected_version, actor, snapshot=application)
+        customer = LineIdentityCandidate(LineBindingSubjectType.CUSTOMER, str(outcome.client_id),
+                                         line_user_id if binding and binding.status is LineIdentityBindingStatus.BOUND else None)
+        preview = _customer_preview(unit_of_work, line_user_id, customer)
+        result = self._apply_customer_candidate(
+            unit_of_work, LineIdentityFlowId(f"registration-approval:{registration_id}"), preview,
+            CustomerIdentityProof(str(application.candidate.client_payload["name"]),
+                                  str(application.candidate.client_payload["phone"])),
+            correlation_id, owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
+        )
+        if result.status not in {LineIdentityApplyStatus.BOUND, LineIdentityApplyStatus.EXISTING}:
+            raise LineIdentityConflictError("registration_customer_binding_changed")
         return outcome, result
 
     def preview_staff(self, flow_id, line_user_id, proof):

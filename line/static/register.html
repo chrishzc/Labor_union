@@ -503,11 +503,13 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
         </div>
     </form>
 
+    <button type="button" class="btn-submit" id="registrationStatusButton" onclick="queryRegistrationStatus()">查詢原申請結果</button>
     <!-- 成功畫面 -->
     <div id="successCard" class="success-card">
         <div class="success-icon">✓</div>
         <div class="success-title">登記已受理</div>
         <div class="success-desc">登記結果將顯示於此。</div>
+        <button type="button" class="btn-submit" id="reapplyButton" style="display:none" onclick="startNewRegistration()">重新申請</button>
         <button class="btn-submit" id="closeButton" onclick="liff.closeWindow()">關閉視窗</button>
     </div>
 
@@ -549,6 +551,11 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
     let pendingRegistrationPreview = null;
     let registrationSubmissionPending = false;
     let registrationResultUnknown = false;
+    const submissionStorageKey = `registration-submission:${isNonCitizen ? 'non-citizen' : 'subsidy'}`;
+    const hadSubmission = Boolean(sessionStorage.getItem(submissionStorageKey));
+    let registrationSubmissionId = sessionStorage.getItem(submissionStorageKey) || crypto.randomUUID();
+    sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
+
 
     function liffStateParameters(parameters) {
         const rawState = parameters.get("liff.state") || "";
@@ -583,6 +590,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             await liff.init({liffId});
             if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
             currentIdToken = liff.getIDToken() || '';
+            if (hadSubmission && currentIdToken) await queryRegistrationStatus();
             if (!currentIdToken) throw new Error('無法取得 LINE 登入憑證，請重新開啟此頁。');
         } catch (error) {
             console.error("初始化失敗", error);
@@ -1324,7 +1332,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             registrationResultUnknown = true;
             const applyRes = await fetch('/api/v1/line/identity/registration/apply', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Idempotency-Key': registrationSubmissionId },
                 body: JSON.stringify({
                     ...payload,
                     expected_binding_version: preview.expected_binding_version,
@@ -1335,7 +1343,7 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
             loader.style.display = "none";
 
             if (!applyRes.ok || !applyResult.data) {
-                if (!applyRes.ok) registrationResultUnknown = false;
+                if (!applyRes.ok && applyRes.status < 500 && applyRes.status !== 408) registrationResultUnknown = false;
                 statusMsg.textContent = !applyResult.data && applyRes.ok
                     ? '登記結果讀回不完整，請勿重複送出並聯絡工會確認。'
                     : registrationErrorMessage(applyResult, applyRes.status);
@@ -1359,23 +1367,62 @@ Description: 提供 LIFF 客戶服務登記的 Preview/Apply 流程；初始化�
 
     function renderRegistrationSuccess(receipt) {
         if (!receipt || !Number.isSafeInteger(receipt.registration_id) || receipt.registration_id <= 0
-            || !['pending_approval', 'pending_review', 'bound', 'existing'].includes(receipt.identity_status)
+            || !['pending_approval', 'approving', 'approved', 'rejected', 'expired'].includes(receipt.identity_status)
             || (receipt.identity_status === 'pending_approval'
                 && (receipt.client_id !== null || receipt.beclass_record_id !== null))) {
             throw new Error('登記結果讀回不完整，請勿重複送出並聯絡工會確認。');
         }
+        registrationResultUnknown = false;
+        const terminal = ['rejected', 'expired'].includes(receipt.identity_status);
+        document.getElementById('reapplyButton').style.display = terminal ? 'block' : 'none';
+        const lifecycle = {pending_approval: '申請已送出，待工會核准。', approving: '核准建檔或清除確認中，請查詢原申請。', approved: '申請已核准，待審問卷內容已清除。', rejected: '申請已拒絕，問卷內容已清除。', expired: '申請已到期，問卷內容已清除。'};
         const successDescription = document.querySelector('.success-desc');
         successDescription.style.whiteSpace = 'pre-line';
         successDescription.textContent = [...new Set([
             runtimePage?.success_description || '',
-            receipt.identity_status === 'pending_approval' ? '申請已送出，待工會核准。' : '登記資料已提交。',
+            lifecycle[receipt.identity_status],
+            receipt.expires_at_utc ? `待審到期：${new Date(receipt.expires_at_utc).toLocaleString('zh-TW', {timeZone:'Asia/Taipei'})}（台北時間）` : '',
             `申請編號：${receipt.registration_id}`,
         ])].filter(Boolean).join('\n');
-        document.querySelector('.success-title').textContent = runtimePage?.success_title
-            || (receipt.identity_status === 'pending_approval' ? '申請已送出' : '登記已受理');
+        document.querySelector('.success-title').textContent = terminal ? (receipt.identity_status === 'expired' ? '申請已到期' : '申請已拒絕') : receipt.identity_status === 'approved' ? '申請已核准' : '申請已送出';
         document.getElementById('formHeader').style.display = 'none';
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('successCard').style.display = 'block';
+    }
+
+    async function queryRegistrationStatus() {
+        const statusMsg = document.getElementById('statusMessage');
+        const button = document.getElementById('registrationStatusButton');
+        button.disabled = true;
+        try {
+            const response = await fetch('/api/v1/line/identity/registration/status', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({line_id_token: currentIdToken, submission_id: registrationSubmissionId})
+            });
+            const result = await response.json();
+            if (!response.ok || !result.data) throw new Error('原申請結果暫時無法確認，請稍後再查詢。');
+            if (result.data.status === 'not_received') {
+                registrationResultUnknown = false;
+                document.querySelector('#registerForm button[type="submit"]').disabled = false;
+                statusMsg.textContent = '目前尚未收到這筆申請，可使用原識別送出表單。';
+                statusMsg.style.display = 'block';
+            } else renderRegistrationSuccess(result.data);
+        } catch (error) {
+            statusMsg.textContent = error.message || '原申請結果暫時無法確認。';
+            statusMsg.style.display = 'block';
+        } finally { button.disabled = false; }
+    }
+
+    function startNewRegistration() {
+        registrationSubmissionId = crypto.randomUUID();
+        sessionStorage.setItem(submissionStorageKey, registrationSubmissionId);
+        registrationResultUnknown = false;
+        refundPolicyAccepted = false;
+        document.getElementById('registerForm').reset();
+        document.getElementById('successCard').style.display = 'none';
+        document.getElementById('formHeader').style.display = 'block';
+        document.getElementById('registerForm').style.display = 'block';
+        document.querySelector('#registerForm button[type="submit"]').disabled = false;
     }
 
     function requireRegistrationPreview(data) {

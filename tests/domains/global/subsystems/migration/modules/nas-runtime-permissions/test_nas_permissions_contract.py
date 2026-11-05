@@ -14,9 +14,10 @@ def test_line_has_no_delete_ddl_or_account_security_write_and_no_approval_write(
     assert grants["admin_users"][-1] == "UPDATE (linked_line_user_id)"
     assert grants["orders"] == ["SELECT"]
     assert grants["clients"] == ["SELECT", "UPDATE (line_user_id)"]
-    assert "INSERT" in grants["provisional_client_registrations"]
-    assert not any("approved" in privilege or "application_version" in privilege
-                   for privilege in grants["provisional_client_registrations"])
+    assert "provisional_client_registrations" not in grants
+    assert "provisional_registration_conflicts" not in grants
+    management = dict(_table_grants("management", ["provisional_client_registrations"]))
+    assert "INSERT" in management["provisional_client_registrations"]
     assert grants["scheduling_service_day_logs"] == ["SELECT"]
     assert not any("line" in profiles for _, _, profiles in PROCEDURES.values())
     assert dict(_table_grants("line", ["application_command_claims"])) == {

@@ -103,7 +103,7 @@ def _translate(operation):
 def _result(snapshot):
     return {"registration_id": snapshot.registration_id, "client_id": snapshot.client_id,
             "beclass_record_id": snapshot.beclass_record_id, "case_no": snapshot.case_no,
-            "client_name": "", "replayed": False,
+            "client_name": "", "replayed": snapshot.replayed,
             "identity_status": "pending_approval" if snapshot.status == "pending" else snapshot.status,
             "status": snapshot.status, "submitted_at_utc": snapshot.submitted_at_utc.isoformat(),
             "expires_at_utc": snapshot.expires_at_utc.isoformat()}

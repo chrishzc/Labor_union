@@ -257,7 +257,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_historical_ord
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, **{field: None for field in ORDER_INFORMATION_KEYS},
+            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in ORDER_INFORMATION_KEYS},
         },
         "corrections": {},
         "source_kind": "admin_manual",
@@ -280,7 +280,7 @@ def test_beclass_mysql_correction_exposes_empty_manual_source_for_current_order(
         "original": {
             "name": None, "email": None, "phone": None, "tel": None,
             "ext": None, "city": None, "zip_code": None, "address": None,
-            "admin_notes": None, **{field: None for field in ORDER_INFORMATION_KEYS},
+            "admin_notes": None, "refund_bank_code": None, "refund_account_no": None, **{field: None for field in ORDER_INFORMATION_KEYS},
         },
         "corrections": {},
         "source_kind": "admin_manual",

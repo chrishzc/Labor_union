@@ -68,7 +68,7 @@ Console output、README、測試名稱、候選 DB 名稱或人工記憶不是 S
 
 ### 4.1 Release Manifest
 
-2026-10-27 補助期款校驗修正：current preserve chain 選取
+歷史v2（2026-10-27 補助期款校驗修正）：當時preserve chain選取
 `labor_union_2026_10_27_government_subsidy_periods_hash_v2.json`，綁定既有
 `1055_government_subsidy_periods.sql` 的實際 bytes；2026-10-24 v1 清單保留追溯、不再預設選取。
 v2 的 SQL、descriptor 語意及 `subsidy-period-policy-v1` backfill 均不改變；
@@ -78,9 +78,11 @@ apply／verify 與 backfill 重送驗證，不得只更新校驗碼就宣稱保�
 不因新庫省略它們就重建或刪除歷史表；保留欄位沿用原 owner 的 metadata／successor 契約。
 LINE 舊 append-only 名稱契約仍由後續已選取 release 驗其演進，不拿早期欄位型別覆蓋新 owner。
 
-2026-10-29 最新人工裁決：移除 `migrate_subsidy_period_policy.py` 對 `lu_test_` 前綴的限制，接受明確指定的既有本機 development database，包括原有 preserve candidate 名稱；localhost／development、Apply 的 plan／backup 要求及既有 writer／驗證保持原契約。以 `labor_union_2026_10_29_subsidy_policy_database_names_v3.json` 綁定新工具 hash，取代 default chain 的 v2 選取；v1／v2 歷史 manifest 不改寫，1055 SQL、descriptor 與業務回填語意不變。移除前綴限制不授權額外資料變更或 production 執行。
+歷史v3（2026-10-29）：移除 `migrate_subsidy_period_policy.py` 對 `lu_test_` 前綴的限制，接受明確指定的既有本機 development database，包括原有 preserve candidate 名稱；localhost／development、Apply 的 plan／backup 要求及既有 writer／驗證保持當時契約。以 `labor_union_2026_10_29_subsidy_policy_database_names_v3.json` 綁定新工具 hash，取代當時default chain的v2選取；v1／v2 歷史 manifest 不改寫，1055 SQL、descriptor 與當時業務回填語意不變。移除前綴限制不授權額外資料變更或 production 執行。
 
-同次執行發現已提交政策的來源，在 replay preservation 被誤作首次身分轉換；既有 policy events 亦被再次計入 account version 增量。以 `labor_union_2026_10_29_subsidy_policy_replay_v4.json` 作為 current 工具 hash successor，取代 default chain 的 v3；驗證器必須依來源 marker 保持已轉換身分，只計 candidate 新增的 policy event ids，仍拒絕額外身分／版本變更。不改回填 writer、現金流水、SQL／descriptor 或已發布 manifest。
+歷史v4裁決（現行選取由下方v5取代）：同次執行發現已提交政策的來源，在 replay preservation 被誤作首次身分轉換；既有 policy events 亦被再次計入 account version 增量。以 `labor_union_2026_10_29_subsidy_policy_replay_v4.json` 作為當時工具 hash successor，取代 default chain 的 v3；驗證器依來源 marker 保持已轉換身分，只計 candidate 新增的 policy event ids。此為當時驗證語意，不授權現行工具重跑舊對照。
+
+2026-11-05 最新人工裁決：使用者要求修正未來匯入與資料升級的舊身分轉換。current chain 以`labor_union_2026_11_05_subsidy_identity_preservation_v5.json`取代v4選取；沿用完全相同的1055 SQL及owned descriptors，`backfills=[]`，不新增DDL、system seed或business-row-backfill。一般市民、原住民、補助市民、其他既有身分及缺值均按來源保留；既有政策綁定、人工更正、舊marker／更名日誌與全部已成立帳務不可變。不得因沒有marker而將一般市民變成補助市民，也不因舊日誌與後來更正不同而還原舊錯誤；未知不猜填。current manifest選取、執行及candidate驗證均拒絕`subsidy-period-policy-v1`／原腳本／該回填receipt，回`subsidy_identity_backfill_retired`並零DB寫入；不能藉自訂manifest、關閉backfills或舊回條重啟舊流程。已發布v1～v4、原腳本及historical receipts保持原bytes，僅供歷史重現／稽核，不是現行升級入口。舊身分附帶自動重算退款亦退出升級；新的退款成立／更正仍由正式業務owner依規格04／16／22辦理。其他已核准backfill（例如雙胞胎快照）維持，source→dump→candidate→apply→verify與重跑均須驗身分及金融資料保留；不在本輪切換既有DB或部署。
 
 Modules：
 
@@ -384,8 +386,7 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
    artifacts 與 blocked reason，且零 DB 寫入。
    本機入口先判斷整條待套 release 是否包含 business backfill，再查 schema-only qualification；
    含資料轉換時明確導向 preserve-data 路徑，不因較早的 schema qualification 缺件隱藏真正需求。
-   預設 preserve 選取必須包含 current 補助身分／退款 backfill；預覽與 plan fingerprint 均列入
-   實際選取的 backfill id、artifact 及 hash，不能只建表卻漏執行資料轉換。
+   預設 preserve 選取只包含仍有效且已核准的backfill；舊補助身分／退款backfill依v5裁決退役，不再預設或顯式執行。預覽與plan fingerprint列入實際選取的backfill id、artifact及hash，不能漏列仍有效的資料轉換，亦不能以舊規格復活退役轉換。
 6. **Engine verification**：先跑 metadata／manifest／plan focused tests，再以符合各情境前置條件的本機 DB 驗 fresh
    bootstrap，最後以含上一支援版 schema 與代表性舊資料的 source 驗 dump → candidate → apply → verify。
    schema／migration 沒有真 MySQL evidence 時為 `BLOCKED_ENGINE_EVIDENCE`，mock／compile 不能取代。

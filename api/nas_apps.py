@@ -23,8 +23,10 @@ async def _management_lifespan(_):
     except Exception:
         pass
     ensure_builtin_knowledge_catalog()
+    from api.dependencies.registration_runtime import registration_maintenance_runtime
     try:
-        yield
+        with registration_maintenance_runtime():
+            yield
     finally:
         close_connection_pools()
 

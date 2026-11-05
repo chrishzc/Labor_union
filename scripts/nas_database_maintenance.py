@@ -50,7 +50,6 @@ ARCHIVE_NAME = re.compile(r"union_db_(\d{8}_\d{6})\.sql\.gz\Z")
 IDENTIFIER = re.compile(r"[A-Za-z0-9_]{1,64}\Z")
 # The NAS IO adapter below mirrors this CLI revision's receipt/verification
 # orchestration. A future artifact must be reviewed, not silently skipped.
-SUPPORTED_POLICY_SHA256 = "2d2ddfebf56f6ed092cd856a97ba47d2dd46b216ee45d992064e20d7c4cb65ab"
 
 
 class MaintenanceBlocked(RuntimeError):
@@ -146,46 +145,10 @@ class ConnectionConfig:
         return [executable, *options]
 
     def run_manifest_backfill(self, backfill, mode, candidate, plan_path, backup_path, receipt_path):
-        # This is an IO adapter for the existing policy library. No source
-        # connection is exposed to it; the hash-checked manifest remains SSOT.
         require(candidate == self.candidate and candidate.startswith("lu_nas_"), "資料轉換只能作用於本次 NAS 副本。")
-        if backfill.backfill_id == "twins-payroll-rate-snapshots-v1":
-            return False  # Its canonical CLI already accepts an explicit remote target.
-        require(backfill.backfill_id == "subsidy-period-policy-v1", "此版本包含尚未支援的資料轉換；已保留原庫，請交由維護人員處理。")
-        require(backfill.artifact.sha256 == SUPPORTED_POLICY_SHA256, "資料轉換版本已變更，請維護人員更新 NAS 升級工具。")
-        from scripts import migrate_subsidy_period_policy as policy
-        require(backfill.artifact.relative_path == "scripts/migrate_subsidy_period_policy.py", "資料轉換來源不符。")
-        require(digest(ROOT / backfill.artifact.relative_path) == backfill.artifact.sha256, "資料轉換檔案驗證失敗。")
-        connection = self.connect(candidate)
-        try:
-            changes = policy.plan(connection)
-            pending, pending_cases = {}, []
-            if mode == "apply":
-                expected = json.loads(plan_path.read_text(encoding="utf-8"))
-                require(backup_path.is_file() and backup_path.stat().st_size > 0, "缺少副本轉換前備份。")
-                require(expected["database"] == candidate and expected["changes"] == changes, "資料轉換預覽已過期。")
-                pending = policy.apply(connection, changes, pending_cases=pending_cases) or {}
-            if mode == "verify":
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT policy_key FROM client_subsidy_policy_migrations WHERE policy_key=%s", (policy.POLICY,))
-                    require(cursor.fetchone(), "資料轉換尚未完成。")
-                    cursor.execute("SELECT COUNT(*) n FROM client_subsidy_identity_label_changes change_row JOIN clients client "
-                                   "ON client.id=change_row.client_id WHERE client.identity_status<>change_row.after_identity")
-                    require(not cursor.fetchone()["n"], "資料轉換核對失敗。")
-            if mode in {"verify", "dry-run"}:
-                pending_cases = policy.pending_refund_cases(connection)
-                pending = {code: sum(item["reason"] == code for item in pending_cases)
-                           for code in policy.PENDING_SOURCE_CODES if any(item["reason"] == code for item in pending_cases)}
-            # Detailed business cases belong to the existing canonical receipt,
-            # never console/UI output.
-            save(receipt_path, {"contract": backfill.receipt_contract, "mode": mode, "database": candidate,
-                 "receipt_status": {"apply": "committed", "verify": "verified", "dry-run": "planned"}[mode],
-                 "changes": changes if mode == "dry-run" else [], "changed_count": len(changes),
-                 "pending_source_codes": pending, "pending_cases": pending_cases,
-                 "dataset_fingerprint": hashlib.sha256(json.dumps(changes, ensure_ascii=False, sort_keys=True).encode()).hexdigest()})
-        finally:
-            connection.close()
-        return True
+        require(backfill.backfill_id == "twins-payroll-rate-snapshots-v1",
+                "此版本包含尚未支援或已退役的資料轉換；已保留原庫。")
+        return False  # Delegate to the existing CLI with the candidate's TLS settings.
 
 
 def load_settings(environment_file=ROOT / ".env", settings_file=SETTINGS):
@@ -659,10 +622,8 @@ def upgrade(settings):
     for executable in ("mysql", "mysqldump"):
         write.client_prefix(executable)
     # Unknown backfills stop before source backup or candidate writes.
-    require(all(item.backfill_id in {"subsidy-period-policy-v1", "twins-payroll-rate-snapshots-v1"} for item in migration.RELEASE_MANIFEST.backfills),
+    require(all(item.backfill_id == "twins-payroll-rate-snapshots-v1" for item in migration.RELEASE_MANIFEST.backfills),
             "新版包含尚未支援的資料轉換，請交由維護人員處理。")
-    require(all(item.artifact.sha256 == SUPPORTED_POLICY_SHA256 for item in migration.RELEASE_MANIFEST.backfills
-                if item.backfill_id == "subsidy-period-policy-v1"), "資料轉換版本已變更，請維護人員更新 NAS 升級工具。")
     original_env_digest = digest(settings["environment_file"])
     config = migration.SeparateDatabaseConfig(migration.DatabaseDescriptor("source-read", source, read),
               migration.DatabaseDescriptor("candidate-write", candidate, write))

@@ -9,11 +9,12 @@ import { OrderTermsUnavailableNote } from './OrderTermsUnavailableNote';
 import { CaseArchitectureBootstrapRepairPanel } from './CaseArchitectureBootstrapRepairPanel';
 import { ClientRegistryServiceStaff } from './ClientRegistryServiceStaff';
 import { ClientRegistryVirtualAccount } from './ClientRegistryVirtualAccount';
+import { ClientRegistryAccountingSummary } from './ClientRegistryAccountingSummary';
 import { CasePricingAdjustmentPanel } from './CasePricingAdjustmentPanel';
 import '../pages/ClientRegistryPage.css';
 
-const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '行政註記', service_type: '服務方式（排班參考）' };
-const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
+const profileLabels: Record<string, string> = { name: '姓名', gender: '性別', phone: '電話（手機／市話）', email: 'HCM Email', city: '縣市', address: '地址', due_month: '預產期／預計服務開始月份', reject_reason: '不符合原因', residence_type: '住宅型態', delivery_type: '生產方式', baby_info: '寶寶資訊', notes: '客戶備註（主檔）', service_type: '服務方式（排班參考）' };
+const beclassLabels: Record<string, string> = { name: '報名姓名', email: 'BeClass Email', phone: '手機', tel: '市話', ext: '分機', city: '縣市', zip_code: '郵遞區號', address: '報名地址', admin_notes: '報名註記', refund_bank_code: '退款銀行及分行代碼（7碼）', refund_account_no: '退款帳號（文字，保留前導零）', multi_birth_count: '胎數（單胞胎／雙胞胎）' };
 const careLabels: Record<string, string> = {
   dietary_habits: '飲食習慣與中藥接受度', vegetarian_preference: '可否接受蛋奶素餐食', alcohol_ratio: '餐飲含酒比例',
   cooking_oil_type: '料理用油', maternal_allergy: '過敏體質', special_care_notes: '特殊照護注意事項',
@@ -184,6 +185,8 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     return <section className="registry-editor" aria-label={title[section]}>
       <h3>{title[section]}</h3>
       <small>資料來源：{section === 'profile' ? '客戶主檔' : detail.beclass.source_kind === 'admin_manual' ? '後台人工補登（無 BeClass 匯入紀錄）' : 'BeClass 有效修正資料；保留原始匯入內容'}</small>
+      {section === 'profile' && <dl className="registry-information-fields"><div><dt>補助身分（唯讀）</dt><dd>{display(detail.client.values.identity_status)}</dd></div><div><dt>行政註記（客戶主檔，唯讀）</dt><dd>{display(detail.client.values.admin_notes)}</dd></div></dl>}
+      {section === 'beclass' && <><p>退款帳戶：{detail.beclass.status !== 'ready' ? '來源待確認' : detail.beclass.values?.refund_account_status === 'complete' ? '已登錄' : '待補齊'}</p><p>目前帳號：{detail.beclass.values?.refund_account_no ?? '待補齊'}</p><p>退款帳號僅顯示末四碼；更正時請完整輸入。缺少銀行或帳號時為待補，儲存不會更動既有退款快照。</p><p>生日（唯讀）：{display(detail.beclass.values?.birth_date)}</p></>}
       {unavailable ? <p>{detail.beclass.status === 'duplicate_binding' ? '同一案件綁定多筆 BeClass，請先處理綁定異常。' : '此案件尚無可編輯的 BeClass 資料。'}</p> : <>
         {section === 'care' && <p className="registry-section-note">三節欄位記錄客戶給月嫂的獎金協調結果；樓層費總額請在下方訂單條件登錄。</p>}
         <div className="registry-fields">{Object.entries(labels[section]).map(([field, label]) => {
@@ -199,7 +202,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
             : typeof source(detail, section)[field] === 'number' && !textAgreement ? <input id={id} type="number" disabled={disabled} value={String(value)} onChange={(event) => update(section, field, event.target.value === '' ? null : Number(event.target.value))} />
             : section === 'care' || ['notes', 'baby_info', 'admin_notes', 'reject_reason'].includes(field)
               ? <textarea id={id} disabled={disabled} rows={2} maxLength={field === 'reject_reason' ? 500 : 2000} value={textAgreement && typeof value !== 'string' ? display(value) : String(value)} onChange={(event) => update(section, field, event.target.value)} />
-              : <input id={id} disabled={disabled} type={field === 'email' ? 'email' : field === 'due_month' ? 'date' : 'text'} maxLength={field === 'email' || field === 'service_type' ? 100 : undefined} value={String(value)} onChange={(event) => update(section, field, event.target.value)} />;
+              : <input id={id} disabled={disabled} autoComplete={field === 'refund_account_no' ? 'off' : undefined} type={field === 'refund_account_no' ? 'password' : field === 'email' ? 'email' : field === 'due_month' ? 'date' : 'text'} maxLength={field === 'email' || field === 'service_type' ? 100 : undefined} value={String(value)} onChange={(event) => update(section, field, event.target.value)} />;
           return <label key={field} htmlFor={id}>{label}{control}{capability?.editable === false && <small>{capability.reason === 'multi_birth_count_locked_after_service_start' ? '服務已開始，胎數會影響費率，不能在此直接修改。' : '此欄位目前不可修改。'}</small>}{section === 'care' && detail.order_information.field_issues[field] && <small className="source-issue">來源內容無法判定，請核對後補登。</small>}</label>;
         })}</div>
         <div className="registry-actions">
@@ -226,7 +229,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     {refreshError && <p role="alert">{refreshError}<button type="button" onClick={() => void refreshRelated()}>重新讀取案件資料</button></p>}
     {renderSection('profile')}
     {renderSection('beclass')}{renderSection('care')}
-    <section id="registry-order-terms" className="registry-editor"><h3>目前訂單條件</h3><p>服務方式（排班參考）：{detail.service_type ?? '尚未登錄'}</p>
+    <section id="registry-order-terms" className="registry-editor"><h3>目前訂單條件</h3><dl className="registry-information-fields">{Object.entries({planned_start_date: '整案預計開始日', planned_end_date: '整案預計結束日', actual_start_date: '整案實際開始日', actual_end_date: '整案實際結束日'}).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{detail.order_dates?.[field as keyof NonNullable<typeof detail.order_dates>] ?? '尚未登錄'}</dd></div>)}</dl><p>服務方式（排班參考）：{detail.service_type ?? '尚未登錄'}</p>
       <fieldset disabled={pending && !intakeState.busy} className="registry-terms-fieldset">{intakeOpened ? <OrderIntakeRepairPanel caseNo={detail.case_no} repairServiceTime registry focusMissing={focusField === 'intake'} onChanged={refreshIntake} onEditStateChange={setIntakeState} onNeedsRepair={setIntakeNeeded} /> : detail.order_terms.status === 'ready' && detail.order_terms.data
         ? <OrderTermsMutationPanel caseNo={detail.case_no} query={detail.order_terms.data} onObserved={() => { void refreshRelated(); }} onEditStateChange={setTermsState} />
         : <OrderTermsUnavailableNote caseNo={detail.case_no} code={detail.order_terms.code} />}
@@ -238,6 +241,7 @@ export const ClientRegistryDetailEditor: React.FC<Props> = ({ detail, focusField
     <section className="registry-editor"><h3>客戶帳務（唯讀）</h3>{detail.finance.status === 'ready' && detail.finance.values
       ? <dl className="registry-information-fields">{Object.entries(financeLabels).map(([field, label]) => <div key={field}><dt>{label}</dt><dd>{display(detail.finance.values![field as keyof typeof detail.finance.values])}</dd></div>)}</dl>
       : <><p>{detail.finance.code === 'client_finance_bootstrap_required' ? '尚未建立客戶帳務資料。' : '客戶帳務暫時無法讀取，請重新整理。'}</p>{detail.finance.code && <details><summary>技術資訊</summary><code>{detail.finance.code}</code></details>}</>}</section>
+    <ClientRegistryAccountingSummary caseNo={detail.case_no} revision={detail} />
     <ClientRegistryServiceStaff key={detail.case_no} caseNo={detail.case_no} revision={detail} disabled={Object.values(actions).some((action) => action.loading || action.applied || action.unknown) || termsState.busy || repairState.busy || intakeState.busy || accountState.busy || pricingState.busy} onCommitted={refreshRelated} onStateChange={setStaffState} onOpenServiceArrangement={onOpenServiceArrangement} />
     <ClientChangeHistory detail={detail} />
   </div>;

@@ -8,6 +8,7 @@ from typing import Any
 
 from domains.case_import.order_information import project_order_information
 from domains.case_import.order_information import ORDER_INFORMATION_KEYS
+from domains.case_import.refund_account import mask_refund_values, refund_fields_from_survey, effective_refund_account
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.case_import.beclass_correction_workflow import (
@@ -17,7 +18,7 @@ from subsystems.case_import.beclass_correction_workflow import (
 
 
 _SOURCE_FIELDS = (
-    "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
+    "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes", "refund_bank_code", "refund_account_no",
 )
 _FAMILY = "client_beclass_correction/v1"
 
@@ -25,6 +26,16 @@ _FAMILY = "client_beclass_correction/v1"
 class MySqlBeClassCorrectionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def original_refund_account(self, case_no: str):
+        """Bounded repair source only. Never guess a binding or expose the raw survey."""
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT survey_details FROM beclass_records WHERE bound_case_no=%s ORDER BY id LIMIT 2", (case_no,))
+            rows = tuple(cursor.fetchall() or ())
+        if len(rows) != 1:
+            raise ValueError("beclass_refund_source_not_unique")
+        survey = _decode_json(rows[0].get("survey_details"), {})
+        return effective_refund_account(refund_fields_from_survey(survey), {})
 
     def load(self, case_no: str, *, for_update: bool) -> Mapping[str, Any] | None:
         suffix = " FOR UPDATE" if for_update else ""
@@ -159,8 +170,8 @@ class MySqlBeClassCorrectionRepository:
                     reason,
                     key.value,
                     correlation_id.value,
-                    _json(snapshot.effective),
-                    _json(after),
+                    _json(mask_refund_values(snapshot.effective)),
+                    _json(mask_refund_values(after)),
                 ),
             )
             correction_event_id = int(cursor.lastrowid)

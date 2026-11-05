@@ -29,6 +29,7 @@ class ClientRegistryStaffObligationDateView(_StrictModel):
 
 
 class ClientRegistrySummaryView(_StrictModel):
+    identity_status: str | None = None
     client_id: int = Field(gt=0)
     case_no: str = Field(min_length=1, max_length=50)
     imported_virtual_accounts: tuple[str, ...] = ()
@@ -71,6 +72,8 @@ class ClientRegistryChangeHistoryItemView(_StrictModel):
 
 
 class ClientProfileValuesView(_StrictModel):
+    identity_status: str | None = None
+    admin_notes: str | None = None
     email: str | None = None
     service_type: str | None = None
     due_month: str | None = None
@@ -101,6 +104,10 @@ class ClientRegistryProfileView(_StrictModel):
 
 
 class ClientBeClassValuesView(_StrictModel):
+    refund_account_status: Literal["complete", "incomplete"] | None = None
+    birth_date: str | None = None
+    refund_bank_code: str | None = None
+    refund_account_no: str | None = None
     name: str | None = None
     email: str | None = None
     phone: str | None = None
@@ -174,7 +181,15 @@ class RegistryOrderTermsSectionView(_StrictModel):
     field_capabilities: dict[str, RegistryFieldCapabilityView]
 
 
+class RegistryOrderDatesView(_StrictModel):
+    planned_start_date: date | None = None
+    planned_end_date: date | None = None
+    actual_start_date: date | None = None
+    actual_end_date: date | None = None
+
+
 class ClientRegistryDetailView(_StrictModel):
+    order_dates: RegistryOrderDatesView | None = None
     case_no: str = Field(min_length=1, max_length=50)
     service_type: str | None = None
     client: ClientRegistryProfileView
@@ -201,6 +216,8 @@ class ClientProfileChangeSet(_StrictModel):
 
 
 class BeClassChangeSet(_StrictModel):
+    refund_bank_code: str | None = None
+    refund_account_no: str | None = None
     name: str | None = None
     email: str | None = None
     phone: str | None = None

@@ -47,6 +47,7 @@ class ClientRegistrySummary:
     claim_application_year: int | None = None
     claim_application_month: int | None = None
     service_type: str | None = None
+    identity_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,7 @@ class ClientRegistryDetail:
     order_information: ClientRegistryOrderInformation
     finance: ClientRegistryFinance
     service_type: str | None = None
+    order_dates: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +265,7 @@ class ClientRegistryQueryApplication:
                 ),
             ),
             service_type=_nullable_text(row.get("service_type")),
+            order_dates=row.get("order_dates"),
         )
 
     def history(self, case_no: str) -> tuple[ClientRegistryChangeHistoryItem, ...]:
@@ -314,6 +317,7 @@ def _summary(row: Mapping[str, Any]) -> ClientRegistrySummary:
         row.get("claim_application_year"),
         row.get("claim_application_month"),
         service_type=_nullable_text(row.get("service_type")),
+        identity_status=_nullable_text(row.get("identity_status")),
     )
 
 

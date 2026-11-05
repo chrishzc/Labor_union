@@ -688,7 +688,7 @@ describe('Client registry owner editing', () => {
   it('shows changes before discarding drafts from the drawer or tabs', async () => {
     window.location.hash = '#clients?case=CASE-001';
     render(<UnsavedChangesProvider><ClientRegistryPage /></UnsavedChangesProvider>);
-    fireEvent.change(await screen.findByLabelText('行政註記'), { target: { value: '尚未儲存' } });
+    fireEvent.change(await screen.findByLabelText('客戶備註（主檔）'), { target: { value: '尚未儲存' } });
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     const warning = () => screen.getByRole('dialog', { name: '尚有未儲存的變更' });
     expect(within(warning()).getByRole('cell', { name: '尚未儲存' })).toBeInTheDocument();
@@ -696,7 +696,7 @@ describe('Client registry owner editing', () => {
     fireEvent.click(screen.getByRole('tab', { name: '虛擬帳號匯入' }));
     expect(warning()).toBeInTheDocument();
     fireEvent.click(within(warning()).getByRole('button', { name: '繼續編輯' }));
-    expect(screen.getByLabelText('行政註記')).toHaveValue('尚未儲存');
+    expect(screen.getByLabelText('客戶備註（主檔）')).toHaveValue('尚未儲存');
     fireEvent.click(screen.getByRole('button', { name: '關閉案件詳細資料' }));
     fireEvent.click(within(warning()).getByRole('button', { name: '捨棄變更並離開' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -863,7 +863,7 @@ describe('Client registry owner editing', () => {
       { sequence: 1, event_type: 'client_profile', label: '客戶資料修正', reason: '已核對電話', actor: 'admin-1', occurred_at: '2026-10-13T08:00:00Z' },
     ]);
     render(<ClientRegistryPage />);
-    const notes = await screen.findByLabelText('行政註記');
+    const notes = await screen.findByLabelText('客戶備註（主檔）');
     fireEvent.change(notes, { target: { value: '尚未儲存的草稿' } });
     fireEvent.click(screen.getByRole('region', { name: '變更歷程' }).querySelector('summary')!);
     const retryHistory = await screen.findByRole('button', { name: '重新讀取變更歷程' });
@@ -893,3 +893,5 @@ describe('Client registry owner editing', () => {
     expect(screen.getByText('第二案紀錄')).toBeInTheDocument();
   });
 });
+
+vi.mock('../../../../../../../api/finance_import/finance_accounting_client', () => ({financeAccountingClient: {query: vi.fn().mockRejectedValue(new Error('synthetic unavailable summary'))}}));

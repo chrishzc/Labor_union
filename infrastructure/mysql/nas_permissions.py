@@ -83,7 +83,6 @@ LINE_READ_TABLES = frozenset({
 })
 LINE_WRITE_TABLES = frozenset({
     "application_command_claims",
-    "provisional_client_registrations", "provisional_registration_conflicts",
     "customer_service_tickets", "customer_service_ticket_events", "customer_service_escalations",
     "controlled_file_staging_objects", "controlled_file_objects", "controlled_file_apply_receipts",
     "controlled_file_finalize_intents", "controlled_file_leases", "controlled_file_references",
@@ -249,8 +248,6 @@ def _table_grants(profile: str, tables: list[str]):
             privileges.append("INSERT")
             if table not in NO_DIRECT_UPDATE | {"admin_audit_logs", "admin_command_receipts", "staff_bank_account_events"} and not table.endswith("_events"):
                 columns = UPDATE_COLUMNS.get(table)
-                if profile == "line" and table in {"provisional_client_registrations", "provisional_registration_conflicts"}:
-                    columns = ("active_line_user_id",) if table == "provisional_client_registrations" else ()
                 if profile == "line" and table == "customer_service_tickets":
                     columns = ("status", "version", "resolved_at_utc", "active_marker")
                 if profile == "line" and table in {"client_profile_change_requests", "client_profile_change_apply_receipts"}:

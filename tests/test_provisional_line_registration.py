@@ -157,27 +157,16 @@ def test_different_payload_creates_one_admin_conflict_and_returns_conflict():
     assert any("INSERT IGNORE INTO provisional_registration_conflicts" in statement for statement in statements)
 
 
-def test_legacy_liff_route_delegates_to_typed_owner(monkeypatch):
-    captured = []
-    receipt = ProvisionalRegistrationReceipt(5, 17, 23, "王小美", False, True)
-    application = SimpleNamespace(apply=lambda intent: captured.append(intent) or receipt)
-    connection = SimpleNamespace(close=lambda: None)
-    monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
-    monkeypatch.setattr(line_bot, "wake_worker", lambda: None)
+def test_legacy_liff_route_cannot_bypass_redis_intake_even_when_legacy_is_enabled(monkeypatch):
+    from fastapi import HTTPException
+    def no_database():
+        raise AssertionError("retired public questionnaire handler opened MySQL")
+    monkeypatch.setattr(line_bot, "get_db_connection", no_database)
     monkeypatch.setattr(line_bot, "_require_legacy_line_surface", lambda _: None)
-    monkeypatch.setattr(line_bot, "build_provisional_registration_application", lambda _: application)
-    monkeypatch.setattr(
-        line_bot,
-        "_trusted_line_user_id",
-        lambda *_: asyncio.sleep(0, result="U-registration"),
-    )
-
-    result = asyncio.run(line_bot.line_register(_payload()))
-
-    assert result == {
-        "status": "success", "client_id": 17, "client_name": "王小美", "case_no": None, "replayed": False,
-    }
-    assert captured[0].line_user_id == "U-registration"
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(line_bot.line_register(_payload()))
+    assert failure.value.status_code == 410
+    assert failure.value.detail["code"] == "registration_intake_required"
 
 
 def _payload():

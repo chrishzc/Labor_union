@@ -416,7 +416,9 @@ Review: pending → approved | rejected | cancelled
 
 legacy internal-key-only review／role mutation routes 不具人類授權，必須退出或 `410 Gone`。
 
-待審案件沒有 `due_at`、逾期、自動核准、自動拒絕、轉派或 escalated state。它會以
+此處僅指LINE身分綁定／改綁review，不包含需求問卷registration；問卷的拒絕、14天到期及清除依§5.1.1.1 REG-REDIS／REG-EXPIRY，不能互相套用。
+
+身分綁定／改綁待審案件沒有 `due_at`、逾期、自動核准、自動拒絕、轉派或 escalated state。它會以
 建立時間由早到晚留在待辦佇列，直到具 `line.identity.review` 的真人管理員明確核准、
 拒絕或取消；系統只可顯示待辦數量，不得以時間推導任何決定。
 
@@ -519,6 +521,8 @@ Authority：使用者核准本次最終權限清單並授權實作、設定與�
 - NAS-WORKER-01：NAS production 使用 `nas_service_token`；每個 Worker 獨立隨機憑證，API 由憑證對應驗證後的 service identity，不能藉 X-Internal-Service-Name 或 body 冒充另一服務。API 只保存 verifier；Worker 只掛載自己的憑證及 CA，不取得 DB credential。Google OIDC 不再是此部署認證路徑。
 - NAS-WORKER-02：私人操作只在隔離網路提供 HTTPS，Worker 驗證 server 憑證；缺憑證、未知／撤銷 token、錯服務、明文連線皆 fail closed。初始化準備憑證，不新增人員啟用碼。既有 local development shared-key 工作流限 local/test，不能 fallback 成 production。
 - NAS-LINE-01：LINE token 於後端驗證，再核對 current bound identity 與本人案件／assignment/day。需求表單先保存完整申請，工會核准才建立 Client／BeClass 與完成對應 binding；同筆申請重複核准不得建立重複客戶。既有已建立客戶不回退成待審。
+
+2026-11-05最新申請儲存邊界補充：上述「先保存完整申請」不得解讀為核准前可寫入MySQL；問卷內容必須存於MySQL之外，僅經工會核准後才允許正式採納入MySQL。此新要求依[§5.1.1.1](#registration-storage-refund-projection-20261105)優先，現行MySQL待審實作尚未符合；不改已核准案件的既有正式資料。
 - NAS-LINE-02：異動申請仍只寫 Customer Service intake；正式核心異動由工會與既有 owner writer 執行。日誌／照片保留本人有效服務範圍直接提交，不增加逐筆工會核准。
 - NAS-LINE-03（2026-10-30 人工裁決）：群組與管理員個人自動告警 Push 全部退役，包含系統異常、重大客訴及人工升級管理員通知。保留監測、歷史 target／event／receipt／audit、客服受理／工單／hold 與案件服務群組。管理員於既有 LIFF 待辦工作台頂端主動查看唯讀系統狀態，不另設通知對象頁；舊 target Preview／Apply／偏好寫入回 typed 410，查詢不排送。歷史 outbox 消化但不建投遞工作；未寄出的告警工作在 provider 前取消，禁止補送恢復。
 - NAS-LINE-04（2026-10-19 使用者核准私人照片方案，後端先行）：NAS LINE composition 的日誌照片上傳、日誌 Query／Preview／Apply 只經受限私人 HTTPS 代理，不能 fallback 本機檔案 workflow；對外 URL、typed response、idempotency key 與 Scheduling outer UoW 保留。私人入口為 `/internal/v1/line-media/`，獨立 `line-media-proxy` 機器憑證只可執行此入口，不可執行其他 Worker 操作。私人端必須重新驗證原始 LINE ID token、current binding 與 assignment／service-day；僅 flow 或宣稱的 staff／LINE ID 不構成此入口的身份證明。保留本人直接提交，不增加人工核准。私人 API 不提供任意路徑、列目錄、覆寫或刪除操作；受控檔案格式與 DB schema 不變，正式檔案根目錄由可信後端持有。LINE 原有專用媒體流程保留。現行 LIFF 日誌頁直接送出並提供照片選檔預覽及本人附件查看／下載；部署 UID／ACL／掛載仍由 NAS 部署契約負責，不因本機介面驗證變更。
@@ -789,6 +793,8 @@ Unit of Work 建立。
 本節是非市民進件與配號的正式 owner 契約；付款及帳號公式由 `04`、訂單推進由 `01`、契約由 `21`、統計由 `15`、LINE 導流及頁面設定由 `29`／`20` 承接。非市民與補助案件共用既有 owning-domain commands，不另建一套訂單生命週期或帳務 writer。
 
 - **NC-ENTRY-01**：非市民新案由 LINE 官方帳號的 LIFF 表單提出，不由 HCM 匯入建案。HCM 與 BeClass 在此是欄位格式來源，申請人以一張表單提供合併資料，重複欄位只填一次。
+- **NC-ENTRY-02**（2026-11-03 人工補充；僅規格，尚未實作）：非市民指不符合市民補助資格，不代表不能接受自費服務。已經 HCM 報名而確認不符合市民補助資格者，原 HCM 報名作廢；如仍需要服務，只能另走本節非市民專用報名、工會核准及 NC-NUMBER-01 配號流程，不得沿用原 HCM 報名或原案號繼續為自費案件，也不得只修改原身分即宣稱已完成轉案。
+- **NC-ENTRY-03**（同次補充）：HCM「作廢」是原報名失去有效受理資格，原申請、補助審核不符合結果、來源及可追溯歷史仍保留，不等於刪除原資料，也不以此直接取消另行核准的 A 字頭自費案件。一般 HCM replay／補件不得將已確認作廢的報名恢復為有效補助案件。實際作廢入口及既有正式案件的 owner 狀態銜接尚未實作，本輪不執行資料異動；統計分流依 `15` §15.1.1、§15.3。
 - **NC-FORM-01**：非市民表單的 HCM 欄位全部必填，BeClass 欄位維持既有必填規則；同一欄位同時來自兩者時須滿足 HCM 必填要求。此裁決只約束非市民新表單，不改變補助案件 HCM workbook 或既有 BeClass 問卷的驗證規則。案件編號仍是核准後由系統配發的欄位，不要求申請人填入尚不存在的編號。
 - **NC-FORM-02**：原 BeClass「補助款退款帳戶」保留銀行、分行與銀行帳號，改稱「退款帳戶」，供非市民一般退款使用；必填與否仍依 BeClass 原有規則。資料只交既有欄位 owner 保存及供授權退款作業使用。
 - **NC-APPROVAL-01**：送出只保存完整待審申請及既有 receipt，不建立正式案件或預先配發案件編號。工會核准後才建立 Client／BeClass 及 Orders 案件並完成相應 LINE binding；畫面需區分申請編號與正式案件編號。
@@ -797,7 +803,7 @@ Unit of Work 建立。
 - **NC-NUMBER-02**：非市民虛擬帳號末三碼為案件流水號加 `500`，故 `A115001 → 501`、`A115002 → 502`；此號段分界依使用者提供「補助案件不會超過 500 件」的業務前提區隔兩類案件。其餘帳號組成及對照優先序由 `04` §8 擁有。編號容量與超量處理依使用者裁決暫不納入本次範圍，不將三碼可表示範圍另行升格為已確認的案件容量政策。
 - **NC-FLOW-01**：正式建案且資料齊備後，候選月嫂、詢問意願、意願回覆、客戶推薦確認、外部契約簽署、定金核銷、服務日期與排班、履約、完工及兩端結算均沿用既有流程，完整逐步對照見 `01` §3.1.4。
 - **NC-PAYMENT-01**：套用現有非市民費率政策及契約自費條文，定金按 5 天服務費收取，剩餘服務費分期金額與繳款期限沿用既有計算公式，詳 `04` §0.1 及 `21` §1.2。
-- **NC-STAT-01**：非市民排除於既有案件受理統計，另以工會核准建案日提供獨立案件統計；帳務統計則提供補助案件／非市民案件／全部案件篩選。完整計數及篩選契約分別見 `15` §15.3、`04` §0.1。
+- **NC-STAT-01**（2026-11-03 補充）：原 HCM 補助申請因非市民而作廢，其原申請的「一般市民不符合／審核不符合」結果仍屬補助申請審核統計；另經本節核准的 A 字頭案件只進非市民自費案件統計，以工會核准建案日歸期，不回灌原補助申請總數。補助審核失敗與自費案件受理／履約是不同結果，不能把原 HCM 審核不符合套成 A 案件的服務生命週期。帳務統計仍提供補助案件／非市民案件／全部案件篩選；完整計數及篩選契約分別見 `15` §15.1.1／§15.3、`04` §0.1。
 
 ### 5.1.2 後續實作影響範圍：LIFF、管理 UI 與資料邊界
 
@@ -811,7 +817,7 @@ Unit of Work 建立。
 | LINE 管理／LIFF 設定 | `ui_react/src/pages/line_management/LiffCardStudio.tsx`、LIFF configuration Query／Apply | 新增非市民頁面選項、導流目標及對應欄位／文案設定；runtime、頁面型別驗證、歷史及還原共用同一資料庫版本，不回退 JSON 或新增選單角色 |
 | 客戶名冊／待核准需求 | `ClientRegistryPage.tsx`、`RegistrationApplications.tsx` | 可辨識非市民申請、查看完整合併資料與退款帳戶；核准完成回讀正式案件編號及建案結果，不能只建立客戶就顯示整案完成 |
 | 客戶清單與詳細資料 | `ClientRosterPage.tsx`、`ClientRegistryDetailEditor.tsx`、虛擬帳號區 | 接受並呈現 A 開頭案件編號、非市民身分、完整資料及正式虛擬帳號；沿用現有各欄位 owner 編輯、查詢及名冊匯出 |
-| 待辦看板與案件工作台 | `OrderWorkbenchV2Page.tsx`、`OrderWorkbenchV2Drawer.tsx`、`WorkbenchCaseStatistics.tsx` | 正常承接非市民案件及既有十三步流程；原統計排除非市民，另呈現年／季／月、期間數、年度累計與六種狀態的非市民獨立統計 |
+| 待辦看板與案件工作台 | `OrderWorkbenchV2Page.tsx`、`OrderWorkbenchV2Drawer.tsx`、`WorkbenchCaseStatistics.tsx` | 正常承接非市民案件及既有十三步流程；原 HCM 補助申請的不符合結果保留，另行核准的自費案件只進年／季／月、期間數、年度累計與六種生命週期的非市民獨立統計，依 `15` §15.1.1 去重 |
 | 媒合與推薦 | 候選查詢、月嫂意願、推薦確認既有畫面 | 接受新案件識別並讀取本案服務需求及非市民費率；候選規則、意願及確認流程不新增分支 |
 | 契約與繳費資訊 | 現有契約產生／下載／送交／回收及繳費通知 | 套用非市民自費條文、本案費率、既有分期公式與正式帳號；保留簽署、LINE 提醒及文件不可變規則 |
 | 服務日期、排班與履約 | 現有日期／排班、服務紀錄、異動、完工及兩端結算畫面 | 讓 A 開頭案件沿既有流程讀寫及返回同案，使用各 owner 的本案事實，不因新來源重建另一套流程 |
@@ -822,6 +828,105 @@ Unit of Work 建立。
 | 資料結構與驗收 | 既有 owner schema、focused contracts／integration／UI tests | 後續盤點案件識別長度、索引、核准時間及年度流水保存能力；若需 schema，依 `10` 另走 fresh／preserve-data 執行門。本次不產生 migration 或測試檔 |
 
 後續驗收至少涵蓋：非市民導流與獨立頁面、合併必填與退款欄位、送出不建案、核准才配號、跨年與並行核准／重播、帳號 `001 → 501` 正反解析、既有流程接續、自費契約／5 天定金及既有分期、案件統計互斥、帳務三選項與明細／件數／金額一致，以及補助案件既有流程不受新表單必填規則影響。此處只定義待驗收事項，未執行程式或 Browser 驗收。
+
+<a id="registration-storage-refund-projection-20261105"></a>
+
+#### 5.1.1.1 核准前問卷不得進MySQL、結案清除與退款銜接（2026-11-05）
+
+最新Authority承接：使用者已回覆「這個方案可以」核可獨立持久化Redis方案，並明確選擇待審保留14天；原先儲存僅候選、期限待定或不設TTL的設計已被取代。此為規格／設計核可，未授權安裝、程式施工、真實資料刪除或切換；實際驗收仍NOT_RUN。
+
+Authority：使用者原要求確認保存位置及將名冊方案補入規格；其後明確更正核准的設計目的為不讓對外使用者取得MySQL寫入能力，並要求「就算是暫存也不希望問卷儲存在mysql裡」。另已要求核准並確認正式資料完整匯入後清除問卷、拒絕核准後亦清除。以下新邊界取代先前建議以MySQL保存待審內容及核准後保留申請副本的方案；先前實作／測試僅是舊流程證據。此輪仍只改規格，不修改程式、schema或資料，不執行清除、部署、服務／權限切換。名冊欄位及唯讀補助身分依33 §5.1。
+
+- **REG-BOUNDARY-01／核准前內容隔離**：問卷提交內容、完整client／beclass候選及可還原的申請副本不得保存於MySQL，亦不得經通知payload、outbox、稽核或錯誤記錄繞道存入。MySQL以外的待審儲存由原Case Import申請owner負責，具體儲存方案依下述REG-REDIS；原有其他LINE功能不因本條自動退役或改變其資料owner。
+- **REG-BOUNDARY-02／伺服器能力邊界**：瀏覽器仍只呼叫bounded後端API，不直連MySQL或Redis。核准必須由既有內部管理身分在伺服器驗證，不能由提交內容中的狀態／旗標代替。對外問卷提交服務的憑證、權限及網路隔離依REG-REDIS-03；僅把問卷換儲存而保留同一對外服務可用的正式DB寫入能力，不足以證明達成本次隔離目標。此處未宣稱目前存在可利用漏洞或正式部署已隔離。
+- **REG-BOUNDARY-03／核准後正式採納**：受控的管理端核准流程沿原Case Import及各Domain正式writer建立必要Client／BeClass／Orders資料、退款正式欄位及適用綁定；不得旁路writer。原MySQL正式資料建立仍維持唯一outer commit。完成欄位完整性、來源一致及正式結果確認後，才可清除該份MySQL以外的待審內容；建立失敗不清除原申請。跨儲存確認、冪等及清除失敗處理依REG-REDIS-06／07，不能宣稱MySQL與Redis共享同一交易。
+- **REG-BOUNDARY-04／拒絕與清除**：新增管理端明確拒絕核准的產品要求；拒絕不建立正式客戶／案件，清除該份待審問卷內容，不能只從清單隱藏。核准、拒絕及到期須有唯一終態，重送不重建／反轉已確認結果。最小審核結果、保存位置及終態後重送／再申請依REG-REDIS-05／07及REG-EXPIRY-01～04，不得為了沿用舊Query而保留整份待審內容。
+- **REG-BOUNDARY-05／Redis方案界線**：使用者進一步要求實際儲存方案後，本輪設計選擇獨立Redis 7待審實例，具體持久化、權限、生命週期及失敗恢復依REG-REDIS-01～09。這是待實作方案，不是已安裝、部署或驗證的服務；不能以產品名稱推定安全或零遺失。
+- **REG-BOUNDARY-06／既有資料及問卷範圍**：A115001等已核准資料未取得清除執行授權，本輪不刪。正式BeClass的`survey_details`目前仍供照護／胎數等正式查詢使用；核准前不得入MySQL的要求不等於可直接刪除這些已採納正式facts。若另要求清除正式原始問卷，須先逐欄採納、保全必要正式來源並更換consumer，不能在欄位未轉存時清空。退款欄位銜接及原有金融快照保護依下述REG-REFUND及16／33維持。
+
+**本輪交付：具體Redis儲存設計已列於下節**；不再把儲存選用、持久化或跨儲存恢復留為無方案的SPEC_GAP。此設計只承接使用者要求的方案及規格，不授權安裝、切換、資料移轉或刪除。實際隔離／恢復／容量驗收均NOT_RUN，不能將設計收斂當成已具備正式執行能力。其餘名冊方案保持。
+
+##### 具體待審儲存方案 REG-REDIS（2026-11-05）
+
+**REG-REDIS-01／部署與owner**：新增專用`registration-redis`，沿現有Redis 7技術族系，實作時固定經驗證的image digest；不是沿用現有快取實例或增加一個logical DB。`docker-compose.yml`目前只有`redis:7-alpine`、未宣告資料volume且有host port mapping，沒有證據可當待審正式儲存；G15現有Redis快取容許fallback及過期，與待審申請的權威儲存不同，不借用其cache adapter。專用實例掛載持久化`registration-data:/data`，不發布host port、不對瀏覽器開放；僅收件服務及內部管理服務可達。Case Import仍擁有申請與審核state，Redis僅是typed persistence adapter。
+
+**REG-REDIS-02／持久化與容量**：下列為本方案的明確設定，不只保存於RAM；回傳提交成功前，須取得Redis成功寫入回應。初始`256mb`及AOF自動重寫的`100`／`64mb`門檻是可調部署起始值（IMPLEMENTATION_DEFAULT），不是業務筆數或正式容量承諾；實作驗收依實際payload、持久化及重寫的資源需求設定主機／容器上限，不以固定倍率推定足夠。REG-REDIS-05之14天則是人工核定PRODUCT_REQUIREMENT，不得當成效能參數自行改動。
+
+```text
+dir /data
+appendonly yes
+appendfsync always
+no-appendfsync-on-rewrite no
+aof-load-truncated no
+save ""
+maxmemory 256mb
+maxmemory-policy noeviction
+auto-aof-rewrite-percentage 100
+auto-aof-rewrite-min-size 64mb
+```
+
+`appendfsync always`在寫入回應前同步AOF；`noeviction`禁止記憶體壓力淘汰舊申請，容量或儲存寫入失敗須明確拒收新申請、不回成功、不fallback到MySQL或僅RAM。AOF損壞時不自動略過截斷資料假裝完整恢復。持久volume提供容器重建／正常重啟恢復；不宣稱單一磁碟毀損或整機災難零遺失。首版不另建長期問卷快照／備份副本；若需額外災難復原，另定範圍及刪除保存政策，不能默默增加問卷保存位置。
+
+**REG-REDIS-03／收件與核准權限隔離**：對外`registration-intake`為獨立process／容器，僅持有LIFF token驗證及專用Redis受限憑證，不注入MySQL帳密、DB連線設定或網路路徑，也不能呼叫內部核准／正式writer。Redis ACL只允許其申請內容／提交索引namespace，不允許修改管理端decision namespace或執行管理命令。內部管理服務沿既有管理員登入／角色授權，才具備審核、受限Redis讀寫及原MySQL正式writer能力。既有公開registration URL可由路由轉交新收件服務，不能留下可繞過隔離、仍寫MySQL的舊handler；不將其他既有LINE功能一起搬移。Redis ACL及網路隔離必須實際測試，不能只有程式碼自律。
+
+**REG-REDIS-04／資料內容及編號**：完整typed申請保存於專用Redis的申請content namespace，含原client／beclass候選、驗證過的LINE主體、提交時間、schema／內容版本及原有payload fingerprint；不放入MySQL或其通知／稽核副本。沿用正整數申請編號，專用Redis持久化counter原子配號；首次啟用／備份還原後，由內部管理程序先校正既有MySQL與Redis最大已用編號，通過前停止新收件，不由對外收件端連MySQL查號。若counter遺失或無法證明拒絕／未決申請等全部已用高水位，不得僅以MySQL已核准最大值或空庫重設；停止配號，另依災難恢復方案處理，不能冒險重用舊編號。申請內容保存後不可原地改寫；變更內容須另建版本／新申請，既有待審申請仍依原單一active主體規則檢查。版本及既有fingerprint用於核准fresh-read比對，不新增一套金融fingerprint。
+
+**REG-REDIS-05／14天待審期限、拒絕與自動清除**：使用者因擔心未處理問卷及持久化檔不斷累積，明確選擇待審保留「14天」。此最新裁決取代先前「未決申請不設自動TTL、一直保存至人工處理」的方案。
+
+- **REG-EXPIRY-01／固定期限**：期限從伺服器確認該申請成功提交的時間起算14×24小時，保存不可由客戶指定的`submitted_at`／`expires_at`；畫面以臺灣時間顯示到期日。問卷content在專用Redis設定對應絕對到期時間，伺服器Query及審核亦檢查原期限，不能只等背景刪除才禁止讀取。重新開頁、讀取、同筆重送及服務重啟不得延長期限。
+- **REG-EXPIRY-02／到期處理**：仍為待審且到期者，自動清除content及同申請可還原副本，移出待審索引並釋放active主體占用；保存不含問卷的最小「已到期」結果及必要授權參照。到期不是拒絕／資格不符，不建立MySQL資料。提交端若先遇到已到期舊占用，須按同一原子規則解除後才接受明確新申請，不要求客戶等待索引清理才能重申請。
+- **REG-EXPIRY-03／審核競態**：核准／拒絕需原子檢查狀態、版本及伺服器當下是否已到期；到期不得再核准。到期前已合法轉入核准處理中的申請，轉移時同時解除content的待審TTL，保留原到期時間及核准操作識別，改由REG-REDIS-07恢復流程接管，避免MySQL交易中途被TTL清除。此例外只限已授權核准處理，須可見且可恢復，不把普通待審件以讀取／假處理延長保存。
+- **REG-EXPIRY-04／清理工作及顯示**：Redis內容到期配合內部固定清理工作處理索引／最小終態；不能以過期事件通知是否有收到作唯一依據。逾時查核、重啟及清理工作重送仍回相同已到期結果；畫面明示「申請已到期，請重新申請」，不可顯示不明消失或已拒絕。清理工作只處理仍待審的到期件，核准處理中先恢復／查核正式回執，不直接暴力清除。
+
+容量達上限時停止收新件，不以提前淘汰舊申請代替14天期限。管理端提供核准／拒絕；Redis原子狀態轉移使同案只有一個審核決定。拒絕將該申請轉為終態，立即刪除content及移出待審索引，保留不含問卷答案、姓名、電話、地址、銀行帳戶的最小結果：申請編號、結果、處理時間、操作者及操作識別。拒絕不寫MySQL、不建正式Client／Orders／綁定。核准確認完成後亦立即清除content，不等14天。拒絕／到期後可明確重新送件取得新編號，原申請重送只回原終態，不能當作重新申請或再核准。
+
+**REG-REDIS-06／核准與正式交易**：管理端讀取待審版本及既有fingerprint，核准時fresh-read相同內容；原子轉為核准處理中，固定本次操作識別，拒絕或另一核准不得插入。核准授權成立後，才可在MySQL原outer UoW保存最小申請關聯／操作結果，借用原Case Import及各owner正式writer建立Client／BeClass／適用Orders、退款正式欄位及LINE binding，完整驗證並一起commit。沿用既有申請／case issue／receipt關聯，必要parent metadata只在核准時建立、`application_payload`不再裝入完整申請；不因既有FK而預先在MySQL建立待審列。一般補助申請與非市民核准各沿原建檔差異，不將原只建Client的流程誤宣稱已建完整Order。
+
+**REG-REDIS-07／成功後清除與失敗恢復**：MySQL提交及正式結果確認後，才以Redis原子操作保存最小已核准結果、刪除content及移出待審索引。最小結果只含申請／操作識別、身分核對必要主體參照、時間、操作者及正式Client／BeClass／case識別，不保留問卷副本；拒絕結果亦保留必要主體參照供原申請人授權回讀，不因刪除問卷而開放他人查詢。故障處理如下，不能把Redis與MySQL宣稱成同一交易。
+
+| 中斷位置 | 可觀察結果及恢復 |
+|---|---|
+| Redis尚未確認持久化 | 不回提交成功；逾時顯示結果待確認，以同一提交識別查核，不能重新配號重建。 |
+| 已入Redis、尚未核准 | Redis重啟後未滿原14天者仍為待審，已到期者按原期限清除，不能重啟後重新算14天；MySQL無問卷內容。恢復失敗停止新收件及審核，不當成空清單。 |
+| 核准處理中、MySQL未提交 | 完整payload留在Redis。內部恢復以相同操作識別查原MySQL回執，再沿原冪等writer續辦；不能僅因回應逾時就釋放為可拒絕／新核准。 |
+| MySQL已提交、Redis未清除 | 正式結果已成功，管理端顯示已建檔／待清除。恢復程序查同一已commit回執，只補Redis終態及清除，不再建Client、配案號或重送正式writer。由內部管理恢復工作在啟動、定期掃描及處理原申請時，讀取Redis持久化的核准處理中索引，逐筆查原MySQL已commit回執後承接清除；不虛構既有Case Import outbox，也不保存原問卷至MySQL。 |
+| 拒絕或清除回應逾時 | 回讀Redis終態；原子狀態／刪除若已完成便回同一結果，未確認時保持待確認，不回假完成。 |
+
+核准後單筆Query不再強制從已清除的payload組合畫面：待審詳情讀Redis，已核准詳情讀原正式owner及最小回執，已拒絕僅回最小結果；前後端typed契約同步調整，不為沿用舊必填姓名／電話而留問卷。核准前成功提示及必要通知不得因LINE原SQL outbox而繞寫問卷欄位。
+
+**REG-REDIS-08／內容清除、持久化檔自動整理與既有資料**：核准／拒絕後立即清除、待審滿14天自動清除的是Redis申請content及同申請的可還原副本；已核准正式BeClass照護／胎數等資料依原owner保留。每份問卷是Redis資料紀錄，不另外產生一份永久檔案；Redis 7以共用base／incremental AOF及manifest管理持久化。
+
+`DEL`／到期刪除不等於立即物理抹除AOF舊內容，所以分兩層自動整理：其一啟用REG-REDIS-02原生AOF大小增長重寫；其二由受限內部維運工作每小時合併檢查自上次成功整理後是否有content清除，有則觸發一次BGREWRITEAOF，不因檔案未達64mb而永久留下舊答案。每小時是可調IMPLEMENTATION_DEFAULT，不是14天期限的延長；線上內容到期後不可再查閱。重寫進行中不逐問卷另開重寫，完成後確認是否涵蓋最新清除；失敗保留待整理狀態及錯誤，不能回報完成或高頻盲重試。成功後由Redis原生manifest切換清理不再使用的舊base／increment檔，應用及人工腳本不得直接掃目錄刪現行AOF。
+
+此設計沒有額外長期問卷快照；最小終態／編號記錄不屬完整問卷，保留作重送、授權及恢復依據。磁碟容量須另檢查並保留安全重寫所需空間，`maxmemory 256mb`不是磁碟檔案上限；空間不足時停止新收件並顯示待處理，保護既有待審資料，不用任意刪AOF解決。磁碟舊內容須待成功整理後才可宣告已移除，不宣稱到期當刻已完成物理抹除。
+
+既有MySQL待審列須由另行授權的管理端移轉程序，先寫Redis並驗證內容／編號／關聯，再清除舊payload；不得直接切換後遺留兩套runtime來源或讓外部收件回讀MySQL。已核准A115001先補齊正式帳戶並核對必要正式資料後，才可依授權清除重複申請內容；現有正式問卷consumer與金融快照保護保持。本輪未執行任何移轉、刪除或改號。
+
+**REG-REDIS-09／驗收與證據**：至少驗證核准前MySQL零問卷寫入、收件容器無MySQL憑證及不可連線、無法偽造管理決定、Redis AOF持久化／容器重建、容量／磁碟滿及損壞拒絕、正常／拒絕清除、每個REG-REDIS-07中斷點、核准與拒絕競態、還原後不重號，以及A115001／原退款與名冊回歸。另須驗14天邊界前／到期時、讀取／重送／重啟不續期、到期禁止核准、處理中TTL保護與故障恢復、到期後重新申請、索引／最小結果重送一致，以及低於原生重寫門檻仍自動整理、重寫期間再清除及失敗不假報完成。記憶體假資料測試不能代替真Redis／網路／持久volume／MySQL整合測試；2026-11-05使用者已授權「按照新規格執行程式實作」；新程式完成本機真Redis／隔離MySQL、容器ACL／網路、崩潰重啟／AOF截斷拒絕／小量刪除重寫、容量拒絕及前端／Browser驗收，證據見`validation/receipts/REGISTRY-REGISTRATION-20261105-local-verification-v1.json`。管理服務已接入每分鐘expiry／recovery與每小時AOF維護；Query不代執清除，復原由原POST／內部worker處理。真LINE登入及目標環境切換／權限套用、真實問卷搬移／刪除與舊資料Apply仍NOT_RUN，不以本機PASS外推。
+
+研究依據REG-REDIS-20261105（僅設計適用）：Q1／C1由[Redis persistence](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)及[Redis 7.4設定來源](https://raw.githubusercontent.com/redis/redis/7.4/redis.conf)支持AOF同步及損壞策略；Q2／C2由[Key eviction](https://redis.io/docs/latest/develop/reference/eviction/)、現有compose及G15 cache契約支持獨立實例／noeviction；Q3／C3由既有MySQL outer UoW及Case Import receipt／case issue關聯支持提交後清除與原識別恢復。受限Redis角色依[ACL](https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/)。官方能力是設計來源證據，不代表已部署；該研究階段未安裝或執行外部元件。後續實作的Redis 7.4.11映像、固定digest及故障驗收依上述收據。AOF重播須保留停用default使用者的內部命令權限；網路登入仍以off／resetpass禁止，公開角色不能管理決策，實際拒絕與重啟已驗證；相容背景見[Redis官方問題紀錄](https://github.com/redis/redis/issues/14541)。
+
+以下表格及REG-STORE-01～03為**已被上述最新要求取代的舊流程觀測**，僅供確認既有資料與後續變更差異，不能作為新待審儲存設計或核准後保留副本的規範。
+
+| 階段 | 保存位置及成功意義 |
+|---|---|
+| 尚未送出或僅Preview | 表單草稿仍屬瀏覽器狀態；Preview零正式寫入，不能以填完或驗證通過宣稱申請已保存。現行流程未提供伺服器草稿持久化保證；關頁／刷新可能遺失未提交輸入。 |
+| Apply成功、待工會核准 | 原Case Import申請owner在`provisional_client_registrations.application_payload`保存完整client／beclass候選，包含`beclass.survey_details`、版本及內容指紋；由既有外層交易commit後回傳申請編號，新待核准申請的client／beclass正式識別為NULL。不依賴瀏覽器仍開啟或LINE flow仍有效來保存已提交申請。 |
+| 工會核准建檔 | 依已保存申請fresh-read／lock，沿原交易建立Client、BeClass及適用Orders／LINE綁定；原`application_payload`保留，BeClass問卷另存在`beclass_records.survey_details`。更新核准版本、核准人／時間及正式關聯，不因核准清除申請快照或問卷。 |
+| 已核准、不在待核准清單 | 清單以尚無正式client／beclass關聯作篩選；已核准後不再列待核准，不等於資料被刪除。既有授權單筆申請Query與正式關聯供查核。 |
+
+- **REG-STORE-01**：成功提交以已commit及有效申請回條為準。未送出、Preview、明確失敗及回應不完整須區分；逾時／斷線可能是已commit但未收到回應，顯示結果待確認，沿原申請識別／已驗證身分及授權Query核對，不推定遺失、不盲目另建申請。此處不新增endpoint、browser持久化或自動重試。
+- **REG-STORE-02**：核准沿原outer UoW；建立Client後任一下游步驟失敗完整回滾本次核准，先前已提交申請仍可查核。重複核准回原結果，不重建正式根；stale或申請內容指紋不符拒絕，不以新內容覆寫已保存申請。
+- **REG-STORE-03**：正常提交／核准／離開LIFF或flow到期，不構成刪除已提交問卷的操作。本條不設定永久保存年限、備份或災難復原政策；既有經授權案件永久刪除仍另依33 RD-1，不將本條擴成新的刪除禁止或清理授權。
+- **REG-REFUND-01**：BeClass Excel匯入與LIFF核准建檔共用Case Import-owned退款銀行／分行代碼及帳號的欄位轉換、驗證與正式來源語意。新核准資料須在原建檔交易一併保存`beclass_records.refund_bank_code`及`refund_account_no`，不能只存於問卷；保留原問卷證據。各入口既有必填規則保持，不將非市民新表單必填回溯套用全部舊案，不新增獨立commit。
+- **REG-REFUND-02**：既有A115001正式欄位缺件，先核對申請、核准事件、案件及唯一BeClass關聯，再由33 §5.1原有效修正流程補登；已有較新有效帳戶時不得由舊問卷覆蓋。保存來源及實際補登時間，原問卷不直接UPDATE、既有退款快照不覆寫，正式查詢與金融帳戶消費結果須一致。取得帳戶不成立補助退款；本案非市民仍依正式一般退款義務使用。此處僅規格，未執行補登。
+- **REG-REFUND-03**：無唯一關聯、問卷帳戶不完整或來源相互衝突時保留待確認，不從其他案件、月嫂帳戶或相似姓名取得資料。A115001補正不代表先前7筆漏列案件已有退款依據或完整帳戶。
+
+直接實作證據：`provisional_registration_repository.py`保存完整candidate、核准不清除payload；其`_insert_beclass_record`目前保存問卷卻未帶退款兩欄。`client_beclass_workbook_import.py::_normalized_payload`現有退款欄位映射則保存兩欄。上述是需要修正的接線差異，不能將問卷存在誤報為正式退款欄位已完成。
+
+新邊界必要驗收：核准前MySQL零問卷內容寫入（包含間接副本）、提交端不能旁路核准寫正式DB、偽造核准旗標無效、未核准儲存重啟／回應結果未明、核准完整採納後才清除、正式建立失敗保留申請、提交成功但清除失敗不重建正式資料、核准／拒絕競態及重送終態一致。既有退款驗收仍須覆蓋兩種入口正式帳戶一致、A115001有界補登及已有快照不變。新增隔離／清除、退款接線及補登驗收均NOT_RUN；舊MySQL待審流程的回歸通過不能代替。
+
+2026-11-05本機唯讀核對：`union_db`有1筆已核准申請，原`application_payload`仍存在；A115001之申請與BeClass問卷均有退款欄位且銀行／帳號比對一致，未讀出或保存完整值到回報；相關兩表沒有查到DB trigger或直接引用它們的MySQL排程事件。這只證明當時本機保存狀態，未檢查正式環境、外部清理程序、備份／還原或永久保存年限。既有5個記憶體測試PASS，涵蓋申請快照、提交重播、核准重播、stale／內容異動及失敗回滾；未對真實資料執行提交、核准或故障注入。
 
 ### 5.2 State machine
 
@@ -981,7 +1086,9 @@ HCM partial intake 必須逐欄保存合法 Orders 條款：預計開始日、�
 缺漏而將其他合法條款清空；只有來源對應欄位本身無效才留空。未齊全的案件仍不提前建立
 帳務／薪資／排班 roots。補正其他欄位後，Orders 條款 Query 必須能回讀既有合法條款。
 
-HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
+2026-11-03 NC-ENTRY-02／03 補充優先適用：已明確確認非市民、因補助資格不符而作廢的 HCM 報名，不因有可用原案號就繼續新建或恢復有效補助案件；原申請與審核來源保留，自費須另走專用非市民報名及 A 字頭案號。僅身分缺值／尚待確認仍沿原 partial intake／review，不能猜為非市民而作廢。本段只規格，不執行既有資料異動。
+
+HCM 不得以 fabricated default 補造欄位。除上述已確認作廢的補助報名外，案件編號是最低寫入資格：有可用案件編號時必須建立／保留
 正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 owner validation／review result；只有案件編號
 缺失或不可用時不建案，且只保留來源 review／receipt／outbox 稽核，不投影異常中心。
 Client／Staff historical import 必須另走 HistoricalAdoption

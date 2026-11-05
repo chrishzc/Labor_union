@@ -31,7 +31,7 @@ def test_release_widens_only_the_enum_and_preserves_history():
         'labor_union_2026_10_19_nas_registration_approval_v1.json',
         'labor_union_2026_10_22_line_order_group_invitation_url_v1.json',
         'labor_union_2026_10_23_scheduling_service_start_v1.json',
-        'labor_union_2026_10_29_subsidy_policy_replay_v4.json',
+        'labor_union_2026_11_05_subsidy_identity_preservation_v5.json',
     )
     assert (ROOT / "db/schema_parts/232_candidate_weekly_information.sql").read_bytes() == (ROOT / "db/schema_parts" / ARTIFACT).read_bytes()
     statements = migration.split_sql((ROOT / "db/schema_parts" / ARTIFACT).read_text(encoding="utf-8"))

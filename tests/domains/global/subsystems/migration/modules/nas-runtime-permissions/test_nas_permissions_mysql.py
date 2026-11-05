@@ -253,40 +253,40 @@ def test_disallowed_procedures_are_rejected_before_body_execution(engine, profil
             denied(runtime,f"CALL `{name}`({','.join(['NULL']*len(signature.split(',')))})",numbers=(1370,))
 
 
-def test_line_intake_approval_replay_and_approval_rollback_use_real_profiles(engine):
+def test_line_questionnaire_sql_is_denied_and_internal_approval_uses_real_profile(engine):
+    from datetime import timezone, timedelta
     from domains.case_import.provisional_registration import ProvisionalRegistrationIntent, build_provisional_registration_candidate
     from infrastructure.mysql.provisional_registration_repository import MySqlProvisionalRegistrationRepository
-    from subsystems.case_import.provisional_registration_types import ProvisionalRegistrationConflictError
+    from subsystems.case_import.registration_staging import StagedRegistration
     key='U-test-'+uuid4().hex
     intent=ProvisionalRegistrationIntent(line_user_id=key,name='synthetic test',phone='0900000000',
         expected_date='2030-01-01',service_days=1,address='synthetic fixture',gender=None,email=None,
         birth_date=None,tel=None,ext=None,city=None,zip_code=None,id_number=None,
         liff_config_revision=None,survey_details={})
     candidate=build_provisional_registration_candidate(intent)
+    now=datetime.now(timezone.utc)
+    staged=StagedRegistration(100000+int(uuid4().hex[:7],16),2,'approving',now,now+timedelta(days=14),
+        'subsidy',candidate,uuid4().hex,'test-manager')
     with connect(engine,'line') as line:
-        repo=MySqlProvisionalRegistrationRepository(line)
-        submitted=repo.apply(candidate)
-        assert submitted.client_id is None and submitted.beclass_record_id is None
-        line.commit()
-        assert scalar(line,'SELECT COUNT(*) FROM clients WHERE line_user_id=%s',(key,))==0
-        replay=repo.apply(candidate)
-        assert replay.registration_id==submitted.registration_id
-        line.rollback()
+        denied(line,"INSERT INTO provisional_client_registrations (line_user_id,payload_fingerprint,application_payload) VALUES (%s,%s,%s)",
+               (key,candidate.payload_fingerprint.value,'{}'))
+        denied(line,'SELECT application_payload FROM provisional_client_registrations')
+        denied(line,"INSERT INTO provisional_registration_conflicts (registration_id,proposed_payload_fingerprint,proposed_payload) VALUES (%s,%s,%s)",
+               (staged.registration_id,candidate.payload_fingerprint.value,'{}'))
     with connect(engine,'management') as manager:
         repo=MySqlProvisionalRegistrationRepository(manager)
-        with pytest.raises(ProvisionalRegistrationConflictError):
-            repo.approve(submitted.registration_id,99,'test-manager')
-        manager.rollback()
-        approved=repo.approve(submitted.registration_id,1,'test-manager')
+        snapshot=repo.prepare_staged_approval(staged)
+        approved=repo.approve(staged.registration_id,1,'test-manager',snapshot=snapshot)
         assert approved.client_id and approved.beclass_record_id
         manager.rollback()
         assert scalar(manager,'SELECT COUNT(*) FROM clients WHERE line_user_id=%s',(key,))==0
         manager.rollback()
-        approved=repo.approve(submitted.registration_id,1,'test-manager')
+        snapshot=repo.prepare_staged_approval(staged)
+        approved=repo.approve(staged.registration_id,1,'test-manager',snapshot=snapshot)
+        receipt=repo.save_approval_receipt(staged,approved)
         manager.commit()
-        again=repo.approve(submitted.registration_id,1,'test-manager')
-        assert again.client_id==approved.client_id and again.beclass_record_id==approved.beclass_record_id
-        assert scalar(manager,'SELECT COUNT(*) FROM clients WHERE line_user_id=%s',(key,))==1
+        assert repo.approval_receipt(staged.registration_id,staged.operation_id)==receipt
+        assert scalar(manager,'SELECT application_payload IS NULL FROM provisional_client_registrations WHERE id=%s',(staged.registration_id,))==1
 
 
 def test_parent_lock_is_held_until_outer_rollback(engine):

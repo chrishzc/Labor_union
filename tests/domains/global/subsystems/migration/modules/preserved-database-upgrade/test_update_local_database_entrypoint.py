@@ -36,7 +36,7 @@ def test_preview_reports_catalog_failure_before_database_access(monkeypatch, tmp
 def test_pending_business_backfill_selects_preserve_route_before_earlier_schema_qualification(monkeypatch):
     migration=update.migration
     artifacts = [entry['artifact']['name'] for entry in migration._local_ordered_upgrade_entries()]
-    missing = set(artifacts[artifacts.index('1054_scheduling_service_start.sql'):])
+    missing = set(artifacts[artifacts.index('1037_twins_payroll_policy.sql'):])
     monkeypatch.setattr(migration,'local_additive_target_state',
         lambda _config,_source,name,*_args,**_kwargs:{'state':'absent' if name in missing else 'exact'})
     def must_not_qualify(*args,**kwargs):
@@ -45,12 +45,12 @@ def test_pending_business_backfill_selects_preserve_route_before_earlier_schema_
     with pytest.raises(migration.LocalAdditiveBlocked) as raised:
         migration._local_ordered_chain_plan(object(),'lu_test_subsidy_route',{})
     assert raised.value.code=='replacement_required'
-    assert raised.value.details['artifact']=='1055_government_subsidy_periods.sql'
-    assert raised.value.details['backfills']==['subsidy-period-policy-v1']
+    assert raised.value.details['artifact']=='1037_twins_payroll_policy.sql'
+    assert raised.value.details['backfills']==['twins-payroll-rate-snapshots-v1']
 
 
 def test_preserve_preview_exposes_the_selected_business_backfill_inventory(monkeypatch):
-    backfills=[{'backfill_id':'subsidy-period-policy-v1','artifact':'migrate_subsidy_period_policy.py','sha256':'synthetic'}]
+    backfills=[{'backfill_id':'twins-payroll-rate-snapshots-v1','artifact':'backfill_twins_payroll_rate_snapshots.py','sha256':'synthetic'}]
     monkeypatch.setattr(update.migration,'build_plan',lambda *_args:{
         'source_objects':{},'release_id':'synthetic-subsidy','backfills':backfills})
     assert update.build_preview(object(),'lu_test_source','lu_test_candidate')['backfills']==backfills

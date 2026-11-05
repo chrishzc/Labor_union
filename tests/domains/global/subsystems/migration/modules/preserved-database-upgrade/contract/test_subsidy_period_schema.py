@@ -10,7 +10,7 @@ from shared_kernel.migration_release import load_migration_release_manifest
 
 ROOT=Path(__file__).resolve().parents[8]
 ARTIFACT='1055_government_subsidy_periods.sql'
-MANIFEST=ROOT/'db/migration_releases/labor_union_2026_10_29_subsidy_policy_replay_v4.json'
+MANIFEST=ROOT/'db/migration_releases/labor_union_2026_11_05_subsidy_identity_preservation_v5.json'
 
 
 def test_hash_successor_preserves_sql_descriptors_backfill_and_archived_release():
@@ -50,18 +50,18 @@ def metadata(descriptor):
     return snapshot
 
 
-def test_release_binds_separate_schema_and_backfill_and_fresh_does_not_relabel_current_clients():
+def test_release_keeps_schema_without_legacy_backfill_and_fresh_does_not_relabel_clients():
     manifest=load_migration_release_manifest(MANIFEST,ROOT)
     released=manifest.owned_object_descriptors(ROOT)[ARTIFACT]
     canonical=migration._canonical_artifact_descriptor(ARTIFACT)
     assert released['tables']=={table:set(columns) for table,columns in canonical['tables'].items()}
     for kind in ('indexes','foreign_keys','checks','parent_columns'):assert released[kind]==canonical[kind]
     raw=json.loads(MANIFEST.read_text(encoding='utf-8'))
-    assert raw['artifacts'][0]['data_effect']=='schema_only' and len(raw['backfills'])==1
-    for item in (raw['artifacts'][0],raw['descriptor_artifact'],raw['backfills'][0]['artifact']):
+    assert raw['artifacts'][0]['data_effect']=='schema_only' and raw['backfills']==[]
+    for item in (raw['artifacts'][0],raw['descriptor_artifact']):
         assert hashlib.sha256((ROOT/item['relative_path']).read_bytes()).hexdigest()==item['sha256']
     assert MANIFEST.name in migration.DEFAULT_RELEASE_MANIFESTS
-    assert 'subsidy-period-policy-v1' in {item.backfill_id for item in migration.RELEASE_MANIFEST.backfills}
+    assert 'subsidy-period-policy-v1' not in {item.backfill_id for item in migration.RELEASE_MANIFEST.backfills}
     fresh=(ROOT/'db/schema_parts/233_government_subsidy_periods.sql').read_text(encoding='utf-8')
     assert 'INSERT IGNORE INTO client_subsidy_policy_migrations' in fresh
     assert not re.search(r'\b(?:UPDATE|DELETE)\s+clients\b',fresh,re.I)
@@ -69,7 +69,7 @@ def test_release_binds_separate_schema_and_backfill_and_fresh_does_not_relabel_c
 
 def test_database_name_successor_changes_only_backfill_execution_binding():
     predecessor=json.loads((ROOT/'db/migration_releases/labor_union_2026_10_27_government_subsidy_periods_hash_v2.json').read_text(encoding='utf-8'))
-    current=json.loads(MANIFEST.read_text(encoding='utf-8'))
+    current=json.loads((ROOT/'db/migration_releases/labor_union_2026_10_29_subsidy_policy_replay_v4.json').read_text(encoding='utf-8'))
     assert current['artifacts']==predecessor['artifacts']
     prior_descriptor=json.loads((ROOT/predecessor['descriptor_artifact']['relative_path']).read_text(encoding='utf-8'))
     descriptor=json.loads((ROOT/current['descriptor_artifact']['relative_path']).read_text(encoding='utf-8'))

@@ -19,6 +19,18 @@ from scripts import nas_database_maintenance as nas
 IS_NAS_DESTINATION = nas.is_nas_destination
 
 
+def test_nas_does_not_execute_the_retired_subsidy_relabeling(monkeypatch, tmp_path):
+    candidate = 'lu_nas_upgrade_synthetic'
+    connection = nas.ConnectionConfig({'host': 'nas.invalid', 'port': 3306, 'ssl_mode': 'VERIFY_IDENTITY',
+        'tls_files': {}}, user='fixture', password='fixture', candidate=candidate)
+    monkeypatch.setattr(connection, 'connect', lambda *_args, **_kw: pytest.fail('retired backfill cannot connect'))
+    with pytest.raises(nas.MaintenanceBlocked, match='已退役'):
+        connection.run_manifest_backfill(SimpleNamespace(backfill_id='subsidy-period-policy-v1'),
+            'apply', candidate, tmp_path/'plan.json', tmp_path/'backup.sql', tmp_path/'receipt.json')
+    assert connection.run_manifest_backfill(SimpleNamespace(backfill_id='twins-payroll-rate-snapshots-v1'),
+        'apply', candidate, tmp_path/'plan.json', tmp_path/'backup.sql', tmp_path/'receipt.json') is False
+
+
 @pytest.fixture
 def settings(tmp_path, monkeypatch):
     # Tests never read the workstation's real environment or credentials.

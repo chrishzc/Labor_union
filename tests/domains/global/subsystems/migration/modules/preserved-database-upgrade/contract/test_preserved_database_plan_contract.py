@@ -318,7 +318,6 @@ def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch)
 def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
     assert tuple(item.backfill_id for item in runner.RELEASE_MANIFEST.backfills) == (
         "twins-payroll-rate-snapshots-v1",
-        "subsidy-period-policy-v1",
     )
     releases = tuple(item.release_id for item in runner.RELEASE_MANIFEST.manifests)
     release_index = releases.index("labor-union-twins-payroll-policy-2026-09-12-v2")
@@ -340,7 +339,7 @@ def test_default_catalog_runs_only_the_current_declared_backfill() -> None:
         "labor-union-nas-registration-approval-2026-10-19-v1",
         "labor-union-line-order-group-invitation-url-2026-10-22-v1",
         "labor-union-scheduling-service-start-2026-10-23-v1",
-        "labor-union-subsidy-policy-replay-2026-10-29-v4",
+        "labor-union-subsidy-identity-preservation-2026-11-05-v5",
     )
     assert runner.RELEASE_MANIFEST.backfills[0].artifact.sha256 == (
         "5281b8a96620f081494c3339327013c00ff94cbdabea9d0a878851570b2882dd"

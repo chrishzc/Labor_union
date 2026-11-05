@@ -6,6 +6,7 @@ const optionalNullableText = z.string().nullish().transform((value) => value ?? 
 const optionalNullablePositiveInt = z.number().int().positive().nullish().transform((value) => value ?? null);
 const optionalNullableBoolean = z.boolean().nullish().transform((value) => value ?? null);
 const profileValues = z.strictObject({
+  identity_status: nullableText.optional(), admin_notes: nullableText.optional(),
   email: nullableText.optional(),
   service_type: nullableText.optional(),
   due_month: nullableText.optional(), reject_reason: nullableText.optional(),
@@ -14,6 +15,8 @@ const profileValues = z.strictObject({
   baby_info: nullableText, notes: nullableText,
 });
 const beclassValues = z.strictObject({
+  refund_account_status: z.enum(['complete', 'incomplete']).nullable().optional(),
+  birth_date: nullableText.optional(), refund_bank_code: nullableText.optional(), refund_account_no: nullableText.optional(),
   name: nullableText, email: nullableText, phone: nullableText, tel: nullableText,
   ext: nullableText, city: nullableText, zip_code: nullableText, address: nullableText,
   admin_notes: nullableText, multi_birth_count: nullableText,
@@ -61,6 +64,7 @@ const staffObligationDate = z.strictObject({
 });
 
 export const ClientRegistrySummarySchema = z.strictObject({
+  identity_status: nullableText.optional(),
   client_id: z.number().int().positive(), case_no: z.string().min(1),
   imported_virtual_accounts: z.array(z.string().min(1)), built_in_virtual_account: z.string().nullable(), name: nullableText,
   phone: nullableText, city: nullableText, district: z.string().nullable().optional(), multi_birth_count: optionalNullableText, service_days: optionalNullablePositiveInt,
@@ -93,6 +97,7 @@ export const ClientRegistryChangeHistoryItemSchema = z.strictObject({
 });
 export const ClientRegistryChangeHistorySchema = z.array(ClientRegistryChangeHistoryItemSchema);
 export const ClientRegistryDetailSchema = z.strictObject({
+  order_dates: z.strictObject({planned_start_date: nullableText, planned_end_date: nullableText, actual_start_date: nullableText, actual_end_date: nullableText}).nullable().optional(),
   case_no: z.string().min(1),
   service_type: nullableText.optional(),
   client: z.strictObject({ client_id: z.number().int().positive(), version: z.number().int().nonnegative(), values: profileValues, field_capabilities: fieldCapabilities }),
@@ -135,5 +140,5 @@ export type ClientRegistryDetail = z.infer<typeof ClientRegistryDetailSchema>;
 export type ClientRegistryChangeHistoryItem = z.infer<typeof ClientRegistryChangeHistoryItemSchema>;
 export type RegistryMutationPreview = z.infer<typeof RegistryMutationPreviewSchema>;
 export type RegistryMutationReceipt = z.infer<typeof RegistryMutationReceiptSchema>;
-export type ClientProfileChanges = Partial<z.infer<typeof profileValues>>;
-export type BeClassChanges = Partial<z.infer<typeof beclassValues> & z.infer<typeof orderInformationValues>>;
+export type ClientProfileChanges = Partial<Omit<z.infer<typeof profileValues>, 'identity_status' | 'admin_notes'>>;
+export type BeClassChanges = Partial<Omit<z.infer<typeof beclassValues>, 'birth_date' | 'refund_account_status'> & z.infer<typeof orderInformationValues>>;

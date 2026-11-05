@@ -6,11 +6,12 @@ from collections.abc import Mapping
 from math import isfinite
 
 from domains.case_import.order_information import ORDER_INFORMATION_KEYS
+from domains.case_import.refund_account import REFUND_FIELDS, normalize_refund_field
 
 
 BECLASS_CORRECTION_FIELDS = (
     "name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes",
-    *ORDER_INFORMATION_KEYS,
+    *ORDER_INFORMATION_KEYS, *REFUND_FIELDS,
 )
 _MAXIMUMS = {
     "name": 100,
@@ -42,6 +43,12 @@ def normalize_beclass_changes(changes: Mapping[str, object]) -> dict[str, str | 
     for field, raw_value in changes.items():
         if field not in BECLASS_CORRECTION_FIELDS:
             raise BeClassCorrectionError("beclass_field_not_allowed", str(field))
+        if field in REFUND_FIELDS:
+            try:
+                normalized[field] = normalize_refund_field(raw_value, bank=field == "refund_bank_code")
+            except ValueError as error:
+                raise BeClassCorrectionError(str(error), field) from None
+            continue
         if raw_value is None:
             if field in {"name", "multi_birth_count"}:
                 raise BeClassCorrectionError("beclass_value_cannot_be_empty", field)

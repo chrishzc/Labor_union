@@ -125,6 +125,7 @@ def approve_application(registration_id: int, body: ApprovalRequest, principal=D
 @router.post("/{registration_id}/reject", response_model=BaseResponse[ApplicationView])
 def reject_application(registration_id: int, body: ApprovalRequest, principal=Depends(require_admin),
                        application: RegistrationReviewApplication = Depends(get_registration_review_application)):
-    return BaseResponse(data=_translate(lambda: _view(application.reject_registration(
-        registration_id, body.expected_version, admin_actor_context(principal).actor_id))),
-        message="需求申請已拒絕，問卷內容已清除。")
+    snapshot = _translate(lambda: application.reject_registration(
+        registration_id, body.expected_version, admin_actor_context(principal).actor_id))
+    return BaseResponse(data=_view(snapshot), message=("申請已到期，問卷內容已清除。"
+        if snapshot.status == "expired" else "需求申請已拒絕，問卷內容已清除。"))
