@@ -15,6 +15,15 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+
+if not hasattr(Path, "is_junction"):
+    def _is_junction(self) -> bool:
+        try:
+            st = os.lstat(str(self))
+            return bool(getattr(st, "st_file_attributes", 0) & 0x0400) and not self.is_symlink()
+        except (OSError, ValueError):
+            return False
+    Path.is_junction = _is_junction  # type: ignore[attr-defined]
 from infrastructure.file.storage_layout import DATABASE_BACKUP_DIRECTORY, STAGING_DIRECTORY, StorageLayoutError, ensure_storage_layout
 
 from subsystems.controlled_files.contracts import (

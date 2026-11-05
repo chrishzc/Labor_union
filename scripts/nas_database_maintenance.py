@@ -21,6 +21,15 @@ import sys
 from threading import Timer
 from uuid import uuid4
 
+if not hasattr(Path, "is_junction"):
+    def _is_junction(self) -> bool:
+        try:
+            st = os.lstat(str(self))
+            return bool(getattr(st, "st_file_attributes", 0) & 0x0400) and not self.is_symlink()
+        except (OSError, ValueError):
+            return False
+    Path.is_junction = _is_junction  # type: ignore[attr-defined]
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
