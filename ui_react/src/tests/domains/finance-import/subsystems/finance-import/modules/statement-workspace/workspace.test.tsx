@@ -5,7 +5,6 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceCaseAccounting, FinanceAccountingWarnings, AccountingWarningList } from '../../../../../../../components/FinanceCaseAccounting';
 import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
-import { FinanceCaseArrangementPanel } from '../../../../../../../components/FinanceCaseArrangementPanel';
 import { loadAllCoreStageTimelines } from '../../../../../../../api/orders/load_all_core_stage_timelines';
 import { FinanceCaseList } from '../../../../../../../components/FinanceCaseList';
 import { FinanceGovernmentSubsidyList } from '../../../../../../../components/FinanceGovernmentSubsidyList';
@@ -274,44 +273,7 @@ it('filters the complete ongoing scope with six columns and twenty-row display p
 });
 
 
-describe('逐案直付安排保存',()=>{
- const event={version:1,action:'confirm_direct' as const,reason:'本案直接撥付依據',actor:'admin_user_id:9',created_at:'2026-11-04T12:00:00+00:00'};
- const data=()=>({...detail(),arrangement:{case_no:'115000701',version:0,events:[]},can_confirm_direct:true,scheme:'unknown' as const});
- function edit(){fireEvent.click(screen.getByText('確認／更正本案安排'));fireEvent.change(screen.getByLabelText('安排操作'),{target:{value:'confirm_direct'}});fireEvent.change(screen.getByLabelText('確認依據／更正原因'),{target:{value:'本案直接撥付依據'}});}
- it('saves confirmation and withdrawal with full server history, without requiring customer subsidy receipt proof',async()=>{
-  const onChanged=vi.fn();
-  vi.mocked(financeAccountingClient.confirmArrangement).mockResolvedValueOnce({case_no:'115000701',applied_version:1,arrangement:{case_no:'115000701',version:1,events:[event]}}).mockResolvedValueOnce({case_no:'115000701',applied_version:2,arrangement:{case_no:'115000701',version:2,events:[event,{...event,version:2,action:'withdraw_direct',reason:'更正為工會經手',actor:'admin_user_id:10'}]}});
-  render(<UnsavedChangesProvider><FinanceCaseArrangementPanel data={data()} onChanged={onChanged}/></UnsavedChangesProvider>);edit();
-  expect(screen.queryByLabelText(/客戶.*收款證明/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'儲存本案安排'}));
-  await screen.findByText('政府直付安排已確認',{exact:false});expect(screen.getByText('admin_user_id:9')).toBeInTheDocument();
-  expect(onChanged).toHaveBeenCalledTimes(1);expect(screen.getByText('2026/11/04 20:00:00')).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('安排操作'),{target:{value:'withdraw_direct'}});fireEvent.change(screen.getByLabelText('確認依據／更正原因'),{target:{value:'更正為工會經手'}});fireEvent.click(screen.getByRole('button',{name:'儲存本案安排'}));
-  await screen.findByText('政府直付安排已撤回',{exact:false});expect(screen.getByText('admin_user_id:9')).toBeInTheDocument();expect(screen.getByText('admin_user_id:10')).toBeInTheDocument();
-  expect(financeAccountingClient.confirmArrangement).toHaveBeenLastCalledWith('115000701',{action:'withdraw_direct',reason:'更正為工會經手',expected_version:1},expect.any(String));
- });
- it('keeps an unknown outcome locked and confirms only the original command/key',async()=>{
-  const onChanged=vi.fn();vi.mocked(financeAccountingClient.confirmArrangement).mockRejectedValueOnce(new ApiHttpError(503,'unknown','unknown')).mockResolvedValueOnce({case_no:'115000701',applied_version:1,arrangement:{case_no:'115000701',version:1,events:[event]}});
-  render(<UnsavedChangesProvider><FinanceCaseArrangementPanel data={data()} onChanged={onChanged}/></UnsavedChangesProvider>);edit();fireEvent.click(screen.getByRole('button',{name:'儲存本案安排'}));
-  const retry=await screen.findByRole('button',{name:'確認原操作結果'});expect(onChanged).not.toHaveBeenCalled();expect(screen.getByLabelText('確認依據／更正原因')).toBeDisabled();
-  fireEvent.click(retry);await screen.findByText('政府直付安排已確認',{exact:false});
-  expect(vi.mocked(financeAccountingClient.confirmArrangement).mock.calls[1]).toEqual(vi.mocked(financeAccountingClient.confirmArrangement).mock.calls[0]);expect(onChanged).toHaveBeenCalledTimes(1);
- });
- it('preserves edits on stale data and requires an explicit read before submitting a new version',async()=>{
-  vi.mocked(financeAccountingClient.confirmArrangement).mockRejectedValueOnce(new ApiHttpError(409,'arrangement_source_changed','stale')).mockResolvedValueOnce({case_no:'115000701',applied_version:2,arrangement:{case_no:'115000701',version:2,events:[event,{...event,version:2}]}});
-  vi.mocked(financeAccountingClient.arrangement).mockResolvedValue({case_no:'115000701',version:1,events:[event]});
-  render(<FinanceCaseArrangementPanel data={data()} onChanged={vi.fn()}/>);edit();fireEvent.click(screen.getByRole('button',{name:'儲存本案安排'}));
-  expect(await screen.findByRole('alert')).toHaveTextContent('輸入已保留');expect(screen.getByLabelText('確認依據／更正原因')).toHaveValue('本案直接撥付依據');
-  fireEvent.click(screen.getByRole('button',{name:'重新讀取安排'}));await screen.findByText(/已重新讀取安排/);
-  fireEvent.click(screen.getByRole('button',{name:'儲存本案安排'}));await screen.findByText(/已保存安排版本 2/);
-  const calls=vi.mocked(financeAccountingClient.confirmArrangement).mock.calls;
-  expect(calls[1][1].expected_version).toBe(1);expect(calls[1][2]).not.toBe(calls[0][2]);
- });
- it('shows a later cash conflict while preserving the recorded arrangement evidence',()=>{
-  render(<FinanceCaseArrangementPanel data={{...data(),arrangement:{case_no:'115000701',version:1,events:[event]},scheme_conflict:true,can_confirm_direct:false}} onChanged={vi.fn()}/>);
-  expect(screen.getByRole('alert')).toHaveTextContent('方案待確認');expect(screen.getByText('admin_user_id:9')).toBeInTheDocument();
- });
-});
+
 
 
 it('uses the canonical step8 projection without treating service dates as entry evidence',async()=>{

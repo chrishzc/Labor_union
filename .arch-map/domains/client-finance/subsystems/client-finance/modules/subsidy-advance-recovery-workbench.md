@@ -10,7 +10,7 @@
 ## Implementation
 - payout policy: `domains/client_finance/subsidy_advance.py`
 - funding adapter: `infrastructure/mysql/client_refund_reversal_repository.py`
-- current presentation replacement: `ui_react/src/components/SubsidyAdvanceSettlementPanel.tsx`
+- current presentation: 由 Government Subsidy `SubsidyPeriodWorkbench.tsx` 整期直接處理，原逐案面板已退役清理。
 - retained historical query: `api/routes/subsidy_advance_settlement.py` — GET 唯讀；POST 410。
 - historical implementation: `domains/client_finance/subsidy_advance_settlement.py`、`subsystems/client_finance/subsidy_advance_settlement.py`、`infrastructure/mysql/subsidy_advance_settlement_repository.py`、`ui_react/src/api/client_finance/subsidy_advance_settlement_client.ts`。
 

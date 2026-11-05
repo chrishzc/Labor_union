@@ -40,7 +40,7 @@ function chooseWorkbook(){
 describe('finance import operation identity after an observed result',()=>{
   it('allows a new confirmed submission after known failure, without reusing the failed job key',async()=>{
     chooseWorkbook();
-    await screen.findByText('未完成入帳，請查看未入帳明細與原因。');
+    await screen.findByText('未完成銷帳，請查看未銷帳明細與原因。');
     const button=screen.getByRole('button',{name:'匯入銀行交易明細'});
     expect(button).toBeEnabled();
     fireEvent.click(button);

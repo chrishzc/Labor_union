@@ -1,12 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FinancePostedBankTransactions } from '../../../../../../../components/FinancePostedBankTransactions';
 import { FinanceMonthlyAccounting } from '../../../../../../../components/FinanceMonthlyAccounting';
 import { FinanceReceivableItems } from '../../../../../../../components/FinanceReceivableItems';
-import { HistoricalAccountingMarkerPanel } from '../../../../../../../components/HistoricalAccountingMarkerPanel';
-import { UnsavedChangesProvider } from '../../../../../../../components/UnsavedChanges';
 import { monthlyAccountingClient, type MonthlyAccountingReport } from '../../../../../../../api/finance_import/monthly_accounting_client';
-import type { CaseAccounting } from '../../../../../../../api/finance_import/finance_accounting_client';
 vi.mock('../../../../../../../api/finance_import/monthly_accounting_client', () => ({ monthlyAccountingClient: { query:vi.fn(), receivables:vi.fn(), download:vi.fn(), marker:vi.fn(), mark:vi.fn() } }));
 
 function report(): MonthlyAccountingReport {
@@ -65,22 +61,6 @@ describe('每月帳務',()=>{
   });
 });
 
-describe('歷史案件人工核銷',()=>{
-  const data:CaseAccounting={case_no:'H1',client_name:'歷史客戶',receivable_ntd:10000,received_ntd:9900,payable_ntd:null,paid_ntd:null,pending_warning_count:0,warnings:[],transactions:[],staff_items:[],client_items:[{identity:'old',direction:'receivable',label:'第一期',party:'歷史客戶',expected_ntd:10000,actual_ntd:9900,has_payment:true,version:'v1',due_date:'2026-09-20'}]};
-  it('requires staff confirmation and reuses the original command after an unknown result',async()=>{
-    const marker={case_no:'H1',reason:'歷史原因無法查明',actor:'actor',created_at:'2026-11-02'};
-    vi.mocked(monthlyAccountingClient.mark).mockRejectedValueOnce(new Error('timeout')).mockResolvedValueOnce(marker);vi.mocked(monthlyAccountingClient.marker).mockResolvedValue(null);
-    render(<UnsavedChangesProvider><HistoricalAccountingMarkerPanel data={data} onMarked={vi.fn()}/></UnsavedChangesProvider>);
-    expect(screen.getByRole('button',{name:'標記案件帳務已人工核銷'})).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));fireEvent.change(screen.getByLabelText('確認說明'),{target:{value:marker.reason}});fireEvent.click(screen.getByRole('button',{name:'標記案件帳務已人工核銷'}));
-    fireEvent.click(await screen.findByRole('button',{name:'確認原操作結果'}));
-    await waitFor(()=>expect(monthlyAccountingClient.mark).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(monthlyAccountingClient.mark).mock.calls[0]).toEqual(vi.mocked(monthlyAccountingClient.mark).mock.calls[1]);
-    expect(await screen.findByText('案件帳務已人工核銷')).toBeInTheDocument();expect(data.client_items[0].actual_ntd).toBe(9900);
-  });
-});
-
-
 it('retains each monthly mode expansion across mode switches and refreshes',async()=>{
  const open=vi.fn(),range={start_month:'2026-09',end_month:'2026-10',category:'subsidy' as const};
  const view=render(<FinanceMonthlyAccounting initialRange={range} onCase={open}/>);
@@ -95,18 +75,4 @@ it('retains each monthly mode expansion across mode switches and refreshes',asyn
  await waitFor(()=>expect(monthlyAccountingClient.query).toHaveBeenCalledTimes(2));
  expect(screen.getByRole('region',{name:'2026-09明細'})).toBeInTheDocument();
  fireEvent.click(screen.getByRole('tab',{name:'已核銷收付款'}));expect(screen.getByRole('region',{name:'2026-10明細'})).toBeInTheDocument();
-});
-
-
-it('opens posted bank cases without duplicating a shared amount or offering another posting action',async()=>{
- const data=report();data.rows[1].bank_facts=data.rows[1].bank_facts.map(bank=>({...bank,bank:bank.identity==='government'?'taishin':'sinopac',cash_flow:bank.identity==='government'?'G':'C'}));
- vi.mocked(monthlyAccountingClient.query).mockResolvedValue(data);
- const open=vi.fn();render(<FinancePostedBankTransactions onCase={open}/>);
- fireEvent.change(screen.getByLabelText('銀行交易起日'),{target:{value:'2026-10-01'}});fireEvent.change(screen.getByLabelText('銀行交易迄日'),{target:{value:'2026-10-31'}});fireEvent.click(screen.getByRole('button',{name:'查詢已核銷交易'}));
- await screen.findByText('government');
- const row=screen.getByRole('row',{name:/government/});expect(row).toHaveTextContent('NT$ 90,000');expect(within(row).getAllByText('government')).toHaveLength(1);
- expect(row).toHaveTextContent('整筆來源，不代表每案分配金額');
- fireEvent.click(within(row).getByRole('button',{name:'S2'}));expect(open).toHaveBeenCalledWith('S2');
- expect(screen.queryByRole('button',{name:/確認核銷/})).not.toBeInTheDocument();
- fireEvent.change(screen.getByLabelText('已核銷銀行'),{target:{value:'taishin'}});expect(screen.queryByText('b1')).not.toBeInTheDocument();expect(screen.getByText('government')).toBeInTheDocument();
 });

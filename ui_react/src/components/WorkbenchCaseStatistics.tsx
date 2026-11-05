@@ -6,6 +6,10 @@ import type { CaseStatisticsData } from '../api/reports/weekly_operations_report
 
 const QUALIFICATION_LABELS = ['一般市民符合', '一般市民不符合', '補助市民符合', '補助市民不符合'];
 const STATUS_LABELS = ['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消'] as const;
+const APPLICATION_STATUS_FIELDS = [
+  ['訂單成立', 'order_established_count'], ['洽談中', 'negotiating_count'],
+  ['取消', 'cancelled_count'], ['審核不符合', 'review_rejected_count'],
+] as const;
 const currentYear = () => Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Taipei', year: 'numeric' }).format(new Date()));
 const displayCount = (value: number | null | undefined) => value == null ? '—' : value.toLocaleString('zh-TW');
 
@@ -78,18 +82,27 @@ export function WorkbenchCaseStatistics({ refreshKey = 0, caseCategory = 'subsid
       </div>
 
       <div className="workbench-statistics-overview" aria-live="polite">
-        <div className="workbench-statistics-total"><span>{nonCitizen ? '期間核准建案' : '期間匯入'}</span><strong>{displayCount(summary?.application_count)}</strong></div>
+        <div className="workbench-statistics-total"><span>{nonCitizen ? '期間核准建案' : '平台案件申請數'}</span><strong>{displayCount(summary?.application_count)}</strong></div>
         <div className="workbench-statistics-annual"><span>年度累計</span><strong>{displayCount(selectedData?.annual_application_count)}</strong></div>
       </div>
 
       {!nonCitizen && <div className="workbench-statistics-group">
-        <dl className="workbench-statistics-grid qualifications">
-          {QUALIFICATION_LABELS.map((label, index) => <div key={label}><dt>{label}</dt><dd>{displayCount(counts[index])}</dd></div>)}
-        </dl>
+        <div className="workbench-statistics-qualifications">
+          {['市民案件審核', '社福案件審核'].map((group, groupIndex) => <div key={group}>
+            <h3>{group}</h3>
+            <dl className="workbench-statistics-grid qualifications">
+              {QUALIFICATION_LABELS.slice(groupIndex * 2, groupIndex * 2 + 2).map((label, index) =>
+                <div key={label}><dt>{label}</dt><dd>{displayCount(counts[groupIndex * 2 + index])}</dd></div>)}
+            </dl>
+          </div>)}
+        </div>
       </div>}
       <div className="workbench-statistics-group">
-        <dl className="workbench-statistics-grid statuses">
-          {STATUS_LABELS.map((label) => <div key={label}><dt>{label}</dt><dd>{displayCount(summary?.order_status_counts[label])}</dd></div>)}
+        {!nonCitizen && <h3>申請案件狀況</h3>}
+        <dl className={`workbench-statistics-grid statuses${nonCitizen ? '' : ' application-statuses'}`}>
+          {nonCitizen
+            ? STATUS_LABELS.map((label) => <div key={label}><dt>{label}</dt><dd>{displayCount(summary?.order_status_counts[label])}</dd></div>)
+            : APPLICATION_STATUS_FIELDS.map(([label, field]) => <div key={label}><dt>{label}</dt><dd>{displayCount(summary?.[field])}</dd></div>)}
         </dl>
       </div>
     </section>

@@ -78,6 +78,17 @@ def test_corrupt_manifest_stops_before_any_connection(monkeypatch):
     connect.assert_not_called()
 
 
+def test_crlf_lf_normalized_compact_asset_is_accepted_without_drift():
+    import hashlib
+    from scripts import compact_fresh_schema as compact
+
+    raw = compact.POLICY_PATH.read_bytes()
+    crlf_hash = hashlib.sha256(raw.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')).hexdigest()
+    lf_hash = hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
+    assert compact._matches_expected_hash(compact.POLICY_PATH, crlf_hash)
+    assert compact._matches_expected_hash(compact.POLICY_PATH, lf_hash)
+
+
 @pytest.mark.parametrize("changed", ["sql", "bindings"])
 def test_stale_compact_asset_is_rejected_before_connection(tmp_path, monkeypatch, changed):
     from scripts import compact_fresh_schema as compact

@@ -1,0 +1,328 @@
+/**
+ * File: FinanceBankReconciliationWorkspace.css
+ * Description: 銀行對帳工作台（WF-03/04）Nurture Core 蜜桃珊瑚暖色系視覺樣式、雙行流水資料表與核對抽屜。
+ */
+
+.bank-reconcile-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  margin-top: 12px;
+}
+
+/* 1. 業務導引橫幅 Banner (Nurture Core Peach/Coral Theme) */
+.bank-reconcile-banner {
+  background: linear-gradient(135deg, #fffaf6 0%, #fff0e6 100%);
+  border: 1px solid var(--md-sys-color-secondary-container, #fed9b8);
+  border-radius: var(--radius-lg, 14px);
+  padding: 22px 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  box-shadow: 0 2px 8px rgba(194, 65, 12, 0.05);
+}
+
+.bank-reconcile-banner-content {
+  max-width: 680px;
+}
+
+.bank-reconcile-eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.09em;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--md-sys-color-primary, #c2410c);
+  margin-bottom: 5px;
+}
+
+.bank-reconcile-banner h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  line-height: 1.4;
+}
+
+.bank-reconcile-banner p {
+  margin: 6px 0 0 0;
+  font-size: 0.82rem;
+  color: var(--md-sys-color-secondary, #74593f);
+  line-height: 1.6;
+}
+
+.bank-reconcile-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bank-btn-ghost {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--md-sys-color-primary, #c2410c);
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bank-btn-ghost:hover {
+  background: #ffede0;
+}
+
+/* 2. 受控匯入上傳面板 (可展開) */
+.bank-reconcile-import-panel {
+  background: #fffaf7;
+  border: 1px dashed var(--md-sys-color-secondary-container, #fed9b8);
+  border-radius: var(--radius-md, 10px);
+  padding: 16px 20px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bank-reconcile-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.bank-reconcile-import-fields {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 3. KPI 筆數統計膠囊列 (Pill Tags) */
+.bank-reconcile-counts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px 0;
+}
+
+.bank-reconcile-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 9999px;
+  background: #ffffff;
+  border: 1px solid var(--md-sys-color-outline-variant, #f2e2dc);
+  font-size: 0.82rem;
+  color: var(--md-sys-color-secondary, #74593f);
+  box-shadow: 0 1px 3px rgba(74, 69, 67, 0.04);
+}
+
+.bank-reconcile-pill strong {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.bank-reconcile-pill.pill-pending strong {
+  color: var(--md-sys-color-primary, #c2410c);
+}
+
+.bank-reconcile-pill.pill-posted strong {
+  color: var(--md-sys-color-success, #16a34a);
+}
+
+.bank-reconcile-pill.pill-warning strong {
+  color: var(--md-sys-color-warning, #ea580c);
+}
+
+/* 4. 總表卡片面板 */
+.bank-reconcile-panel {
+  background: #ffffff;
+  border: 1px solid var(--md-sys-color-outline-variant, #f2e2dc);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: 0 4px 14px rgba(74, 69, 67, 0.05);
+  overflow: hidden;
+}
+
+/* 5. 整合型篩選列 (Filter Bar) */
+.bank-reconcile-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 18px 24px;
+  background: #fffdfc;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant, #f2e2dc);
+}
+
+.bank-reconcile-filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--md-sys-color-secondary, #74593f);
+}
+
+.bank-reconcile-filter-item select,
+.bank-reconcile-filter-item input {
+  min-height: 38px;
+  border: 1px solid var(--md-sys-color-outline, #dec0b6);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  background: #ffffff;
+}
+
+.bank-reconcile-filter-item select:focus-visible,
+.bank-reconcile-filter-item input:focus-visible {
+  outline: 3px solid #ff7f50;
+  border-color: var(--md-sys-color-primary, #c2410c);
+}
+
+.bank-reconcile-search {
+  flex: 1;
+  min-width: 220px;
+}
+
+.bank-reconcile-search input {
+  width: 100%;
+}
+
+/* 6. 資料表格雙行排版與狀態標籤 */
+.bank-reconcile-sub {
+  display: block;
+  font-size: 0.72rem;
+  color: #9a8473;
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+.bank-direction-in {
+  color: var(--md-sys-color-success, #16a34a);
+  font-weight: 700;
+}
+
+.bank-direction-out {
+  color: var(--md-sys-color-error, #dc2626);
+  font-weight: 700;
+}
+
+.bank-chip-amber {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+  color: var(--md-sys-color-primary, #c2410c);
+}
+
+.bank-chip-green {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.bank-btn-action {
+  border: none;
+  background: transparent;
+  color: var(--md-sys-color-primary, #c2410c);
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 4px 6px;
+}
+
+.bank-btn-action:hover {
+  color: var(--md-sys-color-primary-hover, #9a3412);
+}
+
+.bank-btn-action.btn-view {
+  color: var(--md-sys-color-secondary, #74593f);
+}
+
+.bank-btn-action.btn-view:hover {
+  color: var(--md-sys-color-primary, #c2410c);
+}
+
+/* 7. 表格底註說明 */
+.bank-reconcile-footer-note {
+  padding: 12px 20px;
+  background: #fffaf6;
+  border-top: 1px solid var(--md-sys-color-outline-variant, #f2e2dc);
+  font-size: 0.78rem;
+  color: var(--md-sys-color-secondary, #74593f);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 8. WF-04 原始交易事實卡片 */
+.bank-fact-card {
+  background: #fff5ed;
+  border: 1px solid var(--md-sys-color-secondary-container, #fed9b8);
+  border-radius: var(--radius-md, 10px);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.bank-fact-card .eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--md-sys-color-primary, #c2410c);
+}
+
+.bank-fact-card h3 {
+  margin: 6px 0 2px 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--md-sys-color-on-surface, #1e1b19);
+}
+
+.bank-fact-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--md-sys-color-secondary, #74593f);
+}
+
+.bank-fact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(254, 217, 184, 0.7);
+  font-size: 0.78rem;
+}
+
+.bank-fact-grid span {
+  color: var(--md-sys-color-secondary, #74593f);
+  display: block;
+}
+
+.bank-fact-grid strong {
+  color: var(--md-sys-color-on-surface, #1e1b19);
+  font-size: 0.84rem;
+}

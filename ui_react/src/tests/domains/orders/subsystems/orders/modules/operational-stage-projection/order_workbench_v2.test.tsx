@@ -419,7 +419,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     expect(screen.queryByRole('button', { name: '取消訂單' })).not.toBeInTheDocument();
     const statistics = screen.getByRole('region', { name: '案件受理統計' });
     expect(within(statistics).queryByText('UI 預覽・示意數據')).not.toBeInTheDocument();
-    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
     await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')!.textContent).toBe('12'));
     const initialTotal = statistics.querySelector('.workbench-statistics-total strong')!.textContent;
     fireEvent.change(within(statistics).getByLabelText('季度'), { target: { value: '2' } });
@@ -435,7 +435,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     fireEvent.change(within(statistics).getByLabelText('年度'), { target: { value: '2025' } });
     expect(within(statistics).getByText('2025/10/01－2025/12/31')).toBeInTheDocument();
     await waitFor(() => expect(caseStatisticsQueryClient.query).toHaveBeenLastCalledWith(2025, 4, null, expect.any(Object)));
-    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
     expect(screen.getByText('CASE-NORMAL')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '13 個核心訂單階段' })).toBeInTheDocument();
     expect(clientMocks.getCoreStageTimelines).toHaveBeenCalledTimes(callsBeforeSearch);
@@ -448,7 +448,7 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     const retry = await screen.findByRole('button', { name: '統計讀取失敗・重試' });
     const statistics = screen.getByRole('region', { name: '案件受理統計' });
     expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('—');
-    expect(statistics.querySelectorAll('dt')).toHaveLength(10);
+    expect(statistics.querySelectorAll('dt')).toHaveLength(8);
     fireEvent.click(retry);
     await waitFor(() => expect(statistics.querySelector('.workbench-statistics-total strong')).toHaveTextContent('12'));
     const beforeRefresh = vi.mocked(caseStatisticsQueryClient.query).mock.calls.length;
@@ -469,6 +469,26 @@ describe('待辦看板 Beta 正式十三階段 contract', () => {
     resolveInitial(statisticsResult(2026, null, null));
     await waitFor(() => expect(total).toHaveTextContent('5'));
     expect(screen.getByText('2026/05/01－2026/05/31')).toBeInTheDocument();
+  });
+
+  it('案件受理依模板分組並使用 server 四欄指標；非市民保留六種狀態', async () => {
+    const response = statisticsResult(2026, null, null);
+    response.summary.order_established_count = 7;
+    response.summary.negotiating_count = 2;
+    response.summary.cancelled_count = 1;
+    response.summary.review_rejected_count = 2;
+    vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue(response);
+    const view = render(<WorkbenchCaseStatistics />);
+    await waitFor(() => expect(document.querySelector('.application-statuses dd')).toHaveTextContent('7'));
+    expect([...document.querySelectorAll('h3')].map((cell) => cell.textContent)).toEqual(['市民案件審核', '社福案件審核', '申請案件狀況']);
+    expect([...document.querySelectorAll('.application-statuses dt')].map((cell) => cell.textContent)).toEqual(['訂單成立', '洽談中', '取消', '審核不符合']);
+    expect([...document.querySelectorAll('.application-statuses dd')].map((cell) => cell.textContent)).toEqual(['7', '2', '1', '2']);
+    view.unmount();
+    vi.mocked(caseStatisticsQueryClient.query).mockResolvedValue({ ...response, case_category: 'non_citizen' });
+    render(<WorkbenchCaseStatistics caseCategory="non_citizen" />);
+    await waitFor(() => expect(document.querySelector('.statuses dd')).toHaveTextContent('12'));
+    expect([...document.querySelectorAll('.statuses dt')].map((cell) => cell.textContent)).toEqual(['待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消']);
+    expect(document.querySelector('.qualifications')).toBeNull();
   });
 
   it('未分類的不符合案件與週報同樣顯示未知，不將缺值顯示成零', async () => {
