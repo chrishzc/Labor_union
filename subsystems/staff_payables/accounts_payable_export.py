@@ -299,7 +299,8 @@ def build_accounts_payable_workbook(rows: tuple[AccountsPayableRow, ...]) -> byt
 
 def _transfer_rows(rows):
     serials = {bank_code: 0 for bank_code in _OUTGOING_BANKS}
-    for row in rows:
+    # Group by outgoing bank with a stable sort so each bank keeps its serial order.
+    for row in sorted(rows, key=lambda item: _outgoing_bank(item) != "31"):
         outgoing_bank = _outgoing_bank(row)
         serials[outgoing_bank] += 1
         yield (

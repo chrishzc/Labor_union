@@ -108,6 +108,13 @@ def test_export_preserves_staff_number_and_keeps_banks_and_recipient_accounts_se
     rows = aggregate_accounts_payable_rows(staff, (_refund("normal", 120), _refund("subsidy:1", 80, refund_type="subsidy_return")))
     sheet = load_workbook(BytesIO(build_accounts_payable_workbook(rows))).active
     values = list(sheet.values)[2:]
+    assert [(row[0], row[1], row[5]) for row in values] == [
+        ("8-31-1", "永豐銀行", 120),
+        ("8-31-2", "永豐銀行", 300),
+        ("8-31-3", "永豐銀行", 50),
+        ("8-633-1", "台新銀行", 80),
+        ("8-633-2", "台新銀行", 500),
+    ]
     staff_values = [row for row in values if row[2] == "00123 王月嫂"]
     assert sorted((row[1], row[3], row[5]) for row in staff_values) == [
         ("台新銀行", "001", 500), ("永豐銀行", "001", 300), ("永豐銀行", "002", 50)]
