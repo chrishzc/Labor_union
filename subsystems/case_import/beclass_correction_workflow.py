@@ -88,6 +88,8 @@ class BeClassFinancialSyncPort(Protocol):
         correlation_id: CorrelationId,
     ) -> None: ...
 
+    def sync_refund_recipient_snapshots(self, *, case_no: str) -> int: ...
+
 
 class BeClassCorrectionWorkflow:
     def __init__(self, repository: BeClassCorrectionRepository, unit_of_work_factory: Callable[[], Any], financial_sync: BeClassFinancialSyncPort | None = None) -> None:
@@ -184,6 +186,8 @@ class BeClassCorrectionWorkflow:
                     idempotency_key=idempotency_key,
                     correlation_id=correlation_id,
                 )
+            if _refund_account_touched(normalized) and self._financial_sync is not None and hasattr(self._financial_sync, "sync_refund_recipient_snapshots"):
+                self._financial_sync.sync_refund_recipient_snapshots(case_no=identity)
             result = {
                 "beclass_record_id": beclass_record_id,
                 "case_no": identity,
@@ -259,6 +263,12 @@ def _birth_count_changed(
         and normalized["multi_birth_count"]
         != snapshot.effective.get("multi_birth_count")
     )
+
+
+def _refund_account_touched(
+    normalized: Mapping[str, str | bool | int | float | None],
+) -> bool:
+    return "refund_bank_code" in normalized or "refund_account_no" in normalized
 
 
 def _validate_financial_field_change(

@@ -57,3 +57,56 @@ def test_ambiguous_or_missing_account_is_not_payable_and_existing_snapshot_is_im
     cursor = Cursor([], existing=True)
     assert not _insert_refund_recipient_snapshot(cursor, "existing", "SYNTHETIC-1", "client_refund")
     assert len(cursor.operations) == 1
+
+
+def test_sync_refund_recipient_snapshots_inserts_for_open_obligations():
+    from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
+
+    class MockCursor:
+        def __init__(self):
+            self.operations = []
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, sql, args=None):
+            self.operations.append((sql, args))
+
+        def fetchall(self):
+            last_sql = self.operations[-1][0] if self.operations else ""
+            if "FROM client_obligations" in last_sql:
+                return [{"obligation_identity": "client-correction:test-refund-1"}]
+            if "FROM beclass_records" in last_sql:
+                return [{"refund_bank_code": "0040012", "refund_account_no": "123456789012", "effective_values_json": None}]
+            return []
+
+        def fetchone(self):
+            last_sql = self.operations[-1][0] if self.operations else ""
+            if "SELECT refund_obligation_identity FROM client_refund_recipient_snapshots" in last_sql:
+                return None
+            return None
+
+    class MockConn:
+        def __init__(self, cur):
+            self._cur = cur
+
+        def cursor(self):
+            return self._cur
+
+    cur = MockCursor()
+    conn = MockConn(cur)
+    sync = MySqlBeClassFinancialSync(conn)
+    inserted = sync.sync_refund_recipient_snapshots(case_no="CASE-TEST-1")
+    assert inserted == 1
+
+    insert_ops = [op for op in cur.operations if "INSERT INTO client_refund_recipient_snapshots" in op[0]]
+    assert len(insert_ops) == 1
+    assert insert_ops[0][1][0] == "client-correction:test-refund-1"
+    assert insert_ops[0][1][1] == "CASE-TEST-1"
+    assert insert_ops[0][1][2] == "0040012"
+    assert insert_ops[0][1][3] == "123456789012"
+    assert insert_ops[0][1][4] == "beclass_correction_supplement"

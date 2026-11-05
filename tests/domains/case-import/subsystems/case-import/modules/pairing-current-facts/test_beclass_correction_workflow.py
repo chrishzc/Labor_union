@@ -62,9 +62,13 @@ class _Repository:
 class _FinancialSync:
     def __init__(self):
         self.calls = []
+        self.snapshot_sync_calls = []
 
     def apply(self, **kwargs):
         self.calls.append(kwargs)
+
+    def sync_refund_recipient_snapshots(self, **kwargs):
+        self.snapshot_sync_calls.append(kwargs)
 
 
 def test_beclass_correction_preserves_original_and_replays_exactly_once():
@@ -337,3 +341,42 @@ def test_beclass_mysql_correction_creates_a_marked_manual_container_on_first_app
     assert first_parameters == ("CASE-HISTORY",)
     assert connection.cursor_instance.statements[1][1][0] == 44
     assert connection.cursor_instance.statements[2][1][0] == 44
+
+
+def test_beclass_correction_triggers_refund_snapshot_sync_when_account_fields_touched():
+    repository = _Repository()
+    financial_sync = _FinancialSync()
+    workflow = BeClassCorrectionWorkflow(repository, _Uow, financial_sync)
+
+    # 1. 僅修改電話時，不觸發退款快照同步
+    preview_phone = workflow.preview("CASE-001", {"phone": "0911222333"}, ExpectedVersion(0))
+    workflow.apply(
+        "CASE-001",
+        {"phone": "0911222333"},
+        ExpectedVersion(0),
+        preview_phone.preview_fingerprint,
+        IdempotencyKey("beclass-phone-sync-1"),
+        ActorContext("admin:9"),
+        "更新電話",
+        CorrelationId("corr-phone"),
+    )
+    assert len(financial_sync.snapshot_sync_calls) == 0
+
+    # 2. 補登退款帳號時，自動連動觸發退款快照同步
+    preview_refund = workflow.preview(
+        "CASE-001",
+        {"refund_bank_code": "0040012", "refund_account_no": "123456789012"},
+        ExpectedVersion(1),
+    )
+    workflow.apply(
+        "CASE-001",
+        {"refund_bank_code": "0040012", "refund_account_no": "123456789012"},
+        ExpectedVersion(1),
+        preview_refund.preview_fingerprint,
+        IdempotencyKey("beclass-refund-sync-1"),
+        ActorContext("admin:9"),
+        "補登退款帳戶",
+        CorrelationId("corr-refund"),
+    )
+    assert len(financial_sync.snapshot_sync_calls) == 1
+    assert financial_sync.snapshot_sync_calls[0] == {"case_no": "CASE-001"}

@@ -785,7 +785,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
         </div>
 
       </header>}
-      {!runtimeOnly && <nav className="line-tab-bar" aria-label={view.title}>`n        {[view.title].map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>`n          {TABS.filter(([tab]) => view.tabs.includes(tab)).map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab !== tab) requestLeave(() => { if (activeTab === 'richmenu') setRichMenuLocalDefinition(null); setActiveTab(tab); }); }}>{label}</button>)}
+      {!runtimeOnly && <nav className="line-tab-bar" aria-label={view.title}>
+        {[view.title].map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
+          {TABS.filter(([tab]) => view.tabs.includes(tab)).map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab !== tab) requestLeave(() => { if (activeTab === 'richmenu') setRichMenuLocalDefinition(null); setActiveTab(tab); }); }}>{label}</button>)}
         </div>)}
       </nav>}
 

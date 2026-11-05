@@ -40,6 +40,7 @@
 - Named care／bonus／floor-agreement fields share the existing BeClass correction state／version／event／receipt and effective projection. Corrected NULL clears an original value／field issue, unchanged bool／number scalars retain their type. Holiday bonus and floor-agreement text do not invoke financial sync; floor-fee amounts use Orders Terms and birth count retains its existing financial coordination.
 - Any order without a bound BeClass row may create one `record_origin='admin_manual'` container during Apply; Preview remains zero-write, and all entered values continue through the same versioned correction state／event owner.
 - A pre-service effective birth-count correction coordinates existing Client Finance／formally assigned Payroll impact in the same outer UoW. Absent financial roots only retain effective correction for later bootstrap; unassigned cases do not require full Payroll facts. Partial roots and orphan history remain blocked. Once service has started, birth count is financially locked while non-financial BeClass fields remain independently correctable.
+- Effective refund account corrections (`refund_bank_code`, `refund_account_no`) automatically coordinate Client Finance `sync_refund_recipient_snapshots` in the same outer UoW, backfilling immutable snapshots for open client refund obligations and resolving pending recipient status (`recipient_ready=True`).
 
 ## Consumers
 - Case Import／Client owner follow-up only；不再有 Anomalies runtime consumer。

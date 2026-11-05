@@ -35,6 +35,7 @@ def main():
         parser.error("Apply requires the reviewed version, preview fingerprint, operation key and actor.")
     from infrastructure.mysql.mysql_adapter import _database_config_from_environment, get_connection
     from infrastructure.mysql.beclass_correction_repository import MySqlBeClassCorrectionRepository
+    from infrastructure.mysql.beclass_financial_sync import MySqlBeClassFinancialSync
     from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     config = _database_config_from_environment()
     if os.getenv("APP_ENV", "development") != "development" or config["host"] not in {"127.0.0.1", "localhost"}:
@@ -44,7 +45,7 @@ def main():
     connection = get_connection()
     try:
         repository = MySqlBeClassCorrectionRepository(connection)
-        workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection))
+        workflow = BeClassCorrectionWorkflow(repository, lambda: MySqlUnitOfWork(connection), MySqlBeClassFinancialSync(connection))
         changes = prepare(repository, args.case_no)
         if args.apply:
             receipt = workflow.apply(args.case_no, changes, ExpectedVersion(args.expected_version),

@@ -132,6 +132,48 @@ class MySqlBeClassFinancialSync:
                 ),
             )
 
+    def sync_refund_recipient_snapshots(self, *, case_no: str) -> int:
+        """為補登退款帳號之案件，自動將快照補入尚無快照的 open 退款義務，解除待補狀態。"""
+        from infrastructure.mysql.client_receipt_reconciliation_repository import (
+            _insert_refund_recipient_snapshot,
+        )
+
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.obligation_identity
+                FROM client_obligations o
+                WHERE o.case_no = %s
+                  AND o.direction = 'payable_to_client'
+                  AND o.obligation_type IN ('refund', 'subsidy_return')
+                  AND o.status = 'open'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM client_refund_recipient_snapshots s
+                      WHERE s.refund_obligation_identity = o.obligation_identity
+                  )
+                ORDER BY o.obligation_identity
+                FOR UPDATE
+                """,
+                (case_no,),
+            )
+            rows = cursor.fetchall() or ()
+            inserted = 0
+            for row in rows:
+                obligation_identity = (
+                    row["obligation_identity"]
+                    if isinstance(row, dict)
+                    else row[0]
+                )
+                if _insert_refund_recipient_snapshot(
+                    cursor,
+                    obligation_identity,
+                    case_no,
+                    "beclass_correction_supplement",
+                    require_complete=False,
+                ):
+                    inserted += 1
+            return inserted
+
 
 def _load_rate_correction_presence(cursor, case_no):
     # The Orders root is already locked. Discover the branch without taking
