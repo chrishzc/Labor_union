@@ -36,13 +36,24 @@ def test_workbook_reads_explicit_time_and_cross_day_evidence(tmp_path):
     assert row.service_time == ServiceTimeTerms(time(22), time(6), 1)
 
 
-def test_workbook_compares_combined_service_times_across_overlapping_date_ranges(tmp_path):
+@pytest.mark.parametrize(
+    ("time_headers", "morning_values", "afternoon_values"),
+    [
+        (["服務時間"], ["9:00-13:00(4小時)"], ["13:30 - 17:30(4小時)"]),
+        (["服務時間（每日時數）"], ["９：００－１３：００（４小時）"], ["１３：３０　－　１７：３０（４ 小時）"]),
+        (["\ufeff服務時間"], ["9 : 00−13 : 00\n(4小時)"], ["13:30\u200b〜17:30\u00a0(4小時)"]),
+        (["服務時間", "服務時段"], [None, "9:00至13:00(4小時)"], ["13:30到17:30(4小時)", None]),
+        (["服務時間", "服務開始時間", "服務結束時間"], ["9:00–13:00(4小時)", "９：００", None], ["13:30—17:30(4小時)", None, "17:30"]),
+        (["服務時間", "服務時段"], ["9:00-13:00(4小時)", "09：00－13：00"], ["13:30 - 17:30(4小時)", "13:30-17:30"]),
+    ],
+)
+def test_workbook_compares_combined_service_times_across_overlapping_date_ranges(tmp_path, time_headers, morning_values, afternoon_values):
     path = tmp_path / "historical-service-time-text.xlsx"
     workbook = Workbook()
     sheet = workbook.active
-    sheet.append(["案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂", "服務時間"])
-    sheet.append(["CASE-1", "示範客戶甲", "2026-09-15", "2026-10-30", 1, "示範月嫂", "9:00-13:00(4小時)"])
-    sheet.append(["CASE-2", "示範客戶乙", "2026-10-19", "2026-11-09", 1, "示範月嫂", "13:30 - 17:30(4小時)"])
+    sheet.append(["案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂", *time_headers])
+    sheet.append(["CASE-1", "示範客戶甲", "2026-09-15", "2026-10-30", 1, "示範月嫂", *morning_values])
+    sheet.append(["CASE-2", "示範客戶乙", "2026-10-19", "2026-11-09", 1, "示範月嫂", *afternoon_values])
     workbook.save(path)
     workbook.close()
 
@@ -73,6 +84,28 @@ def test_workbook_compares_combined_service_times_across_overlapping_date_ranges
     conflict, = module.project_source_schedule_conflicts(previews, (morning, overlapping))
     assert conflict.issue_code == "historical_order_source_schedule_conflict"
     assert [instant.strftime("%H:%M") for instant in conflict.overlap] == ["12:30", "13:00"]
+
+
+@pytest.mark.parametrize(
+    ("headers", "values"),
+    [
+        (["服務時間"], ["4小時"]),
+        (["服務時間"], ["22:00-06:00(8小時)"]),
+        (["服務時間", "服務時段"], ["9:00-13:00(4小時)", "10:00-14:00(4小時)"]),
+        (["服務時間", "服務開始時間"], ["9:00-13:00(4小時)", "10:00"]),
+    ],
+)
+def test_workbook_does_not_infer_missing_or_conflicting_service_times(tmp_path, headers, values):
+    path = tmp_path / "historical-unconfirmed-time.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["案件編號", "客戶姓名", "開始日期", "結束日期", "訂單狀態", "月嫂", *headers])
+    workbook.active.append(["CASE-1", "示範客戶", "2026-08-01", "2026-08-01", 1, "示範月嫂", *values])
+    workbook.save(path)
+    workbook.close()
+
+    row, = load_historical_order_workbook(path).rows
+    assert row.service_time is None
+    assert "historical_service_time_unconfirmed" in row.issue_codes
 
 
 class _Repository:

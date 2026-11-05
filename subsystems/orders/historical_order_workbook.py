@@ -10,6 +10,7 @@ from datetime import date, datetime, time
 from hashlib import sha256
 from pathlib import Path
 import re
+from unicodedata import normalize
 
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
@@ -28,14 +29,16 @@ _FIELD_ALIASES = {
     "start_time": {"service_start_time", "每日服務開始時間", "服務開始時間"},
     "end_time": {"service_end_time", "每日服務結束時間", "服務結束時間"},
     "end_day_offset": {"service_end_day_offset", "跨日標記", "服務結束日偏移"},
-    "time_range": {"service_time", "服務時間", "每日服務時間", "服務時段", "每日服務時段"},
+    "time_range": {"service_time", "服務時間", "每日服務時間", "服務時段", "每日服務時段", "服務時間(每日時數)"},
     "status": {"status", "狀態", "訂單狀態", "訂單成立狀態"},
 }
 _STAFF_HEADER = re.compile(r"^(staff_name|服務人員|月嫂|月嫂姓名)$")
+_TIME_TEXT_TRANSLATION = str.maketrans("‐‑‒–—―−〜", "-------~", "\u200b\u2060\ufeff")
+_CLOCK_TEXT = r"[0-9]{1,2}\s*:\s*[0-9]{2}(?:\s*:\s*[0-9]{2})?"
 _TIME_RANGE = re.compile(
-    r"(?P<start>[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)\s*[-–—－~～至]\s*"
-    r"(?P<overnight>次日|翌日|\+1)?\s*(?P<end>[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"
-    r"\s*(?:[(（]\s*[0-9]+(?:\.[0-9]+)?\s*(?:小時|小時整)\s*[)）])?"
+    rf"(?P<start>{_CLOCK_TEXT})\s*[-~至到]\s*"
+    rf"(?P<overnight>次日|翌日|\+1)?\s*(?P<end>{_CLOCK_TEXT})"
+    r"\s*(?:\(\s*[0-9]+(?:\.[0-9]+)?\s*小時(?:整)?\s*\))?"
 )
 _STATUS_MAP = {
     "0": HistoricalOrderSourceStatus.CANCELLED,
@@ -177,7 +180,7 @@ def _parse_row(values, positions, source_row, epoch, digest):
         "start_time", "end_time", "end_day_offset",
     ))
     try:
-        service_time = _read_service_time(raw_time, _value(values, positions.get("time_range")))
+        service_time = _read_service_time(raw_time, (_value(values, index) for index in positions["time_range"]))
     except (TypeError, ValueError):
         service_time = None
         issues += ("historical_service_time_unconfirmed",)
@@ -213,27 +216,40 @@ def _parse_row(values, positions, source_row, epoch, digest):
     )
 
 
-def _read_service_time(raw_time, raw_range) -> ServiceTimeTerms | None:
-    split_time = None
-    if any(not _blank(value) for value in raw_time):
-        start, end, offset = raw_time
-        split_time = ServiceTimeTerms(
-            _clock_time(start), _clock_time(end), 0 if _blank(offset) else int(str(offset).strip()),
-        )
-    range_time = None
-    if not _blank(raw_range):
-        match = _TIME_RANGE.fullmatch(str(raw_range).strip())
-        if match is None:
-            raise ValueError("invalid historical service time range")
-        range_time = ServiceTimeTerms(
-            _clock_time(match["start"]), _clock_time(match["end"]), int(bool(match["overnight"])),
-        )
-    if split_time is not None and range_time is not None and split_time != range_time:
-        raise ValueError("conflicting historical service times")
-    service_time = split_time or range_time
+def _read_service_time(raw_time, raw_ranges) -> ServiceTimeTerms | None:
+    start, end, offset = raw_time
+    split = (
+        None if _blank(start) else _clock_time(start),
+        None if _blank(end) else _clock_time(end),
+        None if _blank(offset) else int(_normalize_time_text(offset)),
+    )
+    range_texts = (_normalize_time_text(value) for value in raw_ranges if not _blank(value))
+    ranges = {_parse_time_range(text) for text in range_texts if text}
+    if len(ranges) > 1:
+        raise ValueError("conflicting historical service time ranges")
+    service_time = ranges.pop() if ranges else None
+    if service_time is not None:
+        expected = (service_time.start_time, service_time.end_time, service_time.end_day_offset)
+        if any(value is not None and value != expected_value for value, expected_value in zip(split, expected)):
+            raise ValueError("conflicting historical service times")
+    elif any(value is not None for value in split):
+        service_time = ServiceTimeTerms(split[0], split[1], split[2] if split[2] is not None else 0)
     if service_time is not None and service_time.service_interval(date(2000, 1, 1)) is None:
         raise ValueError("invalid historical service interval")
     return service_time
+
+
+def _parse_time_range(text: str) -> ServiceTimeTerms:
+    match = _TIME_RANGE.fullmatch(text)
+    if match is None:
+        raise ValueError("invalid historical service time range")
+    return ServiceTimeTerms(
+        _clock_time(match["start"]), _clock_time(match["end"]), int(bool(match["overnight"])),
+    )
+
+
+def _normalize_time_text(value) -> str:
+    return normalize("NFKC", str(value)).translate(_TIME_TEXT_TRANSLATION).strip()
 
 
 def _clock_time(value):
@@ -241,16 +257,19 @@ def _clock_time(value):
         return value.time()
     if isinstance(value, time):
         return value
-    text = str(value).strip()
+    text = re.sub(r"\s*:\s*", ":", _normalize_time_text(value))
     if re.fullmatch(r"[0-9]:.*", text):
         text = "0" + text
     return time.fromisoformat(text)
 
 
 def _header_positions(headers):
-    positions: dict[str, object] = {"staff": [], "staff_start": {}, "staff_end": {}}
+    positions: dict[str, object] = {"staff": [], "staff_start": {}, "staff_end": {}, "time_range": []}
     for index, header in enumerate(headers):
         field = _field_for_header(header)
+        if field == "time_range":
+            positions["time_range"].append(index)
+            continue
         if field and field not in positions:
             positions[field] = index
             continue
@@ -301,7 +320,8 @@ def _interval_issues(bad_start, bad_end, start, end, prefix):
 
 def _field_for_header(header):
     for field, aliases in _FIELD_ALIASES.items():
-        if header in {_header(alias) for alias in aliases}:
+        candidate = _normalize_time_text(header) if field == "time_range" else header
+        if candidate in {_header(alias) for alias in aliases}:
             return field
     return None
 

@@ -108,7 +108,7 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         assert excluded["current_conflict_count"] == 2
         assert apply_workbook(client, incomplete)["replayed_workbook"] is True
 
-        corrected = workbook_bytes("9:00-13:00(4小時)", "13:30 - 17:30(4小時)")
+        corrected = workbook_bytes("９：００－１３：００（４小時）", "13:30\u200b−17:30\u00a0(4小時)")
         imported = apply_workbook(client, corrected)
         assert imported["import_counts"]["imported_count"] == 2
         assert imported["assignments_created"] == 2
