@@ -2,7 +2,9 @@
 from dataclasses import asdict
 from io import BytesIO
 from typing import Annotated, Literal
-from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService, ManualSupplementBlocked
+from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
+from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
 
 from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -29,6 +31,16 @@ router = APIRouter()
 
 
 def _error(error):
+    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError)):
+        envelope = error.error
+        status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500}.get(envelope.category.value, 422)
+        response = typed_http_error(status, envelope.category.value, envelope.code,
+                                    envelope.message, envelope.correlation_id.value,
+                                    retryable=envelope.retryable)
+        response.detail["error"]["domain_blockers"] = list(envelope.domain_blockers)
+        return response
+    if isinstance(error, ClientReceiptRepositoryUnavailable):
+        return typed_http_error(503, "unavailable", "accounting_unavailable", "帳務資料暫時無法取得，請稍後重試。", "finance-workspace", retryable=True)
     if isinstance(error, MonthlyAccountingUnavailable):
         return typed_http_error(503, "unavailable", "accounting_scope_unavailable", "部分銀行款跨統計範圍，尚缺正式分配金額，無法提供正確合計。請調整案件類別或核對原始款項。", "finance-workspace")
     if isinstance(error, ValueError) and str(error).startswith("invalid_accounting_"):
@@ -374,7 +386,7 @@ def create_case_manual_supplement(
         )
         application.state.connection.commit()
         return BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
-    except (LookupError, ValueError, MySQLError) as error:
+    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientReceiptRepositoryUnavailable) as error:
         try:
             application.state.connection.rollback()
         except Exception:

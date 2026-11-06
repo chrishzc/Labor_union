@@ -33,6 +33,7 @@ from infrastructure.mysql.knowledge_retrieval_unit_of_work import (
 )
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.knowledge_retrieval.contracts import AskKnowledgeQuestionCommand
+from subsystems.knowledge_retrieval.application import KnowledgeApplication
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SERVICE_HELP_PAGE = PROJECT_ROOT / "line" / "static" / "service_help.html"
@@ -347,9 +348,9 @@ def _persist_liff_answer(
         CorrelationId(f"liff-knowledge:{interaction_id}"),
     )
     try:
-        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
-            receipt_id = unit_of_work.knowledge.record_inline_answer(command, answer)
-            unit_of_work.commit()
+        receipt_id = KnowledgeApplication(open_knowledge_retrieval_unit_of_work).record_inline_answer(
+            command, answer
+        )
     except HTTPException:
         raise
     except Exception as error:
@@ -370,9 +371,9 @@ def _persist_liff_outcome(
         CorrelationId(f"liff-knowledge:{interaction_id}"),
     )
     try:
-        with open_knowledge_retrieval_unit_of_work() as unit_of_work:
-            request_id = unit_of_work.record_inline_outcome(command, request_status)
-            unit_of_work.commit()
+        request_id = KnowledgeApplication(open_knowledge_retrieval_unit_of_work).record_inline_outcome(
+            command, request_status
+        )
     except HTTPException:
         raise
     except Exception as error:

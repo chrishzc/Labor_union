@@ -80,30 +80,24 @@ class MySqlStatementArchiveRepository:
 
     def _command(self, command, key, actor, write):
         digest = hashlib.sha256(json.dumps(command, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        self.connection.begin()
-        try:
-            with self.connection.cursor() as cursor:
-                cursor.execute("SELECT version FROM finance_statement_archive_state WHERE id=1 FOR UPDATE")
-                if cursor.fetchone() is None:
-                    raise RuntimeError("archive_schema_not_initialized")
-                cursor.execute("SELECT * FROM finance_statement_commands WHERE idempotency_key=%s", (key,))
-                previous = cursor.fetchone()
-                if previous:
-                    if previous["command_digest"] != digest:
-                        raise StatementCommandConflict("idempotency_conflict")
-                    result = StatementCommandReceipt(previous["result_identity"], previous["saved_count"], previous["excluded_count"])
-                else:
-                    result = write(cursor)
-                    cursor.execute(
-                        "INSERT INTO finance_statement_commands(idempotency_key,command_digest,result_identity,saved_count,excluded_count,actor) VALUES (%s,%s,%s,%s,%s,%s)",
-                        (key, digest, result.identity, result.saved_count, result.excluded_count, actor),
-                    )
-                    cursor.execute("UPDATE finance_statement_archive_state SET version=version+1 WHERE id=1")
-            self.connection.commit()
-            return result
-        except Exception:
-            self.connection.rollback()
-            raise
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT version FROM finance_statement_archive_state WHERE id=1 FOR UPDATE")
+            if cursor.fetchone() is None:
+                raise RuntimeError("archive_schema_not_initialized")
+            cursor.execute("SELECT * FROM finance_statement_commands WHERE idempotency_key=%s", (key,))
+            previous = cursor.fetchone()
+            if previous:
+                if previous["command_digest"] != digest:
+                    raise StatementCommandConflict("idempotency_conflict")
+                result = StatementCommandReceipt(previous["result_identity"], previous["saved_count"], previous["excluded_count"])
+            else:
+                result = write(cursor)
+                cursor.execute(
+                    "INSERT INTO finance_statement_commands(idempotency_key,command_digest,result_identity,saved_count,excluded_count,actor) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (key, digest, result.identity, result.saved_count, result.excluded_count, actor),
+                )
+                cursor.execute("UPDATE finance_statement_archive_state SET version=version+1 WHERE id=1")
+        return result
 
 
 def _object(value):

@@ -285,47 +285,45 @@ def _all_staff_names(cursor: Any) -> tuple[str, ...]:
 
 
 def _staff_payout_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
-    try:
-        cursor.execute(
-            """SELECT obligation.staff_id, staff.name, obligation.case_no,
-                      obligation.obligation_identity,
-                      COALESCE(projection.balance_ntd, obligation.amount_due_ntd) AS amount_due_ntd,
-                      obligation.due_date
-               FROM staff_obligations obligation
-               JOIN staff staff ON staff.id=obligation.staff_id
-               LEFT JOIN staff_payable_projections projection
-                 ON projection.obligation_identity=obligation.obligation_identity
-               WHERE obligation.direction='payable_to_staff'
-                 AND obligation.status<>'cancelled'
-                 AND obligation.amount_due_ntd>0
-                 AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid'))
-               ORDER BY obligation.staff_id, obligation.obligation_identity"""
+    # Source failures must reach the ingestion UoW; only a successful read may be empty.
+    cursor.execute(
+        """SELECT obligation.staff_id, staff.name, obligation.case_no,
+                  obligation.obligation_identity,
+                  COALESCE(projection.balance_ntd, obligation.amount_due_ntd) AS amount_due_ntd,
+                  obligation.due_date
+           FROM staff_obligations obligation
+           JOIN staff staff ON staff.id=obligation.staff_id
+           LEFT JOIN staff_payable_projections projection
+             ON projection.obligation_identity=obligation.obligation_identity
+           WHERE obligation.direction='payable_to_staff'
+             AND obligation.status<>'cancelled'
+             AND obligation.amount_due_ntd>0
+             AND (projection.status IS NULL OR projection.status IN ('payable','partially_paid'))
+           ORDER BY obligation.staff_id, obligation.obligation_identity"""
+    )
+    results = []
+    for row in cursor.fetchall():
+        if not isinstance(row, Mapping):
+            continue
+        staff_id = _positive_id(row.get("staff_id"), "staff_id")
+        name = _account(row.get("name")) or ""
+        due_date = row.get("due_date")
+        due_date_str = (
+            due_date.isoformat()
+            if hasattr(due_date, "isoformat")
+            else (str(due_date) if due_date else None)
         )
-        results = []
-        for row in cursor.fetchall():
-            if not isinstance(row, Mapping):
-                continue
-            staff_id = _positive_id(row.get("staff_id"), "staff_id")
-            name = _account(row.get("name")) or ""
-            due_date = row.get("due_date")
-            due_date_str = (
-                due_date.isoformat()
-                if hasattr(due_date, "isoformat")
-                else (str(due_date) if due_date else None)
-            )
-            results.append(
-                {
-                    "staff_id": staff_id,
-                    "name": name,
-                    "case_no": str(row.get("case_no") or ""),
-                    "obligation_identity": str(row.get("obligation_identity") or ""),
-                    "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
-                    "due_date": due_date_str,
-                }
-            )
-        return tuple(results)
-    except Exception:
-        return ()
+        results.append(
+            {
+                "staff_id": staff_id,
+                "name": name,
+                "case_no": str(row.get("case_no") or ""),
+                "obligation_identity": str(row.get("obligation_identity") or ""),
+                "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
+                "due_date": due_date_str,
+            }
+        )
+    return tuple(results)
 
 
 def _all_client_names(cursor: Any) -> tuple[str, ...]:

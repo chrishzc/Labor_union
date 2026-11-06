@@ -688,54 +688,143 @@ def test_manual_plan_body_does_not_accept_forged_actor_or_financial_values():
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,actor='forged')
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,amount_ntd=10)
 
-def test_case_manual_supplement_api_endpoint_success():
+def test_case_manual_supplement_api_endpoint_success(monkeypatch):
+    """Transport only: this test must never execute project SQL."""
     from types import SimpleNamespace
-    from unittest.mock import MagicMock
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    from api.dependencies.admin_auth import require_admin
-    from api.dependencies.finance_import import get_accounting_workspace
-    from api.routes.finance_statement_workspace import router
+    import api.routes.finance_statement_workspace as routes
     from subsystems.finance_import.accounting_workspace import CaseAccounting
-    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
 
-    case = CaseAccounting(
-        '115000001', 'Test Client', 10000, 10000, None, None, 0,
-        (ClientAccountingItem('first', 'receivable', '第一期', 'Test Client', 10000, 10000, True, '1', '2026-11-01', recognized_ntd=0),),
-        (), (), (),
-    )
-    mock_conn = MagicMock()
-    mock_cursor = MagicMock()
-    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-    mock_cursor.fetchone.side_effect = [
-        {"case_no": "115000001"},
-        None,
-        {"amount_due_ntd": 10000, "total_paid": 10000},
-    ]
-    mock_cursor.lastrowid = 101
+    case = CaseAccounting('115000001', 'Synthetic', 1000, 300, None, None, 0, (), (), (), ())
+    calls = []
 
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="test_admin")
+    class Connection:
+        def cursor(self): raise AssertionError("project SQL is forbidden in this transport test")
+        def commit(self): calls.append("commit")
+        def rollback(self): calls.append("rollback")
+
+    connection = Connection()
+
+    class Service:
+        def __init__(self, actual): assert actual is connection
+        def execute(self, **command): calls.append(command)
+
+    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    app = FastAPI(); app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
-        query=lambda _: case,
-        state=SimpleNamespace(connection=mock_conn)
+        query=lambda _: case, state=SimpleNamespace(connection=connection),
     )
-
     with TestClient(app) as client:
-        res = client.post(
-            "/cases/115000001/manual-supplement",
-            headers={"Idempotency-Key": "test-key-123"},
-            json={
-                "bank": "sinopac",
-                "direction": "client_receipt",
-                "target_item": "client-obligation:115000001:deposit",
-                "amount_ntd": 13500,
-                "transaction_date": "2026-11-06",
-                "reason": "現金繳納"
-            }
+        response = client.post(
+            "/cases/115000001/manual-supplement", headers={"Idempotency-Key": "manual-test-key"},
+            json={"bank": "sinopac", "direction": "client_receipt", "target_item": "deposit:case",
+                  "amount_ntd": 300, "transaction_date": "2026-11-06"},
         )
-    assert res.status_code == 200
-    assert res.json()["success"] is True
-    assert res.json()["message"] == "人工補登成功，期款已自動銷帳"
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert calls[0]["case_no"] == "115000001"
+    assert calls[0]["target_item"] == "deposit:case" and calls[0]["amount_ntd"] == 300
+    assert calls[0]["actor"] == "admin_user_id:1"
+    assert calls[1:] == ["commit"]
+
+
+@pytest.mark.parametrize("failure,expected_status,expected_code", [
+    ("idempotency", 409, "accounting_source_changed"),
+    ("target", 409, "accounting_source_changed"),
+    ("overage", 422, "client_receipt_overpaid"),
+    ("unavailable", 503, "accounting_unavailable"),
+])
+def test_case_manual_supplement_api_rejection_rolls_back_without_success(monkeypatch, failure, expected_status, expected_code):
+    """Exercise the real route/error adapter with a SQL-free service port."""
+    from types import SimpleNamespace
+    import api.routes.finance_statement_workspace as routes
+    from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
+    from shared_kernel.errors import ErrorCategory, TypedError
+    from shared_kernel.identities import CorrelationId
+    from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
+    from subsystems.finance_import.accounting_workspace import AccountingConflict
+    from subsystems.finance_import.statement_archive import StatementCommandConflict
+
+    calls = []
+
+    class Connection:
+        def cursor(self): raise AssertionError("project SQL is forbidden in this transport test")
+        def commit(self): calls.append("commit")
+        def rollback(self): calls.append("rollback")
+
+    class Service:
+        def __init__(self, connection): pass
+        def execute(self, **command):
+            if failure == "idempotency": raise StatementCommandConflict("idempotency_conflict")
+            if failure == "target": raise AccountingConflict("manual_supplement_target_not_current")
+            if failure == "unavailable": raise ClientReceiptRepositoryUnavailable("synthetic")
+            raise ClientReconciliationError(TypedError(
+                ErrorCategory.DOMAIN_BLOCKED, "client_receipt_overpaid", "Review required.",
+                CorrelationId("manual-test"), domain_blockers=("client_receipt_overpaid",),
+            ))
+
+    def query(_): raise AssertionError("a rejected command must not return a successful case view")
+    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    app = FastAPI(); app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
+    app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
+        query=query, state=SimpleNamespace(connection=Connection()),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/115000001/manual-supplement", headers={"Idempotency-Key": "manual-test-key"},
+            json={"bank": "sinopac", "direction": "client_receipt", "target_item": "deposit:case",
+                  "amount_ntd": 300, "transaction_date": "2026-11-06"},
+        )
+    assert response.status_code == expected_status
+    assert response.json()["detail"]["error"]["code"] == expected_code
+    assert calls == ["rollback"]
+
+@pytest.mark.parametrize("operation", ["manual", "exclude"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_statement_archive_application_owns_command_transaction(operation, fail):
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.finance_import.statement_archive import (
+        StatementArchiveApplication, StatementCommandConflict, StatementCommandReceipt,
+    )
+    events = []
+    receipt = StatementCommandReceipt("manual:7", 1, 0)
+    failure = StatementCommandConflict("idempotency_conflict")
+
+    class Connection:
+        # The real transaction guard runs; no SQL cursor can be created.
+        def begin(self): events.append("begin")
+        def commit(self): events.append("commit")
+        def rollback(self): events.append("rollback")
+
+    class Repository:
+        def export_rows(self): events.append("query"); return ()
+        def create_manual(self, fields, key, actor, duplicate_of):
+            assert fields["支出"] == 300
+            assert (key, actor, duplicate_of) == ("key", "actor", None)
+            return self.write()
+        def exclude_duplicate(self, candidate, kept, key, actor):
+            assert (candidate, kept, key, actor) == ("bank:8", "manual:7", "key", "actor")
+            return self.write()
+        def write(self):
+            events.append("write")
+            if fail: raise failure
+            return receipt
+
+    application = StatementArchiveApplication(Repository(), lambda: MySqlUnitOfWork(Connection()))
+    assert application.export_rows() == ()
+    assert events == ["query"]
+    events.clear()
+
+    def command():
+        if operation == "manual":
+            return application.create_manual({"交易日": "2026-11-06", "支出": 300, "備註": "synthetic"}, "key", "actor")
+        return application.exclude_duplicate("bank:8", "manual:7", "key", "actor")
+
+    if fail:
+        with pytest.raises(StatementCommandConflict) as caught:
+            command()
+        assert caught.value is failure
+    else:
+        assert command() is receipt
+    assert events == ["begin", "write", "rollback" if fail else "commit"]

@@ -202,10 +202,13 @@ def get_finance_import_query_service():
 
 def get_statement_archive_application():
     from infrastructure.mysql.finance_statement_archive_repository import MySqlStatementArchiveRepository
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
     from subsystems.finance_import.statement_archive import StatementArchiveApplication
     connection = get_connection()
     try:
-        yield StatementArchiveApplication(MySqlStatementArchiveRepository(connection))
+        yield StatementArchiveApplication(
+            MySqlStatementArchiveRepository(connection), lambda: MySqlUnitOfWork(connection)
+        )
     finally:
         connection.close()
 

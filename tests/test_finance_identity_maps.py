@@ -5,7 +5,43 @@ Description: 驗證銀行匯入身分帳號與收款候選映射載入之唯讀�
 
 import pytest
 
-from subsystems.finance_import.identity_maps import load_finance_identity_maps
+from subsystems.finance_import.identity_maps import (
+    _staff_payout_candidates,
+    load_finance_identity_maps,
+)
+
+
+@pytest.mark.parametrize("failure_phase", ["execute", "fetchall"])
+def test_staff_payout_source_failure_is_not_a_successful_empty_result(failure_phase):
+    failure = ConnectionError("candidate source unavailable")
+
+    class Source:
+        def execute(self, _sql):
+            if failure_phase == "execute":
+                raise failure
+
+        def fetchall(self):
+            raise failure
+
+    with pytest.raises(ConnectionError) as raised:
+        _staff_payout_candidates(Source())
+    assert raised.value is failure
+
+
+@pytest.mark.parametrize("rows", [[], [{
+    "staff_id": 9, "name": "合成人員", "case_no": "115000001",
+    "obligation_identity": "staff-obligation:synthetic", "amount_due_ntd": 300,
+    "due_date": "2026-11-06",
+}]])
+def test_staff_payout_success_preserves_empty_or_unique_candidates(rows):
+    class Source:
+        def execute(self, _sql):
+            pass
+
+        def fetchall(self):
+            return rows
+
+    assert _staff_payout_candidates(Source()) == tuple(rows)
 
 
 class Cursor:
@@ -16,7 +52,8 @@ class Cursor:
 
     def execute(self, sql):
         self.executed.append(" ".join(sql.split()))
-        self.current = next(self.responses)
+        # Unspecified identity sources are successful empty reads, not read failures.
+        self.current = next(self.responses, [])
 
     def fetchall(self):
         return list(self.current)

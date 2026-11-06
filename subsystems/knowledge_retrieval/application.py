@@ -86,6 +86,18 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return result
 
+    def record_inline_answer(self, command, answer) -> int:
+        with self._unit_of_work() as unit_of_work:
+            result = unit_of_work.knowledge.record_inline_answer(command, answer)
+            unit_of_work.commit()
+        return result
+
+    def record_inline_outcome(self, command, request_status: str) -> int:
+        with self._unit_of_work() as unit_of_work:
+            result = unit_of_work.record_inline_outcome(command, request_status)
+            unit_of_work.commit()
+        return result
+
     def list_items(self, limit: int, lifecycle_status: str | None = None):
         with self._unit_of_work() as unit_of_work:
             result = unit_of_work.knowledge.list_items(limit, lifecycle_status)

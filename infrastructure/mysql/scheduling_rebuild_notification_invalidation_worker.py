@@ -32,6 +32,7 @@ class MySqlSchedulingRebuildNotificationInvalidationWorker:
 
     def run_once(self) -> int:
         connection = self._connection_factory()
+        failure = None
         try:
             with MySqlUnitOfWork(connection) as unit_of_work:
                 try:
@@ -39,14 +40,17 @@ class MySqlSchedulingRebuildNotificationInvalidationWorker:
                         MySqlSchedulingRebuildNotificationInvalidationRepository(connection),
                         MySqlLineNotificationRepository(connection),
                     ).run_once(self._now())
-                except SchedulingRebuildNotificationInvalidationError:
+                except SchedulingRebuildNotificationInvalidationError as error:
                     # Persist the bounded retry/failed state recorded by the
                     # projector, then propagate so provider delivery is blocked.
                     unit_of_work.commit()
-                    raise
-                if result:
-                    unit_of_work.commit()
-                return result
+                    failure = error
+                else:
+                    if result:
+                        unit_of_work.commit()
+            if failure is not None:
+                raise failure
+            return result
         finally:
             connection.close()
 

@@ -8,28 +8,41 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from domains.client_finance.reconciliation import PaymentStage
+from infrastructure.mysql.client_receipt_reconciliation_repository import (
+    MySqlClientReceiptReconciliationRepository,
+)
+from infrastructure.mysql.finance_import_owning_domain_composite import BorrowedTransactionUnitOfWork
+from infrastructure.mysql.staff_payable_correction_sql import selectable_staff_obligation
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.client_finance.reconciliation_workflow import (
+    ClientReconciliationApplyRequest,
+    ClientReconciliationWorkflow, ReconciliationSelection,
+)
+from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account
+from subsystems.finance_import.accounting_workspace import AccountingConflict
+from subsystems.finance_import.statement_archive import StatementCommandConflict
 
 
-def _case_suffix_six(case_no: str) -> str:
-    """提取案件後六碼，用於對帳單備註比對。"""
-    digits = re.findall(r"\d+", case_no)
-    if not digits:
-        return case_no[-6:].zfill(6)
-    num_str = "".join(digits)
-    return num_str[-6:].zfill(6)
+def _bank_references(bank, reason, cancellation_code, memo):
+    # Sinopac's canonical parser reads the original reference column; storing
+    # only the row-level cancellation_code would make the owner reject it.
+    return {"source": "manual_supplement", "bank": bank, "reason": reason,
+            "銷帳編號": cancellation_code, "備註": memo}
 
 
-def _build_virtual_account(case_no: str) -> str:
-    """計算案件 14 碼標準虛擬帳號（99781699 + 3 碼年度 + 3 碼流水）。"""
-    match = re.match(r"^A?(\d{3})(\d{3,6})$", case_no)
-    if not match:
-        suffix = _case_suffix_six(case_no)
-        return f"99781699{suffix}"
-    year = match.group(1)
-    raw_seq = int(match.group(2))
-    account_seq = raw_seq + 500 if case_no.startswith("A") else raw_seq
-    return f"99781699{year}{account_seq:03d}"
+class ManualSupplementBlocked(ValueError):
+    """A known owner blocker; the caller must roll back the whole command."""
+
+    def __init__(self, code: str):
+        self.error = TypedError(
+            ErrorCategory.DOMAIN_BLOCKED, code,
+            "Manual supplement requires review before posting.",
+            CorrelationId("finance-manual-supplement"), domain_blockers=(code,),
+        )
+        super().__init__(code)
 
 
 @dataclass(frozen=True)
@@ -74,36 +87,51 @@ class CaseManualSupplementService:
         if not target_item.strip():
             raise ValueError("缺少沖銷對象／期款代碼")
 
-        case_suffix = _case_suffix_six(case_no)
-        virtual_account = _build_virtual_account(case_no)
-        note_text = (reason or "").strip() or "人工補登"
+        note_text = (reason or "").strip()
+        command = {
+            "case_no": case_no, "bank": bank, "direction": direction,
+            "target_item": target_item, "amount_ntd": amount_ntd,
+            "transaction_date": transaction_date, "reason": note_text, "actor": actor,
+        }
 
         with self.connection.cursor() as cursor:
             # 1. 驗證訂單存在
-            cursor.execute("SELECT case_no FROM orders WHERE case_no=%s", (case_no,))
+            cursor.execute("SELECT case_no FROM orders WHERE case_no=%s FOR UPDATE", (case_no,))
             if not cursor.fetchone():
                 raise LookupError(f"查無案件: {case_no}")
 
             # 2. 冪等檢查
-            cmd_digest = hashlib.sha256(
-                f"{case_no}:{bank}:{direction}:{target_item}:{amount_ntd}:{transaction_date}:{note_text}:{actor}".encode()
-            ).hexdigest()
+            cmd_digest = fingerprint_payload(command).value
             cursor.execute(
-                "SELECT result_identity FROM finance_statement_commands WHERE idempotency_key=%s",
+                "SELECT command_digest,result_identity FROM finance_statement_commands WHERE idempotency_key=%s FOR UPDATE",
                 (idempotency_key,),
             )
             existing = cursor.fetchone()
             if existing:
-                res_id = existing["result_identity"] or f"case:{case_no}"
-                return ManualSupplementResult(
-                    case_no=case_no,
-                    row_id=0,
-                    entry_id=0,
-                    direction=direction,
-                    target_item=target_item,
-                    amount_ntd=amount_ntd,
-                    reconciled=True,
+                # Old receipts used a delimiter-based digest and a generated
+                # default reason. Accept them only after checking original facts.
+                legacy_note = note_text or "人工補登"
+                legacy_digest = hashlib.sha256(
+                    f"{case_no}:{bank}:{direction}:{target_item}:{amount_ntd}:{transaction_date}:{legacy_note}:{actor}".encode()
+                ).hexdigest()
+                stored_digest = existing["command_digest"]
+                if stored_digest not in {cmd_digest, legacy_digest}:
+                    raise StatementCommandConflict("idempotency_conflict")
+                return self._replay(
+                    cursor, existing["result_identity"], command,
+                    legacy_reason=legacy_note if stored_digest != cmd_digest else None,
                 )
+
+            # Replay precedes mutable balance/status checks: a settled target can replay.
+            target = self._lock_target(cursor, case_no, direction, target_item)
+            resolution = resolve_case_virtual_account(cursor, case_no)
+            if resolution["result"] != "resolved":
+                raise ManualSupplementBlocked(str(resolution["reason"]))
+            virtual_account = str(resolution["virtual_account"])
+            case_suffix = virtual_account[-6:]
+            if direction in {"staff_salary", "client_refund"} and amount_ntd > int(target["remaining_ntd"]):
+                code = "staff_payout_difference_mode_invalid" if direction == "staff_salary" else "allocation_exceeds_obligation"
+                raise ManualSupplementBlocked(code)
 
             # 3. 建立標準對帳單明細 (finance_import_rows)
             row_fp = hashlib.sha256(
@@ -132,7 +160,7 @@ class CaseManualSupplementService:
             )
             date_slash = transaction_date.replace("-", "/")
             raw_payload = {
-                "帳號": "80700000000000" if bank == "sinopac" else "81200000000000",
+                "帳號": None,
                 "交易日": date_slash,
                 "計息日": date_slash,
                 "入帳日": date_slash,
@@ -168,12 +196,12 @@ class CaseManualSupplementService:
                     memo,
                     cancellation_code,
                     json.dumps(
-                        {"source": "manual_supplement", "bank": bank, "reason": note_text},
+                        _bank_references(bank, note_text, cancellation_code, memo),
                         ensure_ascii=False,
                     ),
                     "[]",
                     classification,
-                    "reconciled",
+                    "pending" if direction == "client_receipt" else "reconciled",
                     json.dumps(raw_payload, ensure_ascii=False),
                 ),
             )
@@ -182,68 +210,14 @@ class CaseManualSupplementService:
             # 4. 領域核銷連動
             entry_id = 0
             if direction == "client_receipt":
-                # 客戶繳款核銷
-                cursor.execute(
-                    """
-                    INSERT INTO client_ledger_entries (
-                        case_no, finance_import_row_id, entry_type, amount_ntd,
-                        occurred_on, reconciliation_reference, idempotency_key, actor, reason
-                    ) VALUES (%s, %s, 'receipt', %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        case_no,
-                        row_id,
-                        amount_ntd,
-                        transaction_date,
-                        f"manual-supplement:{row_id}",
-                        idempotency_key,
-                        actor,
-                        note_text,
-                    ),
-                )
-                entry_id = cursor.lastrowid
-                cursor.execute(
-                    """
-                    INSERT INTO client_ledger_obligation_allocations (
-                        ledger_entry_id, obligation_identity, amount_ntd, allocation_ordinal
-                    ) VALUES (%s, %s, %s, 1)
-                    """,
-                    (entry_id, target_item, amount_ntd),
-                )
-                # 更新期款餘額與狀態（嚴格遵循 chk_client_obligation_state 約束）
-                cursor.execute(
-                    "SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
-                    (target_item,),
-                )
-                ob_row = cursor.fetchone()
-                if ob_row:
-                    before_due = int(ob_row["amount_due_ntd"])
-                    remaining = max(0, before_due - amount_ntd)
-                    new_status = "settled" if remaining == 0 else "open"
-                    cursor.execute(
-                        """
-                        UPDATE client_obligations
-                        SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
-                        WHERE obligation_identity=%s
-                        """,
-                        (remaining, new_status, target_item),
-                    )
-                # 累加帳戶版本
-                cursor.execute(
-                    "UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s",
-                    (case_no,),
+                entry_id = self._post_client_receipt(
+                    cursor, case_no, row_id, target_item, target["obligation_type"],
+                    idempotency_key, actor, note_text,
                 )
 
             elif direction == "staff_salary":
                 # 月嫂薪資核銷
-                cursor.execute(
-                    "SELECT staff_id, amount_due_ntd FROM staff_obligations WHERE obligation_identity=%s",
-                    (target_item,),
-                )
-                staff_ob = cursor.fetchone()
-                if not staff_ob:
-                    raise LookupError(f"查無月嫂應付項目: {target_item}")
-                staff_id = staff_ob["staff_id"]
+                staff_id = int(target["staff_id"])
 
                 bank_hash = hashlib.sha256(f"manual:{staff_id}:{bank}".encode()).hexdigest()
                 cursor.execute(
@@ -275,19 +249,22 @@ class CaseManualSupplementService:
                     """,
                     (entry_id, target_item, amount_ntd),
                 )
-                # 更新 staff_payable_projections
+                # All assignments use the same locked pre-payment values. MySQL
+                # single-table UPDATE otherwise reuses already-updated net_paid.
+                net_paid = int(target["net_paid_ntd"]) + amount_ntd
+                remaining = int(target["remaining_ntd"]) - amount_ntd
                 cursor.execute(
                     """
                     UPDATE staff_payable_projections
-                    SET net_paid_ntd = net_paid_ntd + %s,
-                        balance_ntd = GREATEST(0, obligation_amount_ntd - (net_paid_ntd + %s)),
-                        status = CASE WHEN (net_paid_ntd + %s) >= obligation_amount_ntd THEN 'completed' ELSE 'partially_paid' END,
-                        aggregate_version = aggregate_version + 1,
-                        current_event_id = %s
-                    WHERE obligation_identity=%s
+                    SET net_paid_ntd=%s, balance_ntd=%s, status=%s,
+                        aggregate_version=aggregate_version+1, current_event_id=%s
+                    WHERE obligation_identity=%s AND aggregate_version=%s
                     """,
-                    (amount_ntd, amount_ntd, amount_ntd, entry_id, target_item),
+                    (net_paid, remaining, "completed" if remaining == 0 else "partially_paid",
+                     entry_id, target_item, target["aggregate_version"]),
                 )
+                if cursor.rowcount != 1:
+                    raise AccountingConflict("staff_payables_candidate_stale")
 
             elif direction == "client_refund":
                 # 客戶退款核銷
@@ -318,24 +295,19 @@ class CaseManualSupplementService:
                     """,
                     (entry_id, target_item, amount_ntd),
                 )
-                # 更新退款餘額與狀態（嚴格遵循 chk_client_obligation_state 約束）
+                remaining = int(target["remaining_ntd"]) - amount_ntd
                 cursor.execute(
-                    "SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
-                    (target_item,),
+                    """
+                    UPDATE client_obligations
+                    SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
+                    WHERE obligation_identity=%s AND case_no=%s
+                      AND direction='payable_to_client' AND status='open' AND amount_due_ntd=%s
+                    """,
+                    (remaining, "settled" if remaining == 0 else "open", target_item,
+                     case_no, target["remaining_ntd"]),
                 )
-                ref_row = cursor.fetchone()
-                if ref_row:
-                    before_due = int(ref_row["amount_due_ntd"])
-                    remaining = max(0, before_due - amount_ntd)
-                    new_status = "settled" if remaining == 0 else "open"
-                    cursor.execute(
-                        """
-                        UPDATE client_obligations
-                        SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
-                        WHERE obligation_identity=%s
-                        """,
-                        (remaining, new_status, target_item),
-                    )
+                if cursor.rowcount != 1:
+                    raise AccountingConflict("client_finance_candidate_stale")
                 cursor.execute(
                     "UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s",
                     (case_no,),
@@ -401,4 +373,144 @@ class CaseManualSupplementService:
             target_item=target_item,
             amount_ntd=amount_ntd,
             reconciled=True,
+        )
+
+
+    def _lock_target(self, cursor, case_no, direction, target_item):
+        if direction == "government_subsidy":
+            return {}
+        if direction == "staff_salary":
+            cursor.execute(
+                "SELECT obligations.staff_id FROM staff_obligations obligations "
+                "WHERE obligations.obligation_identity=%s AND obligations.case_no=%s",
+                (target_item, case_no),
+            )
+            scope = cursor.fetchone()
+            if scope is None:
+                raise AccountingConflict("manual_supplement_target_not_current")
+            cursor.execute(
+                "SELECT aggregate_version FROM staff_payable_accounts WHERE staff_id=%s FOR UPDATE",
+                (scope["staff_id"],),
+            )
+            cursor.fetchone()
+            cursor.execute(
+                "SELECT obligations.staff_id,projection.net_paid_ntd,projection.balance_ntd AS remaining_ntd,"
+                "projection.aggregate_version FROM staff_obligations obligations "
+                "JOIN staff_payable_projections projection ON projection.obligation_identity=obligations.obligation_identity "
+                "WHERE obligations.obligation_identity=%s AND obligations.case_no=%s "
+                "AND obligations.direction='payable_to_staff' AND obligations.status='open' "
+                "AND projection.status IN ('payable','partially_paid') AND projection.balance_ntd>0 "
+                "AND " + selectable_staff_obligation() + " FOR UPDATE",
+                (target_item, case_no),
+            )
+        else:
+            cursor.execute(
+                "SELECT aggregate_version FROM client_finance_accounts WHERE case_no=%s FOR UPDATE",
+                (case_no,),
+            )
+            cursor.fetchone()
+            expected_direction = "receivable_from_client" if direction == "client_receipt" else "payable_to_client"
+            allowed_types = ("deposit", "first", "second", "adjustment") if direction == "client_receipt" else ("refund", "adjustment")
+            placeholders = ",".join("%s" for _ in allowed_types)
+            cursor.execute(
+                "SELECT obligation_type,amount_due_ntd AS remaining_ntd FROM client_obligations "
+                "WHERE obligation_identity=%s AND case_no=%s AND direction=%s "
+                "AND status='open' AND amount_due_ntd>0 "
+                f"AND obligation_type IN ({placeholders}) FOR UPDATE",
+                (target_item, case_no, expected_direction, *allowed_types),
+            )
+        target = cursor.fetchone()
+        if target is None:
+            raise AccountingConflict("manual_supplement_target_not_current")
+        return target
+
+    def _post_client_receipt(self, cursor, case_no, row_id, target_item, obligation_type, key, actor, reason):
+        repository = MySqlClientReceiptReconciliationRepository(self.connection)
+        workflow = ClientReconciliationWorkflow(repository, BorrowedTransactionUnitOfWork)
+        selection = ReconciliationSelection(
+            case_no, PaymentStage(obligation_type), (str(row_id),), (target_item,),
+            allow_partial_receipt=True,
+        )
+        preview = workflow.preview(selection)
+        request = ClientReconciliationApplyRequest(
+            selection, ExpectedVersion(preview.account_version), preview.fingerprint,
+            IdempotencyKey("manual-client-receipt:" + hashlib.sha256(key.encode()).hexdigest()),
+            ActorContext(actor), reason, CorrelationId("finance-manual-supplement"),
+        )
+        repository.bind_apply_request(request)
+        try:
+            workflow.apply(request)
+        finally:
+            repository.clear_apply_request()
+        cursor.execute(
+            "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type='receipt'",
+            (row_id, case_no),
+        )
+        entry = cursor.fetchone()
+        if entry is None:
+            raise AccountingConflict("manual_supplement_receipt_missing")
+        return int(entry["id"])
+
+    def _replay(self, cursor, result_identity, command, *, legacy_reason=None):
+        if not isinstance(result_identity, str) or re.fullmatch(r"manual:[1-9][0-9]*", result_identity) is None:
+            raise StatementCommandConflict("manual_supplement_receipt_invalid")
+        row_id = int(result_identity.split(":", 1)[1])
+        case_no, direction = command["case_no"], command["direction"]
+        cursor.execute(
+            "SELECT format_id,transaction_date,credit,debit,bank_references FROM finance_import_rows WHERE id=%s",
+            (row_id,),
+        )
+        source = cursor.fetchone()
+        if source is None:
+            raise StatementCommandConflict("manual_supplement_receipt_invalid")
+        references = source["bank_references"]
+        if isinstance(references, str):
+            references = json.loads(references)
+        expected_reason = command["reason"] if legacy_reason is None else legacy_reason
+        source_amount = source["credit"] if direction in {"client_receipt", "government_subsidy"} else source["debit"]
+        if (
+            source["format_id"] != command["bank"]
+            or str(source["transaction_date"]) != command["transaction_date"]
+            or not isinstance(references, dict)
+            or references.get("source") != "manual_supplement"
+            or references.get("reason") != expected_reason
+            or source_amount is None
+            or int(source_amount) != command["amount_ntd"]
+        ):
+            raise StatementCommandConflict("idempotency_conflict")
+        if direction == "staff_salary":
+            query = (
+                "SELECT payout.id AS entry_id,link.obligation_identity AS target_item,payout.amount_ntd,payout.actor "
+                "FROM staff_payout_events payout JOIN staff_payout_obligation_links link ON link.payout_event_id=payout.id "
+                "JOIN staff_obligations obligation ON obligation.obligation_identity=link.obligation_identity "
+                "WHERE payout.finance_import_row_id=%s AND obligation.case_no=%s AND payout.event_type='payout'"
+            )
+        elif direction == "government_subsidy":
+            query = (
+                "SELECT entry.id AS entry_id,member.case_no AS target_item,entry.amount_ntd,entry.actor "
+                "FROM government_subsidy_period_entries entry JOIN government_subsidy_period_members member ON member.receipt_id=entry.id "
+                "WHERE entry.finance_import_row_id=%s AND member.case_no=%s"
+            )
+        else:
+            entry_type = "receipt" if direction == "client_receipt" else "refund"
+            query = (
+                "SELECT entry.id AS entry_id,allocation.obligation_identity AS target_item,entry.amount_ntd,entry.actor "
+                "FROM client_ledger_entries entry JOIN client_ledger_obligation_allocations allocation ON allocation.ledger_entry_id=entry.id "
+                "WHERE entry.finance_import_row_id=%s AND entry.case_no=%s AND entry.entry_type='" + entry_type + "'"
+            )
+        cursor.execute(query, (row_id, case_no))
+        rows = tuple(cursor.fetchall())
+        if len(rows) != 1:
+            raise StatementCommandConflict("manual_supplement_receipt_invalid")
+        original = rows[0]
+        if (
+            int(original["amount_ntd"]) != command["amount_ntd"]
+            or original["actor"] != command["actor"]
+            or (direction != "government_subsidy" and original["target_item"] != command["target_item"])
+        ):
+            raise StatementCommandConflict("idempotency_conflict")
+        return ManualSupplementResult(
+            case_no, row_id, int(original["entry_id"]), direction,
+            command["target_item"] if direction == "government_subsidy" else str(original["target_item"]),
+            int(original["amount_ntd"]), True,
         )

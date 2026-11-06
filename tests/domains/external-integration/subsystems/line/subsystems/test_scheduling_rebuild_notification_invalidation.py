@@ -83,58 +83,42 @@ def test_rebuild_worker_declares_pre_delivery_gate() -> None:
     assert MySqlSchedulingRebuildNotificationInvalidationWorker.run_before_delivery is True
 
 
-def test_rebuild_worker_commits_retry_before_propagating_gate_failure(monkeypatch) -> None:
-    state = {"committed": 0, "closed": 0}
+@pytest.mark.parametrize("worker_kind", ["rebuild", "completion"])
+@pytest.mark.parametrize("outcome", ["typed_failure", "unexpected_failure", "processed", "empty"])
+def test_worker_transaction_preserves_gate_outcome(monkeypatch, worker_kind, outcome):
+    from infrastructure.mysql import service_day_log_notification_stop_worker as stop_module
+    from subsystems.line.service_day_log_notification_stop import ServiceDayLogNotificationStopError
 
-    class _Connection:
-        def close(self):
-            state["closed"] += 1
+    state = {"begun": 0, "committed": 0, "rolled_back": 0, "closed": 0}
+    module = rebuild_worker_module if worker_kind == "rebuild" else stop_module
+    prefix = "SchedulingRebuildNotificationInvalidation" if worker_kind == "rebuild" else "ServiceDayLogNotificationStop"
+    error_type = SchedulingRebuildNotificationInvalidationError if worker_kind == "rebuild" else ServiceDayLogNotificationStopError
+    failure = error_type(1, OSError("projection unavailable")) if outcome == "typed_failure" else OSError("unexpected")
 
-    class _UnitOfWork:
-        def __init__(self, _connection):
-            pass
+    class Connection:
+        # No cursor or SQL implementation: only the real UoW transaction port.
+        def begin(self): state["begun"] += 1
+        def commit(self): state["committed"] += 1
+        def rollback(self): state["rolled_back"] += 1
+        def close(self): state["closed"] += 1
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def commit(self):
-            state["committed"] += 1
-
-    class _Projector:
-        def __init__(self, *_args):
-            pass
-
+    class Projector:
+        def __init__(self, *_args): pass
         def run_once(self, _now):
-            raise SchedulingRebuildNotificationInvalidationError(
-                1, RuntimeError("cancel unavailable")
-            )
+            if outcome.endswith("failure"):
+                raise failure
+            return 1 if outcome == "processed" else 0
 
-    monkeypatch.setattr(rebuild_worker_module, "MySqlUnitOfWork", _UnitOfWork)
-    monkeypatch.setattr(
-        rebuild_worker_module,
-        "MySqlSchedulingRebuildNotificationInvalidationRepository",
-        lambda _connection: object(),
-    )
-    monkeypatch.setattr(
-        rebuild_worker_module,
-        "MySqlLineNotificationRepository",
-        lambda _connection: object(),
-    )
-    monkeypatch.setattr(
-        rebuild_worker_module,
-        "SchedulingRebuildNotificationInvalidationProjector",
-        _Projector,
-    )
+    monkeypatch.setattr(module, f"MySql{prefix}Repository", lambda _connection: object())
+    monkeypatch.setattr(module, "MySqlLineNotificationRepository", lambda _connection: object())
+    monkeypatch.setattr(module, f"{prefix}Projector", Projector)
+    worker = getattr(module, f"MySql{prefix}Worker")(Connection, lambda: datetime(2026, 8, 16, tzinfo=timezone.utc))
 
-    worker = MySqlSchedulingRebuildNotificationInvalidationWorker(
-        _Connection,
-        lambda: datetime(2026, 8, 16, tzinfo=timezone.utc),
-    )
-
-    with pytest.raises(SchedulingRebuildNotificationInvalidationError):
-        worker.run_once()
-
-    assert state == {"committed": 1, "closed": 1}
+    if outcome.endswith("failure"):
+        with pytest.raises(type(failure)) as caught:
+            worker.run_once()
+        assert caught.value is failure
+    else:
+        assert worker.run_once() == (1 if outcome == "processed" else 0)
+    assert state == {"begun": 1, "committed": int(outcome in {"typed_failure", "processed"}),
+                     "rolled_back": int(outcome in {"unexpected_failure", "empty"}), "closed": 1}
