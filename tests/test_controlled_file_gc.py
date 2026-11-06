@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from shared_kernel.clock import FixedBusinessClock
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.controlled_files.cleanup import ControlledFileCleanupOutcome
@@ -12,6 +14,7 @@ from subsystems.controlled_files.contracts import ControlledFileStagingRegistrat
 from subsystems.controlled_files.gc import (
     ControlledFileGcCandidate,
     ControlledFileGcDisposition,
+    ControlledFileGcError,
     ControlledFileGcOutcome,
     ControlledFileStagingGarbageCollector,
     GarbageCollectControlledFileStaging,
@@ -140,3 +143,25 @@ def test_concurrent_gc_passes_do_not_issue_duplicate_cleanup_for_one_staging_obj
     assert sorted((first.cleaned, second.cleaned)) == [0, 1]
     skipped = second if second.cleaned == 0 else first
     assert skipped.items[0].disposition is ControlledFileGcDisposition.SKIPPED_ALREADY_CLEANED
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_mysql_gc_blocks_without_reference_authority_before_sql_or_cleanup(dry_run):
+    from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
+
+    class NoSqlConnection:
+        def cursor(self):
+            raise AssertionError("GC must reject missing authority before project SQL")
+
+    cleanup = _Cleanup()
+    service = ControlledFileStagingGarbageCollector(
+        MySqlControlledFileWorkflowRepository(NoSqlConnection()),
+        cleanup,
+        FixedBusinessClock(NOW),
+    )
+
+    with pytest.raises(ControlledFileGcError) as failure:
+        service.run(_command("controlled-file.gc:authority-not-ready", dry_run=dry_run))
+
+    assert failure.value.code == "controlled_file_gc_reference_authority_not_ready"
+    assert cleanup.commands == []

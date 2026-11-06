@@ -12,6 +12,8 @@ from domains.client_finance.reconciliation import PaymentStage
 from infrastructure.mysql.client_receipt_reconciliation_repository import (
     MySqlClientReceiptReconciliationRepository,
 )
+from infrastructure.mysql.client_refund_reversal_repository import MySqlClientRefundReversalRepository
+from domains.client_finance.client_refund_reversal import ClientFinanceCorrectionType, ClientRefundPurpose
 from infrastructure.mysql.finance_import_owning_domain_composite import BorrowedTransactionUnitOfWork
 from infrastructure.mysql.staff_payable_correction_sql import selectable_staff_obligation
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -22,17 +24,25 @@ from subsystems.client_finance.reconciliation_workflow import (
     ClientReconciliationWorkflow, ReconciliationSelection,
 )
 from subsystems.client_finance.virtual_account_resolution import resolve_case_virtual_account
+from subsystems.client_finance.client_refund_reversal_workflow import (
+    ClientRefundReversalApplyRequest, ClientRefundReversalSelection,
+    ClientRefundReversalWorkflow, ManualClientRefundSource,
+)
 from subsystems.finance_import.accounting_workspace import AccountingConflict
 from subsystems.finance_import.statement_archive import StatementCommandConflict
 
 
-def _bank_references(bank, reason, cancellation_code, memo, *, allow_overage_disposition=False):
+def _bank_references(bank, reason, cancellation_code, memo, *, allow_overage_disposition=False,
+                     manual_command=None):
     # Sinopac's canonical parser reads the original reference column; storing
     # only the row-level cancellation_code would make the owner reject it.
     references = {"source": "manual_supplement", "bank": bank, "reason": reason,
                   "銷帳編號": cancellation_code, "備註": memo}
     if allow_overage_disposition:
         references["allow_overage_disposition"] = True
+    if manual_command is not None:
+        references["manual_command"] = dict(manual_command)
+        references["manual_command_digest"] = fingerprint_payload(manual_command).value
     return references
 
 
@@ -112,7 +122,7 @@ class CaseManualSupplementService:
             raise ValueError(f"不支援的操作銀行: {bank}")
         if direction not in {"client_receipt", "staff_salary", "client_refund", "government_subsidy"}:
             raise ValueError(f"不支援的交易方向: {direction}")
-        if not isinstance(allow_overage_disposition, bool) or (allow_overage_disposition and direction != "client_receipt"):
+        if not isinstance(allow_overage_disposition, bool) or (allow_overage_disposition and direction not in {"client_receipt", "client_refund"}):
             raise ValueError("invalid_client_receipt_intent")
         if amount_ntd <= 0:
             raise ValueError("補登金額必須大於 0")
@@ -157,7 +167,8 @@ class CaseManualSupplementService:
                 raise ManualSupplementBlocked(str(resolution["reason"]))
             virtual_account = str(resolution["virtual_account"])
             case_suffix = virtual_account[-6:]
-            if direction in {"staff_salary", "client_refund"} and amount_ntd > int(target["remaining_ntd"]):
+            if (direction in {"staff_salary", "client_refund"} and amount_ntd > int(target["remaining_ntd"])
+                and not (direction == "client_refund" and allow_overage_disposition)):
                 code = "staff_payout_difference_mode_invalid" if direction == "staff_salary" else "allocation_exceeds_obligation"
                 raise ManualSupplementBlocked(code)
 
@@ -225,12 +236,13 @@ class CaseManualSupplementService:
                     cancellation_code,
                     json.dumps(
                         _bank_references(bank, note_text, cancellation_code, memo,
-                                         allow_overage_disposition=allow_overage_disposition),
+                                         allow_overage_disposition=allow_overage_disposition,
+                                         manual_command=command if direction == "client_refund" else None),
                         ensure_ascii=False,
                     ),
                     "[]",
                     classification,
-                    "pending" if direction == "client_receipt" else "reconciled",
+                    "pending" if direction in {"client_receipt", "client_refund"} else "reconciled",
                     json.dumps(raw_payload, ensure_ascii=False),
                 ),
             )
@@ -305,51 +317,19 @@ class CaseManualSupplementService:
                     raise AccountingConflict("staff_payables_candidate_stale")
 
             elif direction == "client_refund":
-                # 客戶退款核銷
-                cursor.execute(
-                    """
-                    INSERT INTO client_ledger_entries (
-                        case_no, finance_import_row_id, entry_type, amount_ntd,
-                        occurred_on, reconciliation_reference, idempotency_key, actor, reason
-                    ) VALUES (%s, %s, 'refund', %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        case_no,
-                        row_id,
-                        amount_ntd,
-                        transaction_date,
-                        f"manual-refund:{row_id}",
-                        idempotency_key,
-                        actor,
-                        note_text,
-                    ),
+                self._post_client_refund(
+                    case_no, row_id, target_item, amount_ntd, transaction_date,
+                    idempotency_key, actor, note_text, cmd_digest,
+                    allow_overage_disposition=allow_overage_disposition,
                 )
-                entry_id = cursor.lastrowid
                 cursor.execute(
-                    """
-                    INSERT INTO client_ledger_obligation_allocations (
-                        ledger_entry_id, obligation_identity, amount_ntd, allocation_ordinal
-                    ) VALUES (%s, %s, %s, 1)
-                    """,
-                    (entry_id, target_item, amount_ntd),
+                    "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type='refund'",
+                    (row_id, case_no),
                 )
-                remaining = int(target["remaining_ntd"]) - amount_ntd
-                cursor.execute(
-                    """
-                    UPDATE client_obligations
-                    SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
-                    WHERE obligation_identity=%s AND case_no=%s
-                      AND direction='payable_to_client' AND status='open' AND amount_due_ntd=%s
-                    """,
-                    (remaining, "settled" if remaining == 0 else "open", target_item,
-                     case_no, target["remaining_ntd"]),
-                )
-                if cursor.rowcount != 1:
-                    raise AccountingConflict("client_finance_candidate_stale")
-                cursor.execute(
-                    "UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s",
-                    (case_no,),
-                )
+                entry = cursor.fetchone()
+                if entry is None:
+                    raise AccountingConflict("manual_supplement_receipt_missing")
+                entry_id = int(entry["id"])
 
             elif direction == "government_subsidy":
                 # 政府入款核銷（台新入款 G）
@@ -484,6 +464,33 @@ class CaseManualSupplementService:
             if str(error) == "client_refund_recipient_snapshot_missing":
                 raise ManualSupplementBlocked(str(error)) from error
             raise
+        finally:
+            repository.clear_apply_request()
+
+    def _post_client_refund(self, case_no, row_id, target_item, amount_ntd, transaction_date,
+                            key, actor, reason, command_digest, *, allow_overage_disposition=False):
+        context = ManualClientRefundSource(
+            int(row_id), case_no, target_item, amount_ntd, transaction_date,
+            ActorContext(actor), command_digest, allow_overage_disposition, reason=reason,
+        )
+        repository = MySqlClientRefundReversalRepository(self.connection, manual_source=context)
+        workflow = ClientRefundReversalWorkflow(repository, BorrowedTransactionUnitOfWork)
+        selection = ClientRefundReversalSelection(
+            case_no,
+            ClientFinanceCorrectionType.REFUND_OVERAGE if allow_overage_disposition else ClientFinanceCorrectionType.REFUND,
+            ClientRefundPurpose.CUSTOMER_REFUND,
+            bank_fact_identities=(str(row_id),), obligation_identities=(target_item,),
+            allow_partial_refund_recovery=not allow_overage_disposition,
+        )
+        preview = workflow.preview(selection, CorrelationId("finance-manual-supplement"))
+        request = ClientRefundReversalApplyRequest(
+            selection, ExpectedVersion(preview.account_version), preview.fingerprint,
+            IdempotencyKey("manual-client-refund:" + hashlib.sha256(key.encode()).hexdigest()),
+            ActorContext(actor), reason, CorrelationId("finance-manual-supplement"),
+        )
+        repository.bind_apply_request(request)
+        try:
+            return workflow.apply(request)
         finally:
             repository.clear_apply_request()
 

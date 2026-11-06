@@ -1,6 +1,8 @@
 """Preview/apply workflow for client refunds, subsidy returns, and reversals."""
 from __future__ import annotations
 from dataclasses import asdict, dataclass
+from datetime import date
+import re
 from typing import Callable, Protocol
 from domains.client_finance.client_refund_reversal import (ClientFinanceCorrectionType,ClientRefundBankFact,ClientRefundObligation,ClientRefundPurpose,ClientRefundReturnBankFact,ClientRefundReversalCandidate,ClientReversalTarget,build_client_refund_candidate,build_client_refund_overage_candidate,build_client_refund_return_candidate,build_client_reversal_candidate)
 from shared_kernel.errors import ErrorCategory,TypedError
@@ -9,6 +11,40 @@ from shared_kernel.identities import ActorContext,CorrelationId,ExpectedVersion,
 from shared_kernel.validation import require_canonical_text,require_nonnegative_integer
 from domains.client_finance.subsidy_advance import SubsidyPayoutFundingFacts, subsidy_payout_is_advance
 CLIENT_FINANCE_CANDIDATE_STALE="client_finance_candidate_stale"; CLIENT_FINANCE_IDEMPOTENCY_CONFLICT="client_finance_idempotency_conflict"
+
+
+@dataclass(frozen=True, slots=True)
+class ManualClientRefundSource:
+ """Internal binding for one newly created, authenticated manual refund command."""
+ row_id: int
+ case_no: str
+ target_item: str
+ amount_ntd: int
+ transaction_date: str
+ actor: ActorContext
+ command_digest: str
+ allow_overage_disposition: bool = False
+ reason: str = ""
+
+ def __post_init__(self):
+  if type(self.row_id) is not int or self.row_id <= 0 or type(self.amount_ntd) is not int or self.amount_ntd <= 0:
+   raise ValueError("manual_refund_source_invalid")
+  require_canonical_text(self.case_no,"case number",191)
+  require_canonical_text(self.target_item,"refund obligation identity",191)
+  require_canonical_text(self.reason,"reason",500,allow_empty=True)
+  if not isinstance(self.actor,ActorContext) or not isinstance(self.command_digest,str) or not re.fullmatch(r"[0-9a-f]{64}",self.command_digest):
+   raise ValueError("manual_refund_source_invalid")
+  if not isinstance(self.transaction_date,str) or date.fromisoformat(self.transaction_date).isoformat()!=self.transaction_date or type(self.allow_overage_disposition) is not bool:
+   raise ValueError("manual_refund_source_invalid")
+
+ def validate_selection(self, selection):
+  expected_type=ClientFinanceCorrectionType.REFUND_OVERAGE if self.allow_overage_disposition else ClientFinanceCorrectionType.REFUND
+  if (selection.case_no!=self.case_no or selection.correction_type is not expected_type
+      or selection.refund_purpose is not ClientRefundPurpose.CUSTOMER_REFUND
+      or selection.bank_fact_identities!=(str(self.row_id),) or selection.obligation_identities!=(self.target_item,)
+      or selection.allow_partial_refund_recovery != (not self.allow_overage_disposition)):
+   raise ValueError("manual_refund_source_mismatch")
+
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalSelection:
  case_no:str; correction_type:ClientFinanceCorrectionType; refund_purpose:ClientRefundPurpose=ClientRefundPurpose.CUSTOMER_REFUND; bank_fact_identities:tuple[str,...]=(); obligation_identities:tuple[str,...]=(); reversal_target_identities:tuple[str,...]=(); reversal_occurred_on:str|None=None; allow_partial_refund_recovery:bool=False
@@ -45,6 +81,7 @@ class ClientRefundReversalWorkflow:
  def preview(self,selection,correlation_id):
   try:return _preview(selection,self._repository.load(selection,for_update=False))
   except ValueError as e: raise _error(correlation_id,ErrorCategory.DOMAIN_BLOCKED,str(e)) from e
+  except ClientRefundReversalStorageError as e:raise _error(correlation_id,ErrorCategory.UNAVAILABLE if e.retryable else ErrorCategory.INTERNAL,"transaction_failed",retryable=e.retryable) from e
  def apply(self,request):
   try:
    command=_command(request)

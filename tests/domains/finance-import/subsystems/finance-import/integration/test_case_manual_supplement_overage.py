@@ -140,7 +140,7 @@ def test_false_intent_preserves_saved_canonical_and_legacy_receipts_but_true_nev
             manual._replay_reason(requested, saved)
 
 
-@pytest.mark.parametrize("direction", ["staff_salary", "client_refund", "government_subsidy"])
+@pytest.mark.parametrize("direction", ["staff_salary", "government_subsidy"])
 def test_overage_choice_is_not_accepted_for_other_directions(direction):
     with pytest.raises(ValueError, match="invalid_client_receipt_intent"):
         manual.CaseManualSupplementService(NoSqlConnection()).execute(

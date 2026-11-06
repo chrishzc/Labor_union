@@ -2,7 +2,7 @@
  * File: CaseManualSupplementWorkbench.tsx
  * Description: 案件抽屜手動補登款項工作台，提供操作銀行（永豐、台新）、交易方向、沖銷對象選擇，自動標準化並完成銷帳。
  */
-import { useState, useId, useRef } from 'react';
+import { useState, useId, useRef, useEffect } from 'react';
 import {
   financeAccountingClient,
   type AccountingItem,
@@ -11,6 +11,11 @@ import {
 } from '../api/finance_import/finance_accounting_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { ApiHttpError } from '../api/shared/typed_errors';
+import { sessionClient } from '../api/auth/session_client';
+import {
+  clearPendingManualSupplement, manualSupplementSignature, ManualSupplementStorageError,
+  readPendingManualSupplement, savePendingManualSupplement, type PendingManualSupplement,
+} from '../api/finance_import/case_manual_supplement_pending';
 import './FinanceCompactCase.css';
 
 interface Props {
@@ -91,8 +96,54 @@ export function CaseManualSupplementWorkbench({
   const [busy, setBusy] = useState<boolean>(false);
   const [unknown, setUnknown] = useState(false);
   const [error, setError] = useState<string>('');
-  const pendingCommand = useRef<{ caseNo: string; command: CaseManualSupplementCommand; key: string; signature: string } | undefined>(undefined);
-  const disabled = busy || unknown;
+  const pendingCommand = useRef<PendingManualSupplement | null>(null);
+  const [restoring, setRestoring] = useState(() => {
+    try { return readPendingManualSupplement(caseNo) !== null; } catch { return true; }
+  });
+  const [storageError, setStorageError] = useState('');
+  const [recoveryRevision, setRecoveryRevision] = useState(0);
+  const inFlight = useRef(false);
+  const alive = useRef(true);
+  const activeCase = useRef(caseNo); activeCase.current = caseNo;
+  const disabled = busy || unknown || restoring || Boolean(storageError);
+
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setStorageError('');
+    try {
+      const stored = readPendingManualSupplement(caseNo)
+        ?? (pendingCommand.current?.caseNo === caseNo ? pendingCommand.current : null);
+      if (stored === null) {
+        pendingCommand.current = null;
+        setUnknown(false); setRestoring(false);
+        return () => controller.abort();
+      }
+      setRestoring(true);
+      void sessionClient.fetchCurrentUser({ signal: controller.signal }).then(user => {
+        if (controller.signal.aborted) return;
+        if (user.id === null || user.id !== stored.actorId) {
+          throw new ManualSupplementStorageError('此案有另一位管理員尚未確認的補登操作，請由原管理員登入查回。');
+        }
+        pendingCommand.current = stored;
+        setBank(stored.command.bank); setDirection(stored.command.direction);
+        setTargetItem(stored.command.target_item); setAmount(String(stored.command.amount_ntd));
+        setTransactionDate(stored.command.transaction_date); setReason(stored.command.reason ?? '');
+        setAllowOverageDisposition(stored.command.allow_overage_disposition);
+        setUnknown(true); setRestoring(false);
+        setError('已還原尚未確認的補登操作，請確認原操作結果。');
+      }).catch(failure => {
+        if (controller.signal.aborted) return;
+        setStorageError(failure instanceof ManualSupplementStorageError ? failure.message : '無法確認原補登的登入管理員，請重新登入後讀取補登狀態。');
+        setRestoring(false);
+      });
+    } catch (failure) {
+      setStorageError(failure instanceof Error ? failure.message : '無法讀取原補登操作。');
+      setRestoring(false);
+    }
+    return () => controller.abort();
+  }, [caseNo, recoveryRevision]);
 
   function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy') {
     setDirection(newDir);
@@ -155,6 +206,7 @@ export function CaseManualSupplementWorkbench({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (inFlight.current || restoring || storageError) return;
     const parsedAmount = /^[0-9]+$/.test(amount.trim()) ? BigInt(amount.trim()) : 0n;
     if (!targetItem) {
       setError('請選擇沖銷對象／期款');
@@ -179,27 +231,45 @@ export function CaseManualSupplementWorkbench({
       amount_ntd: parsedAmount <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(parsedAmount) : parsedAmount.toString(),
       transaction_date: transactionDate,
       reason: reason.trim() || null,
-      allow_overage_disposition: direction === 'client_receipt' && allowOverageDisposition,
+      allow_overage_disposition: (direction === 'client_receipt' || direction === 'client_refund') && allowOverageDisposition,
     };
 
-    const signature = JSON.stringify({ case_no: caseNo, ...command });
-    if (unknown && pendingCommand.current?.signature !== signature) {
+    const signature = manualSupplementSignature(caseNo, command);
+    if (unknown && (!pendingCommand.current || manualSupplementSignature(pendingCommand.current.caseNo, pendingCommand.current.command) !== signature)) {
       setError('原操作結果尚未確認，請先查回原操作，不能改成另一筆補登。');
       setBusy(false);
       return;
     }
-    if (pendingCommand.current?.signature !== signature) {
-      pendingCommand.current = { caseNo, command, signature, key: crypto.randomUUID() };
-    }
-    const submitted = pendingCommand.current;
-
+    inFlight.current = true;
+    let attempted = false;
+    let updatedCase: CaseAccounting | undefined;
     try {
-      const updated = await financeAccountingClient.manualSupplement(submitted.caseNo, submitted.command, submitted.key);
-      pendingCommand.current = undefined;
+      // getUser() can be a cached browser projection. Bind to the existing
+      // server-authenticated /me result before persisting or replaying a command.
+      const user = await sessionClient.fetchCurrentUser();
+      if (user.id === null || !Number.isSafeInteger(user.id) || user.id <= 0
+        || sessionClient.getUser()?.id !== user.id || !sessionClient.getToken()) {
+        throw new ManualSupplementStorageError('無法確認目前登入的管理員，請重新登入後讀取補登狀態。');
+      }
+      const previous = pendingCommand.current;
+      if (previous && previous.actorId !== user.id) {
+        throw new ManualSupplementStorageError('此案有另一位管理員尚未確認的補登操作，請由原管理員登入查回。');
+      }
+      const submitted = previous && manualSupplementSignature(previous.caseNo, previous.command) === signature
+        ? previous : { version: 1 as const, caseNo, command: { ...command, allow_overage_disposition: command.allow_overage_disposition ?? false }, key: crypto.randomUUID(), actorId: user.id };
+      savePendingManualSupplement(submitted, previous);
+      pendingCommand.current = submitted;
+      attempted = true;
+      updatedCase = await financeAccountingClient.manualSupplement(submitted.caseNo, submitted.command, submitted.key);
+      clearPendingManualSupplement(submitted);
+      pendingCommand.current = null;
       setUnknown(false);
-      onSuccess(updated);
-      onClose();
     } catch (err: unknown) {
+      updatedCase = undefined;
+      if (!attempted || err instanceof ManualSupplementStorageError) {
+        setStorageError(err instanceof ManualSupplementStorageError ? err.message : '無法確認目前登入的管理員，請重新登入後讀取補登狀態。');
+        return;
+      }
       const rejected = err instanceof ApiHttpError && [400, 401, 403, 404, 409, 422].includes(err.status);
       setUnknown(!rejected);
       const message = err instanceof Error ? err.message : '補登失敗，請確認資料後重試。';
@@ -208,8 +278,10 @@ export function CaseManualSupplementWorkbench({
         ? '報名資料缺少客戶退款帳戶，本次未核銷。請先補齊退款帳戶資料，再回本案補登。'
         : message : '尚未確認原操作結果；已保留原操作，請確認原操作結果後再新增補登。');
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
+    if (updatedCase && alive.current && activeCase.current === caseNo) { onSuccess(updatedCase); onClose(); }
   }
 
   return (
@@ -231,6 +303,12 @@ export function CaseManualSupplementWorkbench({
       </div>
 
       {error && <div className="case-accounting-warning" role="alert"><p>{error}</p></div>}
+      {restoring && <p role="status">正在查回原補登操作…</p>}
+      {storageError && <div className="case-accounting-warning" role="alert">
+        <p>{storageError}</p>
+        <button type="button" className="finance-btn-secondary" disabled={busy || restoring}
+          onClick={() => setRecoveryRevision(value => value + 1)}>重新讀取補登狀態</button>
+      </div>}
 
       <form onSubmit={handleSubmit} className="case-manual-supplement-form">
         <div className="supplement-form-row">
@@ -311,13 +389,15 @@ export function CaseManualSupplementWorkbench({
           </div>
         </div>
 
-        {direction === 'client_receipt' && <div className="supplement-form-row">
+        {(direction === 'client_receipt' || direction === 'client_refund') && <div className="supplement-form-row">
           <label>
             <input type="checkbox" checked={allowOverageDisposition}
               onChange={event => setAllowOverageDisposition(event.target.checked)} disabled={disabled} />
-            將超收差額列為客戶退款
+            {direction === 'client_receipt' ? '將超收差額列為客戶退款' : '將超付差額列為客戶追償'}
           </label>
-          <p>實收金額全額保留，僅核銷所選期款的待收額，超收差額另列應退客戶款項；不會直接退款。</p>
+          <p>{direction === 'client_receipt'
+            ? '實收金額全額保留，僅核銷所選期款的待收額，超收差額另列應退客戶款項；不會直接退款。'
+            : '實付金額全額保留，僅核銷所選退款的待退額，超付差額另列客戶追償；不會自動追回或再次付款。'}</p>
         </div>}
 
         <div className="supplement-form-grid">
@@ -389,7 +469,7 @@ export function CaseManualSupplementWorkbench({
           <button
             type="submit"
             className="finance-btn-primary"
-            disabled={busy || !targetItem || candidateItems.length === 0}
+            disabled={busy || restoring || Boolean(storageError) || (!unknown && (!targetItem || candidateItems.length === 0))}
           >
             {busy ? '正在自動銷帳...' : unknown ? '確認原操作結果' : '確認補登並自動銷帳'}
           </button>

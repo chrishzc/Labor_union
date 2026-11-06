@@ -474,6 +474,92 @@ def test_explicit_preview_manual_fallback_can_reuse_active_hold_ticket() -> None
     assert len(gateway.create_calls) == 1
 
 
+@pytest.mark.parametrize("binding,fail", [("current", False), ("no_root", False), ("no_owner", False), ("current", True)])
+def test_bound_manual_fallback_application_owns_transaction_without_sql(monkeypatch, binding, fail):
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.line.service_help_application import ManualFallbackBindingNotCurrent
+
+    calls = []
+
+    class Connection:
+        def begin(self): calls.append("begin")
+        def commit(self): calls.append("commit")
+        def rollback(self): calls.append("rollback")
+        def cursor(self): raise AssertionError("SQL is forbidden in this port test")
+
+    connection = Connection()
+    unit = MySqlUnitOfWork(connection)
+
+    def current_fact(query):
+        calls.append("binding")
+        return SimpleNamespace(root_version=None if binding == "no_root" else 1,
+                               owner_projections=() if binding == "no_owner" else ("client",))
+
+    unit.identity_management = SimpleNamespace(current_fact=current_fact)
+    application = LineServiceHelpApplication(lambda: datetime(2026, 11, 6, tzinfo=timezone.utc))
+    inbox, actor = _inbox("bound-preview-event"), LineUserId("U123456789")
+
+    def fallback(actual_inbox, actual_unit, actual_actor, text):
+        assert (actual_inbox, actual_unit, actual_actor, text) == (inbox, unit, actor, "需要人工")
+        calls.append("fallback")
+        if fail:
+            raise RuntimeError("synthetic owner failure")
+        return 31
+
+    monkeypatch.setattr(application, "apply_manual_fallback", fallback)
+    if binding != "current":
+        with pytest.raises(ManualFallbackBindingNotCurrent, match="line_router_preview_binding_not_current"):
+            application.apply_bound_manual_fallback(inbox, actor, "需要人工", lambda: unit)
+        assert calls == ["begin", "binding", "rollback"]
+    elif fail:
+        with pytest.raises(RuntimeError, match="synthetic owner failure"):
+            application.apply_bound_manual_fallback(inbox, actor, "需要人工", lambda: unit)
+        assert calls == ["begin", "binding", "fallback", "rollback"]
+    else:
+        assert application.apply_bound_manual_fallback(inbox, actor, "需要人工", lambda: unit) == 31
+        assert calls == ["begin", "binding", "fallback", "commit"]
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_router_explicit_fallback_delegates_transaction_and_keeps_binding_error(monkeypatch, bound):
+    import api.routes.line_ai_events as routes
+    from api.schemas.line_ai_events import LineRouterPreviewRequest
+    from fastapi import HTTPException
+    from subsystems.line.service_help_application import ManualFallbackBindingNotCurrent
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_auth")
+    monkeypatch.setenv("LIFF_REQUIRE_ID_TOKEN", "false")
+    calls = []
+
+    def forbidden_open():
+        raise AssertionError("transport must not open a transaction")
+
+    class Application:
+        def __init__(self, *args, **kwargs): pass
+        def apply_bound_manual_fallback(self, inbox, actor, text, factory):
+            assert factory is forbidden_open
+            assert inbox.event.event_id.value == "explicit-preview"
+            assert actor.value == "U123456789"
+            calls.append(text)
+            if not bound:
+                raise ManualFallbackBindingNotCurrent()
+            return 31
+
+    monkeypatch.setattr(routes, "open_line_unit_of_work", forbidden_open)
+    monkeypatch.setattr(routes, "LineServiceHelpApplication", Application)
+    request = LineRouterPreviewRequest(text="高信心但沒有已發布答案", source_event_id="explicit-preview",
+                                      score=90, apply_manual_fallback=True,
+                                      development_line_user_id="U123456789")
+    if bound:
+        assert routes.preview_router(request).data.ticket_id == 31
+    else:
+        with pytest.raises(HTTPException) as raised:
+            routes.preview_router(request)
+        assert (raised.value.status_code, raised.value.detail) == (403, "line_router_preview_binding_not_current")
+    assert calls == [request.text]
+
+
 @pytest.mark.parametrize('liff_id', ['', 'your_liff_id_here'])
 def test_order_update_menu_without_configured_liff_has_no_invented_link(liff_id, monkeypatch):
     from subsystems.line.service_help_application import _order_update_menu_payload

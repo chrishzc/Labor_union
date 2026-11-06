@@ -42,7 +42,7 @@ from subsystems.line.ai_router_contracts import Unavailable
 from subsystems.line.deterministic_ai_router import DeterministicLineRouter, score_band
 from subsystems.line.identity_management_contracts import LineIdentityCurrentFactQuery
 from subsystems.line.navigation_catalog import CATALOG_REVISION, CATALOG_SOURCE_IDENTITY, catalog_entries
-from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.service_help_application import LineServiceHelpApplication, ManualFallbackBindingNotCurrent
 
 
 router = APIRouter(prefix="/api/v1/line/ai-events", tags=["LINE AI Events"])
@@ -65,21 +65,17 @@ def preview_router(
         actor = request.development_line_user_id.strip()
         if not actor:
             raise HTTPException(status_code=401, detail="development_line_identity_required")
-        with open_line_unit_of_work() as unit_of_work:
-            fact = unit_of_work.identity_management.current_fact(
-                LineIdentityCurrentFactQuery(LineUserId(actor))
+        application = LineServiceHelpApplication(
+            lambda: datetime.now(timezone.utc),
+            escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, lambda: datetime.now(timezone.utc)),
+        )
+        inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value=request.source_event_id)))
+        try:
+            ticket_id = application.apply_bound_manual_fallback(
+                inbox, LineUserId(actor), request.text, open_line_unit_of_work
             )
-            if fact.root_version is None or not fact.owner_projections:
-                raise HTTPException(status_code=403, detail="line_router_preview_binding_not_current")
-            application = LineServiceHelpApplication(
-                lambda: datetime.now(timezone.utc),
-                escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, lambda: datetime.now(timezone.utc)),
-            )
-            inbox = SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value=request.source_event_id)))
-            ticket_id = application.apply_manual_fallback(
-                inbox, unit_of_work, LineUserId(actor), request.text
-            )
-            unit_of_work.commit()
+        except ManualFallbackBindingNotCurrent as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
     return BaseResponse(data=_router_preview_view(
         router_outcome, request.source_event_id, ticket_id, request.score
     ))

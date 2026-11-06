@@ -37,6 +37,8 @@
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
 - `ui_react/src/components/CancellationSettlementAccounting.tsx` — common cancellation readback and notices for case accounting and registry.
 - `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
+- `ui_react/src/api/finance_import/case_manual_supplement_pending.ts` — same-tab journal preserves the original case/command/key before POST and across remount/reload; fresh authenticated actor checks and storage failures block replacement. It stores no authentication token.
+- `subsystems/finance_import/case_manual_supplement.py` — §19 case-scoped manual command composition and immutable source provenance; owner writer integration and remaining unsupported source paths must be checked against current §19 acceptance, not the retired §15 manual-archive semantics.
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`

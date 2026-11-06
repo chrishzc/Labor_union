@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import Annotated, Literal
 from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService, ManualSupplementBlocked
 from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
+from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
 from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
 
 from fastapi import APIRouter, Depends, Header, Response
@@ -31,7 +32,7 @@ router = APIRouter()
 
 
 def _error(error):
-    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError)):
+    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError, ClientRefundReversalError)):
         envelope = error.error
         status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500}.get(envelope.category.value, 422)
         response = typed_http_error(status, envelope.category.value, envelope.code,
@@ -365,7 +366,7 @@ class CaseManualSupplementBody(BaseModel):
 
     @model_validator(mode="after")
     def validate_overage_direction(self):
-        if self.allow_overage_disposition and self.direction != "client_receipt":
+        if self.allow_overage_disposition and self.direction not in {"client_receipt", "client_refund"}:
             raise ValueError("invalid_client_receipt_intent")
         return self
 
@@ -395,7 +396,7 @@ def create_case_manual_supplement(
         response = BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
         application.state.connection.commit()
         return response
-    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientReceiptRepositoryUnavailable) as error:
+    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientRefundReversalError, ClientReceiptRepositoryUnavailable) as error:
         try:
             application.state.connection.rollback()
         except Exception:
