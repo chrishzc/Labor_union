@@ -6,6 +6,7 @@ Description: 提供歷史訂單 workbook Preview／Apply 路由、排程衝突�
 import logging
 from pathlib import Path
 import tempfile
+from traceback import extract_tb
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
@@ -33,6 +34,34 @@ logger = logging.getLogger(__name__)
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)]
 _CorrelationHeader = Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)]
+_INVALID_WORKBOOK_CODE = "historical_order_workbook_invalid"
+_VALIDATION_MESSAGES = {
+    _INVALID_WORKBOOK_CODE: "歷史訂單工作簿處理時遇到未分類的驗證錯誤，請提供追蹤編號供管理員查核。",
+    "historical_order_workbook_must_be_xlsx": "歷史訂單匯入只接受 .xlsx 檔案。",
+    "historical_order_workbook_empty": "上傳的歷史訂單檔案是空檔。",
+    "historical_order_workbook_exceeds_20_mib": "上傳的歷史訂單檔案超過 20 MiB。",
+    "historical_order_sheet_not_found": "找不到指定的歷史訂單工作表。",
+    "historical_order_sheet_contract_mismatch": "指定工作表的欄位格式不符合歷史訂單匯入格式。",
+    "historical_order_sheet_contract_not_found": "沒有工作表符合歷史訂單匯入格式，請核對表頭是否包含客戶姓名、案件編號與訂單狀態。",
+    "historical_order_sheet_contract_not_unique": "有多張工作表符合歷史訂單匯入格式，請保留一張待匯入的工作表。",
+    "xlsx_archive_too_large": "Excel 檔案超過 20 MiB。",
+    "xlsx_too_many_members": "Excel 檔案的內部元件數量超過匯入上限。",
+    "xlsx_unsafe_member": "Excel 檔案含有加密、重複或不支援的內部元件。",
+    "xlsx_expansion_limit_exceeded": "Excel 檔案解壓後的大小或壓縮比超過匯入上限。",
+    "xlsx_missing_workbook_parts": "Excel 檔案缺少必要的活頁簿或工作表結構。",
+    "xlsx_too_many_sheets": "Excel 檔案有超過 16 張工作表。",
+    "xlsx_cell_limit_exceeded": "整份 Excel 的儲存格範圍超過 50 萬格。",
+    "xlsx_sheet_limit_exceeded": "單張工作表的使用範圍超過 5 萬列、256 欄或 50 萬格的其中一項限制。",
+    "xlsx_invalid_cell_reference": "Excel 檔案內含無效的列號或儲存格位置。",
+    "xlsx_xml_element_limit_exceeded": "Excel 檔案的樣式或共用文字數量超過匯入上限。",
+    "xlsx_invalid_archive": "無法讀取 Excel 檔案的內部結構，請確認檔案可正常開啟並重新另存為 .xlsx。",
+    "historical_order_source_schedule_conflict": "歷史訂單工作簿存在跨案件月嫂排程重疊衝突。",
+    "historical_client_payment_terms_missing": "歷史案件缺少客戶付款條款，無法建立帳務。",
+    "historical_payroll_rate_policy_missing": "歷史案件缺少月嫂薪資費率，無法建立帳務。",
+    "historical_default_accounting_unavailable": "歷史訂單的帳務建立服務未就緒。",
+    "historical_order_import_counts_not_conserved": "系統核對匯入結果時，來源列數與結果筆數不一致，請提供追蹤編號。",
+    "historical_order_not_imported_rows_not_conserved": "系統核對匯入結果時，未匯入列的明細與筆數不一致，請提供追蹤編號。",
+}
 
 
 @router.post("/preview", response_model=BaseResponse[HistoricalOrderWorkbookPreviewView])
@@ -98,13 +127,22 @@ async def _with_workbook(
             ),
         ) from error
     except ValueError as error:
-        logger.exception("歷史訂單工作簿處理驗證失敗: %s", error)
+        code = str(error)
+        if code not in _VALIDATION_MESSAGES:
+            code = _INVALID_WORKBOOK_CODE
+            origin = extract_tb(error.__traceback__, limit=-1)[0]
+            logger.warning(
+                "歷史訂單工作簿處理驗證失敗 code=%s file=%s function=%s line=%s correlation_id=%s",
+                code, Path(origin.filename).name, origin.name, origin.lineno, correlation.value,
+            )
+        else:
+            logger.warning("歷史訂單工作簿處理驗證失敗 code=%s correlation_id=%s", code, correlation.value)
         raise _http_error(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             TypedError(
                 ErrorCategory.VALIDATION,
-                _error_code(error, "historical_order_workbook_invalid"),
-                "歷史訂單工作簿資料未通過驗證。",
+                code,
+                _VALIDATION_MESSAGES[code],
                 correlation,
             ),
         ) from error

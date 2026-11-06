@@ -375,6 +375,56 @@ def test_preview_projects_schedule_conflict_rows_and_cases_in_field_errors():
     assert "客戶" not in error["field_errors"][0]["message"]
 
 
+@pytest.mark.parametrize(
+    ("matching_sheets", "code", "message"),
+    [
+        (0, "historical_order_sheet_contract_not_found", "沒有工作表符合歷史訂單匯入格式"),
+        (2, "historical_order_sheet_contract_not_unique", "有多張工作表符合歷史訂單匯入格式"),
+    ],
+)
+def test_workbook_validation_reports_the_actual_sheet_problem(matching_sheets, code, message):
+    service = HistoricalOrderWorkbookImportService(_WorkbookRepository(), _PreviewMatrixWorkflow(), _UnitOfWork)
+    workbook = Workbook()
+    workbook.active.append(["客戶姓名", "案件編號", "訂單狀態"] if matching_sheets else ["備註"])
+    if matching_sheets == 2:
+        workbook.create_sheet().append(["客戶姓名", "案件編號", "訂單狀態"])
+    upload = BytesIO()
+    workbook.save(upload)
+    workbook.close()
+
+    response = _production_client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/preview",
+        files={"workbook": ("orders.xlsx", upload.getvalue(), _XLSX_MEDIA_TYPE)},
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == code
+    assert message in error["message"]
+    assert error["correlation_id"] == response.headers["x-correlation-id"]
+
+
+def test_unknown_workbook_validation_keeps_correlation_without_leaking_raw_values(caplog):
+    service = _Service()
+
+    def fail_preview(*_args):
+        raise ValueError("SYNTHETIC_PRIVATE_CELL_VALUE")
+
+    service.preview = fail_preview
+    response = _production_client(service).post(
+        "/api/v1/orders/historical-adoption/workbooks/preview",
+        headers={"X-Correlation-ID": "historical-validation-test"},
+        files=_file(),
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "historical_order_workbook_invalid"
+    assert error["correlation_id"] == "historical-validation-test"
+    assert "historical-validation-test" in caplog.text
+    assert "SYNTHETIC_PRIVATE_CELL_VALUE" not in response.text + caplog.text
+
+
 def test_actual_xlsx_preview_keeps_bad_rows_reviewable_without_aborting_good_rows():
     repository = _WorkbookRepository()
     service = HistoricalOrderWorkbookImportService(

@@ -142,7 +142,9 @@ def _select_sheet(workbook, requested):
         return workbook[requested], *candidate
     candidates = [(sheet, _sheet_contract(sheet)) for sheet in workbook.worksheets]
     matches = [(sheet, contract) for sheet, contract in candidates if contract is not None]
-    if len(matches) != 1:
+    if not matches:
+        raise ValueError("historical_order_sheet_contract_not_found")
+    if len(matches) > 1:
         raise ValueError("historical_order_sheet_contract_not_unique")
     selected, contract = matches[0]
     return selected, *contract

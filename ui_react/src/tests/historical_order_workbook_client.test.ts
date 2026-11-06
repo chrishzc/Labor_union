@@ -80,6 +80,34 @@ describe('Historical Orders workbook Preview client', () => {
       expect(mapped.message).toContain('排程重疊衝突');
     }
   });
+
+  it('保留伺服器 422 的具體原因、錯誤代碼與追蹤編號', async () => {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
+    const error = {
+      category: 'validation',
+      code: 'historical_order_sheet_contract_not_unique',
+      message: '有多張工作表符合歷史訂單匯入格式，請保留一張待匯入的工作表。',
+      field_errors: [],
+      domain_blockers: [],
+      retryable: false,
+      correlation_id: 'historical-validation-test',
+      current_version: null,
+    };
+    globalThis.fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ detail: { error } }), {
+      status: 422,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const expected = {
+      code: error.code,
+      message: `${error.message}（追蹤編號：${error.correlation_id}）`,
+      status: 422,
+    };
+
+    await expect(previewHistoricalOrderWorkbook(snapshot)).rejects.toMatchObject(expected);
+    await expect(applyHistoricalOrderWorkbook(snapshot, 'c'.repeat(64), {
+      idempotencyKey: 'historical-validation-apply', correlationId: error.correlation_id,
+    })).rejects.toMatchObject(expected);
+  });
   beforeEach(() => { vi.restoreAllMocks(); setSession(); });
   afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
 

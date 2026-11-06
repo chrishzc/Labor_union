@@ -27,6 +27,25 @@ function scheduleConflictFields(error: ApiHttpError): HistoricalOrderWorkbookFie
   return result.success ? result.data.detail.error.field_errors : [];
 }
 
+const workbookValidationResponse = z.object({
+  detail: z.object({
+    error: z.object({
+      category: z.literal('validation'),
+      code: z.string(),
+      message: z.string(),
+      correlation_id: z.string(),
+    }),
+  }),
+});
+
+function workbookValidationMessage(error: ApiHttpError): string | undefined {
+  if (error.status !== 422) return undefined;
+  const result = workbookValidationResponse.safeParse(error.raw);
+  if (!result.success || result.data.detail.error.code !== error.code) return undefined;
+  const { message, correlation_id: correlationId } = result.data.detail.error;
+  return `${message}（追蹤編號：${correlationId}）`;
+}
+
 export class HistoricalOrderWorkbookPreviewError extends Error {
   public readonly code: string;
   public readonly retryable: boolean;
@@ -114,6 +133,8 @@ export function mapHistoricalOrderWorkbookPreviewError(error: unknown): Error {
     if (error.status===422 && error.code==='historical_order_source_schedule_conflict') return new HistoricalOrderWorkbookPreviewError(error.code,'歷史訂單工作簿存在跨案件月嫂排程重疊衝突，請依列號與案件明細修正後重新預覽。',false,error.status,scheduleConflictFields(error));
     const databaseMessage = databaseErrorMessage(error);
     if (databaseMessage) return new HistoricalOrderWorkbookPreviewError(error.code, databaseMessage, error.retryable, error.status);
+    const validationMessage = workbookValidationMessage(error);
+    if (validationMessage) return new HistoricalOrderWorkbookPreviewError(error.code, validationMessage, error.retryable, error.status);
     const message = error.code === 'historical_assignment_required_for_actual_start'
       ? '歷史訂單缺少已完成的歷史服務指派，無法重建實際開工資料。'
       : error.status === 403
@@ -146,6 +167,8 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
     if (error.code === 'historical_client_payment_terms_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少客戶付款條款，無法建立應收應付；本次匯入未完成，請先補齊付款條款。', false, error.status);
     if (error.code === 'historical_payroll_rate_policy_missing') return new HistoricalOrderWorkbookApplyError(error.code, '歷史案件缺少月嫂薪資費率，無法建立應付帳務；本次匯入未完成，請先補齊費率。', false, error.status);
     if (error.code === 'historical_default_accounting_unavailable') return new HistoricalOrderWorkbookApplyError(error.code, '歷史帳務建立服務未就緒，本次匯入未完成，請由系統管理員檢查服務設定。', false, error.status);
+    const validationMessage = workbookValidationMessage(error);
+    if (validationMessage) return new HistoricalOrderWorkbookApplyError(error.code, validationMessage, error.retryable, error.status);
     if (error.code.endsWith('_lock_timeout')) return new HistoricalOrderWorkbookApplyError(error.code, '歷史訂單匯入等待處理鎖逾時，先前操作可能仍在處理；結果尚未確認，請保留本頁確認結果。', true, error.status);
     if (error.status === 502 || error.status === 504) return new HistoricalOrderWorkbookApplyError(error.code, error.status === 504 ? '等待歷史訂單匯入的閘道回應逾時（HTTP 504），結果尚未確認，請保留本頁確認結果。' : '歷史訂單匯入閘道無法取得後端有效回應（HTTP 502），結果尚未確認，請保留本頁確認結果。', error.retryable, error.status);
     const message = error.status === 403
