@@ -40,6 +40,9 @@ class CasePricingTerms:
             raise ValueError("pricing_identity_name_must_be_trimmed")
         if not isinstance(self.rule, IdentityRule):
             raise ValueError("pricing_identity_rule_invalid")
+        days = self.deposit_service_days
+        if days is not None and (type(days) is not int or not 0 <= days <= 2_147_483_647):
+            raise ValueError("pricing_deposit_service_days_invalid")
         hours = Decimal(str(self.subsidy_hours))
         if not hours.is_finite() or hours < 0 or hours * 2 != (hours * 2).to_integral_value():
             raise ValueError("pricing_subsidy_hours_invalid")
@@ -115,8 +118,10 @@ class PricingPolicy:
         result = next((item for item in self.identities if item.identity_name == identity), None)
         if result is None:
             raise ValueError("pricing_identity_not_in_bound_policy")
-        deposit_days = self.indigenous_deposit_service_days if identity == "原住民" else None
-        if not twins and deposit_days is None:
+        deposit_days = result.deposit_service_days
+        if deposit_days is None and identity == "原住民":
+            deposit_days = self.indigenous_deposit_service_days
+        if not twins and deposit_days == result.deposit_service_days:
             return result
         return CasePricingTerms(result.identity_name, result.rule, result.subsidy_hours,
             self.twins_client if twins else result.client, self.twins_payroll if twins else result.payroll,

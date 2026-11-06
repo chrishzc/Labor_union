@@ -46,7 +46,7 @@ def _object(value):
 def terms_from_payload(value):
     value = _object(value)
     return CasePricingTerms(value["identity_name"], IdentityRule(value["rule"]), Decimal(str(value["subsidy_hours"])),
-        HourlyRates(**value["client"]), HourlyRates(**value["payroll"]))
+        HourlyRates(**value["client"]), HourlyRates(**value["payroll"]), value.get("deposit_service_days"))
 
 
 def policy_from_payload(value):
@@ -132,7 +132,7 @@ def load_case_pricing(cursor, order_row, *, lock=False):
         if row is None:
             raise ValueError("case_pricing_override_missing")
         override = terms_from_payload(row["pricing_json"])
-        if policy_id is None or identity != "原住民":
+        if policy_id is None:
             return override
     if policy_id is None:
         return None
@@ -142,7 +142,7 @@ def load_case_pricing(cursor, order_row, *, lock=False):
         raise ValueError("case_pricing_bound_policy_missing")
     policy = policy_from_payload(row["policy_json"])
     if event_id is not None:
-        return replace(override, deposit_service_days=policy.indigenous_deposit_service_days)
+        return replace(override, deposit_service_days=policy.for_case(str(identity)).deposit_service_days)
     return policy.for_case(str(identity), twins=_is_twins(cursor, order_row["case_no"], lock))
 
 

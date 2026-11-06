@@ -439,37 +439,45 @@ def test_non_citizen_zero_subsidy_and_independent_self_pay_through_real_writers(
         connection.close()
 
 
-def test_indigenous_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
+def test_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
     from api.dependencies.case_import import build_case_import_application
     from infrastructure.mysql.pricing_configuration_repository import initial_identity_rule
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
     from subsystems.case_import.case_import_workflow import ApplyCaseImport
     from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
 
-    def publish(days):
+    def publish(days, *, legacy=False):
         draft = policy()
         draft["identities"].append({
             **draft["identities"][1], "identity_name": "原住民", "subsidy_hours": 80,
             "client": {"covered": 350, "excess": 350},
         })
-        draft["indigenous_deposit_service_days"] = days
+        if legacy:
+            draft["indigenous_deposit_service_days"] = days
+        else:
+            draft["identities"][-1]["deposit_service_days"] = days
+            draft["identities"][0]["deposit_service_days"] = 2
         before = client.get("/api/v1/accounting-pricing").json()["data"]["revision"]
         saved = post(client, "/api/v1/accounting-pricing/policies",
                      {"policy": draft, "expected_revision": before}, f"indigenous-policy-{days}")
         current = client.get("/api/v1/accounting-pricing").json()["data"]["versions"][0]
         assert current["revision"] == saved["revision"]
-        assert current["policy"]["indigenous_deposit_service_days"] == days
+        if legacy:
+            assert current["policy"]["indigenous_deposit_service_days"] == days
+        else:
+            assert current["policy"]["identities"][-1]["deposit_service_days"] == days
+            assert current["policy"]["identities"][0]["deposit_service_days"] == 2
         return saved["revision"]
 
     start = date(2026, 11, 16)
 
-    def import_case(case_no, service_days):
+    def import_case(case_no, service_days, identity="原住民"):
         connection = mysql_adapter.get_connection()
         try:
             with connection.cursor() as cursor:
-                rule = initial_identity_rule(cursor, "原住民", case_no)
+                rule = initial_identity_rule(cursor, identity, case_no)
             intent = build_hcm_case_import_intent({
-                "case_no": case_no, "name": f"Synthetic {case_no}", "identity_status": "原住民",
+                "case_no": case_no, "name": f"Synthetic {case_no}", "identity_status": identity,
                 "created_at": datetime(2026, 11, 1), "service_start_date": start,
                 "service_days": service_days, "service_time": "8小時 09:00-17:00",
                 "service_type": "連續服務",
@@ -482,11 +490,12 @@ def test_indigenous_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
         finally:
             connection.close()
 
-    zero_policy = publish(0)
+    zero_policy = publish(0, legacy=True)
     import_case("115009911", 20)
     five_policy = publish(5)
     import_case("115009912", 31)
     import_case("115009913", 10)
+    import_case("115009914", 20, "一般市民")
     connection = mysql_adapter.get_connection()
     try:
         with connection.cursor() as cursor:
@@ -494,6 +503,7 @@ def test_indigenous_deposit_policy_round_trips_and_binds_new_hcm_cases(client):
                 ("115009911", zero_policy, 0, {"first": 28000}),
                 ("115009912", five_policy, 5, {"deposit": 14000, "first": 42000, "second": 2800}),
                 ("115009913", five_policy, 5, {}),
+                ("115009914", five_policy, 2, {"deposit": 4800, "first": 36000, "second": 7200}),
             ):
                 cursor.execute("SELECT o.pricing_policy_id,t.deposit_service_days,t.second_payment_due_date "
                     "FROM orders o JOIN client_payment_terms t ON t.case_no=o.case_no WHERE o.case_no=%s", (case_no,))

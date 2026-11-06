@@ -23,7 +23,8 @@ def pricing_payload(value):
     def encode(item):
         if is_dataclass(item):
             payload = asdict(item, dict_factory=lambda fields: {
-                key: value for key, value in fields if key != "deposit_service_days"
+                key: value for key, value in fields
+                if key != "deposit_service_days" or (isinstance(item, PricingPolicy) and value is not None)
             })
             if isinstance(item, PricingPolicy) and item.indigenous_deposit_service_days is None:
                 # Keep the original hash for replays of policy commands without this setting.

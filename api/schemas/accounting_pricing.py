@@ -1,6 +1,7 @@
 """Closed public contracts for policy versions and individual case pricing."""
 
 from datetime import date
+from dataclasses import replace
 from decimal import Decimal
 from typing import Literal
 
@@ -30,9 +31,16 @@ class CasePricingTermsBody(PricingModel):
             HourlyRates(**self.client.model_dump()), HourlyRates(**self.payroll.model_dump()))
 
 
+class PolicyIdentityBody(CasePricingTermsBody):
+    deposit_service_days: int | None = Field(default=None, strict=True, ge=0, le=2_147_483_647)
+
+    def domain(self):
+        return replace(super().domain(), deposit_service_days=self.deposit_service_days)
+
+
 class PricingPolicyBody(PricingModel):
     effective_on: date
-    identities: list[CasePricingTermsBody] = Field(min_length=1, max_length=100)
+    identities: list[PolicyIdentityBody] = Field(min_length=1, max_length=100)
     twins_client: HourlyRatesBody
     twins_payroll: HourlyRatesBody
     indigenous_deposit_service_days: int | None = Field(default=None, strict=True, ge=0, le=2_147_483_647)

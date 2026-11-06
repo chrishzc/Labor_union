@@ -28,6 +28,7 @@ from domains.case_import.case_import import (
     imported_order_intake_terms,
 )
 from domains.case_import.order_information import project_order_information
+from domains.client_finance.subsidy_coverage import normalize_subsidy_policy_identity
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
     MySqlCaseArchitectureBootstrapRepository,
 )
@@ -99,11 +100,14 @@ class MySqlCaseImportRepository:
             pricing_row = None if exists else select_initial_pricing(cursor)
             identity = next((item.value for item in intent.client_attributes if item.name == "identity_status"), None)
             pricing = None
-            if pricing_row and intent.is_complete and identity in {"原住民", "補助市民"}:
+            if pricing_row and intent.is_complete and identity:
                 bound_policy = policy_from_payload(pricing_row["policy_json"])
                 if not bound_policy.uses_legacy_identity_names:
-                    if any(item.identity_name == identity for item in bound_policy.identities):
-                        pricing = bound_policy.for_case(identity, twins=multi_birth_count == "雙胞胎")
+                    policy_identity = normalize_subsidy_policy_identity(identity)
+                    if any(item.identity_name == policy_identity for item in bound_policy.identities):
+                        terms = bound_policy.for_case(identity, twins=multi_birth_count == "雙胞胎")
+                        if terms.deposit_service_days is not None or identity in {"原住民", "補助市民"}:
+                            pricing = terms
         return CaseImportFacts(
             exists,
             policy,

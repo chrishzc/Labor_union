@@ -1,19 +1,18 @@
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useEffect, useState } from 'react';
-import { accountingPricingClient, PricingPolicySchema, pricingTermsError, pricingIdentityLabel, pricingPolicyDraft, type PricingCatalog, type PricingPolicy, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
+import { accountingPricingClient, policyDepositDays, PricingPolicySchema, pricingTermsError, pricingIdentityLabel, pricingPolicyDraft, type PricingCatalog, type PricingPolicy, type PricingPolicyIdentity } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
 import { useUnsavedChanges, useUnsavedNavigation } from '../components/UnsavedChanges';
 import './AccountingParametersPage.css';
 
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
-const identity = (identity_name: string, rule: PricingTerms['rule'], subsidy_hours: number, rate: number): PricingTerms =>
+const identity = (identity_name: string, rule: PricingPolicyIdentity['rule'], subsidy_hours: number, rate: number): PricingPolicyIdentity =>
   ({ identity_name, rule, subsidy_hours, client: { covered: rule === 'non_citizen' ? 0 : rate, excess: rate }, payroll: { covered: rule === 'non_citizen' ? 0 : rate, excess: rate } });
 export function initialPricingPolicy(): PricingPolicy {
-  return { effective_on: today(), identities: [identity('一般市民', 'citizen', 40, 300), identity('補助市民', 'social', 120, 350), identity('非市民', 'non_citizen', 0, 320)],
-    twins_client: { covered: 450, excess: 450 }, twins_payroll: { covered: 450, excess: 450 }, indigenous_deposit_service_days: null };
+  return pricingPolicyDraft({ effective_on: today(), identities: [identity('一般市民', 'citizen', 40, 300), identity('補助市民', 'social', 120, 350), identity('非市民', 'non_citizen', 0, 320)],
+    twins_client: { covered: 450, excess: 450 }, twins_payroll: { covered: 450, excess: 450 } });
 }
 const copy = <T,>(value: T): T => structuredClone(value);
-const ruleLabels = { citizen: '一般市民：先墊後退', social: '補助市民：補助內不先墊', non_citizen: '非市民：自費' };
 type Pending = { policy: PricingPolicy; revision: number; reason: string; key: string };
 
 export function AccountingParametersPage() {
@@ -26,13 +25,11 @@ export function AccountingParametersPage() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'unknown' | 'error'>('loading');
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
-  const [name, setName] = useState('');
-  const [rule, setRule] = useState<PricingTerms['rule']>('citizen');
   const { requestLeave } = useUnsavedNavigation();
-  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || reason !== '' || name !== '';
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || reason !== '';
   const busy = status === 'saving' || status === 'unknown';
   const subsidyError = draft.identities.map(pricingTermsError).find(Boolean) || (draft.twins_client.covered !== draft.twins_payroll.covered ? '雙胞胎補助內的客戶時薪與月嫂時薪必須相等。' : draft.twins_client.covered <= 0 ? '雙胞胎補助內時薪必須為正整數。' : '');
-  const unsavedRef = useUnsavedChanges('帳務參數設定', dirty ? [{ label: '政策版本與四段費率', before: '已載入的參數', after: '有未儲存的政策調整' }] : [], { busy, save: () => save(), discard: () => { setDraft(copy(baseline)); setReason(''); setName(''); } });
+  const unsavedRef = useUnsavedChanges('帳務參數設定', dirty ? [{ label: '計價政策與訂金天數', before: '已載入的參數', after: '有未儲存的政策調整' }] : [], { busy, save: () => save(), discard: () => { setDraft(copy(baseline)); setReason(''); } });
 
   useEffect(() => {
     let active = true;
@@ -44,21 +41,11 @@ export function AccountingParametersPage() {
     return () => { active = false; };
   }, []);
 
-  const update = (index: number, change: Partial<PricingTerms>) => setDraft(current => ({ ...current, identities: current.identities.map((item, i) => i === index ? { ...item, ...change } : item) }));
-  const addIdentity = () => {
-    const label = name.trim();
-    if (!label || draft.identities.some(item => item.identity_name === label)) { setMessage('請輸入不重複的身分名稱。'); return; }
-    if (['社福', '低收入戶', '中低收入戶'].includes(label)) { setMessage('此名稱為補助市民的來源別名，請使用正式身分名稱。'); return; }
-    const inherited = draft.identities.find(item => item.rule === rule);
-    if (!inherited) return;
-    setDraft(current => ({ ...current, identities: [...current.identities, { ...copy(inherited), identity_name: label }] }));
-    setName(''); setMessage('');
-  };
+  const update = (index: number, change: Partial<PricingPolicyIdentity>) => setDraft(current => ({ ...current, identities: current.identities.map((item, i) => i === index ? { ...item, ...change } : item) }));
   const save = async () => {
     if (!catalog || status === 'saving') return;
-    if (!pending && name.trim()) { setMessage('請先新增身分，或清空尚未新增的身分名稱。'); return; }
     const checked = PricingPolicySchema.safeParse(draft);
-    if (!pending && (!checked.success || subsidyError)) { setMessage(subsidyError || '請確認生效日期、補助時數與時薪。用盡後時薪須為正整數，原住民訂金天數須留空或填非負整數。'); return; }
+    if (!pending && (!checked.success || subsidyError)) { setMessage(subsidyError || '請確認生效日期、補助時數與時薪。用盡後時薪須為正整數，訂金天數須留空或填非負整數。'); return; }
     const command = pending ?? { policy: copy(draft), revision: catalog.revision, reason: reason.trim(), key: `pricing-policy:${crypto.randomUUID()}` };
     setPending(command); setStatus('saving'); setMessage('');
     let applied = false;
@@ -77,14 +64,20 @@ export function AccountingParametersPage() {
   };
   const historyPolicy = catalog?.versions.find(item => item.revision === viewVersion)?.policy;
   const shown = tab === 'history' ? historyPolicy : draft;
-  const renderRows = (policy: PricingPolicy, readOnly: boolean) => <div className="pricing-table-wrap"><table className="pricing-table"><thead>
-    <tr><th rowSpan={2}>身分</th><th rowSpan={2}>補助上限（小時）</th><th colSpan={2}>客戶收費時薪（元）</th><th colSpan={2}>月嫂薪資時薪（元）</th></tr>
+  const renderRows = (policy: PricingPolicy, readOnly: boolean) => <div className="pricing-table-wrap"><table className="pricing-table pricing-identity-table"><thead>
+    <tr><th rowSpan={2}>身分</th><th rowSpan={2}>補助上限（小時）</th><th colSpan={2}>客戶收費時薪（元）</th><th colSpan={2}>月嫂薪資時薪（元）</th><th className="pricing-deposit-heading" rowSpan={2}>訂金天數</th></tr>
     <tr><th>補助內</th><th>用盡後</th><th>補助內</th><th>用盡後</th></tr></thead><tbody>{policy.identities.map((item, index) => <tr key={item.identity_name}>
-      <th scope="row">{readOnly ? pricingIdentityLabel(item) : item.identity_name}<div className="pricing-note">{ruleLabels[item.rule]}</div>
+      <th scope="row">{readOnly ? pricingIdentityLabel(item) : item.identity_name}
         {readOnly && pricingIdentityLabel(item) !== item.identity_name && <div className="pricing-note">原版本名稱：{item.identity_name}</div>}
       </th>
-      <td><input aria-label={`${item.identity_name} 補助上限`} type="number" min="0" step="0.5" value={item.subsidy_hours} disabled={readOnly || item.rule === 'non_citizen'} onChange={event => update(index, { subsidy_hours: Number(event.target.value) })} /></td>
-      {(['client', 'payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`${item.identity_name} ${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min={tier === 'covered' && item.subsidy_hours === 0 ? 0 : 1} step="1" value={item[owner][tier]} disabled={readOnly || (item.rule === 'non_citizen' && tier === 'covered')} onChange={event => update(index, { [owner]: { ...item[owner], [tier]: Number(event.target.value) } })} /></td>))}
+      <td><span className="pricing-mobile-label" aria-hidden="true">補助上限（小時）</span><input aria-label={`${item.identity_name} 補助上限`} type="number" min="0" step="0.5" value={item.subsidy_hours} disabled={readOnly || item.rule === 'non_citizen'} onChange={event => update(index, { subsidy_hours: Number(event.target.value) })} /></td>
+      {(['client', 'payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => {
+        const label = `${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`;
+        return <td key={`${owner}-${tier}`}><span className="pricing-mobile-label" aria-hidden="true">{label}</span><input aria-label={`${item.identity_name} ${label}`} type="number" min={tier === 'covered' && item.subsidy_hours === 0 ? 0 : 1} step="1" value={item[owner][tier]} disabled={readOnly || (item.rule === 'non_citizen' && tier === 'covered')} onChange={event => update(index, { [owner]: { ...item[owner], [tier]: Number(event.target.value) } })} /></td>;
+      }))}
+      <td><span className="pricing-mobile-label" aria-hidden="true">訂金天數</span><input className="pricing-deposit-input" aria-label={`${item.identity_name} 訂金天數`} aria-describedby="pricing-deposit-help"
+        type="number" min="0" max="2147483647" step="1" value={policyDepositDays(policy, item) ?? ''} placeholder="沿用原條款"
+        disabled={readOnly} onChange={event => update(index, { deposit_service_days: event.target.value === '' ? null : event.target.valueAsNumber })} /></td>
     </tr>)}</tbody></table></div>;
   return <div ref={unsavedRef}>
   <ManagementPageHeader title="帳務參數設定" description="新增政策版本；既有案件維持原設定。">
@@ -102,23 +95,11 @@ export function AccountingParametersPage() {
     {shown && catalog && <><label className="pricing-field">生效日期<input type="date" required value={shown.effective_on} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, effective_on: event.target.value }))} /></label>
       <section className="pricing-section"><div className="pricing-section-heading"><h2>補助身分與分段時薪</h2></div>{renderRows(shown, busy || status === 'loading' || tab === 'history')}
         <p className="pricing-note">補助範圍內客戶與月嫂時薪須相等，用盡後可分別調整。非市民補助時數與補助內時薪均為 0，自費時薪維持用盡後設定。</p>
-        {tab === 'pricing' && <div className="pricing-new-identity"><label className="pricing-field">新增身分名稱<input value={name} maxLength={100} disabled={busy} onChange={event => setName(event.target.value)} /></label><label className="pricing-field">沿用身分規則<select value={rule} disabled={busy} onChange={event => setRule(event.target.value as PricingTerms['rule'])}>{Object.entries(ruleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button type="button" className="pricing-reload" disabled={busy} onClick={addIdentity}>新增身分</button></div>}
-      </section>
-      <section className="pricing-section">
-        <h2>原住民訂金</h2>
-        <label className="pricing-field">原住民訂金天數
-          <input type="number" min="0" max="2147483647" step="1"
-            value={shown.indigenous_deposit_service_days ?? ''} placeholder="沿用既有規則"
-            disabled={busy || status === 'loading' || tab === 'history'}
-            onChange={event => {
-              const days = event.target.value === '' ? null : event.target.valueAsNumber;
-              setDraft(current => ({ ...current, indigenous_deposit_service_days: days }));
-            }} />
-        </label>
-        <p className="pricing-note">留空沿用既有訂金天數，填 0 為免收訂金服務費。全額補助案件免繳。設定隨政策版本生效，供新建案件使用。</p>
+        <p id="pricing-deposit-help" className="pricing-note">留空沿用原訂金條款，填 0 免收訂金服務費。全額補助免自備時，各期皆免繳。</p>
+        <p className="pricing-note">個案補助款歸屬請至帳務中心的案件抽屜設定。</p>
       </section>
       <section className="pricing-section"><h2>雙胞胎費率</h2><div className="pricing-table-wrap"><table className="pricing-table"><thead><tr><th>客戶補助內時薪</th><th>客戶用盡後時薪</th><th>月嫂補助內時薪</th><th>月嫂用盡後時薪</th></tr></thead><tbody><tr>{(['twins_client', 'twins_payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`雙胞胎${owner === 'twins_client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min="1" step="1" value={shown[owner][tier]} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, [owner]: { ...current[owner], [tier]: Number(event.target.value) } }))} /></td>))}</tr></tbody></table></div><p className="pricing-note">單胞胎依身分設定；雙胞胎優先套用此處費率，補助上限仍依身分。</p></section>
-      {tab === 'pricing' && <><section className="pricing-section"><label className="pricing-field">變更說明（選填）<textarea maxLength={500} value={reason} disabled={busy || status === 'loading'} onChange={event => setReason(event.target.value)} /></label></section><div className="pricing-actions"><button disabled={busy} onClick={() => requestLeave(() => { setDraft(copy(baseline)); setReason(''); setName(''); })}>取消修改</button><button className="pricing-primary" disabled={status === 'saving' || (!pending && !!subsidyError)} onClick={() => void save()}>{status === 'saving' ? '儲存中…' : pending ? '重試原儲存' : '儲存新版本'}</button></div></>}
+      {tab === 'pricing' && <><section className="pricing-section"><label className="pricing-field">變更說明（選填）<textarea maxLength={500} value={reason} disabled={busy || status === 'loading'} onChange={event => setReason(event.target.value)} /></label></section><div className="pricing-actions"><button disabled={busy} onClick={() => requestLeave(() => { setDraft(copy(baseline)); setReason(''); })}>取消修改</button><button className="pricing-primary" disabled={status === 'saving' || (!pending && !!subsidyError)} onClick={() => void save()}>{status === 'saving' ? '儲存中…' : pending ? '重試原儲存' : '儲存新版本'}</button></div></>}
     </>}
   </div></div>;
 }

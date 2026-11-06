@@ -26,12 +26,13 @@ describe('Standalone accounting parameter policy', () => {
       { ...current.terms, identity_name: '補助市民', rule: 'citizen' as const, subsidy_hours: 40, client: { covered: 300, excess: 320 }, payroll: { covered: 300, excess: 310 } },
       { ...current.terms, identity_name: '社福' },
       { ...current.terms, identity_name: '原住民', rule: 'citizen' as const, subsidy_hours: 80 },
-    ], twins_client: { covered: 450, excess: 460 }, twins_payroll: { covered: 450, excess: 470 } };
+    ], twins_client: { covered: 450, excess: 460 }, twins_payroll: { covered: 450, excess: 470 }, indigenous_deposit_service_days: 3 };
     const original = structuredClone(policy);
     const draft = pricingPolicyDraft(policy);
     expect(draft.identities.map(item => item.identity_name)).toEqual(['一般市民', '補助市民', '原住民']);
-    expect(draft.identities.map(({ identity_name: _name, ...terms }) => terms))
+    expect(draft.identities.map(({ identity_name: _name, deposit_service_days: _days, ...terms }) => terms))
       .toEqual(policy.identities.map(({ identity_name: _name, ...terms }) => terms));
+    expect(draft.identities[2].deposit_service_days).toBe(3);
     vi.mocked(accountingPricingClient.catalog).mockResolvedValue({ revision: 7, versions: [{ revision: 7, policy, actor: 'synthetic-admin', reason: '' }] });
     render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
     expect(await screen.findByLabelText('一般市民 補助上限')).toHaveValue(40);
@@ -43,11 +44,12 @@ describe('Standalone accounting parameter policy', () => {
     expect(screen.getByText('原版本名稱：社福')).toBeInTheDocument();
     expect(screen.getByLabelText('社福 補助上限')).toHaveValue(120);
     expect(screen.getByLabelText('社福 補助上限')).toBeDisabled();
+    expect(screen.getByLabelText('原住民 訂金天數')).toHaveValue(3);
     expect(policy).toEqual(original);
     expect(accountingPricingClient.savePolicy).not.toHaveBeenCalled();
   });
 
-  it('keeps independent excess rates, inherits new identities and confirms saved version by readback', async () => {
+  it('saves independent deposit days and excess rates by identity and reads back the new version', async () => {
     let catalog: PricingCatalog = { revision: 0, versions: [] };
     vi.mocked(accountingPricingClient.catalog).mockImplementation(async () => structuredClone(catalog));
     vi.mocked(accountingPricingClient.savePolicy).mockImplementation(async (policy, revision, reason) => {
@@ -56,28 +58,29 @@ describe('Standalone accounting parameter policy', () => {
     });
     render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
     const excess = await screen.findByLabelText('補助市民 客戶用盡後時薪');
-    fireEvent.change(screen.getByLabelText('原住民訂金天數'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('原住民 訂金天數'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('一般市民 訂金天數'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('非市民 訂金天數'), { target: { value: '2' } });
     fireEvent.change(excess, { target: { value: '300' } });
     fireEvent.change(screen.getByLabelText('補助市民 月嫂用盡後時薪'), { target: { value: '310' } });
     expect(screen.getByLabelText('補助市民 客戶補助內時薪')).toHaveValue(350);
     expect(screen.getByLabelText('補助市民 月嫂補助內時薪')).toHaveValue(350);
-    fireEvent.change(screen.getByLabelText('新增身分名稱'), { target: { value: '新增身分' } });
-    fireEvent.change(screen.getByLabelText('沿用身分規則'), { target: { value: 'social' } });
-    fireEvent.click(screen.getByRole('button', { name: '新增身分' }));
-    expect(screen.getByLabelText('新增身分 客戶用盡後時薪')).toHaveValue(300);
+    expect(screen.queryByLabelText('沿用身分規則')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新增身分' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('變更說明（選填）')).not.toBeRequired();
     fireEvent.click(screen.getByRole('button', { name: '儲存新版本' }));
     await screen.findByText('版本 1 已儲存；依生效日期套用新案件。');
     expect(accountingPricingClient.savePolicy).toHaveBeenCalledTimes(1);
     const saved = vi.mocked(accountingPricingClient.savePolicy).mock.calls[0][0];
-    expect(saved.indigenous_deposit_service_days).toBe(5);
+    expect(saved.indigenous_deposit_service_days).toBeUndefined();
+    expect(saved.identities.map(item => item.deposit_service_days)).toEqual([0, null, 2, 5]);
     expect(saved.identities.find(item => item.identity_name === '補助市民')?.payroll).toEqual({ covered: 350, excess: 310 });
     expect(screen.queryByRole('tab', { name: '收款帳戶' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '版本紀錄' }));
     await screen.findByText('synthetic-admin');
     fireEvent.click(screen.getByRole('button', { name: '版本 1' }));
-    expect(screen.getByLabelText('原住民訂金天數')).toHaveValue(5);
-    expect(screen.getByLabelText('原住民訂金天數')).toBeDisabled();
+    expect(screen.getByLabelText('原住民 訂金天數')).toHaveValue(5);
+    expect(screen.getByLabelText('原住民 訂金天數')).toBeDisabled();
   });
 });
 
