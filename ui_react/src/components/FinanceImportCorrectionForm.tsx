@@ -10,7 +10,7 @@ import { clientReceiptQueryClient } from '../api/client_finance/client_receipt_q
 import { StaffPayoutRemediationWorkbench, type StaffPayoutRemediationTarget } from './StaffPayoutRemediationWorkbench';
 import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_query_client';
 import { clientSettlementRemediationClient } from '../api/client_finance/client_settlement_remediation_client';
-import { subsidyPeriodClient, type SubsidyPeriod, type SubsidyPeriodView, type GovernmentDifferenceCommand } from '../api/government_subsidy/period_reconciliation_client';
+import { subsidyPeriodClient, type SubsidyPeriod, type SubsidyPeriodView } from '../api/government_subsidy/period_reconciliation_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
 import { ClientReceiptReconciliationPanel } from './ClientReceiptReconciliationPanel';
 
@@ -25,12 +25,14 @@ const refundModes = {
   overage: '退款超出，另列待追回款',
 };
 
-export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, initialKind = 'client_receipt', initialCaseNo, initialCounterpartyName, onPosted, onBusyChange }: {
+export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, governmentRefund = false, initialKind = 'client_receipt', initialCaseNo, initialCounterpartyName, lockedObligations, onPosted, onBusyChange }: {
   rowIdentity: string; sourceLabel: string; staff: readonly { id: number; label: string }[];
   bankAmount?: number;
+  governmentRefund?: boolean;
   initialKind?: 'client_receipt' | 'staff_payout' | 'client_refund' | 'client_subsidy_return' | 'government_subsidy';
   initialCaseNo?: string;
   initialCounterpartyName?: string;
+  lockedObligations?: readonly { id: string; label: string }[];
   onPosted?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -59,8 +61,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   const [caseSearching, setCaseSearching] = useState(true);
   const [caseError, setCaseError] = useState('');
   const caseRequest = useRef<AbortController | null>(null);
-  const [options, setOptions] = useState<{ id: string; label: string }[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [options, setOptions] = useState<readonly { id: string; label: string }[]>(lockedObligations ?? []);
+  const [selected, setSelected] = useState<string[]>(() => lockedObligations?.map(item => item.id) ?? []);
   const [reason, setReason] = useState('');
   const [preview, setPreview] = useState<FinanceImportCorrectionPreview | null>(null);
   const [selection, setSelection] = useState<FinanceImportCorrectionSelection | null>(null);
@@ -87,7 +89,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     finally { if (!controller.signal.aborted) setCaseSearching(false); }
   };
   useEffect(() => {
-    if (kind === 'staff_payout' || kind === 'government_subsidy') { setCaseSearching(false); return; }
+    if (lockedObligations || kind === 'staff_payout' || kind === 'government_subsidy') { setCaseSearching(false); return; }
     setCases([]); setCaseCursor(null); setCaseSearching(true); setCaseError('');
     const timer = window.setTimeout(() => void loadCases(caseSearch.trim()), 250);
     return () => { window.clearTimeout(timer); caseRequest.current?.abort(); };
@@ -104,6 +106,13 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   const [subsidyBalanceId, setSubsidyBalanceId] = useState<string>('');
   const [subsidyConfirmed, setSubsidyConfirmed] = useState(false);
 
+  const subsidyLabel = governmentRefund ? '政府退回款' : '政府入款';
+  const refundLimit = (balance: NonNullable<SubsidyPeriodView['balances']>[number]) =>
+    balance.direction === 'receivable' ? balance.refund_due_ntd : balance.remaining_ntd;
+  const refundBalances = subsidyView?.balances?.filter(balance => refundLimit(balance) > 0) ?? [];
+  const refundBalance = refundBalances.find(balance => balance.identity === subsidyBalanceId);
+  const canRefund = refundBalance != null && bankAmount != null && bankAmount <= refundLimit(refundBalance);
+
   const loadSubsidyPeriod = async () => {
     setSubsidyLoading(true); setSubsidyError(''); setSubsidyView(null);
     try {
@@ -114,7 +123,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       });
       setSubsidyView(data);
       setSubsidyHandling('');
-      setSubsidyBalanceId(data.balances?.find(b => b.direction === 'receivable')?.identity || '');
+      setSubsidyBalanceId(governmentRefund ? '' : data.balances?.find(b => b.direction === 'receivable')?.identity || '');
       setSubsidyConfirmed(false);
     } catch (err) {
       setSubsidyError(err instanceof Error ? err.message : '整期補助資料載入失敗，請確認期間後重試。');
@@ -129,7 +138,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   }, [kind, subsidyUnit, subsidyYear, subsidyIndex]);
 
   const wantedHandling = (() => {
-    if (!subsidyView || bankAmount === undefined) return 'exact';
+    if (governmentRefund || !subsidyView || bankAmount === undefined) return 'exact';
     if (subsidyView.coverage.length === 0) {
       const exp = subsidyView.total_ntd ?? 0;
       if (bankAmount === exp) return 'exact';
@@ -141,30 +150,30 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   })();
 
   const applySubsidyPeriod = async () => {
-    if (!subsidyView || !bankRow || busy || !subsidyConfirmed) return;
+    if (!subsidyView || !bankRow || busy || !subsidyConfirmed || (governmentRefund && !canRefund)) return;
     setBusy(true); setMessage(''); setSubsidyError('');
     try {
       const mode = subsidyView.coverage.length ? 'balance' : 'initial';
-      const action = mode === 'initial' ? 'initial_receipt' : 'receipt';
+      const action = governmentRefund ? 'refund' : mode === 'initial' ? 'initial_receipt' : 'receipt';
       const handling = wantedHandling === 'exact' ? 'exact' : (subsidyHandling || wantedHandling);
       await subsidyPeriodClient.difference({
         unit: subsidyUnit,
         year: subsidyYear,
         index: subsidyIndex,
-        action: action as GovernmentDifferenceCommand['action'],
+        action,
         identity: mode === 'balance' ? subsidyBalanceId : '',
         amount_ntd: null,
         bank_row_id: Number(bankRow[1]),
-        handling: handling as GovernmentDifferenceCommand['handling'],
-        reason: reason.trim() || '銀行對帳手動核對政府入款',
+        handling: governmentRefund ? '' : handling,
+        reason: reason.trim() || `銀行對帳手動核對${subsidyLabel}`,
         expected_version: subsidyView.version,
         key: crypto.randomUUID(),
       });
-      setMessage('政府補助整期入款核銷完成！已確認核銷收據。');
+      setMessage(governmentRefund ? '政府退回款核銷完成。' : '政府補助整期入款核銷完成！已確認核銷收據。');
       setCompleted(true);
       onPosted?.();
     } catch (err) {
-      setSubsidyError(err instanceof Error ? err.message : '政府入款核銷失敗，請重新整理後重試。');
+      setSubsidyError(err instanceof Error ? err.message : `${subsidyLabel}核銷失敗，請重新整理後重試。`);
     } finally {
       setBusy(false);
     }
@@ -255,7 +264,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   return <section aria-label="銀行款項更正" className="order-case-review-note finance-correction-form">
     <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款、月嫂付款或政府整期入款。金額由後端核對，不可手動標記已付。</p>
     <fieldset disabled={busy || payoutBusy || groupOpen || submitted || retryCommand !== null}>
-      <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setRefundMode('exact'); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_subsidy_return">退客戶先墊補助</option><option value="staff_payout">月嫂付款</option><option value="government_subsidy">政府入款</option></select></label>
+      {!lockedObligations && kind !== 'government_subsidy' && <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setRefundMode('exact'); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_subsidy_return">退客戶先墊補助</option><option value="staff_payout">月嫂付款</option><option value="government_subsidy">{subsidyLabel}</option></select></label>}
       {kind === 'government_subsidy' ? (
         <div className="government-subsidy-correction-section" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -292,7 +301,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
               <p>
                 本期{subsidyView.coverage.length ? '原已固定' : '目前計算'}應收：
                 <strong>{financeMoney(subsidyView.coverage.length ? subsidyView.recorded_lines.reduce((n, l) => n + (l.amount_ntd ?? 0), 0) : (subsidyView.total_ntd ?? 0))}</strong>
-                {' · '}銀行本筆入帳：
+                {' · '}{governmentRefund ? '銀行本筆出款' : '銀行本筆入帳'}：
                 <strong>{financeMoney(bankAmount ?? 0)}</strong>
               </p>
 
@@ -303,7 +312,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
                       {c.settled === false ? '已納入本期，差額尚待處理' : '已核銷'} · {c.label} · 實收 {financeMoney(c.amount_ntd)}
                     </p>
                   ))}
-                  {subsidyView.balances && subsidyView.balances.length > 0 && (
+                  {!governmentRefund && subsidyView.balances && subsidyView.balances.length > 0 && (
                     <label>選擇核對的差額款項
                       <select value={subsidyBalanceId} onChange={(e) => setSubsidyBalanceId(e.target.value)}>
                         <option value="">請選擇</option>
@@ -316,6 +325,25 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
                     </label>
                   )}
                 </div>
+              )}
+
+              {governmentRefund && (
+                refundBalances.length ? (
+                  <label>選擇本筆退回的款項
+                    <select value={subsidyBalanceId} onChange={event => {
+                      setSubsidyBalanceId(event.target.value);
+                      setSubsidyConfirmed(false);
+                    }}>
+                      <option value="">請選擇</option>
+                      {refundBalances.map(balance => (
+                        <option key={balance.identity} value={balance.identity}>
+                          {balance.kind === 'original' ? '本期原款' : balance.case_no} · 待退 {financeMoney(refundLimit(balance))}
+                        </option>
+                      ))}
+                    </select>
+                    {refundBalance && !canRefund && <span role="alert">銀行出款超過此款項的待退金額。</span>}
+                  </label>
+                ) : <p>本期目前沒有待退回款項。</p>
               )}
 
               {wantedHandling !== 'exact' && (
@@ -347,7 +375,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
               )}
 
               <label>核銷備註（選填）
-                <input maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="例：銀行對帳手動核對政府入款" />
+                <input maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={`例：銀行對帳手動核對${subsidyLabel}`} />
               </label>
 
               <div style={{ marginTop: '0.75rem' }}>
@@ -361,10 +389,10 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
                 <button
                   type="button"
                   className="finance-btn-primary"
-                  disabled={!subsidyConfirmed || busy || subsidyLoading}
+                  disabled={!subsidyConfirmed || busy || subsidyLoading || (governmentRefund && !canRefund)}
                   onClick={() => void applySubsidyPeriod()}
                 >
-                  {busy ? '核銷中…' : '確認核銷本期政府入款'}
+                  {busy ? '核銷中…' : `確認核銷本期${subsidyLabel}`}
                 </button>
               </div>
             </div>
@@ -372,7 +400,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
         </div>
       ) : (
         <>
-          {kind !== 'staff_payout' ? <>
+          {!lockedObligations && <>{kind !== 'staff_payout' ? <>
             <label>搜尋案件<input type="search" maxLength={50} placeholder="輸入部分案件編號或客戶姓名" value={caseSearch} onChange={(event) => { caseRequest.current?.abort(); setCaseSearch(event.target.value); setCaseSearching(true); setCases([]); setCaseCursor(null); setTarget(''); setOptions([]); setSelected([]); invalidate(); }} /></label>
             <label>案件編號<select value={target} disabled={caseSearching} onChange={(event) => { setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇案件</option>{cases.map(item => <option key={item.case_no} value={item.case_no}>{item.case_no}｜{item.client_name}</option>)}</select></label>
             {caseSearching && <p role="status">正在搜尋案件…</p>}
@@ -384,7 +412,8 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
           {kind === 'client_receipt' && target && bankRow && (
             <button type="button" onClick={() => { invalidate(); setGroupOpen(true); }}>核對同案多筆入款</button>
           )}
-          {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
+          </>}
+          {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} disabled={!!lockedObligations} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
           {kind === 'staff_payout' && bankRow && <button type="button" disabled={!selected.length} onClick={() => setPayoutTarget({ staffId: Number(target), obligationIdentity: selected[0], obligationIdentities: selected })}>處理付款不足或超額</button>}
           {kind === 'client_refund' && <><label>退款核銷方式<select value={refundMode} onChange={(event) => { setRefundMode(event.target.value as keyof typeof refundModes); invalidate(); }}>{Object.entries(refundModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{refundMode === 'overage' && <p>銀行多退的金額會另列待追回款；原銀行支出保留全額。</p>}</>}
           <label>更正原因（選填）<input maxLength={500} value={reason} onChange={(event) => { if (retryCommand) return; setReason(event.target.value); invalidate(); }} /></label>

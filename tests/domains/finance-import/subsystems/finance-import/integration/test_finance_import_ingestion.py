@@ -230,6 +230,31 @@ def test_filter_admitted_business_rows_discards_loan_and_unmatched_rows() -> Non
     assert admitted["normalized_rows"][1]["cancellation_code"] == "99781699115001"
 
 
+@pytest.mark.parametrize("bank", ["sinopac", "taishin"])
+@pytest.mark.parametrize("amount", [11899, 12001])
+def test_known_same_month_payout_difference_is_admitted(bank, amount):
+    row = _normalized_row(
+        format_id=bank,
+        transaction_date="2026-10-15",
+        direction="outgoing",
+        debit=Decimal(amount),
+        credit=None,
+        counterparty_name="Synthetic Staff",
+        bank_references={},
+    )
+    identity_maps = {
+        "staff_payout_candidates": ({
+            "staff_id": 12,
+            "name": "Synthetic Staff",
+            "due_date": "2026-10-20",
+            "amount_due_ntd": 12000,
+        },),
+    }
+    admitted = _filter_admitted_business_rows({"normalized_rows": [row]}, identity_maps)
+
+    assert admitted["normalized_rows"] == [row]
+
+
 def test_filter_admitted_business_rows_preserves_source_file_when_all_rows_discarded() -> None:
     normalized = {
         "format_id": "taishin",

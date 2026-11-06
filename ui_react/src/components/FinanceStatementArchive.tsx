@@ -10,7 +10,13 @@ import { useUnsavedDraft, useUnsavedNavigation } from './UnsavedChanges';
 import { Drawer } from './Drawer';
 import { ApiHttpError } from '../api/shared/typed_errors';
 
-export function FinanceStatementArchive({ compact = false }: { compact?: boolean } = {}) {
+export function FinanceStatementArchive({
+  compact = false,
+  showManual = !compact,
+}: {
+  compact?: boolean;
+  showManual?: boolean;
+} = {}) {
   const [manualOpen, setManualOpen] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [direction, setDirection] = useState<'' | '存入' | '支出'>('');
@@ -83,40 +89,44 @@ export function FinanceStatementArchive({ compact = false }: { compact?: boolean
       >
         {busy && !manualOpen ? '匯出中…' : '匯出 Excel'}
       </button>
-      <button
-        ref={manualTrigger}
-        type="button"
-        className="finance-btn-secondary"
-        disabled={busy || unknown || manualOpen}
-        onClick={() => { setMessage(''); setError(''); setManualOpen(true); }}
-        aria-label="新增人工明細"
-      >
-        新增人工明細
-      </button>
+      {showManual && (
+        <button
+          ref={manualTrigger}
+          type="button"
+          className="finance-btn-secondary"
+          disabled={busy || unknown || manualOpen}
+          onClick={() => { setMessage(''); setError(''); setManualOpen(true); }}
+          aria-label="新增人工明細"
+        >
+          新增人工明細
+        </button>
+      )}
       {message && (compact ? <span role="status" className="statement-result" style={{ fontSize: '0.82rem', alignSelf: 'center' }}>{message}</span> : <p role="status" className="statement-result">{message}</p>)}
       {error && !manualOpen && (compact ? <span role="alert" className="statement-field-error" style={{ fontSize: '0.82rem', alignSelf: 'center' }}>{error}</span> : <p role="alert" className="statement-field-error">{error}</p>)}
-      <Drawer isOpen={manualOpen} onClose={closeManual} title="新增人工明細" closeLabel="關閉人工新增明細" closeDisabled={busy || unknown} className="statement-manual-drawer" footer={<>
-        <button type="button" className="finance-btn-secondary" disabled={busy || unknown} onClick={() => requestLeave(closeManual)}>取消</button>
-        <button type="submit" form={formId} className="finance-btn-primary" disabled={busy}>{busy ? '儲存中…' : unknown ? '重新確認儲存結果' : '儲存明細'}</button>
-      </>}>
-        <form id={formId} ref={draft} className="statement-manual-form" noValidate onSubmit={event => { event.preventDefault(); void saveManual(); }}>
-          <p className="statement-manual-note">只保存銀行明細，不會完成案件銷帳。</p>
-          {error && <p role="alert" className="statement-field-error">{error}</p>}
-          <fieldset className="statement-manual-fields" disabled={busy || unknown} aria-label="人工明細資料">
-            <div className="statement-field"><label htmlFor={`${formId}-date`}>交易日（必填）</label><input id={`${formId}-date`} type="date" required value={fields['交易日'] ?? ''} aria-invalid={!!fieldErrors.date} aria-describedby={fieldErrors.date ? `${formId}-date-error` : undefined} onChange={event => editField('交易日', event.target.value)} />{errorText('date')}</div>
-            <div className="statement-field"><label htmlFor={`${formId}-direction`}>交易方向（必填）</label><select id={`${formId}-direction`} required value={direction} aria-invalid={!!fieldErrors.direction} aria-describedby={fieldErrors.direction ? `${formId}-direction-error` : undefined} onChange={event => { setDirection(event.target.value as typeof direction); setFieldErrors(previous => ({ ...previous, direction: '' })); setError(''); }}><option value="">請選擇存入或支出</option><option value="存入">存入</option><option value="支出">支出</option></select>{errorText('direction')}</div>
-            <div className="statement-field statement-full-row"><label htmlFor={`${formId}-amount`}>金額（必填）</label><input id={`${formId}-amount`} className="statement-money-input" type="text" inputMode="numeric" disabled={!direction} required placeholder="輸入新臺幣整數金額" value={amount} aria-invalid={!!fieldErrors.amount} aria-describedby={fieldErrors.amount ? `${formId}-amount-error` : undefined} onChange={event => { setAmount(event.target.value); setFieldErrors(previous => ({ ...previous, amount: '' })); setError(''); }} />{errorText('amount')}</div>
-            <div className="statement-full-row">
-              <p className="statement-reference-hint" id={`${formId}-reference-hint`}>銷帳編號或備註，至少填寫一項。</p>
-              <div className="statement-reference-fields">
-                {['銷帳編號', '備註'].map(column => <label key={column}>{column}<input value={fields[column] ?? ''} aria-invalid={!!fieldErrors.reference} aria-describedby={fieldErrors.reference ? `${formId}-reference-error` : `${formId}-reference-hint`} onChange={event => editField(column, event.target.value)} /></label>)}
+      {showManual && (
+        <Drawer isOpen={manualOpen} onClose={closeManual} title="新增人工明細" closeLabel="關閉人工新增明細" closeDisabled={busy || unknown} className="statement-manual-drawer" footer={<>
+          <button type="button" className="finance-btn-secondary" disabled={busy || unknown} onClick={() => requestLeave(closeManual)}>取消</button>
+          <button type="submit" form={formId} className="finance-btn-primary" disabled={busy}>{busy ? '儲存中…' : unknown ? '重新確認儲存結果' : '儲存明細'}</button>
+        </>}>
+          <form id={formId} ref={draft} className="statement-manual-form" noValidate onSubmit={event => { event.preventDefault(); void saveManual(); }}>
+            <p className="statement-manual-note">只保存銀行明細，不會完成案件銷帳。</p>
+            {error && <p role="alert" className="statement-field-error">{error}</p>}
+            <fieldset className="statement-manual-fields" disabled={busy || unknown} aria-label="人工明細資料">
+              <div className="statement-field"><label htmlFor={`${formId}-date`}>交易日（必填）</label><input id={`${formId}-date`} type="date" required value={fields['交易日'] ?? ''} aria-invalid={!!fieldErrors.date} aria-describedby={fieldErrors.date ? `${formId}-date-error` : undefined} onChange={event => editField('交易日', event.target.value)} />{errorText('date')}</div>
+              <div className="statement-field"><label htmlFor={`${formId}-direction`}>交易方向（必填）</label><select id={`${formId}-direction`} required value={direction} aria-invalid={!!fieldErrors.direction} aria-describedby={fieldErrors.direction ? `${formId}-direction-error` : undefined} onChange={event => { setDirection(event.target.value as typeof direction); setFieldErrors(previous => ({ ...previous, direction: '' })); setError(''); }}><option value="">請選擇存入或支出</option><option value="存入">存入</option><option value="支出">支出</option></select>{errorText('direction')}</div>
+              <div className="statement-field statement-full-row"><label htmlFor={`${formId}-amount`}>金額（必填）</label><input id={`${formId}-amount`} className="statement-money-input" type="text" inputMode="numeric" disabled={!direction} required placeholder="輸入新臺幣整數金額" value={amount} aria-invalid={!!fieldErrors.amount} aria-describedby={fieldErrors.amount ? `${formId}-amount-error` : undefined} onChange={event => { setAmount(event.target.value); setFieldErrors(previous => ({ ...previous, amount: '' })); setError(''); }} />{errorText('amount')}</div>
+              <div className="statement-full-row">
+                <p className="statement-reference-hint" id={`${formId}-reference-hint`}>銷帳編號或備註，至少填寫一項。</p>
+                <div className="statement-reference-fields">
+                  {['銷帳編號', '備註'].map(column => <label key={column}>{column}<input value={fields[column] ?? ''} aria-invalid={!!fieldErrors.reference} aria-describedby={fieldErrors.reference ? `${formId}-reference-error` : `${formId}-reference-hint`} onChange={event => editField(column, event.target.value)} /></label>)}
+                </div>
+                {errorText('reference')}
               </div>
-              {errorText('reference')}
-            </div>
-            <details className="statement-full-row statement-optional-fields"><summary>其他資料（選填）</summary><div className="statement-fields">{statementColumns.filter(column => !['交易日', '支出', '存入', '銷帳編號', '備註'].includes(column)).map(fieldInput)}</div></details>
-          </fieldset>
-        </form>
-      </Drawer>
+              <details className="statement-full-row statement-optional-fields"><summary>其他資料（選填）</summary><div className="statement-fields">{statementColumns.filter(column => !['交易日', '支出', '存入', '銷帳編號', '備註'].includes(column)).map(fieldInput)}</div></details>
+            </fieldset>
+          </form>
+        </Drawer>
+      )}
     </>
   );
 

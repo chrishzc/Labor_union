@@ -262,6 +262,12 @@ class FinanceImportReviewRowPageView(_StrictModel):
     next_after_row_id: int | None = Field(default=None, gt=0)
 
 
+class FinanceBankReconciliationTargetView(_StrictModel):
+    case_no: str
+    obligation_identities: list[str] = Field(min_length=1)
+    staff_id: int | None = Field(default=None, gt=0)
+
+
 class FinanceBankTransactionView(_StrictModel):
     row_id: int
     row_identity: str
@@ -277,6 +283,7 @@ class FinanceBankTransactionView(_StrictModel):
     reference: str
     counterparty_name: str | None
     cases: list[str]
+    reconciliation_target: FinanceBankReconciliationTargetView | None = None
 
 
 class FinanceBankTransactionPageView(_StrictModel):

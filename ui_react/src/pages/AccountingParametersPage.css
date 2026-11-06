@@ -31,6 +31,7 @@
 .pricing-case .pricing-table th, .pricing-case .pricing-table td { padding: 8px; }
 .pricing-identity-table .pricing-deposit-heading { color: #a3390c; }
 .pricing-identity-table .pricing-deposit-input { min-width: 120px; background: #fbf6f3; }
+.pricing-identity-table .pricing-deposit-input::placeholder { color: #1e1b19; opacity: 1; }
 .pricing-mobile-label { display: none; }
 .pricing-history-row button { font: inherit; background: none; border: 0; color: #c2410c; text-decoration: underline; cursor: pointer; }
 @media (max-width: 720px) {

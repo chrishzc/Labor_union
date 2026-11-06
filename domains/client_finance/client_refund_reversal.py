@@ -153,7 +153,10 @@ def build_client_refund_candidate(
     bank_total = sum(item.amount.amount for item in ordered_banks)
     obligation_total = sum(item.amount_due.amount for item in ordered_obligations)
     diff = obligation_total - bank_total
-    if purpose is ClientRefundPurpose.CUSTOMER_REFUND and 0 < diff <= 100:
+    fee_eligible = purpose is ClientRefundPurpose.CUSTOMER_REFUND or (
+        purpose is ClientRefundPurpose.SUBSIDY_RETURN and len(ordered_banks) == 1
+    )
+    if fee_eligible and 0 < diff <= 100:
         allocations = tuple(
             ClientCorrectionAllocation(
                 f"refund-bank:{ordered_banks[0].identity}",

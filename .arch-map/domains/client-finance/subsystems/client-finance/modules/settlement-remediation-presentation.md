@@ -9,6 +9,7 @@
 一般退款提供既有 partial-refund 選項；typed Query 的 `include_not_due=true` 供銀行核對選取未到期退款，預設仍只讀逾期款項。補退沿同一退款 owner，不新增後端付款能力。
 
 ## Implementation
+- settlement rules: `domains/client_finance/client_refund_reversal.py` — 客戶退款與補助退還核銷的金額分配、結清及沖正規則。
 - primary: `ui_react/src/components/ClientSettlementRemediationWorkbench.tsx`
 - transport: `api/routes/client_refund_reversal.py`
 

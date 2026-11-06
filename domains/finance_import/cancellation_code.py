@@ -15,16 +15,16 @@ _MEMO_PREFIXED_SUFFIX = re.compile(r"(?:99781699|[A-Za-z]{1,3})([0-9]{6})(?!\d)"
 
 def extract_sinopac_memo_case_suffix(value: object) -> str | None:
     """Read one distinct six-digit case reference from the memo only."""
-    if not isinstance(value, str):
-        return None
-    normalized = unicodedata.normalize("NFKC", value).strip()
-    if not normalized:
-        return None
-    prefixed = set(_MEMO_PREFIXED_SUFFIX.findall(normalized))
-    if len(prefixed) == 1:
-        return next(iter(prefixed))
-    candidates = set(_MEMO_CASE_SUFFIX.findall(normalized))
+    candidates = sinopac_memo_case_suffixes(value)
     return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def sinopac_memo_case_suffixes(value: object) -> frozenset[str]:
+    if not isinstance(value, str):
+        return frozenset()
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    prefixed = _MEMO_PREFIXED_SUFFIX.findall(normalized)
+    return frozenset(prefixed or _MEMO_CASE_SUFFIX.findall(normalized))
 
 
 def extract_sinopac_account_reference(value: object) -> str | None:

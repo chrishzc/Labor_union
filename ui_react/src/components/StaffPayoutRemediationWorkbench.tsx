@@ -30,6 +30,7 @@ export interface StaffPayoutRemediationWorkbenchProps {
   onResolved?: () => void | Promise<void>;
   onPosted?: () => void;
   financeImportRowId?: number;
+  confirmPreview?: boolean;
   onBusyChange?: (busy: boolean) => void;
   client?: StaffPayoutRemediationClient;
   requestOptions?: StaffPayoutRemediationOptions;
@@ -129,6 +130,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
   onResolved,
   onPosted,
   financeImportRowId,
+  confirmPreview = false,
   onBusyChange,
   client = staffPayoutRemediationClient,
   requestOptions = EMPTY_REQUEST_OPTIONS,
@@ -207,7 +209,7 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
       const value = await client.preview(selected, requestOptions);
       if (!previewMatchesTarget(value, target, query)) throw new StaffPayoutRemediationError('STAFF_PAYOUT_PREVIEW_IDENTITY_MISMATCH', 'Preview 未回傳同一 Staff 與原義務。');
       setPreview(value);
-      await runApply(value);
+      if (!confirmPreview) await runApply(value);
     } catch (caught) { setError(displayError(caught)); }
     finally { if (mounted.current) setBusy(null); }
   };
@@ -313,10 +315,12 @@ export const StaffPayoutRemediationWorkbench: React.FC<StaffPayoutRemediationWor
     <p><strong>解除條件：</strong>只核對既有銀行入帳資料，不會發動銀行匯款。核銷處理完成後，系統仍會重新確認此筆應付款已結清。</p>
     {obligations.map((obligation) => <div key={obligation.obligation_identity} data-surface-id="staff-payout-obligation"><strong>案件 {obligation.case_no} 應付款</strong><p>到期 {obligation.due_date ?? '未設定'}｜應付 NT$ {obligation.amount_due_ntd.toLocaleString('zh-TW')}｜餘額 NT$ {obligation.balance_ntd.toLocaleString('zh-TW')}｜狀態 {payoutStatusLabel(obligation.payout_status)}</p></div>)}
     {error && <div role="alert">{error}</div>}{notice && <div role="status">{notice}</div>}
-    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>核銷方式<select aria-label="核銷方式" value={differenceMode} onChange={(event) => { setDifferenceMode(event.target.value as typeof differenceMode); invalidatePreview(); }}><option value="">足額核銷剩餘款</option><option value="underpayment">付款不足，先核銷實付</option><option value="overpayment">付款超額，另列追收</option></select></label>{financeImportRowId === undefined ? <label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label> : <p>使用已選取的銀行流水。</p>}<label>人工核對理由（選填）<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection()} onClick={() => void runPreview()}>儲存核銷</button></fieldset>
+    <fieldset disabled={busy !== null || unknownOutcome || accepted !== null || !active} style={{ display: 'grid', gap: 8 }}><legend>既有銀行入帳資料</legend><label>核銷方式<select aria-label="核銷方式" value={differenceMode} onChange={(event) => { setDifferenceMode(event.target.value as typeof differenceMode); invalidatePreview(); }}><option value="">足額核銷剩餘款</option><option value="underpayment">付款不足，先核銷實付</option><option value="overpayment">付款超額，另列追收</option></select></label>{financeImportRowId === undefined ? <label>銀行流水紀錄編號（可用逗號或空白分隔）<input aria-label="銀行流水紀錄編號" inputMode="numeric" value={rowIdsText} onChange={(event) => { setRowIdsText(event.target.value); invalidatePreview(); }} /></label> : <p>使用已選取的銀行流水。</p>}<label>人工核對理由（選填）<textarea aria-label="人工核對理由" maxLength={500} value={reason} onChange={(event) => { setReason(event.target.value); invalidatePreview(); }} /></label><button type="button" disabled={!selection()} onClick={() => void runPreview()}>{confirmPreview ? '預覽核銷' : '儲存核銷'}</button></fieldset>
     {accepted && job?.status === 'succeeded' && !unknownOutcome && active && financeImportRowId === undefined && <button type="button" disabled={busy !== null} onClick={continueRemaining}>繼續核銷剩餘款</button>}
     {accepted && job?.status === 'succeeded' && active && financeImportRowId !== undefined && <p role="status">剩餘款繼續待付；請由補款流水接續核銷。</p>}
     {preview && payoutCandidate && <div data-surface-id="staff-payout-remediation-preview" style={{ border: '1px solid #b7d8d1', padding: 10, borderRadius: 8 }}><strong>本次核銷資料</strong><p>銀行總額 NT$ {payoutCandidate.bank_total.amount.toLocaleString('zh-TW')}｜應付款總額 NT$ {payoutCandidate.obligation_total.amount.toLocaleString('zh-TW')}</p></div>}
+    {confirmPreview && preview && !accepted && !unknownOutcome &&
+      <button type="button" disabled={busy !== null} onClick={() => void runApply(preview)}>確認核銷</button>}
     {accepted && <div data-surface-id="staff-payout-job"><p>核銷已受理，正在處理並重新確認應付款狀態。</p>{job && <p>處理狀態：{jobStatusLabel(job.status)}</p>}{(unknownOutcome || (job !== null && (job.status === 'queued' || job.status === 'running' || job.status === 'succeeded'))) && <button type="button" disabled={busy !== null} onClick={() => void reconcile()}>重新查詢核銷結果</button>}</div>}
     {unknownOutcome && !accepted && <div role="alert">核銷結果目前無法安全確認，禁止產生新操作。<button type="button" disabled={busy !== null} onClick={() => void runApply()}>使用原操作安全重試</button></div>}
     {!active && !accepted && <div role="status">目前應付款已非逾期待處理；系統會依最新應付款資料判斷是否解除異常。</div>}

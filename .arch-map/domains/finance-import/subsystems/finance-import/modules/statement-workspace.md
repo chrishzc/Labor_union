@@ -29,7 +29,7 @@
 - `ui_react/src/components/FinanceReceivableItems.tsx` — 按到期月份列出正式應收款，未定日期款分到待確認；同一 typed Query 不建立第二份案件總額。
 - `ui_react/src/pages/FinancePage.tsx` — 進行中案件（預設）、銀行對帳、政府補助清單、每月帳務；所有案件入口開同一右側抽屜，原核銷與查證工具保留可達入口。
 - `ui_react/src/components/FinanceCaseList.tsx` — 組合完整 Orders 搜尋及十三階段正式投影，第8步起列入，最多四案並行查詢；六欄／單一目前事項／階段時效篩選／20案分頁。沿Domain collection_progress顯示訂金→第一期→第二期→人工方案；只有客戶款齊且獨立人工方案已保存才移出。發出提醒共用LINE同案期款來源及原成功紀錄。
-- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數及逐筆核對抽屜。匯入紀錄從獨立入口查看。
+- `ui_react/src/components/FinanceBankReconciliationWorkspace.tsx`、`FinanceBankReconciliationWorkspace.css` — 銀行對帳工作台（WF-03/04），跨批次查原始銀行流水與正式核銷狀態，顯示待核對筆數。已確認的案件款項帶原流水直開共用案件抽屜核對，政府款開原整期核對。匯入紀錄從獨立入口查看。
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
@@ -50,7 +50,7 @@
 ## Contracts
 - `document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md` §15、§17～18
 - archive endpoints: `statements/export`, `statements/manual`, `statements/duplicates` beneath `/api/v1/finance-import`
-- `bank-transactions` — 以已辨識業務對象／案件／政府補助之原始銀行流水為清單身分（無關流水於匯入前丟棄且不列入待核對），跨批次分頁並補齊對象與關聯案件，正式核銷證據決定狀態。
+- `bank-transactions` — 以已辨識業務對象／案件／政府補助之原始銀行流水為清單身分（無關流水於匯入前丟棄且不列入待核對），跨批次分頁並補齊對象與關聯案件，正式核銷證據決定狀態；待核對列僅在案件及正式款項可唯一確認時提供案件核對目標。
 - `import-history`、`workbooks/ingestion-outcome` — 查每次匯入的保存、核銷結果與原操作結果；待核對歷史筆數沿原匯入／核銷收據保存，缺歷史證據顯示未知。
 - manual plan endpoints: GET/POST `cases/{case_no}/accounting/subsidy-plan`; server actor, plan version CAS and same-command replay under the Orders case identity lock, one outer metadata transaction. No collection, bank uniqueness or legacy direct-arrangement prerequisite; no financial/date writer or payable generation.
 - case/warning endpoints: `cases/{case_no}/accounting`, `cases/{case_no}/accounting/dismiss`, `accounting/warnings`
@@ -62,7 +62,7 @@
 - case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection; absent government money is never direct-arrangement evidence. Direct arrangement facts are explicit append-only confirm_direct/withdraw_direct events, never inferred from missing government cash; same-case GET/POST arrangement is the authenticated metadata writer, with arrangement version, Orders identity lock and original-command replay.
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; no case-side bank reconciliation, duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
+- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; the bank list opens a scoped reconciliation subview with the selected source and obligation; the normal case overview has no duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
 
 ## Verification
 - layout_status: `custom_current`

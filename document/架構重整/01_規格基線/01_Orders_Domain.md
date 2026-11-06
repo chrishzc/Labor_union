@@ -542,27 +542,46 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 
 ### 3.5 Cancellation
 
-- 只適用於全部約定服務完成前。
+適用於全部約定服務完成前，包含尚未服務即取消及服務中提前結束。2026-11-06 人工確認下列流程，取代原「不收違約金」及「不通知客戶」的條文。實作待後續授權。
+
 - 尚無正式 assignment 的日期-only 開始日不代表已服務，不得因此要求逐日服務補登。
 - Cancellation 專用 reader 必須驗證下游 owner 的存在與完整性。尚未服務且 Scheduling、Client Finance、Payroll
   root 合法不存在時，Query／Preview／Apply 與 receipt 的對應 version、generation、impact／Scheduling receipt link
-  使用 `NULL`，不得自動 bootstrap、補造版本或義務。已初始化 owner 仍維持既有取消 impact；已有收款但未排班
-  仍必須由 Client Finance 處理退款。partial root、孤立財務歷史或正式服務缺必要 root 一律 typed blocker、零寫入。
+  使用 `NULL`。零服務、零收款且不收違約金時，維持原本無帳務異動的取消路徑。已有收款但未排班仍由 Client Finance
+  結算。原無 Finance root 而人員確認收取違約金時，由 Client Finance 按正式案件事實承接這筆待收；
+  若必要事實不完整，回 typed blocker，整筆取消零寫入。partial root、孤立財務歷史或正式服務缺必要 root 同樣阻擋。
 - Apply fresh-read 並鎖定 Orders 及既有下游 facts；不存在的 owner 若在 Preview 後建立，或既有 owner version 改變，
-  以原有 typed version conflict／stale preview 拒絕，不得盲目略過。取消事件、取消控制、等待訂金鎖釋放、lifecycle
-  與 committed outbox 仍由同一 outer transaction 保存；只有不存在的下游 writer 可省略。
+  以原有 typed version conflict／stale preview 拒絕，不得盲目略過。同一 outer transaction 保存取消事件、取消控制、
+  等待訂金鎖釋放、lifecycle、Client Finance 結算與 committed outbox。
 - 已開始服務時，Preview 由使用者確認逐日「實際服務日期＋實際月嫂」；現有事實預填，新增或改派必須指定月嫂與原因。
-- 取消 Query 依注入的台北業務日期自動排除取消日之後的排班，僅預填截至當日的候選服務日；當日是否已服務由人員保留或移除，不逐筆刪除未來排班。開始日期或預排不代表已實際服務，確認完全未服務可按 0 日取消；已鎖定的完整履約及未來日驗證仍不得旁路。取消原因選填，點擊取消即執行內部 Preview／Apply，結果依 receipt／正式回讀確認。
+- 取消 Query 依注入的台北業務日期自動排除取消日之後的排班，僅預填截至當日的候選服務日；當日是否已服務由人員保留或移除。確認完全未服務可按 0 日取消；已鎖定的完整履約及未來日驗證仍不得旁路。
+- 具取消權限的公會人員逐案決定是否收取取消違約金。不收時為 0 元；收取時輸入正整數新臺幣金額與原因，金額不設上限，也不受現有可退款額限制。一般取消原因仍選填。正式取消保存違約金決定、金額、原因與操作人員。
+- Preview 零寫入，列出實際服務日與時數、服務應付、取消違約金、淨實收及應退款／應補收／無待收付差額。人員可返回調整，重新預覽後明確確認才 Apply。結果依 receipt 與正式回讀確認。
 - Apply 取消舊 assignments、未來 schedule 與 buffer，依確認後服務日建立新 assignments，重算 hours、整數樓層費、Client Finance 與 Staff Finance。
-- 沒有取消費或解約違約金。服務中取消的服務本金固定為已確認實際服務時數乘有效服務單價；已正式
-  核銷的訂金與第一期款都納入既有實收，與新本金比較後只形成應退款、應補收或無帳務變動。
+- Client Finance 依[客戶取消結算與違約金規格](04_Client_Finance_Domain.md#client-cancellation-settlement)重算帳務，計入原期款未結清前已入帳的實收。違約金與服務應付分列。
 - 月嫂應付同步改為該月嫂已確認實際服務時數乘有效服務單價，再加依法有效的樓層費與其他調整；
   未服務的原排定日期不得形成薪資或補助時數。
 - 取消結果若包含 Client Finance impact，Orders 只轉送 owning Domain 的 typed 結果；每筆必須帶
   `direction`（`refund_due`／`additional_charge_due`／`no_finance_change`）與
   `direction_amount_ntd`。Orders、API 與 UI 不得由 action kind、obligation amount 或金額正負自行推定。
 - 完整履約後取消回 `order_cancellation_after_full_service` blocker 並零寫入；狀態、薪資與服務結算維持完整履約。
-- 取消與退款成功均不建立 LINE 訊息。既有取消 terminal closure 僅依 LINE 身分資格處理選單恢復，不代表退款或通知已完成。
+- 取消及帳務結果正式提交後，依[取消結算通知契約](20_LINE客服與月嫂自助服務正式規格.md#order-cancellation-settlement-notices)通知客戶結算明細。退款或補收全額核銷後，再通知客戶該筆結算完成。
+
+```mermaid
+flowchart TD
+    A["發起取消或提前結束"] --> B["核對實際服務<br/>未服務按 0 天"]
+    B --> C["決定是否收取違約金<br/>收取時填寫金額與原因"]
+    C --> D["預覽服務應付、違約金、淨實收及應退／應補收"]
+    D --> E{"確認取消？"}
+    E -->|返回調整| B
+    E -->|確認| F["同一交易保存取消及帳務<br/>有差額時建立待退款或待補收"]
+    F --> G["提交後通知客戶結算明細"]
+    F -->|有待退款| H["依銀行出款核銷"]
+    F -->|有待補收| I["依銀行入款核銷"]
+    F -->|無待收付差額| J["結算完成"]
+    H --> K["部分核銷保留餘額<br/>全額核銷後通知客戶"]
+    I --> K
+```
 
 #### 3.5.1 服務中代班的契約邊界（2026-08-27 人工裁決）
 
@@ -677,8 +696,7 @@ operational blocker，不得偽造成 signed／delivered／paid，也不得繞�
 
 Orders service completion 與 Client Finance、Staff Payables、Government Subsidy settlement 分開投影：
 服務根事實完整可使 Orders 完成；未結清金流仍各自保持 actionable alert，不得把 Orders 倒退為服務中。
-取消則依 §3.5 分流，沒有額外解約違約金；服務前無正式金流不要求付款紀錄，已有收款或服務中取消所形成的
-退款、補收、月嫂應付／追回仍由各 owner 結清後才解除。
+取消則依 §3.5 分流。服務前無正式金流時，以零實收結算；取消所形成的退款、補收、月嫂應付／追回仍由各 owner 結清後才解除。
 
 ## 4. Module
 

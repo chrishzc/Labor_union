@@ -77,11 +77,14 @@ describe('PAYOUT-001 remediation workbench', () => {
     const combined = { ...initial, obligations: [...initial.obligations, second] };
     const partial = { ...settled, obligations: [...settled.obligations, second] };
     const client = clientFor({ query: combined, settled: partial }); const onResolved = vi.fn();
-    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1', obligationIdentities: combined.obligations.map(item => item.obligation_identity) }} financeImportRowId={91} client={client} onResolved={onResolved} pollIntervalMs={0}/>);
+    render(<StaffPayoutRemediationWorkbench target={{ staffId: 11, obligationIdentity: 'obligation:11:CASE-1', obligationIdentities: combined.obligations.map(item => item.obligation_identity) }} financeImportRowId={91} confirmPreview client={client} onResolved={onResolved} pollIntervalMs={0}/>);
     await screen.findAllByText(/餘額 NT\$ 12,000/);
     expect(screen.queryByLabelText('銀行流水紀錄編號')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('核銷方式'), { target: { value: 'underpayment' } });
-    fireEvent.click(screen.getByRole('button', { name: '儲存核銷' }));
+    fireEvent.click(screen.getByRole('button', { name: '預覽核銷' }));
+    const confirm = await screen.findByRole('button', { name: '確認核銷' });
+    expect(client.apply).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
     await screen.findByText('剩餘款繼續待付；請由補款流水接續核銷。');
     expect(client.preview).toHaveBeenCalledWith(expect.objectContaining({ financeImportRowIds: [91], obligationIdentities: combined.obligations.map(item => item.obligation_identity), differenceMode: 'underpayment' }), expect.anything());
     expect(onResolved).not.toHaveBeenCalled();

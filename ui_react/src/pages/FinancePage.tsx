@@ -1,6 +1,6 @@
 import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
-import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components/StaffIdentityProvider';
+import { useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
  * Description: 呈現 Finance 四大主工作區（案件帳務、銀行對帳、政府補助清單、每月帳務），收斂舊作業工具並維護受控銀行交易明細。
@@ -8,8 +8,6 @@ import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components
 import React, { useEffect, useRef, useState } from 'react';
 import { Drawer } from '../components/Drawer';
 import './FinancePage.css';
-import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
-import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
 import { FinanceImportQueryError } from '../api/finance_import/finance_import_query_errors';
 
@@ -17,6 +15,8 @@ import { FinanceCaseList } from '../components/FinanceCaseList';
 import { FinanceGovernmentSubsidyList } from '../components/FinanceGovernmentSubsidyList';
 import { FinanceMonthlyAccounting } from '../components/FinanceMonthlyAccounting';
 import type { AccountingRange } from '../api/finance_import/monthly_accounting_client';
+import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
+import { SubsidyPeriodWorkbench } from '../components/SubsidyPeriodWorkbench';
 import { FinanceCaseAccounting } from '../components/FinanceCaseAccounting';
 import { FinanceBankReconciliationWorkspace } from '../components/FinanceBankReconciliationWorkspace';
 
@@ -43,6 +43,7 @@ function normalizeFinanceTab(tab: string | null, overdue: boolean, hasCaseNo: bo
     case 'subsidy-advance':
       return 'government-list';
     case 'monthly':
+    case 'payment-destination':
     case 'payments':
     case 'staff-payables':
     case 'receipt-notices':
@@ -84,7 +85,6 @@ function financeErrorMessage(error: unknown, fallback: string): string {
 export const FinancePage: React.FC = () => {
   const { requestLeave } = useUnsavedNavigation();
   useStaffIdentityLabels();
-  const sharedStaffDirectory = useStaffIdentityDirectory();
   const [entry] = useState(() => {
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     return {
@@ -99,6 +99,8 @@ export const FinancePage: React.FC = () => {
     normalizeFinanceTab(entry.tab, entry.overdue, Boolean(entry.caseNo))
   );
   const [caseDrawer, setCaseDrawer] = useState(entry.caseNo);
+  const [bankReview, setBankReview] = useState<FinanceBankTransaction | null>(null);
+  const [bankReviewBusy, setBankReviewBusy] = useState(false);
   const [caseClientName, setCaseClientName] = useState('');
   const [caseNotice, setCaseNotice] = useState<'deposit' | 'first' | 'second' | undefined>();
   const [monthlyRange, setMonthlyRange] = useState<AccountingRange>(() => ({
@@ -108,12 +110,32 @@ export const FinancePage: React.FC = () => {
   }));
 
   const openCase = (caseNo: string, noticeStage?: 'deposit' | 'first' | 'second') => {
+    setBankReview(null);
     setCaseClientName('');
     setCaseNotice(noticeStage);
     setCaseDrawer(caseNo);
   };
 
-  const [staff, setStaff] = useState<{ id: number; label: string }[]>([]);
+  const openBankReview = (row: FinanceBankTransaction) => {
+    if (row.status !== 'pending' || row.disposition === 'blocked') return;
+    const targetCase = row.reconciliation_target?.case_no;
+    if (!targetCase && (row.classification_type !== 'government_subsidy' || row.direction === 'unknown')) return;
+    if (targetCase) openCase(targetCase);
+    else setCaseDrawer('');
+    setBankReview(row);
+  };
+
+  const closeCase = () => {
+    setCaseDrawer('');
+    setBankReview(null);
+  };
+
+  const bankReviewPosted = () => {
+    closeCase();
+    setReload(value => value + 1);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-bank-reconciliation-focus]')?.focus({ preventScroll: true }));
+  };
+
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
@@ -124,7 +146,6 @@ export const FinancePage: React.FC = () => {
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
   const [batchOutcome, setBatchOutcome] = useState<LoadState<FinanceImportBatchOutcome>>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
-  const staffReload = useRef(reload);
   const controllers = useRef(new Map<string, AbortController>());
   const sequences = useRef(new Map<string, number>());
   const financeApplyCommandByPreview = useRef(new Map<string, { idempotencyKey: string; correlationId: string; reason: string }>());
@@ -164,34 +185,6 @@ export const FinancePage: React.FC = () => {
   const current = (key: string, sequence: number, controller: AbortController) =>
     sequences.current.get(key) === sequence && !controller.signal.aborted;
 
-  useEffect(() => {
-    if (activeTab !== 'finance-import') return;
-    if (sharedStaffDirectory !== null) {
-      if (staffReload.current !== reload) {
-        staffReload.current = reload;
-        sharedStaffDirectory.refresh();
-        return;
-      }
-      if (sharedStaffDirectory.status === 'ready') {
-        const people = [...sharedStaffDirectory.people.values()].sort(compareStaffUnionNumbers)
-          .map(person => ({ id: person.id, label: staffDisplayLabel(person.unionNo, person.name ?? `服務人員摘要 #${person.id}`) }));
-        setStaff(people);
-      }
-      return;
-    }
-    const request = start('staff');
-    loadAllStaffDirectoryPages(
-      staffDirectoryClient.queryPage.bind(staffDirectoryClient),
-      { pageSize: 200 },
-      { signal: request.controller.signal },
-    )
-    .then((page) => {
-      if (!current('staff', request.sequence, request.controller)) return;
-      const adapted = adaptStaffDirectoryPage(page).items.sort(compareStaffUnionNumbers).map((item) => ({ id: item.id, label: staffDisplayLabel(item.unionNo, item.displayName) }));
-      setStaff(adapted);
-    })
-    .catch(() => {});
-  }, [activeTab, reload, sharedStaffDirectory]);
 
   const ingestWorkbook = async (original?: IngestionCommand) => {
     if (importBusy || (unconfirmedIngestion && !original)) return;
@@ -380,7 +373,6 @@ export const FinancePage: React.FC = () => {
         <FinanceBankReconciliationWorkspace
           onCase={openCase}
           revision={reload}
-          staff={staff}
           ingestionNeedsLookup={unconfirmedIngestion !== null}
           onLookupIngestion={() => void lookupIngestion()}
           onResendIngestion={ingestionRecordMissing && unconfirmedIngestion && financeWorkbook
@@ -406,7 +398,7 @@ export const FinancePage: React.FC = () => {
           onIngest={() => void ingestWorkbook()}
           onApply={(preview) => void applyImportedBatch(preview)}
           onObserveApplyOutcome={(jobId, expected) => void observeApplyOutcome(jobId, expected)}
-          onPostedManual={() => setReload(value => value + 1)}
+          onReconcile={openBankReview}
           confirmedImportReceipt={confirmedImportReceipt}
           submittedFinanceCommand={submittedFinanceCommand}
         />
@@ -433,27 +425,42 @@ export const FinancePage: React.FC = () => {
           closeLabel="關閉案件"
           size="xl"
           className="finance-accounting-drawer"
-          onClose={() => setCaseDrawer('')}
+          onClose={closeCase}
+          closeDisabled={bankReviewBusy}
           footer={
             <button
               type="button"
               className="finance-btn-secondary"
-              onClick={() => requestLeave(() => setCaseDrawer(''))}
+              disabled={bankReviewBusy}
+              onClick={() => requestLeave(closeCase)}
             >
               關閉案件
             </button>
           }
         >
           <FinanceCaseAccounting
-            key={caseDrawer}
+            key={bankReview?.row_identity ?? caseDrawer}
             embedded
             initialCase={caseDrawer}
             initialNoticeStage={caseNotice}
+            bankReconciliation={bankReview ? { row: bankReview, onPosted: bankReviewPosted, onBusyChange: setBankReviewBusy } : undefined}
             onIdentity={(caseNo, name) => {
               if (caseNo === caseDrawer) setCaseClientName(name);
             }}
             onChanged={() => setReload((value) => value + 1)}
           />
+        </Drawer>
+      )}
+      {bankReview?.classification_type === 'government_subsidy' && (
+        <Drawer isOpen title="政府整期核對" closeLabel="關閉整期核對" size="wide"
+          onClose={closeCase} closeDisabled={bankReviewBusy}>
+          <p>台新 · {bankReview.transaction_date ?? '日期未提供'} · {bankReview.reference} · NT$ {bankReview.amount_ntd.toLocaleString()}</p>
+          {bankReview.direction !== 'unknown' && (
+            <SubsidyPeriodWorkbench key={bankReview.row_identity}
+              bankSource={{ id: bankReview.row_id, direction: bankReview.direction, amountNtd: bankReview.amount_ntd }}
+              onOpenCase={caseNo => requestLeave(() => openCase(caseNo))}
+              onPosted={bankReviewPosted} onBusyChange={setBankReviewBusy} />
+          )}
         </Drawer>
       )}
     </div>

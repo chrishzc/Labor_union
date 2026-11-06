@@ -20,8 +20,8 @@ function getObligationLabel(identity: string, stage?: string | null): string {
   return identity;
 }
 
-export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersion=0,requiredBankRowId,onBusyChange}:{
-  caseNo:string;onChanged:()=>void;refreshVersion?:number;requiredBankRowId?:number;onBusyChange?:(busy:boolean)=>void;
+export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersion=0,requiredBankRowId,initialObligationId,onBusyChange}:{
+  caseNo:string;onChanged:()=>void;refreshVersion?:number;requiredBankRowId?:number;initialObligationId?:string;onBusyChange?:(busy:boolean)=>void;
 }){
   const [facts,setFacts]=useState<ClientReceiptQuery>();
   const [selectedBanks,setSelectedBanks]=useState<number[]>([]);
@@ -46,16 +46,20 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
       if(controller.signal.aborted)return;
       const banks=value.bank_facts.map(row=>row.finance_import_row_id);
       if(requiredBankRowId!==undefined&&!banks.includes(requiredBankRowId)){
-        setError('此筆交易尚未辨識為本案入款，請返回單筆核對確認歸屬。');
+        setError('此筆交易尚未辨識為本案入款，請返回銀行對帳重新確認歸屬。');
+        return;
+      }
+      if(initialObligationId!==undefined&&!value.obligations.some(item=>item.obligation_identity===initialObligationId)){
+        setError('對應期款已變更，請返回銀行對帳重新查詢。');
         return;
       }
       setFacts(value);
       setSelectedBanks(requiredBankRowId===undefined?banks:[requiredBankRowId]);
-      setSelectedItems(requiredBankRowId===undefined?value.obligations.map(row=>row.obligation_identity):[]);
+      setSelectedItems(initialObligationId ? [initialObligationId] : requiredBankRowId===undefined?value.obligations.map(row=>row.obligation_identity):[]);
     }).catch(()=>{if(!controller.signal.aborted)setError('本案待核對入款暫時無法取得，請重新查詢。');});
     });
     return()=>controller.abort();
-  },[caseNo,revision,refreshVersion,requiredBankRowId]);
+  },[caseNo,revision,refreshVersion,requiredBankRowId,initialObligationId]);
 
   const selection=():ReceiptSelection=>({payment_stage:null,finance_import_row_ids:selectedBanks,obligation_identities:selectedItems});
   const bankTotal=facts?.bank_facts.filter(row=>selectedBanks.includes(row.finance_import_row_id)).reduce((sum,row)=>sum+row.amount_ntd,0)??0;

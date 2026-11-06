@@ -2,7 +2,7 @@
  * File: FinanceCaseAccounting.tsx
  * Description: 案件帳務精簡抽屜與警示清單，提供各期核銷、補助方案、銀行對帳虛擬帳號與退款帳戶核對。
  */
-import {useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {financeAccountingClient,type CaseAccounting,type AccountingWarning} from '../api/finance_import/finance_accounting_client';
 import {paymentOverdueReminderClient,type CasePaymentReminder} from '../api/line_order_groups/payment_overdue_reminder_client';
 import {ordersQueryClient} from '../api/orders/order_query_client';
@@ -16,6 +16,10 @@ import {ApiHttpError} from '../api/shared/typed_errors';
 import {FinanceSubsidyPlanForm,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
 import {FinanceCaseNotice,lastNotification,notificationTime,notificationStatus} from './FinanceCaseNotice';
 import {CaseManualSupplementWorkbench} from './CaseManualSupplementWorkbench';
+import type { FinanceBankTransaction } from '../api/finance_import/finance_import_query_schemas';
+import { ClientReceiptReconciliationPanel } from './ClientReceiptReconciliationPanel';
+import { StaffPayoutRemediationWorkbench } from './StaffPayoutRemediationWorkbench';
+import { FinanceImportCorrectionForm } from './FinanceImportCorrectionForm';
 import './FinanceCaseAccounting.css';
 import './FinanceCompactCase.css';
 
@@ -78,7 +82,48 @@ export function AccountingWarningList({ data, onChange }: { data: CaseAccounting
   </section>;
 }
 
-export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void}){
+function CaseBankReconciliation({ row, data, onPosted, onBusyChange }: {
+  row: FinanceBankTransaction;
+  data: CaseAccounting;
+  onPosted: () => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
+  const target = row.reconciliation_target;
+  const staffTarget = useMemo(() => target?.staff_id ? {
+    staffId: target.staff_id, obligationIdentity: target.obligation_identities[0],
+    obligationIdentities: target.obligation_identities,
+  } : null, [target]);
+  if (!target || target.case_no !== data.case_no) return <p role="alert">對應款項已變更，請返回銀行對帳重新查詢。</p>;
+  const isReceipt = row.classification_type === 'client_receipt';
+  const isStaff = target.staff_id !== null;
+  const items = isStaff ? data.staff_items : data.client_items;
+  const direction = isReceipt ? 'receivable' : 'payable';
+  const obligations = items.filter(item => item.direction === direction && target.obligation_identities.includes(item.identity));
+  if (obligations.length !== target.obligation_identities.length) {
+    return <p role="alert">對應款項已變更，請返回銀行對帳重新查詢。</p>;
+  }
+  const initialKind = row.classification_type === 'client_subsidy_return' ? 'client_subsidy_return' : 'client_refund';
+  return <section className="finance-case-subview" aria-label="案件銀行交易核對">
+    <header>
+      <h3>{isReceipt ? '客戶繳款' : isStaff ? '月嫂薪資' : '客戶退款'} · 核對交易</h3>
+      <p>{row.bank === 'sinopac' ? '永豐' : '台新'} · {row.transaction_date ?? '日期未提供'} · {row.reference} · {money(row.amount_ntd)}</p>
+    </header>
+    {isReceipt ? (
+      <ClientReceiptReconciliationPanel caseNo={data.case_no} requiredBankRowId={row.row_id}
+        initialObligationId={target.obligation_identities[0]} onChanged={onPosted} onBusyChange={onBusyChange} />
+    ) : staffTarget ? (
+      <StaffPayoutRemediationWorkbench target={staffTarget} financeImportRowId={row.row_id} confirmPreview onPosted={onPosted} onBusyChange={onBusyChange} />
+    ) : (
+      <FinanceImportCorrectionForm rowIdentity={row.row_identity} sourceLabel={row.reference}
+        staff={[]} initialKind={initialKind} initialCaseNo={data.case_no}
+        lockedObligations={obligations.map(item => ({
+          id: item.identity, label: `${item.label || '應退款項'} · 待退 ${money(item.remaining_ntd)}`,
+        }))} onPosted={onPosted} onBusyChange={onBusyChange} />
+    )}
+  </section>;
+}
+
+export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity,bankReconciliation}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void;bankReconciliation?:{row:FinanceBankTransaction;onPosted:()=>void;onBusyChange:(busy:boolean)=>void}}){
  const {requestLeave}=useUnsavedNavigation();
  const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
@@ -122,7 +167,8 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
 
  return <section ref={section} className="case-accounting finance-compact-case" aria-label="案件帳務內容">
  {!embedded&&data&&<h2>{data.case_no} · {data.client_name}</h2>}{state.error&&<p role="alert">{state.error}</p>}{state.loading&&<p role="status">正在讀取案件資料…</p>}{state.error&&<button onClick={()=>setRevision(v=>v+1)}>重新讀取案件</button>}
- {data&&<><div hidden={view!==null}>
+ {data&&bankReconciliation&&<CaseBankReconciliation data={data} {...bankReconciliation}/>}
+ {data&&!bankReconciliation&&<><div hidden={view!==null}>
  <dl className="finance-compact-facts" aria-label="案件精簡摘要"><div><dt>相關月嫂</dt><dd>{staff||state.order?.staff_name||'待確認'}</dd></div><div><dt>實際開始</dt><dd>{state.order?.actual_start_date??'待確認'}</dd></div><div><dt>實際結束</dt><dd>{state.order?.actual_end_date??'待確認'}</dd></div><div><dt>案件總額 T</dt><dd>{money(data.staff_receivable_ntd)}</dd></div></dl>
  <section className="finance-reconciliation-card" aria-label="銀行對帳與帳戶資訊">
    <div className="finance-reconciliation-header">

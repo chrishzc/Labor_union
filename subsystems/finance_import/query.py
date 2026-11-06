@@ -13,6 +13,7 @@ import json
 from typing import Any
 from domains.finance_import.cancellation_code import (
     extract_sinopac_memo_case_suffix,
+    sinopac_memo_case_suffixes,
     resolve_finance_cancellation_code,
 )
 from domains.finance_import.statement_archive import bank_import_type
@@ -789,6 +790,7 @@ def _enrich_bank_transactions(
     case_staff_name_cache: dict[str, str | None] = {}
     va_cache: dict[str, str | None] = {}
     suffix_cache: dict[str, str | None] = {}
+    receipt_obligations: dict[str, Sequence[Mapping[str, Any]]] = {}
 
     def client_name_by_id(client_id: int) -> str | None:
         if client_id not in client_name_cache:
@@ -840,7 +842,9 @@ def _enrich_bank_transactions(
             va_cache[code] = str(res["case_no"]) if res["result"] == "resolved" and res["case_no"] else None
         return va_cache[code]
 
-    def resolve_suffix(suffix: str) -> str | None:
+    def resolve_suffix(suffix: str | None) -> str | None:
+        if suffix is None:
+            return None
         if suffix not in suffix_cache:
             res = resolve_client_virtual_account_suffix(cursor, suffix)
             suffix_cache[suffix] = str(res["case_no"]) if res["result"] == "resolved" and res["case_no"] else None
@@ -851,6 +855,10 @@ def _enrich_bank_transactions(
         row_id = int(row["row_id"])
         c_type = str(row.get("classification_type") or "")
         status = str(row.get("transaction_status") or "pending")
+        review_reason = row["review_reason"]
+        target = None
+        target_rows = ()
+        target_staff_id = None
         cases = list(dict.fromkeys(posted_cases_by_id.get(row_id, [])))
         cp_name = str(row["counterparty_name"]).strip() if row.get("counterparty_name") else None
 
@@ -870,14 +878,37 @@ def _enrich_bank_transactions(
                     resolved_case = resolve_va(code)
                     if resolved_case:
                         cases = [resolved_case]
+                        if resolved_case not in receipt_obligations:
+                            cursor.execute(
+                                "SELECT obligation_identity, due_date, amount_due_ntd FROM client_obligations "
+                                "WHERE case_no=%s AND direction='receivable_from_client' "
+                                "AND status='open' AND amount_due_ntd>0",
+                                (resolved_case,),
+                            )
+                            receipt_obligations[resolved_case] = cursor.fetchall()
+                        open_rows = receipt_obligations[resolved_case]
+                        target_rows = open_rows
+                        bank_amount = _integer_money(row)
+                        if not any(int(item["amount_due_ntd"]) == bank_amount for item in open_rows):
+                            month_rows = [
+                                item for item in open_rows
+                                if _is_same_month(row.get("transaction_date"), item.get("due_date"))
+                            ]
+                            if len(month_rows) == 1:
+                                review_reason = (
+                                    "sinopac_client_receipt_shortfall"
+                                    if bank_amount < int(month_rows[0]["amount_due_ntd"])
+                                    else "sinopac_client_receipt_overage"
+                                )
                 elif client_id is not None:
                     cursor.execute(
-                        "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
+                        "SELECT o.case_no, o.due_date, o.obligation_identity, o.amount_due_ntd FROM client_obligations o "
                         "JOIN orders ord ON ord.case_no=o.case_no "
                         "WHERE ord.client_id=%s AND o.direction='receivable_from_client' AND o.status='open'",
                         (client_id,),
                     )
                     open_rows = cursor.fetchall()
+                    target_rows = open_rows
                     month_cases = {
                         str(r["case_no"])
                         for r in open_rows
@@ -909,9 +940,10 @@ def _enrich_bank_transactions(
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
-                if not cases and staff_id is not None:
+                if staff_id is not None:
                     cursor.execute(
-                        "SELECT DISTINCT o.case_no, o.due_date FROM staff_obligations o "
+                        "SELECT o.case_no, o.due_date, o.obligation_identity, "
+                        "COALESCE(p.balance_ntd,o.amount_due_ntd) AS amount_due_ntd FROM staff_obligations o "
                         "LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity "
                         "WHERE o.staff_id=%s AND o.direction='payable_to_staff' "
                         "AND o.status<>'cancelled' AND o.amount_due_ntd>0 "
@@ -919,17 +951,19 @@ def _enrich_bank_transactions(
                         (staff_id,),
                     )
                     open_rows = cursor.fetchall()
+                    target_rows = open_rows
+                    target_staff_id = staff_id
                     month_cases = {
                         str(r["case_no"])
                         for r in open_rows
                         if r.get("case_no") and _is_same_month(row.get("transaction_date"), r.get("due_date"))
                     }
                     all_open_cases = {str(r["case_no"]) for r in open_rows if r.get("case_no")}
-                    if len(month_cases) == 1:
+                    if not cases and len(month_cases) == 1:
                         cases = [next(iter(month_cases))]
-                    elif len(all_open_cases) == 1:
+                    elif not cases and len(all_open_cases) == 1:
                         cases = [next(iter(all_open_cases))]
-                    else:
+                    elif not cases:
                         cursor.execute(
                             "SELECT DISTINCT case_no FROM orders WHERE staff_id=%s AND status<>'訂單取消'",
                             (staff_id,),
@@ -958,20 +992,21 @@ def _enrich_bank_transactions(
                     resolved_case = resolve_suffix(suffix)
                     if resolved_case:
                         cases = [resolved_case]
-                if not cases and client_id is not None:
+                if client_id is not None:
                     type_sql = (
                         "AND o.obligation_type='subsidy_return'"
                         if c_type == "client_subsidy_return"
                         else "AND o.obligation_type IN ('refund','adjustment')"
                     )
                     cursor.execute(
-                        "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
+                        "SELECT o.case_no, o.due_date, o.obligation_identity, o.amount_due_ntd FROM client_obligations o "
                         "JOIN orders ord ON ord.case_no=o.case_no "
                         f"WHERE ord.client_id=%s AND o.direction='payable_to_client' AND o.status='open' {type_sql}",
                         (client_id,),
                     )
                     open_rows = cursor.fetchall()
-                    if not open_rows:
+                    target_rows = open_rows if c_type != "client_refund_return" else ()
+                    if not open_rows and not cases:
                         cursor.execute(
                             "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
                             "JOIN orders ord ON ord.case_no=o.case_no "
@@ -985,11 +1020,11 @@ def _enrich_bank_transactions(
                         if r.get("case_no") and _is_same_month(row.get("transaction_date"), r.get("due_date"))
                     }
                     all_open_cases = {str(r["case_no"]) for r in open_rows if r.get("case_no")}
-                    if len(month_cases) == 1:
+                    if not cases and len(month_cases) == 1:
                         cases = [next(iter(month_cases))]
-                    elif len(all_open_cases) == 1:
+                    elif not cases and len(all_open_cases) == 1:
                         cases = [next(iter(all_open_cases))]
-                    else:
+                    elif not cases:
                         cursor.execute(
                             "SELECT DISTINCT case_no FROM orders WHERE client_id=%s AND status<>'訂單取消'",
                             (client_id,),
@@ -1003,11 +1038,46 @@ def _enrich_bank_transactions(
                 if not cp_name and client_id is not None:
                     cp_name = client_name_by_id(client_id)
 
-        enriched.append(_bank_transaction({**row, "counterparty_name": cp_name}, cases))
+        # This target opens the existing workflow. The owner revalidates it at Preview/Apply.
+        if (
+            status == "pending" and row["disposition"] != "blocked" and len(cases) == 1
+            and (
+                row["direction"] != "outgoing" or not sinopac_memo_case_suffixes(row.get("memo"))
+                or resolve_suffix(extract_sinopac_memo_case_suffix(row.get("memo"))) == cases[0]
+            )
+        ):
+            case_no = cases[0]
+            scoped_rows = [
+                item for item in target_rows
+                if item.get("case_no", case_no) == case_no
+                and item.get("obligation_identity") and int(item["amount_due_ntd"]) > 0
+            ]
+            month_rows = [
+                item for item in scoped_rows
+                if _is_same_month(row.get("transaction_date"), item.get("due_date"))
+            ]
+            amount = _integer_money(row)
+            if c_type == "client_receipt":
+                exact = [item for item in scoped_rows if int(item["amount_due_ntd"]) == amount]
+                selected = exact if exact else month_rows
+            elif len(month_rows) <= 1:
+                selected = month_rows
+            else:
+                singles = [item for item in month_rows if 0 <= int(item["amount_due_ntd"]) - amount <= 100]
+                grouped = 0 <= sum(int(item["amount_due_ntd"]) for item in month_rows) - amount <= 100
+                selected = month_rows if grouped and not singles else singles if len(singles) == 1 and not grouped else []
+            if selected and (c_type != "client_receipt" or len(selected) == 1):
+                target = {
+                    "case_no": case_no,
+                    "obligation_identities": sorted(item["obligation_identity"] for item in selected),
+                    "staff_id": target_staff_id,
+                }
+
+        enriched.append(_bank_transaction({**row, "counterparty_name": cp_name, "review_reason": review_reason}, cases, target))
     return enriched
 
 
-def _bank_transaction(row, cases):
+def _bank_transaction(row, cases, reconciliation_target=None):
     bank = "taishin" if row["format_id"] == "taishin" else "sinopac"
     reference = row["safe_reference"]
     if not reference:
@@ -1030,6 +1100,7 @@ def _bank_transaction(row, cases):
         "reference": reference,
         "counterparty_name": row["counterparty_name"],
         "cases": cases,
+        "reconciliation_target": reconciliation_target,
     }
 
 

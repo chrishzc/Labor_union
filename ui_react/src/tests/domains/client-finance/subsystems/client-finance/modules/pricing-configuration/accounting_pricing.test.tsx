@@ -44,6 +44,7 @@ describe('Standalone accounting parameter policy', () => {
     expect(screen.getByText('原版本名稱：社福')).toBeInTheDocument();
     expect(screen.getByLabelText('社福 補助上限')).toHaveValue(120);
     expect(screen.getByLabelText('社福 補助上限')).toBeDisabled();
+    expect(screen.getByLabelText('社福 訂金天數')).toHaveValue(0);
     expect(screen.getByLabelText('原住民 訂金天數')).toHaveValue(3);
     expect(policy).toEqual(original);
     expect(accountingPricingClient.savePolicy).not.toHaveBeenCalled();
@@ -58,6 +59,8 @@ describe('Standalone accounting parameter policy', () => {
     });
     render(<UnsavedChangesProvider><AccountingParametersPage /></UnsavedChangesProvider>);
     const excess = await screen.findByLabelText('補助市民 客戶用盡後時薪');
+    expect(screen.getByLabelText('原住民 訂金天數')).toHaveAttribute('placeholder', '5');
+    expect(screen.getByLabelText('補助市民 訂金天數')).toHaveAttribute('placeholder', '0');
     fireEvent.change(screen.getByLabelText('原住民 訂金天數'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('一般市民 訂金天數'), { target: { value: '0' } });
     fireEvent.change(screen.getByLabelText('非市民 訂金天數'), { target: { value: '2' } });
@@ -80,6 +83,8 @@ describe('Standalone accounting parameter policy', () => {
     await screen.findByText('synthetic-admin');
     fireEvent.click(screen.getByRole('button', { name: '版本 1' }));
     expect(screen.getByLabelText('原住民 訂金天數')).toHaveValue(5);
+    expect(screen.getByLabelText('一般市民 訂金天數')).toHaveValue(0);
+    expect(screen.getByLabelText('補助市民 訂金天數')).toHaveValue(0);
     expect(screen.getByLabelText('原住民 訂金天數')).toBeDisabled();
   });
 });

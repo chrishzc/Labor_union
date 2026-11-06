@@ -13,6 +13,8 @@ export function initialPricingPolicy(): PricingPolicy {
     twins_client: { covered: 450, excess: 450 }, twins_payroll: { covered: 450, excess: 450 } });
 }
 const copy = <T,>(value: T): T => structuredClone(value);
+// The same fallback used by case bootstrap when the policy has no explicit deposit days.
+const defaultDepositDays = { citizen: 5, social: 0, non_citizen: 5 };
 type Pending = { policy: PricingPolicy; revision: number; reason: string; key: string };
 
 export function AccountingParametersPage() {
@@ -76,7 +78,9 @@ export function AccountingParametersPage() {
         return <td key={`${owner}-${tier}`}><span className="pricing-mobile-label" aria-hidden="true">{label}</span><input aria-label={`${item.identity_name} ${label}`} type="number" min={tier === 'covered' && item.subsidy_hours === 0 ? 0 : 1} step="1" value={item[owner][tier]} disabled={readOnly || (item.rule === 'non_citizen' && tier === 'covered')} onChange={event => update(index, { [owner]: { ...item[owner], [tier]: Number(event.target.value) } })} /></td>;
       }))}
       <td><span className="pricing-mobile-label" aria-hidden="true">訂金天數</span><input className="pricing-deposit-input" aria-label={`${item.identity_name} 訂金天數`} aria-describedby="pricing-deposit-help"
-        type="number" min="0" max="2147483647" step="1" value={policyDepositDays(policy, item) ?? ''} placeholder="沿用原條款"
+        type="number" min="0" max="2147483647" step="1"
+        value={policyDepositDays(policy, item) ?? (readOnly ? defaultDepositDays[item.rule] : '')}
+        placeholder={String(defaultDepositDays[item.rule])}
         disabled={readOnly} onChange={event => update(index, { deposit_service_days: event.target.value === '' ? null : event.target.valueAsNumber })} /></td>
     </tr>)}</tbody></table></div>;
   return <div ref={unsavedRef}>
@@ -95,7 +99,7 @@ export function AccountingParametersPage() {
     {shown && catalog && <><label className="pricing-field">生效日期<input type="date" required value={shown.effective_on} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, effective_on: event.target.value }))} /></label>
       <section className="pricing-section"><div className="pricing-section-heading"><h2>補助身分與分段時薪</h2></div>{renderRows(shown, busy || status === 'loading' || tab === 'history')}
         <p className="pricing-note">補助範圍內客戶與月嫂時薪須相等，用盡後可分別調整。非市民補助時數與補助內時薪均為 0，自費時薪維持用盡後設定。</p>
-        <p id="pricing-deposit-help" className="pricing-note">留空沿用原訂金條款，填 0 免收訂金服務費。全額補助免自備時，各期皆免繳。</p>
+        <p id="pricing-deposit-help" className="pricing-note">未填時顯示預設天數，填 0 免收訂金服務費。全額補助免自備時，各期皆免繳。</p>
         <p className="pricing-note">個案補助款歸屬請至帳務中心的案件抽屜設定。</p>
       </section>
       <section className="pricing-section"><h2>雙胞胎費率</h2><div className="pricing-table-wrap"><table className="pricing-table"><thead><tr><th>客戶補助內時薪</th><th>客戶用盡後時薪</th><th>月嫂補助內時薪</th><th>月嫂用盡後時薪</th></tr></thead><tbody><tr>{(['twins_client', 'twins_payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`雙胞胎${owner === 'twins_client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min="1" step="1" value={shown[owner][tier]} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, [owner]: { ...current[owner], [tier]: Number(event.target.value) } }))} /></td>))}</tr></tbody></table></div><p className="pricing-note">單胞胎依身分設定；雙胞胎優先套用此處費率，補助上限仍依身分。</p></section>

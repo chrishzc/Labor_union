@@ -229,3 +229,22 @@ it('supports government subsidy whole-period reconciliation via correction form'
     handling: 'exact',
   }));
 });
+
+
+it('preserves the over-refund operation for the locked bank row and its confirmed case obligation', async () => {
+  render(<FinanceImportCorrectionForm rowIdentity="finance-import-row:42" sourceLabel="TX"
+    staff={[]} initialKind="client_refund" initialCaseNo="CASE-1"
+    lockedObligations={[{ id: 'refund:1', label: '本案退款' }]} />);
+
+  expect(screen.getByRole('checkbox', { name: '本案退款' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '本案退款' })).toBeDisabled();
+  expect(screen.queryByLabelText('案件編號')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('退款核銷方式'), { target: { value: 'overage' } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽核銷' }));
+
+  expect(corrections.preview).toHaveBeenCalledWith(expect.objectContaining({
+    row_identity: 'finance-import-row:42', classification_type: 'client_refund',
+    target_obligation_identities: ['refund:1'], allow_refund_overage_recovery: true,
+  }));
+  expect(corrections.apply).not.toHaveBeenCalled();
+});

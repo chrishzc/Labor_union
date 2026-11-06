@@ -79,10 +79,20 @@ def _workbook_row(tmp_path, memo):
     return normalize_workbook(path)["normalized_rows"][0]
 
 
-def _pending(row, kind):
+def _pending(row, kind, *, verified_name=True):
+    obligation = {
+        "staff_id" if kind == "staff" else "client_id": 7,
+        "name": "Synthetic Payee",
+        "due_date": "2026-10-20",
+        "amount_due_ntd": 12000,
+    }
+    if verified_name:
+        row = {**row, "counterparty_name": obligation["name"]}
     decision = classify_finance_transaction(
         row, {"10001": [7]} if kind == "refund" else {},
         {"10001": [7]} if kind == "staff" else {}, {},
+        staff_payout_candidates=(obligation,) if kind == "staff" else (),
+        taishin_client_refund_candidates=(obligation,) if kind == "refund" else (),
     )
     assert decision["classification_type"] == ("client_refund" if kind == "refund" else "staff_salary")
     initial = build_initial_classification(InitialClassificationFacts(
@@ -97,7 +107,7 @@ def _pending(row, kind):
 
 def _obligation(case_no, identity, owner_id=7):
     return {"case_no": case_no, "obligation_identity": identity, "owner_id": owner_id,
-            "amount_due_ntd": 12000, "balance_ntd": 12000}
+            "amount_due_ntd": 12000, "due_date": "2026-10-20"}
 
 
 @pytest.mark.parametrize("memo", ["HC115001服務人員", "A115001服務人員", "HC115001退款"])
@@ -141,12 +151,21 @@ def test_memo_case_uses_imported_mapping_instead_of_a_formula_guess(tmp_path, ki
 
 @pytest.mark.parametrize("kind", ["refund", "staff"])
 @pytest.mark.parametrize("memo", [None, "", "HC11500", "HC1150010", "HC115001 HC115002"])
-def test_missing_or_ambiguous_memo_never_falls_back_to_passbook_or_all_cases(tmp_path, kind, memo):
+def test_unverified_recipient_never_falls_back_to_passbook_or_all_cases(tmp_path, kind, memo):
     row = _workbook_row(tmp_path, memo)
-    candidate = _pending(row, kind)
+    candidate = _pending(row, kind, verified_name=False)
     connection = _CaseConnection(row, (_obligation("115000001", "must-not-select"),))
     assert MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate) == candidate
-    assert len(connection.cursor_instance.executions) == 1
+    assert connection.cursor_instance.executions == []
+
+
+@pytest.mark.parametrize("kind", ["refund", "staff"])
+def test_verified_name_with_conflicting_case_suffixes_remains_pending(tmp_path, kind):
+    row = _workbook_row(tmp_path, "HC115001 HC115002")
+    candidate = _pending(row, kind)
+    connection = _CaseConnection(row, (_obligation("115000001", "must-not-select"),))
+
+    assert MySqlFinanceImportOwningDomainComposite(connection).resolve(candidate) == candidate
 
 
 @pytest.mark.parametrize("kind", ["refund", "staff"])
@@ -183,7 +202,7 @@ def test_refund_does_not_use_cached_or_memo_account_when_bank_reference_conflict
 
 
 @pytest.mark.parametrize(("kind", "format_id"), [("refund", "taishin"), ("staff", "legacy")])
-def test_other_bank_formats_keep_existing_resolution_without_a_memo_case(tmp_path, kind, format_id):
+def test_verified_name_can_resolve_without_a_memo_case(tmp_path, kind, format_id):
     row = _workbook_row(tmp_path, "HC115001退款")
     candidate = _pending(row, kind)
     source = {**row, "format_id": format_id, "memo": None}

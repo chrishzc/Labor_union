@@ -126,16 +126,10 @@ def _resolve(database, row, decision):
 
 @pytest.mark.parametrize("refund_type", REFUND_TYPES)
 @pytest.mark.parametrize("profile_changed", (False, True))
-def test_snapshot_outflow_resolves_without_bank_case_reference(
+def test_snapshot_outflow_keeps_identity_but_requires_name_for_automatic_posting(
     monkeypatch, database, refund_type, profile_changed
 ):
-    # This SQLite oracle covers frozen-account matching. Funding eligibility has
-    # separate owner tests and the real-MySQL automatic accounting chain.
-    monkeypatch.setattr(
-        'infrastructure.mysql.finance_import_owning_domain_composite.ClientRefundReversalWorkflow.preview',
-        lambda *_args: None,
-    )
-    identity = _add_refund(database, refund_type)
+    _add_refund(database, refund_type)
     if profile_changed:
         database.execute(
             "UPDATE beclass_records SET refund_account_no=?",
@@ -152,8 +146,8 @@ def test_snapshot_outflow_resolves_without_bank_case_reference(
     )
     assert decision["matched_identity_ids"] == [7]
     resolved = _resolve(database, row, decision)
-    assert resolved.disposition is FinanceImportDisposition.CREATE
-    assert resolved.target_identities == (identity,)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.target_identities == ("client:7",)
     assert resolved.integrity_violations == ()
 
 

@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 
 from domains.client_finance.client_refund_reversal import (
-    ClientRefundObligation, ClientRefundPurpose, build_client_refund_candidate,
+    ClientRefundBankFact, ClientRefundObligation, ClientRefundPurpose, build_client_refund_candidate,
 )
 from infrastructure.mysql.client_refund_reversal_repository import _refund_bank_facts
 from shared_kernel.money import MoneyNTD
@@ -37,3 +37,19 @@ def test_partial_refund_checks_the_complete_source_account_without_changing_bank
         with pytest.raises(ValueError, match='bank_fact_not_eligible'):
             build_client_refund_candidate('CASE', facts, (obligation,), allow_partial_refund_recovery=True)
     assert row == original
+
+
+@pytest.mark.parametrize(("amount", "fee", "allocated"), [
+    (12000, 0, 12000),
+    (11900, 100, 12000),
+    (11899, 0, 11899),
+])
+def test_subsidy_return_fee_preserves_bank_amount_and_settles_only_within_threshold(amount, fee, allocated):
+    bank = ClientRefundBankFact("16", "CASE", MoneyNTD(amount), "2026-11-02", True)
+    obligation = ClientRefundObligation("return:CASE", "CASE", MoneyNTD(12000), "subsidy_return")
+
+    candidate = build_client_refund_candidate("CASE", (bank,), (obligation,), ClientRefundPurpose.SUBSIDY_RETURN)
+
+    assert candidate.amount == MoneyNTD(amount)
+    assert candidate.transfer_fee == MoneyNTD(fee)
+    assert sum(item.amount.amount for item in candidate.allocations) == allocated

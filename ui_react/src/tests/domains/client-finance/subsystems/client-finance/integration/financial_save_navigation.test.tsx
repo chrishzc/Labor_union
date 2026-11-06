@@ -33,7 +33,7 @@ describe('financial forms share direct save and protected navigation', () => {
       return { revision: revision + 1 };
     });
     mount(<AccountingParametersPage />);
-    fireEvent.change(await screen.findByLabelText('社福 客戶用盡後時薪'), { target: { value: '310' } });
+    fireEvent.change(await screen.findByLabelText('補助市民 客戶用盡後時薪'), { target: { value: '310' } });
     expect(screen.getByLabelText('變更說明（選填）')).not.toBeRequired();
     await leaveAndSave(); await screen.findByText('已離開帳務頁');
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ effective_on: initialPricingPolicy().effective_on }), 0, '', expect.any(String));

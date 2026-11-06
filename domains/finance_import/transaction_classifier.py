@@ -377,7 +377,10 @@ def _classify_outgoing_by_name_month_fee(
             c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
         ]
         if not month_matched:
-            return _review("outgoing_staff_payout_month_no_match")
+            return _result(
+                "staff_salary", [matching_obligations[0]["staff_id"]],
+                "outgoing_staff_payout_month_no_match",
+            )
 
         fee_matched = [
             c for c in month_matched if _is_valid_fee_diff(debit_val, c.get("amount_due_ntd"))
@@ -386,10 +389,13 @@ def _classify_outgoing_by_name_month_fee(
             debit_val, sum(c["amount_due_ntd"] for c in month_matched)
         ):
             if fee_matched:
-                return _review("outgoing_staff_payout_multiple_fee_matches")
+                return _result(
+                    "staff_salary", [matching_obligations[0]["staff_id"]],
+                    "outgoing_staff_payout_multiple_fee_matches",
+                )
             return _result(
                 "staff_salary", [month_matched[0]["staff_id"]],
-                "unique_staff_payout_name_month_fee_matched", matched_staff,
+                "unique_staff_payout_name_month_fee_matched",
             )
         if len(fee_matched) == 1:
             cand = fee_matched[0]
@@ -402,10 +408,17 @@ def _classify_outgoing_by_name_month_fee(
                 )
             else:
                 reason = "unique_staff_payout_name_month_fee_matched"
-            return _result("staff_salary", [cand["staff_id"]], reason, matched_staff)
+            return _result("staff_salary", [cand["staff_id"]], reason)
         if len(fee_matched) > 1:
-            return _review("outgoing_staff_payout_multiple_fee_matches")
-        return _review("outgoing_staff_payout_amount_mismatch")
+            return _result(
+                "staff_salary", [matching_obligations[0]["staff_id"]],
+                "outgoing_staff_payout_multiple_fee_matches",
+            )
+        return _result(
+            "staff_salary", [matching_obligations[0]["staff_id"]],
+            "outgoing_staff_payout_amount_mismatch" if len(month_matched) == 1
+            else "outgoing_staff_payout_target_ambiguous",
+        )
 
     if matched_client is not None:
         is_taishin = row["format_id"] == "taishin"
@@ -424,7 +437,11 @@ def _classify_outgoing_by_name_month_fee(
             c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
         ]
         if not month_matched:
-            return _review("taishin_client_refund_month_no_match")
+            return _result(
+                "client_subsidy_return" if is_taishin else "client_refund",
+                [matching_obligations[0]["client_id"]],
+                "taishin_client_refund_month_no_match",
+            )
 
         fee_matched = [
             c for c in month_matched if _is_valid_fee_diff(debit_val, c.get("amount_due_ntd"))
@@ -440,7 +457,11 @@ def _classify_outgoing_by_name_month_fee(
         ]
         if grouped_matches:
             if len(grouped_matches) != 1 or fee_matched:
-                return _review("taishin_client_refund_multiple_exact_matches")
+                return _result(
+                    "client_subsidy_return" if is_taishin else "client_refund",
+                    [matching_obligations[0]["client_id"]],
+                    "taishin_client_refund_multiple_exact_matches",
+                )
             fee_matched = grouped_matches
             reason = "taishin_unique_client_refund_name_month_fee_matched"
         else:
@@ -457,10 +478,19 @@ def _classify_outgoing_by_name_month_fee(
             elif reason is None:
                 reason = "taishin_unique_client_refund_name_month_fee_matched"
             kind = "client_subsidy_return" if cand.get("obligation_type") == "subsidy_return" else "client_refund"
-            return _result(kind, [cand["client_id"]], reason, matched_client)
+            return _result(kind, [cand["client_id"]], reason)
         if len(fee_matched) > 1:
-            return _review("taishin_client_refund_multiple_exact_matches")
-        return _review("taishin_client_refund_amount_mismatch")
+            return _result(
+                "client_subsidy_return" if is_taishin else "client_refund",
+                [matching_obligations[0]["client_id"]],
+                "taishin_client_refund_multiple_exact_matches",
+            )
+        return _result(
+            "client_subsidy_return" if is_taishin else "client_refund",
+            [matching_obligations[0]["client_id"]],
+            "taishin_client_refund_amount_mismatch" if len(month_matched) == 1
+            else "outgoing_client_refund_target_ambiguous",
+        )
 
     return None
 
@@ -529,7 +559,7 @@ def classify_finance_transaction(
                     )
                     if other_ids or any(candidates and set(candidates) != set(ids) for candidates in (account_ids, case_ids)):
                         return _review("counterparty_identity_type_conflict")
-                    return fee_result
+                    return {**fee_result, "resolved_counterparty_account": account}
                 if fee_result["reason"] in {
                     "counterparty_identity_type_conflict",
                     "outgoing_staff_payout_name_ambiguous",

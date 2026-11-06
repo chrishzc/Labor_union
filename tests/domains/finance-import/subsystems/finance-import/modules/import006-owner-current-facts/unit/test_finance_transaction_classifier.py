@@ -565,8 +565,9 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "client_subsidy_return"
     assert result["reason"] == "taishin_client_refund_amount_mismatch"
+    assert result["matched_identity_ids"] == [101]
 
 
 def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
@@ -660,8 +661,9 @@ def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "client_subsidy_return"
     assert result["reason"] == "taishin_client_refund_month_no_match"
+    assert result["matched_identity_ids"] == [101]
 
 
 def test_taishin_outgoing_longest_prefix_match():
@@ -812,8 +814,9 @@ def test_taishin_outgoing_staff_payout_fee_over_100_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+    assert result["matched_identity_ids"] == [88]
 
 
 def test_taishin_outgoing_staff_payout_overpayment_enters_review():
@@ -842,8 +845,9 @@ def test_taishin_outgoing_staff_payout_overpayment_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+    assert result["matched_identity_ids"] == [88]
 
 
 def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
@@ -872,8 +876,9 @@ def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_month_no_match"
+    assert result["matched_identity_ids"] == [88]
     assert result["reason"] == "sinopac_unique_staff_case_suffix_in_memo"
 
 
@@ -1011,8 +1016,9 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "client_subsidy_return"
     assert result["reason"] == "taishin_client_refund_amount_mismatch"
+    assert result["matched_identity_ids"] == [101]
 
 
 def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
@@ -1106,8 +1112,9 @@ def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "client_subsidy_return"
     assert result["reason"] == "taishin_client_refund_month_no_match"
+    assert result["matched_identity_ids"] == [101]
 
 
 def test_taishin_outgoing_longest_prefix_match():
@@ -1258,8 +1265,9 @@ def test_taishin_outgoing_staff_payout_fee_over_100_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+    assert result["matched_identity_ids"] == [88]
 
 
 def test_taishin_outgoing_staff_payout_overpayment_enters_review():
@@ -1288,8 +1296,9 @@ def test_taishin_outgoing_staff_payout_overpayment_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+    assert result["matched_identity_ids"] == [88]
 
 
 def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
@@ -1318,5 +1327,6 @@ def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
             },
         ),
     )
-    assert result["classification_type"] == "non_business_review"
+    assert result["classification_type"] == "staff_salary"
     assert result["reason"] == "outgoing_staff_payout_month_no_match"
+    assert result["matched_identity_ids"] == [88]

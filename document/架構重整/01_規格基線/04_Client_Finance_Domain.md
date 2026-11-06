@@ -142,7 +142,7 @@ Authority：使用者於2026-11-03採用第三版「帳務方案、對帳來源�
 | `client_payments` | current／compatibility projection |
 | review status | root-derived projection，不可人工直接修改 |
 
-每次正式核銷必須完整分配所選銀行流水，且每個所選義務在同一次 Apply 後精確為 `0`。少收、超收、錯案或 ownership 不明不得建立部分正式交易。
+一般期款正式核銷必須完整分配所選銀行流水，且每個所選義務在同一次 Apply 後精確為 `0`。另有正式差額或部分核銷契約時依該契約，取消退款與補收的部分核銷依[客戶取消結算與違約金](#client-cancellation-settlement)。錯案或歸屬不明不得核銷。
 
 ## 3. Subsystems
 
@@ -217,8 +217,7 @@ LINE 案件群組不接受上述未付款放行取代核銷；只有
 view 的必要欄位，實際 obligation、ledger、allocation 與 settlement 仍由本 Domain 根事實重建；
 不存在新的帳務根事實或 UI writer。
 
-取消結果對現有 action kind 的 canonical mapping 固定如下；server 必須在建 candidate 時寫入，
-caller 不得重算：
+下表定義各期款 action 的既有欄位語意。取消時的客戶應退或應補收總額，以[全案結算規則](#client-cancellation-settlement)為準，由 Client Finance 在 Preview／Apply 提供，caller 不得加總各期款 action 代替全案結果：
 
 表中的 `current_settled_amount_ntd` 是 Client Finance 由 immutable ledger／allocation reducer
 重建的目前已結算金額；不是 `before_amount_ntd`（後者是既有 obligation target）。
@@ -237,10 +236,6 @@ caller 不得重算：
 obligation；真正已有正式收款而新義務下降時，固定使用 `create_refund` 與 `refund_due`。
 同一 cancellation response 可含多筆 action，各筆均依本表產生自己的 direction 與
 direction amount。
-
-取消不加收取消費。服務中取消以已確認實際服務時數重算服務本金；訂金、第一期及其他已正式
-核銷款項均依 allocation reducer 計入 `current_settled_amount_ntd`，不得只扣其中一期或重複收取。
-已收總額大於實際應付時建立退款，小於時才形成補收。
 
 缺少 direction、direction_amount 與 direction 不一致、或 current owner readback 不能唯一確認
 方向時，Query／Preview／Apply 回 typed schema／domain error 或 `outcome_unknown`，不建立或
@@ -264,6 +259,29 @@ Modules：
 - `PaymentDueDatePolicy`
 - `ObligationDiffCalculator`
 - `FinancePreviewFingerprint`
+
+<a id="client-cancellation-settlement"></a>
+
+### 客戶取消結算與違約金（2026-11-06 人工裁決）
+
+本節適用於 Orders §3.5 的服務前取消及服務中提前結束。Client Finance 擁有正式結算、退款、補收與違約金營收認列。以下為已確認規格，實作待後續授權。
+
+- **服務應付 S**依已確認實際服務日與時數、有效服務單價及既有適用費用規則重算。取消違約金 F 由公會人員決定，與 S 分開記錄，不納入月嫂薪資或政府補助計算。**最終應付為 S ＋ F**。
+- **淨實收 R**依同案有效客戶金流及其分配重建。計入已入帳的訂金、各期款及部分收款，扣除適用的退款與沖正。原期款餘額大於零仍須計入該期已收部分。銀行流水未完成正式入帳時不得列作實收；政府補助款、非現金抵銷及其他案件款項不列入 R。
+- **應退款**為 `max(0, R − S − F)`，大於零時在確認取消的同一交易建立一般待退款單。**應補收**為 `max(0, S + F − R)`，大於零時在同一交易建立待補收款，分列服務費與違約金的未收額。兩者皆為零時結算完成。原期款依取消結果調整，既有收款與核銷歷史保留，待收付只計一次。
+- **實收先抵服務應付**，剩餘金額再抵違約金，抵到該筆違約金收足為止。已收違約金為 `min(F, max(0, R − S))`，列公會營收；違約金餘額為 F 減已收違約金，列待收。後續補收入帳仍按相同順序分配，只有實際抵入違約金的新增金額才增加營收。有效金流被沖正時依正式紀錄更正餘額與營收。
+- 退款及補收依同案正式銀行流水核銷，部分核銷保留餘額。核銷與重查須沿用同一結算及來源識別，避免重複出款、補收或認列營收。只有退款或補收全額核銷才產生完成通知來源，通知依規格 20 §5.8。
+
+驗收案例以原期款應收 10,000 元、已入帳 6,000 元且仍未結清、取消後服務應付 4,000 元為基準。預覽、正式結算與回讀應一致：
+
+| 違約金 | 最終應付 | 待退款 | 待補收 | 已收違約金／公會營收 |
+|---:|---:|---:|---:|---:|
+| 0 | 4,000 | 2,000 | 0 | 0 |
+| 500 | 4,500 | 1,500 | 0 | 500 |
+| 2,000 | 6,000 | 0 | 0 | 2,000 |
+| 2,500 | 6,500 | 0 | 500 | 2,000 |
+
+最後一列補收 200 元並核銷後，違約金營收累計 2,200 元、待收 300 元。餘款全額核銷後，違約金營收累計 2,500 元、待收歸零。
 
 ### Reconciliation Preview／Apply
 
@@ -322,7 +340,7 @@ obligation依strictly-newer owner event更新current projection，未被舊event
 
 義務合法下降造成有效實收大於新義務時，差額形成 `over_receipt` 與退款義務。退款後淨應收與淨實收同減；銀行撤銷原收款而義務未降低則是 reversal，重新形成應收。退款不取消已完成訂單，也不解除服務資料鎖。
 
-取消自動產生的一般退款與月嫂薪資、補助退款共用每月應付帳款清冊；退款依本身 due date 納入所選月份月底以前仍未退完的款項，包含以前月份餘額。原期款取消歸零時若不再產生新期款到期日，其已收款退款保留來源義務既有到期日，不清空為未知日期；來源本來缺日期時仍列待確認。人工核對提供足額或「退款不足，先核銷實退」，沿既有 `allow_partial_refund_recovery` 保存實付並保留剩餘款；補退不重建退款，退匯／沖正重開對應餘額。銀行核對可依原流水選取客戶退款，不限逾期；一般逾期查詢仍保留原預設。取消與退款成功不發送 LINE 通知。
+取消自動產生的一般退款與月嫂薪資、補助退款共用每月應付帳款清冊；退款依本身 due date 納入所選月份月底以前仍未退完的款項，包含以前月份餘額。原期款取消歸零時若不再產生新期款到期日，其已收款退款保留來源義務既有到期日，不清空為未知日期；來源本來缺日期時仍列待確認。人工核對提供足額或「退款不足，先核銷實退」，沿既有 `allow_partial_refund_recovery` 保存實付並保留剩餘款；補退不重建退款，退匯／沖正重開對應餘額。銀行核對可依原流水選取客戶退款，不限逾期；一般逾期查詢仍保留原預設。取消結算退款全額核銷後的客戶通知依規格 20 §5.8。
 
 ### Client Subsidy Return
 

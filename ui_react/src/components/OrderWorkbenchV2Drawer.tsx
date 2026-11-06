@@ -38,7 +38,7 @@ import { ServiceArrangementDepositGate } from './ServiceArrangementDepositGate';
 import { OrderServiceDatesPanel } from './OrderServiceDatesPanel';
 import { OrderWorkbenchV2OwnerContext } from './OrderWorkbenchV2OwnerContext';
 import { serviceHandoverHref } from '../adapters/scheduling/service_handover_navigation';
-import { OrderCancellationPanel } from './OrderCancellationPanel';
+import { OrderCancellationDemoPanel, OrderCancellationPanel } from './OrderCancellationPanel';
 import { OrderControlledReopenPanel } from './OrderControlledReopenPanel';
 import { OrderActualStartPanel } from './OrderActualStartPanel';
 import { CandidateInquiryDialog } from './CandidateInquiryDialog';
@@ -177,13 +177,13 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
   const [replacementRequest, setReplacementRequest] = useState(0);
   const [serviceConfirmationState, setServiceConfirmationState] = useState({ dirty: false, busy: false });
   const [depositBusy, setDepositBusy] = useState(false);
-  const [operation, setOperation] = useState<'cancellation' | 'reopen' | 'actual-start' | null>(null);
+  const [operation, setOperation] = useState<'cancellation' | 'cancellation-demo' | 'reopen' | 'actual-start' | null>(null);
   const [operationBusy, setOperationBusy] = useState(false);
   const [editingCompletedDates, setEditingCompletedDates] = useState(false);
   useEffect(() => { setEditingCompletedDates(false); }, [caseNo]);
   const operationDialogRef = useRef<HTMLDialogElement>(null);
   const headerActionRef = useRef<HTMLButtonElement>(null);
-  const caseOperation = operation === 'cancellation';
+  const caseOperation = operation === 'cancellation' || operation === 'cancellation-demo';
   useEffect(() => {
     if (!caseOperation) return;
     const dialog = operationDialogRef.current!;
@@ -331,6 +331,8 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
     ? historicalCurrentOwnerStage(timeline.data)
     : null;
   const terminalStatus = timeline.status === 'ready' && ['訂單完成', '訂單取消', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
+  const cancellationDemo = import.meta.env.DEV && !terminalStatus
+    && new URLSearchParams(window.location.search).get('cancel-preview') === '1';
   const completedService = timeline.status === 'ready' && timeline.data.lifecycle_status === '訂單完成';
   const showCompletion = timeline.status === 'ready' && ['訂單完成', '歷史訂單－服務完成', '歷史訂單－帳務完成'].includes(timeline.data.lifecycle_status);
   const completionStage = timeline.status === 'ready' ? timeline.data.core_stages.find(stage => stage.code === 'service_completion') : undefined;
@@ -425,9 +427,10 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
           <div><p className="order-case-eyebrow">案件 {caseNo}</p><h1 ref={pageHeadingRef} tabIndex={-1}>案件處理</h1></div>
           <div className="order-case-header-actions">
             <span className="order-case-lifecycle">{intakeOrderStatus ?? '讀取案件中'}</span>
+            {cancellationDemo && timeline.status === 'ready' && <span className="order-case-lifecycle">取消流程預覽</span>}
             {timeline.status === 'ready' && currentBranch === 'cancelled'
               ? <OrderControlledReopenPanel key={caseNo} caseNo={caseNo} startDisabled={navigationLocked || factsRefreshing || operation !== null} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />
-              : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation('cancellation')}>取消訂單</button>}
+              : timeline.status === 'ready' && !terminalStatus && <button ref={headerActionRef} type="button" className="order-v2-danger" disabled={navigationLocked || factsRefreshing} onClick={() => setOperation(cancellationDemo ? 'cancellation-demo' : 'cancellation')}>取消訂單</button>}
           </div>
         </div>
         <p className="order-case-purpose">依目前進度接續工作；需要的訂單與服務資料會顯示在各辦理事項中。</p>
@@ -656,10 +659,11 @@ export const OrderWorkbenchV2Drawer: FC<OrderWorkbenchV2DrawerProps> = ({
         event.preventDefault();
         if (!operationBusyRef.current && !leavePending) requestLeave(() => setOperation(null));
       }}>
-        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
+        <header className="order-case-dialog-heading"><h2 id="order-case-operation-title">{operation === 'cancellation-demo' ? '取消訂單／提前結束' : currentBranch === 'cancelled' ? '補登取消服務事實' : '取消訂單'}</h2>
           <button type="button" disabled={operationBusy} onClick={() => requestLeave(() => setOperation(null))}>返回案件處理</button>
         </header>
         {operationBusy && <p role="status">操作結果或正式回讀尚未確認，請先完成確認再返回案件。</p>}
+        {import.meta.env.DEV && operation === 'cancellation-demo' && <OrderCancellationDemoPanel key={caseNo} />}
         {operation === 'cancellation' && <OrderCancellationPanel key={caseNo} caseNo={caseNo} onObserved={refreshFacts} onBusyChange={onOperationBusyChange} />}
       </dialog>
     </div>

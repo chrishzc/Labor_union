@@ -837,6 +837,20 @@
 .order-case-operation-dialog::backdrop { background: rgb(35 25 18 / 45%); }
 .order-case-dialog-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .order-case-dialog-heading h2 { margin: 0; font-size: 1.2rem; }
+.order-cancel-demo,
+.order-cancel-demo form,
+.order-cancel-demo section { display: grid; gap: 12px; }
+.order-cancel-demo :is(h3, p, dl, dd, ol, fieldset) { margin: 0; }
+.order-cancel-demo-steps { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
+.order-cancel-demo-steps li { padding: 4px 8px; border-radius: 6px; }
+.order-cancel-demo-steps li[aria-current="step"] { background: #eee4d9; font-weight: 600; }
+.order-cancel-demo-options { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.order-cancel-demo fieldset { min-width: 0; border: 1px solid #eadfd6; border-radius: 8px; }
+.order-cancel-demo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.order-cancel-demo input:not([type]) { display: block; width: 100%; margin: 4px 0; }
+.order-cancel-demo dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 4px 0; }
+.order-cancel-demo dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; }
+.order-cancel-demo footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 @media (max-width: 760px) {
   .order-case-stepper > ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
   .order-case-stepper > ol > li { min-width: 0; }

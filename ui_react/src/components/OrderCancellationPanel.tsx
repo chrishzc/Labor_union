@@ -1,6 +1,6 @@
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useStaffIdentityLabels } from './StaffIdentityProvider';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FC, type FormEvent } from 'react';
 import { orderCancellationClient, type OrderCancellationPreview, type OrderCancellationQuery,
   type ServiceDay } from '../api/orders/order_cancellation_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -12,6 +12,128 @@ type DayDraft = { service_date: string; staff_id: string; reason: string };
 type Phase = 'idle' | 'loading' | 'previewing' | 'applying' | 'outcome_unknown' | 'observation_failed' | 'observed';
 const drafts = (days: ServiceDay[]): DayDraft[] => days.map((day) => ({ service_date: day.service_date, staff_id: String(day.staff_id), reason: day.reason ?? '' }));
 const subscribeCancellation = (listener: () => void) => orderMutationFlowStore.subscribe(listener);
+
+const demoDays = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05'];
+const demoReceived = 6000n;
+const demoCurrency = new Intl.NumberFormat('zh-TW');
+const demoMoney = (amount: bigint) => `NT$${demoCurrency.format(amount)}`;
+
+export const OrderCancellationDemoPanel = () => {
+  const [step, setStep] = useState<'input' | 'review' | 'result'>('input');
+  const [days, setDays] = useState(demoDays);
+  const [charge, setCharge] = useState(false);
+  const [feeText, setFeeText] = useState('');
+  const [feeReason, setFeeReason] = useState('');
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [error, setError] = useState<'amount' | 'reason' | null>(null);
+  const [fee, setFee] = useState(0n);
+  const amountInput = useRef<HTMLInputElement>(null);
+  const reasonInput = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const serviceDue = BigInt(days.length) * 1000n;
+  const total = serviceDue + fee;
+  const surplus = demoReceived > serviceDue ? demoReceived - serviceDue : 0n;
+  const revenue = surplus < fee ? surplus : fee;
+  const difference = demoReceived - total;
+  const balance = difference < 0n ? -difference : difference;
+  const balanceLabel = difference > 0n ? '應退款' : difference < 0n ? '應補收' : '無待收付差額';
+  const nextStep = difference > 0n ? '會計出款後，到銀行對帳核銷。'
+    : difference < 0n ? '客戶繳款入帳後，到銀行對帳核銷。' : '無待退款或待補收款項。';
+
+  useEffect(() => { heading.current?.focus(); }, [step]);
+
+  const preview = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const value = feeText.trim();
+    if (charge && (!/^\d+$/.test(value) || BigInt(value) === 0n)) {
+      setError('amount');
+      amountInput.current?.focus();
+      return;
+    }
+    if (charge && !feeReason.trim()) {
+      setError('reason');
+      reasonInput.current?.focus();
+      return;
+    }
+    setError(null);
+    setFee(charge ? BigInt(value) : 0n);
+    setStep('review');
+  };
+
+  return (
+    <div className="order-cancel-demo">
+      <p className="order-case-review-note"><strong>本機預覽 · 示範帳務</strong><br />原應收 NT$10,000，已入帳 {demoMoney(demoReceived)}。試算與確認結果只保留在這個視窗。</p>
+      <ol className="order-cancel-demo-steps" aria-label="取消進度">
+        <li aria-current={step === 'input' ? 'step' : undefined}>1 核對與填寫</li>
+        <li aria-current={step === 'review' ? 'step' : undefined}>2 預覽與確認</li>
+        <li aria-current={step === 'result' ? 'step' : undefined}>3 取消結果</li>
+      </ol>
+      {step === 'input' && <form onSubmit={preview} noValidate>
+        <h3 ref={heading} tabIndex={-1}>核對實際服務與違約金</h3>
+        <details>
+          <summary>實際服務 {days.length} 日 · {days.length * 8} 小時</summary>
+          <div className="order-cancel-demo-options">
+            {demoDays.map(day => <label key={day}><input type="checkbox" checked={days.includes(day)}
+              onChange={event => setDays(event.target.checked ? [...days, day] : days.filter(value => value !== day))} /> {day} · 8 小時</label>)}
+          </div>
+        </details>
+        <fieldset>
+          <legend>取消違約金</legend>
+          <div className="order-cancel-demo-options">
+            <label><input type="radio" name="demo-cancellation-fee" checked={!charge} onChange={() => { setCharge(false); setError(null); }} /> 不收取</label>
+            <label><input type="radio" name="demo-cancellation-fee" checked={charge} onChange={() => setCharge(true)} /> 收取</label>
+          </div>
+          {charge && <div className="order-cancel-demo-grid">
+            <label>違約金金額（NT$）
+              <input ref={amountInput} inputMode="numeric" value={feeText} required aria-invalid={error === 'amount'}
+                onChange={event => { setFeeText(event.target.value); setError(null); }} />
+              <small>無金額上限，可高於可退款額。</small>
+            </label>
+            <label>收取原因
+              <input ref={reasonInput} value={feeReason} required aria-invalid={error === 'reason'}
+                onChange={event => { setFeeReason(event.target.value); setError(null); }} />
+            </label>
+          </div>}
+        </fieldset>
+        <label>取消原因（選填）<input value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} /></label>
+        {error && <p role="alert">{error === 'amount' ? '請輸入大於 0 的整數金額。' : '請填寫收取原因。'}</p>}
+        <footer><button type="submit">預覽取消帳務</button></footer>
+      </form>}
+      {step === 'review' && <section aria-label="取消帳務預覽">
+        <h3 ref={heading} tabIndex={-1}>取消帳務預覽</h3>
+        <p>實際服務 {days.length} 日 · {days.length * 8} 小時{charge && <> · 收取原因／{feeReason.trim()}</>}</p>
+        {cancellationReason.trim() && <p>取消原因／{cancellationReason.trim()}</p>}
+        <div className="order-cancel-demo-grid">
+          <dl>
+            <div><dt>服務應付</dt><dd>{demoMoney(serviceDue)}</dd></div>
+            <div><dt>取消違約金</dt><dd>{demoMoney(fee)}</dd></div>
+            <div><dt>最終應付</dt><dd>{demoMoney(total)}</dd></div>
+            <div><dt>客戶淨實收</dt><dd>{demoMoney(demoReceived)}</dd></div>
+          </dl>
+          <dl className="order-case-review-note">
+            <div><dt>{balanceLabel}</dt><dd><strong>{demoMoney(balance)}</strong></dd></div>
+            <div><dt>已收違約金／公會營收</dt><dd>{demoMoney(revenue)}</dd></div>
+            <div><dt>違約金待收</dt><dd>{demoMoney(fee - revenue)}</dd></div>
+          </dl>
+        </div>
+        <p>正式流程會在取消提交後通知客戶結算明細。{nextStep}</p>
+        <footer>
+          <button type="button" onClick={() => setStep('input')}>返回調整</button>
+          <button type="button" className="order-v2-danger" onClick={() => setStep('result')}>確認取消（模擬）</button>
+        </footer>
+      </section>}
+      {step === 'result' && <section aria-label="取消結果">
+        <h3 ref={heading} tabIndex={-1}>取消已確認（模擬）</h3>
+        <p className="order-case-review-note"><strong>{balanceLabel} · {demoMoney(balance)}</strong><br />{nextStep}</p>
+        <dl>
+          <div><dt>取消結算明細通知</dt><dd>正式取消提交後發出</dd></div>
+          <div><dt>退款／補收完成通知</dt><dd>{balance ? '待全額核銷' : '結算明細已涵蓋'}</dd></div>
+        </dl>
+        <footer><button type="button" onClick={() => setStep('input')}>返回填寫</button></footer>
+      </section>}
+    </div>
+  );
+};
 
 export const OrderCancellationPanel: FC<Props> = ({ caseNo, onObserved, onBusyChange }) => {
   const staffIdentity = useStaffIdentityLabels();

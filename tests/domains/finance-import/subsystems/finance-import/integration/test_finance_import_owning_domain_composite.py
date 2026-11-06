@@ -100,7 +100,7 @@ def test_subsidy_return_ready_requires_owner_funding_preview(monkeypatch, blocke
     ))
     selection = object()
     monkeypatch.setattr(module, '_client_subsidy_return_selection', lambda *args: selection)
-    preview = Mock()
+    preview = Mock(return_value=Mock(candidate=Mock(transfer_fee=MoneyNTD(0))))
     if blocker:
         preview.side_effect = ClientRefundReversalError(TypedError(ErrorCategory.DOMAIN_BLOCKED,blocker,'funding pending',CorrelationId('test-funding')))
     monkeypatch.setattr(module.ClientRefundReversalWorkflow, 'preview', preview)

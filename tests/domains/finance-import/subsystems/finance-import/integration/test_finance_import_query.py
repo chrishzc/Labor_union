@@ -383,8 +383,10 @@ class _EnrichCursor:
             self._one = {"name": "林小美"} if params == ("115000001",) else None
         elif "SELECT case_no FROM orders WHERE case_no = %s" in sql:
             self._rows = [{"case_no": "115000001"}] if params == ("115000001",) else []
+        elif "SELECT obligation_identity, due_date, amount_due_ntd FROM client_obligations" in sql:
+            self._rows = [{"obligation_identity": "receipt:first", "due_date": "2026-10-19", "amount_due_ntd": 6200}]
         elif "FROM staff_obligations" in sql:
-            self._rows = [{"case_no": "115000009", "amount_due_ntd": 12000}] if params == (19,) else []
+            self._rows = [{"case_no": "115000009", "obligation_identity": "staff:payout", "due_date": "2026-10-19", "amount_due_ntd": 12000}] if params == (19,) else []
         else:
             self._one = None
             self._rows = []
@@ -467,6 +469,27 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
     ]
 
     items = _enrich_bank_transactions(_EnrichCursor(), page, {})
+
+    assert [item["review_reason"] for item in items] == [
+        "taishin_incoming_government_subsidy",
+        "sinopac_client_receipt_shortfall",
+        "staff_account_matched",
+    ]
+    [cross_month] = _enrich_bank_transactions(
+        _EnrichCursor(), [{**page[1], "transaction_date": "2026-11-15"}], {},
+    )
+    assert cross_month["review_reason"] == "sinopac_virtual_account_matched"
+    assert cross_month["reconciliation_target"] is None
+    assert [item["reconciliation_target"] for item in items] == [
+        None,
+        {"case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None},
+        {"case_no": "115000009", "obligation_identities": ["staff:payout"], "staff_id": 19},
+    ]
+    [ambiguous] = _enrich_bank_transactions(
+        _EnrichCursor(), [{**page[2], "memo": "HC115009 HC115010"}], {},
+    )
+    assert ambiguous["reconciliation_target"] is None
+
 
     assert [(item["counterparty_name"], item["cases"]) for item in items] == [
         ("新竹市政府", []),
