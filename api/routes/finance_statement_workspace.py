@@ -336,7 +336,7 @@ def dismiss_accounting_warning(body: AccountingWarningBody, case_no: str, princi
 class CaseManualSupplementBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bank: Literal["sinopac", "taishin"]
-    direction: Literal["client_receipt", "staff_salary", "client_refund"]
+    direction: Literal["client_receipt", "staff_salary", "client_refund", "government_subsidy"]
     target_item: str = Field(min_length=1, max_length=191)
     amount_ntd: int = Field(gt=0)
     transaction_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")

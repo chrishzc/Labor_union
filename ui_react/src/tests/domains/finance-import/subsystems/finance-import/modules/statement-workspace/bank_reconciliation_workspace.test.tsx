@@ -155,7 +155,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.queryByRole('button', { name: '匯入紀錄' })).not.toBeInTheDocument();
 
     // KPI pills
-    expect(screen.getByText(/對象／案件待確認/)).toBeInTheDocument();
+    expect(screen.queryByText(/對象／案件待確認/)).not.toBeInTheDocument();
     expect(screen.getAllByText('待核對').length).toBeGreaterThan(0);
     expect(screen.getAllByText('已核銷').length).toBeGreaterThan(0);
 

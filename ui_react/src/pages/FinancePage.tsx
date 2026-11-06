@@ -247,13 +247,23 @@ export const FinancePage: React.FC = () => {
         setBatches(list);
         const valid = list.filter((b) => b.batch_identity && b.batch_identity.trim() !== '');
         if (valid.length > 0) {
-          setSelectedBatchIdentity((currentId) => {
-            const chosen = currentId && valid.some((b) => b.batch_identity === currentId) ? currentId : valid[0].batch_identity!;
-            if (sourceReview.kind === 'idle' && batchPreview.kind === 'idle') {
-              void loadSourceReview(chosen);
+          let chosen = valid[0].batch_identity!;
+          for (const b of valid) {
+            try {
+              const rows = await financeImportQueryClient.listReviewRows(b.batch_identity!);
+              if (rows.items.length > 0) {
+                chosen = b.batch_identity!;
+                break;
+              }
+            } catch {
+              // ignore
             }
-            return chosen;
-          });
+          }
+          if (!active) return;
+          setSelectedBatchIdentity(chosen);
+          if (sourceReview.kind === 'idle' && batchPreview.kind === 'idle') {
+            void loadSourceReview(chosen);
+          }
         }
       } catch {
         // Fallback for offline / unmocked test contexts

@@ -88,7 +88,7 @@ export function FinanceBankReconciliationWorkspace({
   staff,
   batches,
   selectedBatchIdentity,
-  onSelectBatch: _onSelectBatch,
+  onSelectBatch,
   sourceReview,
   onReloadSourceReview: _onReloadSourceReview,
   financeWorkbook,
@@ -179,7 +179,7 @@ export function FinanceBankReconciliationWorkspace({
   const pendingRows = reviewItems.filter((row) => {
     if (manuallyPostedRows.has(row.row_identity)) return false;
     const itemDate = row.transaction_date ?? '';
-    const dateMatch = !itemDate || (itemDate >= dates.start && itemDate <= dates.end);
+    const dateMatch = !itemDate || ((!dates.start || itemDate >= dates.start) && (!dates.end || itemDate <= dates.end));
     const bankMatch =
       filterBank === 'all' ||
       (filterBank === 'sinopac' && batchBankFormat === 'sinopac') ||
@@ -194,10 +194,6 @@ export function FinanceBankReconciliationWorkspace({
       `${row.source_sheet}#${row.source_row} ${row.amount_ntd}`.includes(filterSearch.trim());
     return dateMatch && bankMatch && dirMatch && searchMatch;
   });
-
-  const pendingWithoutCase = pendingRows.filter(
-    (row) => !row.available_actions.some((a) => a === 'preview_manual_correction')
-  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -364,15 +360,29 @@ export function FinanceBankReconciliationWorkspace({
         <span className="bank-reconcile-pill pill-posted">
           已核銷 <strong>{postedRows.length}</strong> 筆
         </span>
-        <span className="bank-reconcile-pill pill-warning">
-          對象／案件待確認 <strong>{pendingWithoutCase.length}</strong> 筆
-        </span>
       </div>
 
       {/* 5. 總表卡片面板 */}
       <section className="bank-reconcile-panel" aria-label="銀行對帳總表">
         {/* 篩選工具列 Filter Bar */}
         <div className="bank-reconcile-filters">
+          {batches.length > 1 && (
+            <div className="bank-reconcile-filter-item">
+              <label htmlFor="filter-batch">匯入批次</label>
+              <select
+                id="filter-batch"
+                value={selectedBatchIdentity}
+                onChange={(e) => onSelectBatch(e.target.value)}
+                aria-label="篩選匯入批次"
+              >
+                {batches.map((b) => (
+                  <option key={b.batch_identity} value={b.batch_identity ?? ''}>
+                    {b.source_file} (#{b.batch_id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="bank-reconcile-filter-item">
             <label htmlFor="filter-bank">銀行</label>
             <select
@@ -485,7 +495,7 @@ export function FinanceBankReconciliationWorkspace({
                       <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.95rem' }}>
                         {financeMoney(row.amount_ntd)}
                       </td>
-                      <td>{row.classification_type === 'staff_payout' ? '月嫂（待指定）' : row.classification_type === 'client_refund' ? '客戶（待退款）' : '對象待確認'}</td>
+                      <td>{(row.classification_type === 'staff_payout' || row.classification_type === 'staff_salary') ? '月嫂（待指定）' : row.classification_type === 'client_refund' ? '客戶（待退款）' : row.classification_type === 'government_subsidy' ? '政府補助（待核對）' : '對象待確認'}</td>
                       <td>
                         <span style={{ color: '#74593f', fontSize: '0.8rem' }}>待指派案件</span>
                       </td>
@@ -631,10 +641,13 @@ export function FinanceBankReconciliationWorkspace({
             initialKind={
               correctionRow.classification_type === 'client_refund'
                 ? 'client_refund'
-                : correctionRow.classification_type === 'staff_payout'
+                : (correctionRow.classification_type === 'staff_payout' || correctionRow.classification_type === 'staff_salary')
                 ? 'staff_payout'
+                : correctionRow.classification_type === 'government_subsidy'
+                ? 'government_subsidy'
                 : 'client_receipt'
             }
+            bankAmount={correctionRow.amount_ntd}
             onBusyChange={setCorrectionBusy}
             onPosted={() => {
               onPostedManual(correctionRow.row_identity);

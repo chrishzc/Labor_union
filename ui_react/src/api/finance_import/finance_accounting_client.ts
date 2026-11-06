@@ -28,7 +28,7 @@ export type AccountingWarning = z.infer<typeof warning>;
 export type AccountingItem = z.infer<typeof item>;
 export type CaseManualSupplementCommand = {
   bank: 'sinopac' | 'taishin';
-  direction: 'client_receipt' | 'staff_salary' | 'client_refund';
+  direction: 'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy';
   target_item: string;
   amount_ntd: number;
   transaction_date: string;

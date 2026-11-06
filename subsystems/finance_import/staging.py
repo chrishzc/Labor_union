@@ -9,6 +9,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 import json
 from typing import Any, Mapping
+import unicodedata
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import (
@@ -66,6 +67,8 @@ def _identity_maps(
     Mapping[str, Any],
     tuple[str, ...],
     tuple[Any, ...],
+    tuple[str, ...],
+    tuple[Any, ...],
 ]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
@@ -77,6 +80,8 @@ def _identity_maps(
     client_refund_case_suffixes = identity_maps.get("client_refund_case_suffixes", {})
     all_client_names = tuple(identity_maps.get("all_client_names", ()))
     taishin_candidates = tuple(identity_maps.get("taishin_client_refund_candidates", ()))
+    all_staff_names = tuple(identity_maps.get("all_staff_names", ()))
+    staff_payout_candidates = tuple(identity_maps.get("staff_payout_candidates", ()))
     if not isinstance(client_accounts, Mapping) or not isinstance(
         staff_accounts, Mapping
     ):
@@ -100,6 +105,8 @@ def _identity_maps(
         client_refund_case_suffixes,
         all_client_names,
         taishin_candidates,
+        all_staff_names,
+        staff_payout_candidates,
     )
 
 
@@ -140,6 +147,8 @@ def stage_finance_rows(
         client_refund_case_suffixes,
         all_client_names,
         taishin_candidates,
+        all_staff_names,
+        staff_payout_candidates,
     ) = _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
@@ -162,18 +171,30 @@ def stage_finance_rows(
         if row.get("format_id") != format_id or row.get("sheet_name") != sheet_name:
             raise ValueError("normalized row metadata does not match its batch")
 
-        # 情境 C（選項 C-1）：台新支出若非新竹市政府且備註查無客戶姓名，直接跳過不匯入
-        if format_id == "taishin" and row.get("direction") == "outgoing":
+        # 台新銀行：無配對案件編號、月嫂、客戶退款或政府入款明細直接捨棄
+        if format_id == "taishin":
             memo = row.get("memo") or ""
-            is_government = isinstance(memo, str) and "新竹市政府" in memo
-            if not is_government and all_client_names:
-                from domains.finance_import.transaction_classifier import (
-                    extract_client_name_from_memo,
-                )
-
-                matched_name = extract_client_name_from_memo(memo, all_client_names)
-                if not matched_name:
+            memo_text = unicodedata.normalize("NFKC", memo) if isinstance(memo, str) else ""
+            is_government = "新竹市政府" in memo_text or "新竹市府" in memo_text
+            if row.get("direction") == "incoming":
+                if not is_government and (all_client_names or taishin_candidates or all_staff_names):
                     continue
+            elif row.get("direction") == "outgoing":
+                if not is_government and (all_client_names or taishin_candidates or all_staff_names):
+                    from domains.finance_import.transaction_classifier import (
+                        extract_client_name_from_memo,
+                    )
+                    from domains.finance_import.cancellation_code import (
+                        extract_sinopac_memo_case_suffix,
+                    )
+                    matched_client = extract_client_name_from_memo(memo, all_client_names) if all_client_names else None
+                    matched_staff = extract_client_name_from_memo(memo, all_staff_names) if all_staff_names else None
+                    suffix = extract_sinopac_memo_case_suffix(memo)
+                    is_kw = any(k in memo_text for k in ("服務人員", "月嫂", "薪資", "補助款", "退款", "退費"))
+                    cp_acc = row.get("counterparty_account")
+                    acc_match = bool(cp_acc and (cp_acc in client_accounts or cp_acc in staff_accounts or (subsidy_return_accounts and cp_acc in subsidy_return_accounts)))
+                    if not (matched_client or matched_staff or suffix or is_kw or acc_match):
+                        continue
 
         # 永豐銀行：沒有配對案件編號或月嫂或政府成功的明細直接捨棄
         pre_classification = None
@@ -189,6 +210,8 @@ def stage_finance_rows(
                     client_refund_case_suffixes,
                     all_client_names,
                     taishin_candidates,
+                    all_staff_names,
+                    staff_payout_candidates,
                 )
             except TypeError:
                 pre_classification = classify_finance_transaction(
@@ -346,6 +369,8 @@ def stage_finance_rows(
                     client_refund_case_suffixes,
                     all_client_names,
                     taishin_candidates,
+                    all_staff_names,
+                    staff_payout_candidates,
                 )
             except TypeError:
                 classification = classify_finance_transaction(

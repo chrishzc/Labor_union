@@ -467,13 +467,30 @@ def _batch_manifest(row: dict[str, Any]) -> FinanceImportBatchManifest:
 
 def _review_row(row: dict[str, Any]) -> FinanceImportReviewRowSummary:
     row_id = int(row["row_id"])
+    classification_type = str(row.get("classification_type") or "")
+    direction = str(row.get("direction") or "")
+    format_id = str(row.get("format_id", "legacy"))
+
+    if classification_type in ("staff_payout", "staff_salary", "staff_legacy_subsidy"):
+        b_type = "payable"
+    elif classification_type == "client_receipt":
+        b_type = "receivable"
+    elif classification_type == "government_subsidy":
+        b_type = "government_subsidy"
+    elif classification_type in ("client_refund", "client_subsidy_return"):
+        b_type = "subsidy_return"
+    elif classification_type == "non_business_review":
+        b_type = "review"
+    else:
+        b_type = bank_import_type(format_id, direction)
+
     return FinanceImportReviewRowSummary(
         row_id, f"finance-import-row:{row_id}", row.get("transaction_date"),
-        str(row["direction"]), _integer_money(row), str(row["classification_type"]),
+        direction, _integer_money(row), classification_type,
         str(row["disposition"]), str(row["reconciliation_status"]),
         str(row["source_sheet"]), int(row["source_row"]), int(row["occurrence_count"]),
         _text_tuple(row.get("available_actions")), row["created_at"],
-        bank_import_type(str(row.get("format_id", "legacy")), str(row["direction"])),
+        b_type,
     )
 
 

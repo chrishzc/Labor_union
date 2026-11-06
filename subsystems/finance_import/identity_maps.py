@@ -120,6 +120,28 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
 
     try:
         cursor.execute(
+            """SELECT case_no, staff_id
+               FROM orders
+               WHERE staff_id IS NOT NULL AND status <> '訂單取消'"""
+        )
+        order_staff_rows = cursor.fetchall()
+    except Exception:
+        order_staff_rows = ()
+
+    try:
+        cursor.execute(
+            """SELECT case_no, staff_id
+               FROM case_staff_assignments
+               WHERE staff_id IS NOT NULL AND status='active'"""
+        )
+        assignment_staff_rows = cursor.fetchall()
+    except Exception:
+        assignment_staff_rows = ()
+
+    all_staff_case_rows = list(staff_obligation_rows) + list(order_staff_rows) + list(assignment_staff_rows)
+
+    try:
+        cursor.execute(
             """SELECT obligation.case_no, order_row.client_id
                FROM client_obligations obligation
                JOIN orders order_row ON order_row.case_no=obligation.case_no
@@ -134,7 +156,7 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         refund_obligation_rows = ()
 
     all_cases = {
-        str(r["case_no"]) for r in staff_obligation_rows if isinstance(r, Mapping) and r.get("case_no")
+        str(r["case_no"]) for r in all_staff_case_rows if isinstance(r, Mapping) and r.get("case_no")
     } | {
         str(r["case_no"]) for r in refund_obligation_rows if isinstance(r, Mapping) and r.get("case_no")
     }
@@ -157,9 +179,11 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
             va = legacy_va.get(case_no) or build_client_virtual_account(case_no)
             if va and len(va) >= 6:
                 case_suffixes[case_no] = va[-6:]
+            elif len(case_no) == 6 and case_no.isdigit():
+                case_suffixes[case_no] = case_no
 
     staff_case_candidates: dict[str, set[int]] = {}
-    for r in staff_obligation_rows:
+    for r in all_staff_case_rows:
         if not isinstance(r, Mapping):
             continue
         c_no = str(r.get("case_no") or "")

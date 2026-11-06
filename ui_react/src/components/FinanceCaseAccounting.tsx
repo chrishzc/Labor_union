@@ -213,6 +213,7 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
      caseNo={initialCase}
      clientItems={data.client_items}
      staffItems={data.staff_items}
+     subsidyNtd={data.subsidy_ntd ?? 0}
      onSuccess={updated => {
        setState(old => ({ ...old, data: updated }));
        refresh();

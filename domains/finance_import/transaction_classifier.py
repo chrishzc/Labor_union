@@ -499,8 +499,9 @@ def classify_finance_transaction(
         )
 
     if format_id == "taishin":
-        memo = row["memo"]
-        government_memo = isinstance(memo, str) and "新竹市政府" in memo
+        memo = row.get("memo")
+        memo_text = unicodedata.normalize("NFKC", memo) if isinstance(memo, str) else ""
+        government_memo = bool(memo_text and ("新竹市政府" in memo_text or "新竹市府" in memo_text))
         if direction == "incoming":
             if government_memo:
                 return _result("government_subsidy", [], "taishin_government_memo")
@@ -512,6 +513,75 @@ def classify_finance_transaction(
             )):
                 return _review("counterparty_identity_type_conflict")
             return _result("government_subsidy", [], "taishin_government_return_memo")
+
+        is_staff_kw = any(k in memo_text for k in ("服務人員", "月嫂", "薪資", "補助款"))
+        is_refund_kw = any(k in memo_text for k in ("退款", "退費", "客戶"))
+        suffix = extract_sinopac_memo_case_suffix(memo)
+
+        if suffix is not None:
+            staff_case_map = staff_case_suffixes or {}
+            refund_case_map = client_refund_case_suffixes or {}
+            memo_staff_ids = _ids_for_account(staff_case_map, suffix)
+            memo_refund_ids = _ids_for_account(refund_case_map, suffix)
+
+            if memo_staff_ids and memo_refund_ids:
+                if is_staff_kw and not is_refund_kw:
+                    memo_refund_ids = []
+                elif is_refund_kw and not is_staff_kw:
+                    memo_staff_ids = []
+                else:
+                    return _review("counterparty_identity_type_conflict")
+
+            if len(memo_staff_ids) > 1 or len(memo_refund_ids) > 1:
+                return _review("counterparty_account_multiple_matches")
+            if memo_staff_ids:
+                return _result(
+                    "staff_salary",
+                    memo_staff_ids,
+                    "taishin_unique_staff_case_suffix_in_memo",
+                    suffix,
+                )
+            if memo_refund_ids:
+                return _result(
+                    "client_refund",
+                    memo_refund_ids,
+                    "taishin_unique_client_refund_case_suffix_in_memo",
+                    suffix,
+                )
+            if is_staff_kw and not is_refund_kw:
+                return _result(
+                    "staff_salary",
+                    [],
+                    "taishin_staff_case_suffix_in_memo",
+                    suffix,
+                )
+            if is_refund_kw and not is_staff_kw:
+                return _result(
+                    "client_refund",
+                    [],
+                    "taishin_client_refund_case_suffix_in_memo",
+                    suffix,
+                )
+
+        if is_staff_kw and not is_refund_kw:
+            account = row.get("counterparty_account")
+            staff_ids = _ids_for_account(staff_accounts, account)
+            if len(staff_ids) == 1:
+                return _result(
+                    "staff_salary",
+                    staff_ids,
+                    "taishin_unique_staff_account",
+                    account,
+                )
+            if len(staff_ids) > 1:
+                return _review("counterparty_account_multiple_matches")
+            if any(k in memo_text for k in ("服務人員薪資", "月嫂薪資", "月嫂")):
+                return _result(
+                    "staff_salary",
+                    [],
+                    "taishin_staff_salary_memo",
+                    account,
+                )
 
         if all_client_names or taishin_client_refund_candidates or all_staff_names or staff_payout_candidates:
             return _review("taishin_outgoing_unrecognized")

@@ -5,11 +5,13 @@ import { financeImportCorrectionClient as corrections } from '../../../../../../
 import { clientReceiptQueryClient } from '../../../../../../../api/client_finance/client_receipt_query_client';
 import { ordersQueryClient } from '../../../../../../../api/orders/order_query_client';
 import { clientSettlementRemediationClient } from '../../../../../../../api/client_finance/client_settlement_remediation_client';
+import { subsidyPeriodClient } from '../../../../../../../api/government_subsidy/period_reconciliation_client';
 
 vi.mock('../../../../../../../api/orders/order_query_client', () => ({ ordersQueryClient: { getOrderSummaries: vi.fn() } }));
 vi.mock('../../../../../../../api/client_finance/client_receipt_query_client', () => ({ clientReceiptQueryClient: { query: vi.fn() } }));
 vi.mock('../../../../../../../api/client_finance/client_settlement_remediation_client', () => ({ clientSettlementRemediationClient: { query: vi.fn() } }));
 vi.mock('../../../../../../../api/finance_import/finance_import_correction_client', () => ({ financeImportCorrectionClient: { preview: vi.fn(), apply: vi.fn(), queryOutcome: vi.fn() } }));
+vi.mock('../../../../../../../api/government_subsidy/period_reconciliation_client', () => ({ subsidyPeriodClient: { query: vi.fn(), difference: vi.fn() } }));
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -18,6 +20,38 @@ beforeEach(() => {
   vi.mocked(corrections.preview).mockResolvedValue({ candidate: { row_identity: 'row:1', batch_identity: 'batch:1', classification_type: 'client_receipt', bank_amount_ntd: 100, allocations: [{ obligation_identity: 'obligation:1', amount_ntd: 100 }] }, preview_fingerprint: 'a'.repeat(64) } as never);
   vi.mocked(corrections.apply).mockResolvedValue({ job_id: 'job:1' } as never);
   vi.mocked(corrections.queryOutcome).mockResolvedValue({ status: 'succeeded', receipt: null } as never);
+  vi.mocked(subsidyPeriodClient.query).mockResolvedValue({
+    period: { unit: 'quarter', year: 2026, index: 1 },
+    version: 1,
+    label: '115年第1季',
+    lines: [
+      { case_no: 'CASE-1', service_end_date: '2026-03-31', amount_ntd: 5000, unavailable_reason: null },
+    ],
+    total_ntd: 5000,
+    coverage: [],
+    blocked_cases: [],
+    recorded_lines: [],
+    changed_cases: [],
+    can_reconcile: true,
+  } as never);
+  vi.mocked(subsidyPeriodClient.difference).mockResolvedValue({
+    period: { unit: 'quarter', year: 2026, index: 1 },
+    version: 2,
+    label: '115年第1季',
+    lines: [
+      { case_no: 'CASE-1', service_end_date: '2026-03-31', amount_ntd: 5000, unavailable_reason: null },
+    ],
+    total_ntd: 5000,
+    coverage: [
+      { receipt_id: 1, period: { unit: 'quarter', year: 2026, index: 1 }, amount_ntd: 5000, recovered_advance_ntd: 0, label: '115年第1季', settled: true },
+    ],
+    blocked_cases: [],
+    recorded_lines: [
+      { case_no: 'CASE-1', service_end_date: '2026-03-31', amount_ntd: 5000, unavailable_reason: null },
+    ],
+    changed_cases: [],
+    can_reconcile: false,
+  } as never);
 });
 
 async function preview() {
@@ -158,4 +192,36 @@ it('requires an explicit overage choice to delegate excess refund cash to recove
     allow_refund_overage_recovery:true,allow_partial_refund_recovery:false,
   }));
   expect(corrections.apply).toHaveBeenCalledOnce();
+});
+
+it('supports government subsidy whole-period reconciliation via correction form', async () => {
+  render(
+    <FinanceImportCorrectionForm
+      rowIdentity="finance-import-row:42"
+      sourceLabel="bank sheet row 42"
+      staff={[]}
+      bankAmount={5000}
+      initialKind="government_subsidy"
+    />
+  );
+  await screen.findByText('115年第1季');
+  expect(screen.getByText(/本期目前計算應收/)).toBeInTheDocument();
+  expect(subsidyPeriodClient.query).toHaveBeenCalled();
+
+  const confirmCheckbox = screen.getByRole('checkbox', { name: /我已確認整期期別、金額與處理方式無誤/ });
+  fireEvent.click(confirmCheckbox);
+
+  const reconcileBtn = screen.getByRole('button', { name: '確認核銷本期政府入款' });
+  expect(reconcileBtn).toBeEnabled();
+  fireEvent.click(reconcileBtn);
+
+  await screen.findByText('政府補助整期入款核銷完成！已確認核銷收據。');
+  expect(subsidyPeriodClient.difference).toHaveBeenCalledWith(expect.objectContaining({
+    unit: 'quarter',
+    year: expect.any(Number),
+    index: expect.any(Number),
+    action: 'initial_receipt',
+    bank_row_id: 42,
+    handling: 'exact',
+  }));
 });

@@ -16,6 +16,7 @@ interface Props {
   caseNo: string;
   clientItems: AccountingItem[];
   staffItems: AccountingItem[];
+  subsidyNtd?: number;
   onSuccess: (updated: CaseAccounting) => void;
   onClose: () => void;
 }
@@ -24,6 +25,7 @@ export function CaseManualSupplementWorkbench({
   caseNo,
   clientItems,
   staffItems,
+  subsidyNtd = 0,
   onSuccess,
   onClose,
 }: Props) {
@@ -31,7 +33,7 @@ export function CaseManualSupplementWorkbench({
   const dirGroupId = useId();
 
   const [bank, setBank] = useState<'sinopac' | 'taishin'>('sinopac');
-  const [direction, setDirection] = useState<'client_receipt' | 'staff_salary' | 'client_refund'>('client_receipt');
+  const [direction, setDirection] = useState<'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy'>('client_receipt');
 
   // 計算候選期款項目
   const stageNames: Record<string, string> = { deposit: '訂金', first: '第一期', second: '第二期' };
@@ -61,6 +63,14 @@ export function CaseManualSupplementWorkbench({
         label: `客戶退款 · ${i.label}（待退 ${financeMoney(i.remaining_ntd ?? 0)}／應退 ${financeMoney(i.expected_ntd)}）`,
         remaining: i.remaining_ntd ?? i.expected_ntd,
       }));
+  } else if (direction === 'government_subsidy') {
+    candidateItems = [
+      {
+        identity: 'government_subsidy',
+        label: subsidyNtd > 0 ? `政府補助款（本案補助 ${financeMoney(subsidyNtd)}）` : '政府補助款（G 流向）',
+        remaining: subsidyNtd,
+      },
+    ];
   }
 
   const [targetItem, setTargetItem] = useState<string>(candidateItems[0]?.identity || '');
@@ -72,8 +82,11 @@ export function CaseManualSupplementWorkbench({
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
-  function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund') {
+  function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy') {
     setDirection(newDir);
+    if (newDir === 'government_subsidy') {
+      setBank('taishin');
+    }
     let nextCandidates: { identity: string; label: string; remaining: number }[] = [];
     if (newDir === 'client_receipt') {
       nextCandidates = clientItems
@@ -91,7 +104,7 @@ export function CaseManualSupplementWorkbench({
           label: `${i.party} · ${i.label || '月嫂薪資'}`,
           remaining: i.remaining_ntd ?? i.expected_ntd,
         }));
-    } else {
+    } else if (newDir === 'client_refund') {
       nextCandidates = clientItems
         .filter(i => i.direction === 'payable')
         .map(i => ({
@@ -99,6 +112,14 @@ export function CaseManualSupplementWorkbench({
           label: `客戶退款 · ${i.label}`,
           remaining: i.remaining_ntd ?? i.expected_ntd,
         }));
+    } else {
+      nextCandidates = [
+        {
+          identity: 'government_subsidy',
+          label: subsidyNtd > 0 ? `政府補助款（本案補助 ${financeMoney(subsidyNtd)}）` : '政府補助款（G 流向）',
+          remaining: subsidyNtd,
+        },
+      ];
     }
     const first = nextCandidates[0];
     if (first) {
@@ -244,6 +265,17 @@ export function CaseManualSupplementWorkbench({
                 disabled={busy}
               />
               <span>客戶退款（出款）</span>
+            </label>
+            <label className={`supplement-radio-pill ${direction === 'government_subsidy' ? 'is-active' : ''}`}>
+              <input
+                type="radio"
+                name="direction"
+                value="government_subsidy"
+                checked={direction === 'government_subsidy'}
+                onChange={() => handleDirectionChange('government_subsidy')}
+                disabled={busy}
+              />
+              <span>政府入款（G 補助）</span>
             </label>
           </div>
         </div>

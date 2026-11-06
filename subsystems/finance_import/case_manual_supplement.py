@@ -63,7 +63,7 @@ class CaseManualSupplementService:
     ) -> ManualSupplementResult:
         if bank not in {"sinopac", "taishin"}:
             raise ValueError(f"不支援的操作銀行: {bank}")
-        if direction not in {"client_receipt", "staff_salary", "client_refund"}:
+        if direction not in {"client_receipt", "staff_salary", "client_refund", "government_subsidy"}:
             raise ValueError(f"不支援的交易方向: {direction}")
         if amount_ntd <= 0:
             raise ValueError("補登金額必須大於 0")
@@ -110,14 +110,25 @@ class CaseManualSupplementService:
                 f"manual-supplement:{case_no}:{bank}:{direction}:{amount_ntd}:{transaction_date}:{idempotency_key}".encode()
             ).hexdigest()
 
-            is_incoming = direction == "client_receipt"
-            cancellation_code = virtual_account if is_incoming else ""
+            is_incoming = direction in {"client_receipt", "government_subsidy"}
+            cancellation_code = virtual_account if direction == "client_receipt" else ""
             memo = (
                 f"HC{case_suffix}服務人員"
                 if direction == "staff_salary"
                 else f"HC{case_suffix}退款"
                 if direction == "client_refund"
+                else f"新竹市政府補助款 {case_suffix}"
+                if direction == "government_subsidy"
                 else note_text
+            )
+            classification = (
+                "government_subsidy"
+                if direction == "government_subsidy"
+                else "client_receipt"
+                if direction == "client_receipt"
+                else "staff_payout"
+                if direction == "staff_salary"
+                else "client_refund"
             )
             date_slash = transaction_date.replace("-", "/")
             raw_payload = {
@@ -143,8 +154,8 @@ class CaseManualSupplementService:
                 INSERT INTO finance_import_rows (
                     dedup_fingerprint, format_id, transaction_date, direction,
                     credit, debit, summary, memo, cancellation_code, bank_references,
-                    warnings, reconciliation_status, raw_payload
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    warnings, classification_type, reconciliation_status, raw_payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     row_fp,
@@ -161,6 +172,7 @@ class CaseManualSupplementService:
                         ensure_ascii=False,
                     ),
                     "[]",
+                    classification,
                     "reconciled",
                     json.dumps(raw_payload, ensure_ascii=False),
                 ),
@@ -327,6 +339,48 @@ class CaseManualSupplementService:
                 cursor.execute(
                     "UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s",
                     (case_no,),
+                )
+
+            elif direction == "government_subsidy":
+                # 政府入款核銷（台新入款 G）
+                cursor.execute(
+                    "SELECT COALESCE(actual_end_date, end_date) as service_end FROM orders WHERE case_no=%s",
+                    (case_no,),
+                )
+                ord_row = cursor.fetchone()
+                svc_date = ord_row["service_end"] if ord_row and ord_row["service_end"] else transaction_date
+                year_val = int(str(svc_date)[:4])
+                month_val = int(str(svc_date)[5:7]) if len(str(svc_date)) >= 7 else 1
+                quarter_val = (month_val - 1) // 3 + 1
+                cursor.execute(
+                    """
+                    INSERT INTO government_subsidy_period_entries (
+                        period_unit, period_year, period_index, period_start, period_end,
+                        finance_import_row_id, amount_ntd, paid_on, idempotency_key, actor
+                    ) VALUES (
+                        'quarter', %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        year_val,
+                        quarter_val,
+                        f"{year_val}-{(quarter_val-1)*3+1:02d}-01",
+                        f"{year_val}-{quarter_val*3:02d}-28",
+                        row_id,
+                        amount_ntd,
+                        transaction_date,
+                        idempotency_key,
+                        actor,
+                    ),
+                )
+                entry_id = cursor.lastrowid
+                cursor.execute(
+                    """
+                    INSERT INTO government_subsidy_period_members (
+                        receipt_id, case_no, service_end_date, amount_ntd
+                    ) VALUES (%s, %s, %s, %s)
+                    """,
+                    (entry_id, case_no, svc_date, amount_ntd),
                 )
 
             # 5. 寫入 command 收據防重

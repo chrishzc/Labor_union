@@ -106,7 +106,7 @@ class MySqlGovernmentSubsidyPeriodRepository:
             if (row is None or row['currency'] not in (None,'TWD','NTD') or row['transaction_date'] is None
                     or row['reconciliation_status']!='pending'
                     or row.get('disposition')=='blocked' or row.get('has_active_integrity')
-                    or row['classification_type'] != 'government_subsidy'
+                    or (row['classification_type'] not in ('government_subsidy', 'review', 'receivable') if not reversal else row['classification_type'] not in ('government_subsidy', 'review', 'subsidy_return', 'payable'))
                     or row['direction'] != ('outgoing' if reversal else 'incoming')):
                 raise PeriodReconciliationConflict('subsidy_period_bank_invalid')
             amount, other = (row['debit'], row['credit']) if reversal else (row['credit'], row['debit'])
@@ -224,4 +224,10 @@ class MySqlGovernmentSubsidyPeriodRepository:
             'finance_import_row_id,amount_ntd,reversal_of_id,paid_on,idempotency_key,actor) '
             'SELECT %s,%s,%s,%s,%s,id,%s,%s,transaction_date,%s,%s FROM finance_import_rows WHERE id=%s',
             (period.unit,period.year,period.index,period.start,period.end,amount,reversal,key,actor,bank_row_id))
-        return int(cursor.lastrowid)
+        entry_id = int(cursor.lastrowid)
+        cursor.execute(
+            "UPDATE finance_import_rows SET reconciliation_status='reconciled', "
+            "classification_type='government_subsidy' WHERE id=%s AND reconciliation_status='pending'",
+            (bank_row_id,),
+        )
+        return entry_id
