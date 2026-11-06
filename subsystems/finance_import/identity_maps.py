@@ -1,6 +1,6 @@
 """
 File: identity_maps.py
-Description: 讀取銀行帳戶、客戶姓名及待退款義務候選，供財務分類與台新比對使用。
+Description: 讀取銀行帳戶、既有案件虛擬帳號與服務人員／客戶候選，供財務流水分類使用。
 """
 
 from __future__ import annotations
@@ -105,6 +105,9 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
         staff_id = _positive_id(row.get("staff_id"), "staff_id")
         staff_candidates.setdefault(account, set()).add(staff_id)
 
+    receipt_candidates = _client_receipt_candidates(cursor)
+    known_virtual_accounts, known_case_suffixes = _known_case_virtual_accounts(cursor)
+
     try:
         cursor.execute(
             """SELECT obligation.case_no, obligation.staff_id
@@ -208,14 +211,63 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, Any]:
             subsidy_return_candidates
         ),
         "staff_accounts": _stable_map(staff_candidates),
-        "client_receipt_candidates": _client_receipt_candidates(cursor),
+        "client_receipt_candidates": receipt_candidates,
         "staff_case_suffixes": _stable_map(staff_case_candidates),
         "client_refund_case_suffixes": _stable_map(refund_case_candidates),
         "all_client_names": _all_client_names(cursor),
         "taishin_client_refund_candidates": _client_refund_name_candidates(cursor),
         "all_staff_names": _all_staff_names(cursor),
         "staff_payout_candidates": _staff_payout_candidates(cursor),
+        "known_virtual_accounts": known_virtual_accounts,
+        "known_case_suffixes": known_case_suffixes,
     }
+
+
+def _known_case_virtual_accounts(
+    cursor: Any,
+) -> tuple[frozenset[str] | None, frozenset[str] | None]:
+    try:
+        cursor.execute("SELECT case_no FROM orders WHERE case_no IS NOT NULL")
+        existing_cases = {
+            str(row["case_no"])
+            for row in cursor.fetchall()
+            if isinstance(row, Mapping) and row.get("case_no")
+        }
+    except Exception:
+        return None, None
+
+    try:
+        cursor.execute(
+            "SELECT case_no, virtual_account FROM client_legacy_virtual_accounts "
+            "WHERE case_no IS NOT NULL AND virtual_account IS NOT NULL"
+        )
+        legacy_rows = list(cursor.fetchall())
+    except Exception:
+        legacy_rows = []
+
+    va_to_cases: dict[str, set[str]] = {}
+    for row in legacy_rows:
+        if isinstance(row, Mapping) and row.get("case_no") and row.get("virtual_account"):
+            case_no = str(row["case_no"])
+            virtual_account = str(row["virtual_account"]).strip()
+            if virtual_account:
+                va_to_cases.setdefault(virtual_account, set()).add(case_no)
+
+    valid_virtual_accounts = {
+        va for va, cases in va_to_cases.items() if len(cases) == 1
+    }
+    formula_to_cases: dict[str, set[str]] = {}
+    for case_no in existing_cases:
+        built = build_client_virtual_account(case_no)
+        if built and built not in va_to_cases:
+            formula_to_cases.setdefault(built, set()).add(case_no)
+    valid_virtual_accounts.update(
+        va for va, cases in formula_to_cases.items() if len(cases) == 1
+    )
+    known_suffixes = frozenset(
+        va[-6:] for va in valid_virtual_accounts if len(va) >= 6
+    )
+    return frozenset(valid_virtual_accounts), known_suffixes
 
 
 def _all_staff_names(cursor: Any) -> tuple[str, ...]:

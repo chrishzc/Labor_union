@@ -2,30 +2,12 @@
 import hashlib
 import json
 
+from subsystems.finance_import.query import BANK_CASE_PROOFS_SQL
 from subsystems.finance_import.statement_archive import (
     StatementCommandConflict, StatementCommandReceipt, StatementExportRow,
 )
 
-_PROOFS = """
-SELECT finance_import_row_id AS row_id,case_no FROM client_ledger_entries WHERE finance_import_row_id IS NOT NULL
-UNION
-SELECT e.finance_import_row_id,o.case_no FROM staff_payout_events e
-JOIN staff_payout_obligation_links l ON l.payout_event_id=e.id
-JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity WHERE e.finance_import_row_id IS NOT NULL
-UNION
-SELECT t.finance_import_row_id,i.case_no FROM government_subsidy_transactions t
-JOIN government_subsidy_allocations a ON a.transaction_id=t.id
-JOIN subsidy_claim_batch_items i ON i.id=a.claim_item_id
-WHERE t.finance_import_row_id IS NOT NULL AND t.transaction_status='succeeded'
-UNION
-SELECT entry.finance_import_row_id,member.case_no FROM government_subsidy_period_entries entry
-JOIN government_subsidy_period_members member ON member.receipt_id=COALESCE(entry.reversal_of_id,entry.id)
-UNION
-SELECT event.finance_import_row_id,o.case_no FROM staff_overpayment_recovery_events event
-JOIN staff_overpayment_recoveries recovery ON recovery.recovery_identity=event.recovery_identity
-JOIN staff_obligations o ON JSON_CONTAINS(recovery.source_obligation_identities,JSON_QUOTE(o.obligation_identity))
-WHERE event.event_type='cash_recovered' AND event.finance_import_row_id IS NOT NULL
-"""
+
 
 
 class MySqlStatementArchiveRepository:
@@ -36,7 +18,7 @@ class MySqlStatementArchiveRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT b.id,b.format_id,b.raw_payload,p.case_no FROM finance_import_rows b JOIN ("
-                + _PROOFS + ") p ON p.row_id=b.id JOIN orders r ON r.case_no=p.case_no "
+                + BANK_CASE_PROOFS_SQL + ") p ON p.row_id=b.id JOIN orders r ON r.case_no=p.case_no "
                 "LEFT JOIN finance_statement_exclusions x ON x.finance_import_row_id=b.id "
                 "WHERE x.finance_import_row_id IS NULL ORDER BY b.id,p.case_no"
             )

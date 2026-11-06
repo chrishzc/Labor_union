@@ -14,6 +14,10 @@ const ingestionReceiptSchema = z.strictObject({
   canonical_created_count: z.number().int().nonnegative(), duplicate_occurrence_count: z.number().int().nonnegative(),
   source_warning_count: z.number().int().nonnegative(), source_warning_created_count: z.number().int().nonnegative(), replayed: z.boolean(),
 });
+const ingestionOutcomeSchema = z.strictObject({
+  status: z.enum(['committed', 'rolled_back', 'unknown']), receipt: ingestionReceiptSchema.nullable(),
+  source_content_digest: sha256.nullable(), error_code: z.string().nullable(), phase: z.string().nullable(),
+});
 const countsSchema = z.strictObject({ source_rows: z.number().int().nonnegative(), canonical_created: z.number().int().nonnegative(), duplicate_occurrences: z.number().int().nonnegative(), ready_dispatch: z.number().int().nonnegative(), existing: z.number().int().nonnegative(), manual_review: z.number().int().nonnegative(), business_pending: z.number().int().nonnegative(), blocked: z.number().int().nonnegative() });
 const previewSchema = z.strictObject({ batch_identity: z.string().min(1), batch_version: z.number().int().nonnegative(), source_content_digest: sha256, classifier_version: z.string(), fingerprint_version: z.string(), counts: countsSchema, dispatch_summaries: z.array(z.strictObject({ classification_type: z.string(), candidate_count: z.number().int().nonnegative(), total_amount_ntd: z.number().int().nonnegative() })), rows: z.array(z.strictObject({ row_identity: z.string(), canonical_fact_version: z.number().int().nonnegative(), amount_ntd: z.number().int().positive(), classification_type: z.string(), disposition: z.string(), target_identities: z.array(z.string()), evidence: z.array(z.string()), available_actions: z.array(z.string()), integrity_violations: z.array(z.string()), fingerprint_collision: z.boolean(), formal_reference_conflict: z.boolean() })), blocking_codes: z.array(z.string()), apply_allowed: z.boolean(), preview_fingerprint: sha256 });
 const jobAcceptedSchema = z.strictObject({ job_id: z.string().min(1).max(191), status_url: z.string().min(1), replayed: z.boolean() });
@@ -62,6 +66,18 @@ function decode<T>(schema: z.ZodType<T>, raw: unknown, label: string): T {
 }
 
 export const financeImportMutationClient = {
+  async queryIngestionOutcome(command: { idempotencyKey: string; correlationId: string; sourceDigest: string }) {
+    try {
+      const raw = await transport.get('/api/v1/finance-import/workbooks/ingestion-outcome',
+        requestOptions(undefined, keyHeader(command.idempotencyKey, command.correlationId)));
+      const outcome = decode(ingestionOutcomeSchema, raw, '原次銀行流水匯入結果');
+      if ((outcome.status !== 'unknown' && outcome.source_content_digest !== command.sourceDigest)
+        || (outcome.status === 'committed' && outcome.receipt?.source_content_digest !== command.sourceDigest)) {
+        throw new FinanceImportQueryError('FINANCE_IMPORT_SOURCE_DIGEST_MISMATCH', '伺服器回傳來源摘要與原次匯入不一致。');
+      }
+      return outcome;
+    } catch (error) { throw mapFinanceImportQueryError(error); }
+  },
   async ingest(snapshot: FinanceWorkbookSnapshot, command: { idempotencyKey: string; correlationId: string; signal?: AbortSignal }): Promise<FinanceWorkbookIngestionReceipt> {
     try {
       const receipt = decode(ingestionReceiptSchema, await transport.post('/api/v1/finance-import/workbooks/ingest', snapshot.toFormData(), requestOptions(command.signal, keyHeader(command.idempotencyKey, command.correlationId))), '銀行流水入庫');

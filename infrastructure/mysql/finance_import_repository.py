@@ -152,16 +152,21 @@ class MySqlFinanceImportRepository:
                 raise RuntimeError("stale_preview")
 
     def save_receipt(self, key, stored) -> None:
+        from subsystems.finance_import.query import batch_review_count
+
         receipt = stored.receipt
+        batch_id = _batch_database_id(receipt.batch_identity)
         with _mysql_cursor(self._connection) as cursor:
+            payload = _apply_receipt_payload(receipt)
+            payload["history"] = {"pending_count": batch_review_count(cursor, batch_id)}
             cursor.execute(
                 _APPLY_RECEIPT_INSERT_SQL,
                 (
                     key.value,
                     stored.command_fingerprint.value,
                     receipt.preview_fingerprint.value,
-                    _batch_database_id(receipt.batch_identity),
-                    _canonical_json(_apply_receipt_payload(receipt)),
+                    batch_id,
+                    _canonical_json(payload),
                 ),
             )
 

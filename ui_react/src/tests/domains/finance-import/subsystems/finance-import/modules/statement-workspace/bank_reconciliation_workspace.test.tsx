@@ -3,13 +3,17 @@
  * Description: 銀行對帳工作台（WF-03/04）單元驗收測試，驗證雙行排版、KPI膠囊、篩選與核對抽屜。
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinanceBankReconciliationWorkspace } from '../../../../../../../components/FinanceBankReconciliationWorkspace';
-import { monthlyAccountingClient } from '../../../../../../../api/finance_import/monthly_accounting_client';
+import { financeImportQueryClient } from '../../../../../../../api/finance_import/finance_import_query_client';
+import type { FinanceBankTransaction } from '../../../../../../../api/finance_import/finance_import_query_schemas';
+import { sessionClient } from '../../../../../../../api/auth/session_client';
+import { transport } from '../../../../../../../api/shared/transport';
 
-vi.mock('../../../../../../../api/finance_import/monthly_accounting_client', () => ({
-  monthlyAccountingClient: { query: vi.fn() },
+vi.mock('../../../../../../../api/finance_import/finance_import_query_client', () => ({
+  financeImportQueryClient: { listBankTransactions: vi.fn(), listImportHistory: vi.fn() },
 }));
 vi.mock('../../../../../../../components/FinanceStatementArchive', () => ({
   FinanceStatementArchive: ({ compact: _compact }: { compact?: boolean }) => (
@@ -20,8 +24,23 @@ vi.mock('../../../../../../../components/FinanceStatementArchive', () => ({
   ),
 }));
 vi.mock('../../../../../../../components/FinanceImportCorrectionForm', () => ({
-  FinanceImportCorrectionForm: ({ onPosted }: { onPosted?: () => void }) => (
-    <div data-testid="correction-form">
+  FinanceImportCorrectionForm: ({
+    initialKind,
+    initialCaseNo,
+    initialCounterpartyName,
+    onPosted,
+  }: {
+    initialKind?: string;
+    initialCaseNo?: string;
+    initialCounterpartyName?: string;
+    onPosted?: () => void;
+  }) => (
+    <div
+      data-testid="correction-form"
+      data-initial-kind={initialKind ?? ''}
+      data-initial-case={initialCaseNo ?? ''}
+      data-initial-counterparty={initialCounterpartyName ?? ''}
+    >
       <span>核銷校正表單</span>
       <button type="button" onClick={onPosted}>完成核銷</button>
     </div>
@@ -31,51 +50,41 @@ vi.mock('../../../../../../../components/FinanceImportCorrectionForm', () => ({
 describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
   const onCase = vi.fn();
   const onPostedManual = vi.fn();
-  const onSelectBatch = vi.fn();
-  const onReloadSourceReview = vi.fn();
+  const onLookupIngestion = vi.fn();
   const onWorkbookChange = vi.fn();
   const onApplyReasonChange = vi.fn();
   const onIngest = vi.fn();
   const onApply = vi.fn();
   const onObserveApplyOutcome = vi.fn();
 
+  const sinopac: FinanceBankTransaction = {
+    row_id: 101, row_identity: 'finance-import-row:101', transaction_date: '2026-01-09',
+    bank: 'sinopac', direction: 'incoming', amount_ntd: 15000, classification_type: 'client_receipt',
+    status: 'pending', disposition: 'business_pending', review_reason: 'sinopac_virtual_account_matched', available_actions: [],
+    reference: 'Sheet1#2', counterparty_name: '林小美', cases: ['115000001'],
+  };
+  const taishin: FinanceBankTransaction = {
+    ...sinopac, row_id: 102, row_identity: 'finance-import-row:102', bank: 'taishin',
+    direction: 'incoming', amount_ntd: 18000, reference: '交易明細#3', classification_type: 'government_subsidy',
+    review_reason: 'taishin_incoming_government_subsidy', counterparty_name: '新竹市政府', cases: [],
+  };
+  const posted: FinanceBankTransaction = {
+    ...sinopac, row_id: 100, row_identity: 'finance-import-row:100', status: 'posted', amount_ntd: 6000,
+    reference: 'DEMO-POSTED-01', cases: ['DEMO-08'],
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(monthlyAccountingClient.query).mockResolvedValue({
-      start_month: '2026-11',
-      end_month: '2026-11',
-      category: 'all',
-      as_of: '2026-11-05T00:00:00Z',
-      excluded_cases: [],
-      undated_item_count: 0,
-      rows: [
-        {
-          month: '2026-11',
-          expected_in_ntd: 6000,
-          received_ntd: 6000,
-          remaining_in_ntd: 0,
-          expected_out_ntd: 0,
-          paid_ntd: 0,
-          remaining_out_ntd: 0,
-          cash_in_ntd: 6000,
-          cash_out_ntd: 0,
-          other_in_ntd: 0,
-          other_out_ntd: 0,
-          cash_by_flow: { C: 6000, G: 0, PS: 0, PT: 0, RS: 0, RT: 0 },
-          items: [],
-          bank_facts: [
-            {
-              occurred_on: '2026-11-03',
-              identity: 'DEMO-POSTED-01',
-              bank: 'sinopac',
-              direction: 'in',
-              amount_ntd: 6000,
-              cash_flow: 'C',
-              cases: ['DEMO-08'],
-            },
-          ],
-        },
-      ],
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(async query => ({
+      items: query.transaction_status === 'posted' ? [posted] : [taishin, sinopac].filter(row => !query.bank || row.bank === query.bank),
+      pending_count: query.transaction_status === 'posted' ? null : query.bank ? 1 : 2,
+      next_before_row_id: null,
+    }));
+    vi.mocked(financeImportQueryClient.listImportHistory).mockResolvedValue({
+      items: [{ identity: 'attempt:2', started_at: '2026-01-10T00:00:00Z', bank: 'sinopac', source_file: 'statement.xlsx',
+        status: 'saved', new_count: 0, duplicate_count: 3, reconciled_count: 0, pending_count: 2,
+        source_warning_count: 0, error_code: null }],
+      next_before: null,
     });
   });
 
@@ -83,48 +92,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     onCase,
     revision: 0,
     staff: [{ id: 1, label: '測試月嫂' }],
-    batches: [
-      {
-        batch_id: 2,
-        batch_identity: 'batch:2',
-        format_id: 'taishin',
-        source_file: 'taishin.xlsx',
-        row_count: 1,
-        status: 'ready',
-        batch_version: 1,
-        architecture_ready: true,
-        created_at: '2026-11-05T00:00:00Z',
-      },
-    ],
-    selectedBatchIdentity: 'batch:2',
-    onSelectBatch,
-    sourceReview: {
-      kind: 'ready' as const,
-      data: {
-        batchIdentity: 'batch:2',
-        reviewCount: 1,
-        sourceReviews: [],
-        items: [
-          {
-            row_id: 101,
-            row_identity: 'row:101',
-            transaction_date: '2026-11-05',
-            direction: 'incoming',
-            amount_ntd: 15000,
-            classification_type: 'client_receipt',
-            bank_type: 'receivable' as const,
-            disposition: 'review_required',
-            reconciliation_status: 'pending',
-            source_sheet: 'Sheet1',
-            source_row: 2,
-            occurrence_count: 1,
-            available_actions: ['preview_manual_correction'],
-            created_at: '2026-11-05T00:00:00Z',
-          },
-        ],
-      },
-    },
-    onReloadSourceReview,
+    onLookupIngestion,
     financeWorkbook: null,
     onWorkbookChange,
     applyReason: '',
@@ -138,8 +106,6 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     onApply,
     onObserveApplyOutcome,
     onPostedManual,
-    postingStopped: false,
-    manuallyPostedRows: new Set<string>(),
     confirmedImportReceipt: null,
   };
 
@@ -152,13 +118,12 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByRole('button', { name: '匯入台新對帳單' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '匯出 Excel' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新增人工明細' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '匯入紀錄' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '匯入紀錄' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('篩選匯入批次')).not.toBeInTheDocument();
 
-    // KPI pills
-    expect(screen.queryByText(/對象／案件待確認/)).not.toBeInTheDocument();
-    expect(screen.getAllByText('待核對').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('已核銷').length).toBeGreaterThan(0);
-
+    const stats = await screen.findByLabelText('銀行對帳統計摘要');
+    expect(stats).toHaveTextContent('待核對 2 筆');
+    expect(stats).not.toHaveTextContent('已核銷');
     // Filters
     expect(screen.getByLabelText('篩選銀行')).toBeInTheDocument();
     expect(screen.getByLabelText('篩選方向')).toBeInTheDocument();
@@ -168,49 +133,50 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(screen.getByLabelText('搜尋交易')).toBeInTheDocument();
   });
 
-  it('displays pending transaction with double-line layout and opens WF-04 drawer on click', async () => {
+  it('displays pending transaction with counterparty, clickable case link, and opens WF-04 drawer with prefill', async () => {
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
 
-    expect(screen.getByText('2026-11-05')).toBeInTheDocument();
-    expect(screen.getByText('Sheet1#2')).toBeInTheDocument();
+    expect(await screen.findByText('Sheet1#2')).toBeInTheDocument();
     expect(screen.getByText('NT$ 15,000')).toBeInTheDocument();
+    expect(screen.getByText('林小美')).toBeInTheDocument();
+    expect(screen.getByText('新竹市政府')).toBeInTheDocument();
+    expect(screen.getByText('整期核銷（待選期間）')).toBeInTheDocument();
+    expect(screen.queryByText('待指派案件')).not.toBeInTheDocument();
+
+    // Clicking pending row case button invokes onCase
+    fireEvent.click(screen.getByRole('button', { name: '115000001' }));
+    expect(onCase).toHaveBeenCalledWith('115000001');
 
     // Click 核對交易 to open drawer
     const reviewBtn = screen.getByRole('button', { name: '核對交易 Sheet1#2' });
     fireEvent.click(reviewBtn);
 
-    // Verify WF-04 Drawer opens
+    // Verify WF-04 Drawer opens with recognized counterparty/case and pre-fills correction form
     expect(screen.getByText('WF-04 · 逐筆核對抽屜')).toBeInTheDocument();
     expect(screen.getByText('銀行原始交易事實')).toBeInTheDocument();
-    expect(screen.getByTestId('correction-form')).toBeInTheDocument();
+    expect(screen.getByText('辨識對象')).toBeInTheDocument();
+    const form = screen.getByTestId('correction-form');
+    expect(form).toHaveAttribute('data-initial-kind', 'client_receipt');
+    expect(form).toHaveAttribute('data-initial-case', '115000001');
+    expect(form).toHaveAttribute('data-initial-counterparty', '林小美');
 
     // Finish review
     fireEvent.click(screen.getByRole('button', { name: '完成核銷' }));
-    expect(onPostedManual).toHaveBeenCalledWith('row:101');
+    expect(onPostedManual).toHaveBeenCalledWith('finance-import-row:101');
   });
 
-  it.each(['sinopac', 'taishin'])('keeps historical %s review visible and counts reimport once', (bank) => {
-    const sourceReview = {
-      ...defaultProps.sourceReview,
-      data: {
-        ...defaultProps.sourceReview.data,
-        items: defaultProps.sourceReview.data.items.map(row => ({ ...row, transaction_date: '2026-01-09' })),
-      },
-    };
-    render(<FinanceBankReconciliationWorkspace
-      {...defaultProps}
-      batches={[{ ...defaultProps.batches[0], format_id: bank }]}
-      sourceReview={sourceReview}
-      financeWorkbook={new File(['test'], 'test.xlsx')}
-      ingestion={{ kind: 'ready', data: {
-        batch_identity: 'batch:2', source_content_digest: 'a'.repeat(64), source_row_count: 2,
-        canonical_created_count: 0, duplicate_occurrence_count: 2,
-        source_warning_count: 0, source_warning_created_count: 0, replayed: false,
-      } }}
-    />);
-    expect(screen.getByText(/本次自動核銷 0 筆.*新增流水 0 筆.*重複來源列 2 筆.*仍待核對 1 筆/)).toBeVisible();
-    fireEvent.change(screen.getByLabelText('篩選銀行'), { target: { value: bank } });
-    expect(screen.getByRole('button', { name: '核對交易 Sheet1#2' })).toBeVisible();
+  it('shows both banks across all uploads and opens import history independently', async () => {
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+    expect(await screen.findByRole('button', { name: '核對交易 Sheet1#2' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '核對交易 交易明細#3' })).toBeVisible();
+    fireEvent.change(screen.getByLabelText('篩選銀行'), { target: { value: 'sinopac' } });
+    expect(await screen.findByRole('button', { name: '核對交易 Sheet1#2' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '核對交易 交易明細#3' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '匯入紀錄' }));
+    const dialog = await screen.findByRole('dialog', { name: '匯入紀錄' });
+    expect(await within(dialog).findByText('statement.xlsx', { exact: false })).toBeInTheDocument();
+    expect(within(dialog).getByText('本次核銷')).toBeInTheDocument();
+    expect(screen.getByLabelText('篩選銀行')).toHaveValue('sinopac');
   });
 
   it('displays posted bank facts and opens readonly fact drawer', async () => {
@@ -228,7 +194,7 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(onCase).toHaveBeenCalledWith('DEMO-08');
 
     // Clicking 查看明細 opens readonly drawer
-    const viewBtn = screen.getByRole('button', { name: '查看交易 DEMO-POSTED-01' });
+    const viewBtn = screen.getByRole('button', { name: '查看交易 finance-import-row:100' });
     fireEvent.click(viewBtn);
 
     expect(await screen.findByText('已核銷交易明細')).toBeInTheDocument();
@@ -240,5 +206,27 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
 
     expect(screen.queryByText(/正式銷帳原因/)).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText('輸入銷帳說明')).not.toBeInTheDocument();
+  });
+
+  const exchangePath = process.env.FI_REVIEW_EXCHANGE;
+  (exchangePath ? it : it.skip)('renders same-run source-review MySQL evidence through the typed bank query', async () => {
+    const evidence = JSON.parse(readFileSync(exchangePath!, 'utf8'));
+    const real = await vi.importActual<typeof import('../../../../../../../api/finance_import/finance_import_query_client')>(
+      '../../../../../../../api/finance_import/finance_import_query_client',
+    );
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockImplementation(real.financeImportQueryClient.listBankTransactions);
+    const token = vi.spyOn(sessionClient, 'getToken').mockReturnValue('synthetic-test-session');
+    const get = vi.spyOn(transport, 'get').mockResolvedValue(evidence.bank_page);
+    try {
+      render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+      expect(await screen.findByLabelText('銀行對帳統計摘要')).toHaveTextContent('待核對 1 筆');
+      const row = evidence.bank_page.data.items[0];
+      expect(screen.getByRole('button', { name: `核對交易 ${row.reference}` })).toBeVisible();
+      expect(screen.queryByText(evidence.source_audit.issue_codes[0])).not.toBeInTheDocument();
+      expect(get).toHaveBeenCalledWith('/api/v1/finance-import/bank-transactions', expect.anything());
+    } finally {
+      get.mockRestore();
+      token.mockRestore();
+    }
   });
 });

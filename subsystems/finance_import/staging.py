@@ -68,6 +68,8 @@ def _identity_maps(
     tuple[Any, ...],
     tuple[str, ...],
     tuple[Any, ...],
+    set[str] | frozenset[str] | None,
+    set[str] | frozenset[str] | None,
 ]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
@@ -81,6 +83,8 @@ def _identity_maps(
     taishin_candidates = tuple(identity_maps.get("taishin_client_refund_candidates", ()))
     all_staff_names = tuple(identity_maps.get("all_staff_names", ()))
     staff_payout_candidates = tuple(identity_maps.get("staff_payout_candidates", ()))
+    known_virtual_accounts = identity_maps.get("known_virtual_accounts")
+    known_case_suffixes = identity_maps.get("known_case_suffixes")
     if not isinstance(client_accounts, Mapping) or not isinstance(
         staff_accounts, Mapping
     ):
@@ -106,7 +110,53 @@ def _identity_maps(
         taishin_candidates,
         all_staff_names,
         staff_payout_candidates,
+        known_virtual_accounts,
+        known_case_suffixes,
     )
+
+
+def classify_row_with_identity_maps(
+    row: Mapping[str, Any],
+    identity_maps: Mapping[str, Any],
+) -> dict[str, Any]:
+    (
+        client_accounts,
+        staff_accounts,
+        subsidy_return_accounts,
+        receipt_candidates,
+        staff_case_suffixes,
+        client_refund_case_suffixes,
+        all_client_names,
+        taishin_candidates,
+        all_staff_names,
+        staff_payout_candidates,
+        known_virtual_accounts,
+        known_case_suffixes,
+    ) = _identity_maps(identity_maps)
+    try:
+        return classify_finance_transaction(
+            row,
+            client_accounts,
+            staff_accounts,
+            subsidy_return_accounts,
+            receipt_candidates,
+            staff_case_suffixes,
+            client_refund_case_suffixes,
+            all_client_names,
+            taishin_candidates,
+            all_staff_names,
+            staff_payout_candidates,
+            known_virtual_accounts,
+            known_case_suffixes,
+        )
+    except TypeError:
+        return classify_finance_transaction(
+            row,
+            client_accounts,
+            staff_accounts,
+            subsidy_return_accounts,
+            receipt_candidates,
+        )
 
 
 def stage_finance_rows(
@@ -137,21 +187,12 @@ def stage_finance_rows(
         or source_row_count < len(rows)
     ):
         raise ValueError("normalized_result source_row_count is invalid")
-    (
-        client_accounts,
-        staff_accounts,
-        subsidy_return_accounts,
-        receipt_candidates,
-        staff_case_suffixes,
-        client_refund_case_suffixes,
-        all_client_names,
-        taishin_candidates,
-        all_staff_names,
-        staff_payout_candidates,
-    ) = _identity_maps(identity_maps)
+    _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
-    source_file = next(iter(source_files)) if len(source_files) == 1 else None
+    source_file = normalized_result.get("source_file")
+    if source_file is None and len(source_files) == 1:
+        source_file = next(iter(source_files))
     cursor.execute(
         """INSERT INTO finance_import_batches
            (format_id, source_file, sheet_name, header_row, row_count, status)
@@ -301,28 +342,7 @@ def stage_finance_rows(
             ),
         )
 
-        try:
-            classification = classify_finance_transaction(
-                row,
-                client_accounts,
-                staff_accounts,
-                subsidy_return_accounts,
-                receipt_candidates,
-                staff_case_suffixes,
-                client_refund_case_suffixes,
-                all_client_names,
-                taishin_candidates,
-                all_staff_names,
-                staff_payout_candidates,
-            )
-        except TypeError:
-            classification = classify_finance_transaction(
-                row,
-                client_accounts,
-                staff_accounts,
-                subsidy_return_accounts,
-                receipt_candidates,
-            )
+        classification = classify_row_with_identity_maps(row, identity_maps)
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])
         resolved_counterparty_account = classification.get("resolved_counterparty_account")

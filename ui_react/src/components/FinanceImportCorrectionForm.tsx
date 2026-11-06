@@ -1,3 +1,7 @@
+/**
+ * File: FinanceImportCorrectionForm.tsx
+ * Description: WF-04 銀行流水逐筆人工核對與核銷表單，支援預填已辨識案件或月嫂。
+ */
 import { useUnsavedDraft } from './UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { ordersQueryClient } from '../api/orders/order_query_client';
@@ -21,10 +25,12 @@ const refundModes = {
   overage: '退款超出，另列待追回款',
 };
 
-export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, initialKind = 'client_receipt', onPosted, onBusyChange }: {
+export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, initialKind = 'client_receipt', initialCaseNo, initialCounterpartyName, onPosted, onBusyChange }: {
   rowIdentity: string; sourceLabel: string; staff: readonly { id: number; label: string }[];
   bankAmount?: number;
   initialKind?: 'client_receipt' | 'staff_payout' | 'client_refund' | 'client_subsidy_return' | 'government_subsidy';
+  initialCaseNo?: string;
+  initialCounterpartyName?: string;
   onPosted?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -35,8 +41,19 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   const bankRow = /^finance-import-row:([1-9][0-9]*)$/.exec(rowIdentity);
   const [kind, setKind] = useState(initialKind);
   const [refundMode, setRefundMode] = useState<keyof typeof refundModes>('exact');
-  const [target, setTarget] = useState('');
-  const [caseSearch, setCaseSearch] = useState('');
+  const [target, setTarget] = useState(() => {
+    if (initialKind === 'staff_payout' && initialCounterpartyName) {
+      const matched = staff.filter((s) => s.label === initialCounterpartyName || s.label.startsWith(`${initialCounterpartyName} `) || s.label.startsWith(`${initialCounterpartyName}（`));
+      return matched.length === 1 ? String(matched[0].id) : '';
+    }
+    if ((initialKind === 'client_receipt' || initialKind === 'client_refund' || initialKind === 'client_subsidy_return') && initialCaseNo) {
+      return initialCaseNo;
+    }
+    return '';
+  });
+  const [caseSearch, setCaseSearch] = useState(() => (
+    (initialKind === 'client_receipt' || initialKind === 'client_refund' || initialKind === 'client_subsidy_return') && initialCaseNo ? initialCaseNo : ''
+  ));
   const [cases, setCases] = useState<{ case_no: string; client_name: string }[]>([]);
   const [caseCursor, setCaseCursor] = useState<string | null>(null);
   const [caseSearching, setCaseSearching] = useState(true);

@@ -1,4 +1,9 @@
+"""
+File: test_finance_import_ingestion.py
+Description: 驗證銀行對帳單匯入重播、分類事件唯一性與無關流水匯入前丟棄規則。
+"""
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -7,6 +12,7 @@ from shared_kernel.identities import ActorContext, IdempotencyKey
 from subsystems.finance_import.ingestion import (
     _append_missing_classifications,
     _command_fingerprint,
+    _filter_admitted_business_rows,
     _find_replay,
     _integer_tuple,
     _unique_rows,
@@ -121,3 +127,126 @@ def test_duplicate_staged_row_still_creates_only_one_canonical_event(monkeypatch
 
     assert created == 1
     assert inserted == ["event"]
+
+
+def _normalized_row(**overrides) -> dict[str, object]:
+    base: dict[str, object] = {
+        "format_id": "taishin",
+        "source_file": "taishin.xlsx",
+        "source_bank_account": "000000000001",
+        "sheet_name": "交易明細查詢",
+        "source_row": 2,
+        "source_reference": None,
+        "transaction_date": "2026-10-15",
+        "transaction_time": "09:00:00",
+        "posting_date": "2026-10-15",
+        "value_date": None,
+        "debit": None,
+        "credit": Decimal("10000"),
+        "direction": "incoming",
+        "balance": Decimal("80000"),
+        "currency": "TWD",
+        "summary": "轉帳",
+        "memo": "借款",
+        "counterparty_name": None,
+        "counterparty_account": None,
+        "cancellation_code": None,
+        "bank_references": {"sequence": "0001"},
+        "warnings": [],
+        "raw_payload": {"memo": "借款"},
+    }
+    base.update(overrides)
+    return base
+
+
+def test_filter_admitted_business_rows_discards_loan_and_unmatched_rows() -> None:
+    identity_maps = {
+        "client_refund_accounts": {},
+        "staff_accounts": {"001234567890": [12]},
+        "client_subsidy_return_accounts": {},
+        "client_receipt_candidates": (),
+        "staff_case_suffixes": {},
+        "client_refund_case_suffixes": {},
+        "all_client_names": (),
+        "taishin_client_refund_candidates": (),
+        "all_staff_names": ("王月嫂",),
+        "staff_payout_candidates": (),
+        "known_virtual_accounts": frozenset({"99781699115001"}),
+        "known_case_suffixes": frozenset({"115001"}),
+    }
+    normalized = {
+        "format_id": "taishin",
+        "sheet_name": "交易明細查詢",
+        "header_row": 2,
+        "source_row_count": 5,
+        "normalized_rows": [
+            _normalized_row(
+                source_row=2,
+                credit=Decimal("50000"),
+                memo="借款",
+                bank_references={"sequence": "0001"},
+            ),
+            _normalized_row(
+                source_row=3,
+                credit=Decimal("18000"),
+                memo="新竹市政府補助入款",
+                bank_references={"sequence": "0002"},
+            ),
+            _normalized_row(
+                source_row=4,
+                direction="outgoing",
+                debit=Decimal("12000"),
+                credit=None,
+                memo="月嫂薪資",
+                bank_references={"sequence": "0003"},
+            ),
+            _normalized_row(
+                format_id="sinopac",
+                source_row=5,
+                credit=Decimal("6000"),
+                memo="虛擬帳號入帳",
+                cancellation_code="99781699999999",
+                bank_references={"銷帳編號": "99781699999999"},
+            ),
+            _normalized_row(
+                format_id="sinopac",
+                source_row=6,
+                credit=Decimal("6000"),
+                memo="虛擬帳號入帳",
+                cancellation_code="99781699115001",
+                bank_references={"銷帳編號": "99781699115001"},
+            ),
+        ],
+    }
+
+    admitted = _filter_admitted_business_rows(normalized, identity_maps)
+
+    assert admitted["source_row_count"] == 2
+    assert admitted["source_file"] == "taishin.xlsx"
+    assert [row["memo"] for row in admitted["normalized_rows"]] == [
+        "新竹市政府補助入款",
+        "虛擬帳號入帳",
+    ]
+    assert admitted["normalized_rows"][1]["cancellation_code"] == "99781699115001"
+
+
+def test_filter_admitted_business_rows_preserves_source_file_when_all_rows_discarded() -> None:
+    normalized = {
+        "format_id": "taishin",
+        "sheet_name": "交易明細查詢",
+        "header_row": 2,
+        "source_row_count": 1,
+        "normalized_rows": [
+            _normalized_row(
+                source_file="only-loan.xlsx",
+                credit=Decimal("10000"),
+                memo="借款",
+            )
+        ],
+    }
+
+    admitted = _filter_admitted_business_rows(normalized, {})
+
+    assert admitted["source_row_count"] == 0
+    assert admitted["normalized_rows"] == []
+    assert admitted["source_file"] == "only-loan.xlsx"

@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 import tempfile
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from pymysql.err import OperationalError
@@ -41,6 +41,9 @@ from shared_kernel.durable_job_queue import DurableJobCommand
 from subsystems.jobs.command_application import DurableJobCommandApplication
 from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.finance_import import (
+    FinanceBankTransactionPageView,
+    FinanceImportHistoryPageView,
+    FinanceImportIngestionOutcomeView,
     FinanceImportBatchApplyBody,
     FinanceImportBatchJobOutcomeView,
     FinanceImportBatchManifestView,
@@ -267,6 +270,59 @@ def query_finance_import_correction_job_outcome(
     )
 
 
+@router.get("/bank-transactions", response_model=BaseResponse[FinanceBankTransactionPageView])
+def list_bank_transactions(
+    request: Request,
+    bank: Literal["sinopac", "taishin"] | None = None,
+    direction: Literal["incoming", "outgoing"] | None = None,
+    transaction_status: Literal["pending", "posted", "all"] = "pending",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    search: Annotated[str, Query(max_length=120)] = "",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before_row_id: Annotated[int | None, Query(ge=1)] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    query_service=Depends(get_finance_import_query_service),
+):
+    return _call_query(
+        lambda: _materialize(query_service.bank_transactions(
+            bank=bank, direction=direction, status=transaction_status, start=start_date,
+            end=end_date, search=search, limit=limit, before_row_id=before_row_id,
+        )),
+        "成功載入銀行對帳交易",
+        CorrelationId(_request_correlation(request)),
+    )
+
+
+@router.get("/import-history", response_model=BaseResponse[FinanceImportHistoryPageView])
+def list_finance_import_history(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before: Annotated[str | None, Query(max_length=30)] = None,
+    principal: AdminPrincipal = Depends(require_admin),
+    query_service=Depends(get_finance_import_query_service),
+):
+    return _call_query(
+        lambda: _materialize(query_service.import_history(limit=limit, before=before)),
+        "成功載入對帳單匯入紀錄",
+        CorrelationId(_request_correlation(request)),
+    )
+
+
+@router.get("/workbooks/ingestion-outcome", response_model=BaseResponse[FinanceImportIngestionOutcomeView])
+def get_finance_import_ingestion_outcome(
+    request: Request,
+    idempotency_key: _IdempotencyHeader = ...,
+    principal: AdminPrincipal = Depends(require_admin),
+    query_service=Depends(get_finance_import_query_service),
+):
+    return _call_query(
+        lambda: _materialize(query_service.ingestion_outcome(IdempotencyKey(idempotency_key).value)),
+        "成功查詢原次對帳單匯入",
+        CorrelationId(_request_correlation(request)),
+    )
+
+
 @router.get(
     "/batches",
     response_model=BaseResponse[list[FinanceImportBatchSummaryView]],
@@ -391,6 +447,7 @@ async def ingest_finance_import_workbook(
             str(upload_path),
             IdempotencyKey(idempotency_key),
             ActorContext(str(principal.username or "").strip()),
+            source_filename=str(workbook.filename or "").replace("\\", "/").rsplit("/", 1)[-1][:1024],
         )
         return BaseResponse(
             data=_materialize(receipt),

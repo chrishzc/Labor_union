@@ -1,3 +1,8 @@
+"""
+File: test_finance_identity_maps.py
+Description: 驗證銀行匯入身分帳號與收款候選映射載入之唯讀查詢與正規化契約。
+"""
+
 import pytest
 
 from subsystems.finance_import.identity_maps import load_finance_identity_maps
@@ -74,7 +79,8 @@ def test_queries_are_read_only_and_do_not_use_names():
 
     load_finance_identity_maps(cursor)
 
-    assert len(cursor.executed) == 4
+    assert len(cursor.executed) >= 4
+    assert all("name" not in sql for sql in cursor.executed[:3])
     assert all(sql.startswith("SELECT") for sql in cursor.executed)
 
 

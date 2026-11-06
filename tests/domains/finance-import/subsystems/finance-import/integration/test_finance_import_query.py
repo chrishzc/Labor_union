@@ -1,3 +1,7 @@
+"""
+File: test_finance_import_query.py
+Description: 驗證銀行流水查詢、預覽處置映射與待核對交易對象及關聯案件補齊契約。
+"""
 from datetime import datetime
 from decimal import Decimal
 import sqlite3
@@ -21,6 +25,7 @@ from subsystems.finance_import.query import (
     FinanceImportQueryNotFound,
     FinanceImportQueryService,
     _batch_summary,
+    _enrich_bank_transactions,
     _integer_money,
     _review_row,
 )
@@ -361,3 +366,110 @@ def _review_row_source() -> dict[str, object]:
         "available_actions": '["apply", "ignore"]',
         "created_at": datetime(2026, 8, 3),
     }
+
+
+class _EnrichCursor:
+    def __init__(self) -> None:
+        self._rows: list[dict[str, object]] = []
+        self._one: dict[str, object] | None = None
+
+    def execute(self, statement: str, params=()) -> None:
+        sql = " ".join(statement.split())
+        if "SELECT name FROM clients WHERE id=%s" in sql:
+            self._one = {"name": "林小美"} if params == (7,) else None
+        elif "SELECT name FROM staff WHERE id=%s" in sql:
+            self._one = {"name": "陳月嫂"} if params == (19,) else None
+        elif "SELECT c.name FROM orders o JOIN clients c" in sql:
+            self._one = {"name": "林小美"} if params == ("115000001",) else None
+        elif "SELECT case_no FROM orders WHERE case_no = %s" in sql:
+            self._rows = [{"case_no": "115000001"}] if params == ("115000001",) else []
+        elif "FROM staff_obligations" in sql:
+            self._rows = [{"case_no": "115000009", "amount_due_ntd": 12000}] if params == (19,) else []
+        else:
+            self._one = None
+            self._rows = []
+
+    def fetchone(self):
+        return self._one
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_rows() -> None:
+    page = [
+        {
+            "row_id": 1,
+            "transaction_date": "2026-10-15",
+            "format_id": "taishin",
+            "direction": "incoming",
+            "debit": None,
+            "credit": Decimal("18000"),
+            "sheet_name": "交易明細",
+            "source_row": 2,
+            "counterparty_name": None,
+            "cancellation_code": None,
+            "bank_references": '{"sequence":"0001"}',
+            "memo": "新竹市政府補助款",
+            "matched_identity_ids": "[]",
+            "target_identities": "[]",
+            "classification_type": "government_subsidy",
+            "transaction_status": "pending",
+            "disposition": "business_pending",
+            "review_reason": "taishin_incoming_government_subsidy",
+            "available_actions": "[]",
+            "safe_reference": "0001",
+        },
+        {
+            "row_id": 2,
+            "transaction_date": "2026-10-15",
+            "format_id": "sinopac",
+            "direction": "incoming",
+            "debit": None,
+            "credit": Decimal("6000"),
+            "sheet_name": "Sheet1",
+            "source_row": 3,
+            "counterparty_name": None,
+            "cancellation_code": "99781699115001",
+            "bank_references": '{"銷帳編號":"99781699115001"}',
+            "memo": "轉帳",
+            "matched_identity_ids": "[]",
+            "target_identities": "[]",
+            "classification_type": "client_receipt",
+            "transaction_status": "pending",
+            "disposition": "business_pending",
+            "review_reason": "sinopac_virtual_account_matched",
+            "available_actions": "[]",
+            "safe_reference": "TX-02",
+        },
+        {
+            "row_id": 3,
+            "transaction_date": "2026-10-15",
+            "format_id": "taishin",
+            "direction": "outgoing",
+            "debit": Decimal("12000"),
+            "credit": None,
+            "sheet_name": "交易明細",
+            "source_row": 4,
+            "counterparty_name": None,
+            "cancellation_code": None,
+            "bank_references": '{"sequence":"0003"}',
+            "memo": "月嫂薪資",
+            "matched_identity_ids": "[19]",
+            "target_identities": "[]",
+            "classification_type": "staff_salary",
+            "transaction_status": "pending",
+            "disposition": "business_pending",
+            "review_reason": "staff_account_matched",
+            "available_actions": "[]",
+            "safe_reference": "0003",
+        },
+    ]
+
+    items = _enrich_bank_transactions(_EnrichCursor(), page, {})
+
+    assert [(item["counterparty_name"], item["cases"]) for item in items] == [
+        ("新竹市政府", []),
+        ("林小美", ["115000001"]),
+        ("陳月嫂", ["115000009"]),
+    ]

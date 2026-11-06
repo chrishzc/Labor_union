@@ -5,12 +5,23 @@ Description: 讀取 Finance Import batch、review、reprocess 與已遮罩的 te
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 import json
 from typing import Any
+from domains.finance_import.cancellation_code import (
+    extract_sinopac_memo_case_suffix,
+    resolve_finance_cancellation_code,
+)
 from domains.finance_import.statement_archive import bank_import_type
+from domains.finance_import.ingestion import FinanceWorkbookIngestionReceipt
+from domains.finance_import.transaction_classifier import _is_same_month
+from subsystems.client_finance.virtual_account_resolution import (
+    resolve_client_virtual_account,
+    resolve_client_virtual_account_suffix,
+)
 
 
 _MAXIMUM_PAGE_SIZE = 100
@@ -55,6 +66,27 @@ AND NOT EXISTS (
 )
 """
 
+
+BANK_CASE_PROOFS_SQL = """
+SELECT finance_import_row_id AS row_id,case_no FROM client_ledger_entries WHERE finance_import_row_id IS NOT NULL
+UNION
+SELECT e.finance_import_row_id,o.case_no FROM staff_payout_events e
+JOIN staff_payout_obligation_links l ON l.payout_event_id=e.id
+JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity WHERE e.finance_import_row_id IS NOT NULL
+UNION
+SELECT t.finance_import_row_id,i.case_no FROM government_subsidy_transactions t
+JOIN government_subsidy_allocations a ON a.transaction_id=t.id
+JOIN subsidy_claim_batch_items i ON i.id=a.claim_item_id
+WHERE t.finance_import_row_id IS NOT NULL AND t.transaction_status='succeeded'
+UNION
+SELECT entry.finance_import_row_id,member.case_no FROM government_subsidy_period_entries entry
+JOIN government_subsidy_period_members member ON member.receipt_id=COALESCE(entry.reversal_of_id,entry.id)
+UNION
+SELECT event.finance_import_row_id,o.case_no FROM staff_overpayment_recovery_events event
+JOIN staff_overpayment_recoveries recovery ON recovery.recovery_identity=event.recovery_identity
+JOIN staff_obligations o ON JSON_CONTAINS(recovery.source_obligation_identities,JSON_QUOTE(o.obligation_identity))
+WHERE event.event_type='cash_recovered' AND event.finance_import_row_id IS NOT NULL
+"""
 
 @dataclass(frozen=True, slots=True)
 class FinanceImportBatchSummary:
@@ -170,6 +202,222 @@ class FinanceImportQueryNotFound(ValueError):
 class FinanceImportQueryService:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def bank_transactions(
+        self, *, bank, direction, status, start, end, search, limit, before_row_id,
+    ):
+        _validate_page(limit, before_row_id, "before_row_id")
+        if start and end and start > end:
+            raise ValueError("bank_transaction_invalid_date_range")
+        search = search.strip()
+        conditions, params = [], []
+        if bank:
+            conditions.append("finance_row.format_id IN ('sinopac','legacy')" if bank == "sinopac"
+                              else "finance_row.format_id='taishin'")
+        for value, condition in (
+            (direction, "finance_row.direction=%s"),
+            (start, "finance_row.transaction_date>=%s"),
+            (end, "finance_row.transaction_date<=%s"),
+        ):
+            if value:
+                conditions.append(condition)
+                params.append(value)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        scoped = f"""
+            WITH proofs AS ({BANK_CASE_PROOFS_SQL}),
+            raw_rows AS (
+                SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.format_id,
+                    finance_row.direction, finance_row.debit, finance_row.credit,
+                    finance_row.sheet_name, finance_row.source_row,
+                    finance_row.counterparty_name,
+                    finance_row.cancellation_code, finance_row.bank_references,
+                    finance_row.memo, finance_row.matched_identity_ids,
+                    (JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references,'$.source'))='manual_supplement') AS is_manual_supplement,
+                    CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(finance_row.bank_references,'$.source'))='manual_supplement'
+                        THEN '人工補登'
+                        ELSE COALESCE(finance_row.source_reference, NULLIF(JSON_UNQUOTE(JSON_EXTRACT(
+                        finance_row.bank_references, CASE finance_row.format_id
+                            WHEN 'taishin' THEN '$.sequence'
+                            WHEN 'legacy' THEN '$.transaction_reference'
+                            ELSE '$."交易參考編號"' END
+                    )), 'null')) END AS raw_reference,
+                    COALESCE(event.classification_type,finance_row.classification_type) classification_type,
+                    event.reason AS event_reason,
+                    COALESCE(finance_row.classification_reason,event.reason) AS review_reason,
+                    COALESCE(event.target_identities,JSON_ARRAY()) AS target_identities,
+                    COALESCE(event.available_actions,JSON_ARRAY()) AS available_actions,
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM finance_import_integrity_events issue
+                        WHERE issue.finance_import_row_id=finance_row.id AND issue.active=1
+                          AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest
+                            WHERE latest.finance_import_row_id=issue.finance_import_row_id
+                              AND latest.batch_id=issue.batch_id AND latest.issue_code=issue.issue_code)
+                    ) THEN 'blocked' ELSE COALESCE(event.disposition,'manual_review') END disposition,
+                    CASE WHEN ({_REVIEW_ROW_PREDICATE})
+                        AND NOT EXISTS (SELECT 1 FROM proofs WHERE row_id=finance_row.id)
+                        THEN 'pending' ELSE 'posted' END AS transaction_status
+                FROM finance_import_rows finance_row
+                LEFT JOIN finance_import_classification_events event ON event.id=(
+                    SELECT MAX(latest.id) FROM finance_import_classification_events latest
+                    WHERE latest.finance_import_row_id=finance_row.id
+                )
+                WHERE {where}
+            ),
+            bank_rows AS (
+                SELECT raw_rows.*, CASE
+                    WHEN raw_reference REGEXP '[0-9][0-9 -]{6,}[0-9]'
+                        THEN CONCAT('****',RIGHT(raw_reference,4))
+                    ELSE raw_reference END AS safe_reference
+                FROM raw_rows
+                WHERE transaction_status='posted'
+                   OR is_manual_supplement=1
+                   OR (
+                       COALESCE(classification_type,'')<>'non_business_review'
+                       AND NOT (
+                           format_id='taishin'
+                           AND direction='incoming'
+                           AND classification_type='government_subsidy'
+                           AND COALESCE(event_reason,'initial_bank_classification')='initial_bank_classification'
+                           AND LOCATE('新竹市政府',COALESCE(memo,''))=0
+                           AND LOCATE('新竹市府',COALESCE(memo,''))=0
+                       )
+                       AND NOT (
+                           classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy','client_refund','client_subsidy_return')
+                           AND COALESCE(event_reason,'initial_bank_classification')='initial_bank_classification'
+                           AND JSON_LENGTH(COALESCE(matched_identity_ids,JSON_ARRAY()))=0
+                           AND JSON_LENGTH(COALESCE(target_identities,JSON_ARRAY()))=0
+                           AND COALESCE(memo,'') NOT REGEXP '[0-9]{{6}}'
+                       )
+                   )
+            )
+        """
+        if search:
+            scoped += """,
+                matched AS (
+                    SELECT bank_rows.* FROM bank_rows
+                    WHERE LOCATE(%s,CONCAT_WS(' ',CONCAT('bank:',row_id),
+                        CONCAT(sheet_name,'#',source_row), safe_reference, counterparty_name,
+                        cancellation_code, memo,
+                        CASE WHEN classification_type='government_subsidy' THEN '新竹市政府' ELSE '' END))>0
+                      OR EXISTS (SELECT 1 FROM proofs
+                           WHERE proofs.row_id=bank_rows.row_id AND LOCATE(%s,proofs.case_no)>0)
+                      OR (bank_rows.classification_type IN ('staff_payout','staff_salary','staff_legacy_subsidy')
+                          AND EXISTS (SELECT 1 FROM staff s
+                               WHERE JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(s.id AS JSON))
+                                 AND LOCATE(%s,s.name)>0))
+                      OR (bank_rows.classification_type IN ('client_receipt','client_refund','client_subsidy_return')
+                          AND EXISTS (SELECT 1 FROM clients c
+                               WHERE JSON_CONTAINS(COALESCE(bank_rows.matched_identity_ids,JSON_ARRAY()),CAST(c.id AS JSON))
+                                 AND LOCATE(%s,c.name)>0))
+                )
+            """
+            params.extend((search, search, search, search))
+        scope = "matched" if search else "bank_rows"
+        with self._connection.cursor() as cursor:
+            pending_count = None
+            if status != "posted":
+                cursor.execute(scoped + f"SELECT COUNT(*) AS total FROM {scope} WHERE transaction_status='pending'", params)
+                pending_count = int(cursor.fetchone()["total"])
+            predicates, page_params = [], list(params)
+            if status != "all":
+                predicates.append("transaction_status=%s")
+                page_params.append(status)
+            if before_row_id is not None:
+                predicates.append("row_id<%s")
+                page_params.append(before_row_id)
+            page_where = " AND ".join(predicates) if predicates else "1=1"
+            cursor.execute(scoped + f"SELECT * FROM {scope} WHERE {page_where} ORDER BY row_id DESC LIMIT %s",
+                           (*page_params, limit + 1))
+            rows = cursor.fetchall()
+            page = rows[:limit]
+            cases_by_id = {}
+            if page:
+                ids = tuple(row["row_id"] for row in page)
+                placeholders = ",".join("%s" for _ in ids)
+                cursor.execute(
+                    f"SELECT row_id,case_no FROM ({BANK_CASE_PROOFS_SQL}) proofs "
+                    f"WHERE row_id IN ({placeholders}) ORDER BY row_id,case_no", ids,
+                )
+                for case in cursor.fetchall():
+                    cases_by_id.setdefault(case["row_id"], []).append(case["case_no"])
+            items = _enrich_bank_transactions(cursor, page, cases_by_id)
+        return {
+            "items": items,
+            "pending_count": pending_count,
+            "next_before_row_id": int(page[-1]["row_id"]) if len(rows) > limit else None,
+        }
+
+    def import_history(self, *, limit, before):
+        kind, record_id = None, None
+        if before is not None:
+            kind, _, raw_id = before.partition(":")
+            if kind not in {"attempt", "batch"} or not raw_id.isascii() or not raw_id.isdecimal():
+                raise ValueError("invalid_import_history_cursor")
+            record_id = int(raw_id)
+        _validate_page(limit, record_id, "before_history_id")
+        segment = 1 if kind == "attempt" else 0 if kind == "batch" else None
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH uploads AS (
+                    SELECT 1 AS segment, attempt.id,attempt.started_at,attempt.transaction_outcome,
+                           attempt.error_code,attempt.batch_id,attempt.idempotency_key
+                    FROM finance_import_ingestion_attempts attempt
+                    UNION ALL
+                    SELECT 0,prior.id,prior.created_at,'legacy',NULL,prior.id,NULL
+                    FROM finance_import_batches prior
+                    WHERE NOT EXISTS (SELECT 1 FROM finance_import_ingestion_attempts
+                                      WHERE batch_id=prior.id)
+                ),
+                page AS (
+                    SELECT * FROM uploads
+                    WHERE (%s IS NULL OR segment<%s OR (segment=%s AND id<%s))
+                    ORDER BY segment DESC,id DESC LIMIT %s
+                )
+                SELECT page.*,batch.format_id,batch.source_file,
+                    saved.result_snapshot AS ingestion_snapshot, applied.result_snapshot AS apply_snapshot,
+                    job.status AS apply_job_status
+                FROM page
+                LEFT JOIN finance_import_batches batch ON batch.id=page.batch_id
+                LEFT JOIN finance_import_batch_contracts contract ON contract.batch_id=batch.id
+                LEFT JOIN finance_import_ingestion_receipts saved ON saved.idempotency_key=page.idempotency_key
+                LEFT JOIN finance_import_apply_receipts applied ON applied.id=(
+                    SELECT MIN(receipt.id) FROM finance_import_apply_receipts receipt WHERE receipt.batch_id=batch.id
+                )
+                LEFT JOIN background_jobs job ON job.command_identity=(
+                    SELECT latest.command_identity FROM background_jobs latest
+                    WHERE latest.command_type='finance_import_batch_apply'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(latest.command_payload,'$.batch_identity'))=contract.batch_identity
+                    ORDER BY latest.created_at DESC,latest.job_id DESC LIMIT 1
+                )
+                ORDER BY page.segment DESC,page.id DESC
+                """, (segment, segment, segment, record_id, limit + 1),
+            )
+            rows = cursor.fetchall()
+        page = [_import_history_entry(row) for row in rows[:limit]]
+        return {"items": page, "next_before": page[-1]["identity"] if len(rows) > limit else None}
+
+    def ingestion_outcome(self, key: str):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT attempt.transaction_outcome,attempt.error_code,attempt.phase,
+                          attempt.source_content_digest,saved.result_snapshot
+                   FROM finance_import_ingestion_attempts attempt
+                   LEFT JOIN finance_import_ingestion_receipts saved ON saved.idempotency_key=attempt.idempotency_key
+                   WHERE attempt.idempotency_key=%s""", (key,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return {"status": "unknown", "receipt": None, "source_content_digest": None, "error_code": None, "phase": None}
+        receipt = _history_snapshot(row["result_snapshot"])
+        receipt.pop("history", None)
+        return {
+            "status": row["transaction_outcome"],
+            "receipt": FinanceWorkbookIngestionReceipt(**receipt) if receipt else None,
+            "source_content_digest": row["source_content_digest"],
+            "error_code": row["error_code"],
+            "phase": row["phase"],
+        }
 
     def list_batches(
         self, *, limit: int, before_batch_id: int | None = None
@@ -485,6 +733,358 @@ def _review_row(row: dict[str, Any]) -> FinanceImportReviewRowSummary:
     )
 
 
+def _json_dict(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+            return decoded if isinstance(decoded, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _json_list(raw: Any) -> list[Any]:
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            decoded = json.loads(raw)
+            return decoded if isinstance(decoded, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _single_entity_id(row: Mapping[str, Any], prefix: str) -> int | None:
+    targets = [
+        str(item)
+        for item in _json_list(row.get("target_identities"))
+        if isinstance(item, str) and item.startswith(prefix)
+    ]
+    if len(targets) == 1:
+        raw_val = targets[0].removeprefix(prefix)
+        if raw_val.isdigit() and int(raw_val) > 0:
+            return int(raw_val)
+    matched = [
+        int(item)
+        for item in _json_list(row.get("matched_identity_ids"))
+        if isinstance(item, int) and not isinstance(item, bool) and item > 0
+    ]
+    unique_matched = sorted(set(matched))
+    return unique_matched[0] if len(unique_matched) == 1 else None
+
+
+def _enrich_bank_transactions(
+    cursor: Any,
+    page: Sequence[Mapping[str, Any]],
+    posted_cases_by_id: Mapping[int, list[str]],
+) -> list[dict[str, Any]]:
+    if not page:
+        return []
+    client_name_cache: dict[int, str | None] = {}
+    staff_name_cache: dict[int, str | None] = {}
+    case_client_name_cache: dict[str, str | None] = {}
+    case_staff_name_cache: dict[str, str | None] = {}
+    va_cache: dict[str, str | None] = {}
+    suffix_cache: dict[str, str | None] = {}
+
+    def client_name_by_id(client_id: int) -> str | None:
+        if client_id not in client_name_cache:
+            cursor.execute("SELECT name FROM clients WHERE id=%s", (client_id,))
+            found = cursor.fetchone()
+            client_name_cache[client_id] = str(found["name"]).strip() if found and found.get("name") else None
+        return client_name_cache[client_id]
+
+    def staff_name_by_id(staff_id: int) -> str | None:
+        if staff_id not in staff_name_cache:
+            cursor.execute("SELECT name FROM staff WHERE id=%s", (staff_id,))
+            found = cursor.fetchone()
+            staff_name_cache[staff_id] = str(found["name"]).strip() if found and found.get("name") else None
+        return staff_name_cache[staff_id]
+
+    def client_name_by_case(case_no: str) -> str | None:
+        if case_no not in case_client_name_cache:
+            cursor.execute(
+                "SELECT c.name FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s",
+                (case_no,),
+            )
+            found = cursor.fetchone()
+            case_client_name_cache[case_no] = str(found["name"]).strip() if found and found.get("name") else None
+        return case_client_name_cache[case_no]
+
+    def staff_name_by_case(case_no: str) -> str | None:
+        if case_no not in case_staff_name_cache:
+            cursor.execute(
+                "SELECT s.name FROM orders o JOIN staff s ON s.id=o.staff_id WHERE o.case_no=%s",
+                (case_no,),
+            )
+            found = cursor.fetchone()
+            if not (found and found.get("name")):
+                cursor.execute(
+                    "SELECT DISTINCT s.name FROM staff_obligations o "
+                    "JOIN staff s ON s.id=o.staff_id "
+                    "WHERE o.case_no=%s AND o.status<>'cancelled'",
+                    (case_no,),
+                )
+                names = [str(r["name"]).strip() for r in cursor.fetchall() if r.get("name")]
+                case_staff_name_cache[case_no] = names[0] if len(set(names)) == 1 else None
+            else:
+                case_staff_name_cache[case_no] = str(found["name"]).strip()
+        return case_staff_name_cache[case_no]
+
+    def resolve_va(code: str) -> str | None:
+        if code not in va_cache:
+            res = resolve_client_virtual_account(cursor, code)
+            va_cache[code] = str(res["case_no"]) if res["result"] == "resolved" and res["case_no"] else None
+        return va_cache[code]
+
+    def resolve_suffix(suffix: str) -> str | None:
+        if suffix not in suffix_cache:
+            res = resolve_client_virtual_account_suffix(cursor, suffix)
+            suffix_cache[suffix] = str(res["case_no"]) if res["result"] == "resolved" and res["case_no"] else None
+        return suffix_cache[suffix]
+
+    enriched = []
+    for row in page:
+        row_id = int(row["row_id"])
+        c_type = str(row.get("classification_type") or "")
+        status = str(row.get("transaction_status") or "pending")
+        cases = list(dict.fromkeys(posted_cases_by_id.get(row_id, [])))
+        cp_name = str(row["counterparty_name"]).strip() if row.get("counterparty_name") else None
+
+        if c_type == "government_subsidy":
+            cp_name = cp_name or "新竹市政府"
+        elif c_type == "client_receipt":
+            client_id = _single_entity_id(row, "client:")
+            if status == "pending" and not cases:
+                code = resolve_finance_cancellation_code(
+                    {
+                        "format_id": row.get("format_id"),
+                        "cancellation_code": row.get("cancellation_code"),
+                        "bank_references": _json_dict(row.get("bank_references")),
+                    }
+                )["cancellation_code"]
+                if code:
+                    resolved_case = resolve_va(code)
+                    if resolved_case:
+                        cases = [resolved_case]
+                elif client_id is not None:
+                    cursor.execute(
+                        "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
+                        "JOIN orders ord ON ord.case_no=o.case_no "
+                        "WHERE ord.client_id=%s AND o.direction='receivable_from_client' AND o.status='open'",
+                        (client_id,),
+                    )
+                    open_rows = cursor.fetchall()
+                    month_cases = {
+                        str(r["case_no"])
+                        for r in open_rows
+                        if r.get("case_no") and _is_same_month(row.get("transaction_date"), r.get("due_date"))
+                    }
+                    all_open_cases = {str(r["case_no"]) for r in open_rows if r.get("case_no")}
+                    if len(month_cases) == 1:
+                        cases = [next(iter(month_cases))]
+                    elif len(all_open_cases) == 1:
+                        cases = [next(iter(all_open_cases))]
+                    else:
+                        cursor.execute(
+                            "SELECT DISTINCT case_no FROM orders WHERE client_id=%s AND status<>'訂單取消'",
+                            (client_id,),
+                        )
+                        order_cases = {str(r["case_no"]) for r in cursor.fetchall() if r.get("case_no")}
+                        if len(order_cases) == 1:
+                            cases = [next(iter(order_cases))]
+            if not cp_name:
+                if cases:
+                    cp_name = client_name_by_case(cases[0])
+                if not cp_name and client_id is not None:
+                    cp_name = client_name_by_id(client_id)
+        elif c_type in {"staff_payout", "staff_salary", "staff_legacy_subsidy"}:
+            staff_id = _single_entity_id(row, "staff:")
+            if status == "pending" and not cases:
+                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+                if suffix:
+                    resolved_case = resolve_suffix(suffix)
+                    if resolved_case:
+                        cases = [resolved_case]
+                if not cases and staff_id is not None:
+                    cursor.execute(
+                        "SELECT DISTINCT o.case_no, o.due_date FROM staff_obligations o "
+                        "LEFT JOIN staff_payable_projections p ON p.obligation_identity=o.obligation_identity "
+                        "WHERE o.staff_id=%s AND o.direction='payable_to_staff' "
+                        "AND o.status<>'cancelled' AND o.amount_due_ntd>0 "
+                        "AND (p.status IS NULL OR p.status IN ('payable','partially_paid'))",
+                        (staff_id,),
+                    )
+                    open_rows = cursor.fetchall()
+                    month_cases = {
+                        str(r["case_no"])
+                        for r in open_rows
+                        if r.get("case_no") and _is_same_month(row.get("transaction_date"), r.get("due_date"))
+                    }
+                    all_open_cases = {str(r["case_no"]) for r in open_rows if r.get("case_no")}
+                    if len(month_cases) == 1:
+                        cases = [next(iter(month_cases))]
+                    elif len(all_open_cases) == 1:
+                        cases = [next(iter(all_open_cases))]
+                    else:
+                        cursor.execute(
+                            "SELECT DISTINCT case_no FROM orders WHERE staff_id=%s AND status<>'訂單取消'",
+                            (staff_id,),
+                        )
+                        order_cases = {str(r["case_no"]) for r in cursor.fetchall() if r.get("case_no")}
+                        if len(order_cases) == 1:
+                            cases = [next(iter(order_cases))]
+            if not cp_name:
+                if staff_id is None and status == "posted":
+                    cursor.execute(
+                        "SELECT staff_id FROM staff_payout_events WHERE finance_import_row_id=%s LIMIT 1",
+                        (row_id,),
+                    )
+                    posted_staff = cursor.fetchone()
+                    if posted_staff and posted_staff.get("staff_id"):
+                        staff_id = int(posted_staff["staff_id"])
+                if staff_id is not None:
+                    cp_name = staff_name_by_id(staff_id)
+                if not cp_name and len(cases) == 1:
+                    cp_name = staff_name_by_case(cases[0])
+        elif c_type in {"client_refund", "client_subsidy_return", "client_refund_return"}:
+            client_id = _single_entity_id(row, "client:")
+            if status == "pending" and not cases:
+                suffix = extract_sinopac_memo_case_suffix(row.get("memo"))
+                if suffix:
+                    resolved_case = resolve_suffix(suffix)
+                    if resolved_case:
+                        cases = [resolved_case]
+                if not cases and client_id is not None:
+                    type_sql = (
+                        "AND o.obligation_type='subsidy_return'"
+                        if c_type == "client_subsidy_return"
+                        else "AND o.obligation_type IN ('refund','adjustment')"
+                    )
+                    cursor.execute(
+                        "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
+                        "JOIN orders ord ON ord.case_no=o.case_no "
+                        f"WHERE ord.client_id=%s AND o.direction='payable_to_client' AND o.status='open' {type_sql}",
+                        (client_id,),
+                    )
+                    open_rows = cursor.fetchall()
+                    if not open_rows:
+                        cursor.execute(
+                            "SELECT DISTINCT o.case_no, o.due_date FROM client_obligations o "
+                            "JOIN orders ord ON ord.case_no=o.case_no "
+                            "WHERE ord.client_id=%s AND o.direction='payable_to_client' AND o.status='open'",
+                            (client_id,),
+                        )
+                        open_rows = cursor.fetchall()
+                    month_cases = {
+                        str(r["case_no"])
+                        for r in open_rows
+                        if r.get("case_no") and _is_same_month(row.get("transaction_date"), r.get("due_date"))
+                    }
+                    all_open_cases = {str(r["case_no"]) for r in open_rows if r.get("case_no")}
+                    if len(month_cases) == 1:
+                        cases = [next(iter(month_cases))]
+                    elif len(all_open_cases) == 1:
+                        cases = [next(iter(all_open_cases))]
+                    else:
+                        cursor.execute(
+                            "SELECT DISTINCT case_no FROM orders WHERE client_id=%s AND status<>'訂單取消'",
+                            (client_id,),
+                        )
+                        order_cases = {str(r["case_no"]) for r in cursor.fetchall() if r.get("case_no")}
+                        if len(order_cases) == 1:
+                            cases = [next(iter(order_cases))]
+            if not cp_name:
+                if cases:
+                    cp_name = client_name_by_case(cases[0])
+                if not cp_name and client_id is not None:
+                    cp_name = client_name_by_id(client_id)
+
+        enriched.append(_bank_transaction({**row, "counterparty_name": cp_name}, cases))
+    return enriched
+
+
+def _bank_transaction(row, cases):
+    bank = "taishin" if row["format_id"] == "taishin" else "sinopac"
+    reference = row["safe_reference"]
+    if not reference:
+        reference = (
+            f'{row["sheet_name"]}#{row["source_row"]}'
+            if row["sheet_name"] and row["source_row"] else f'bank:{row["row_id"]}'
+        )
+    return {
+        "row_id": int(row["row_id"]),
+        "row_identity": f'finance-import-row:{row["row_id"]}',
+        "transaction_date": row["transaction_date"],
+        "bank": bank,
+        "direction": row["direction"],
+        "amount_ntd": _integer_money(row),
+        "classification_type": row["classification_type"],
+        "status": row["transaction_status"],
+        "disposition": row["disposition"],
+        "review_reason": row["review_reason"],
+        "available_actions": _text_tuple(row["available_actions"]),
+        "reference": reference,
+        "counterparty_name": row["counterparty_name"],
+        "cases": cases,
+    }
+
+
+def batch_review_count(cursor, batch_id: int) -> int:
+    """Capture the pending bank facts inside the receipt's own transaction."""
+    cursor.execute(
+        f"""SELECT COUNT(*) AS total FROM finance_import_batch_contracts contract
+            {_REVIEW_ROW_JOINS}
+            WHERE contract.batch_id=%s
+              AND event.disposition IN ('manual_review','business_pending','blocked','create')
+              AND {_REVIEW_ROW_PREDICATE}""",
+        (batch_id,),
+    )
+    return int(cursor.fetchone()["total"])
+
+
+def _history_snapshot(raw):
+    return dict(json.loads(raw) if isinstance(raw, str) else raw or {})
+
+
+def _import_history_entry(row):
+    ingestion = _history_snapshot(row["ingestion_snapshot"])
+    apply = _history_snapshot(row["apply_snapshot"])
+    captured = (apply if apply else ingestion).get("history", {})
+    job = row["apply_job_status"]
+    if row["transaction_outcome"] == "rolled_back":
+        status = "failed"
+    elif apply:
+        status = "posted"
+    elif job in {"queued", "running"}:
+        status = "posting"
+    elif job in {"failed", "cancelled"}:
+        status = "posting_failed"
+    elif row["transaction_outcome"] == "legacy":
+        status = "legacy"
+    elif captured.get("blocked"):
+        status = "blocked"
+    else:
+        status = "saved"
+    bank = {"legacy": "sinopac", "sinopac": "sinopac", "taishin": "taishin"}.get(row["format_id"])
+    return {
+        "identity": f'{"attempt" if row["segment"] else "batch"}:{row["id"]}',
+        "started_at": row["started_at"].isoformat() + "Z",
+        "bank": bank,
+        "source_file": _source_filename(row["source_file"]),
+        "status": status,
+        "new_count": ingestion.get("canonical_created_count"),
+        "duplicate_count": ingestion.get("duplicate_occurrence_count"),
+        "reconciled_count": apply.get("reconciled_count", 0) if status not in {"posting", "failed", "legacy"} else None,
+        "pending_count": captured.get("pending_count") if status != "posting" else None,
+        "source_warning_count": ingestion.get("source_warning_count"),
+        "error_code": row["error_code"],
+    }
+
+
 def _reprocess_run(row: dict[str, Any]) -> FinanceImportReprocessRunSummary:
     return FinanceImportReprocessRunSummary(
         int(row["run_id"]), str(row["batch_identity"]),
@@ -499,6 +1099,8 @@ def _reprocess_run(row: dict[str, Any]) -> FinanceImportReprocessRunSummary:
 def _batch_apply_receipt(row: dict[str, Any]) -> FinanceImportBatchApplyReceipt:
     snapshot = row.get("result_snapshot")
     parsed = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    if isinstance(parsed, dict):
+        parsed = {key: value for key, value in parsed.items() if key != "history"}
     if not isinstance(parsed, dict) or set(parsed) != {
         "batch_identity", "resulting_batch_version", "preview_fingerprint",
         "reconciled_count", "existing_count", "pending_count",

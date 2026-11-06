@@ -1,4 +1,7 @@
-"""Period receipt adapter. The application owns the only commit; no external effects."""
+"""
+File: government_subsidy_period_repository.py
+Description: 政府補助整期核銷 MySQL repository，由上層單一交易擁有 commit。
+"""
 from dataclasses import replace
 from domains.government_subsidy.period_reconciliation import (
     PeriodReconciliationConflict, SubsidyPeriod, SubsidyPeriodLine,
@@ -95,6 +98,7 @@ class MySqlGovernmentSubsidyPeriodRepository:
     def bank_amount(self, bank_row_id, *, reversal=False):
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT bank.credit,bank.debit,bank.currency,bank.transaction_date,bank.direction,bank.reconciliation_status, '
+                'bank.format_id,bank.memo,bank.bank_references,classification.reason AS classification_event_reason, '
                 'classification.disposition,COALESCE(classification.classification_type,bank.classification_type) classification_type, '
                 'EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=bank.id AND issue.active=1 '
                 'AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest WHERE latest.batch_id=issue.batch_id '
@@ -103,7 +107,17 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 'ON classification.id=(SELECT MAX(latest.id) FROM finance_import_classification_events latest '
                 'WHERE latest.finance_import_row_id=bank.id) WHERE bank.id=%s FOR UPDATE', (bank_row_id,))
             row = cursor.fetchone()
-            if (row is None or row['currency'] not in (None,'TWD','NTD') or row['transaction_date'] is None
+            memo_text = str(row.get('memo') or '') if row else ''
+            is_stale_non_gov_taishin = bool(
+                row and not reversal
+                and row.get('format_id') == 'taishin'
+                and row.get('direction') == 'incoming'
+                and (row.get('classification_event_reason') or 'initial_bank_classification') == 'initial_bank_classification'
+                and '"manual_supplement"' not in str(row.get('bank_references') or '')
+                and '新竹市政府' not in memo_text
+                and '新竹市府' not in memo_text
+            )
+            if (row is None or is_stale_non_gov_taishin or row['currency'] not in (None,'TWD','NTD') or row['transaction_date'] is None
                     or row['reconciliation_status']!='pending'
                     or row.get('disposition')=='blocked' or row.get('has_active_integrity')
                     or (row['classification_type'] not in ('government_subsidy', 'review', 'receivable') if not reversal else row['classification_type'] not in ('government_subsidy', 'review', 'subsidy_return', 'payable'))
@@ -128,6 +142,10 @@ class MySqlGovernmentSubsidyPeriodRepository:
                 "LEFT JOIN finance_import_classification_events classification ON classification.id=(SELECT MAX(latest.id) "
                 "FROM finance_import_classification_events latest WHERE latest.finance_import_row_id=bank.id) "
                 "WHERE COALESCE(classification.classification_type,bank.classification_type)='government_subsidy' "
+                "AND NOT (bank.format_id='taishin' AND bank.direction='incoming' "
+                "AND COALESCE(classification.reason,'initial_bank_classification')='initial_bank_classification' "
+                "AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(bank.bank_references,'$.source')),'')<>'manual_supplement' "
+                "AND LOCATE('新竹市政府',COALESCE(bank.memo,''))=0 AND LOCATE('新竹市府',COALESCE(bank.memo,''))=0) "
                 "AND bank.reconciliation_status='pending' "
                 "AND COALESCE(classification.disposition,'')<>'blocked' "
                 "AND NOT EXISTS(SELECT 1 FROM finance_import_integrity_events issue WHERE issue.finance_import_row_id=bank.id AND issue.active=1 AND issue.id=(SELECT MAX(latest.id) FROM finance_import_integrity_events latest WHERE latest.batch_id=issue.batch_id AND latest.finance_import_row_id=issue.finance_import_row_id AND latest.issue_code=issue.issue_code)) "

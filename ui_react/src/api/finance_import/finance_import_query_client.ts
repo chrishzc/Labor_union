@@ -7,6 +7,7 @@ import { transport } from '../shared/transport';
 import { ApiDecodeError } from '../shared/typed_errors';
 import { FinanceImportBatchListResponseSchema, FinanceImportManifestSchema, FinanceImportReviewPageSchema, FinanceImportRunPageSchema, financeEnvelope, type FinanceImportBatchSummary, type FinanceImportManifest, type FinanceImportReviewPage, type FinanceImportRunPage } from './finance_import_query_schemas';
 import { FinanceImportQueryError, mapFinanceImportQueryError } from './finance_import_query_errors';
+import { FinanceBankTransactionPageSchema, FinanceImportHistoryPageSchema, type FinanceBankTransactionPage, type FinanceImportHistoryPage } from './finance_import_query_schemas';
 export interface FinanceImportQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 let correlationSequence = 0;
 function nextCorrelationId(scope: string): string { correlationSequence += 1; return `${scope}-${correlationSequence.toString(36)}`; }
@@ -15,6 +16,19 @@ function normalizeIdentity(value: string) { const normalized = value.trim(); if 
 function assertPageCursor(ids: readonly number[], cursor: number | null, pageSize: number, code: string, label: string): void { const expected = ids.length === pageSize ? ids[ids.length - 1] ?? null : null; if (cursor !== expected) throw new FinanceImportQueryError(code, `${label} cursor與回應頁面範圍不一致。`); }
 async function decode<T>(promise: Promise<unknown>, schema: ReturnType<typeof financeEnvelope>, label: string): Promise<T> { try { const raw = await promise; const parsed = schema.safeParse(raw); if (!parsed.success) throw new ApiDecodeError(`${label}回應結構異常。`, parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw); if (!parsed.data.success) throw new FinanceImportQueryError('FINANCE_IMPORT_FAILURE', parsed.data.error ?? parsed.data.message); return parsed.data.data as T; } catch (error) { throw mapFinanceImportQueryError(error); } }
 export const financeImportQueryClient = {
+  async listBankTransactions(params: {
+    bank?: 'sinopac' | 'taishin'; direction?: 'incoming' | 'outgoing'; transaction_status: 'pending' | 'posted' | 'all';
+    start_date?: string; end_date?: string; search?: string; before_row_id?: number;
+  }, source?: FinanceImportQueryOptions): Promise<FinanceBankTransactionPage> {
+    return decode(transport.get<unknown>('/api/v1/finance-import/bank-transactions', {
+      ...options(source, 'finance-bank-transactions'), params,
+    }), financeEnvelope(FinanceBankTransactionPageSchema), '銀行對帳');
+  },
+  async listImportHistory(before?: string, source?: FinanceImportQueryOptions): Promise<FinanceImportHistoryPage> {
+    return decode(transport.get<unknown>('/api/v1/finance-import/import-history', {
+      ...options(source, 'finance-import-history'), params: { before },
+    }), financeEnvelope(FinanceImportHistoryPageSchema), '匯入紀錄');
+  },
   async listBatches(query: { limit?: number; beforeBatchId?: number } = {}, source?: FinanceImportQueryOptions): Promise<FinanceImportBatchSummary[]> {
     const limit = query.limit ?? 50; if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new FinanceImportQueryError('FINANCE_IMPORT_VALIDATION', 'limit必須介於1至100。');
     if (query.beforeBatchId !== undefined && (!Number.isInteger(query.beforeBatchId) || query.beforeBatchId <= 0)) throw new FinanceImportQueryError('FINANCE_IMPORT_VALIDATION', 'beforeBatchId必須是正整數。');

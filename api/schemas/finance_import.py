@@ -262,6 +262,48 @@ class FinanceImportReviewRowPageView(_StrictModel):
     next_after_row_id: int | None = Field(default=None, gt=0)
 
 
+class FinanceBankTransactionView(_StrictModel):
+    row_id: int
+    row_identity: str
+    transaction_date: str | None
+    bank: Literal["sinopac", "taishin"]
+    direction: Literal["incoming", "outgoing", "unknown"]
+    amount_ntd: int
+    classification_type: str
+    status: Literal["pending", "posted"]
+    disposition: str
+    review_reason: str | None
+    available_actions: list[str]
+    reference: str
+    counterparty_name: str | None
+    cases: list[str]
+
+
+class FinanceBankTransactionPageView(_StrictModel):
+    items: list[FinanceBankTransactionView]
+    pending_count: int | None
+    next_before_row_id: int | None
+
+
+class FinanceImportHistoryEntryView(_StrictModel):
+    identity: str
+    started_at: str
+    bank: Literal["sinopac", "taishin"] | None
+    source_file: str | None
+    status: Literal["saved", "posting", "posted", "blocked", "posting_failed", "failed", "legacy"]
+    new_count: int | None
+    duplicate_count: int | None
+    reconciled_count: int | None
+    pending_count: int | None
+    source_warning_count: int | None
+    error_code: str | None
+
+
+class FinanceImportHistoryPageView(_StrictModel):
+    items: list[FinanceImportHistoryEntryView]
+    next_before: str | None
+
+
 class FinanceImportReprocessRunSummaryView(_StrictModel):
     run_id: int = Field(gt=0)
     batch_identity: str
@@ -299,6 +341,14 @@ class FinanceImportJobAcceptedView(_StrictModel):
     job_id: str = Field(min_length=1, max_length=191)
     status_url: str = Field(min_length=1, max_length=255)
     replayed: bool
+
+
+class FinanceImportIngestionOutcomeView(_StrictModel):
+    status: Literal["committed", "rolled_back", "unknown"]
+    receipt: FinanceWorkbookIngestionReceiptView | None
+    source_content_digest: str | None
+    error_code: str | None
+    phase: str | None
 
 
 class FinanceImportBatchApplyBody(FinanceImportBatchPreviewBody):

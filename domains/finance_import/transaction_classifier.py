@@ -1,6 +1,6 @@
 """
 File: transaction_classifier.py
-Description: 純函式正規化財務流水分類，支援台新備註姓名與月份金額退款判定，不直接核銷。
+Description: 純函式正規化銀行流水分類，驗證既有案件與對象身分證據且不直接核銷。
 """
 
 from __future__ import annotations
@@ -477,6 +477,8 @@ def classify_finance_transaction(
     taishin_client_refund_candidates: Sequence[Mapping[str, Any]] = (),
     all_staff_names: Sequence[str] = (),
     staff_payout_candidates: Sequence[Mapping[str, Any]] = (),
+    known_virtual_accounts: set[str] | frozenset[str] | None = None,
+    known_case_suffixes: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -491,6 +493,7 @@ def classify_finance_transaction(
         client_subsidy_return_accounts = client_refund_accounts
         client_refund_accounts = {}
 
+    fallback_review: dict[str, Any] | None = None
     if direction == "outgoing":
         memo = row.get("memo")
         government_memo = isinstance(memo, str) and any(marker in memo for marker in ("新竹市政府", "新竹市府"))
@@ -526,11 +529,21 @@ def classify_finance_transaction(
                     )
                     if other_ids or any(candidates and set(candidates) != set(ids) for candidates in (account_ids, case_ids)):
                         return _review("counterparty_identity_type_conflict")
-                return fee_result
+                    return fee_result
+                if fee_result["reason"] in {
+                    "counterparty_identity_type_conflict",
+                    "outgoing_staff_payout_name_ambiguous",
+                    "outgoing_client_refund_name_ambiguous",
+                }:
+                    return fee_result
+                fallback_review = fee_result
 
     if format_id in {"legacy", "sinopac"}:
         if direction == "incoming":
-            if _valid_client_virtual_account(row):
+            cancellation_code = resolve_finance_cancellation_code(row)["cancellation_code"]
+            if cancellation_code is not None and (
+                known_virtual_accounts is None or cancellation_code in known_virtual_accounts
+            ):
                 return _result("client_receipt", [], "sinopac_valid_virtual_account")
             reference_key = "transaction_reference" if format_id == "legacy" else "交易參考編號"
             account = extract_sinopac_account_reference(row["bank_references"].get(reference_key))
@@ -545,14 +558,19 @@ def classify_finance_transaction(
             )
             if heuristic_result is not None:
                 return heuristic_result
+            if cancellation_code is not None:
+                return _review("sinopac_virtual_account_case_not_found")
             return _review("sinopac_invalid_or_missing_virtual_account")
-        return _classify_sinopac_outgoing(
+        sinopac_result = _classify_sinopac_outgoing(
             row,
             staff_accounts,
             client_refund_accounts,
             staff_case_suffixes,
             client_refund_case_suffixes,
         )
+        if sinopac_result["classification_type"] == "non_business_review" and fallback_review is not None:
+            return fallback_review
+        return sinopac_result
 
     if format_id == "taishin":
         memo = row.get("memo")
@@ -574,7 +592,7 @@ def classify_finance_transaction(
         is_refund_kw = any(k in memo_text for k in ("退款", "退費", "客戶"))
         suffix = extract_sinopac_memo_case_suffix(memo)
 
-        if suffix is not None:
+        if suffix is not None and (known_case_suffixes is None or suffix in known_case_suffixes):
             staff_case_map = staff_case_suffixes or {}
             refund_case_map = client_refund_case_suffixes or {}
             memo_staff_ids = _ids_for_account(staff_case_map, suffix)
@@ -604,20 +622,21 @@ def classify_finance_transaction(
                     "taishin_unique_client_refund_case_suffix_in_memo",
                     suffix,
                 )
-            if is_staff_kw and not is_refund_kw:
-                return _result(
-                    "staff_salary",
-                    [],
-                    "taishin_staff_case_suffix_in_memo",
-                    suffix,
-                )
-            if is_refund_kw and not is_staff_kw:
-                return _result(
-                    "client_refund",
-                    [],
-                    "taishin_client_refund_case_suffix_in_memo",
-                    suffix,
-                )
+            if known_case_suffixes is not None and suffix in known_case_suffixes:
+                if is_staff_kw and not is_refund_kw:
+                    return _result(
+                        "staff_salary",
+                        [],
+                        "taishin_staff_case_suffix_in_memo",
+                        suffix,
+                    )
+                if is_refund_kw and not is_staff_kw:
+                    return _result(
+                        "client_refund",
+                        [],
+                        "taishin_client_refund_case_suffix_in_memo",
+                        suffix,
+                    )
 
         if is_staff_kw and not is_refund_kw:
             account = row.get("counterparty_account")
@@ -631,22 +650,22 @@ def classify_finance_transaction(
                 )
             if len(staff_ids) > 1:
                 return _review("counterparty_account_multiple_matches")
-            if any(k in memo_text for k in ("服務人員薪資", "月嫂薪資", "月嫂")):
-                return _result(
-                    "staff_salary",
-                    [],
-                    "taishin_staff_salary_memo",
-                    account,
-                )
 
-        if all_client_names or taishin_client_refund_candidates or all_staff_names or staff_payout_candidates:
-            return _review("taishin_outgoing_unrecognized")
-
-        return _classify_taishin_outgoing(
+        taishin_result = _classify_taishin_outgoing(
             row,
             client_refund_accounts,
             staff_accounts,
             client_subsidy_return_accounts,
         )
+        if (
+            taishin_result["classification_type"] != "non_business_review"
+            or taishin_result["reason"] in {"counterparty_identity_type_conflict", "counterparty_account_multiple_matches"}
+        ):
+            return taishin_result
+        if fallback_review is not None:
+            return fallback_review
+        if all_client_names or taishin_client_refund_candidates or all_staff_names or staff_payout_candidates:
+            return _review("taishin_outgoing_unrecognized")
+        return taishin_result
 
     return _review("unsupported_bank_direction")

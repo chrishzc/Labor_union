@@ -14,3 +14,29 @@ export type FinanceImportBatchSummary = z.infer<typeof FinanceImportBatchSummary
 export type FinanceImportManifest = z.infer<typeof FinanceImportManifestSchema>;
 export type FinanceImportReviewPage = z.infer<typeof FinanceImportReviewPageSchema>;
 export type FinanceImportRunPage = z.infer<typeof FinanceImportRunPageSchema>;
+
+const bankSchema = z.enum(['sinopac', 'taishin']);
+const optionalCount = z.number().int().nonnegative().nullable();
+export const FinanceBankTransactionPageSchema = z.strictObject({
+  items: z.array(z.strictObject({
+    row_id: z.number().int().positive(), row_identity: z.string(), transaction_date: z.string().nullable(),
+    bank: bankSchema, direction: z.enum(['incoming', 'outgoing', 'unknown']), amount_ntd: z.number().int().positive(),
+    classification_type: z.string(), status: z.enum(['pending', 'posted']), disposition: z.string(),
+    review_reason: z.string().nullable(), available_actions: z.array(z.string()),
+    reference: z.string(), counterparty_name: z.string().nullable(), cases: z.array(z.string()),
+  })),
+  pending_count: optionalCount,
+  next_before_row_id: z.number().int().positive().nullable(),
+});
+export const FinanceImportHistoryPageSchema = z.strictObject({
+  items: z.array(z.strictObject({
+    identity: z.string(), started_at: z.string(), bank: bankSchema.nullable(),
+    source_file: z.string().nullable(), status: z.enum(['saved', 'posting', 'posted', 'blocked', 'posting_failed', 'failed', 'legacy']),
+    new_count: optionalCount, duplicate_count: optionalCount, reconciled_count: optionalCount,
+    pending_count: optionalCount, source_warning_count: optionalCount, error_code: z.string().nullable(),
+  })),
+  next_before: z.string().nullable(),
+});
+export type FinanceBankTransactionPage = z.infer<typeof FinanceBankTransactionPageSchema>;
+export type FinanceBankTransaction = FinanceBankTransactionPage['items'][number];
+export type FinanceImportHistoryPage = z.infer<typeof FinanceImportHistoryPageSchema>;

@@ -1,6 +1,6 @@
-"""T11-2: real source-only review, typed query, formal Apply and replay readback.
-
-Requires an explicitly bootstrapped disposable lu_test_* database. No provider calls.
+"""
+File: test_finance_source_review_mysql_e2e.py
+Description: 驗證銀行對帳單匯入過濾無關流水、跨銀行待核對對象與案件補齊及手動核銷 E2E 契約。
 """
 from __future__ import annotations
 
@@ -93,11 +93,17 @@ def _seed_deposit(case_no, token):
 
 def test_both_banks_first_import_and_new_key_reimport(tmp_path):
     bootstrap(_arguments())
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.dependencies.admin_auth import require_admin, require_system_admin
     from api.dependencies.finance_import import build_finance_import_application
+    from api.routes.client_receipt_reconciliation import router as receipt_router
+    from api.routes.finance_import import router
     from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
     from subsystems.finance_import.ingestion import ingest_finance_workbook
     from subsystems.finance_import.query import FinanceImportQueryService
@@ -115,12 +121,13 @@ def test_both_banks_first_import_and_new_key_reimport(tmp_path):
         ['說明'], taishin_headers,
         ['0001', '2026/09/01', '09:00:00', '2026/09/01', '政府補助', '', '500', '80000', '新竹市政府補助入款'],
         ['0002', '2026/09/02', '09:00:00', '2026/09/02', '轉出', '80', '', '79920', '對象未知'],
+        ['0003', '2026/09/03', '09:00:00', '2026/09/03', '轉入', '', '999', '80919', '借款'],
     ]).to_excel(taishin, index=False, header=False)
 
     actor = ActorContext('isolated-finance-test')
     correlation = CorrelationId('first-and-repeat')
     for workbook, source_count, posted_count, pending_amounts in (
-        (sinopac, 3, 1, [204, 259]), (taishin, 2, 0, [80, 500]),
+        (sinopac, 3, 1, [204, 259]), (taishin, 1, 0, [500]),
     ):
         before = _counts()
         first = ingest_finance_workbook(str(workbook), IdempotencyKey(f'{workbook.stem}:first'), actor,
@@ -164,6 +171,107 @@ def test_both_banks_first_import_and_new_key_reimport(tmp_path):
         assert after['finance_import_rows'] - before['finance_import_rows'] == source_count
         assert after['finance_import_occurrences'] - before['finance_import_occurrences'] == source_count * 2
         assert after['client_ledger_entries'] - before['client_ledger_entries'] == posted_count
+
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(receipt_router)
+    for guard in (require_admin, require_system_admin):
+        app.dependency_overrides[guard] = lambda: AdminPrincipal(1, 'test', 'Synthetic', 'system_admin')
+    with TestClient(app) as client:
+        base = '/api/v1/finance-import'
+
+        def read(path, **kwargs):
+            response = client.get(base + path, **kwargs)
+            assert response.status_code == 200, response.text
+            return response.json()['data']
+
+        page = read('/bank-transactions')
+        assert page['pending_count'] == len(page['items']) == 3
+        assert len({row['row_id'] for row in page['items']}) == 3
+        assert {row['bank'] for row in page['items']} == {'sinopac', 'taishin'}
+        for item in page['items']:
+            if item['bank'] == 'sinopac':
+                assert item['counterparty_name'] == 'T11 synthetic client'
+                assert item['cases'] == ['115000003']
+            else:
+                assert item['classification_type'] == 'government_subsidy'
+                assert item['counterparty_name'] == '新竹市政府'
+                assert item['cases'] == []
+        posted = read('/bank-transactions', params={'transaction_status': 'posted', 'search': '115000003'})
+        assert posted['pending_count'] is None
+        assert [(row['amount_ntd'], row['cases']) for row in posted['items']] == [(300, ['115000003'])]
+        tai = read('/bank-transactions', params={'bank': 'taishin', 'direction': 'incoming', 'start_date': '2026-09-01'})
+        assert [(row['amount_ntd'], row['counterparty_name']) for row in tai['items']] == [(500, '新竹市政府')]
+        exact_reference = read('/bank-transactions', params={'search': 'test-2'})
+        assert [row['amount_ntd'] for row in exact_reference['items']] == [259]
+        first_page = read('/bank-transactions', params={'limit': 2})
+        second_page = read('/bank-transactions', params={'limit': 2, 'before_row_id': first_page['next_before_row_id']})
+        assert first_page['items'] + second_page['items'] == page['items']
+
+        history = read('/import-history')
+        assert [
+            (row['bank'], row['new_count'], row['duplicate_count'], row['reconciled_count'], row['pending_count'])
+            for row in history['items']
+        ] == [
+            ('taishin', 0, 1, 0, 1), ('taishin', 1, 0, 0, 1),
+            ('sinopac', 0, 3, 0, 2), ('sinopac', 3, 0, 1, 2),
+        ]
+        history_first = read('/import-history', params={'limit': 2})
+        history_second = read('/import-history', params={'limit': 2, 'before': history_first['next_before']})
+        assert history_first['items'] + history_second['items'] == history['items']
+        connection = get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO finance_import_batches(format_id,source_file,sheet_name,header_row,status) "
+                    "VALUES ('legacy','older-statement.xlsx','Sheet',1,'completed')"
+                )
+                cursor.execute(
+                    "INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,"
+                    "direction,event_type,before_amount_ntd,after_amount_ntd,after_due_date,source_event_identity,"
+                    "expected_account_version,idempotency_key,actor,reason) VALUES "
+                    "('first:115000003','115000003','first','receivable_from_client','established',0,259,"
+                    "'2026-09-02','synthetic:first',1,'synthetic:first','test','Synthetic first payment')"
+                )
+                cursor.execute(
+                    "INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,"
+                    "amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES "
+                    "('first:115000003','115000003','first','receivable_from_client',259,'2026-09-02','open',%s,1)",
+                    (cursor.lastrowid,),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+        receipt_url = '/api/v1/orders/115000003/client-finance/receipt-reconciliation'
+        selection = {'payment_stage': 'first', 'finance_import_row_ids': [exact_reference['items'][0]['row_id']],
+                     'obligation_identities': ['first:115000003']}
+        preview = client.post(receipt_url + '/preview', json=selection)
+        assert preview.status_code == 200, preview.text
+        proof = preview.json()['data']
+        applied = client.post(receipt_url + '/apply', headers={'Idempotency-Key': 'later-manual', 'X-Correlation-ID': 'later-manual'},
+                              json={**selection, 'expected_account_version': proof['account_version'],
+                                    'preview_fingerprint': proof['preview_fingerprint'], 'reason': 'Synthetic manual confirmation'})
+        assert applied.status_code == 200, applied.text
+        assert read('/bank-transactions')['pending_count'] == 2
+        after_manual = read('/import-history')['items']
+        assert after_manual[:4] == history['items']
+        assert (after_manual[4]['source_file'], after_manual[4]['pending_count']) == ('older-statement.xlsx', None)
+
+        assert read('/workbooks/ingestion-outcome', headers={'Idempotency-Key': 'sinopac:repeat'})['status'] == 'committed'
+        named_upload = client.post(base + '/workbooks/ingest',
+                                   headers={'Idempotency-Key': 'named-upload', 'X-Correlation-ID': 'named-upload'},
+                                   files={'workbook': ('original-bank-statement.xlsx', sinopac.read_bytes())})
+        assert named_upload.status_code == 200, named_upload.text
+        assert read('/import-history')['items'][0]['source_file'] == 'original-bank-statement.xlsx'
+        failed_key = {'Idempotency-Key': 'synthetic-format-failure', 'X-Correlation-ID': 'test-format-failure'}
+        bad_file = tmp_path / 'bad-format.xlsx'
+        pd.DataFrame([['not a bank statement']]).to_excel(bad_file, index=False, header=False)
+        failed = client.post(base + '/workbooks/ingest', headers=failed_key,
+                             files={'workbook': (bad_file.name, bad_file.read_bytes())})
+        assert failed.status_code == 422, failed.text
+        assert read('/workbooks/ingestion-outcome', headers=failed_key)['status'] == 'rolled_back'
+        assert read('/workbooks/ingestion-outcome', headers={'Idempotency-Key': 'missing-attempt'})['status'] == 'unknown'
+        assert read('/import-history')['items'][0]['status'] == 'failed'
 
 
 def test_t11_source_review_query_apply_and_replay(tmp_path):
@@ -223,6 +331,9 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert len(page['items']) == 1 and page['items'][0]['disposition'] == 'business_pending'
         # Source-format warnings are audit evidence, not matched pending receipts.
         assert page['source_reviews'] == []
+        global_page = client.get('/api/v1/finance-import/bank-transactions')
+        assert global_page.status_code == 200, global_page.text
+        assert global_page.json()['data']['pending_count'] == 1
         audit_connection = get_connection()
         try:
             source_reviews = FinanceImportQueryService(audit_connection).list_source_reviews(batch, limit=100)
@@ -270,13 +381,13 @@ def test_t11_source_review_query_apply_and_replay(tmp_path):
         assert client.get(url+'/manifest').json()['data']['review_count'] == 0
         # Exact API response crosses the real typed client and page, without DB credentials in the UI process.
         exchange = tmp_path/'review-exchange.json'
-        exchange.write_text(json.dumps({'ingestion': intake.json(), 'preview': preview.json(), 'manifest': manifest.json(), 'reviews': reviews.json(), 'source_audit': source}, default=str), encoding='utf-8')
+        exchange.write_text(json.dumps({'bank_page': global_page.json(), 'source_audit': source}, default=str), encoding='utf-8')
         root = Path(__file__).resolve().parents[1]
         ui_report = tmp_path/'typed-ui-report.json'
         # Direct Node invocation also works on Windows without shell/npm.cmd lookup.
         ui_environment = {name: os.environ[name] for name in ('PATH','SystemRoot','TEMP','TMP') if name in os.environ}
         ui_environment.update(HOME=str(tmp_path), CI='true', FI_REVIEW_EXCHANGE=str(exchange))
-        result = subprocess.run(['node', str(root/'ui_react/node_modules/vitest/vitest.mjs'), 'run', 'src/tests/finance_source_review_list.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root/'ui_react', env=ui_environment, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(['node', str(root/'ui_react/node_modules/vitest/vitest.mjs'), 'run', 'src/tests/domains/finance-import/subsystems/finance-import/modules/statement-workspace/bank_reconciliation_workspace.test.tsx', '-t', 'same-run source-review', '--reporter=json', '--outputFile', str(ui_report)], cwd=root/'ui_react', env=ui_environment, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout[-5000:]+result.stderr[-5000:]
         report = json.loads(ui_report.read_text(encoding='utf-8'))
         assert report.get('numPassedTests') == 1 and report.get('numFailedTests') == 0, report

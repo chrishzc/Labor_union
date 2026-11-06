@@ -6,9 +6,9 @@ import {financeImportQueryClient} from '../../../../../../../api/finance_import/
 
 vi.mock('../../../../../../../api/finance_import/finance_import_mutation_client', async original => ({
   ...await original<typeof import('../../../../../../../api/finance_import/finance_import_mutation_client')>(),
-  financeImportMutationClient: {ingest:vi.fn(), preview:vi.fn(), apply:vi.fn(), queryBatchOutcome:vi.fn()},
+  financeImportMutationClient: {ingest:vi.fn(), preview:vi.fn(), apply:vi.fn(), queryBatchOutcome:vi.fn(), queryIngestionOutcome:vi.fn()},
 }));
-vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{getManifest:vi.fn(),listReviewRows:vi.fn()}}));
+vi.mock('../../../../../../../api/finance_import/finance_import_query_client',()=>({financeImportQueryClient:{listBankTransactions:vi.fn(),listImportHistory:vi.fn()}}));
 vi.mock('../../../../../../../components/UnsavedChanges',()=>({useUnsavedDraft:vi.fn(),useUnsavedNavigation:()=>({requestLeave:(action:()=>void)=>action()})}));
 vi.mock('../../../../../../../components/FinanceStatementArchive',()=>({FinanceStatementArchive:()=>null}));
 const staffDirectory=vi.hoisted(()=>({status:'ready',people:new Map(),refresh:vi.fn(),labels:{label:()=>'',compare:()=>0}}));
@@ -27,8 +27,7 @@ beforeEach(()=>{
   vi.mocked(financeImportMutationClient.preview).mockResolvedValue(preview);
   vi.mocked(financeImportMutationClient.apply).mockResolvedValue({job_id:'job-1',status_url:'/api/v1/jobs/job-1',replayed:false});
   vi.mocked(financeImportMutationClient.queryBatchOutcome).mockResolvedValue({job_id:'job-1',status:'failed',attempt_count:1,max_attempts:3,result_reference:null,receipt:null});
-  vi.mocked(financeImportQueryClient.getManifest).mockResolvedValue({batch_identity:preview.batch_identity,review_count:0} as Awaited<ReturnType<typeof financeImportQueryClient.getManifest>>);
-  vi.mocked(financeImportQueryClient.listReviewRows).mockResolvedValue({batch_identity:preview.batch_identity,items:[],source_reviews:[],next_after_row_id:null,next_after_source_review_id:null});
+  vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({items:[],pending_count:0,next_before_row_id:null});
 });
 
 function chooseWorkbook(){
@@ -61,5 +60,36 @@ describe('finance import operation identity after an observed result',()=>{
     expect(second[2].correlationId).toBe(first[2].correlationId);
     expect(second[1]).toBe(first[1]);
     expect(financeImportMutationClient.preview).toHaveBeenCalledTimes(1);
+  });
+
+  it('looks up a failed upload with the original key before allowing another upload', async () => {
+    vi.mocked(financeImportMutationClient.ingest).mockRejectedValueOnce(new Error('response lost'));
+    vi.mocked(financeImportMutationClient.queryIngestionOutcome).mockResolvedValue({
+      status: 'rolled_back', receipt: null, source_content_digest: 'b'.repeat(64),
+      error_code: 'finance_import_processing_failed', phase: 'staging',
+    });
+    chooseWorkbook();
+    const lookup = await screen.findByRole('button', { name: '查詢原次匯入結果' });
+    expect(screen.getByRole('button', { name: '匯入銀行交易明細' })).toBeDisabled();
+    fireEvent.click(lookup);
+    await screen.findByText('已確認原次匯入失敗，流水未保存。');
+    expect(financeImportMutationClient.queryIngestionOutcome).toHaveBeenCalledWith(
+      vi.mocked(financeImportMutationClient.ingest).mock.calls[0][1],
+    );
+    expect(financeImportMutationClient.ingest).toHaveBeenCalledOnce();
+    expect(financeImportMutationClient.preview).not.toHaveBeenCalled();
+  });
+
+  it('resends the same upload with its original key when no result is recorded', async () => {
+    vi.mocked(financeImportMutationClient.ingest).mockRejectedValueOnce(new Error('request lost'));
+    vi.mocked(financeImportMutationClient.queryIngestionOutcome).mockResolvedValue({
+      status: 'unknown', receipt: null, source_content_digest: null, error_code: null, phase: null,
+    });
+    chooseWorkbook();
+    fireEvent.click(await screen.findByRole('button', { name: '查詢原次匯入結果' }));
+    fireEvent.click(await screen.findByRole('button', { name: '以原操作重送同一檔案' }));
+    await waitFor(() => expect(financeImportMutationClient.ingest).toHaveBeenCalledTimes(2));
+    const [first, retry] = vi.mocked(financeImportMutationClient.ingest).mock.calls;
+    expect(retry[1]).toEqual(first[1]);
   });
 });

@@ -3,7 +3,7 @@ import calendar
 from datetime import date
 
 from infrastructure.mysql.case_category_query import CASE_CATEGORY_SQL
-from infrastructure.mysql.finance_statement_archive_repository import _PROOFS
+from subsystems.finance_import.query import BANK_CASE_PROOFS_SQL
 from infrastructure.mysql.finance_import_repository import _integer_bank_amount
 from subsystems.finance_import.monthly_accounting import AccountingBankFact
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
@@ -77,7 +77,7 @@ class MySqlMonthlyAccountingSource:
         end_date = date(end.year, end.month, calendar.monthrange(end.year, end.month)[1])
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
+                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + BANK_CASE_PROOFS_SQL + ") p ON p.row_id=b.id "
                 "WHERE b.transaction_date BETWEEN %s AND %s "
                 "ORDER BY b.id,p.case_no", (start, end_date))
             rows = cursor.fetchall()
@@ -86,8 +86,8 @@ class MySqlMonthlyAccountingSource:
     def case_bank_facts(self, case_no):
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + _PROOFS + ") p ON p.row_id=b.id "
-                "WHERE b.id IN (SELECT q.row_id FROM (" + _PROOFS + ") q WHERE q.case_no=%s) "
+                "SELECT " + _CASH_FACT_COLUMNS + " FROM finance_import_rows b JOIN (" + BANK_CASE_PROOFS_SQL + ") p ON p.row_id=b.id "
+                "WHERE b.id IN (SELECT q.row_id FROM (" + BANK_CASE_PROOFS_SQL + ") q WHERE q.case_no=%s) "
                 "ORDER BY b.id,p.case_no", (case_no,))
             return self._facts(cursor.fetchall())
 

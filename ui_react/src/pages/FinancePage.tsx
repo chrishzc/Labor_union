@@ -11,8 +11,7 @@ import './FinancePage.css';
 import { loadAllStaffDirectoryPages, staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { adaptStaffDirectoryPage, compareStaffUnionNumbers, staffDisplayLabel } from '../adapters/staff/staff_directory_adapter';
 import { FinanceWorkbookSnapshot, financeImportMutationClient, type FinanceImportBatchOutcome, type FinanceImportBatchPreview, type FinanceImportJobAccepted, type FinanceWorkbookIngestionReceipt } from '../api/finance_import/finance_import_mutation_client';
-import { financeImportQueryClient } from '../api/finance_import/finance_import_query_client';
-import type { FinanceImportBatchSummary } from '../api/finance_import/finance_import_query_schemas';
+import { FinanceImportQueryError } from '../api/finance_import/finance_import_query_errors';
 
 import { FinanceCaseList } from '../components/FinanceCaseList';
 import { FinanceGovernmentSubsidyList } from '../components/FinanceGovernmentSubsidyList';
@@ -23,13 +22,7 @@ import { FinanceBankReconciliationWorkspace } from '../components/FinanceBankRec
 
 export type FinanceTab = 'case-accounting' | 'finance-import' | 'government-list' | 'monthly';
 type LoadState<T> = { kind: 'idle' | 'loading' } | { kind: 'ready'; data: T } | { kind: 'empty' } | { kind: 'error'; message: string } | { kind: 'unavailable'; message: string };
-type FinanceImportReviewSnapshot = {
-  batchIdentity: string;
-  reviewCount: number;
-  items: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['items'];
-  sourceReviews: Awaited<ReturnType<typeof financeImportQueryClient.listReviewRows>>['source_reviews'];
-};
-
+type IngestionCommand = Parameters<typeof financeImportMutationClient.queryIngestionOutcome>[0];
 const FINANCE_OUTCOME_POLL_LIMIT = 10;
 const FINANCE_OUTCOME_POLL_DELAY_MS = 500;
 
@@ -122,12 +115,10 @@ export const FinancePage: React.FC = () => {
 
   const [staff, setStaff] = useState<{ id: number; label: string }[]>([]);
   const [financeWorkbook, setFinanceWorkbook] = useState<File | null>(null);
-  const [batches, setBatches] = useState<FinanceImportBatchSummary[]>([]);
-  const [selectedBatchIdentity, setSelectedBatchIdentity] = useState<string>('');
   const [ingestion, setIngestion] = useState<LoadState<FinanceWorkbookIngestionReceipt>>({ kind: 'idle' });
   const [batchPreview, setBatchPreview] = useState<LoadState<FinanceImportBatchPreview>>({ kind: 'idle' });
-  const [sourceReview, setSourceReview] = useState<LoadState<FinanceImportReviewSnapshot>>({ kind: 'idle' });
-  const [manuallyPostedRows, setManuallyPostedRows] = useState<ReadonlySet<string>>(new Set());
+  const [unconfirmedIngestion, setUnconfirmedIngestion] = useState<IngestionCommand | null>(null);
+  const [ingestionRecordMissing, setIngestionRecordMissing] = useState(false);
   const [applyReason, setApplyReason] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [applyJob, setApplyJob] = useState<LoadState<FinanceImportJobAccepted>>({ kind: 'idle' });
@@ -142,7 +133,6 @@ export const FinancePage: React.FC = () => {
     : undefined;
   const displayedApplyReason = submittedFinanceCommand?.reason ?? applyReason;
   const confirmedImportReceipt = batchOutcome.kind === 'ready' && batchOutcome.data.status === 'succeeded' ? batchOutcome.data.receipt : null;
-  const postingStopped = (batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed) || (batchOutcome.kind === 'ready' && batchOutcome.data.status !== 'succeeded');
 
   useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), []);
 
@@ -203,107 +193,73 @@ export const FinancePage: React.FC = () => {
     .catch(() => {});
   }, [activeTab, reload, sharedStaffDirectory]);
 
-  const loadSourceReview = async (batchIdentity: string) => {
-    const request = start('source-review');
-    setSourceReview({ kind: 'loading' });
-    try {
-      const [manifest, firstPage] = await Promise.all([
-        financeImportQueryClient.getManifest(batchIdentity, { signal: request.controller.signal }),
-        financeImportQueryClient.listReviewRows(batchIdentity, { signal: request.controller.signal }),
-      ]);
-      if (!current('source-review', request.sequence, request.controller)) return;
-      let page = firstPage;
-      const items = [...page.items];
-      while (page.next_after_row_id !== null) {
-        page = await financeImportQueryClient.listReviewRows(batchIdentity, {
-          signal: request.controller.signal,
-          afterRowId: items.at(-1)?.row_id,
-        });
-        if (!current('source-review', request.sequence, request.controller)) return;
-        items.push(...page.items);
-      }
-      if (items.length !== manifest.review_count) {
-        setSourceReview({ kind: 'error', message: '未銷帳明細與統計不一致，請重新查詢。' });
-        return;
-      }
-      setSelectedBatchIdentity(manifest.batch_identity);
-      setBatches(previous => [
-        {
-          batch_id: manifest.batch_id, batch_identity: manifest.batch_identity,
-          format_id: manifest.format_id, source_file: manifest.source_file,
-          row_count: manifest.source_row_count, status: manifest.status,
-          batch_version: manifest.batch_version, architecture_ready: true,
-          created_at: manifest.created_at,
-        },
-        ...previous.filter(batch => batch.batch_identity !== manifest.batch_identity),
-      ].sort((left, right) => right.batch_id - left.batch_id));
-      setSourceReview({
-        kind: 'ready',
-        data: { batchIdentity: manifest.batch_identity, reviewCount: items.length, items, sourceReviews: [] },
-      });
-    } catch (error) {
-      if (current('source-review', request.sequence, request.controller)) {
-        setSourceReview({ kind: 'error', message: financeErrorMessage(error, '未銷帳明細載入失敗，請重新查詢。') });
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab !== 'finance-import') return;
-    let active = true;
-    void (async () => {
-      try {
-        const list = await financeImportQueryClient.listBatches({ limit: 50 });
-        if (!active) return;
-        setBatches(list);
-        const valid = list.filter((b) => b.batch_identity && b.batch_identity.trim() !== '');
-        if (valid.length > 0) {
-          if (sourceReview.kind === 'idle' && batchPreview.kind === 'idle') {
-            const chosen = valid[0].batch_identity!;
-            setSelectedBatchIdentity(chosen);
-            void loadSourceReview(chosen);
-          }
-        }
-      } catch {
-        // Fallback for offline / unmocked test contexts
-      }
-    })();
-    return () => { active = false; };
-  }, [activeTab]);
-
-  const handleSelectBatch = (identity: string) => {
-    setSelectedBatchIdentity(identity);
-    setIngestion({ kind: 'idle' });
-    setBatchPreview({ kind: 'idle' });
-    setBatchOutcome({ kind: 'idle' });
-    void loadSourceReview(identity);
-  };
-
-  const ingestWorkbook = async () => {
-    if (importBusy) return;
+  const ingestWorkbook = async (original?: IngestionCommand) => {
+    if (importBusy || (unconfirmedIngestion && !original)) return;
     if (financeWorkbook === null) { setIngestion({ kind: 'error', message: '請先選擇 .xlsx 銀行交易明細工作簿。' }); return; }
     setImportBusy(true);
-    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setSourceReview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setIngestion({ kind: 'loading' }); setBatchPreview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setIngestionRecordMissing(false);
+    let command: IngestionCommand | null = null;
     try {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
-      const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${crypto.randomUUID()}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
+      if (original && original.sourceDigest !== snapshot.sha256) {
+        setIngestion({ kind: 'error', message: '檔案內容與原次匯入不同，請查詢原次結果。' });
+        return;
+      }
+      command = original ?? {
+        idempotencyKey: `ui-finance-ingest-${crypto.randomUUID()}`,
+        correlationId: `ui-finance-ingest-${crypto.randomUUID()}`,
+        sourceDigest: snapshot.sha256,
+      };
+      const receipt = await financeImportMutationClient.ingest(snapshot, command);
+      setUnconfirmedIngestion(null);
       setIngestion({ kind: 'ready', data: receipt });
-      setSelectedBatchIdentity(receipt.batch_identity);
+      setReload(value => value + 1);
       await previewImportedBatch(receipt);
-    } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請重新選擇檔案。') }); }
-    finally { setImportBusy(false); }
+    } catch (error) {
+      const status = error instanceof FinanceImportQueryError ? error.status : undefined;
+      if (command && (status === undefined || status >= 500 || status === 408)) {
+        setUnconfirmedIngestion(command);
+        setIngestion({ kind: 'error', message: '本次匯入結果尚未確認，請查詢原次結果。' });
+      } else {
+        setReload(value => value + 1);
+        setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請確認檔案。') });
+      }
+    } finally { setImportBusy(false); }
+  };
+
+  const lookupIngestion = async () => {
+    if (!unconfirmedIngestion || importBusy) return;
+    setImportBusy(true);
+    setIngestionRecordMissing(false);
+    try {
+      const outcome = await financeImportMutationClient.queryIngestionOutcome(unconfirmedIngestion);
+      if (outcome.status === 'committed' && outcome.receipt) {
+        setUnconfirmedIngestion(null);
+        setIngestion({ kind: 'ready', data: outcome.receipt });
+        setReload(value => value + 1);
+        await previewImportedBatch(outcome.receipt);
+      } else if (outcome.status === 'rolled_back') {
+        setUnconfirmedIngestion(null);
+        setIngestion({ kind: 'error', message: '已確認原次匯入失敗，流水未保存。' });
+        setReload(value => value + 1);
+      } else {
+        setIngestionRecordMissing(true);
+        setIngestion({ kind: 'error', message: '尚未查到原次匯入結果。可以稍後再查，或以原操作重送同一份檔案。' });
+      }
+    } catch (error) {
+      setIngestion({ kind: 'error', message: financeErrorMessage(error, '暫時無法查詢原次匯入，請稍後再試。') });
+    } finally { setImportBusy(false); }
   };
 
   const previewImportedBatch = async (ingested: FinanceWorkbookIngestionReceipt) => {
     const request = start('batch-preview');
-    controllers.current.get('source-review')?.abort();
-    setBatchPreview({ kind: 'loading' }); setSourceReview({ kind: 'idle' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
+    setBatchPreview({ kind: 'loading' }); setApplyJob({ kind: 'idle' }); setBatchOutcome({ kind: 'idle' });
     try {
       const preview = await financeImportMutationClient.preview(ingested.batch_identity, request.controller.signal);
       if (!current('batch-preview', request.sequence, request.controller)) return;
       setBatchPreview({ kind: 'ready', data: preview });
       if (preview.apply_allowed && preview.counts.ready_dispatch > 0) await applyImportedBatch(preview);
-      else await loadSourceReview(preview.batch_identity);
     }
     catch (error) { if (current('batch-preview', request.sequence, request.controller)) setBatchPreview({ kind: 'error', message: financeErrorMessage(error, '銀行交易檢查未完成，請重新按「匯入銀行交易明細」。') }); }
   };
@@ -353,7 +309,6 @@ export const FinancePage: React.FC = () => {
           }
           setBatchOutcome({ kind: 'ready', data: outcome });
           setReload((value) => value + 1);
-          if (expected) await loadSourceReview(expected.batchIdentity);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, FINANCE_OUTCOME_POLL_DELAY_MS));
@@ -372,7 +327,7 @@ export const FinancePage: React.FC = () => {
     {
       baseline: { '待匯入檔案': '', '原因': '' },
       enabled: batchOutcome.kind !== 'ready' && !(ingestion.kind === 'ready' && batchPreview.kind === 'ready' && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch <= 0)),
-      busy: importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
+      busy: unconfirmedIngestion !== null || importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' || (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'),
       save: ingestWorkbook,
       discard: () => { setFinanceWorkbook(null); setBatchPreview({ kind: 'idle' }); setApplyReason(''); },
     }
@@ -426,20 +381,18 @@ export const FinancePage: React.FC = () => {
           onCase={openCase}
           revision={reload}
           staff={staff}
-          batches={batches}
-          selectedBatchIdentity={selectedBatchIdentity}
-          onSelectBatch={handleSelectBatch}
-          sourceReview={sourceReview}
-          onReloadSourceReview={loadSourceReview}
+          ingestionNeedsLookup={unconfirmedIngestion !== null}
+          onLookupIngestion={() => void lookupIngestion()}
+          onResendIngestion={ingestionRecordMissing && unconfirmedIngestion && financeWorkbook
+            ? () => void ingestWorkbook(unconfirmedIngestion)
+            : undefined}
           financeWorkbook={financeWorkbook}
           onWorkbookChange={(file) => {
             controllers.current.get('batch-preview')?.abort();
-            controllers.current.get('source-review')?.abort();
-            controllers.current.get('batch-outcome')?.abort();
+                    controllers.current.get('batch-outcome')?.abort();
             setFinanceWorkbook(file);
             setIngestion({ kind: 'idle' });
             setBatchPreview({ kind: 'idle' });
-            setManuallyPostedRows(new Set());
             setApplyJob({ kind: 'idle' });
             setBatchOutcome({ kind: 'idle' });
           }}
@@ -453,13 +406,7 @@ export const FinancePage: React.FC = () => {
           onIngest={() => void ingestWorkbook()}
           onApply={(preview) => void applyImportedBatch(preview)}
           onObserveApplyOutcome={(jobId, expected) => void observeApplyOutcome(jobId, expected)}
-          onPostedManual={(rowIdentity) => {
-            setManuallyPostedRows((rows) => new Set([...rows, rowIdentity]));
-            setReload((value) => value + 1);
-            if (sourceReview.kind === 'ready') void loadSourceReview(sourceReview.data.batchIdentity);
-          }}
-          postingStopped={postingStopped}
-          manuallyPostedRows={manuallyPostedRows}
+          onPostedManual={() => setReload(value => value + 1)}
           confirmedImportReceipt={confirmedImportReceipt}
           submittedFinanceCommand={submittedFinanceCommand}
         />
