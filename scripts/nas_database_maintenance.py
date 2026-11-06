@@ -398,6 +398,7 @@ def schema_inventory(config, database, equivalent_databases=(), *, reject_source
                             require(not re.search(rf"(?:`{re.escape(original)}`|\b{re.escape(original)})\s*\.", sql, re.I),
                                     "副本定義仍參照原資料庫，未切換；請維護人員檢查跨庫相依。")
                 sql = re.sub(r"\bAUTO_INCREMENT=\d+\s*", "", sql)
+                sql = re.sub(r"\bCHARACTER SET\s+([A-Za-z0-9_]+)\s+COLLATE\s+", "COLLATE ", sql)
                 definitions.append(migration._normalize_database_qualifiers(sql, (database, *equivalent_databases)))
             result["definitions_sha256"] = hashlib.sha256(json.dumps(definitions, ensure_ascii=False).encode()).hexdigest()
             cursor.execute("SELECT default_character_set_name AS charset,default_collation_name AS collation FROM information_schema.schemata WHERE schema_name=%s", (database,))
