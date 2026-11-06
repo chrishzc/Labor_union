@@ -178,12 +178,12 @@ export function mapHistoricalOrderWorkbookApplyError(error: unknown): Error {
         : error.status === 422
           ? '歷史訂單檔案未通過套用驗證，請重新預覽。'
           : error.status === 503
-            ? '歷史訂單匯入服務暫時無法回覆（HTTP 503），結果尚未確認，可稍後查詢這次匯入結果。'
+            ? '歷史訂單匯入服務暫時無法回覆（HTTP 503），結果尚未確認。'
             : '歷史訂單檔案套用目前無法完成。';
     return new HistoricalOrderWorkbookApplyError(error.code || `HTTP_${error.status}`, message, error.retryable, error.status);
   }
-  if (error instanceof ApiTimeoutError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_timeout', '等待歷史訂單匯入回應逾時，結果尚未確認，資料可能已寫入。系統會自動確認，請保留本頁。', true);
-  if (error instanceof ApiNetworkError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_network_error', '歷史訂單匯入連線中斷，結果尚未確認，資料可能已寫入。系統會自動確認，請保留本頁。', true);
+  if (error instanceof ApiTimeoutError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_timeout', '等待歷史訂單匯入回應逾時，結果尚未確認，資料可能已寫入。', true);
+  if (error instanceof ApiNetworkError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_network_error', '歷史訂單匯入連線中斷，結果尚未確認，資料可能已寫入。', true);
   if (error instanceof ApiAbortError) return new HistoricalOrderWorkbookApplyError('historical_order_apply_aborted', '歷史訂單檔案套用已取消，請先確認結果再重試。', true);
   return new HistoricalOrderWorkbookApplyError('historical_order_apply_unexpected_error', '歷史訂單檔案套用發生未預期錯誤。');
 }

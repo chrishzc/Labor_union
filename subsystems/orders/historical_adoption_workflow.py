@@ -5,7 +5,7 @@ Description: 編排逐列 Historical Order Preview／Apply、replay、配對 evi
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from typing import Callable, Protocol
@@ -91,6 +91,7 @@ class HistoricalOrderAdoptionRequest:
     actor: str
     reason: str
     correlation_id: str
+    workbook_import: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,7 @@ class HistoricalOrderAdoptionReceipt:
     review_identity: str | None
     replayed: bool
     preview_fingerprint: PreviewFingerprint
+    unchanged: bool = False
 
 
 class HistoricalOrderAdoptionRepository(Protocol):
@@ -109,6 +111,7 @@ class HistoricalOrderAdoptionRepository(Protocol):
     def resolve_staff(self, name: str, *, for_update: bool) -> tuple[int, ...]: ...
     def active_assignments(self, case_no: str, *, for_update: bool) -> tuple[dict[str, object], ...]: ...
     def find_receipt(self, key: str, source_identity: str) -> dict[str, object] | None: ...
+    def has_current_adoption(self, preview: HistoricalOrderAdoptionPreview) -> bool: ...
     def persist(
         self,
         request: HistoricalOrderAdoptionRequest,
@@ -179,15 +182,26 @@ class HistoricalOrderAdoptionWorkflow:
         self, request: HistoricalOrderAdoptionRequest
     ) -> HistoricalOrderAdoptionReceipt:
         """Persist one adoption without opening or committing a nested transaction."""
-        command_fingerprint = _command_fingerprint(request)
-        replay = self._replay(request, command_fingerprint)
-        if replay is not None:
-            return replay
+        if not request.workbook_import:
+            replay = self._replay(request, _command_fingerprint(request))
+            if replay is not None:
+                return replay
         preview = self._build_preview(request.row, for_update=True)
         if preview.fingerprint != request.preview_fingerprint:
             raise RuntimeError("historical_order_candidate_stale")
         if preview.outcome is HistoricalOrderOutcome.UNMATCHED_CASE:
             return _unmatched_receipt(preview)
+        if request.workbook_import:
+            if (preview.outcome is HistoricalOrderOutcome.ADOPTED
+                    and preview.expected_version == preview.resulting_version
+                    and self._repository.has_current_adoption(preview)):
+                return HistoricalOrderAdoptionReceipt(
+                    preview.outcome, preview.case_no, preview.resulting_version,
+                    0, None, False, preview.fingerprint, unchanged=True,
+                )
+            source_identity = f"{request.row.source_identity}:{request.idempotency_key.removeprefix('historical-order-row:')}"
+            request = replace(request, row=replace(request.row, source_identity=source_identity))
+            preview = replace(preview, source_identity=source_identity)
         if (preview.outcome is HistoricalOrderOutcome.ADOPTED
                 and preview.result is HistoricalOrderResult.HISTORICAL_SERVICE_COMPLETED
                 and self._default_accounting is None):

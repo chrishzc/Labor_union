@@ -1,6 +1,6 @@
 """
 File: historical_order_workbook_import.py
-Description: 協調訂單歷史 workbook Preview、Apply、replay、跨案件排程衝突排除與逐列採納。
+Description: 協調訂單歷史 workbook Preview、Apply、跨案件排程衝突排除與逐列採納。
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from hashlib import sha256
-import json
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -29,23 +28,6 @@ class HistoricalOrderWorkbookRepository(Protocol):
     def acquire_lock(self, key: str) -> bool: ...
 
     def release_lock(self, key: str) -> None: ...
-
-    def load_receipt(self, key: str): ...
-
-    def claim(self, key: str, digest: str, correlation_id: str) -> str: ...
-
-    def find_workbook_receipt(self, key: str): ...
-
-    def save_receipt(
-        self,
-        key: str,
-        digest: str,
-        preview_fingerprint: str,
-        actor: str,
-        result: dict[str, object],
-    ) -> None: ...
-
-    def find_open_review_identities(self, source_event_identities: tuple[str, ...]) -> tuple[str, ...]: ...
 
     def find_absent_orders(
         self, source_case_nos: tuple[str, ...], *, for_update: bool
@@ -370,9 +352,6 @@ class HistoricalOrderWorkbookImportService:
             raise HistoricalOrderWorkbookUnavailable("historical_order_workbook_coordinator_lock_timeout")
         try:
             workbook = load_historical_order_workbook(source_path)
-            replay = self._stored_replay(key, workbook)
-            if replay is not None:
-                return replay
             source_case_nos = _source_case_nos(workbook)
             row_previews = tuple(self._workflow.preview(row) for row in workbook.rows)
             absent_orders = self._repository.find_absent_orders(
@@ -387,8 +366,6 @@ class HistoricalOrderWorkbookImportService:
             preview_exclusions = _source_schedule_conflict_exclusions(workbook, row_previews)
             try:
                 with self._unit_of_work_factory() as unit_of_work:
-                    if self._repository.claim(key, workbook.content_digest, correlation_id) == "conflict":
-                        raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
                     locked_absent_orders = self._repository.find_absent_orders(
                         source_case_nos, for_update=True
                     )
@@ -405,13 +382,6 @@ class HistoricalOrderWorkbookImportService:
                         correlation_id,
                         locked_absent_orders,
                         preview_exclusions,
-                    )
-                    self._repository.save_receipt(
-                        key,
-                        workbook.content_digest,
-                        preview.preview_fingerprint,
-                        actor,
-                        receipt.as_dict(),
                     )
                     unit_of_work.commit()
             except RuntimeError as error:
@@ -520,8 +490,9 @@ class HistoricalOrderWorkbookImportService:
                 mutated_cases.add(row.case_no)
             outcomes[receipt.outcome.value] += 1
             assignments_created += 0 if receipt.replayed else receipt.assignment_count
+            unchanged = getattr(receipt, "unchanged", False)
             replayed_rows += int(receipt.replayed)
-            if receipt.replayed:
+            if receipt.replayed or unchanged:
                 import_counts["duplicate_skipped_count"] += 1
             elif receipt.outcome.value == "adopted":
                 import_counts["imported_count"] += 1
@@ -569,48 +540,6 @@ class HistoricalOrderWorkbookImportService:
             ),
             row_issues=tuple(row_issues),
         )
-
-    def _stored_replay(self, key: str, workbook: HistoricalOrderWorkbook) -> HistoricalOrderWorkbookReceipt | None:
-        stored = self._repository.load_receipt(key)
-        if stored is None:
-            return None
-        if stored["request_fingerprint"] != workbook.content_digest:
-            raise HistoricalOrderWorkbookConflict("historical_order_workbook_idempotency_conflict")
-        snapshot = {**json.loads(stored["result_snapshot"]), "replayed_workbook": True}
-        snapshot.setdefault("absent_order_cancellation_count", 0)
-        stored_counts = snapshot.get("status_counts")
-        if stored_counts is not None and "completed_1" in stored_counts:
-            stored_counts = {
-                **stored_counts,
-                "deposit_paid_1": stored_counts["completed_1"],
-            }
-            stored_counts.pop("completed_1", None)
-        snapshot["status_counts"] = (
-            HistoricalOrderStatusCounts(**stored_counts)
-            if stored_counts is not None
-            else _status_counts(workbook)
-        )
-        if "result_counts" not in snapshot:
-            snapshot["result_counts"] = _legacy_result_counts(snapshot["status_counts"])
-        elif isinstance(snapshot["result_counts"], dict):
-            snapshot["result_counts"] = HistoricalOrderResultCounts(
-                **snapshot["result_counts"]
-            )
-        if "review_references" not in snapshot:
-            find_open_reviews = getattr(
-                self._repository, "find_open_review_identities", None
-            )
-            snapshot["review_references"] = tuple(
-                find_open_reviews(tuple(row.source_identity for row in workbook.rows))
-                if callable(find_open_reviews)
-                else ()
-            )
-        if isinstance(snapshot.get("import_counts"), dict):
-            snapshot["import_counts"] = HistoricalOrderWorkbookImportCounts(**snapshot["import_counts"])
-        if snapshot.get("row_issues") is not None:
-            snapshot["row_issues"] = tuple(HistoricalOrderWorkbookRowIssue(**item) for item in snapshot["row_issues"])
-        return HistoricalOrderWorkbookReceipt(**snapshot)
-
 
 def _preview(
     workbook: HistoricalOrderWorkbook,
@@ -879,20 +808,6 @@ def _preview_result(item: object) -> HistoricalOrderResult:
     return HistoricalOrderResult.HISTORICAL_UNSERVED
 
 
-def _legacy_result_counts(
-    status_counts: HistoricalOrderStatusCounts,
-) -> HistoricalOrderResultCounts:
-    """Conserve old immutable receipts without rereading mutable Order facts."""
-
-    return HistoricalOrderResultCounts(
-        not_adopted=status_counts.cancelled_0 + status_counts.invalid_or_blank,
-        matching_pending_deposit=status_counts.discussion_2,
-        historical_unserved=status_counts.deposit_paid_1,
-        historical_in_service=0,
-        historical_service_completed=0,
-    )
-
-
 def _status_counts(workbook: HistoricalOrderWorkbook) -> HistoricalOrderStatusCounts:
     counts = Counter(row.asserted_status for row in workbook.rows)
     result = HistoricalOrderStatusCounts(
@@ -910,7 +825,7 @@ def _row_request(row, fingerprint: PreviewFingerprint, workbook_key: str, actor:
     row_hash = sha256(f"{workbook_key}:{row.source_identity}".encode("utf-8")).hexdigest()
     return HistoricalOrderAdoptionRequest(
         row, fingerprint, f"historical-order-row:{row_hash}", actor, "資料匯入中心訂單歷史採納",
-        f"{correlation_id}:row:{row.source_row}",
+        f"{correlation_id}:row:{row.source_row}", workbook_import=True,
     )
 
 

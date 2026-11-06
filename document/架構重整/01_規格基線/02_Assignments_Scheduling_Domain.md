@@ -29,7 +29,7 @@
 
 `orders.staff_id`、`planned_hours`、`actual_hours_adjustments`、`replaced_assignment_id` 及 `original_assigned_*` 不得成為新架構依賴。
 
-Assignment Plan Query 與付款查核共用 current assignment 選取：有效 generation 的 assignment，或歷史服務分支由最新成功 adoption 精確綁定且未取消／被替換的既有 assignment。歷史 assignment 的 `generation_id IS NULL` 不代表沒有月嫂。唯讀回傳允許已保存期間而無逐日排班，不借用正常 mutation 的日期完整性條件，不放寬 Preview／Apply invariant；名冊、歷史服務天數與應付帳務引用相同 assignment identity（2026-10-20 人工根源修正）。
+Assignment Plan Query 與付款查核共用 current assignment 選取。正常分支讀有效 generation，歷史分支由目前有效的正式歷史來源關聯精確綁定未取消或被替換的 assignment。歷史 assignment 可以沒有 generation 或逐日排班，唯讀回傳仍包含已保存的指派與期間。正式寫入須依原規則驗證日期。名冊、歷史服務天數與應付帳務引用相同 assignment identity，舊匯入紀錄的搬遷依規格 `27` §12.1。
 
 ## 3. Domain invariants
 
@@ -52,7 +52,7 @@ Assignment Plan Query 與付款查核共用 current assignment 選取：有效 g
 
 ### 同日分時占用（2026-11-05 採用）
 
-- **SHIFT-01／班次。** Orders 擁有每日服務開始、結束、跨日標記。Scheduling 以有效服務日和其已確認的時段建立班次占用，以台北時區比較「含開始、不含結束」的時間區間。首尾相接可排，由人員確認通勤。跨午夜班占用兩個曆日，班次與工時只歸開始的服務日一次；完整排定時段參與占用，計薪仍使用約定工時。
+- **SHIFT-01／班次。** Orders 擁有訂單約定的每日服務開始、結束、跨日標記。Scheduling 擁有正式指派及其可證實的歷史服務時段。Scheduling 以有效服務日和其已確認的時段建立班次占用，以台北時區比較「含開始、不含結束」的時間區間。首尾相接可排，由人員確認通勤。跨午夜班占用兩個曆日，班次與工時只歸開始的服務日一次；完整排定時段參與占用，計薪仍使用約定工時。
 - **SHIFT-02／可用性。** 跨案重疊以有效班次、等待訂金保留的班次及月嫂不可服務期間計算。案件區段可跨休息日，但週休、未上班的國定假日、停班及核准後未服務的班次不占用原月嫂；代班占用實際承接者。月嫂本人全日不可服務期間仍阻擋該日相交的服務。資料缺漏且可能影響安排時回「時段待確認」，正式寫入暫停；不得將歷史唯讀指派當成現役占用。提醒、待確認和已證實衝突為不同結果。
 - **SHIFT-03／查詢與寫入。** 候選、案件排查、分段媒合、等待訂金、正式排班、開工、改期、請假／順延／代班及換人共用班次占用判定。對正式安排以 current owner 服務日、時段、現役占用和不可服務資料重驗；日期相同但改時段也須重驗。沿既有月嫂 mutex、版本與 outer UoW 保存。有效占用衝突須帶對造案件或占用來源、日期和重疊起訖；同案轉換鎖或重建只排除本次實際被替換的來源。既有待辦、冪等與零部分寫入契約照常適用。
 - **SHIFT-04／下游。** 班次的穩定案件、指派、服務日識別供更正及工時、Payroll、Client Finance、週報與通知消費。兩案各保留服務量與帳務歸屬；月嫂工時匯總可累加兩案，不能依月嫂及日期去重。開工、完工、日誌提醒及本案群組日期表使用該案有效班次時刻，沿各 owner 的凍結、通知及更正規則。
@@ -399,7 +399,7 @@ leave／substitution 等 mutation，不得使歷史區段消失。Query 優先�
 assignment-owned `staff_schedule.assignment_id` 的每日 ownership；若 historical／legacy
 資料缺少該 daily ownership，但 `case_staff_assignments` 保有 completed assignment 的起訖日，
 Calendar 必須以該區段顯示 `historical_assignment`／「歷史指派」。此投影可在同日與現役班次並列；
-可證實的時段照實顯示，缺時段時明示未確認。歷史投影不形成排班工作日、actual hours、薪資、availability
+可證實的起訖及跨日標記由 Scheduling 的正式歷史指派資料提供，缺時段時明示未確認。工會甘特圖、案件排查與月嫂 LINE LIFF 共用此來源。歷史投影不形成排班工作日、actual hours、薪資、availability
 current projection，也不能授權任何 Apply。
 
 已有同一指派同一服務日的正式班次時，避免再顯示重複的歷史摘要。Calendar 不得使用

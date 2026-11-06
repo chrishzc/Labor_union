@@ -163,9 +163,13 @@ def _persist_ingestion(
         cursor, batch_id, staged["staged_rows"], actor
     )
     _complete_batch(cursor, batch_id)
-    source_rows = int(
-        normalized_result.get("source_row_count", len(staged["staged_rows"]))
-    )
+    admitted_rows = len(staged["staged_rows"]) + source_warning_count
+    if admitted_rows != int(normalized_result.get("source_row_count", len(staged["staged_rows"]))):
+        cursor.execute(
+            "UPDATE finance_import_batches SET row_count = %s WHERE id = %s",
+            (admitted_rows, batch_id),
+        )
+    source_rows = admitted_rows
     return FinanceWorkbookIngestionReceipt(
         batch_identity,
         source_digest,

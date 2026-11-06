@@ -6,7 +6,6 @@ Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與 Orders
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from hashlib import sha256
 from io import BytesIO
 import json
 import os
@@ -76,12 +75,12 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
     )
     path = "/api/v1/orders/historical-adoption/workbooks"
 
-    def workbook_bytes(morning, afternoon):
+    def workbook_bytes(morning, afternoon, afternoon_start=date(2026, 10, 19)):
         book = Workbook()
         sheet = book.active
         sheet.append(["客戶姓名", "案件編號", "開始日期", "結束日期", "狀態", "月嫂姓名", "服務時間"])
         sheet.append([_client_name(morning_case), morning_case, date(2026, 9, 15), date(2026, 10, 30), 1, staff_name, morning])
-        sheet.append([_client_name(afternoon_case), afternoon_case, date(2026, 10, 19), date(2026, 11, 9), 1, staff_name, afternoon])
+        sheet.append([_client_name(afternoon_case), afternoon_case, afternoon_start, date(2026, 11, 9), 1, staff_name, afternoon])
         output = BytesIO()
         book.save(output)
         book.close()
@@ -95,7 +94,7 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         response = client.post(
             f"{path}/apply", files=files,
             data={"preview_fingerprint": preview["preview_fingerprint"]},
-            headers={"Idempotency-Key": f"ui-import-historical-orders-authoritative-v3-{sha256(workbook).hexdigest()}",
+            headers={"Idempotency-Key": f"ui-import-historical-orders-authoritative-v3-{uuid4().hex}",
                      "X-Correlation-ID": f"historical-shifts-{token}"},
         )
         assert response.status_code == 200, response.text
@@ -106,13 +105,37 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
         excluded = apply_workbook(client, incomplete)
         assert excluded["import_counts"]["imported_count"] == 0
         assert excluded["current_conflict_count"] == 2
-        assert apply_workbook(client, incomplete)["replayed_workbook"] is True
+        assert apply_workbook(client, incomplete)["current_conflict_count"] == 2
 
         corrected = workbook_bytes("９：００－１３：００（４小時）", "13:30\u200b−17:30\u00a0(4小時)")
         imported = apply_workbook(client, corrected)
         assert imported["import_counts"]["imported_count"] == 2
         assert imported["assignments_created"] == 2
-        assert apply_workbook(client, corrected)["replayed_workbook"] is True
+        identical = apply_workbook(client, corrected)
+        assert identical["import_counts"] == {"imported_count": 0, "duplicate_skipped_count": 2, "not_imported_count": 0}
+        assert identical["assignments_created"] == 0
+
+        connection = get_connection()
+        try:
+            absent_case, _ = _seed_case(connection, token, "added-later")
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE orders SET status='訂單成立',lifecycle_version=lifecycle_version+1 WHERE case_no=%s",
+                    (morning_case,),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+
+        reimported = apply_workbook(client, corrected)
+        assert reimported["import_counts"] == {"imported_count": 1, "duplicate_skipped_count": 1, "not_imported_count": 0}
+        assert reimported["assignments_created"] == 0
+        assert reimported["absent_order_cancellation_count"] == 1
+
+        conflict = apply_workbook(client, workbook_bytes("9:00-13:00(4小時)", "12:30-16:30(4小時)", date(2026, 9, 15)))
+        assert conflict["import_counts"]["not_imported_count"] == 2
+        assert conflict["absent_order_cancellation_count"] == 0
+        assert all(any(";overlap=" in code for code in row["issue_codes"]) for row in conflict["row_issues"])
 
     connection = get_connection()
     try:
@@ -120,10 +143,15 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
             cursor.execute(
                 "SELECT o.case_no,o.status,a.staff_id,a.assigned_start_date,a.assigned_end_date,"
                 "r.result_snapshot FROM orders o JOIN case_staff_assignments a ON a.case_no=o.case_no "
-                "JOIN historical_order_adoption_receipts r ON r.case_no=o.case_no "
+                "JOIN historical_order_adoption_receipts r ON r.id=(SELECT MAX(candidate.id) "
+                "FROM historical_order_adoption_receipts candidate WHERE candidate.case_no=o.case_no) "
                 "WHERE o.case_no IN (%s,%s)", (morning_case, afternoon_case),
             )
             rows = cursor.fetchall()
+            cursor.execute("SELECT status FROM orders WHERE case_no=%s", (absent_case,))
+            assert cursor.fetchone()["status"] == OrderLifecycleStatus.CANCELLED.value
+            cursor.execute("SELECT COUNT(*) AS total FROM admin_command_receipts WHERE command_family='historical_order_workbook_ingest'")
+            assert cursor.fetchone()["total"] == 0
         assert len(rows) == 2
         assert rows[0]["staff_id"] == rows[1]["staff_id"]
         by_case = {row["case_no"]: row for row in rows}

@@ -198,23 +198,23 @@ class CaseManualSupplementService:
                     """,
                     (entry_id, target_item, amount_ntd),
                 )
-                # 檢查期款是否繳清
+                # 更新期款餘額與狀態（嚴格遵循 chk_client_obligation_state 約束）
                 cursor.execute(
-                    """
-                    SELECT o.amount_due_ntd,
-                           COALESCE(SUM(a.amount_ntd), 0) AS total_paid
-                    FROM client_obligations o
-                    LEFT JOIN client_ledger_obligation_allocations a ON a.obligation_identity=o.obligation_identity
-                    WHERE o.obligation_identity=%s
-                    GROUP BY o.obligation_identity, o.amount_due_ntd
-                    """,
+                    "SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
                     (target_item,),
                 )
                 ob_row = cursor.fetchone()
-                if ob_row and ob_row["total_paid"] >= ob_row["amount_due_ntd"]:
+                if ob_row:
+                    before_due = int(ob_row["amount_due_ntd"])
+                    remaining = max(0, before_due - amount_ntd)
+                    new_status = "settled" if remaining == 0 else "open"
                     cursor.execute(
-                        "UPDATE client_obligations SET status='settled' WHERE obligation_identity=%s",
-                        (target_item,),
+                        """
+                        UPDATE client_obligations
+                        SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
+                        WHERE obligation_identity=%s
+                        """,
+                        (remaining, new_status, target_item),
                     )
                 # 累加帳戶版本
                 cursor.execute(
@@ -306,23 +306,23 @@ class CaseManualSupplementService:
                     """,
                     (entry_id, target_item, amount_ntd),
                 )
-                # 檢查退款義務是否退清
+                # 更新退款餘額與狀態（嚴格遵循 chk_client_obligation_state 約束）
                 cursor.execute(
-                    """
-                    SELECT o.amount_due_ntd,
-                           COALESCE(SUM(a.amount_ntd), 0) AS total_refunded
-                    FROM client_obligations o
-                    LEFT JOIN client_ledger_obligation_allocations a ON a.obligation_identity=o.obligation_identity
-                    WHERE o.obligation_identity=%s
-                    GROUP BY o.obligation_identity, o.amount_due_ntd
-                    """,
+                    "SELECT amount_due_ntd FROM client_obligations WHERE obligation_identity=%s FOR UPDATE",
                     (target_item,),
                 )
                 ref_row = cursor.fetchone()
-                if ref_row and ref_row["total_refunded"] >= ref_row["amount_due_ntd"]:
+                if ref_row:
+                    before_due = int(ref_row["amount_due_ntd"])
+                    remaining = max(0, before_due - amount_ntd)
+                    new_status = "settled" if remaining == 0 else "open"
                     cursor.execute(
-                        "UPDATE client_obligations SET status='settled' WHERE obligation_identity=%s",
-                        (target_item,),
+                        """
+                        UPDATE client_obligations
+                        SET amount_due_ntd=%s, status=%s, projection_version=projection_version+1
+                        WHERE obligation_identity=%s
+                        """,
+                        (remaining, new_status, target_item),
                     )
                 cursor.execute(
                     "UPDATE client_finance_accounts SET aggregate_version=aggregate_version+1 WHERE case_no=%s",

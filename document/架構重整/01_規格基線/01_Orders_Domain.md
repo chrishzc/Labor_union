@@ -242,13 +242,12 @@ Apply：
 
 2026-08-28 人工裁決將歷史訂單 canonical workbook 固定為六欄：`client_name`、`case_no`、
 `start_date`、`end_date`、`status`、`staff_name`（標準中文標頭為「客戶姓名、案件編號、開始日期、
-結束日期、狀態、月嫂姓名」）。第七欄起包含「月嫂姓名2」不採納，不得建立第二月嫂
-pairing evidence或 assignment candidate；原檔 bytes 仍參與 content digest。前六欄的單一月嫂可使用訂單開始／
-結束日期作為其服務區間。
+結束日期、狀態、月嫂姓名」）。「月嫂姓名2」等額外月嫂欄不採納，不得建立第二月嫂
+pairing evidence 或 assignment candidate。可選的每日服務時間欄依 §3.7 HIST-SHIFT-01 讀取。
+單一月嫂可使用訂單開始／結束日期作為其服務區間。
 
-歷史訂單採納列若已唯一匹配既有 Order、但 status、月嫂或其他來源欄位仍有 issue，安全可採納欄位
-照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
-evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
+已依 §3.7 與規格 `27` 判定可採納的列，若另有不阻擋採納的欄位問題，可保存合法欄位及正式 review evidence。
+Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
 遮罩案件識別與 issue codes。案號空白、找不到或對到多筆 Order 的列固定不寫 Orders、review、outbox 或 anomaly；
 案號唯一且 `client_name` 非空時，`client_name` 僅為來源 evidence。即使姓名包含歷史次序尾碼（如 `-2`、`-3`）、
 多餘空白或舊拼寫而與 HCM 不同，仍採納該唯一案號的列，並保存 `historical_client_name_mismatch` review evidence；
@@ -261,22 +260,22 @@ evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 
 review 或 alert status。首版只接受一份僅含該 review 對應列的更正 `.xlsx`，不得接受任意
 `corrected_fields` 或以多列檔案猜測對應關係。
 
-1. Context Query 以 server-owned `review_identity` 讀取 immutable review、原 adoption receipt 與
+1. Context Query 以 server-owned `review_identity` 讀取 immutable review、原採納的正式來源關聯與
    Orders root，僅回傳去敏案件識別、每個衝突的 `field_path`、來源值／既有 Orders 值（依權限遮罩）、
    檢核規則與可採用值、造成的流程阻擋、必要 workbook contract、review／disposition version，及
    reason／evidence 要求；不得回傳原始工作簿或未遮罩個資。只回傳 `issue_codes`、顯示「欄位衝突」
    或空白判斷依據不符合此 Query 契約。
-2. Preview 零寫入，必須重新讀取並鎖定 prior review、原 receipt 與目標 Orders root，驗證 actor
+2. Preview 零寫入，必須重新讀取並鎖定 prior review、原採納的正式來源關聯與目標 Orders root，驗證 actor
    capability `orders.historical_review.remediate`、prior review／disposition version、唯一來源列對應、新檔 digest、根事實與既有
    disposition。它產生只能用於該 prior review 的 fingerprint，並明示可採納或仍須建立 successor
    review 的 blocker。
 3. Apply 必須帶 `prior_review_identity`、expected review／disposition version、preview fingerprint、
    idempotency key、reason 與 evidence；在一個 Orders outer Unit of Work fresh-read 後重驗全部
-   binding。它可委派既有歷史採納 typed command，但不得重複 lifecycle event、assignment 或既有
-   adoption receipt。
+   binding。它可委派歷史採納 typed command，但不得重複 lifecycle event 或 assignment。
 4. 原 `historical_order_adoption_reviews` 永遠 immutable。更正結果必須另以 append-only
-   remediation disposition／receipt／outbox 表示 `prior_review_identity → replacement adoption receipt`
-   的唯一關係，保存 actor、reason、evidence、source digest、版本、時間與可重播 identity。
+   remediation disposition／receipt／outbox 保存 `prior_review_identity` 與更正後正式異動的唯一關係，
+   並記錄 actor、reason、evidence、source digest、版本、時間與可重播 identity。更正命令的結果紀錄屬正式業務追溯，
+   歷史訂單整份與逐列匯入暫存的生命週期依 §3.7。
 5. 2026-08-29 current-state anomaly slimming 裁決後，上述 immutable review、Orders
    remediation disposition／receipt／outbox 仍是 Orders owner evidence，但不再建立或保存
    anomaly occurrence、field-warning tracking event、replacement history 或 auto-resolve event。
@@ -600,25 +599,25 @@ Scheduling 規格 2026-09-22 退休獨立 agreement 的最新裁決，不恢復�
 2026-11-03 MySQL 3819 診斷補充：一般 CHECK 拒絕寫入使用 `historical_order_database_check_<constraint>`，從標準錯誤句型只取長度不超過 64 的 ASCII 資料庫規則識別碼、移除 schema 前綴並轉小寫；不回傳原始 SQL、來源值或完整 exception。無可安全辨識名稱時回 `historical_order_database_check_rejected`，不再歸為未分類 MySQL 錯誤。對歷史收據 shape、變更後狀態、歷史配對 assignment shape 提供封閉說明；規則名稱本身不足以判定需要升級或修改來源資料，不得自行移除 CHECK 或重寫歷史資料。既有已確認 before-status 舊結構診斷保留原 `upgrade_required` 相容碼。規則識別可隨分類碼進診斷日誌，仍不得帶 schema 名稱或原始 provider 文字。
 
 2026-11-03 歷史工作簿錯誤診斷裁決：資料庫建連與 Preview／Apply 執行期間的 MySQL 失敗共用去敏 HTTP 503 typed error；錯誤碼以 `historical_order_database_` 加精確原因，不再將已知原因全歸為 `historical_order_import_database_unavailable`。連線原因為 `connect_failed`、`host_not_found`、`connection_lost`、`tls_failed`、`connection_limit_reached`；設定／權限為 `authentication_failed`、`permission_denied`；結構為 `not_found`、`table_missing`、`column_missing`、`routine_missing`，既有兩項已確認舊結構問題保留 `upgrade_required`。資料鎖與死結為 `lock_wait_exceeded`、`deadlock`；指令／資料限制為 `query_invalid`、`data_rejected`、`constraint_rejected`。未知但有數字代碼時用 `mysql_<errno>`，無代碼用 `unknown_error`。
-說明可含 MySQL 數字錯誤碼，回應與日誌不得帶原始 SQL、完整 provider exception 或來源值；日誌只保存分類、數字與 correlation。前端 Preview／Apply 都顯示封閉原因與數字；Apply 仍保留結果未確認及原命令查詢，不因資料鎖／死結碼自動重送。只有連線暫時失敗／中斷、連線額滿、資料鎖等待及死結標示 backend retryable，設定／結構／資料限制須人工修復；此旗標不授權 blind retry，也不代表整份未寫入。
+說明可含 MySQL 數字錯誤碼，回應與日誌不得帶原始 SQL、完整 provider exception 或來源值；日誌只保存分類、數字與 correlation。前端 Preview／Apply 都顯示封閉原因與數字；Apply 結果未確認依 HIST-IMPORT-04 處理，不因資料鎖／死結碼自動重送。只有連線暫時失敗／中斷、連線額滿、資料鎖等待及死結標示 backend retryable，設定／結構／資料限制須人工修復；此旗標不授權 blind retry，也不代表整份未寫入。
 
-2026-10-16 匯入頁統計補充：terminal receipt 的 additive `import_counts` 由原 workbook
-outer UoW 依每列實際 receipt 計數；replayed row 只計入 `duplicate_skipped_count`，
-其餘 adopted row 計入 `imported_count`，其他 row 計入 `not_imported_count`，三項合計等於來源列數。
-review overlay、assignment 數量與來源檔外的取消訂單均不增加來源列統計。
-整份 workbook 結果重查保留原 terminal counters。歷史 immutable receipt 沒有此欄且有混合
-row replay 時，不猜測重疊分布，管理端以「—」標示缺少的統計，不改寫歷史收據。
-2026-10-20 人工補充：同一 terminal receipt 的 additive `row_issues` 保存實際未匯入且非 replay
-的來源列號、案件編號、問題欄位與去敏原因碼，供匯入頁顯示；不包含成功列的 review overlay。
-整份重查沿用原明細；舊收據缺少明細時回傳不可用，不重算歷史結果。
+<a id="historical-order-reimport-20261106"></a>
+
+#### 同檔重匯、檔外取消與匯入暫存（2026-11-06 人工確認）
+
+規格已確認，實作與資料搬遷待執行。較早依檔案摘要重播整份結果、以來源列永久防止重匯，以及永久保存整份或逐筆匯入結果的規則已退役。
+
+- **HIST-IMPORT-01／整份重匯。** 每次主動按「匯入」啟動新操作。完全相同的 Excel 仍須重新判定整份檔案，包含曾成功匯入的列。管理端沿用單一「匯入」入口。後端先零寫入檢查，正式寫入前鎖定並重新讀取 owner 資料，核對版本及檢查結果。可採納的來源依正式映射更新訂單狀態、實際日期及相關資料。結果與目前正式資料一致的列顯示「資料已一致」，避免重複建立指派、帳務或 lifecycle event。
+- **HIST-IMPORT-02／檔外取消。** 每次匯入及重匯均將本次整份檔案的案號集合與目前 Orders 比對。檔外且尚未取消的訂單依原規則取消。檔內可辨識的案號即使該列因時段衝突或其他問題被排除，也必須留在案號集合中。檔案層級驗證未通過時零寫入，包含零檔外取消。檔內更新及檔外取消於同一 outer UoW 提交，任一正式寫入失敗時一起回滾。檔外取消數另列，不計入來源列數。
+- **HIST-IMPORT-03／當次結果與暫存。** 本次結果由後端回傳來源筆數、成功寫入、資料已一致、未匯入及檔外取消筆數。成功寫入、資料已一致與未匯入三者互斥且加總等於來源筆數。未匯入明細包含 Excel 列號、案件編號、問題欄位與去敏原因。整份結果快照和逐列匯入結果均不持久化。上傳檔、逐列檢查及暫存防重資料於操作結束後失效並清除。正式訂單事件、歷史服務事實、指派、帳務與更正關聯由原 owner 保存，見規格 `27` §12.1。
+- **HIST-IMPORT-04／並行與結果未確認。** 同一匯入操作只允許一次進行中的寫入。檔案摘要可檢查輸入完整性，檔案摘要與列號不得作為阻擋下一次主動匯入的永久識別。連線中斷且提交狀態未知時顯示「結果未確認」，提示查核正式訂單狀態與異動紀錄，不自動重送或重播舊結果。人員再次按「匯入」時依 HIST-IMPORT-01／02 重新判定。
 
 restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為唯一的
 `case_no`；非空的 `client_name` 只作來源 evidence，姓名差異建立 review evidence但不阻擋採納。案號或姓名空白、
 案號找不到或不唯一固定為 `unmatched_case`，零 Domain mutation且不建立警示。
-source profile v1 只接受 0→取消、1→已付訂金、2→洽談中；空白／其他值保存 review evidence。
-來源狀態是獨立歷史語意，不得直接視為 Orders lifecycle enum：`1` 表示客戶已付訂金，
-採納後 Orders lifecycle 為 `訂單成立`，Historical Operational Baseline 推進到第 5 步「確認事前服務日期」，
-不得因 `1` 直接標記完成服務或結案。
+source profile v1 只接受 0→取消、1→已付訂金、2→洽談中。來源狀態空白及其他不合法值依規格 `27` §4.2 處理。
+來源狀態使用歷史來源的語意。`1` 表示客戶已付訂金，採納時依實際起訖及業務日選擇歷史未服務、服務中或服務完成。
+歷史帳務完成依實際結清條件判定。來源映射與歷史作業進度依規格 `27`。
 
 2026-08-28 狀態判定補充裁決：numeric `0`不得因falsy正規化而與空白共用row fingerprint；
 Preview與Apply receipt必須由Orders回傳`0／1／2／invalid`守恆數量，管理端只顯示該typed結果，
@@ -643,13 +642,13 @@ lifecycle。狀態、日期、樓層費、雙邊結清、回歸精算、API／UI
 `historical_accounting_service_calendar_unconfirmed` 一律阻擋至精算的語意由第 27 份規格 supersede。
 欄位不可解析或違反 Orders invariant 時仍以 typed validation／conflict fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
-Order、驗證 version／fingerprint，並以單一 UoW 保存 Orders root、event、receipt、outbox及來源配對 evidence。
+Order、驗證 version／fingerprint，並以單一 UoW 保存正式 Orders root、event、outbox 及來源配對關聯。
 
 **HIST-SHIFT-01／同日分時。** Preview 對整份工作簿零寫入驗證採納資格、狀態機、實際期間及同一月嫂跨案班次。以可追溯的歷史來源時段或能證明當時約定的 Orders 完整時段為準，保留起訖及跨日標記。當期條款不能覆蓋已證實的歷史約定，兩種來源矛盾時列待確認。依規格 02 SHIFT-01 比較班次。同日已證實不重疊可並列採納；已證實重疊回 `historical_order_source_schedule_conflict`。日期有交集但缺少時段或服務日證據而無法判定時，回「時段待確認」，不以當前條款、每日時數或預設時間猜填，也不虛構逐日服務。
 
 來源可使用起訖時間分欄，或在「服務時間／服務時段」欄提供完整區間，例如 `9:00-13:00(4小時)`。區間後的時數只作來源註記；跨午夜須明示跨日，分欄與區間同時存在時須一致。
 
-Preview 與 Apply 將已證實衝突的雙方列排除至 `current_conflict`／未匯入；待確認問題列也進未匯入明細，使用可區分的原因。問題明細列出對造 Excel 列號、案件編號、日期及可證實的時段或重疊起訖，沿用 `not_imported_count`、`row_issues` 與適用的 `field_errors` 去敏回傳。更正後可重傳。Apply 不寫入排除列的 Orders、assignment 或逐列收據；其餘列以單一 outer UoW 原子保存 workbook claim、歷史證據及 terminal receipt，任一實際寫入失敗整批回滾。same key＋same canonical workbook 重播原收據；same key＋different workbook 回 conflict。匯入頁保留四種互斥筆數與問題列明細。
+Preview 與 Apply 將已證實衝突的雙方列排除至 `current_conflict`／未匯入。缺少時段或服務日的列也進未匯入明細，並指出缺項。明細列出對造 Excel 列號、案件編號、日期及可證實的時段或重疊起訖，沿用 `not_imported_count`、`row_issues` 與適用的 `field_errors` 去敏回傳。排除列零採納寫入，仍按 HIST-IMPORT-02 計入檔內案號。其餘列和檔外取消依 HIST-IMPORT-01～04 執行。
 來源資料不得因既有測試排班而刪除或覆寫其他案件；同案若已有 current generation，仍只可由
 Scheduling canonical cancel-old／create-new replacement 處理。`assignment_candidate` 與
 `evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。

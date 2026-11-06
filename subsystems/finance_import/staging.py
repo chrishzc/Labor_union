@@ -387,4 +387,10 @@ def stage_finance_rows(
             }
         )
 
+    if len(staged_rows) != source_row_count:
+        cursor.execute(
+            "UPDATE finance_import_batches SET row_count = %s WHERE id = %s",
+            (len(staged_rows), batch_id),
+        )
+
     return {"batch_id": batch_id, "staged_rows": staged_rows}

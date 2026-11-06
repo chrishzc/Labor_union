@@ -108,10 +108,12 @@ interface WorkbookCommandOptions {
   correlationId: string;
 }
 
+const HISTORICAL_ORDERS_IMPORT = 'historical-orders-authoritative-v3';
+
 function commandIdentity(scope: string, sourceContentDigest: string): { idempotencyKey: string; correlationId: string } {
   const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return {
-    idempotencyKey: `ui-import-${scope}-${sourceContentDigest}`,
+    idempotencyKey: `ui-import-${scope}-${scope === HISTORICAL_ORDERS_IMPORT ? nonce : sourceContentDigest}`,
     correlationId: `ui-import-${scope}-${nonce}`,
   };
 }
@@ -135,7 +137,8 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
   const confirmationAttemptsRef = useRef(0);
   const applyInFlightRef = useRef(false);
   const previewAbortRef = useRef<AbortController | null>(null);
-  const mutationLocked = previewState.kind === 'reading' || previewState.kind === 'loading' || applyState.kind === 'loading' || (applyState.kind === 'error' && applyState.outcomeUnknown);
+  const historicalOrders = scope === HISTORICAL_ORDERS_IMPORT;
+  const mutationLocked = previewState.kind === 'reading' || previewState.kind === 'loading' || applyState.kind === 'loading' || (!historicalOrders && applyState.kind === 'error' && applyState.outcomeUnknown);
 
   useEffect(() => () => {
     previewAbortRef.current?.abort();
@@ -227,12 +230,12 @@ function useCaseWorkbookFlow<TSnapshot, TRaw, TModel extends { previewFingerprin
         message: workbookErrorMessage(error, '工作簿套用失敗。'),
         details: workbookErrorDetails(error),
         outcomeUnknown: isOutcomeUnknown(error),
-        autoConfirm: canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
+        autoConfirm: !historicalOrders && canConfirmAutomatically(error) && confirmationAttemptsRef.current < 6,
       });
     } finally {
       applyInFlightRef.current = false;
     }
-  }, [apply, summarize]);
+  }, [apply, historicalOrders, summarize]);
 
   useEffect(() => {
     if (applyState.kind !== 'error' || !applyState.autoConfirm) return undefined;
@@ -295,6 +298,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   id, title, inputLabel, openPreviewControlId, selectedWorkbook, previewState, applyState, mutationLocked, onSelect, onClear, onPreview, onApply,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const historicalOrders = id === 'historic-orders';
   const ready = previewState.kind === 'ready';
   const done = applyState.kind === 'ready';
   const loading = applyState.kind === 'loading';
@@ -307,9 +311,10 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
   const metrics: Array<[string, number | null, string]> = [
     ['來源筆數', result?.sourceCount ?? (ready ? previewState.preview.sourceRowCount : null), 'source'],
     ['成功匯入', result?.importedCount ?? null, 'success'],
-    ['重複略過', result?.duplicateCount ?? null, 'skipped'],
+    [historicalOrders ? '資料已一致' : '重複略過', result?.duplicateCount ?? null, 'skipped'],
     ['未匯入', result?.notImportedCount ?? null, 'not-imported'],
   ];
+  if (historicalOrders) metrics.push(['檔外取消', result?.absentOrderCancellationCount ?? null, 'absent-cancelled']);
   return (
     <section className="import-workbench-card" data-surface-id={`imports.${id}.workbench`} aria-labelledby={`imports-${id}-title`}>
       <header className="import-card-header">
@@ -320,7 +325,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
         <div className="import-simple-file-text"><span>來源檔案</span><strong>{selectedWorkbook?.name ?? '未選擇任何檔案'}</strong></div>
         <input ref={fileInputRef} id={`file-input-${id}`} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={inputLabel} data-control-id={openPreviewControlId} disabled={mutationLocked} onChange={onSelect} className="import-file-native-hidden" />
         <button type="button" className="import-simple-secondary" disabled={mutationLocked} onClick={() => fileInputRef.current?.click()}>{selectedWorkbook ? '更換檔案' : '選擇檔案'}</button>
-        {(!ready || (applyState.kind === 'error' && !unknown)) && <button type="button" data-control-id={`imports.${id}.preview`} aria-describedby={!ready ? previewGuidanceId : undefined} className="import-preview-btn" disabled={mutationLocked || selectedWorkbook === null || previewState.kind === 'reading' || previewState.kind === 'loading'} onClick={() => void onPreview()}>
+        {(!ready || (!historicalOrders && applyState.kind === 'error' && !unknown)) && <button type="button" data-control-id={`imports.${id}.preview`} aria-describedby={!ready ? previewGuidanceId : undefined} className="import-preview-btn" disabled={mutationLocked || selectedWorkbook === null || previewState.kind === 'reading' || previewState.kind === 'loading'} onClick={() => void onPreview()}>
           {previewState.kind === 'reading' ? '正在讀取檔案…' : previewState.kind === 'loading' ? '處理中…' : ready ? '重新匯入' : '匯入'}
         </button>}
         {selectedWorkbook && !done && !mutationLocked && <button type="button" className="import-simple-clear" onClick={() => { if (fileInputRef.current) fileInputRef.current.value = ''; onClear(); }}>取消選取檔案</button>}
@@ -341,13 +346,13 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
       {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。可以切換至其他頁面；離開匯入頁後，自動確認會停止，需重新選取原檔案查詢結果。請勿重複上傳或重新整理。</p>}
       {ready && !waiting && <footer className="import-simple-actions">
         {done ? <><p role="status">本次檔案已處理完成。</p><button type="button" className="import-apply-btn" onClick={() => fileInputRef.current?.click()}>匯入下一份檔案</button></> : <>
-          <div><p id={applyGuidanceId} className="import-control-guidance">{applyControlGuidance(previewState, applyState)}</p></div>
-          <button type="button" data-control-id={`imports.${id}.apply`} aria-describedby={applyGuidanceId} className="import-apply-btn" disabled={loading || (mutationLocked && !unknown)} onClick={() => void onApply()}>{unknown ? '查詢這次匯入結果' : '重試匯入'}</button>
+          <div><p id={applyGuidanceId} className="import-control-guidance">{historicalOrders && unknown ? '匯入結果尚未確認。' : applyControlGuidance(previewState, applyState)}</p></div>
+          <button type="button" data-control-id={`imports.${id}.apply`} aria-describedby={applyGuidanceId} className="import-apply-btn" disabled={loading || (mutationLocked && !unknown)} onClick={() => void (historicalOrders ? onPreview() : onApply())}>{unknown ? (historicalOrders ? '重新匯入' : '查詢這次匯入結果') : '重試匯入'}</button>
         </>}
       </footer>}
       {!ready && <p className="import-control-guidance">選擇檔案後即可匯入。</p>}
       {applyState.kind === 'error' && !applyState.outcomeUnknown && <WorkbookErrorAlert message={applyState.message} details={applyState.details} />}
-      {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} 目前尚未取得最終結果，這不代表匯入失敗。可以切換至其他頁面，或稍後點選「查詢這次匯入結果」。離開匯入頁後需重新選取原檔案查詢。</p>}
+      {unknown && !waiting && <p className="import-result-state" role="status">{applyState.kind === 'error' && applyState.message} {historicalOrders ? '請查核目前訂單狀態及異動紀錄。重新匯入會重新判定整份檔案。' : '目前尚未取得最終結果，這不代表匯入失敗。可以切換至其他頁面，或稍後點選「查詢這次匯入結果」。離開匯入頁後需重新選取原檔案查詢。'}</p>}
     </section>
   );
 };
@@ -377,7 +382,7 @@ export const DataImportPage: React.FC = () => {
   const historicalOrders = useCaseWorkbookFlow(HistoricalOrderWorkbookSnapshot.fromFile,
     (snapshot, options) => historicalOrderWorkbookPreviewClient.preview(snapshot, options),
     (snapshot, fingerprint, options) => historicalOrderWorkbookPreviewClient.apply(snapshot, fingerprint, options),
-    adaptHistoricalOrderWorkbookPreview, adaptHistoricalOrderImportResult, '歷史訂單工作簿處理失敗。', 'historical-orders-authoritative-v3');
+    adaptHistoricalOrderWorkbookPreview, adaptHistoricalOrderImportResult, '歷史訂單工作簿處理失敗。', HISTORICAL_ORDERS_IMPORT);
   const mutationLocked = hcmCurrent.mutationLocked || clientBeClass.mutationLocked || staffHistorical.mutationLocked || historicalOrders.mutationLocked;
   const cards = {
     'hcm-current': { flow: hcmCurrent, title: 'HCM 案件匯入', inputLabel: '選擇 HCM Current Workbook' },

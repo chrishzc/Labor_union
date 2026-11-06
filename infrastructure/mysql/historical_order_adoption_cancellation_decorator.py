@@ -37,6 +37,9 @@ class MySqlHistoricalOrderAdoptionCancellationDecorator:
     def find_receipt(self, key, source_identity):
         return self._inner.find_receipt(key, source_identity)
 
+    def has_current_adoption(self, preview):
+        return self._inner.has_current_adoption(preview)
+
     def persist(self, request, preview, assignment_ids):
         _sync_historical_cancellation(self._connection, request, preview)
         return self._inner.persist(request, preview, assignment_ids)

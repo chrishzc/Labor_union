@@ -930,15 +930,18 @@ auto-aof-rewrite-min-size 64mb
 
 ### 5.2 State machine
 
-2026-10-16 管理端匯入頁顯示裁決：HCM、Client BeClass、Staff Historical、Historical Orders
+2026-11-06 歷史訂單匯入入口沿用單一「匯入」操作，結果筆數、同檔重匯、檔外取消、暫存清除及連線中斷依
+[`01` §3.7 HIST-IMPORT-01～04](01_Orders_Domain.md#historical-order-reimport-20261106)。下列原收據重查、同鍵自動確認、逐列續跑及工作簿保存規則適用於各段所列的其他匯入類型。
+
+2026-10-16 管理端匯入頁顯示裁決：HCM、Client BeClass、Staff Historical
 統一顯示「來源筆數／成功匯入／重複略過／未匯入」。完成結果三類互斥且合計等於來源筆數；
 已成功採納但有欄位警示的列仍只計入成功匯入，review／警示 overlay 不額外增加筆數。
 2026-11-03 月嫂歷史匯入筆數裁決：完成結果以整份工作簿累計計算，同一身分證字號成功採納的人員只計一次成功，其餘成功採納的同人來源列計為重複略過；例如 49 列對應 37 位成功人員，顯示成功匯入 37、重複略過 12。各列仍依既有歷史來源規則採納，不因統計去重而省略合法欄位合併。中斷續跑須保留各列原始成功分類，不將先前成功列一律改算略過。
 同檔舊收據若有完整逐列採納收據，可唯讀重建上述顯示統計；不重新執行 writer、不依目前主檔猜測、不改寫原歷史收據。缺少完整逐列證據時保留原收據結果。
-2026-10-20 人工補充裁決：四種匯入完成後均顯示本次「未匯入明細」，只取實際 terminal receipt
+2026-10-20 人工補充裁決：前述三種匯入完成後均顯示本次「未匯入明細」，只取實際 terminal receipt
 未匯入列，列出來源位置、可用的案件／查詢編號、問題欄位與去敏原因；HCM 使用資料序號，其他來源
 使用 Excel 列號。成功但有警示的列與重複略過列不混入未匯入明細，也不額外增加筆數。
-Client BeClass、Staff Historical、Historical Orders 的 additive `row_issues` 只保存實際未匯入列；
+Client BeClass、Staff Historical 的 additive `row_issues` 只保存實際未匯入列；
 HCM 沿用既有 `row_outcomes`。新收據明細筆數須等於未匯入筆數；舊收據缺少逐筆資料時顯示
 明細不可用，不以重新 Preview 猜測歷史結果，不改寫歷史收據。Staff 明細只用列號定位，不回傳身分證字號。
 匯入頁仍移除成功列警示、問題導覽及頁內更正工作台；問題與更正由既有其他頁面承接，
@@ -950,7 +953,7 @@ Preview 尚無可靠執行結果時只顯示來源筆數，其餘以「—」呈
 穩定錯誤代碼。Client BeClass 的 coordinator lock timeout 表示等候同 key 處理鎖 30 秒未取得，
 不代表檔案驗證失敗，也不能據此判定 NAS／網路故障。
 只有匯入 Apply 的等待逾時、連線中斷、閘道 502／504 或處理鎖等待結果待確認時，UI 才每隔
-5 秒沿用原始快照、Preview 與相同 idempotency key 自動確認，最多 6 次且同一時間只有一個請求。
+5 秒沿用原始快照、Preview 與相同 idempotency key 自動確認，最多 6 次且同一時間只有一個請求。此規則限 HCM、Client BeClass 與 Staff Historical。
 2026-11-03 人工裁決：確認期間維持換檔及重複送出鎖，但不鎖側邊導覽或匯入類型分頁，移除「停止等待」按鈕與專用等待停止狀態。匯入已送出或結果未確認，不得登記為會阻擋離頁的未儲存／busy 表單。
 留在匯入頁仍可接收原請求結果；切換匯入類型保留原操作及 bounded 自動確認，離開匯入頁則停止後續自動確認。離頁不取消已送出的 Apply、不撤銷已寫入資料，也不宣稱成功或失敗。
 原請求未結束前不得再送查詢；結束後可沿用同快照、Preview 與 key 人工確認。等待訊息須告知可以切換頁面，以及離開匯入頁後需重新選取原檔案確認結果，不宣稱自動恢復頁面。
@@ -1012,7 +1015,7 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
   `休周日`只排除星期日、`週休2日`排除星期六與星期日、`連續服務`不排除固定weekday；國定假日及
   人工覆寫仍依其正式規則處理。任何預計結束日、正式服務日、Scheduling、合約及天數／費用精算
   consumer都必須保留此weekday差異，不得再把`休周六`與`休周日`合併成`週休1日`。
-- Client BeClass、Staff Historical、Historical Orders各採`ROW_ATOMIC_RESUMABLE + archive_required`。
+- Client BeClass、Staff Historical 各採 `ROW_ATOMIC_RESUMABLE + archive_required`。
   每個workbook必須有durable `running → row_committed* → terminal_receipt`與
   `retryable_interrupted | terminal_failed`；same key＋same canonical workbook只可replay terminal receipt
   或續跑未terminal rows，same key＋different workbook固定conflict。
@@ -1020,10 +1023,7 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
   不得把partial、job accepted或archive success顯示為whole-workbook匯入成功。
 - archive只允許Case Import受控operator依稽核理由讀取；receipt不得含raw bytes、完整PII、原始檔名或local
   path。retention與encryption由Privacy／Operations擁有，期間及production provider在deployment target另行配置。
-- 四 family 的 current successor 已具備 archive 與 `running → row_committed* → terminal_receipt`／
-  resumable recovery，React 已完成 Preview → Apply → receipt → exact replay 的 runtime 驗收；此處原
-  `DB_SCOPE_REQUIRED`／Apply disabled 敘述已由 `15` §15 的較新裁決取代。任何新 persistence 或 schema
-  變更仍須另過 DB scope gate，不得由既有 runtime 驗收推定授權。
+- 舊版四類匯入的 Preview → Apply → receipt → exact replay runtime 驗收保留於 `15` §15。歷史訂單的現行目標以 `01` §3.7 為準，舊驗收只供追溯。任何新 persistence 或 schema 變更仍須另過 DB scope gate。
 
 ### 5.3 Subsystems／Modules
 

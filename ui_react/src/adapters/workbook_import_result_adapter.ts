@@ -13,6 +13,7 @@ export interface WorkbookImportResult {
   duplicateCount: number | null;
   notImportedCount: number | null;
   replayedWorkbook: boolean;
+  absentOrderCancellationCount?: number;
   notImportedRows: Array<{ sourceRow: number; identifier: string | null; fields: string[]; reasons: string[] }> | null;
 }
 
@@ -222,10 +223,10 @@ export function adaptStaffHistoricalImportResult(receipt: StaffHistoricalWorkboo
 export function adaptHistoricalOrderImportResult(receipt: HistoricalOrderWorkbookReceipt): WorkbookImportResult {
   const rows = receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.case_no, fields: row.fields, reasons: historicalOrderRowReasons(row.issue_codes) })) ?? null;
   if (receipt.import_counts) {
-    return result(receipt.source_row_count, receipt.import_counts.imported_count,
+    return { ...result(receipt.source_row_count, receipt.import_counts.imported_count,
       receipt.import_counts.duplicate_skipped_count, receipt.import_counts.not_imported_count,
       receipt.replayed_workbook,
-      rows);
+      rows), absentOrderCancellationCount: receipt.absent_order_cancellation_count };
   }
   // Old receipts with mixed row replay do not identify which outcomes overlapped.
   if (receipt.replayed_rows > 0) {

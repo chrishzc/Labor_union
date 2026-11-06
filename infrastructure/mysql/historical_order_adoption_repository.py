@@ -77,6 +77,40 @@ class MySqlHistoricalOrderAdoptionRepository:
             )
             return cursor.fetchone()
 
+    def has_current_adoption(self, preview: HistoricalOrderAdoptionPreview) -> bool:
+        if any(item.resolution is HistoricalPairingResolution.ASSIGNMENT_CANDIDATE for item in preview.pairings):
+            return False
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT id,source_fingerprint,resulting_version,result_snapshot "
+                "FROM historical_order_adoption_receipts WHERE case_no=%s AND outcome='adopted' "
+                "ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                (preview.case_no,),
+            )
+            source = cursor.fetchone()
+            if (source is None or source["source_fingerprint"] != preview.source_fingerprint
+                    or source["resulting_version"] != preview.expected_version):
+                return False
+            if tuple(json.loads(source["result_snapshot"]).get("issue_codes", ())) != preview.issue_codes:
+                return False
+            cursor.execute(
+                "SELECT caregiver_ordinal,staff_id,assignment_id,resolution,source_start_date,source_end_date "
+                "FROM historical_order_pairing_evidence WHERE receipt_id=%s ORDER BY caregiver_ordinal",
+                (source["id"],),
+            )
+            stored_pairings = tuple(
+                (row["caregiver_ordinal"], row["staff_id"], row["assignment_id"],
+                 "assigned" if row["assignment_id"] is not None else row["resolution"],
+                 row["source_start_date"], row["source_end_date"])
+                for row in cursor.fetchall()
+            )
+        return stored_pairings == tuple(
+            (item.ordinal, item.staff_id, item.assignment_id,
+             "assigned" if item.assignment_id is not None else item.resolution.value,
+             item.start_date, item.end_date)
+            for item in preview.pairings
+        )
+
     def persist(self, request, preview, assignment_ids):
         command_fingerprint = _command_fingerprint(request)
         review_identity = self._append_review(request, preview)
