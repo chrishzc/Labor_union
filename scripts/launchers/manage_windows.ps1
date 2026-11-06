@@ -310,13 +310,34 @@ function Invoke-ManagerAction {
         if ($mysqlTool -and $mysqldumpTool) {
             Write-Host "[PASS] MySQL 維護工具存在: $toolsMysqlDir"
         } else {
-            Write-Host "[INFO] MySQL 維護工具尚未就緒 (可放置於 tools\mysql\ 或加入系統 PATH)"
+            Write-Host "[WARN] MySQL 維護工具尚未就緒 (未找到 mysql.exe / mysqldump.exe)。若需執行「6 備份資料庫」或「8 復原資料庫備份」，請將工具放置於 tools\mysql\ 目錄。"
         }
         Write-Host '[PASS] Program paths present. No configuration, database, provider or Cloudflare access performed.'
         return
     }
     [void][IO.Directory]::CreateDirectory($runtimeDirectory)
-    $lock = [IO.File]::Open((Join-Path $runtimeDirectory 'manager.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $lockPath = Join-Path $runtimeDirectory 'manager.lock'
+    $lock = $null
+    try {
+        $lock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $lock.SetLength(0)
+        $writer = [IO.StreamWriter]::new($lock, [Text.Encoding]::UTF8)
+        $writer.Write($PID)
+        $writer.Flush()
+    } catch [System.IO.IOException] {
+        $lockingPid = $null
+        try {
+            $lockingPid = [IO.File]::ReadAllText($lockPath).Trim()
+        } catch {}
+        $procDesc = ""
+        if ($lockingPid -and ($lockingPid -as [int])) {
+            $p = Get-Process -Id ([int]$lockingPid) -ErrorAction SilentlyContinue
+            if ($p) {
+                $procDesc = " (占用程序 PID: $lockingPid - $($p.Name))"
+            }
+        }
+        throw "管理鎖定檔 ($lockPath) 正在被另一個處理程序使用$procDesc。若為先前殘留的視窗或背景工作，請開啟工作管理員結束 powershell.exe 或 python.exe，或重開機後再試。"
+    }
     try {
         switch ($Selected) {
             'database-backup' { Invoke-DatabaseMaintenance 'backup' }
@@ -401,7 +422,11 @@ function Invoke-ManagerAction {
             }
         }
     }
-    finally { $lock.Dispose() }
+    finally {
+        if ($null -ne $lock) {
+            $lock.Dispose()
+        }
+    }
 }
 
 if ($Action -ne 'menu') {
