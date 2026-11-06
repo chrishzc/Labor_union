@@ -279,6 +279,7 @@ class FinanceBankTransactionView(_StrictModel):
     status: Literal["pending", "posted"]
     disposition: str
     review_reason: str | None
+    dispatch_reason: str | None = None
     available_actions: list[str]
     reference: str
     counterparty_name: str | None

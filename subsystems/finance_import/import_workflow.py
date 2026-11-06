@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+import re
 from typing import Callable, Protocol
 
 from domains.finance_import.planning import (
@@ -40,6 +41,7 @@ class FinanceImportApplyRequest:
 @dataclass(frozen=True, slots=True)
 class FinanceImportDispatchResult:
     row_identity: str; outcome: FinanceDispatchOutcome; result_reference: str | None = None
+    reason_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,14 +145,23 @@ def _validate_dispatch_results(plan, results, request):
     if tuple(item.row_identity for item in results) != tuple(item.row_identity for item in plan.dispatchable_rows): raise RuntimeError("formal posting results do not match dispatch plan")
     for result in results:
         _validate_result_reference(result)
-        if result.outcome is FinanceDispatchOutcome.REJECTED: raise _dispatch_error(request, "dispatch_rejected")
-        if result.outcome is FinanceDispatchOutcome.CONFLICT: raise _dispatch_error(request, "classification_conflict")
+        if result.outcome in {FinanceDispatchOutcome.REJECTED, FinanceDispatchOutcome.CONFLICT}:
+            code = "dispatch_rejected" if result.outcome is FinanceDispatchOutcome.REJECTED else "classification_conflict"
+            row_blockers = tuple(
+                f"{item.row_identity}:{item.reason_code}"
+                for item in results
+                if item.outcome in {FinanceDispatchOutcome.REJECTED, FinanceDispatchOutcome.CONFLICT}
+                and item.reason_code
+                and re.fullmatch(r"finance-import-row:[0-9]{1,20}", item.row_identity)
+                and re.fullmatch(r"[a-z][a-z0-9_]{0,79}", item.reason_code)
+            )
+            raise _dispatch_error(request, code, row_blockers)
 def _build_receipt(plan, results):
     outcomes = tuple(item.outcome for item in results)
     return FinanceImportApplyReceipt(plan.batch_identity, plan.batch_version + 1, plan.fingerprint, outcomes.count(FinanceDispatchOutcome.RECONCILED), outcomes.count(FinanceDispatchOutcome.EXISTING), outcomes.count(FinanceDispatchOutcome.PENDING))
 def _command_fingerprint(request): return fingerprint_payload({"batch_identity":request.batch_identity,"expected_batch_version":request.expected_batch_version.value,"preview_fingerprint":request.preview_fingerprint.value,"actor_id":request.actor.actor_id,"reason":request.reason})
 def _stale_error(request, current_version): return _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "stale_preview", "Finance Import facts changed after Preview.", current_version=current_version)
-def _dispatch_error(request, code): return _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, code, "Owning Finance Domain rejected the proposed dispatch.", blockers=(code,))
+def _dispatch_error(request, code, row_blockers): return _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, code, "Owning Finance Domain rejected the proposed dispatch.", blockers=(code, *row_blockers))
 def _validation_error(correlation_id, code): return _workflow_error(correlation_id, ErrorCategory.VALIDATION, "invalid_finance_import_facts", code)
 def _transaction_error(request, error, *, retryable): return _workflow_error(request.correlation_id, ErrorCategory.UNAVAILABLE if retryable else ErrorCategory.INTERNAL, "downstream_unavailable" if retryable else "transaction_failed", str(error) or "Finance Import transaction failed.", retryable=retryable)
 def _preview_transaction_error(correlation_id, error): return _workflow_error(correlation_id, ErrorCategory.UNAVAILABLE, "downstream_unavailable", str(error) or "Finance Import Preview is unavailable.", retryable=True)

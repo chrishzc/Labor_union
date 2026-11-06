@@ -130,6 +130,29 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(within(screen.getByRole('row', { name: /交易明細#3/ })).getByText('待核對')).toBeVisible();
   });
 
+  it.each([
+    ['taishin_unique_staff_account', null, /月嫂姓名配對/],
+    ['outgoing_staff_payout_month_no_match', null, /預計撥款日同月/],
+    ['taishin_client_refund_month_no_match', null, /預計退款日同月/],
+    ['sinopac_client_receipt_month_no_match', null, /原到期日同月/],
+    ['taishin_client_refund_amount_mismatch', 'client_refund_recipient_account_mismatch', /與待退款項的收款帳戶不符/],
+    ['staff_account_matched', 'staff_bank_account_ambiguous', /唯一有效的月嫂主要帳戶/],
+    [null, null, /沒有留存更詳細的原因/],
+  ] as const)('shows the concrete reason in transaction details (%s, %s)', async (review_reason, dispatch_reason, message) => {
+    vi.mocked(financeImportQueryClient.listBankTransactions).mockResolvedValue({
+      items: [{ ...sinopac, review_reason, dispatch_reason }],
+      pending_count: 1,
+      next_before_row_id: null,
+    });
+    render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看交易 finance-import-row:101' }));
+    const dialog = screen.getByRole('dialog', { name: '待核對交易明細' });
+    expect(within(dialog).getByRole('heading', { name: '未自動核銷原因' })).toBeVisible();
+    expect(within(dialog).getByText(message)).toBeVisible();
+    expect(onReconcile).not.toHaveBeenCalled();
+  });
+
   it('posts a government outflow to the selected period refund balance', async () => {
     const period = {
       period: { unit: 'quarter' as const, year: 2026, index: 4 },
@@ -255,6 +278,8 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     fireEvent.click(screen.getByRole('button', { name: '匯入紀錄' }));
     const dialog = await screen.findByRole('dialog', { name: '匯入紀錄' });
     expect(await within(dialog).findByText('statement.xlsx', { exact: false })).toBeInTheDocument();
+    expect(within(dialog).getByText('交易指紋已存在，重複列已略過')).toBeVisible();
+    expect(screen.getAllByRole('button', { name: '查看交易 finance-import-row:101' })).toHaveLength(1);
     expect(within(dialog).getByText('本次核銷')).toBeInTheDocument();
     expect(screen.getByLabelText('篩選銀行')).toHaveValue('sinopac');
   });

@@ -7,18 +7,37 @@ import type { FinanceImportBatchPreview } from '../../api/finance_import/finance
 
 const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   suspected_duplicate_business_match: '多筆銀行交易對應到同一筆待收款，需確認是否重複入款。',
-  sinopac_valid_virtual_account: '已由虛擬帳號定位案件，因入款金額與待收期別尚未唯一相符，請核對待收款項。',
+  sinopac_valid_virtual_account: '已由虛擬帳號定位案件。待收款項尚未唯一確認，沒有留存更詳細的核銷結果。',
+  sinopac_client_receipt_month_no_match: '日期比對未通過。交易日的年月找不到原到期日同月的待收款項。',
+  sinopac_client_receipt_no_open_obligation: '案件目前沒有未清的待收款項。',
+  sinopac_client_receipt_shortfall: '入款金額低於同月待收款項，請核對差額。',
+  sinopac_client_receipt_overage: '入款金額高於同月待收款項，請核對差額。',
   sinopac_virtual_account_case_not_found: '虛擬帳號查無對應案件，請確認案件編號。',
   sinopac_invalid_or_missing_virtual_account: '銷帳編號缺漏或格式不符，無法自動定位案件。',
   taishin_government_memo: '已辨識為新竹市政府補助入款，請選擇核銷期間完成整期核銷。',
-  taishin_unique_staff_case_suffix_in_memo: '已由備註案件後六碼辨識月嫂與案件，請核對待付金額。',
-  taishin_unique_client_refund_case_suffix_in_memo: '已由備註案件後六碼辨識客戶與案件，請核對待退金額。',
-  sinopac_unique_staff_case_suffix_in_memo: '已由備註案件後六碼辨識月嫂與案件，請核對待付金額。',
-  sinopac_unique_client_refund_case_suffix_in_memo: '已由備註案件後六碼辨識客戶與案件，請核對待退金額。',
+  taishin_unique_staff_case_suffix_in_memo: '已從備註辨識案件，但沒有符合自動核銷條件的月嫂姓名配對。',
+  taishin_unique_client_refund_case_suffix_in_memo: '已從備註辨識案件，但沒有符合自動核銷條件的客戶姓名配對。',
+  sinopac_unique_staff_case_suffix_in_memo: '已從備註辨識案件，但沒有符合自動核銷條件的月嫂姓名配對。',
+  sinopac_unique_client_refund_case_suffix_in_memo: '已從備註辨識案件，但沒有符合自動核銷條件的客戶姓名配對。',
+  taishin_unique_staff_account: '已從帳號辨識月嫂，但沒有符合自動核銷條件的月嫂姓名配對。',
+  sinopac_unique_staff_account_in_transaction_reference: '已從帳號辨識月嫂，但沒有符合自動核銷條件的月嫂姓名配對。',
+  taishin_unique_client_refund_account: '已從帳號辨識客戶，但沒有符合自動核銷條件的客戶姓名配對。',
+  sinopac_unique_client_refund_account_in_transaction_reference: '已從帳號辨識客戶，但沒有符合自動核銷條件的客戶姓名配對。',
+  taishin_unique_client_subsidy_return_account: '已從帳號辨識客戶，但沒有符合自動核銷條件的客戶姓名配對。',
+  outgoing_staff_payout_name_ambiguous: '月嫂姓名有多個相符對象，無法唯一確認。',
+  outgoing_client_refund_name_ambiguous: '客戶姓名有多個相符對象，無法唯一確認。',
+  outgoing_staff_payout_month_no_match: '日期比對未通過。交易日的年月找不到預計撥款日同月的待付款項。',
+  taishin_client_refund_month_no_match: '日期比對未通過。交易日的年月找不到預計退款日同月的待退款項。',
+  outgoing_staff_payout_amount_mismatch: '出款金額與同月待付款項不符，請核對差額。',
+  taishin_client_refund_amount_mismatch: '出款金額與同月待退款項不符，請核對差額。',
+  outgoing_staff_payout_target_ambiguous: '同月有多筆待付款項，無法用出款金額唯一確認。',
+  outgoing_client_refund_target_ambiguous: '同月有多筆待退款項，無法用出款金額唯一確認。',
+  outgoing_staff_payout_no_open_obligation: '姓名已辨識，目前沒有待付款項。',
+  taishin_client_refund_no_open_obligation: '姓名已辨識，目前沒有待退款項。',
   client_receipt_heuristic_ambiguous: '姓名、帳號與金額符合多位客戶，無法唯一確認對象。',
   counterparty_account_missing: '銀行資料缺少交易對象帳號。',
   counterparty_account_invalid: '交易對象帳號格式不符。',
-  counterparty_identity_type_conflict: '交易帳號同時對應不同類型的收付款對象。',
+  counterparty_identity_type_conflict: '姓名、帳號或案件線索指向不同收付款對象。',
   counterparty_account_multiple_matches: '交易帳號對應多位對象，需人工確認。',
   counterparty_account_no_match: '交易帳號找不到對應的收付款對象。',
   sinopac_staff_account_no_match: '交易參考帳號找不到對應的月嫂。',
@@ -28,6 +47,13 @@ const REVIEW_REASON_LABELS: Readonly<Record<string, string>> = {
   unsupported_bank_direction: '這種銀行交易尚無適用的自動配對方式。',
   sinopac_staff_return_requires_matching: '這筆月嫂退回款需要確認對應的原付款。',
   subsidy_advance_not_due: '補助退款尚未符合政府入款或工會代墊條件，暫時無法核銷。',
+  staff_bank_account_ambiguous: '帳戶驗證未通過。交易收款帳號缺少，或無法對應唯一有效的月嫂主要帳戶。',
+  cross_staff_allocation_forbidden: '帳戶或對象驗證未通過。交易、收款帳戶與待付款項的月嫂歸屬不一致。',
+  client_refund_recipient_account_ambiguous: '帳戶驗證未通過。待退款項沒有唯一的退款收款帳戶。',
+  client_refund_recipient_account_mismatch: '帳戶驗證未通過。銀行出款的收款帳號缺少，或與待退款項的收款帳戶不符。',
+  bank_fact_not_eligible: '銀行流水未通過核銷資格驗證。系統沒有留存更細的拒絕原因。',
+  outgoing_bank_fact_not_eligible: '銀行出款未通過核銷資格驗證。系統沒有留存更細的拒絕原因。',
+  stale_preview: '核銷前資料已變更，當次自動核銷未完成。',
 };
 
 type ReviewDisposition = Pick<FinanceImportReviewPage['items'][number], 'classification_type' | 'direction' | 'available_actions' | 'disposition'>;
@@ -42,33 +68,29 @@ export function financeImportSkipsUnidentifiedOutgoing(
 }
 
 export function financeImportReviewReason(
-  row: ReviewDisposition & { review_reason?: string | null; counterparty_name?: string | null; cases?: readonly string[] },
+  row: ReviewDisposition & { review_reason?: string | null; dispatch_reason?: string | null; transaction_date?: string | null },
   preview?: FinanceImportBatchPreview['rows'][number],
-  postingStopped = false,
+  postingStopped?: 'preview_blocked' | 'apply_failed',
 ): string {
+  if (row.dispatch_reason) return REVIEW_REASON_LABELS[row.dispatch_reason] ?? '正式核銷檢查未通過。';
   if (preview?.fingerprint_collision) return '存在可能重複的銀行交易，需先核對原始資料。';
   if (preview?.formal_reference_conflict) return '正式參考資料互相衝突，需先確認正確來源。';
   if (preview?.integrity_violations.length) return `來源資料未通過完整性檢查：${financeImportBlockerMessage(preview.integrity_violations)}。`;
+  if (row.transaction_date === null) return '日期比對無法執行。銀行流水缺少交易日。';
   if (financeImportSkipsUnidentifiedOutgoing(row, preview)) return '無法辨識收款對象，已略過銷帳；只保留原始銀行紀錄，不指定案件或月嫂。';
-  if (postingStopped && preview?.disposition === 'create') return '此筆資料已匯入入帳，符合自動銷帳條件，但因批次預覽有阻擋，尚未執行自動銷帳。';
+  if (postingStopped && preview?.disposition === 'create') {
+    return postingStopped === 'preview_blocked'
+      ? '流水已保存。批次預覽有阻擋，尚未執行自動核銷。'
+      : '流水已保存。當次核銷工作未完成，這筆交易沒有留存逐筆拒絕原因。';
+  }
   if (row.available_actions.includes('review_suspected_duplicate_business_match')) return REVIEW_REASON_LABELS.suspected_duplicate_business_match;
   const reasons = [...(preview?.evidence ?? []), row.review_reason ?? ''].flatMap(code => REVIEW_REASON_LABELS[code] ? [REVIEW_REASON_LABELS[code]] : []);
   if (reasons.length) return [...new Set(reasons)].join(' ');
-  if (row.disposition === 'business_pending') {
-    if (row.classification_type === 'government_subsidy') {
-      return '已辨識為新竹市政府補助入款，請選擇核銷期間完成整期核銷。';
-    }
-    if (row.counterparty_name && row.cases && row.cases.length > 0) {
-      return '已辨識對象與關聯案件，因金額或期別尚未唯一相符，請核對待銷帳款項。';
-    }
-    if (row.counterparty_name) {
-      return '已辨識收付對象，請選擇關聯案件與待銷帳款項後核對金額。';
-    }
-    const target = ({ staff_payout: '月嫂及待付款項', staff_salary: '月嫂及待付款項', client_refund: '案件及待退款項', government_subsidy: '政府補助待銷帳款項', client_subsidy_return: '補助退款項', client_refund_return: '客戶退款退回款項' } as Record<string, string>)[row.classification_type] ?? '案件及待收款項';
-    return `尚未確認可自動銷帳的${target}，請人工選擇正確對象與款項後核對金額。`;
+  if (row.disposition === 'business_pending' && row.classification_type === 'government_subsidy') {
+    return '已辨識為新竹市政府補助款，請選擇核銷期間完成整期核銷。';
   }
-  if (row.disposition === 'blocked') return '這筆交易未通過銷帳檢查，請核對來源資料後重新查詢。';
-  return '現有銀行資料不足以自動確認收付款用途或對象，需人工核對。';
+  if (row.disposition === 'blocked') return '這筆交易未通過銷帳檢查，沒有留存更詳細的原因。';
+  return '這筆交易尚未核銷，沒有留存更詳細的原因。';
 }
 
 export function financeImportDispositionLabel(disposition: string): string {

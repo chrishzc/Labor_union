@@ -58,6 +58,7 @@ class MySqlClientRefundReversalRepository:
         self._request: ClientRefundReversalApplyRequest | None = None
         self._entry_ids: dict[str, int] = {}
         self._refund_row_metadata: dict[str, tuple[int, date]] = {}
+        self.refund_account_matches: bool | None = None
 
     def bind_apply_request(self, request) -> None:
         self._request = request
@@ -68,6 +69,7 @@ class MySqlClientRefundReversalRepository:
         self._refund_row_metadata.clear()
 
     def load(self, selection, *, for_update):
+        self.refund_account_matches = None
         with _mysql_cursor(self._connection) as cursor:
             if not _case_exists(cursor, selection.case_no):
                 raise ValueError("client_finance_case_not_found")
@@ -250,6 +252,8 @@ class MySqlClientRefundReversalRepository:
         )
         obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
         recipient_account = _single_refund_recipient_account(obligation_rows)
+        if len(bank_rows) == 1:
+            self.refund_account_matches = _refund_source_account(bank_rows[0]) == recipient_account
         self._refund_row_metadata = _refund_metadata(bank_rows)
         funding = {}
         if selection.refund_purpose in {ClientRefundPurpose.SUBSIDY_RETURN, ClientRefundPurpose.SUBSIDY_ADVANCE}:

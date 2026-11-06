@@ -29,7 +29,7 @@ def finance_import_batch_apply_handler(payload: dict[str, Any]) -> tuple[dict[st
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.fingerprints import PreviewFingerprint
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest, FinanceImportWorkflowError
 
     connection = get_connection()
     try:
@@ -49,6 +49,10 @@ def finance_import_batch_apply_handler(payload: dict[str, Any]) -> tuple[dict[st
         receipt = _materialize(application.apply_batch(request))
         reference = "finance_import_batch:" + receipt["batch_identity"]
         return receipt, reference
+    except FinanceImportWorkflowError as error:
+        if error.error.code in {"dispatch_rejected", "classification_conflict"}:
+            raise TerminalDurableJobError(error.error) from error
+        raise
     finally:
         connection.close()
 

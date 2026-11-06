@@ -227,7 +227,7 @@ class FinanceImportQueryService:
         scoped = f"""
             WITH proofs AS ({BANK_CASE_PROOFS_SQL}),
             raw_rows AS (
-                SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.format_id,
+                SELECT finance_row.id AS row_id, finance_row.batch_id, finance_row.transaction_date, finance_row.format_id,
                     finance_row.direction, finance_row.debit, finance_row.credit,
                     finance_row.sheet_name, finance_row.source_row,
                     finance_row.counterparty_name,
@@ -327,8 +327,29 @@ class FinanceImportQueryService:
                 predicates.append("row_id<%s")
                 page_params.append(before_row_id)
             page_where = " AND ".join(predicates) if predicates else "1=1"
-            cursor.execute(scoped + f"SELECT * FROM {scope} WHERE {page_where} ORDER BY row_id DESC LIMIT %s",
-                           (*page_params, limit + 1))
+            cursor.execute(
+                scoped + f""",
+                page AS (
+                    SELECT * FROM {scope} WHERE {page_where} ORDER BY row_id DESC LIMIT %s
+                )
+                SELECT page.*, SUBSTRING_INDEX(diagnostic.blocker, ':', -1) AS dispatch_reason
+                FROM page
+                LEFT JOIN finance_import_batch_contracts contract
+                    ON page.transaction_status='pending' AND contract.batch_id=page.batch_id
+                LEFT JOIN background_jobs job ON job.job_id=(
+                    SELECT latest.job_id FROM background_jobs latest
+                    WHERE contract.batch_identity IS NOT NULL
+                      AND latest.command_type='finance_import_batch_apply'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(latest.command_payload,'$.batch_identity'))=contract.batch_identity
+                    ORDER BY latest.created_at DESC,latest.job_id DESC LIMIT 1
+                ) AND job.status='failed'
+                LEFT JOIN JSON_TABLE(COALESCE(job.error_payload, JSON_OBJECT()), '$.error.domain_blockers[*]'
+                    COLUMNS (blocker VARCHAR(191) PATH '$')) diagnostic
+                    ON SUBSTRING_INDEX(diagnostic.blocker, ':', 2)=CONCAT('finance-import-row:',page.row_id)
+                ORDER BY page.row_id DESC
+                """,
+                (*page_params, limit + 1),
+            )
             rows = cursor.fetchall()
             page = rows[:limit]
             cases_by_id = {}
@@ -900,6 +921,10 @@ def _enrich_bank_transactions(
                                     if bank_amount < int(month_rows[0]["amount_due_ntd"])
                                     else "sinopac_client_receipt_overage"
                                 )
+                            elif open_rows and not month_rows and row.get("transaction_date"):
+                                review_reason = "sinopac_client_receipt_month_no_match"
+                        if not open_rows:
+                            review_reason = "sinopac_client_receipt_no_open_obligation"
                 elif client_id is not None:
                     cursor.execute(
                         "SELECT o.case_no, o.due_date, o.obligation_identity, o.amount_due_ntd FROM client_obligations o "
@@ -1096,6 +1121,7 @@ def _bank_transaction(row, cases, reconciliation_target=None):
         "status": row["transaction_status"],
         "disposition": row["disposition"],
         "review_reason": row["review_reason"],
+        "dispatch_reason": row.get("dispatch_reason"),
         "available_actions": _text_tuple(row["available_actions"]),
         "reference": reference,
         "counterparty_name": row["counterparty_name"],

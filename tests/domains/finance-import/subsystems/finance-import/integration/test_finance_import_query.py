@@ -5,6 +5,7 @@ Description: 驗證銀行流水查詢、預覽處置映射與待核對交易對�
 from datetime import datetime
 from decimal import Decimal
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,7 +21,11 @@ from infrastructure.mysql.finance_import_repository import (
     _sort_canonical_rows,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.durable_job_queue import TerminalDurableJobError
+from shared_kernel.identities import CorrelationId
 from shared_kernel.money import MoneyNTD
+from subsystems.finance_import.import_workflow import FinanceDispatchOutcome, FinanceImportDispatchResult, _validate_dispatch_results
+from subsystems.jobs.contracts import DurableJobFailureOutcome
 from subsystems.finance_import.query import (
     FinanceImportQueryNotFound,
     FinanceImportQueryService,
@@ -295,6 +300,36 @@ def test_business_dispatch_projection_preserves_terminal_outcome_meaning(
     assert disposition is expected
 
 
+def test_rejected_dispatch_carries_only_its_row_reason_into_the_failed_job(monkeypatch):
+    from api.dependencies import finance_import
+    from api.dependencies.durable_job_handlers import finance_import_batch_apply_handler
+    from infrastructure.mysql import mysql_adapter
+
+    rejected_row = "finance-import-row:17"
+    other_row = "finance-import-row:18"
+    results = (
+        FinanceImportDispatchResult(rejected_row, FinanceDispatchOutcome.REJECTED, reason_code="staff_bank_account_ambiguous"),
+        FinanceImportDispatchResult(other_row, FinanceDispatchOutcome.RECONCILED, "staff-payables:proof"),
+    )
+    plan = SimpleNamespace(dispatchable_rows=tuple(SimpleNamespace(row_identity=row) for row in (rejected_row, other_row)))
+    monkeypatch.setattr(mysql_adapter, "get_connection", lambda: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(finance_import, "build_finance_import_application", lambda *_: SimpleNamespace(
+        apply_batch=lambda request: _validate_dispatch_results(plan, results, request),
+    ))
+    payload = {
+        "batch_identity": "finance-import-batch:1", "expected_batch_version": 0,
+        "preview_fingerprint": "a" * 64, "idempotency_key": "test-import",
+        "actor": "test", "reason": "", "correlation_id": CorrelationId("test-import").value,
+    }
+
+    with pytest.raises(TerminalDurableJobError) as raised:
+        finance_import_batch_apply_handler(payload)
+
+    error = DurableJobFailureOutcome.from_typed_error(raised.value.error).to_payload()["error"]
+    assert error["code"] == "dispatch_rejected"
+    assert error["domain_blockers"] == ["dispatch_rejected", f"{rejected_row}:staff_bank_account_ambiguous"]
+
+
 def test_manually_reconciled_rows_are_existing_when_original_batch_is_replayed():
     assert _preview_disposition(
         {'canonical_batch_id': 5, 'disposition': 'create',
@@ -463,6 +498,7 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
             "transaction_status": "pending",
             "disposition": "business_pending",
             "review_reason": "staff_account_matched",
+            "dispatch_reason": "staff_bank_account_ambiguous",
             "available_actions": "[]",
             "safe_reference": "0003",
         },
@@ -478,13 +514,14 @@ def test_enrich_bank_transactions_populates_counterparty_and_cases_for_pending_r
     [cross_month] = _enrich_bank_transactions(
         _EnrichCursor(), [{**page[1], "transaction_date": "2026-11-15"}], {},
     )
-    assert cross_month["review_reason"] == "sinopac_virtual_account_matched"
+    assert cross_month["review_reason"] == "sinopac_client_receipt_month_no_match"
     assert cross_month["reconciliation_target"] is None
     assert [item["reconciliation_target"] for item in items] == [
         None,
         {"case_no": "115000001", "obligation_identities": ["receipt:first"], "staff_id": None},
         {"case_no": "115000009", "obligation_identities": ["staff:payout"], "staff_id": 19},
     ]
+    assert [item["dispatch_reason"] for item in items] == [None, None, "staff_bank_account_ambiguous"]
     [ambiguous] = _enrich_bank_transactions(
         _EnrichCursor(), [{**page[2], "memo": "HC115009 HC115010"}], {},
     )

@@ -23,6 +23,7 @@ export const FinanceBankTransactionPageSchema = z.strictObject({
     bank: bankSchema, direction: z.enum(['incoming', 'outgoing', 'unknown']), amount_ntd: z.number().int().positive(),
     classification_type: z.string(), status: z.enum(['pending', 'posted']), disposition: z.string(),
     review_reason: z.string().nullable(), available_actions: z.array(z.string()),
+    dispatch_reason: z.string().nullish(),
     reference: z.string(), counterparty_name: z.string().nullable(), cases: z.array(z.string()),
     reconciliation_target: z.strictObject({
       case_no: z.string(), obligation_identities: z.array(z.string()).min(1), staff_id: z.number().int().positive().nullable(),

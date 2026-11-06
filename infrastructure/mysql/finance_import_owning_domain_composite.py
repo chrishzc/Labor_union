@@ -264,11 +264,15 @@ class MySqlFinanceImportOwningDomainComposite:
             repository,
             BorrowedTransactionUnitOfWork,
         )
-        preview = workflow.preview(selection, context.correlation_id)
-        request = _client_refund_request(candidate, selection, preview, context)
-        repository.bind_apply_request(request)
         try:
+            preview = workflow.preview(selection, context.correlation_id)
+            request = _client_refund_request(candidate, selection, preview, context)
+            repository.bind_apply_request(request)
             receipt = workflow.apply(request)
+        except ClientRefundReversalError as error:
+            if error.error.code == "bank_fact_not_eligible" and repository.refund_account_matches is False:
+                return _typed_domain_result(candidate, error.error, reason_code="client_refund_recipient_account_mismatch")
+            raise
         finally:
             repository.clear_apply_request()
         return _client_subsidy_return_result(candidate, receipt)
@@ -996,7 +1000,7 @@ def _unavailable_owner_code(candidate):
     return "owning_domain_posting_not_implemented"
 
 
-def _typed_domain_result(candidate, error):
+def _typed_domain_result(candidate, error, *, reason_code=None):
     if error.retryable:
         raise FinanceImportRepositoryUnavailable(error.message)
     if isinstance(candidate, FinanceImportCorrectionCandidate):
@@ -1006,7 +1010,7 @@ def _typed_domain_result(candidate, error):
         if error.category is ErrorCategory.CONFLICT
         else FinanceDispatchOutcome.REJECTED
     )
-    return FinanceImportDispatchResult(candidate.row_identity, outcome)
+    return FinanceImportDispatchResult(candidate.row_identity, outcome, reason_code=reason_code or error.code)
 
 
 def _government_subsidy_domain_result(candidate, error):
@@ -1017,7 +1021,7 @@ def _government_subsidy_domain_result(candidate, error):
         if error.code is GovernmentSubsidyErrorCode.REVIEW_REQUIRED
         else FinanceDispatchOutcome.REJECTED
     )
-    return FinanceImportDispatchResult(candidate.row_identity, outcome)
+    return FinanceImportDispatchResult(candidate.row_identity, outcome, reason_code=error.code.value)
 
 
 def _target_identities(candidate):
