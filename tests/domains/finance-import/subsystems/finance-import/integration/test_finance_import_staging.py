@@ -381,3 +381,105 @@ def test_taishin_outgoing_scenario_c1_unrecognized_skipped(monkeypatch):
     assert len(result["staged_rows"]) == 1
     insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
     assert len(insert_calls) == 1
+
+
+def test_sinopac_unmatched_business_rows_skipped():
+    cursor = FakeCursor()
+    row_valid_incoming = {
+        "format_id": "sinopac",
+        "source_file": "永豐明細.xlsx",
+        "source_bank_account": None,
+        "sheet_name": "明細",
+        "source_row": 2,
+        "source_reference": None,
+        "transaction_date": "2026-08-10",
+        "transaction_time": "10:00:00",
+        "posting_date": "2026-08-10",
+        "value_date": None,
+        "debit": None,
+        "credit": Decimal("30000.00"),
+        "direction": "incoming",
+        "balance": Decimal("30000.00"),
+        "currency": "TWD",
+        "summary": "客戶繳款",
+        "memo": "99781699115001",
+        "counterparty_name": None,
+        "counterparty_account": None,
+        "cancellation_code": "99781699115001",
+        "bank_references": {"銷帳編號": "99781699115001"},
+        "warnings": [],
+        "raw_payload": {},
+    }
+    row_junk_incoming = {
+        "format_id": "sinopac",
+        "source_file": "永豐明細.xlsx",
+        "source_bank_account": None,
+        "sheet_name": "明細",
+        "source_row": 3,
+        "source_reference": None,
+        "transaction_date": "2026-08-10",
+        "transaction_time": "10:05:00",
+        "posting_date": "2026-08-10",
+        "value_date": None,
+        "debit": None,
+        "credit": Decimal("15.00"),
+        "direction": "incoming",
+        "balance": Decimal("30015.00"),
+        "currency": "TWD",
+        "summary": "存款息",
+        "memo": "銀行利息",
+        "counterparty_name": None,
+        "counterparty_account": None,
+        "cancellation_code": None,
+        "bank_references": {},
+        "warnings": [],
+        "raw_payload": {},
+    }
+    row_junk_outgoing = {
+        "format_id": "sinopac",
+        "source_file": "永豐明細.xlsx",
+        "source_bank_account": None,
+        "sheet_name": "明細",
+        "source_row": 4,
+        "source_reference": None,
+        "transaction_date": "2026-08-10",
+        "transaction_time": "11:00:00",
+        "posting_date": "2026-08-10",
+        "value_date": None,
+        "debit": Decimal("500.00"),
+        "credit": None,
+        "direction": "outgoing",
+        "balance": Decimal("29515.00"),
+        "currency": "TWD",
+        "summary": "水電費",
+        "memo": "水費自動扣繳",
+        "counterparty_name": None,
+        "counterparty_account": None,
+        "cancellation_code": None,
+        "bank_references": {},
+        "warnings": [],
+        "raw_payload": {},
+    }
+
+    result = staging.stage_finance_rows(
+        cursor,
+        {
+            "format_id": "sinopac",
+            "sheet_name": "明細",
+            "header_row": 1,
+            "normalized_rows": [row_valid_incoming, row_junk_incoming, row_junk_outgoing],
+        },
+        {
+            "client_refund_accounts": {},
+            "staff_accounts": {},
+            "client_receipt_candidates": (),
+            "staff_case_suffixes": {},
+            "client_refund_case_suffixes": {},
+        },
+    )
+
+    # 只有有效虛擬帳號的客戶入款被保留，水電費與利息等非業務明細直接捨棄
+    assert len(result["staged_rows"]) == 1
+    assert result["staged_rows"][0]["classification_type"] == "client_receipt"
+    insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
+    assert len(insert_calls) == 1

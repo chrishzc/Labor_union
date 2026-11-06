@@ -175,6 +175,32 @@ def stage_finance_rows(
                 if not matched_name:
                     continue
 
+        # 永豐銀行：沒有配對案件編號或月嫂或政府成功的明細直接捨棄
+        pre_classification = None
+        if format_id in {"sinopac", "legacy"}:
+            try:
+                pre_classification = classify_finance_transaction(
+                    row,
+                    client_accounts,
+                    staff_accounts,
+                    subsidy_return_accounts,
+                    receipt_candidates,
+                    staff_case_suffixes,
+                    client_refund_case_suffixes,
+                    all_client_names,
+                    taishin_candidates,
+                )
+            except TypeError:
+                pre_classification = classify_finance_transaction(
+                    row,
+                    client_accounts,
+                    staff_accounts,
+                    subsidy_return_accounts,
+                    receipt_candidates,
+                )
+            if pre_classification.get("classification_type") == "non_business_review":
+                continue
+
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
             """SELECT id, classification_type, matched_identity_ids,
@@ -306,26 +332,29 @@ def stage_finance_rows(
             ),
         )
 
-        try:
-            classification = classify_finance_transaction(
-                row,
-                client_accounts,
-                staff_accounts,
-                subsidy_return_accounts,
-                receipt_candidates,
-                staff_case_suffixes,
-                client_refund_case_suffixes,
-                all_client_names,
-                taishin_candidates,
-            )
-        except TypeError:
-            classification = classify_finance_transaction(
-                row,
-                client_accounts,
-                staff_accounts,
-                subsidy_return_accounts,
-                receipt_candidates,
-            )
+        if pre_classification is not None:
+            classification = pre_classification
+        else:
+            try:
+                classification = classify_finance_transaction(
+                    row,
+                    client_accounts,
+                    staff_accounts,
+                    subsidy_return_accounts,
+                    receipt_candidates,
+                    staff_case_suffixes,
+                    client_refund_case_suffixes,
+                    all_client_names,
+                    taishin_candidates,
+                )
+            except TypeError:
+                classification = classify_finance_transaction(
+                    row,
+                    client_accounts,
+                    staff_accounts,
+                    subsidy_return_accounts,
+                    receipt_candidates,
+                )
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])
         resolved_counterparty_account = classification.get("resolved_counterparty_account")

@@ -65,8 +65,8 @@ export interface FinanceBankReconciliationWorkspaceProps {
   onReloadSourceReview: (batchIdentity: string) => void;
   financeWorkbook: File | null;
   onWorkbookChange: (file: File | null) => void;
-  applyReason: string;
-  onApplyReasonChange: (reason: string) => void;
+  applyReason?: string;
+  onApplyReasonChange?: (reason: string) => void;
   importBusy: boolean;
   ingestion: LoadState<FinanceWorkbookIngestionReceipt>;
   batchPreview: LoadState<FinanceImportBatchPreview>;
@@ -93,8 +93,8 @@ export function FinanceBankReconciliationWorkspace({
   onReloadSourceReview: _onReloadSourceReview,
   financeWorkbook,
   onWorkbookChange,
-  applyReason,
-  onApplyReasonChange,
+  applyReason: _applyReason,
+  onApplyReasonChange: _onApplyReasonChange,
   importBusy,
   ingestion,
   batchPreview,
@@ -269,25 +269,6 @@ export function FinanceBankReconciliationWorkspace({
                 onWorkbookChange(event.target.files?.[0] ?? null);
               }}
             />
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', margin: 0, fontWeight: 600 }}>
-              正式銷帳原因（選填）
-              <input
-                className="finance-input"
-                placeholder="輸入銷帳說明"
-                value={applyReason}
-                maxLength={500}
-                disabled={
-                  importBusy ||
-                  ingestion.kind === 'loading' ||
-                  batchPreview.kind === 'loading' ||
-                  applyJob.kind === 'loading' ||
-                  batchOutcome.kind === 'loading' ||
-                  submittedFinanceCommand !== undefined
-                }
-                onChange={(e) => onApplyReasonChange(e.target.value)}
-                style={{ width: '200px', minHeight: '34px', padding: '6px 10px' }}
-              />
-            </label>
             <button
               type="button"
               className="finance-btn-primary"
@@ -356,11 +337,15 @@ export function FinanceBankReconciliationWorkspace({
           </p>
         )}
         {(confirmedImportReceipt ||
-          (batchPreview.kind === 'ready' && !importBusy && (!batchPreview.data.apply_allowed || batchPreview.data.counts.ready_dispatch === 0))) && (
+          (batchPreview.kind === 'ready' && !importBusy) ||
+          (ingestion.kind === 'ready' && !importBusy)) && (
           <div className="finance-meta" style={{ marginTop: '10px' }}>
             <span>
-              本次已銷帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜已存在略過{' '}
-              {confirmedImportReceipt?.existing_count ?? (batchPreview.kind === 'ready' ? batchPreview.data.counts.existing : 0)} 筆
+              本次已銷帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜重複／已存在略過{' '}
+              {confirmedImportReceipt?.existing_count ??
+                (batchPreview.kind === 'ready'
+                  ? batchPreview.data.counts.existing + batchPreview.data.counts.duplicate_occurrences
+                  : (ingestion.kind === 'ready' ? ingestion.data.duplicate_occurrence_count : 0))} 筆
             </span>
             {batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed && (
               <span style={{ color: '#c5221f', fontWeight: 700 }} role="alert">
