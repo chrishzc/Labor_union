@@ -687,3 +687,55 @@ def test_manual_plan_body_does_not_accept_forged_actor_or_financial_values():
     from api.schemas.finance_import import SubsidyPlanBody
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,actor='forged')
     with pytest.raises(ValidationError): SubsidyPlanBody(scheme='direct',expected_version=0,amount_ntd=10)
+
+def test_case_manual_supplement_api_endpoint_success():
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.dependencies.admin_auth import require_admin
+    from api.dependencies.finance_import import get_accounting_workspace
+    from api.routes.finance_statement_workspace import router
+    from subsystems.finance_import.accounting_workspace import CaseAccounting
+    from subsystems.client_finance.case_accounting_query import ClientAccountingItem
+
+    case = CaseAccounting(
+        '115000001', 'Test Client', 10000, 10000, None, None, 0,
+        (ClientAccountingItem('first', 'receivable', '第一期', 'Test Client', 10000, 10000, True, '1', '2026-11-01', recognized_ntd=0),),
+        (), (), (),
+    )
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.side_effect = [
+        {"case_no": "115000001"},
+        None,
+        {"amount_due_ntd": 10000, "total_paid": 10000},
+    ]
+    mock_cursor.lastrowid = 101
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="test_admin")
+    app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
+        query=lambda _: case,
+        state=SimpleNamespace(connection=mock_conn)
+    )
+
+    with TestClient(app) as client:
+        res = client.post(
+            "/cases/115000001/manual-supplement",
+            headers={"Idempotency-Key": "test-key-123"},
+            json={
+                "bank": "sinopac",
+                "direction": "client_receipt",
+                "target_item": "client-obligation:115000001:deposit",
+                "amount_ntd": 13500,
+                "transaction_date": "2026-11-06",
+                "reason": "現金繳納"
+            }
+        )
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert res.json()["message"] == "人工補登成功，期款已自動銷帳"

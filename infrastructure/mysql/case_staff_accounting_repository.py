@@ -29,7 +29,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         )
         obligations = cursor.fetchall()
         cursor.execute(
-            "SELECT e.id,e.event_type,e.occurred_on,l.obligation_identity,l.allocated_amount_ntd,b.format_id "
+            "SELECT e.id,e.event_type,e.occurred_on,l.obligation_identity,l.allocated_amount_ntd,b.format_id,e.reconciliation_reference,b.summary "
             "FROM staff_payout_obligation_links l JOIN staff_obligations o ON o.obligation_identity=l.obligation_identity "
             "JOIN staff_payout_events e ON e.id=l.payout_event_id "
             "LEFT JOIN finance_import_rows b ON b.id=e.finance_import_row_id "
@@ -65,7 +65,7 @@ def query_case_staff_accounting(connection, case_no, *, for_update=False):
         f"staff-event:{row['id']}:{row['obligation_identity']}", row["obligation_identity"],
         str(row["occurred_on"]), row["event_type"], int(row["allocated_amount_ntd"]) * (
             -1 if row["event_type"] in {"return", "reversal"} else 1
-        ), row["format_id"],
+        ), "manual" if ((row.get("reconciliation_reference") or "").startswith("manual") or row.get("summary") == "人工補登") else row["format_id"],
     ) for row in rows)
     paid_ids = {row.item_identity for row in transactions}
     items = []

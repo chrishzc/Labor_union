@@ -1,7 +1,8 @@
 """Authenticated bank archive downloads and bounded case accounting commands."""
 from dataclasses import asdict
 from io import BytesIO
-from typing import Annotated
+from typing import Annotated, Literal
+from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
 
 from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -330,4 +331,44 @@ def dismiss_accounting_warning(body: AccountingWarningBody, case_no: str, princi
         result = application.dismiss(case_no, AccountingWarning(**body.model_dump()), _actor(principal))
         return BaseResponse(data=_case_view(result), message="帳務警示已解除")
     except (LookupError, ValueError, MySQLError) as error:
+        raise _error(error) from None
+
+class CaseManualSupplementBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    bank: Literal["sinopac", "taishin"]
+    direction: Literal["client_receipt", "staff_salary", "client_refund"]
+    target_item: str = Field(min_length=1, max_length=191)
+    amount_ntd: int = Field(gt=0)
+    transaction_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/cases/{case_no}/manual-supplement", response_model=BaseResponse[CaseAccountingView])
+def create_case_manual_supplement(
+    body: CaseManualSupplementBody,
+    case_no: str,
+    idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
+    principal=Depends(require_admin),
+    application=Depends(get_accounting_workspace),
+):
+    try:
+        service = CaseManualSupplementService(application.state.connection)
+        service.execute(
+            case_no=case_no,
+            bank=body.bank,
+            direction=body.direction,
+            target_item=body.target_item,
+            amount_ntd=body.amount_ntd,
+            transaction_date=body.transaction_date,
+            reason=body.reason,
+            idempotency_key=idempotency_key,
+            actor=_actor(principal),
+        )
+        application.state.connection.commit()
+        return BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
+    except (LookupError, ValueError, MySQLError) as error:
+        try:
+            application.state.connection.rollback()
+        except Exception:
+            pass
         raise _error(error) from None

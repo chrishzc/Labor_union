@@ -347,7 +347,7 @@ def query_case_accounting(connection, case_no, *, for_update=False):
         obligations = cursor.fetchall()
         cursor.execute(
             "SELECT l.id,l.entry_type,l.occurred_on,l.reversal_of_entry_id,"
-            "base.entry_type AS reversed_type,x.obligation_identity,x.amount_ntd,b.format_id "
+            "base.entry_type AS reversed_type,x.obligation_identity,x.amount_ntd,b.format_id,l.reconciliation_reference,b.summary "
             "FROM client_ledger_entries l JOIN client_ledger_obligation_allocations x ON x.ledger_entry_id=l.id "
             "LEFT JOIN client_ledger_entries base ON base.id=l.reversal_of_entry_id "
             "LEFT JOIN finance_import_rows b ON b.id=l.finance_import_row_id "
@@ -392,9 +392,10 @@ def query_case_accounting(connection, case_no, *, for_update=False):
         identity = row["obligation_identity"]
         amount = int(row["amount_ntd"]) * (-1 if kind in {"reversal", "subsidy_return_reversal"} else 1)
         sums[identity] = sums.get(identity, 0) + amount
+        bank = "manual" if ((row.get("reconciliation_reference") or "").startswith("manual") or row.get("summary") == "人工補登") else row["format_id"]
         transactions.append(ClientAccountingTransaction(
             f"client-entry:{row['id']}:{identity}", identity, str(row["occurred_on"]), kind,
-            amount, row["format_id"],
+            amount, bank,
         ))
     allocated = dict(sums)
     for row in (*overages, *refund_overages):

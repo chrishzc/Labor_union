@@ -124,7 +124,7 @@ describe('精簡案件抽屜',()=>{
   expect(screen.getByTestId('refund-account-missing')).toHaveTextContent('待補齊 / 未填寫帳號');
   expect(screen.getByText('未填寫')).toBeVisible();
  });
- it('未完全相符但同月份待核對入款主動呈現於期款列與待核對面板',async()=>{
+ it('未完全相符但同月份待核對入款主動呈現於期款列，抽屜不重複嵌入銀行對帳核銷面板',async()=>{
   vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({
     case_no: caseNo,
     account_version: 1,
@@ -139,7 +139,7 @@ describe('精簡案件抽屜',()=>{
   const matchTag = await screen.findByTestId('pending-match-first');
   expect(matchTag).toHaveTextContent('待核對入款 NT$ 10,000');
   expect(matchTag).toHaveTextContent('短少 NT$ 5,000');
-  expect(screen.getByRole('region',{name:'本案待核對客戶入款'})).toBeVisible();
+  expect(screen.queryByRole('region',{name:'本案待核對客戶入款'})).not.toBeInTheDocument();
  });
 });
 describe('同案通知與方案保存防重',()=>{

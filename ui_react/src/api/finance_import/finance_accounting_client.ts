@@ -26,6 +26,14 @@ const envelope = <T extends z.ZodTypeAny>(data: T) => z.strictObject({ success: 
 export type CaseAccounting = z.infer<typeof detail>;
 export type AccountingWarning = z.infer<typeof warning>;
 export type AccountingItem = z.infer<typeof item>;
+export type CaseManualSupplementCommand = {
+  bank: 'sinopac' | 'taishin';
+  direction: 'client_receipt' | 'staff_salary' | 'client_refund';
+  target_item: string;
+  amount_ntd: number;
+  transaction_date: string;
+  reason?: string | null;
+};
 export const statementColumns = ['帳號', '交易日', '計息日', '入帳日', '摘要', '幣別', '支出', '存入', '餘額', '票據號碼', '銷帳編號', '交易參考編號', '備註', '更正註記', '存摺備註'] as const;
 function options(signal?: AbortSignal) { const token = sessionClient.getToken(); if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。'); return { token, signal }; }
 function verify(data: CaseAccounting, caseNo: string) {
@@ -57,4 +65,7 @@ export const financeAccountingClient = {
     return decodePayload(envelope(receipt), await transport.post('/api/v1/finance-import/statements/duplicates', { candidate_identity: candidate, kept_identity: kept }, { ...options(), headers: { 'Idempotency-Key': key } })).data;
   },
   async download() { return transport.get<Blob>('/api/v1/finance-import/statements/export', { ...options(), responseType: 'blob', timeoutMs: 60000 }); },
+  async manualSupplement(caseNo: string, command: CaseManualSupplementCommand, key: string) {
+    return verify(decodePayload(envelope(detail), await transport.post(`/api/v1/finance-import/cases/${encodeURIComponent(caseNo)}/manual-supplement`, command, { ...options(), headers: { 'Idempotency-Key': key } })).data, caseNo);
+  },
 };
