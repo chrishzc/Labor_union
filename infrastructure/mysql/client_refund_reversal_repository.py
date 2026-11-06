@@ -286,12 +286,13 @@ class MySqlClientRefundReversalRepository:
         # command binding replaces only bank-source matching, never owner facts.
         rows = _load_refund_bank_rows(cursor, selection.bank_fact_identities, lock)
         suffix = " FOR UPDATE" if lock else ""
+        types = _manual_refund_obligation_types(self._manual_source)
         cursor.execute(
             "SELECT obligation_identity,case_no,obligation_type,direction,status,amount_due_ntd "
             "FROM client_obligations WHERE obligation_identity=%s AND case_no=%s "
             "AND direction='payable_to_client' AND status='open' AND amount_due_ntd>0 "
-            "AND obligation_type IN ('refund','adjustment')" + suffix,
-            (self._manual_source.target_item, self._manual_source.case_no),
+            f"AND obligation_type IN ({_placeholders(types)})" + suffix,
+            (self._manual_source.target_item, self._manual_source.case_no, *types),
         )
         obligations = tuple(cursor.fetchall())
         facts = _manual_refund_facts(self._manual_source, selection, rows, obligations)
@@ -501,6 +502,10 @@ def _refund_bank_facts(rows, case_no, refund_purpose, recipient_account):
     )
 
 
+def _manual_refund_obligation_types(source):
+    return ("subsidy_return",) if source.refund_purpose is ClientRefundPurpose.SUBSIDY_RETURN else ("refund", "adjustment")
+
+
 def _manual_refund_facts(source, selection, rows, obligation_rows):
     """Project a manual source only after its exact server-side binding matches."""
     source.validate_selection(selection)
@@ -539,7 +544,7 @@ def _manual_refund_facts(source, selection, rows, obligation_rows):
         or _integer_money(row["debit"]).amount != source.amount_ntd
         or not _is_zero_or_none(row.get("credit"))
         or row.get("direction") != "outgoing"
-        or row.get("effective_classification_type") != "client_refund"
+        or row.get("effective_classification_type") != _classification_for_purpose(source.refund_purpose)
         or row.get("reconciliation_status") != "pending"
         or row.get("ledger_entry_id") is not None
         or _date_text(row.get("transaction_date")) != source.transaction_date
@@ -551,11 +556,12 @@ def _manual_refund_facts(source, selection, rows, obligation_rows):
         or obligation.get("case_no") != source.case_no
         or obligation.get("direction") != "payable_to_client"
         or obligation.get("status") != "open"
-        or obligation.get("obligation_type") not in {"refund", "adjustment"}
+        or obligation.get("obligation_type") not in _manual_refund_obligation_types(source)
         or not _is_positive_integer_money(obligation.get("amount_due_ntd"))
     ):
         raise ValueError("client_obligation_not_found")
     return {
+        "manual_source": source,
         "bank_facts": (ClientRefundBankFact(
             str(source.row_id), source.case_no, MoneyNTD(source.amount_ntd), source.transaction_date,
         ),),

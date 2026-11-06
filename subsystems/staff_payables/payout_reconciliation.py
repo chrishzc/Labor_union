@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+import re
 from typing import Callable, Protocol, TypeAlias
 
 from domains.staff_payables.reconciliation import (
     OutgoingBankFact,
+    ManualStaffPayoutFact,
+    build_manual_staff_payout_candidate,
     StaffPayableFacts,
     StaffPayableStatus,
     StaffPayoutCandidate,
@@ -28,6 +32,38 @@ from shared_kernel.validation import require_canonical_text, require_nonnegative
 _IDENTITY_MAXIMUM_LENGTH = 191
 _REASON_MAXIMUM_LENGTH = 500
 StaffPayoutFormalCandidate: TypeAlias = StaffPayoutCandidate | StaffPayoutReopenCandidate
+
+
+@dataclass(frozen=True, slots=True)
+class ManualStaffPayoutSource:
+    row_id: int
+    case_no: str
+    target_item: str
+    staff_id: int
+    amount_ntd: int
+    transaction_date: str
+    actor: ActorContext
+    command_digest: str
+    reason: str = ""
+
+    def __post_init__(self):
+        if any(type(value) is not int or value <= 0 for value in (self.row_id, self.staff_id, self.amount_ntd)):
+            raise ValueError("manual_staff_source_invalid")
+        require_canonical_text(self.case_no, "case number", 191)
+        require_canonical_text(self.target_item, "staff obligation identity", 191)
+        require_canonical_text(self.reason, "reason", 500, allow_empty=True)
+        if (not isinstance(self.actor, ActorContext)
+            or re.fullmatch(r"admin_user_id:[1-9][0-9]*", self.actor.actor_id) is None
+            or not isinstance(self.command_digest, str) or re.fullmatch(r"[0-9a-f]{64}", self.command_digest) is None
+            or not isinstance(self.transaction_date, str) or date.fromisoformat(self.transaction_date).isoformat() != self.transaction_date):
+            raise ValueError("manual_staff_source_invalid")
+
+    def validate_selection(self, selection):
+        if (selection.event_type is not StaffPayoutEventType.PAYOUT
+            or selection.bank_fact_identities != (str(self.row_id),)
+            or selection.obligation_identities != (self.target_item,)
+            or selection.difference_mode not in (None, StaffPayoutDifferenceMode.UNDERPAYMENT)):
+            raise ValueError("manual_staff_source_mismatch")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +90,7 @@ class StaffPayoutReconciliationFacts:
     obligations: tuple[StaffPayableFacts, ...]
     reopen_fact: StaffPayoutReopenFact | None = None
     blocking_anomalies: tuple[str, ...] = ()
+    manual_source: ManualStaffPayoutFact | None = None
 
     def __post_init__(self) -> None:
         require_nonnegative_integer(self.staff_payables_version, "staff payables version")
@@ -135,7 +172,15 @@ class StaffPayoutReconciliationWorkflow:
         self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, selection: StaffPayoutSelection, correlation_id: CorrelationId) -> StaffPayoutReconciliationPreview:
-        facts = self._repository.load(selection, for_update=False)
+        try:
+            facts = self._repository.load(selection, for_update=False)
+        except StaffPayoutRepositoryUnavailable as error:
+            raise StaffPayoutReconciliationError(TypedError(
+                ErrorCategory.UNAVAILABLE, "transaction_failed",
+                "Staff payout storage is temporarily unavailable.", correlation_id, retryable=True,
+            )) from error
+        except ValueError as error:
+            raise _domain_error(correlation_id, str(error)) from error
         return _build_typed_preview(selection, facts, correlation_id)
 
     def apply(self, request: StaffPayoutApplyRequest) -> StaffPayoutReceipt:
@@ -169,7 +214,10 @@ class StaffPayoutReconciliationWorkflow:
         raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "idempotency_conflict", "Idempotency key was used by another Staff Payables command.")
 
     def _fresh_preview(self, request: StaffPayoutApplyRequest) -> StaffPayoutReconciliationPreview:
-        facts = self._repository.load(request.selection, for_update=True)
+        try:
+            facts = self._repository.load(request.selection, for_update=True)
+        except ValueError as error:
+            raise _domain_error(request.correlation_id, str(error)) from error
         _validate_expected_versions(request, facts)
         preview = _build_typed_preview(request.selection, facts, request.correlation_id)
         if preview.fingerprint != request.preview_fingerprint:
@@ -208,6 +256,8 @@ def _build_preview(selection, facts):
 
 
 def _build_candidate(selection, facts):
+    if facts.manual_source is not None:
+        return build_manual_staff_payout_candidate(facts.manual_source, facts.obligations, selection.difference_mode)
     if selection.event_type is StaffPayoutEventType.PAYOUT:
         if selection.difference_mode is not None:
             return build_staff_payout_difference_candidate(
@@ -223,7 +273,12 @@ def _build_candidate(selection, facts):
 
 
 def _validate_loaded_facts(selection, facts) -> None:
-    bank_identities = tuple(sorted(item.identity for item in facts.bank_facts))
+    if facts.manual_source is not None and (not isinstance(facts.manual_source, ManualStaffPayoutFact)
+        or facts.bank_facts or facts.bank_accounts or facts.reopen_fact is not None or facts.blocking_anomalies
+        or selection.event_type is not StaffPayoutEventType.PAYOUT):
+        raise ValueError("manual_staff_source_mismatch")
+    bank_identities = ((facts.manual_source.identity,) if facts.manual_source is not None
+                       else tuple(sorted(item.identity for item in facts.bank_facts)))
     obligation_identities = tuple(sorted(item.obligation_identity for item in facts.obligations))
     if bank_identities != selection.bank_fact_identities:
         raise ValueError("outgoing_bank_fact_not_eligible")
@@ -282,7 +337,14 @@ def _selection_payload(selection):
 
 
 def _root_facts_payload(facts):
-    return {"bank_facts": _sorted_bank_fact_payloads(facts.bank_facts), "bank_accounts": _sorted_bank_account_payloads(facts.bank_accounts), "obligations": _sorted_obligation_payloads(facts.obligations), "reopen_fact": _reopen_fact_payload(facts.reopen_fact), "blocking_anomalies": facts.blocking_anomalies}
+    payload = {"bank_facts": _sorted_bank_fact_payloads(facts.bank_facts), "bank_accounts": _sorted_bank_account_payloads(facts.bank_accounts), "obligations": _sorted_obligation_payloads(facts.obligations), "reopen_fact": _reopen_fact_payload(facts.reopen_fact), "blocking_anomalies": facts.blocking_anomalies}
+    if facts.manual_source is not None:
+        source = facts.manual_source
+        payload["manual_source"] = {"identity":source.identity,"case_no":source.case_no,
+            "obligation_identity":source.obligation_identity,"staff_id":source.staff_id,
+            "amount_ntd":source.amount.amount,"command_digest":source.command_digest,
+            "raw_fact_identity":source.raw_fact_identity,"payment_source_kind":source.payment_source_kind.value}
+    return payload
 
 
 def _sorted_bank_fact_payloads(bank_facts):
@@ -329,6 +391,8 @@ def _domain_error(correlation_id, code):
 
 
 def _domain_error_category(code):
+    if code == "staff_payables_candidate_stale":
+        return ErrorCategory.CONFLICT
     if code == "staff_payable_not_found":
         return ErrorCategory.NOT_FOUND
     if code == "invalid_staff_payout_intent":
@@ -394,6 +458,7 @@ def _require_tuple(value, field_name) -> None:
 
 
 __all__ = [
+    "ManualStaffPayoutSource",
     "StaffPayoutApplyRequest", "StaffPayoutReceipt", "StaffPayoutReconciliationError",
     "StaffPayoutReconciliationFacts", "StaffPayoutReconciliationPreview",
     "StaffPayoutReconciliationRepository", "StaffPayoutReconciliationWorkflow",

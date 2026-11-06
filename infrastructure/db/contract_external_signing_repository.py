@@ -53,6 +53,8 @@ from subsystems.contract_signing.external_signing_workflow import (
 )
 from subsystems.contract_signing.final_document_workflow import (
     FinalContractDocumentReadback,
+    FinalContractFileReference,
+    signed_contract_object_key,
     SignedContractDocumentReadback,
     SignedContractDocumentPreview,
     FinalSignedContractApplyReceipt,
@@ -704,6 +706,26 @@ class MySqlContractExternalSigningRepository:
         row = self._one(_FINAL_DOCUMENT_READBACK_SQL, (case_no,))
         return None if row is None else _final_document_readback(row)
 
+    def get_controlled_file_reference(self, file_id: str) -> FinalContractFileReference | None:
+        """Read the original final-document and its immutable completion receipt."""
+        row = self._one(
+            "SELECT object.opaque_object_id,object.object_key,session.external_signing_session_id,"
+            "document.case_no,document.content_sha256,document.size_bytes,"
+            "(document.id=(SELECT latest.id FROM contract_final_document_versions latest "
+            "WHERE latest.case_no=document.case_no ORDER BY latest.version_number DESC,latest.id DESC LIMIT 1)) is_current,"
+            "(SELECT COUNT(*) FROM contract_external_signing_receipts receipt "
+            "WHERE receipt.final_document_version_id=document.id "
+            "AND receipt.command_type='apply_final_signed_contract' AND receipt.outcome_state='completed') receipt_count "
+            "FROM contract_final_document_versions document JOIN controlled_file_objects object "
+            "ON object.id=document.controlled_file_object_id "
+            "JOIN contract_external_signing_sessions session ON session.id=document.external_signing_session_id "
+            "WHERE object.opaque_object_id=%s AND session.session_state='completed' LIMIT 1", (file_id,),
+        )
+        if row is None:
+            return None
+        members = self.get_final_documents(str(row["case_no"]))
+        return _final_contract_file_reference(row, members)
+
     def _one(self, statement: str, parameters: tuple[object, ...]):
         with self._connection.cursor() as cursor:
             cursor.execute(statement, parameters)
@@ -726,6 +748,21 @@ class MySqlContractExternalSigningRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("external_signing_persistence_insert_failed")
             return int(cursor.lastrowid)
+
+
+def _final_contract_file_reference(row, members):
+    """Project only the closed owner's receipt, bound to its registered target.
+
+    The digest is transitive through the immutable final-document/object FK;
+    receipt members contain no digest and are not provider-delivery receipts.
+    """
+    member = next((item for item in members if item.file_id == row["opaque_object_id"]), None)
+    member_matches = (member is not None and member.size_bytes == int(row["size_bytes"])
+        and member.mime_type == "application/pdf"
+        and row["object_key"] == signed_contract_object_key(str(row["external_signing_session_id"]), member.target))
+    return FinalContractFileReference(str(row["opaque_object_id"]), str(row["case_no"]),
+        str(row["content_sha256"]), int(row["size_bytes"]), bool(row["is_current"]),
+        int(row["receipt_count"]) > 0 and member_matches, None if not member_matches else member.version)
 
 
 def _stored_receipt(row: Mapping[str, object]) -> StoredExternalSigningReportReceipt:

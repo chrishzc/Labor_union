@@ -25,6 +25,7 @@ class ManualClientRefundSource:
  command_digest: str
  allow_overage_disposition: bool = False
  reason: str = ""
+ refund_purpose: ClientRefundPurpose = ClientRefundPurpose.CUSTOMER_REFUND
 
  def __post_init__(self):
   if type(self.row_id) is not int or self.row_id <= 0 or type(self.amount_ntd) is not int or self.amount_ntd <= 0:
@@ -36,11 +37,15 @@ class ManualClientRefundSource:
    raise ValueError("manual_refund_source_invalid")
   if not isinstance(self.transaction_date,str) or date.fromisoformat(self.transaction_date).isoformat()!=self.transaction_date or type(self.allow_overage_disposition) is not bool:
    raise ValueError("manual_refund_source_invalid")
+  if not isinstance(self.refund_purpose,ClientRefundPurpose) or self.refund_purpose not in {ClientRefundPurpose.CUSTOMER_REFUND,ClientRefundPurpose.SUBSIDY_RETURN}:
+   raise ValueError("manual_refund_source_invalid")
+  if self.refund_purpose is ClientRefundPurpose.SUBSIDY_RETURN and self.allow_overage_disposition:
+   raise ValueError("invalid_client_refund_intent")
 
  def validate_selection(self, selection):
   expected_type=ClientFinanceCorrectionType.REFUND_OVERAGE if self.allow_overage_disposition else ClientFinanceCorrectionType.REFUND
   if (selection.case_no!=self.case_no or selection.correction_type is not expected_type
-      or selection.refund_purpose is not ClientRefundPurpose.CUSTOMER_REFUND
+      or selection.refund_purpose is not self.refund_purpose
       or selection.bank_fact_identities!=(str(self.row_id),) or selection.obligation_identities!=(self.target_item,)
       or selection.allow_partial_refund_recovery != (not self.allow_overage_disposition)):
    raise ValueError("manual_refund_source_mismatch")
@@ -51,7 +56,7 @@ class ClientRefundReversalSelection:
  def __post_init__(self): require_canonical_text(self.case_no,"case number",191); _selection_shape(self)
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalFacts:
- account_version:int; bank_facts:tuple[ClientRefundBankFact,...]=(); obligations:tuple[ClientRefundObligation,...]=(); reversal_targets:tuple[ClientReversalTarget,...]=(); refund_return_bank_facts:tuple[ClientRefundReturnBankFact,...]=(); subsidy_payout:SubsidyPayoutFundingFacts|None=None
+ account_version:int; bank_facts:tuple[ClientRefundBankFact,...]=(); obligations:tuple[ClientRefundObligation,...]=(); reversal_targets:tuple[ClientReversalTarget,...]=(); refund_return_bank_facts:tuple[ClientRefundReturnBankFact,...]=(); subsidy_payout:SubsidyPayoutFundingFacts|None=None; manual_source:ManualClientRefundSource|None=None
  def __post_init__(self): require_nonnegative_integer(self.account_version,"client account version")
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalPreview: candidate:ClientRefundReversalCandidate; account_version:int; fingerprint:PreviewFingerprint
@@ -104,7 +109,7 @@ def _preview(s,f):
  _facts(s,f)
  if s.correction_type is ClientFinanceCorrectionType.REFUND:
   purpose=s.refund_purpose
-  if purpose in {ClientRefundPurpose.SUBSIDY_RETURN,ClientRefundPurpose.SUBSIDY_ADVANCE}:
+  if purpose in {ClientRefundPurpose.SUBSIDY_RETURN,ClientRefundPurpose.SUBSIDY_ADVANCE} and f.manual_source is None:
    if f.subsidy_payout is None:raise ValueError('subsidy_advance_settlement_ambiguous')
    purpose=ClientRefundPurpose.SUBSIDY_ADVANCE if subsidy_payout_is_advance(f.subsidy_payout,sum(b.amount.amount for b in f.bank_facts)) else ClientRefundPurpose.SUBSIDY_RETURN
   c=build_client_refund_candidate(s.case_no,f.bank_facts,f.obligations,purpose,allow_partial_refund_recovery=s.allow_partial_refund_recovery)
@@ -124,10 +129,13 @@ def _selection_shape(s):
  if not all(active) or any(not isinstance(xs,tuple) or xs!=tuple(sorted(set(xs))) for xs in active):raise ValueError("invalid_client_finance_intent")
  if refund and (s.reversal_target_identities or s.reversal_occurred_on is not None):raise ValueError("invalid_client_finance_intent")
  if not isinstance(s.allow_partial_refund_recovery,bool):raise ValueError("invalid_client_finance_intent")
- if s.allow_partial_refund_recovery and (s.correction_type is not ClientFinanceCorrectionType.REFUND or s.refund_purpose is not ClientRefundPurpose.CUSTOMER_REFUND):raise ValueError("invalid_client_finance_intent")
+ if s.allow_partial_refund_recovery and (s.correction_type is not ClientFinanceCorrectionType.REFUND or s.refund_purpose not in {ClientRefundPurpose.CUSTOMER_REFUND,ClientRefundPurpose.SUBSIDY_RETURN}):raise ValueError("invalid_client_finance_intent")
  if refund_return and (s.obligation_identities or s.reversal_occurred_on is not None or len(s.bank_fact_identities)!=1 or len(s.reversal_target_identities)!=1):raise ValueError("invalid_client_finance_intent")
  if not refund and not refund_return and (s.bank_fact_identities or s.obligation_identities or s.reversal_occurred_on is None):raise ValueError("invalid_client_finance_intent")
 def _facts(s,f):
+ if f.manual_source is not None:
+  if not isinstance(f.manual_source,ManualClientRefundSource):raise ValueError("manual_refund_source_invalid")
+  f.manual_source.validate_selection(s)
  if s.correction_type in {ClientFinanceCorrectionType.REFUND,ClientFinanceCorrectionType.REFUND_OVERAGE} and (any(x.case_no!=s.case_no for x in (*f.bank_facts,*f.obligations)) or not f.bank_facts or not f.obligations):raise ValueError("invalid_client_finance_intent")
  if s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN and (len(f.refund_return_bank_facts)!=1 or len(f.reversal_targets)!=1 or f.refund_return_bank_facts[0].case_no!=s.case_no or f.reversal_targets[0].case_no!=s.case_no):raise ValueError("invalid_client_finance_intent")
  if s.correction_type is ClientFinanceCorrectionType.REVERSAL and (not f.reversal_targets or any(x.case_no!=s.case_no for x in f.reversal_targets)):raise ValueError("invalid_client_finance_intent")

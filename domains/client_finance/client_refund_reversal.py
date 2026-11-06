@@ -159,7 +159,7 @@ def build_client_refund_candidate(
     # An explicit partial refund records only the amount paid. The bank-fee
     # settlement rule applies when that distinct intent was not selected.
     explicit_partial = (
-        purpose is ClientRefundPurpose.CUSTOMER_REFUND
+        purpose in {ClientRefundPurpose.CUSTOMER_REFUND, ClientRefundPurpose.SUBSIDY_RETURN}
         and allow_partial_refund_recovery
     )
     if fee_eligible and not explicit_partial and 0 < diff <= 100:

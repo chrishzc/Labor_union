@@ -10,6 +10,8 @@ admin actor、typed errors、opaque projections、digest/readback 與 download r
 
 ## Implementation
 - primary: `api/routes/controlled_files.py`
+- maintenance: `api/routes/controlled_file_maintenance.py` — declared `/api/v1/data-center/staging/{preview,cleanup}` and reconciliation routes, server actor, root authorization, identity/version/digest binding; no arbitrary filesystem paths.
+- consumer: `subsystems/controlled_files/maintenance.py` — same-connection original cleanup intent/terminal facts; read-only observation Preview; four-world success is withheld when authoritative references are unavailable.
 - dependency: `api/dependencies/controlled_files.py`
 - transfer settings: `infrastructure/runtime/file_transfer_settings.py` — photo/resume byte limits, file timeout and atomic settings JSON; no business DB authority. Public LINE reads private HTTPS policy rather than the management configuration file.
 - `GET /api/v1/storage/transfer-settings` — authenticated runtime projection for resume UI; other controlled-document capacities retain their existing behavior.

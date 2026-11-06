@@ -65,6 +65,8 @@
 pre-system historical owner-specific人工付款證據。該例外必須保存獨立source kind、payer/payee/direction、
 exact obligations與audit lineage，不得偽造Finance Import row或bank allocation，也不得跨owner推定結清。
 
+2026-11-06 人工補登 successor例外：規格22 §19另允許案件內登記已發生之收付，沿原Staff Payables／Client Refund writer及同一outer Unit of Work核銷指定義務，支援部分付款，不推定銀行手續費或補造收款帳戶。Staff事件以獨立 `payment_source_kind=manual_supplement` 保存來源，銀行identity hash為NULL；新銀行事件明示 `bank_statement` 並保留有效hash。既有事件新增欄位預設 `legacy_unspecified`，原hash與全部值保持，不反向宣稱其為銀行或人工來源。人工事件更正沿原來源及NULL hash，不因此強制產生新的銀行列；一般銀行對帳／退匯的來源與核銷規則仍沿原契約。schema successor與尚未執行的DB驗證邊界見規格10 §9。
+
 ## 2. Domain：Staff Payables
 
 ### 2.1 責任與 SSOT

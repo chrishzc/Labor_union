@@ -145,12 +145,9 @@ export function CaseManualSupplementWorkbench({
     return () => controller.abort();
   }, [caseNo, recoveryRevision]);
 
-  function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund' | 'government_subsidy') {
+  function handleDirectionChange(newDir: 'client_receipt' | 'staff_salary' | 'client_refund') {
     setDirection(newDir);
     setAllowOverageDisposition(false);
-    if (newDir === 'government_subsidy') {
-      setBank('taishin');
-    }
     let nextCandidates: typeof candidateItems = [];
     if (newDir === 'client_receipt') {
       nextCandidates = clientItems
@@ -176,14 +173,6 @@ export function CaseManualSupplementWorkbench({
           label: `客戶退款 · ${i.label}`,
           remaining: i.remaining_ntd ?? i.expected_ntd,
         }));
-    } else {
-      nextCandidates = [
-        {
-          identity: 'government_subsidy',
-          label: subsidyNtd > 0 ? `政府補助款（本案補助 ${financeMoney(subsidyNtd)}）` : '政府補助款（G 流向）',
-          remaining: subsidyNtd,
-        },
-      ];
     }
     const first = nextCandidates[0];
     if (first) {
@@ -375,18 +364,8 @@ export function CaseManualSupplementWorkbench({
               />
               <span>客戶退款（出款）</span>
             </label>
-            <label className={`supplement-radio-pill ${direction === 'government_subsidy' ? 'is-active' : ''}`}>
-              <input
-                type="radio"
-                name="direction"
-                value="government_subsidy"
-                checked={direction === 'government_subsidy'}
-                onChange={() => handleDirectionChange('government_subsidy')}
-                disabled={disabled}
-              />
-              <span>政府入款（G 補助）</span>
-            </label>
           </div>
+          <p>政府補助入款請從「銀行對帳」選取原政府流水，進入政府整期核對。</p>
         </div>
 
         {(direction === 'client_receipt' || direction === 'client_refund') && <div className="supplement-form-row">

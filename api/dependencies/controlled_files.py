@@ -17,6 +17,7 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.controlled_files.workflow import ControlledFileWorkflow
+from subsystems.controlled_files.maintenance import ControlledFileMaintenanceApplication
 
 
 def get_controlled_file_workflow() -> Iterator[ControlledFileWorkflow]:
@@ -34,4 +35,17 @@ def get_controlled_file_workflow() -> Iterator[ControlledFileWorkflow]:
         connection.close()
 
 
-__all__ = ["get_controlled_file_workflow"]
+def get_controlled_file_maintenance():
+    connection = get_connection()
+    try:
+        capacity = file_read_capacity()
+        yield ControlledFileMaintenanceApplication(
+            MySqlControlledFileWorkflowRepository(connection),
+            FileSystemControlledFileStorage(configured_storage_root(), max_staging_bytes=capacity, max_read_bytes=capacity),
+            lambda: MySqlUnitOfWork(connection), SystemBusinessClock(),
+        )
+    finally:
+        connection.close()
+
+
+__all__ = ["get_controlled_file_workflow", "get_controlled_file_maintenance"]

@@ -12,6 +12,8 @@ workflow／repository／storage port 保護。
 ## Implementation
 - primary: `api/routes/controlled_files.py`
 - dependency: `api/dependencies/controlled_files.py`
+- maintenance routes: `api/routes/controlled_file_maintenance.py` — root-authenticated formal Data Center staging Preview/cleanup and reconciliation Query/Preview/Apply.
+- maintenance consumer: `subsystems/controlled_files/maintenance.py` — binds the existing cleanup/reconciler to the same connection; incomplete business/outbound evidence remains explicit review_required.
 - workflow: `subsystems/controlled_files/workflow.py`
 - finalize runtime: `subsystems/controlled_files/reference_finalize.py`,
   `infrastructure/mysql/controlled_file_finalize_worker.py`

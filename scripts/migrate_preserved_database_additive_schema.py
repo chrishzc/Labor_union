@@ -378,6 +378,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
     "labor_union_2026_11_06_hcm_review_status_v1.json",
+    "labor_union_2026_11_06_staff_payout_payment_sources_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -2331,6 +2332,27 @@ def _modified_parent_predecessor_absent_state(
     defer_missing_triggers: bool,
 ) -> str | None:
     """Recognize the exact predecessor before an additive parent-column MODIFY."""
+    if artifact == "1070_staff_payout_payment_sources.sql":
+        if any(row["table_name"] == "staff_payout_events"
+               and row["column_name"] == "payment_source_kind"
+               for row in snapshot["columns"]) or any(
+            row["table_name"] == "staff_payout_events"
+            and row["constraint_name"] == "chk_staff_payout_payment_source"
+            for row in snapshot.get("constraints", ())
+        ):
+            # One atomic ALTER has no resumable half-applied predecessor shape.
+            return None
+        predecessor = deepcopy(descriptor)
+        predecessor["parent_columns"]["staff_payout_events"].pop("payment_source_kind")
+        predecessor["parent_columns"]["staff_payout_events"]["bank_account_identity_hash"] = (
+            _column_contract("char(64)", "NO")
+        )
+        predecessor["checks"].pop(("staff_payout_events", "chk_staff_payout_payment_source"))
+        state = _artifact_metadata_state(
+            snapshot, predecessor, artifact,
+            defer_missing_triggers=defer_missing_triggers,
+        )
+        return "absent" if state == "exact" else None
     predecessor_columns = {
         "1058_client_refund_overage_receipt.sql": {
             "client_refund_reversal_apply_receipts": {"correction_type": _column_contract("enum('refund','refund_return','reversal')", "NO")},
@@ -3936,6 +3958,9 @@ def _local_classify_statement(statement: str) -> str:
         reopen_optional = ROOT / "db/schema_parts/1062_order_reopen_reason_optional.sql"
         if normalized.startswith("alter table order_reopen_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(reopen_optional.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
             return "alter_add_only"
+        staff_sources = ROOT / "db/schema_parts/1070_staff_payout_payment_sources.sql"
+        if normalized.startswith("alter table staff_payout_events ") and normalized.rstrip(';') == re.sub(r"\s+", " ", split_sql(staff_sources.read_text(encoding="utf-8"))[0].strip()).casefold().rstrip(';'):
+            return "staff_payout_payment_source_widen"
         canonical_1008 = re.sub(
             r"\s+",
             " ",
@@ -5668,6 +5693,11 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         ):
             path = ROOT / "db/schema_parts/194_historical_order_adoption.sql"
     if path is None:
+        if part_name == "114_staff_payout_ledger.sql" and any(
+            item.name == "1070_staff_payout_payment_sources.sql" for item in SCHEMA_PARTS
+        ):
+            path = ROOT / "db/schema_parts/114_staff_payout_ledger.sql"
+    if path is None:
         raise UpgradeBlocked(f"canonical schema part is missing: {part_name}")
     sql = path.read_text(encoding="utf-8")
     descriptor: dict[str, Any] = {
@@ -6303,6 +6333,24 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["clients"] = {
             "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
+    if part_name == "1070_staff_payout_payment_sources.sql":
+        # Bind the complete immutable event contract, without taking ownership
+        # of 114's projections/outbox evolved by other published successors.
+        descriptor = _canonical_artifact_descriptor("114_staff_payout_ledger.sql")
+        _limit_descriptor_to_owned_tables(descriptor, frozenset({"staff_payout_events"}))
+        descriptor["parent_columns"]["staff_payout_events"] = descriptor["tables"].pop("staff_payout_events")
+        descriptor["parent_columns"]["staff_payout_events"].update({
+            "bank_account_identity_hash": _column_contract("char(64)", "YES"),
+            "payment_source_kind": _column_contract(
+                "enum('legacy_unspecified','bank_statement','manual_supplement')",
+                "NO", "legacy_unspecified",
+            ),
+        })
+        check_start = sql.index("CHECK (") + len("CHECK ")
+        clause, _ = _extract_parenthesized(sql, check_start)
+        descriptor["checks"][("staff_payout_events", "chk_staff_payout_payment_source")] = (
+            _normalize_sql_contract(clause)
+        )
     if part_name == "1051_candidate_weekly_information.sql":
         descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {
             "event_type": _column_contract("enum('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn','info_3_sent')", "NO"),
@@ -6692,6 +6740,7 @@ def _release_descriptor_metadata_state(
         "1053_line_order_group_invitation_url.sql",
         "1058_client_refund_overage_receipt.sql",
         "1065_historical_order_reused_pairing_check.sql",
+        "1070_staff_payout_payment_sources.sql",
     }:
         if released.get("parent_columns") != canonical.get("parent_columns"):
             raise UpgradeBlocked(
@@ -7490,10 +7539,17 @@ def _artifact_metadata_state(
         name for name, value in triggers.items()
         if value["event_object_table"] in owned_tables
     }
+    if part_name == "1070_staff_payout_payment_sources.sql":
+        # This successor explicitly binds the complete payout-event guard set.
+        # Other parent ALTERs own only their named guards, not the parent table.
+        actual_owned_trigger_names.update(
+            name for name, value in triggers.items()
+            if value["event_object_table"] == "staff_payout_events"
+        )
     if actual_owned_trigger_names - expected_trigger_names:
         return "drift"
     if (
-        expected_trigger_names - actual_owned_trigger_names
+        expected_trigger_names - triggers.keys()
         and not defer_missing_triggers
         and any(owned_presence)
     ):

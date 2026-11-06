@@ -55,6 +55,7 @@ from api.routes import (
     accounting_pricing,
     contracts,
     controlled_files,
+    controlled_file_maintenance,
     file_settings,
     data_browser_admin,
     finance_import,
@@ -395,6 +396,7 @@ app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(controlled_files.router)
+app.include_router(controlled_file_maintenance.router)
 app.include_router(file_settings.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)

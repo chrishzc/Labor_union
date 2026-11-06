@@ -146,22 +146,17 @@ def test_concurrent_gc_passes_do_not_issue_duplicate_cleanup_for_one_staging_obj
 
 
 @pytest.mark.parametrize("dry_run", [True, False])
-def test_mysql_gc_blocks_without_reference_authority_before_sql_or_cleanup(dry_run):
-    from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
+def test_mysql_gc_blocks_incomplete_reference_projection_before_cleanup(dry_run):
+    from infrastructure.db.controlled_file_repository import _gc_candidate
 
-    class NoSqlConnection:
-        def cursor(self):
-            raise AssertionError("GC must reject missing authority before project SQL")
+    class IncompleteAuthority:
+        def list_staging_gc_candidates(self, **_kwargs):
+            # No SQL is executed: exercise the real adapter's row projection.
+            return (_gc_candidate({"staging_id": _candidate().staging_id}),)
 
     cleanup = _Cleanup()
-    service = ControlledFileStagingGarbageCollector(
-        MySqlControlledFileWorkflowRepository(NoSqlConnection()),
-        cleanup,
-        FixedBusinessClock(NOW),
-    )
-
+    service = ControlledFileStagingGarbageCollector(IncompleteAuthority(), cleanup, FixedBusinessClock(NOW))
     with pytest.raises(ControlledFileGcError) as failure:
         service.run(_command("controlled-file.gc:authority-not-ready", dry_run=dry_run))
-
     assert failure.value.code == "controlled_file_gc_reference_authority_not_ready"
     assert cleanup.commands == []

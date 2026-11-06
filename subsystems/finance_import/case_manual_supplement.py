@@ -13,6 +13,11 @@ from infrastructure.mysql.client_receipt_reconciliation_repository import (
     MySqlClientReceiptReconciliationRepository,
 )
 from infrastructure.mysql.client_refund_reversal_repository import MySqlClientRefundReversalRepository
+from infrastructure.mysql.staff_payout_repository import MySqlStaffPayoutRepository
+from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
+from subsystems.staff_payables.payout_reconciliation import (
+    ManualStaffPayoutSource, StaffPayoutApplyRequest, StaffPayoutReconciliationWorkflow, StaffPayoutSelection,
+)
 from domains.client_finance.client_refund_reversal import ClientFinanceCorrectionType, ClientRefundPurpose
 from infrastructure.mysql.finance_import_owning_domain_composite import BorrowedTransactionUnitOfWork
 from infrastructure.mysql.staff_payable_correction_sql import selectable_staff_obligation
@@ -82,7 +87,9 @@ class ManualSupplementBlocked(ValueError):
     def __init__(self, code: str):
         self.error = TypedError(
             ErrorCategory.DOMAIN_BLOCKED, code,
-            "Manual supplement requires review before posting.",
+            ("政府補助入款請從銀行對帳選取原政府流水，進入政府整期核對。"
+             if code == "government_subsidy_period_selection_required"
+             else "Manual supplement requires review before posting."),
             CorrelationId("finance-manual-supplement"), domain_blockers=(code,),
         )
         super().__init__(code)
@@ -160,8 +167,13 @@ class CaseManualSupplementService:
                     legacy_reason=_replay_reason(command, existing["command_digest"]),
                 )
 
+            if direction == "government_subsidy":
+                raise ManualSupplementBlocked("government_subsidy_period_selection_required")
+
             # Replay precedes mutable balance/status checks: a settled target can replay.
             target = self._lock_target(cursor, case_no, direction, target_item)
+            if direction == "client_refund" and target["obligation_type"] == "subsidy_return" and allow_overage_disposition:
+                raise ManualSupplementBlocked("invalid_client_refund_intent")
             resolution = resolve_case_virtual_account(cursor, case_no)
             if resolution["result"] != "resolved":
                 raise ManualSupplementBlocked(str(resolution["reason"]))
@@ -177,26 +189,24 @@ class CaseManualSupplementService:
                 f"manual-supplement:{case_no}:{bank}:{direction}:{amount_ntd}:{transaction_date}:{idempotency_key}".encode()
             ).hexdigest()
 
-            is_incoming = direction in {"client_receipt", "government_subsidy"}
+            is_incoming = direction == "client_receipt"
             cancellation_code = virtual_account if direction == "client_receipt" else ""
             memo = (
                 f"HC{case_suffix}服務人員"
                 if direction == "staff_salary"
                 else f"HC{case_suffix}退款"
                 if direction == "client_refund"
-                else f"新竹市政府補助款 {case_suffix}"
-                if direction == "government_subsidy"
                 else note_text
             )
             classification = (
-                "government_subsidy"
-                if direction == "government_subsidy"
-                else "client_receipt"
+                "client_receipt"
                 if direction == "client_receipt"
                 else "staff_payout"
                 if direction == "staff_salary"
                 else "client_refund"
             )
+            if direction == "client_refund" and target["obligation_type"] == "subsidy_return":
+                classification = "client_subsidy_return"
             date_slash = transaction_date.replace("-", "/")
             raw_payload = {
                 "帳號": None,
@@ -237,12 +247,12 @@ class CaseManualSupplementService:
                     json.dumps(
                         _bank_references(bank, note_text, cancellation_code, memo,
                                          allow_overage_disposition=allow_overage_disposition,
-                                         manual_command=command if direction == "client_refund" else None),
+                                         manual_command=command if direction in {"client_refund", "staff_salary"} else None),
                         ensure_ascii=False,
                     ),
                     "[]",
                     classification,
-                    "pending" if direction in {"client_receipt", "client_refund"} else "reconciled",
+                    "pending" if direction in {"client_receipt", "client_refund", "staff_salary"} else "reconciled",
                     json.dumps(raw_payload, ensure_ascii=False),
                 ),
             )
@@ -266,112 +276,37 @@ class CaseManualSupplementService:
                 entry_id = int(entry["id"])
 
             elif direction == "staff_salary":
-                # 月嫂薪資核銷
-                staff_id = int(target["staff_id"])
-
-                bank_hash = hashlib.sha256(f"manual:{staff_id}:{bank}".encode()).hexdigest()
-                cursor.execute(
-                    """
-                    INSERT INTO staff_payout_events (
-                        staff_id, finance_import_row_id, event_type, amount_ntd,
-                        occurred_on, bank_account_identity_hash, reconciliation_reference,
-                        idempotency_key, actor, reason
-                    ) VALUES (%s, %s, 'payout', %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        staff_id,
-                        row_id,
-                        amount_ntd,
-                        transaction_date,
-                        bank_hash,
-                        f"manual-payout:{row_id}",
-                        idempotency_key,
-                        actor,
-                        note_text,
-                    ),
-                )
-                entry_id = cursor.lastrowid
-                cursor.execute(
-                    """
-                    INSERT INTO staff_payout_obligation_links (
-                        payout_event_id, obligation_identity, allocated_amount_ntd, allocation_ordinal
-                    ) VALUES (%s, %s, %s, 1)
-                    """,
-                    (entry_id, target_item, amount_ntd),
-                )
-                # All assignments use the same locked pre-payment values. MySQL
-                # single-table UPDATE otherwise reuses already-updated net_paid.
-                net_paid = int(target["net_paid_ntd"]) + amount_ntd
-                remaining = int(target["remaining_ntd"]) - amount_ntd
-                cursor.execute(
-                    """
-                    UPDATE staff_payable_projections
-                    SET net_paid_ntd=%s, balance_ntd=%s, status=%s,
-                        aggregate_version=aggregate_version+1, current_event_id=%s
-                    WHERE obligation_identity=%s AND aggregate_version=%s
-                    """,
-                    (net_paid, remaining, "completed" if remaining == 0 else "partially_paid",
-                     entry_id, target_item, target["aggregate_version"]),
-                )
-                if cursor.rowcount != 1:
-                    raise AccountingConflict("staff_payables_candidate_stale")
-
-            elif direction == "client_refund":
-                self._post_client_refund(
-                    case_no, row_id, target_item, amount_ntd, transaction_date,
-                    idempotency_key, actor, note_text, cmd_digest,
-                    allow_overage_disposition=allow_overage_disposition,
+                self._post_staff_payout(
+                    case_no, row_id, target_item, int(target["staff_id"]), amount_ntd,
+                    int(target["remaining_ntd"]), transaction_date, idempotency_key, actor, note_text, cmd_digest,
                 )
                 cursor.execute(
-                    "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type='refund'",
-                    (row_id, case_no),
+                    "SELECT payout.id FROM staff_payout_events payout "
+                    "JOIN staff_payout_obligation_links link ON link.payout_event_id=payout.id "
+                    "WHERE payout.finance_import_row_id=%s AND payout.event_type='payout' AND link.obligation_identity=%s",
+                    (row_id, target_item),
                 )
                 entry = cursor.fetchone()
                 if entry is None:
                     raise AccountingConflict("manual_supplement_receipt_missing")
                 entry_id = int(entry["id"])
 
-            elif direction == "government_subsidy":
-                # 政府入款核銷（台新入款 G）
-                cursor.execute(
-                    "SELECT COALESCE(actual_end_date, end_date) as service_end FROM orders WHERE case_no=%s",
-                    (case_no,),
+            elif direction == "client_refund":
+                self._post_client_refund(
+                    case_no, row_id, target_item, amount_ntd, transaction_date,
+                    idempotency_key, actor, note_text, cmd_digest,
+                    allow_overage_disposition=allow_overage_disposition,
+                    refund_purpose=(ClientRefundPurpose.SUBSIDY_RETURN if target["obligation_type"] == "subsidy_return"
+                                    else ClientRefundPurpose.CUSTOMER_REFUND),
                 )
-                ord_row = cursor.fetchone()
-                svc_date = ord_row["service_end"] if ord_row and ord_row["service_end"] else transaction_date
-                year_val = int(str(svc_date)[:4])
-                month_val = int(str(svc_date)[5:7]) if len(str(svc_date)) >= 7 else 1
-                quarter_val = (month_val - 1) // 3 + 1
                 cursor.execute(
-                    """
-                    INSERT INTO government_subsidy_period_entries (
-                        period_unit, period_year, period_index, period_start, period_end,
-                        finance_import_row_id, amount_ntd, paid_on, idempotency_key, actor
-                    ) VALUES (
-                        'quarter', %s, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        year_val,
-                        quarter_val,
-                        f"{year_val}-{(quarter_val-1)*3+1:02d}-01",
-                        f"{year_val}-{quarter_val*3:02d}-28",
-                        row_id,
-                        amount_ntd,
-                        transaction_date,
-                        idempotency_key,
-                        actor,
-                    ),
+                    "SELECT id FROM client_ledger_entries WHERE finance_import_row_id=%s AND case_no=%s AND entry_type=%s",
+                    (row_id, case_no, "subsidy_return" if target["obligation_type"] == "subsidy_return" else "refund"),
                 )
-                entry_id = cursor.lastrowid
-                cursor.execute(
-                    """
-                    INSERT INTO government_subsidy_period_members (
-                        receipt_id, case_no, service_end_date, amount_ntd
-                    ) VALUES (%s, %s, %s, %s)
-                    """,
-                    (entry_id, case_no, svc_date, amount_ntd),
-                )
+                entry = cursor.fetchone()
+                if entry is None:
+                    raise AccountingConflict("manual_supplement_receipt_missing")
+                entry_id = int(entry["id"])
 
             # 5. 寫入 command 收據防重
             cursor.execute(
@@ -395,8 +330,6 @@ class CaseManualSupplementService:
 
 
     def _lock_target(self, cursor, case_no, direction, target_item):
-        if direction == "government_subsidy":
-            return {}
         if direction == "staff_salary":
             cursor.execute(
                 "SELECT obligations.staff_id FROM staff_obligations obligations "
@@ -428,7 +361,7 @@ class CaseManualSupplementService:
             )
             cursor.fetchone()
             expected_direction = "receivable_from_client" if direction == "client_receipt" else "payable_to_client"
-            allowed_types = ("deposit", "first", "second", "adjustment") if direction == "client_receipt" else ("refund", "adjustment")
+            allowed_types = ("deposit", "first", "second", "adjustment") if direction == "client_receipt" else ("refund", "adjustment", "subsidy_return")
             placeholders = ",".join("%s" for _ in allowed_types)
             cursor.execute(
                 "SELECT obligation_type,amount_due_ntd AS remaining_ntd FROM client_obligations "
@@ -467,18 +400,39 @@ class CaseManualSupplementService:
         finally:
             repository.clear_apply_request()
 
+    def _post_staff_payout(self, case_no, row_id, target_item, staff_id, amount_ntd, remaining_ntd,
+                           transaction_date, key, actor, reason, command_digest):
+        context = ManualStaffPayoutSource(int(row_id), case_no, target_item, staff_id, amount_ntd,
+            transaction_date, ActorContext(actor), command_digest, reason)
+        repository = MySqlStaffPayoutRepository(self.connection, manual_source=context)
+        workflow = StaffPayoutReconciliationWorkflow(repository, BorrowedTransactionUnitOfWork)
+        selection = StaffPayoutSelection(StaffPayoutEventType.PAYOUT, (str(row_id),), (target_item,),
+            difference_mode=StaffPayoutDifferenceMode.UNDERPAYMENT if amount_ntd < remaining_ntd else None)
+        correlation = CorrelationId("finance-manual-supplement")
+        preview = workflow.preview(selection, correlation)
+        request = StaffPayoutApplyRequest(selection, ExpectedVersion(preview.staff_payables_version),
+            ExpectedVersion(preview.bank_facts_version), preview.fingerprint,
+            IdempotencyKey("manual-staff-payout:" + hashlib.sha256(key.encode()).hexdigest()),
+            ActorContext(actor), reason, correlation)
+        repository.bind_apply_request(request)
+        try:
+            return workflow.apply(request)
+        finally:
+            repository.clear_apply_request()
+
     def _post_client_refund(self, case_no, row_id, target_item, amount_ntd, transaction_date,
-                            key, actor, reason, command_digest, *, allow_overage_disposition=False):
+                            key, actor, reason, command_digest, *, allow_overage_disposition=False,
+                            refund_purpose=ClientRefundPurpose.CUSTOMER_REFUND):
         context = ManualClientRefundSource(
             int(row_id), case_no, target_item, amount_ntd, transaction_date,
-            ActorContext(actor), command_digest, allow_overage_disposition, reason=reason,
+            ActorContext(actor), command_digest, allow_overage_disposition, reason=reason, refund_purpose=refund_purpose,
         )
         repository = MySqlClientRefundReversalRepository(self.connection, manual_source=context)
         workflow = ClientRefundReversalWorkflow(repository, BorrowedTransactionUnitOfWork)
         selection = ClientRefundReversalSelection(
             case_no,
             ClientFinanceCorrectionType.REFUND_OVERAGE if allow_overage_disposition else ClientFinanceCorrectionType.REFUND,
-            ClientRefundPurpose.CUSTOMER_REFUND,
+            refund_purpose,
             bank_fact_identities=(str(row_id),), obligation_identities=(target_item,),
             allow_partial_refund_recovery=not allow_overage_disposition,
         )
@@ -536,17 +490,22 @@ class CaseManualSupplementService:
                 "WHERE entry.finance_import_row_id=%s AND member.case_no=%s"
             )
         else:
-            entry_type = "receipt" if direction == "client_receipt" else "refund"
             query = (
-                "SELECT entry.id AS entry_id,allocation.obligation_identity AS target_item,entry.amount_ntd,entry.actor "
+                "SELECT entry.id AS entry_id,allocation.obligation_identity AS target_item,entry.amount_ntd,entry.actor,entry.entry_type,obligation.obligation_type "
                 "FROM client_ledger_entries entry JOIN client_ledger_obligation_allocations allocation ON allocation.ledger_entry_id=entry.id "
-                "WHERE entry.finance_import_row_id=%s AND entry.case_no=%s AND entry.entry_type='" + entry_type + "'"
+                "JOIN client_obligations obligation ON obligation.obligation_identity=allocation.obligation_identity "
+                "WHERE entry.finance_import_row_id=%s AND entry.case_no=%s AND entry.entry_type "
+                + ("='receipt'" if direction == "client_receipt" else "IN ('refund','subsidy_return')")
             )
         cursor.execute(query, (row_id, case_no))
         rows = tuple(cursor.fetchall())
         if len(rows) != 1:
             raise StatementCommandConflict("manual_supplement_receipt_invalid")
         original = rows[0]
+        if direction == "client_refund" and original["entry_type"] != (
+            "subsidy_return" if original["obligation_type"] == "subsidy_return" else "refund"
+        ):
+            raise StatementCommandConflict("manual_supplement_receipt_invalid")
         if (
             int(original["amount_ntd"]) != command["amount_ntd"]
             or original["actor"] != command["actor"]

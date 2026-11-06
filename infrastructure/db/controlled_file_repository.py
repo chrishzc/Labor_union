@@ -6,7 +6,7 @@ Description: 以單一外層交易保存受控檔案 staging、版本與 Apply r
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from typing import Any
@@ -46,6 +46,7 @@ from subsystems.controlled_files.cleanup import (
     ControlledFileCleanupReceipt,
     ControlledFileCleanupTerminal,
     StoredControlledFileCleanup,
+    ControlledFileCleanupError,
 )
 
 
@@ -324,9 +325,14 @@ class MySqlControlledFileWorkflowRepository:
             row = cursor.fetchone()
         return None if row is None else _readback(row)
 
-    def list_readbacks(self) -> tuple[ControlledFileReadback, ...]:
+    def list_readbacks(self, *, limit: int | None = None) -> tuple[ControlledFileReadback, ...]:
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 100):
+            raise ValueError("controlled file list limit must be between 1 and 100")
         with self._connection.cursor() as cursor:
-            cursor.execute(_READBACK_LIST_SQL)
+            if limit is None:
+                cursor.execute(_READBACK_LIST_SQL)
+            else:
+                cursor.execute(_READBACK_LIST_SQL + " LIMIT %s", (limit,))
             rows = cursor.fetchall()
         return tuple(_readback(row) for row in rows)
 
@@ -360,14 +366,51 @@ class MySqlControlledFileWorkflowRepository:
     def list_staging_gc_candidates(
         self, *, limit: int, observed_at: datetime
     ) -> tuple[ControlledFileGcCandidate, ...]:
-        """Fail closed until every reference and active lease is authoritative."""
+        """Select only governed staging identities; every registered object is protected.
+
+        Object existence protects every owner, including owners whose business
+        references are stored outside the Scheduling-only 1015 reference table.
+        This query never treats an arbitrary NAS path as unreferenced staging.
+        """
         if isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("controlled file GC limit must be between 1 and 100")
-        _ = _mysql_utc(observed_at)
-        raise ControlledFileGcError(
-            "controlled_file_gc_reference_authority_not_ready",
-            "附件 reference 與 active lease SSOT 尚未完成，GC 不得推定零 reference／零 lease",
-        )
+        with self._connection.cursor() as cursor:
+            now = _mysql_utc(observed_at)
+            cursor.execute(_GC_CANDIDATES_SQL, (now, now - timedelta(minutes=30), now, now, limit))
+            rows = tuple(cursor.fetchall())
+        return tuple(_gc_candidate(row) for row in rows)
+
+    def reconciliation_reference_status(self, file_id):
+        target = self.get_download_reference(file_id)
+        if target is None:
+            return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+        readback = target.readback
+        if readback.owner is ControlledFileOwner.CONTRACT_SIGNING and readback.purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
+            from infrastructure.db.contract_external_signing_repository import MySqlContractExternalSigningRepository
+            reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(file_id)
+            return _contract_reference_status(readback, reference)
+        if readback.owner is not ControlledFileOwner.SCHEDULING or readback.purpose not in {
+            ControlledFilePurpose.BABY_LOG_PHOTO, ControlledFilePurpose.MEAL_PHOTO,
+        }:
+            return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+        # This is the same immutable attachment/object relation read by the
+        # Scheduling business page, not a guessed reference inside arbitrary JSON.
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT reference.reference_kind,attachment.attachment_kind,log.case_no "
+                "FROM controlled_file_objects object JOIN controlled_file_references reference "
+                "ON reference.controlled_file_object_id=object.id "
+                "JOIN scheduling_service_day_log_attachments attachment "
+                "ON attachment.id=reference.service_day_log_attachment_id "
+                "AND attachment.controlled_file_object_id=object.id "
+                "JOIN scheduling_service_day_logs log ON log.id=attachment.service_day_log_id "
+                "WHERE object.opaque_object_id=%s", (file_id,),
+            )
+            rows = tuple(cursor.fetchall())
+        matched = (len(rows) == 1 and rows[0]["case_no"] == readback.subject_reference
+                   and rows[0]["attachment_kind"] == readback.purpose.value
+                   and rows[0]["reference_kind"] == "scheduling_service_day_log_attachment")
+        return {"business_reference": "matched" if matched else "mismatch", "outbound_reference": "unavailable"}
 
     def append_reconciliation_event(
         self, event: ControlledFileReconciliationEvent
@@ -465,6 +508,20 @@ class MySqlControlledFileWorkflowRepository:
         event_id = _cleanup_event_id(cleanup_id, 1)
         occurred = _mysql_utc(occurred_at)
         with self._connection.cursor() as cursor:
+            # The same staging mutex is taken by registration and lease writers.
+            # Recheck after Preview; a stale zero-reference observation is unsafe.
+            cursor.execute(_CLEANUP_STAGING_LOCK_SQL, (command.staging_id,))
+            target = cursor.fetchone()
+            if not isinstance(target, Mapping):
+                raise ControlledFileCleanupError("controlled_file_staging_not_found", "指定暫存檔案不存在")
+            cursor.execute("SELECT id FROM controlled_file_objects WHERE source_staging_id=%s FOR UPDATE", (target["id"],))
+            objects = tuple(cursor.fetchall())
+            cursor.execute(
+                "SELECT id FROM controlled_file_leases WHERE staging_object_id=%s "
+                "AND lease_state='active' AND expires_at_utc>%s FOR UPDATE", (target["id"], occurred),
+            )
+            leases = tuple(cursor.fetchall())
+            _require_cleanup_safe({**target, "object_count": len(objects), "active_lease_count": len(leases)}, command, occurred_at)
             cursor.execute(
                 _CLEANUP_INTENT_INSERT_SQL,
                 (
@@ -790,6 +847,75 @@ def _json_value(value: object) -> object:
 
 def _lock_suffix(lock: bool) -> str:
     return " FOR UPDATE" if lock else ""
+
+
+def _gc_candidate(row):
+    required = ("staging_id", "staging_version", "content_sha256", "expires_at_utc",
+                "staging_state", "object_count", "active_lease_count")
+    if any(name not in row for name in required):
+        raise ControlledFileGcError("controlled_file_gc_reference_authority_not_ready", "暫存參照資料不完整")
+    counts = (row["object_count"], row["active_lease_count"])
+    if any(type(value) is not int or value < 0 for value in counts):
+        raise ControlledFileGcError("controlled_file_gc_reference_authority_not_ready", "暫存參照資料無法判讀")
+    return ControlledFileGcCandidate(
+        str(row["staging_id"]), int(row["staging_version"]), str(row["content_sha256"]),
+        _aware_utc(row["expires_at_utc"]),
+        ControlledFileStagingRegistrationStatus.UNREGISTERED if row["staging_state"] == "staged" and not row["object_count"]
+        else ControlledFileStagingRegistrationStatus.REGISTERED,
+        row["object_count"], bool(row["active_lease_count"]),
+    )
+
+
+def _contract_reference_status(readback, reference):
+    if reference is None:
+        return {"business_reference": "unavailable", "outbound_reference": "unavailable"}
+    matched = (reference.file_id == readback.file_id and reference.case_no == readback.subject_reference
+               and reference.sha256_digest == readback.sha256_digest and reference.size_bytes == readback.size_bytes
+               and readback.mime_type == "application/pdf" and reference.current)
+    return {"business_reference": "matched" if matched else "mismatch",
+            "frozen_completion_reference": "matched" if matched and reference.completion_receipt_present
+            and reference.file_version == readback.version else "unavailable",
+            # Inbound signing completion proves an immutable business freeze,
+            # never the result of sending this file to an external provider.
+            "outbound_reference": "unavailable"}
+
+
+def _require_cleanup_safe(row, command, observed_at):
+    candidate = _gc_candidate(row)
+    now = _aware_utc(observed_at)
+    if (candidate.staging_id != command.staging_id
+        or candidate.staging_version != command.expected_staging_version.value
+        or candidate.expected_sha256 != command.expected_sha256):
+        raise ControlledFileCleanupError("controlled_file_cleanup_staging_conflict", "暫存檔案已變更")
+    if candidate.registration_status is not ControlledFileStagingRegistrationStatus.UNREGISTERED or candidate.reference_count:
+        raise ControlledFileCleanupError("controlled_file_cleanup_referenced", "正式或已引用的檔案不可清理")
+    if candidate.active_lease:
+        raise ControlledFileCleanupError("controlled_file_cleanup_leased", "檔案仍有有效租約")
+    created_at = row.get("created_at_utc")
+    if not isinstance(created_at, datetime) or _aware_utc(created_at) > now - timedelta(minutes=30):
+        raise ControlledFileCleanupError("controlled_file_cleanup_minimum_age", "暫存檔案尚未符合最小保留時間")
+    if command.reason is ControlledFileStagingCleanupReason.EXPIRED and candidate.expires_at > now:
+        raise ControlledFileCleanupError("controlled_file_cleanup_not_expired", "暫存檔案尚未到期")
+
+
+_GC_CANDIDATES_SQL = (
+    "SELECT staging.staging_id,staging.staging_version,staging.content_sha256,"
+    "staging.expires_at_utc,staging.staging_state,"
+    "(SELECT COUNT(*) FROM controlled_file_objects object WHERE object.source_staging_id=staging.id) object_count,"
+    "(SELECT COUNT(*) FROM controlled_file_leases lease WHERE lease.staging_object_id=staging.id "
+    "AND lease.lease_state='active' AND lease.expires_at_utc>%s) active_lease_count "
+    "FROM controlled_file_staging_objects staging WHERE staging.staging_state='staged' "
+    "AND staging.created_at_utc<=%s AND staging.expires_at_utc<=%s "
+    "AND NOT EXISTS (SELECT 1 FROM controlled_file_objects registered WHERE registered.source_staging_id=staging.id) "
+    "AND NOT EXISTS (SELECT 1 FROM controlled_file_leases active WHERE active.staging_object_id=staging.id "
+    "AND active.lease_state='active' AND active.expires_at_utc>%s) "
+    # Oldest expiry first keeps protected/young rows from starving eligible orphans.
+    "ORDER BY staging.expires_at_utc,staging.id LIMIT %s"
+)
+_CLEANUP_STAGING_LOCK_SQL = (
+    "SELECT id,staging_id,staging_version,content_sha256,staging_state,created_at_utc,expires_at_utc "
+    "FROM controlled_file_staging_objects WHERE staging_id=%s FOR UPDATE"
+)
 
 
 _STAGING_SELECT_SQL = (

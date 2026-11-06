@@ -105,6 +105,18 @@ class ApplyFinalSignedContractUpload:
 
 
 @dataclass(frozen=True, slots=True)
+class FinalContractFileReference:
+    """Read-only identity/digest evidence for controlled-file reconciliation."""
+    file_id: str
+    case_no: str
+    sha256_digest: str
+    size_bytes: int
+    current: bool
+    completion_receipt_present: bool
+    file_version: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FinalContractDocumentReadback:
     final_document_id: str
     case_no: str

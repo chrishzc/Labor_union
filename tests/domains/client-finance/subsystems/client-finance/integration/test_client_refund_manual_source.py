@@ -29,40 +29,47 @@ class NoSqlConnection:
         raise AssertionError("the borrowed owner may not commit the outer transaction")
 
 
-def _fixture(amount=300, *, overage=False):
+def _fixture(amount=300, *, overage=False, purpose=ClientRefundPurpose.CUSTOMER_REFUND):
+    target = "subsidy-return:CASE-1" if purpose is ClientRefundPurpose.SUBSIDY_RETURN else "refund:CASE-1"
     command = _supplement_command(
-        "CASE-1", "sinopac", "client_refund", "refund:CASE-1", amount,
+        "CASE-1", "sinopac", "client_refund", target, amount,
         "2026-11-06", "", "admin_user_id:7", allow_overage_disposition=overage,
     )
     source = ManualClientRefundSource(
         16, command["case_no"], command["target_item"], amount, command["transaction_date"],
-        ActorContext(command["actor"]), fingerprint_payload(command).value, overage,
+        ActorContext(command["actor"]), fingerprint_payload(command).value, overage, refund_purpose=purpose,
     )
     selection = ClientRefundReversalSelection(
         source.case_no, ClientFinanceCorrectionType.REFUND_OVERAGE if overage else ClientFinanceCorrectionType.REFUND,
-        ClientRefundPurpose.CUSTOMER_REFUND, ("16",), (source.target_item,),
+        purpose, ("16",), (source.target_item,),
         allow_partial_refund_recovery=not overage,
     )
     row = {
         "id": 16, "format_id": "sinopac", "transaction_date": date(2026, 11, 6),
         "debit": amount, "credit": None, "direction": "outgoing", "currency": "TWD",
-        "effective_classification_type": "client_refund", "reconciliation_status": "pending",
+        "effective_classification_type": "client_subsidy_return" if purpose is ClientRefundPurpose.SUBSIDY_RETURN else "client_refund", "reconciliation_status": "pending",
         "ledger_entry_id": None, "resolved_counterparty_account": None,
         "bank_references": _bank_references("sinopac", "", "", "synthetic", manual_command=command,
                                              allow_overage_disposition=overage),
     }
     obligation = {"obligation_identity": source.target_item, "case_no": source.case_no,
-                  "obligation_type": "refund", "direction": "payable_to_client",
+                  "obligation_type": "subsidy_return" if purpose is ClientRefundPurpose.SUBSIDY_RETURN else "refund", "direction": "payable_to_client",
                   "status": "open", "amount_due_ntd": 1000}
     return source, selection, row, obligation
 
 
-@pytest.mark.parametrize("amount,overage,remaining,recovery", [
-    (1000, False, 0, 0), (300, False, 700, 0), (970, False, 30, 0), (1100, True, 0, 100),
+@pytest.mark.parametrize("amount,overage,remaining,recovery,purpose", [
+    (1000, False, 0, 0, ClientRefundPurpose.CUSTOMER_REFUND),
+    (300, False, 700, 0, ClientRefundPurpose.CUSTOMER_REFUND),
+    (970, False, 30, 0, ClientRefundPurpose.CUSTOMER_REFUND),
+    (1100, True, 0, 100, ClientRefundPurpose.CUSTOMER_REFUND),
+    (1000, False, 0, 0, ClientRefundPurpose.SUBSIDY_RETURN),
+    (300, False, 700, 0, ClientRefundPurpose.SUBSIDY_RETURN),
+    (970, False, 30, 0, ClientRefundPurpose.SUBSIDY_RETURN),
 ])
-def test_manual_refund_uses_original_owner_and_borrowed_transaction(monkeypatch, amount, overage, remaining, recovery):
+def test_manual_refund_uses_original_owner_and_borrowed_transaction(monkeypatch, amount, overage, remaining, recovery, purpose):
     import subsystems.finance_import.case_manual_supplement as service_module
-    source, selection, row, obligation = _fixture(amount, overage=overage)
+    source, selection, row, obligation = _fixture(amount, overage=overage, purpose=purpose)
     connection = NoSqlConnection()
     instances = []
 
@@ -101,6 +108,7 @@ def test_manual_refund_uses_original_owner_and_borrowed_transaction(monkeypatch,
         source.case_no, source.row_id, source.target_item, amount, source.transaction_date,
         "manual-key", source.actor.actor_id, "", source.command_digest,
         allow_overage_disposition=overage,
+        refund_purpose=purpose,
     )
     repository = instances[0]
     assert repository._request is None  # the service always clears its borrowed request
@@ -108,7 +116,7 @@ def test_manual_refund_uses_original_owner_and_borrowed_transaction(monkeypatch,
     assert repository.remaining == remaining and repository.recovery == recovery
     assert repository.version == receipt.account_version == 4
     assert repository.candidate.amount.amount == amount
-    assert repository.candidate.entries[0].entry_type == "refund"
+    assert repository.candidate.entries[0].entry_type == ("subsidy_return" if purpose is ClientRefundPurpose.SUBSIDY_RETURN else "refund")
     assert repository.candidate.entries[0].finance_import_row_identity == "16"
     assert repository.candidate.transfer_fee.amount == 0
     before = list(repository.events)
@@ -188,6 +196,39 @@ def test_manual_metadata_alone_does_not_bypass_ordinary_bank_recipient_checks():
     assert repository._manual_source is None
     with pytest.raises(TypeError):
         MySqlClientRefundReversalRepository(NoSqlConnection(), manual_source={"eligible": True})
+
+
+@pytest.mark.parametrize("kind", ["wrong_classification", "wrong_obligation_type", "wrong_purpose", "overage", "advance", "raw_purpose"])
+def test_manual_subsidy_source_cannot_reclassify_customer_refund_or_create_advance(kind):
+    source, selection, row, obligation = _fixture(purpose=ClientRefundPurpose.SUBSIDY_RETURN)
+    if kind == "wrong_classification":
+        row["effective_classification_type"] = "client_refund"
+    elif kind == "wrong_obligation_type":
+        obligation["obligation_type"] = "refund"
+    elif kind == "wrong_purpose":
+        selection = replace(selection, refund_purpose=ClientRefundPurpose.CUSTOMER_REFUND)
+    elif kind == "overage":
+        with pytest.raises(ValueError, match="invalid_client_refund_intent"):
+            replace(source, allow_overage_disposition=True)
+        return
+    else:
+        with pytest.raises(ValueError, match="manual_refund_source_invalid"):
+            replace(source, refund_purpose=ClientRefundPurpose.SUBSIDY_ADVANCE if kind == "advance" else "subsidy_return")
+        return
+    with pytest.raises(ValueError, match="client_obligation_not_found" if kind == "wrong_obligation_type" else "manual_refund_source_mismatch"):
+        _manual_refund_facts(source, selection, (row,), (obligation,))
+
+
+@pytest.mark.parametrize("proof", [None, True])
+def test_subsidy_manual_metadata_requires_typed_validated_binding_for_new_scheme_path(proof):
+    source, selection, row, obligation = _fixture(purpose=ClientRefundPurpose.SUBSIDY_RETURN)
+    facts = ClientRefundReversalFacts(3, **_manual_refund_facts(source, selection, (row,), (obligation,)))
+    class Repository:
+        def load(self, _selection, *, for_update):
+            return replace(facts, manual_source=proof)
+    with pytest.raises(ClientRefundReversalError) as caught:
+        ClientRefundReversalWorkflow(Repository(), BorrowedTransactionUnitOfWork).preview(selection, CorrelationId("manual-test"))
+    assert caught.value.error.code == ("subsidy_advance_settlement_ambiguous" if proof is None else "manual_refund_source_invalid")
 
 
 def test_bound_actor_and_selection_cannot_be_changed_before_any_sql():

@@ -20,6 +20,9 @@ from domains.finance_import.cancellation_code import extract_sinopac_account_ref
 from domains.staff_payables.reconciliation import (
     BankTransactionDirection,
     OutgoingBankFact,
+    ManualStaffPayoutFact,
+    StaffPaymentSourceKind,
+    project_staff_payable,
     StaffPayableFacts,
     StaffPayableStatus,
     StaffPayoutCandidate,
@@ -31,7 +34,8 @@ from domains.staff_payables.reconciliation import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.staff_payable_correction_sql import effective_staff_obligation_amount, selectable_staff_obligation
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.payout_reconciliation import (
@@ -39,8 +43,10 @@ from subsystems.staff_payables.payout_reconciliation import (
     StaffPayoutReceipt,
     StaffPayoutReconciliationFacts,
     StaffPayoutRepositoryUnavailable,
+    StaffPayoutReconciliationError,
     StaffPayoutSelection,
     StoredStaffPayoutReceipt,
+    ManualStaffPayoutSource,
 )
 
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
@@ -58,9 +64,10 @@ _JAVASCRIPT_SAFE_VERSION_HEX_DIGITS = 13
 @dataclass(frozen=True, slots=True)
 class _EventPersistenceMetadata:
     occurred_on: date
-    bank_account_identity_hash: str
+    bank_account_identity_hash: str | None
     finance_import_row_id: int | None
     reversal_of_event_id: int | None
+    payment_source_kind: StaffPaymentSourceKind = StaffPaymentSourceKind.BANK_STATEMENT
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,13 +95,20 @@ class StaffPayoutMySqlUnitOfWork(MySqlUnitOfWork):
 
 
 class MySqlStaffPayoutRepository:
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, *, manual_source: ManualStaffPayoutSource | None = None) -> None:
+        if manual_source is not None and not isinstance(manual_source, ManualStaffPayoutSource):
+            raise TypeError("manual staff source must be typed")
         self._connection = connection
+        self._manual_source = manual_source
         self._request: StaffPayoutApplyRequest | None = None
         self._event_metadata: dict[str, _EventPersistenceMetadata] = {}
         self._event_ids: dict[str, int] = {}
 
     def bind_apply_request(self, request: StaffPayoutApplyRequest) -> None:
+        if self._manual_source is not None:
+            self._manual_source.validate_selection(request.selection)
+            if request.actor != self._manual_source.actor or request.reason != self._manual_source.reason:
+                raise ValueError("manual_staff_source_mismatch")
         self._request = request
 
     def clear_apply_request(self) -> None:
@@ -104,7 +118,39 @@ class MySqlStaffPayoutRepository:
 
     def load(self, selection, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
+            if self._manual_source is not None:
+                return self._load_manual_facts(cursor, selection, for_update)
             return self._load_facts(cursor, selection, for_update)
+
+    def _load_manual_facts(self, cursor, selection, lock):
+        source = self._manual_source
+        source.validate_selection(selection)
+        account_version = _load_account_version(cursor, source.staff_id, lock=lock)
+        rows = _load_selected_bank_rows(cursor, selection, lock)
+        suffix = " FOR UPDATE" if lock else ""
+        cursor.execute(
+            "SELECT obligations.obligation_identity,obligations.case_no,obligations.staff_id,obligations.direction,obligations.status,"
+            + effective_staff_obligation_amount() + " AS amount_due_ntd,"
+            "projection.net_paid_ntd,projection.balance_ntd,projection.status AS projection_status "
+            "FROM staff_obligations obligations JOIN staff_payable_projections projection "
+            "ON projection.obligation_identity=obligations.obligation_identity "
+            "WHERE obligations.obligation_identity=%s AND obligations.case_no=%s AND obligations.staff_id=%s "
+            "AND " + selectable_staff_obligation() + suffix,
+            (source.target_item, source.case_no, source.staff_id),
+        )
+        targets = tuple(cursor.fetchall())
+        events = _load_obligation_events(cursor, selection.obligation_identities, lock)
+        obligations = _obligation_facts(targets, events)
+        blockers = _load_blocking_anomalies(cursor, rows)
+        if _global_blockers(blockers):
+            raise ValueError("outgoing_bank_fact_not_eligible")
+        fact = _manual_staff_payout_fact(source, selection, rows, targets, obligations)
+        self._event_metadata[fact.identity] = _EventPersistenceMetadata(
+            date.fromisoformat(source.transaction_date), None, source.row_id, None,
+            StaffPaymentSourceKind.MANUAL_SUPPLEMENT,
+        )
+        return StaffPayoutReconciliationFacts(account_version, _bank_facts_version(rows, None),
+            (), (), obligations, manual_source=fact)
 
     def find_receipt(self, key):
         with _mysql_cursor(self._connection) as cursor:
@@ -119,6 +165,16 @@ class MySqlStaffPayoutRepository:
                 metadata = self._metadata_for_event(event)
                 event_id = _insert_event(cursor, request, event, metadata, ordinal)
                 self._event_ids[event.identity] = event_id
+                if self._manual_source is not None:
+                    cursor.execute(
+                        "UPDATE finance_import_rows SET reconciliation_status='reconciled',"
+                        "reconciliation_reference=%s,reconciled_at=CURRENT_TIMESTAMP "
+                        "WHERE id=%s AND reconciliation_status='pending'",
+                        (f"staff-payout:{event.identity}", self._manual_source.row_id),
+                    )
+                    if cursor.rowcount != 1:
+                        raise StaffPayoutReconciliationError(TypedError(ErrorCategory.CONFLICT,
+                            "staff_payable_candidate_stale", "Manual payment source changed.", request.correlation_id))
 
     def append_obligation_links(self, candidate) -> None:
         with _mysql_cursor(self._connection) as cursor:
@@ -379,6 +435,8 @@ class MySqlStaffPayoutRepository:
         metadata = self._event_metadata.get(identity)
         if metadata is None:
             raise RuntimeError("staff payout event metadata is missing")
+        if metadata.payment_source_kind is not event.payment_source_kind:
+            raise ValueError("staff_payment_source_invalid")
         return metadata
 
     def _require_request(self) -> StaffPayoutApplyRequest:
@@ -648,6 +706,48 @@ def _global_blockers(blockers) -> tuple[str, ...]:
     return tuple(sorted({code for values in blockers.values() for code in values}))
 
 
+def _manual_staff_payout_fact(source, selection, rows, targets, obligations):
+    """Read-only adapter projection; no manually declared account eligibility."""
+    source.validate_selection(selection)
+    if len(rows) != 1 or len(targets) != 1 or len(obligations) != 1:
+        raise ValueError("manual_staff_source_mismatch")
+    row, target = rows[0], targets[0]
+    try:
+        refs = _json_object(row.get("bank_references"))
+        command = refs.get("manual_command")
+        digest = fingerprint_payload(dict(command)).value if isinstance(command, Mapping) else None
+    except (TypeError, ValueError, RuntimeError) as error:
+        raise ValueError("manual_staff_source_mismatch") from error
+    amount, valid_amount = _integer_money(row.get("debit"))
+    if (not isinstance(command, Mapping) or digest != source.command_digest
+        or refs.get("source") != "manual_supplement" or refs.get("manual_command_digest") != source.command_digest
+        or refs.get("reason") != source.reason or refs.get("allow_overage_disposition", False) is not False
+        or command.get("case_no") != source.case_no or command.get("actor") != source.actor.actor_id
+        or command.get("reason") != source.reason or command.get("direction") != "staff_salary"
+        or command.get("target_item") != source.target_item or type(command.get("amount_ntd")) is not int
+        or command.get("amount_ntd") != source.amount_ntd or command.get("transaction_date") != source.transaction_date
+        or command.get("allow_overage_disposition", False) is not False
+        or type(row.get("id")) is not int or row.get("id") != source.row_id or row.get("format_id") not in {"sinopac", "taishin"}
+        or row.get("format_id") != command.get("bank") or not valid_amount or amount.amount != source.amount_ntd
+        or not _is_zero_or_none(row.get("credit")) or row.get("direction") != "outgoing"
+        or _classification_type(row) != "staff_payout" or row.get("reconciliation_status") != "pending"
+        or row.get("payout_event_id") is not None or _date_text(row.get("transaction_date")) != source.transaction_date
+        or not _is_twd(row.get("currency"))):
+        raise ValueError("manual_staff_source_mismatch")
+    if (target.get("obligation_identity") != source.target_item or target.get("case_no") != source.case_no
+        or type(target.get("staff_id")) is not int or target.get("staff_id") != source.staff_id or target.get("direction") != "payable_to_staff"
+        or target.get("status") != "open" or target.get("projection_status") not in {"payable", "partially_paid"}):
+        raise ValueError("staff_payable_not_found")
+    projected = project_staff_payable(obligations[0])
+    if (projected.staff_id != source.staff_id or projected.balance.amount <= 0
+        or target.get("net_paid_ntd") != projected.net_paid.amount
+        or target.get("balance_ntd") != projected.balance.amount
+        or target["projection_status"] != projected.status.value):
+        raise ValueError("staff_payables_candidate_stale")
+    return ManualStaffPayoutFact(str(source.row_id), source.case_no, source.target_item,
+        source.staff_id, MoneyNTD(source.amount_ntd), source.command_digest, str(row["dedup_fingerprint"]))
+
+
 def _outgoing_bank_fact(row, staff_id, anomaly_codes):
     amount, amount_valid = _integer_money(row.get("debit"))
     eligible = _payout_row_is_eligible(row, amount_valid)
@@ -753,7 +853,7 @@ def _load_source_payout(cursor, reference, lock):
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
         "SELECT id,staff_id,event_type,amount_ntd,occurred_on,"
-        "bank_account_identity_hash,reversal_of_event_id "
+        "bank_account_identity_hash,reversal_of_event_id,payment_source_kind "
         f"FROM staff_payout_events WHERE id=%s{suffix}",
         (reference.source_event_id,),
     )
@@ -796,6 +896,10 @@ def _build_reopen_fact(
         str(reference.source_event_id),
         succeeded=source_valid and bank_valid and account_valid and not blockers,
         blocking_anomalies=blockers,
+        payment_source_kind=(StaffPaymentSourceKind.BANK_STATEMENT
+            if reference.event_type is StaffPayoutEventType.RETURN
+            else StaffPaymentSourceKind(source.get("payment_source_kind", "legacy_unspecified"))
+            if source is not None else StaffPaymentSourceKind.LEGACY_UNSPECIFIED),
     )
 
 
@@ -887,12 +991,20 @@ def _reopen_event_metadata(reference, source, bank_rows):
             int(row["id"]),
             reference.source_event_id,
         )
-    source_hash = "" if source is None else str(source["bank_account_identity_hash"])
+    if source is None:
+        raise ValueError("staff_payout_reversal_invalid")
+    kind = StaffPaymentSourceKind(source.get("payment_source_kind", "legacy_unspecified"))
+    source_hash = source.get("bank_account_identity_hash")
+    if ((kind is StaffPaymentSourceKind.MANUAL_SUPPLEMENT and source_hash is not None)
+        or (kind is not StaffPaymentSourceKind.MANUAL_SUPPLEMENT
+            and (not isinstance(source_hash, str) or re.fullmatch(r"[0-9a-fA-F]{64}", source_hash) is None))):
+        raise ValueError("staff_payout_reversal_invalid")
     return _EventPersistenceMetadata(
         reference.occurred_on or date.min,
-        source_hash or _account_identity_hash("missing"),
+        source_hash,
         None,
         reference.source_event_id,
+        kind,
     )
 
 
@@ -946,24 +1058,36 @@ def _candidate_events(candidate):
 def _insert_event(cursor, request, event, metadata, ordinal) -> int:
     cursor.execute(
         _EVENT_INSERT_SQL,
-        (
+        _event_insert_values(request, event, metadata, ordinal),
+    )
+    event_id = int(cursor.lastrowid or 0)
+    if event_id <= 0:
+        raise RuntimeError("staff payout event identity was not generated")
+    return event_id
+
+
+def _event_insert_values(request, event, metadata, ordinal):
+    if (metadata.payment_source_kind is not event.payment_source_kind
+        or (metadata.payment_source_kind is StaffPaymentSourceKind.MANUAL_SUPPLEMENT
+            and metadata.bank_account_identity_hash is not None)
+        or (metadata.payment_source_kind is not StaffPaymentSourceKind.MANUAL_SUPPLEMENT
+            and (not isinstance(metadata.bank_account_identity_hash, str)
+                 or re.fullmatch(r"[0-9a-fA-F]{64}", metadata.bank_account_identity_hash) is None))):
+        raise ValueError("staff_payment_source_invalid")
+    return (
             event.staff_id,
             metadata.finance_import_row_id,
             event.event_type.value,
             event.amount.amount,
             metadata.occurred_on,
             metadata.bank_account_identity_hash,
+            metadata.payment_source_kind.value,
             metadata.reversal_of_event_id,
             event.identity,
             _event_idempotency_key(request.idempotency_key, ordinal),
             request.actor.actor_id,
             request.reason,
-        ),
-    )
-    event_id = int(cursor.lastrowid or 0)
-    if event_id <= 0:
-        raise RuntimeError("staff payout event identity was not generated")
-    return event_id
+        )
 
 
 def _insert_link(cursor, event_ids, link, ordinal) -> None:
@@ -1254,9 +1378,9 @@ _RECEIPT_SELECT_SQL = (
 _EVENT_INSERT_SQL = (
     "INSERT INTO staff_payout_events "
     "(staff_id,finance_import_row_id,event_type,amount_ntd,occurred_on,"
-    "bank_account_identity_hash,reversal_of_event_id,"
+    "bank_account_identity_hash,payment_source_kind,reversal_of_event_id,"
     "reconciliation_reference,idempotency_key,actor,reason) "
-    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _LINK_INSERT_SQL = (
     "INSERT INTO staff_payout_obligation_links "

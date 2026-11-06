@@ -6,6 +6,7 @@ from subsystems.finance_import.case_manual_supplement import CaseManualSupplemen
 from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
 from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
 from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
+from subsystems.staff_payables.payout_reconciliation import StaffPayoutReconciliationError
 
 from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
@@ -32,9 +33,10 @@ router = APIRouter()
 
 
 def _error(error):
-    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError, ClientRefundReversalError)):
+    if isinstance(error, (ManualSupplementBlocked, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError)):
         envelope = error.error
-        status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500}.get(envelope.category.value, 422)
+        status = {"conflict": 409, "idempotency_mismatch": 409, "unavailable": 503, "internal": 500,
+                  "not_found": 404, "forbidden": 403}.get(envelope.category.value, 422)
         response = typed_http_error(status, envelope.category.value, envelope.code,
                                     envelope.message, envelope.correlation_id.value,
                                     retryable=envelope.retryable)
@@ -396,7 +398,7 @@ def create_case_manual_supplement(
         response = BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
         application.state.connection.commit()
         return response
-    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientRefundReversalError, ClientReceiptRepositoryUnavailable) as error:
+    except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError, ClientReceiptRepositoryUnavailable) as error:
         try:
             application.state.connection.rollback()
         except Exception:

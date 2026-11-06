@@ -114,6 +114,8 @@ describe('CaseManualSupplementWorkbench', () => {
     // 驗證預設交易方向為客戶收款
     expect(screen.getByLabelText('客戶收款（入帳）')).toBeChecked();
     expect(screen.getByLabelText('將超收差額列為客戶退款')).not.toBeChecked();
+    expect(screen.queryByRole('radio', { name: '政府入款（G 補助）' })).not.toBeInTheDocument();
+    expect(screen.getByText('政府補助入款請從「銀行對帳」選取原政府流水，進入政府整期核對。')).toBeInTheDocument();
 
     // 驗證沖銷對象預設帶入第一項（訂金）且金額為 13500
     const amountInput = screen.getByLabelText('補登金額 (NT$)') as HTMLInputElement;
@@ -435,6 +437,22 @@ describe('CaseManualSupplementWorkbench', () => {
       expect(financeAccountingClient.manualSupplement).toHaveBeenCalledWith(saved.caseNo, saved.command, saved.key);
       expect(window.sessionStorage.getItem(manualSupplementStorageKey('115001'))).toBeNull();
     }
+  });
+
+  it('can read back an existing government operation without offering a new case-level government entry', async () => {
+    const saved = { version: 1, actorId: 1, caseNo: '115001', key: 'existing-government-key', command: {
+      bank: 'taishin', direction: 'government_subsidy', target_item: 'government_subsidy',
+      amount_ntd: 1000, transaction_date: '2026-11-05', reason: null, allow_overage_disposition: false,
+    } };
+    window.sessionStorage.setItem(manualSupplementStorageKey('115001'), JSON.stringify(saved));
+    vi.mocked(financeAccountingClient.manualSupplement).mockResolvedValue({ case_no: '115001' } as CaseAccounting);
+    render(<CaseManualSupplementWorkbench caseNo="115001" clientItems={mockClientItems}
+      staffItems={mockStaffItems} onSuccess={onSuccess} onClose={onClose} />);
+    fireEvent.click(await screen.findByRole('button', { name: '確認原操作結果' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
+    expect(financeAccountingClient.manualSupplement).toHaveBeenCalledWith(saved.caseNo, saved.command, saved.key);
+    expect(screen.queryByRole('radio', { name: '政府入款（G 補助）' })).not.toBeInTheDocument();
+    expect(window.sessionStorage.getItem(manualSupplementStorageKey('115001'))).toBeNull();
   });
 
   it('persists explicit refund recovery and restores its original mode and key after an unknown result', async () => {

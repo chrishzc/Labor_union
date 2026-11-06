@@ -226,12 +226,20 @@ class MySqlControlledFileReferenceFinalizeRepository:
     def acquire_lease(self, lease: ControlledFileLease) -> ControlledFileLease:
         with self._connection.cursor() as cursor:
             cursor.execute(
+                "SELECT staging_state FROM controlled_file_staging_objects WHERE staging_id=%s FOR UPDATE",
+                (lease.staging_id,),
+            )
+            staging = cursor.fetchone()
+            if staging is None or staging["staging_state"] not in {"staged", "applied"}:
+                raise ControlledFileFinalizeError("controlled_file_lease_create_conflict", "staging object is unavailable for lease")
+            cursor.execute(
                 """
                 INSERT INTO controlled_file_leases
                     (lease_id, staging_object_id, holder, lease_state,
                      acquired_at_utc, expires_at_utc)
                 SELECT %s, id, %s, 'active', %s, %s
                 FROM controlled_file_staging_objects WHERE staging_id=%s
+                  AND staging_state IN ('staged','applied')
                 """,
                 (
                     lease.lease_id,
@@ -288,46 +296,18 @@ class MySqlControlledFileReferenceFinalizeRepository:
     def list_reference_aware_gc_candidates(
         self, *, limit: int, observed_at: datetime
     ) -> tuple[ReferenceAwareStagingCandidate, ...]:
-        if isinstance(limit, bool) or not 1 <= limit <= 100:
-            raise ValueError("controlled file GC limit must be between 1 and 100")
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT staging.staging_id, staging.staging_version,
-                       staging.content_sha256, staging.expires_at_utc,
-                       CASE WHEN staging.staging_state='applied' THEN 1 ELSE 0 END registered,
-                       COUNT(DISTINCT reference.id) reference_count,
-                       COUNT(DISTINCT active_lease.id) active_lease_count
-                FROM controlled_file_staging_objects staging
-                JOIN controlled_file_finalize_intents intent
-                     ON intent.staging_object_id=staging.id
-                LEFT JOIN controlled_file_objects object ON object.source_staging_id=staging.id
-                LEFT JOIN controlled_file_references reference
-                       ON reference.controlled_file_object_id=object.id
-                LEFT JOIN controlled_file_leases active_lease
-                       ON active_lease.staging_object_id=staging.id
-                      AND active_lease.lease_state='active'
-                      AND active_lease.expires_at_utc>%s
-                WHERE staging.staging_state IN ('staged','quarantined')
-                GROUP BY staging.id, staging.staging_id, staging.staging_version,
-                         staging.content_sha256, staging.expires_at_utc, staging.staging_state
-                ORDER BY staging.id LIMIT %s
-                """,
-                (_mysql_utc(observed_at), limit),
-            )
-            rows = cursor.fetchall()
-        return tuple(
-            ReferenceAwareStagingCandidate(
-                staging_id=str(row["staging_id"]),
-                staging_version=int(row["staging_version"]),
-                expected_sha256=str(row["content_sha256"]),
-                expires_at=_aware(row["expires_at_utc"]),
-                registered=bool(row["registered"]),
-                reference_count=int(row["reference_count"]),
-                active_lease=int(row["active_lease_count"]) > 0,
-            )
-            for row in rows
+        # Share the authoritative staging/object/lease mapping with maintenance.
+        # The former inner join to finalize intents excluded real unregistered orphans.
+        from infrastructure.db.controlled_file_repository import MySqlControlledFileWorkflowRepository
+        from subsystems.controlled_files.contracts import ControlledFileStagingRegistrationStatus
+        candidates = MySqlControlledFileWorkflowRepository(self._connection).list_staging_gc_candidates(
+            limit=limit, observed_at=observed_at,
         )
+        return tuple(ReferenceAwareStagingCandidate(
+            item.staging_id, item.staging_version, item.expected_sha256, item.expires_at,
+            item.registration_status is not ControlledFileStagingRegistrationStatus.UNREGISTERED,
+            item.reference_count, item.active_lease,
+        ) for item in candidates)
 
 
 def _intent(row: Mapping[str, Any]) -> ControlledFileFinalizeIntent:

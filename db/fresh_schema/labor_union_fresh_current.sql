@@ -8062,13 +8062,14 @@ CREATE TABLE `staff_payout_events` (
   `event_type` enum('payout','return','reversal') COLLATE utf8mb4_unicode_ci NOT NULL,
   `amount_ntd` bigint NOT NULL,
   `occurred_on` date NOT NULL,
-  `bank_account_identity_hash` char(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `bank_account_identity_hash` char(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `reversal_of_event_id` bigint DEFAULT NULL,
   `reconciliation_reference` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `idempotency_key` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `actor` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `reason` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `payment_source_kind` enum('legacy_unspecified','bank_statement','manual_supplement') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'legacy_unspecified',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_staff_payout_idempotency` (`idempotency_key`),
   UNIQUE KEY `uq_staff_payout_import_row` (`finance_import_row_id`),
@@ -8079,6 +8080,7 @@ CREATE TABLE `staff_payout_events` (
   CONSTRAINT `fk_staff_payout_staff` FOREIGN KEY (`staff_id`) REFERENCES `staff` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `chk_staff_payout_account_hash` CHECK (regexp_like(`bank_account_identity_hash`,_utf8mb4'^[0-9a-f]{64}$')),
   CONSTRAINT `chk_staff_payout_amount` CHECK ((`amount_ntd` > 0)),
+  CONSTRAINT `chk_staff_payout_payment_source` CHECK ((((`payment_source_kind` in (_utf8mb4'legacy_unspecified',_utf8mb4'bank_statement')) and (`bank_account_identity_hash` is not null) and regexp_like(`bank_account_identity_hash`,_utf8mb4'^[0-9a-f]{64}$')) or ((`payment_source_kind` = _utf8mb4'manual_supplement') and (`bank_account_identity_hash` is null)))),
   CONSTRAINT `chk_staff_payout_reversal_shape` CHECK ((((`event_type` = _utf8mb4'payout') and (`reversal_of_event_id` is null)) or ((`event_type` in (_utf8mb4'return',_utf8mb4'reversal')) and (`reversal_of_event_id` is not null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

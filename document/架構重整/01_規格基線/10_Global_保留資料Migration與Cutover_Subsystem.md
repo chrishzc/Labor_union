@@ -369,6 +369,10 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 
 ## 9. Agent 與開發者 DB 變更執行門
 
+2026-11-06 Staff 人工補登來源 successor：依規格22 §19，current chain 於 HCM release 後選取 `labor_union_2026_11_06_staff_payout_payment_sources_v1.json`，fresh assembly 與 preserve-data 共用 `1070_staff_payout_payment_sources.sql`，不改已發布114、舊full release或historical receipts。此單一原子 ALTER 只在 `staff_payout_events` 新增 `payment_source_kind`（`legacy_unspecified`／`bank_statement`／`manual_supplement`，預設 `legacy_unspecified`）、放寬銀行hash欄位可NULL並新增來源條件CHECK；原hash CHECK、金額、actor、金融流水／連結、FK及immutable guards保留。舊事件的原值、hash與來源不重新推定；僅新銀行writer明示bank來源，人工補登來源必須NULL hash，既有更正／沖正沿原來源，不強制補造銀行列。
+
+本項為schema-only，零system seed／business-row backfill／資料刪改。source為上一支援版Staff ledger，target為選定successor；exact為零DDL重跑，僅完全匹配舊hash欄位且尚無新欄位／CHECK的predecessor為pending，未知partial／drift一律阻擋。Apply前取消可丟棄candidate；Apply後保留所有事件、停用新入口並走相容forward release，不刪欄位或改寫金融紀錄。沿原 `scripts.update_local_database` 唯讀plan、source→dump→candidate→apply→verify及fresh bootstrap執行門；不得直接貼SQL。此輪使用者禁止執行專案SQL，僅交付靜態manifest／descriptor／full release與current compact的確定性文字同步，沒有DB plan、DDL、資料補登或DB連線。DB-backed compact renderer再生成相等性、真MySQL fresh／preserve與舊金融row preservation均 `NOT_RUN`，整體 `DB_CHANGE_NOT_READY`；hash一致不代替engine qualification。
+
 2026-11-06 HCM 審核狀態升級。正式 release `labor_union_2026_11_06_hcm_review_status_v1.json` 及 fresh assembly 共用 `1069_hcm_review_status.sql`，只新增 nullable 欄位，既有資料初始保留 NULL，無 system seed 或自動回填。保留來源 DB，依現有備份、候選與升級入口完成 schema 驗證。升級前的備份保留供復原。
 
 有原始 HCM Excel 的開發環境另行補登。使用 `python -m scripts.backfill_hcm_review_status <原始Excel> [其他原始Excel ...]` 預覽，核對來源 SHA-256、可補登、衝突及待確認筆數。確認備份及目標後，使用相同檔案加 `--apply --confirm-database <資料庫名稱>`。限 localhost development 的 `union_db` 或 `lu_test_*`。此獨立 business-row backfill 只以相同案件編號寫入空白欄位，保留既有決定、案件資料及更新時間。來源缺漏、重複來源決定互斥、查無案件及既存值衝突均保持原值，無新增案件或切換資料庫。重跑可核對已保存及剩餘待確認筆數。
