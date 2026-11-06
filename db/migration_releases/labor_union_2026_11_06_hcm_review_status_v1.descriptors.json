@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-hcm-review-status-2026-11-06-v1",
+  "descriptors": {
+    "1069_hcm_review_status.sql": {
+      "tables": {},
+      "parent_columns": {
+        "clients": {
+          "hcm_review_status": {
+            "column_type": "enum('符合','不符合')",
+            "is_nullable": "YES",
+            "column_default": null,
+            "extra": ""
+          }
+        }
+      },
+      "indexes": {},
+      "foreign_keys": {},
+      "checks": {},
+      "triggers": [],
+      "views": {}
+    }
+  }
+}

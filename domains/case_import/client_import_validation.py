@@ -42,7 +42,7 @@ VALID_CITIES = [
 ]
 
 # Excel 欄位名稱 -> clients 資料表欄位名稱，驗證失敗時要把這個 DB 欄位存成 NULL。
-# 案件狀態沒有對應 DB 欄位（避免覆寫 orders 狀態機），不在這份清單裡。
+# 案件狀態另存為 HCM 審核結果，與 orders 狀態分開。
 EXCEL_TO_DB_COLUMN = {
     "報名時間(建檔)": "created_at",
     "IP位址": "ip_address",
@@ -61,6 +61,11 @@ EXCEL_TO_DB_COLUMN = {
     "服務方式": "service_type",
     "寶寶資訊": "baby_info",
 }
+
+
+def normalize_hcm_review_status(value: object) -> str | None:
+    status = value.strip() if isinstance(value, str) else None
+    return status if status in {"符合", "不符合"} else None
 
 
 def _is_blank(value: Any) -> bool:

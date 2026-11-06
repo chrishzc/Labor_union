@@ -31,7 +31,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT DISTINCT YEAR(c.created_at) AS application_year FROM clients c "
                            "LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no "
-                           "WHERE c.created_at IS NOT NULL AND " + CASE_CATEGORY_SQL + "='subsidy' ORDER BY application_year DESC")
+                           "WHERE c.created_at IS NOT NULL AND " + _REPORT_CASE_CATEGORY_SQL + "='subsidy' ORDER BY application_year DESC")
             return [int(row["application_year"]) for row in cursor.fetchall() if 1 <= int(row["application_year"]) <= 9998]
 
     def list_non_citizen_case_years(self) -> list[int]:
@@ -53,7 +53,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             rows = cursor.fetchall()
         return [WeeklyCaseFact(
             client_id=int(row["client_id"]), case_no=None, created_at=_datetime(row["approved_local"]),
-            applicant_name=None, identity_status=_optional_text(row.get("identity_status")), reject_reason=None,
+            applicant_name=None, identity_status=_optional_text(row.get("identity_status")), hcm_review_status=None,
             district=None, order_status=_optional_text(row.get("order_status")), service_days=None,
             service_hours_per_day=None, planned_start_date=None, planned_end_date=None, case_category="non_citizen",
         ) for row in rows]
@@ -67,7 +67,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
             client_id=int(row["client_id"]), case_no=None,
             created_at=_datetime(row["application_created_at"]), applicant_name=None,
             identity_status=_optional_text(row.get("identity_status")),
-            reject_reason="rejected" if row["is_rejected"] else None,
+            hcm_review_status=row["hcm_review_status"],
             district=None, order_status=_optional_text(row.get("order_status")),
             service_days=None, service_hours_per_day=None, planned_start_date=None, planned_end_date=None,
             case_category=row.get("case_category"),
@@ -84,7 +84,7 @@ class MySqlWeeklyOperationsReportQueryAdapter:
                 created_at=_datetime(row["application_created_at"]),
                 applicant_name=_optional_text(row.get("applicant_name")),
                 identity_status=_optional_text(row.get("identity_status")),
-                reject_reason=_optional_text(row.get("reject_reason")),
+                hcm_review_status=row["hcm_review_status"],
                 district=_hsinchu_district_or_address(row.get("city"), row.get("address")),
                 order_status=_optional_text(row.get("order_status")),
                 service_days=_optional_int(row.get("service_days")),
@@ -247,24 +247,28 @@ JOIN provisional_registration_case_issue_events e ON e.case_no=o.case_no AND e.c
 JOIN provisional_client_registrations r ON r.id=e.registration_id
 WHERE r.approved_at_utc IS NOT NULL AND """ + CASE_CATEGORY_SQL + "='non_citizen'"
 
+_REPORT_CASE_CATEGORY_SQL = (
+    "CASE WHEN c.hcm_review_status='不符合' THEN 'subsidy' ELSE " + CASE_CATEGORY_SQL + " END"
+)
+
 _CASE_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.seq_num,c.case_no,c.created_at AS application_created_at,
-       c.name AS applicant_name,c.identity_status,c.reject_reason,c.city,c.address,
-       {CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,o.service_days,o.service_hours_per_day,
+       c.name AS applicant_name,c.identity_status,c.hcm_review_status,c.city,c.address,
+       {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status,o.service_days,o.service_hours_per_day,
        o.start_date AS planned_start_date,o.end_date AS planned_end_date
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE {CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
+WHERE {_REPORT_CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 
 _CASE_STATISTICS_FACTS_SQL = f"""
 SELECT c.id AS client_id,c.created_at AS application_created_at,c.identity_status,
-       (c.reject_reason IS NOT NULL AND c.reject_reason <> '') AS is_rejected,
-       {CASE_CATEGORY_SQL} AS case_category,o.status AS order_status
+       c.hcm_review_status,
+       {_REPORT_CASE_CATEGORY_SQL} AS case_category,o.status AS order_status
 FROM clients c
 LEFT JOIN orders o ON o.client_id=c.id AND o.case_no=c.case_no
-WHERE {CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
+WHERE {_REPORT_CASE_CATEGORY_SQL}='subsidy' AND c.created_at >= %s AND c.created_at < %s
 ORDER BY c.created_at,c.id
 """
 

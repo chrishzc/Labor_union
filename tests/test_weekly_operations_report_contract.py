@@ -36,6 +36,7 @@ from subsystems.reporting.weekly_report_metrics_service import (
 from infrastructure.mysql import weekly_operations_report_query_adapter as report_adapter
 from infrastructure.mysql.weekly_operations_report_query_adapter import (
     _CASE_FACTS_SQL,
+    _CASE_STATISTICS_FACTS_SQL,
     _SERVICE_FACTS_SQL,
     _case_application_roc_year,
     _hsinchu_district_or_address,
@@ -46,24 +47,24 @@ class _CaseStatisticsFacts:
     def __init__(self):
         seed = _Facts().list_case_facts(date(2026, 8, 20), date(2026, 8, 26))[0]
         entries = [
-            ("2026-01-01", "一般市民", None, "訂單成立"),
-            ("2026-01-04", "補助市民", None, "歷史訂單－未服務"),
-            ("2026-03-31", "一般市民", None, "服務中"),
-            ("2026-04-01", "補助市民", None, "歷史訂單－服務中"),
-            ("2026-04-02", "一般市民", None, "訂單完成"),
-            ("2026-04-03", "補助市民", None, "歷史訂單－服務完成"),
-            ("2026-04-04", "一般市民", None, "歷史訂單－帳務完成"),
-            ("2026-05-31", "一般市民", "資格不符", "訂單取消"),
-            ("2026-06-30", "補助市民", "資格不符", "訂單取消"),
+            ("2026-01-01", "一般市民", "符合", "訂單成立"),
+            ("2026-01-04", "補助市民", "符合", "歷史訂單－未服務"),
+            ("2026-03-31", "一般市民", "符合", "服務中"),
+            ("2026-04-01", "補助市民", "符合", "歷史訂單－服務中"),
+            ("2026-04-02", "一般市民", "符合", "訂單完成"),
+            ("2026-04-03", "補助市民", "符合", "歷史訂單－服務完成"),
+            ("2026-04-04", "一般市民", "符合", "歷史訂單－帳務完成"),
+            ("2026-05-31", "一般市民", "不符合", "訂單取消"),
+            ("2026-06-30", "補助市民", "不符合", "訂單取消"),
             ("2026-07-01", None, None, "待補件"),
-            ("2026-12-31", "一般市民", None, "洽談中"),
+            ("2026-12-31", "一般市民", "符合", "洽談中"),
             ("2026-06-15", None, None, None),
-            ("2025-12-31", "一般市民", None, "服務中"),
-            ("2027-01-01", "一般市民", None, "服務中"),
+            ("2025-12-31", "一般市民", "符合", "服務中"),
+            ("2027-01-01", "一般市民", "符合", "服務中"),
         ]
         self.rows = [replace(seed, client_id=index, case_no=f"115000{index:03d}", created_at=datetime.fromisoformat(day),
-                             identity_status=identity, reject_reason=reason, order_status=status)
-                     for index, (day, identity, reason, status) in enumerate(entries, start=1)]
+                             identity_status=identity, hcm_review_status=review_status, order_status=status)
+                     for index, (day, identity, review_status, status) in enumerate(entries, start=1)]
         self.reads = []
 
     def list_case_facts(self, start_date, end_date):
@@ -98,8 +99,8 @@ def test_case_statistics_calendar_periods_merge_history_and_preserve_unknowns():
     assert (annual.summary.order_established_count, annual.summary.negotiating_count,
             annual.summary.cancelled_count, annual.summary.review_rejected_count) == (7, 1, 0, 2)
     assert (annual.summary.general_eligible_count, annual.summary.general_ineligible_count,
-            annual.summary.subsidized_eligible_count, annual.summary.subsidized_ineligible_count) == (5, 1, 3, 1)
-    assert annual.summary.unclassified_qualification_count == 2
+            annual.summary.subsidized_eligible_count, annual.summary.subsidized_ineligible_count) == (5, 1, 3, None)
+    assert annual.summary.unclassified_qualification_count == 3
     assert sum(query.query_case_statistics(2026, quarter=q).summary.application_count for q in range(1, 5)) == 12
     april = query.query_case_statistics(2026, quarter=2, month=4)
     assert april.summary.application_count == 4
@@ -168,7 +169,7 @@ def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_peri
 
     facts = Facts()
     # 確定沒有不符合案件時，零不得在週報變成「未登錄」。
-    facts.rows = [replace(row, reject_reason=None) for row in facts.rows]
+    facts.rows = [replace(row, hcm_review_status="符合") for row in facts.rows]
     query = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 10, 13, tzinfo=TAIPEI_TIME_ZONE))
     for quarter, month in ((None, None), (2, None), (2, 4), (4, 11)):
         statistics = query.query_case_statistics(2026, quarter, month)
@@ -181,7 +182,7 @@ def test_workbench_and_weekly_have_identical_known_counts_for_same_calendar_peri
         assert report.summary.general_ineligible_count == report.summary.subsidized_ineligible_count == 0
 
     # 尚有未能判定身分的不符合案件時，兩處共同保留未知，不猜成零。
-    facts.rows[11] = replace(facts.rows[11], reject_reason="資格不符")
+    facts.rows[11] = replace(facts.rows[11], hcm_review_status="不符合")
     statistics = query.query_case_statistics(2026)
     report = query.query(statistics.start_date, statistics.end_date)
     assert statistics.summary.general_ineligible_count is report.summary.general_ineligible_count is None
@@ -200,11 +201,11 @@ class _Facts:
         }
         return [
             WeeklyCaseFact(
-                7, "115000007", datetime(2026, 8, 20, 9), "王小美", "一般市民", None,
+                7, "115000007", datetime(2026, 8, 20, 9), "王小美", "一般市民", "符合",
                 "東區", "服務中", 20, 8, date(2026, 8, 10), date(2026, 9, 4),
             ),
             WeeklyCaseFact(
-                8, "115000008", datetime(2026, 8, 24, 10), "林大華", None, "資格不符",
+                8, "115000008", datetime(2026, 8, 24, 10), "林大華", None, "不符合",
                 "北區", None, None, None, None, None,
             ),
         ]
@@ -503,6 +504,9 @@ def test_case_source_keeps_date_scoped_rows_inside_requested_window_only():
     assert "OR c.created_at IS NULL" not in _CASE_FACTS_SQL
     assert "c.created_at >= %s AND c.created_at < %s" in _CASE_FACTS_SQL
     assert "c.city,c.address" in _CASE_FACTS_SQL
+    for source in (_CASE_FACTS_SQL, _CASE_STATISTICS_FACTS_SQL):
+        assert "c.hcm_review_status" in source
+        assert "reject_reason" not in source
 
 
 def test_historical_unserved_is_an_established_order_waiting_for_service():

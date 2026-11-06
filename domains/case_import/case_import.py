@@ -41,6 +41,7 @@ _ALLOWED_CLIENT_ATTRIBUTES = frozenset(
         "due_month",
         "email",
         "gender",
+        "hcm_review_status",
         "identity_status",
         "ip_address",
         "line_id",
@@ -94,6 +95,8 @@ class ClientImportAttribute:
         )
         if self.name not in _ALLOWED_CLIENT_ATTRIBUTES:
             _raise_invalid(f"client attribute {self.name} is not importable")
+        if self.name == "hcm_review_status" and self.value not in (None, "符合", "不符合"):
+            _raise_invalid("HCM review status is invalid")
         if isinstance(self.value, bool):
             _raise_invalid(f"client attribute {self.name} has invalid type")
         if self.value is not None and not isinstance(

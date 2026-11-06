@@ -23,7 +23,7 @@ from subsystems.reporting.weekly_report_metrics_service import (
 
 
 SCHEMA_VERSION = "operations-report.v3"
-SOURCE_REVISION = "operations_report_query_v8"
+SOURCE_REVISION = "operations_report_query_v9"
 TIMEZONE = "Asia/Taipei"
 _HISTORICAL_STATUS_GROUPS = {
     OrderLifecycleStatus.HISTORICAL_UNSERVED.value: OrderLifecycleStatus.ESTABLISHED.value,
@@ -49,7 +49,7 @@ class WeeklyCaseFact:
     created_at: datetime | None
     applicant_name: str | None
     identity_status: str | None
-    reject_reason: str | None
+    hcm_review_status: str | None
     district: str | None
     order_status: str | None
     service_days: int | None
@@ -527,29 +527,26 @@ class WeeklyOperationsReportQuery:
         identity = normalize_subsidy_policy_identity(fact.identity_status or "")
         is_general = identity == GENERAL_CITIZEN
         is_subsidized = identity == SUBSIDIZED_CITIZEN
-        is_rejected = bool(fact.reject_reason)
+        is_rejected = fact.hcm_review_status == "不符合"
+        is_eligible = fact.hcm_review_status == "符合"
+        gen_inelig = int(is_rejected and (is_general or identity == "非市民"))
 
         if is_rejected:
             review_result = "rejected_unpartitioned"
-        elif is_general:
+        elif is_general and is_eligible:
             review_result = "general_eligible"
-        elif is_subsidized:
+        elif is_subsidized and is_eligible:
             review_result = "subsidized_eligible"
         else:
             review_result = "pending"
-            quality_codes.append("review_result_pending")
+            if not _is_non_citizen(fact):
+                quality_codes.append("review_result_pending")
 
         app_date = fact.created_at.date() if fact.created_at is not None else None
 
-        gen_elig = 1 if is_general and not is_rejected else 0
-        gen_inelig = 1 if is_general and is_rejected else 0
-        sub_elig = 1 if is_subsidized and not is_rejected else 0
-        sub_inelig = 1 if is_subsidized and is_rejected else 0
-
-        ord_estab = 1 if fact.order_status in {"訂單成立", "服務中", "訂單完成", "歷史訂單－未服務", "歷史訂單－服務中", "歷史訂單－服務完成", "歷史訂單－帳務完成"} else 0
-        negotiating = 1 if fact.order_status == "洽談中" else 0
-        cancelled = 1 if fact.order_status == "訂單取消" and not is_rejected else 0
-        review_rej = 1 if is_rejected or fact.order_status == "審核不符合" else 0
+        status = reporting_order_status(fact.order_status)
+        if is_rejected:
+            status = "審核不符合"
 
         week_start_date = monday_of(app_date) if app_date else None
         week_end_date = sunday_of(app_date) if app_date else None
@@ -576,14 +573,14 @@ class WeeklyOperationsReportQuery:
             week_start_date=week_start_date,
             week_end_date=week_end_date,
             week_label=week_label(app_date) if app_date else "",
-            general_eligible=gen_elig,
+            general_eligible=int(review_result == "general_eligible"),
             general_ineligible=gen_inelig,
-            subsidized_eligible=sub_elig,
-            subsidized_ineligible=sub_inelig,
-            order_established=ord_estab,
-            negotiating=negotiating,
-            cancelled=cancelled,
-            review_rejected=review_rej,
+            subsidized_eligible=int(review_result == "subsidized_eligible"),
+            subsidized_ineligible=0,
+            order_established=int(status in {"訂單成立", "服務中", "訂單完成"}),
+            negotiating=int(status == "洽談中"),
+            cancelled=int(status == "訂單取消"),
+            review_rejected=int(is_rejected),
             service_status=serv_status,
             notes="",
         )
@@ -668,9 +665,8 @@ class WeeklyOperationsReportQuery:
     ) -> WeeklySummary:
         general_ineligible = sum(row.general_ineligible for row in rows)
         subsidized_ineligible = sum(row.subsidized_ineligible for row in rows)
-        unclassified_rejection = any(
-            row.review_result == "rejected_unpartitioned"
-            and row.identity_status not in {GENERAL_CITIZEN, SUBSIDIZED_CITIZEN}
+        unclassified_rejection = sum(
+            row.review_rejected and not row.general_ineligible
             for row in rows
         )
         return WeeklySummary(
@@ -679,7 +675,7 @@ class WeeklyOperationsReportQuery:
             general_ineligible_count=general_ineligible if general_ineligible or not unclassified_rejection else None,
             subsidized_eligible_count=sum(row.subsidized_eligible for row in rows),
             subsidized_ineligible_count=subsidized_ineligible if subsidized_ineligible or not unclassified_rejection else None,
-            rejection_unpartitioned_count=sum(row.review_result == "rejected_unpartitioned" for row in rows),
+            rejection_unpartitioned_count=unclassified_rejection,
             order_established_count=sum(row.order_established for row in rows),
             negotiating_count=sum(row.negotiating for row in rows),
             cancelled_count=sum(row.cancelled for row in rows),
@@ -697,7 +693,7 @@ class WeeklyOperationsReportQuery:
             DataQualityIssue(
                 "rejection_partition_unknown",
                 "general_ineligible_count,subsidized_ineligible_count",
-                sum(row.review_result == "rejected_unpartitioned" for row in case_rows),
+                sum(row.review_rejected and not row.general_ineligible for row in case_rows),
                 "不符合案件尚無一般／補助 canonical 分類。",
             )
         )

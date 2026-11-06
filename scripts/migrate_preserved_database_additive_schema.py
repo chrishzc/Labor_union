@@ -377,6 +377,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_11_04_finance_case_arrangements_v1.json",
     "labor_union_2026_11_05_finance_case_subsidy_plans_v1.json",
     "labor_union_2026_11_05_scheduling_shift_occupancy_v1.json",
+    "labor_union_2026_11_06_hcm_review_status_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -6297,6 +6298,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
     if part_name == "1049_client_hcm_email.sql":
         descriptor["parent_columns"]["clients"] = {
             "email": _column_contract("varchar(100)", "YES", None),
+        }
+    if part_name == "1069_hcm_review_status.sql":
+        descriptor["parent_columns"]["clients"] = {
+            "hcm_review_status": _column_contract("enum('符合','不符合')", "YES", None),
         }
     if part_name == "1051_candidate_weekly_information.sql":
         descriptor["parent_columns"]["caregiver_candidate_contact_events"] = {

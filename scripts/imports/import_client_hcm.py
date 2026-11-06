@@ -26,6 +26,7 @@ if ROOT not in sys.path:
 from shared_kernel.workbook_resource_limits import validate_xlsx_workbook
 
 from domains.case_import.client_import_validation import (
+    normalize_hcm_review_status,
     HCM_INTAKE_BLOCKING_FIELDS,
     HCM_REQUIRED_HEADERS,
     validate_hcm_row,
@@ -76,7 +77,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 _REQUIRED_DATABASE_SETTINGS = ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_DATABASE")
 
-# 欄位映射關係 (與舊 import_excel.py 一致，但移除 案件狀態 映射以免覆寫 status)
+# 案件狀態使用獨立的 HCM 審核欄位，不覆寫訂單狀態。
 CLIENTS_FIELD_MAPPING = {
     '項次': 'seq_num',
     '不符合原因': 'reject_reason',
@@ -869,6 +870,9 @@ def normalize_hcm_row(row):
         for excel_column, db_column in CLIENTS_FIELD_MAPPING.items()
         if excel_column in row
     }
+    review_status = normalize_hcm_review_status(row.get("案件狀態"))
+    if review_status is not None:
+        record["hcm_review_status"] = review_status
     if "email" in record and not record["email"]:
         record["email"] = None
     if "phone" in record:

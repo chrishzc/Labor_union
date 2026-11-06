@@ -174,7 +174,7 @@ const WeeklyCasesView: React.FC<{ report: WeeklyView }> = ({ report }) => {
     {report.caseRows.length === 0 && <div className="reports-state">此期間沒有案件受理資料。</div>}
     <div className="reports-table-container" tabIndex={0} role="region" aria-label="案件受理資料，可左右捲動">
       <table className="reports-table reports-case-table" aria-label="週報案件受理總表">
-        <caption>{report.totalsAvailable ? '整週按星期一歸月；月小計為查詢期間內的週資料，年度案件累計由 1 月 1 日計至迄日。訂單成立含服務中與完成；取消排除審核不符合，缺值保留待確認。' : '目前顯示舊版週報資料，年度累計與月小計尚未提供。'}</caption>
+        <caption>{report.totalsAvailable ? '整週按星期一歸月。月小計為查詢期間內的週資料，年度案件累計由 1 月 1 日計至迄日。HCM 審核不符合優先列入審核不符合，每案最多計入一個狀況欄。訂單成立含服務中與完成，審核缺值保留待確認。' : '目前顯示舊版週報資料，年度累計與月小計尚未提供。'}</caption>
         <thead>
           <tr>
             <th rowSpan={2} scope="col">平台序號</th><th rowSpan={2} colSpan={2} scope="colgroup">年度月份</th>

@@ -220,7 +220,7 @@ def _append_case_totals(ws, total: WeeklyCaseTotals) -> None:
     ws.cell(row=row_number, column=1).comment = Comment(
         f"案件統計期間：{total.start_date}～{total.end_date}。"
         "整週按星期一歸月／年；推廣與詢問每週僅計一次，任一週未登錄時合計標示未完整登錄。"
-        "申請案件狀況沿用模板四欄指標；訂單成立含服務中與完成，取消排除審核不符合。",
+        "HCM 審核不符合優先列入審核不符合，每案最多計入一個狀況欄。訂單成立含服務中與完成。",
         "系統",
     )
     for column in range(1, last_col + 1):

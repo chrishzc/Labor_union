@@ -1906,6 +1906,7 @@ CREATE TABLE `clients` (
   `client_hcm_correction_version` bigint unsigned NOT NULL DEFAULT '0' COMMENT 'Client-owned HCM correction aggregate version',
   `client_profile_version` bigint unsigned NOT NULL DEFAULT '0',
   `email` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'HCM Email',
+  `hcm_review_status` enum('符合','不符合') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'HCM 案件審核結果',
   PRIMARY KEY (`id`),
   UNIQUE KEY `case_no` (`case_no`),
   KEY `idx_case_no` (`case_no`),

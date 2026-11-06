@@ -10,6 +10,8 @@
 不得修改 source root facts或繞過非schema data-effect。
 
 ## Implementation
+- The HCM review status release uses `db/migration_releases/labor_union_2026_11_06_hcm_review_status_v1.json` and its descriptors, with shared fresh/preserve `db/schema_parts/1069_hcm_review_status.sql` and full validation assembly `db/releases/labor_union_validation_schema_hcm_review_status_v1.sql`. The additive release initializes existing cases to NULL. `scripts/backfill_hcm_review_status.py` is the opt-in Excel preview/apply entry point that fills missing decisions only.
+- `validation/receipts/PROV-HCM-REVIEW-STATUS-local-additive-qualification-20261106.json` qualifies the schema-only local update using synthetic fresh and preserved-data evidence.
 - Current schema-only successor: `db/migration_releases/labor_union_2026_11_05_scheduling_shift_occupancy_v1.json` and its descriptors; shared fresh and preserve artifact `db/schema_parts/1068_scheduling_shift_occupancy_indexes.sql`. It changes four index definitions while preserving existing rows.
 - `validation/receipts/PROV-SCHEDULING-SHIFT-local-additive-qualification-20261105.json` records the synthetic MySQL fresh and preserve qualification used by the developer updater. Apply still requires a backup of the target database.
 - Predecessor: `db/migration_releases/labor_union_2026_11_05_finance_case_subsidy_plans_v1.json` and its descriptors; fresh `db/schema_parts/245_finance_case_subsidy_plans.sql`, preserve `db/schema_parts/1067_finance_case_subsidy_plans.sql`, full v61 `db/releases/labor_union_validation_schema_case_subsidy_plans_v1.sql`. Qualification: `validation/receipts/PROV-FINANCE-COMPACT-20261105-local-additive-qualification-plans.json`.

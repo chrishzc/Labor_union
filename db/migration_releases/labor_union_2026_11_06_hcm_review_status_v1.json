@@ -1,0 +1,79 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-hcm-review-status-2026-11-06-v1",
+  "release_metadata": {
+    "release_name": "HCM review status for case reporting",
+    "application_version": "hcm-review-status-v1",
+    "published_at": "2026-11-06",
+    "description": "Add a nullable HCM source decision independent of order lifecycle. Existing rows are preserved; Excel reconciliation is opt-in."
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-scheduling-shift-occupancy-2026-11-05-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1069_hcm_review_status.sql",
+      "relative_path": "db/schema_parts/1069_hcm_review_status.sql",
+      "sha256": "972a1558188cbf4d04ec0b241efe1b998ba3ff47f21d11086cbe3af7f8da128c",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "discard-candidate-before-entry-switch; retain-column-and-use-compatible-forward-release-after-apply",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "hcm-review-status-column-exact",
+      "phase": "post-schema",
+      "policy": "Exact nullable enum for HCM review status; existing rows have NULL and no source is inferred.",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "hcm-review-status-v1"
+    ],
+    "required_restart_targets": [
+      "api"
+    ],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": [
+      "hcm-review-status-column-exact"
+    ]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_11_06_hcm_review_status_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_11_06_hcm_review_status_v1.descriptors.json",
+    "sha256": "63a8864447a64b208850fc1ed86783e1269f05031cd8652b77196b8d13f1c579",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -369,6 +369,10 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 
 ## 9. Agent 與開發者 DB 變更執行門
 
+2026-11-06 HCM 審核狀態升級。正式 release `labor_union_2026_11_06_hcm_review_status_v1.json` 及 fresh assembly 共用 `1069_hcm_review_status.sql`，只新增 nullable 欄位，既有資料初始保留 NULL，無 system seed 或自動回填。保留來源 DB，依現有備份、候選與升級入口完成 schema 驗證。升級前的備份保留供復原。
+
+有原始 HCM Excel 的開發環境另行補登。使用 `python -m scripts.backfill_hcm_review_status <原始Excel> [其他原始Excel ...]` 預覽，核對來源 SHA-256、可補登、衝突及待確認筆數。確認備份及目標後，使用相同檔案加 `--apply --confirm-database <資料庫名稱>`。限 localhost development 的 `union_db` 或 `lu_test_*`。此獨立 business-row backfill 只以相同案件編號寫入空白欄位，保留既有決定、案件資料及更新時間。來源缺漏、重複來源決定互斥、查無案件及既存值衝突均保持原值，無新增案件或切換資料庫。重跑可核對已保存及剩餘待確認筆數。
+
 只要 diff、錯誤或規格出現 table／column／constraint／index／trigger／view／seed／backfill 變更，
 必須依序執行下列 gate，不得先直接修改 SQL：
 

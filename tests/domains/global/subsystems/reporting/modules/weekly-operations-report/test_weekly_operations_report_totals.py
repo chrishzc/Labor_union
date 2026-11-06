@@ -20,7 +20,7 @@ from subsystems.reporting.weekly_report_metrics_service import WeeklyReportMetri
 def _case(day: str, serial: int, **changes) -> WeeklyCaseFact:
     fact = WeeklyCaseFact(
         client_id=serial, case_no=f"CASE-{serial}", created_at=datetime.fromisoformat(day),
-        applicant_name=f"測試案件{serial}", identity_status="一般市民", reject_reason=None,
+        applicant_name=f"測試案件{serial}", identity_status="一般市民", hcm_review_status="符合",
         district="東區", order_status="訂單成立", service_days=20, service_hours_per_day=8,
         planned_start_date=date(2026, 10, 1), planned_end_date=date(2026, 10, 28),
         seq_num=serial,
@@ -38,6 +38,11 @@ class _Facts:
     def list_case_facts(self, start, end):
         self.calls.append(("cases", start, end))
         return [row for row in self.cases if row.created_at is None or start <= row.created_at.date() <= end]
+
+    list_case_statistics_facts = list_case_facts
+
+    def list_case_years(self):
+        return [2026]
 
     def list_weekly_metrics(self, start, end):
         self.calls.append(("metrics", start, end))
@@ -182,23 +187,23 @@ def test_undated_rows_are_preserved_but_not_assigned_to_year_or_month():
     assert sheet.cell(sheet.max_row, 4).value == "日期未登錄"
 
 
-def test_rejection_statistics_reuse_existing_case_flags():
+def test_rejection_statistics_use_only_hcm_decision():
     facts = _Facts([
-        _case("2026-09-01", 1, reject_reason="測試資格不符", order_status="訂單取消"),
-        _case("2026-09-02", 2, identity_status="補助市民", reject_reason="測試資格不符", order_status="訂單取消"),
-        _case("2026-09-03", 3, identity_status=None, reject_reason="測試待分流", order_status=None),
+        _case("2026-09-01", 1, hcm_review_status="不符合", order_status="訂單取消"),
+        _case("2026-09-02", 2, identity_status="補助市民", hcm_review_status="不符合", order_status="訂單取消"),
+        _case("2026-09-03", 3, identity_status=None, hcm_review_status="不符合", order_status=None),
         _case("2026-09-04", 4, order_status="審核不符合"),
     ])
     report = _query(facts, "2026-08-31", "2026-09-06")
     total, = report.monthly_subtotals
-    assert (total.general_ineligible_count, total.subsidized_ineligible_count) == (1, 1)
-    assert total.review_rejected_count == sum(row.review_rejected for row in report.case_rows) == 4
+    assert (total.general_ineligible_count, total.subsidized_ineligible_count) == (1, None)
+    assert total.review_rejected_count == sum(row.review_rejected for row in report.case_rows) == 3
     assert total.cancelled_count == 0
-    assert total.rejection_unpartitioned_count == report.summary.rejection_unpartitioned_count == 3
+    assert total.rejection_unpartitioned_count == report.summary.rejection_unpartitioned_count == 2
 
 
 def test_unknown_rejection_partition_is_not_invented():
-    report = _query(_Facts([_case("2026-09-01", 1, identity_status=None, reject_reason="測試待分流")]))
+    report = _query(_Facts([_case("2026-09-01", 1, identity_status=None, hcm_review_status="不符合")]))
     total = report.monthly_subtotals[0]
     assert total.general_ineligible_count is None
     assert total.subsidized_ineligible_count is None
@@ -225,7 +230,7 @@ def test_xlsx_annual_first_monthly_after_last_week_and_merges_stop_before_subtot
 def test_template_headers_flags_and_service_columns_are_fixed():
     report = _query(_Facts([
         _case("2026-09-01", 731, order_status="服務中"),
-        _case("2026-09-02", 732, order_status="訂單取消", reject_reason="測試不符"),
+        _case("2026-09-02", 732, order_status="訂單取消", hcm_review_status="不符合"),
     ]), "2026-08-31", "2026-09-06")
     sheet = _workbook(report).worksheets[0]
     assert tuple(cell.value for cell in sheet[2]) == (
@@ -316,13 +321,48 @@ def test_lifecycle_counts_are_preserved_but_xlsx_uses_existing_template_flags():
         )
 
 
-def test_cancelled_and_rejected_are_independent_not_mutually_exclusive():
-    report = _query(_Facts([_case("2026-09-01", 1, order_status="訂單取消", reject_reason="測試不符")]))
+def test_case_outcomes_are_exclusive_while_raw_lifecycle_is_retained():
+    report = _query(_Facts([_case("2026-09-01", 1, order_status="訂單取消", hcm_review_status="不符合")]))
     for total in (*report.annual_totals, *report.monthly_subtotals):
         if total.application_count:
             assert total.order_status_counts["訂單取消"] == 1
             assert sum(total.order_status_counts.values()) == 1
             assert total.review_rejected_count == 1
+            assert total.cancelled_count == 0
+
+
+def test_weekly_view_excel_and_workbench_share_exclusive_case_counts():
+    day = "2026-09-07"
+    facts = _Facts([
+        _case(day, 1, identity_status="一般市民", hcm_review_status="符合", order_status="服務中"),
+        _case(day, 2, identity_status="補助市民", hcm_review_status="符合", order_status="洽談中"),
+        _case(day, 3, hcm_review_status="符合", order_status="訂單取消"),
+        _case(day, 4, hcm_review_status="不符合", order_status="歷史訂單－服務完成"),
+        _case(day, 5, hcm_review_status="不符合", order_status="洽談中"),
+        _case(day, 6, hcm_review_status=None, order_status="待補件"),
+        _case(day, 7, identity_status="非市民", case_category="subsidy", hcm_review_status="不符合"),
+    ])
+    query = WeeklyOperationsReportQuery(facts, lambda: datetime(2026, 9, 23))
+    statistics = query.query_case_statistics(2026, month=9)
+    report = query.query(statistics.start_date, statistics.end_date)
+    fields = (
+        "application_count", "general_eligible_count", "general_ineligible_count",
+        "subsidized_eligible_count", "subsidized_ineligible_count", "order_established_count",
+        "negotiating_count", "cancelled_count", "review_rejected_count",
+    )
+    expected = (7, 2, 3, 1, 0, 1, 1, 1, 3)
+    september, = [total for total in report.monthly_subtotals if total.month == 9]
+    weekly_total = WeeklyReportCaseTotalsView.model_validate(asdict(september))
+    assert tuple(getattr(weekly_total, field) for field in fields) == expected
+    assert tuple(getattr(statistics.summary, field) for field in fields) == expected
+    sheet = _workbook(report).worksheets[0]
+    for row in (4, sheet.max_row):
+        assert tuple(sheet.cell(row, column).value for column in range(8, 17)) == expected
+    assert report.case_rows[5].review_result == "pending"
+    assert all(
+        row.order_established + row.negotiating + row.cancelled + row.review_rejected <= 1
+        for row in report.case_rows
+    )
 
 
 def test_missing_empty_and_additional_source_status_are_not_lost():
@@ -335,7 +375,7 @@ def test_missing_empty_and_additional_source_status_are_not_lost():
     assert total.order_status_counts[MISSING_ORDER_STATUS] == 2
     assert total.order_status_counts["審核不符合"] == 1
     assert sum(total.order_status_counts.values()) == 3
-    assert total.review_rejected_count == 1
+    assert total.review_rejected_count == 0
     sheet = _workbook(report).worksheets[0]
     assert sheet.max_column == 23
     assert sheet.cell(3, 16).value == "審核不符合"

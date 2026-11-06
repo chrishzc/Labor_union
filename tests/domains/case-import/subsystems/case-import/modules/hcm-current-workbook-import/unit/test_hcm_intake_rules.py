@@ -36,6 +36,7 @@ def test_hcm_preview_and_apply_preserve_distinct_formal_identities(monkeypatch, 
     assert outcome == 'inserted'
     attributes = {item.name: item.value for item in applied[0].client_attributes}
     assert attributes['identity_status'] == identity
+    assert attributes['hcm_review_status'] == '符合'
 
 
 @pytest.mark.parametrize('identity', ['一般市民', '原住民', '補助市民'])
@@ -265,6 +266,13 @@ def test_hcm_service_type_normalization_preserves_the_rest_weekday() -> None:
     assert import_client_hcm.normalize_hcm_row({"服務方式": "休周六"})["service_type"] == "休周六"
     assert import_client_hcm.normalize_hcm_row({"服務方式": "休周日"})["service_type"] == "休周日"
     assert import_client_hcm.normalize_hcm_row({"服務方式": "週休1日"})["service_type"] == "週休1日"
+
+
+@pytest.mark.parametrize("source,expected", [(" 符合 ", "符合"), ("不符合", "不符合"), ("待確認", None), (None, None)])
+def test_hcm_decision_is_independent_of_the_reject_reason(source, expected):
+    record = import_client_hcm.normalize_hcm_row({"案件狀態": source, "不符合原因": "舊註記"})
+    assert record.get("hcm_review_status") == expected
+    assert record["reject_reason"] == "舊註記"
     assert {"休周六", "休周日"} <= SERVICE_TYPE_VALUES
 
 
