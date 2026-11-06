@@ -1,6 +1,6 @@
 """
 File: test_historical_order_workbook_import.py
-Description: 驗證訂單歷史 workbook claim、terminal replay、conflict 與逐列結果守恆。
+Description: 驗證歷史工作簿重匯、衝突排除、交易與逐列結果。
 """
 
 from __future__ import annotations
@@ -247,7 +247,7 @@ class _StaleWorkflow(_Workflow):
         raise RuntimeError("historical_order_candidate_stale")
 
 
-def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(monkeypatch):
+def test_workbook_apply_uses_current_validation_and_never_persists_workbook_results(monkeypatch):
     original = _workbook("a" * 64)
     different = _workbook("b" * 64)
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: original if path == "first.xlsx" else different)
@@ -256,15 +256,14 @@ def test_workbook_apply_replays_terminal_receipt_and_conflicts_before_row_apply(
     service = module.HistoricalOrderWorkbookImportService(repository, workflow, _UnitOfWork)
     preview = service.preview("first.xlsx")
 
-    first = service.apply("first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
-    replay = service.apply("first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
-
-    assert first.replayed_workbook is False
-    assert replay.replayed_workbook is True
-    assert workflow.apply_calls == 1
-    with pytest.raises(module.HistoricalOrderWorkbookConflict):
-        service.apply("different.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation")
-    assert workflow.apply_calls == 1
+    first = service.apply("first.xlsx", "first-operation", preview.preview_fingerprint, "operator", "correlation")
+    again = service.apply("first.xlsx", "new-operation", preview.preview_fingerprint, "operator", "correlation")
+    assert first.replayed_workbook is again.replayed_workbook is False
+    assert repository.claims == repository.receipts == {}
+    assert workflow.apply_calls == 2
+    with pytest.raises(module.HistoricalOrderWorkbookConflict, match="historical_order_preview_stale"):
+        service.apply("different.xlsx", "new-operation", preview.preview_fingerprint, "operator", "correlation")
+    assert workflow.apply_calls == 2
 
 
 def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
@@ -303,36 +302,25 @@ def test_import_counts_partition_replayed_review_and_adopted_rows(monkeypatch):
     replay = service.apply("mixed.xlsx", "mixed-key", preview.preview_fingerprint, "operator", "correlation")
     assert replay.import_counts == receipt.import_counts
     assert replay.as_dict()["row_issues"] == receipt.as_dict()["row_issues"]
-    assert workflow.apply_calls == 4
+    assert workflow.apply_calls == 8
 
 
-def test_terminal_replay_does_not_revalidate_current_rows(monkeypatch):
+def test_legacy_workbook_snapshot_does_not_bypass_current_validation(monkeypatch):
     workbook = _workbook("a" * 64)
     monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
-
-    class Workflow(_Workflow):
-        reject_preview = False
-
-        def preview(self, row):
-            if self.reject_preview:
-                raise AssertionError("terminal replay must not revalidate rows")
-            return super().preview(row)
-
     repository = _Repository()
-    workflow = Workflow()
+    old_snapshot = {"request_fingerprint": workbook.content_digest, "result_snapshot": "{}"}
+    repository.receipts["legacy-key"] = old_snapshot
+    workflow = _Workflow()
     service = module.HistoricalOrderWorkbookImportService(repository, workflow, _UnitOfWork)
-    preview = service.preview("first.xlsx")
 
-    service.apply(
-        "first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation"
-    )
-    workflow.reject_preview = True
-    replay = service.apply(
-        "first.xlsx", "workbook-key", preview.preview_fingerprint, "operator", "correlation"
-    )
-
-    assert replay.replayed_workbook is True
+    with pytest.raises(module.HistoricalOrderWorkbookConflict, match="historical_order_preview_stale"):
+        service.apply("legacy.xlsx", "legacy-key", "0" * 64, "operator", "correlation")
+    preview = service.preview("legacy.xlsx")
+    result = service.apply("legacy.xlsx", "legacy-key", preview.preview_fingerprint, "operator", "correlation")
+    assert result.replayed_workbook is False
     assert workflow.apply_calls == 1
+    assert repository.receipts == {"legacy-key": old_snapshot}
 
 
 def test_apply_reports_a_stale_preview_as_a_conflict_before_row_apply(monkeypatch):
@@ -663,71 +651,6 @@ def test_preview_and_receipt_expose_conserved_zero_one_two_status_counts(monkeyp
         "invalid_or_blank": 1,
     }
     assert receipt.status_counts == preview.status_counts
-
-
-def test_legacy_stored_receipt_replay_derives_status_counts_from_same_workbook(monkeypatch):
-    workbook = _workbook_with_statuses()
-    repository = _Repository()
-    repository.receipts["legacy-key"] = {
-        "request_fingerprint": workbook.content_digest,
-        "result_snapshot": json.dumps({
-            "source_content_digest": workbook.content_digest,
-            "source_row_count": 4,
-            "adopted_count": 4,
-            "unmatched_case_count": 0,
-            "review_required_count": 0,
-            "current_conflict_count": 0,
-            "assignments_created": 0,
-            "replayed_rows": 0,
-            "replayed_workbook": False,
-            "status_counts": {
-                "cancelled_0": 1,
-                "completed_1": 1,
-                "discussion_2": 1,
-                "invalid_or_blank": 1,
-            },
-        }),
-    }
-    monkeypatch.setattr(module, "load_historical_order_workbook", lambda path: workbook)
-
-    replay = module.HistoricalOrderWorkbookImportService(repository, _Workflow(), _UnitOfWork).apply(
-        "statuses.xlsx", "legacy-key", "0" * 64, "operator", "correlation",
-    )
-
-    assert replay.replayed_workbook is True
-    assert replay.status_counts.total == 4
-    assert replay.status_counts.deposit_paid_1 == 1
-
-
-def test_legacy_replay_discovers_open_review_identities_from_orders_evidence(monkeypatch):
-    workbook = _workbook("f" * 64)
-    repository = _Repository()
-    repository.receipts["legacy-key"] = {
-        "request_fingerprint": workbook.content_digest,
-        "result_snapshot": json.dumps({
-            "source_content_digest": workbook.content_digest,
-            "source_row_count": 1,
-            "adopted_count": 1,
-            "unmatched_case_count": 0,
-            "review_required_count": 1,
-            "current_conflict_count": 0,
-            "assignments_created": 0,
-            "replayed_rows": 0,
-            "replayed_workbook": False,
-            "status_counts": {"cancelled_0": 0, "deposit_paid_1": 1, "discussion_2": 0, "invalid_or_blank": 0},
-        }),
-    }
-    repository.find_open_review_identities = lambda identities: (
-        "historical-order-review:one",
-    ) if identities == (workbook.rows[0].source_identity,) else ()
-    monkeypatch.setattr(module, "load_historical_order_workbook", lambda _path: workbook)
-
-    replay = module.HistoricalOrderWorkbookImportService(repository, _Workflow(), _UnitOfWork).apply(
-        "legacy.xlsx", "legacy-key", "0" * 64, "operator", "correlation",
-    )
-
-    assert replay.replayed_workbook is True
-    assert replay.review_references == ("historical-order-review:one",)
 
 
 def _workbook(digest: str) -> HistoricalOrderWorkbook:

@@ -222,16 +222,17 @@ export function adaptStaffHistoricalImportResult(receipt: StaffHistoricalWorkboo
 
 export function adaptHistoricalOrderImportResult(receipt: HistoricalOrderWorkbookReceipt): WorkbookImportResult {
   const rows = receipt.row_issues?.map(row => ({ sourceRow: row.source_row, identifier: row.case_no, fields: row.fields, reasons: historicalOrderRowReasons(row.issue_codes) })) ?? null;
+  const absentOrderCancellationCount = receipt.absent_order_cancellation_count;
   if (receipt.import_counts) {
     return { ...result(receipt.source_row_count, receipt.import_counts.imported_count,
       receipt.import_counts.duplicate_skipped_count, receipt.import_counts.not_imported_count,
       receipt.replayed_workbook,
-      rows), absentOrderCancellationCount: receipt.absent_order_cancellation_count };
+      rows), absentOrderCancellationCount };
   }
   // Old receipts with mixed row replay do not identify which outcomes overlapped.
   if (receipt.replayed_rows > 0) {
-    return { sourceCount: receipt.source_row_count, importedCount: null, duplicateCount: null, notImportedCount: null, replayedWorkbook: receipt.replayed_workbook, notImportedRows: null };
+    return { sourceCount: receipt.source_row_count, importedCount: null, duplicateCount: null, notImportedCount: null, replayedWorkbook: receipt.replayed_workbook, notImportedRows: null, absentOrderCancellationCount };
   }
-  return result(receipt.source_row_count, receipt.adopted_count, 0,
-    receipt.source_row_count - receipt.adopted_count, receipt.replayed_workbook, rows);
+  return { ...result(receipt.source_row_count, receipt.adopted_count, 0,
+    receipt.source_row_count - receipt.adopted_count, receipt.replayed_workbook, rows), absentOrderCancellationCount };
 }

@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 import pytest
 from api.dependencies import historical_order_adoption as historical_dependencies
 from api.routes import historical_order_adoption as historical_routes
@@ -24,6 +24,7 @@ from domains.orders.lifecycle import OrderLifecycleStatus
 from infrastructure.mysql.historical_order_adoption_repository import MySqlHistoricalOrderAdoptionRepository
 from infrastructure.mysql.historical_assignment_writer import MySqlHistoricalAssignmentWriter
 from infrastructure.mysql.historical_order_workbook_import_repository import HistoricalOrderWorkbookImportRepository
+from infrastructure.mysql.historical_service_accounting_repository import MySqlHistoricalServiceAccountingRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import FixedBusinessClock
@@ -43,6 +44,7 @@ from subsystems.orders.historical_order_workbook_import import (
     HistoricalOrderWorkbookConflict,
     HistoricalOrderWorkbookImportService,
 )
+from subsystems.scheduling import staff_monthly_calendar_query
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
@@ -154,6 +156,15 @@ def test_corrected_historical_workbook_writes_both_same_day_shifts_to_mysql(monk
             assert cursor.fetchone()["total"] == 0
         assert len(rows) == 2
         assert rows[0]["staff_id"] == rows[1]["staff_id"]
+        monkeypatch.setattr(staff_monthly_calendar_query, "get_connection", get_connection)
+        calendar = staff_monthly_calendar_query.get_staff_monthly_calendar_schedule(rows[0]["staff_id"], 2026, 10, clock=clock)
+        shifts = [item for item in calendar["days"] if item["work_date"] == "2026-10-19" and item["case_no"] in {morning_case, afternoon_case}]
+        assert [(shift["case_no"], shift["starts_at"][11:16], shift["ends_at"][11:16]) for shift in shifts] == [
+            (morning_case, "09:00", "13:00"), (afternoon_case, "13:30", "17:30"),
+        ]
+        accounting = MySqlHistoricalServiceAccountingRepository(connection).load(morning_case, for_update=False)
+        assert accounting.historical_day_revision == 1
+        assert [assignment.staff_id for assignment in accounting.assignments] == [rows[0]["staff_id"]]
         by_case = {row["case_no"]: row for row in rows}
         for case, status, start_date, end_date, start_time, end_time in (
             (morning_case, OrderLifecycleStatus.HISTORICAL_SERVICE_COMPLETED, date(2026, 9, 15), date(2026, 10, 30), "09:00:00", "13:00:00"),
@@ -180,11 +191,13 @@ def test_workbook_apply_uses_only_the_canonical_six_columns(tmp_path):
 
         preview = service.preview(str(workbook_path))
         receipt = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
-        replay = service.apply(str(workbook_path), f"historical-workbook:{token}", preview.preview_fingerprint, "historical-workbook-test", token)
+        repeat = service.preview(str(workbook_path))
+        replay = service.apply(str(workbook_path), f"historical-workbook:{token}:repeat", repeat.preview_fingerprint, "historical-workbook-test", token)
 
         assert receipt.adopted_count == 2
         assert receipt.assignments_created == 1
-        assert replay.replayed_workbook is True
+        assert replay.replayed_workbook is False
+        assert replay.assignments_created == 0
         _assert_assignment_and_evidence(connection, first_case, second_case)
     finally:
         connection.close()
@@ -214,8 +227,9 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
             str(workbook_path), f"historical-workbook:status-012:{token}", preview.preview_fingerprint,
             "historical-workbook-test", token,
         )
+        repeat = service.preview(str(workbook_path))
         replay = service.apply(
-            str(workbook_path), f"historical-workbook:status-012:{token}", preview.preview_fingerprint,
+            str(workbook_path), f"historical-workbook:status-012:{token}:repeat", repeat.preview_fingerprint,
             "historical-workbook-test", token,
         )
 
@@ -228,7 +242,8 @@ def test_six_column_workbook_applies_zero_one_two_as_distinct_order_statuses(tmp
         assert preview.status_counts.as_dict() == expected_counts
         assert receipt.status_counts.as_dict() == expected_counts
         assert replay.status_counts.as_dict() == expected_counts
-        assert replay.replayed_workbook is True
+        assert replay.replayed_workbook is False
+        assert replay.assignments_created == 0
         assert _order_status(connection, cancelled_case) == "洽談中"
         assert _order_status(connection, completed_case) == "歷史訂單－未服務"
         assert _order_status(connection, discussion_case) == "洽談中"
@@ -263,9 +278,10 @@ def test_workbook_refreshes_a_later_row_for_the_same_case_after_its_own_write(tm
 
         assert receipt.source_row_count == 2
         assert receipt.adopted_count == 2
+        assert receipt.import_counts.as_dict() == {"imported_count": 1, "duplicate_skipped_count": 1, "not_imported_count": 0}
         assert _order_status(connection, case_no) == "歷史訂單－未服務"
         assert _count(connection, "order_lifecycle_state_events", case_no) == 1
-        assert _count(connection, "historical_order_adoption_receipts", case_no) == 2
+        assert _count(connection, "historical_order_adoption_receipts", case_no) == 1
     finally:
         connection.close()
 
@@ -299,16 +315,18 @@ def test_six_column_workbook_adopts_pending_orders_with_truthful_before_status(t
             "historical-workbook-test",
             token,
         )
+        repeat = service.preview(str(workbook_path))
         replay = service.apply(
             str(workbook_path),
-            f"historical-workbook:pending-status-012:{token}",
-            preview.preview_fingerprint,
+            f"historical-workbook:pending-status-012:{token}:repeat",
+            repeat.preview_fingerprint,
             "historical-workbook-test",
             token,
         )
 
         assert receipt.adopted_count == 2
-        assert replay.replayed_workbook is True
+        assert replay.replayed_workbook is False
+        assert replay.assignments_created == 0
         expected_after = {
             completed_case: "歷史訂單－未服務",
             discussion_case: "洽談中",
@@ -348,9 +366,8 @@ def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
         first_preview = service.preview(str(first_path))
         service.apply(str(first_path), f"historical-workbook:conflict:{token}", first_preview.preview_fingerprint, "historical-workbook-test", token)
 
-        changed_preview = service.preview(str(changed_path))
-        with pytest.raises(HistoricalOrderWorkbookConflict):
-            service.apply(str(changed_path), f"historical-workbook:conflict:{token}", changed_preview.preview_fingerprint, "historical-workbook-test", token)
+        with pytest.raises(HistoricalOrderWorkbookConflict, match="historical_order_preview_stale"):
+            service.apply(str(changed_path), f"historical-workbook:conflict:{token}:new", first_preview.preview_fingerprint, "historical-workbook-test", token)
 
         assert _order_status(connection, case_no) == "歷史訂單－服務完成"
     finally:
@@ -576,8 +593,17 @@ def test_historical_unknown_issue_remains_an_orders_review_and_is_acknowledged()
         connection.close()
 
 
-def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
-    workbook_path = Path(__file__).resolve().parents[8] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
+def test_controlled_deidentified_historical_workbook_rebuilds_and_reimports(tmp_path):
+    fixture = Path(__file__).resolve().parents[8] / "document" / "資料庫、資料處理" / "假資料_歷史訂單.xlsx"
+    original = load_historical_order_workbook(fixture).rows[0]
+    workbook_path = tmp_path / "controlled-source.xlsx"
+    book = load_workbook(fixture)
+    try:
+        case_cell, = (cell for cell in book.active[original.source_row] if str(cell.value) == original.case_no)
+        case_cell.value = f"HISTORICAL-FIXTURE-{uuid4().hex[:10]}"
+        book.save(workbook_path)
+    finally:
+        book.close()
     parsed = load_historical_order_workbook(str(workbook_path))
     assert len(parsed.rows) == 1
     source_row = parsed.rows[0]
@@ -592,14 +618,16 @@ def test_controlled_deidentified_historical_workbook_rebuilds_and_replays():
             str(workbook_path), "historical-workbook:controlled-deidentified-source",
             preview.preview_fingerprint, "historical-workbook-test", "controlled-deidentified-source",
         )
+        repeat = service.preview(str(workbook_path))
         replay = service.apply(
-            str(workbook_path), "historical-workbook:controlled-deidentified-source",
-            preview.preview_fingerprint, "historical-workbook-test", "controlled-deidentified-source",
+            str(workbook_path), "historical-workbook:controlled-deidentified-source:repeat",
+            repeat.preview_fingerprint, "historical-workbook-test", "controlled-deidentified-source",
         )
 
         assert preview.source_row_count == 1
         assert receipt.adopted_count == 1
-        assert replay.replayed_workbook is True
+        assert replay.replayed_workbook is False
+        assert replay.assignments_created == 0
         assert _order_status(connection, source_row.case_no) == "歷史訂單－服務完成"
     finally:
         connection.close()

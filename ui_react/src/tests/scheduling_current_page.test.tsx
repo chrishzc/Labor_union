@@ -914,7 +914,7 @@ describe('SchedulingPage query-only presentation', () => {
     expect(document.querySelector('[data-control-id="scheduling.holiday.apply"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /新增國定假日/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /請假與代班/ }));
-    await waitFor(() => expect(screen.getByText(/目前此狀態沒有待處理的 LINE 請假申請/)).toBeInTheDocument());
-    expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('pending');
+    await waitFor(() => expect(screen.getByText('此狀態沒有歷史請假紀錄。')).toBeInTheDocument());
+    expect(staffLeaveInboxClient.list).toHaveBeenCalledWith('resolved');
   });
 });

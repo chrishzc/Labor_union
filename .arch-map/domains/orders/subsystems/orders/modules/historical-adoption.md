@@ -5,7 +5,7 @@
 - subsystem: `orders`
 
 ## Responsibility
-將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root，維持精確 case matching、Preview zero-write、Apply fresh recheck、replay/idempotency 與 immutable receipt/outbox；歷史完成訂單在同一 outer UoW 依 Orders 原 `service_days × service_hours_per_day` 自動建立基準帳務，不猜測逐日排假。
+將受控、單一月嫂 historical order workbook 的可採納來源值套用到既有 Orders root。每次匯入重新檢查整份工作簿，檔內採納、檔外取消與基準帳務共用同一 outer UoW。歷史完成訂單依 Orders 原 `service_days × service_hours_per_day` 建立基準帳務，不推測逐日排假。
 
 ## Implementation
 - primary:
@@ -45,7 +45,9 @@
 - inbound: Case Import / operator import entry — only through typed source/workflow boundary.
 
 ## Contracts
-- Preview／Apply 依工作簿可追溯的每日時段區分已證實重疊與時段待確認，將問題列排除並在 `row_issues` 顯示對造 Excel 列號與案件；其餘列在同一 outer UoW 原子匯入。可採納時段保留於 immutable receipt snapshot，供歷史指派唯讀顯示。
+- Preview／Apply 依工作簿可追溯的每日時段區分實際重疊與缺少證據，當次 `row_issues` 顯示雙方 Excel 列號與案件。檔內排除列保留案號，避免被列為檔外取消。
+- Workbook Apply 只回傳當次結果。同檔重匯依目前版本重新判定，業務資料已一致的列避免重複寫入。整份結果快照與整批 claim 已停止讀寫。
+- 現行逐筆採納資料仍承載可採納時段、指派及帳務的正式引用。`27` §12.1 定義搬遷至 owner 資料及轉接查詢與外鍵後的清除條件。
 - MySQL 3819 沿 `historical_order_database_check_<constraint>` 保留 bounded、去 schema 的規則識別，不辨識時回 `check_rejected`；不以規則失敗直接推定 migration 或來源修正。
 - 歷史工作簿資料庫錯誤以 `historical_order_database_*` 區分連線、權限、結構、資料鎖及指令／資料限制，保留數字與 correlation，不回傳或記錄 raw SQL／provider message；資料鎖與死結不觸發自動重送。
 - `document/架構重整/01_規格基線/01_Orders_Domain.md` — historical adoption semantics and Orders ownership.

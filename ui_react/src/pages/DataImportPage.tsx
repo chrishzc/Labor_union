@@ -345,7 +345,7 @@ const CaseWorkbookPreviewCard: React.FC<CaseWorkbookPreviewCardProps> = ({
       </section>}
       {waiting && <p className="import-simple-busy" role="status">正在等待匯入結果，資料量較多或連線較慢時可能需要較長時間。可以切換至其他頁面；離開匯入頁後，自動確認會停止，需重新選取原檔案查詢結果。請勿重複上傳或重新整理。</p>}
       {ready && !waiting && <footer className="import-simple-actions">
-        {done ? <><p role="status">本次檔案已處理完成。</p><button type="button" className="import-apply-btn" onClick={() => fileInputRef.current?.click()}>匯入下一份檔案</button></> : <>
+        {done ? <><p role="status">本次檔案已處理完成。</p><button type="button" className="import-apply-btn" onClick={() => historicalOrders ? void onPreview() : fileInputRef.current?.click()}>{historicalOrders ? '重新匯入' : '匯入下一份檔案'}</button></> : <>
           <div><p id={applyGuidanceId} className="import-control-guidance">{historicalOrders && unknown ? '匯入結果尚未確認。' : applyControlGuidance(previewState, applyState)}</p></div>
           <button type="button" data-control-id={`imports.${id}.apply`} aria-describedby={applyGuidanceId} className="import-apply-btn" disabled={loading || (mutationLocked && !unknown)} onClick={() => void (historicalOrders ? onPreview() : onApply())}>{unknown ? (historicalOrders ? '重新匯入' : '查詢這次匯入結果') : '重試匯入'}</button>
         </>}

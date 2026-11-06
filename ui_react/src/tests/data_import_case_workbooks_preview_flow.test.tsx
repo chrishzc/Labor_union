@@ -92,7 +92,7 @@ describe('Data Import simple result flows', () => {
       const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
       fireEvent.click(within(card).getByRole('button', { name: '匯入' }));
       expect(await within(card).findByRole('status')).toHaveTextContent('historical_order_import_database_unavailable');
-      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      expect(within(card).getByRole('button', { name: '重新匯入' })).toBeEnabled();
       fireEvent.click(screen.getByRole('button', { name: '前往其他頁面' }));
       expect(screen.getByRole('heading', { name: '其他頁面' })).toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -145,7 +145,7 @@ describe('Data Import simple result flows', () => {
       await act(async () => { fireEvent.click(within(card).getByRole('button', { name: '匯入' })); });
       expect(within(card).getByRole('status')).toHaveTextContent(guidance);
       expect(within(card).getByRole('status')).toHaveTextContent(`錯誤代碼：${code}`);
-      expect(within(card).getByRole('button', { name: '查詢這次匯入結果' })).toBeEnabled();
+      expect(within(card).getByRole('button', { name: '重新匯入' })).toBeEnabled();
       expect(within(card).queryByRole('button', { name: '停止等待' })).not.toBeInTheDocument();
       await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
       expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(1);
@@ -256,7 +256,8 @@ describe('Data Import simple result flows', () => {
     expect(details.querySelectorAll('tbody tr')).toHaveLength(2);
     expect(details).toHaveTextContent('必填資料缺漏');
     expect(details).not.toHaveTextContent('CLIENT-007');
-    expect(metrics(card)).toEqual((cases.find(item => item[2] === id)![3]).map(String));
+    const expected = cases.find(item => item[2] === id)![3].map(String);
+    expect(metrics(card)).toEqual(id === 'historic-orders' ? [...expected, '0'] : expected);
   });
 
   it('automatically confirms a lock timeout using the same snapshot, preview and command identity', async () => {
@@ -323,18 +324,21 @@ describe('Data Import simple result flows', () => {
   });
 
 
-  it.each(cases)('%s shows only four final counters and replaces the preview', async (kind, label, id, expected) => {
+  it.each(cases)('%s shows final counters and replaces the preview', async (kind, label, id, expected) => {
     render(<DataImportPage />);
     const card = await selectWorkbook(kind, label, id);
     expect(metrics(card)).toEqual([]);
     expect(within(card).getByRole('button', { name: '匯入' })).toBeEnabled();
     expect(within(card).queryByText(/CLIENT-007|CASE-012|原始資料問題|需人工檢查|既有衝突|身分阻擋/)).not.toBeInTheDocument();
     await apply(card);
-    expect(metrics(card)).toEqual(expected.map(String));
-    expect(Array.from(card.querySelectorAll('dt')).map(node => node.textContent)).toEqual(['來源筆數', '成功匯入', '重複略過', '未匯入']);
+    const historical = id === 'historic-orders';
+    expect(metrics(card)).toEqual(historical ? [...expected.map(String), '0'] : expected.map(String));
+    expect(Array.from(card.querySelectorAll('dt')).map(node => node.textContent)).toEqual(historical
+      ? ['來源筆數', '成功匯入', '資料已一致', '未匯入', '檔外取消']
+      : ['來源筆數', '成功匯入', '重複略過', '未匯入']);
     expect(within(card).queryByText('預覽結果')).not.toBeInTheDocument();
     expect(card.querySelectorAll('dl')).toHaveLength(1);
-    expect(within(card).getByRole('button', { name: '匯入下一份檔案' })).toBeEnabled();
+    expect(within(card).getByRole('button', { name: historical ? '重新匯入' : '匯入下一份檔案' })).toBeEnabled();
     expect(within(card).queryByRole('button', { name: '確認匯入' })).not.toBeInTheDocument();
     expect(within(card).queryByText(/需檢查|問題列|第.*列/)).not.toBeInTheDocument();
   });
@@ -367,8 +371,8 @@ describe('Data Import simple result flows', () => {
     expect(calls[0]?.[2].signal).toBeUndefined();
   });
 
-  it.each(cases)('%s result lookup labels original counts and does not double the totals', async (kind, label, id, expected) => {
-    const client = id === 'client-beclass' ? clientBeClassWorkbookPreviewClient : id === 'staff-historical' ? staffHistoricalWorkbookPreviewClient : historicalOrderWorkbookPreviewClient;
+  it.each(cases.filter(item => item[2] !== 'historic-orders'))('%s result lookup labels original counts and does not double the totals', async (kind, label, id, expected) => {
+    const client = id === 'client-beclass' ? clientBeClassWorkbookPreviewClient : staffHistoricalWorkbookPreviewClient;
     const receipt = await client.apply({} as never, fingerprint, { idempotencyKey: 'fixture', correlationId: 'fixture' });
     vi.spyOn(client, 'apply').mockResolvedValue({ ...receipt, replayed_workbook: true } as never);
     render(<DataImportPage />);
@@ -383,9 +387,21 @@ describe('Data Import simple result flows', () => {
     vi.mocked(historicalOrderWorkbookPreviewClient.apply).mockResolvedValueOnce({ source_content_digest: digest, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 1, current_conflict_count: 0, assignments_created: 0, replayed_rows: 0, replayed_workbook: false, absent_order_cancellation_count: 0, status_counts: { cancelled_0: 0, deposit_paid_1: 1, discussion_2: 0, invalid_or_blank: 0 }, result_counts: { not_adopted: 0, matching_pending_deposit: 0, historical_unserved: 1, historical_in_service: 0, historical_service_completed: 0 }, review_references: ['historical-order-review:one'] });
     render(<DataImportPage />);
     const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders'); await apply(card);
-    expect(metrics(card)).toEqual(['1', '1', '0', '0']);
+    expect(metrics(card)).toEqual(['1', '1', '0', '0', '0']);
     expect(query).not.toHaveBeenCalled();
     expect(screen.queryByText(/處理歷史訂單待確認|歷史訂單欄位衝突更正/)).not.toBeInTheDocument();
+  });
+
+  it('starts a new historical import operation for the same selected file', async () => {
+    render(<DataImportPage />);
+    const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
+    await apply(card);
+    fireEvent.click(within(card).getByRole('button', { name: '重新匯入' }));
+    await waitFor(() => expect(historicalOrderWorkbookPreviewClient.apply).toHaveBeenCalledTimes(2));
+    const [first, second] = vi.mocked(historicalOrderWorkbookPreviewClient.apply).mock.calls;
+    expect(historicalOrderWorkbookPreviewClient.preview).toHaveBeenCalledTimes(2);
+    expect(first?.[0].sha256).toBe(second?.[0].sha256);
+    expect(first?.[2].idempotencyKey).not.toBe(second?.[2].idempotencyKey);
   });
 
   it('explains the first action for each import family', () => {
@@ -521,7 +537,7 @@ describe('Data Import simple result flows', () => {
     render(<DataImportPage />);
     const card = await selectWorkbook('歷史訂單', '選擇歷史訂單 Workbook', 'historic-orders');
     await apply(card);
-    expect(metrics(card)).toEqual(['3', '1', '0', '2']);
+    expect(metrics(card)).toEqual(['3', '1', '0', '2', '0']);
     const details = within(card).getByLabelText('未匯入明細');
     expect(details).toHaveTextContent('CASE-015');
     expect(details).toHaveTextContent('本列的服務時段無法確認，與 Excel 第 28 列（案件 CASE-028，2026-08-08～2026-08-15）的日期有交集，無法比對。');
