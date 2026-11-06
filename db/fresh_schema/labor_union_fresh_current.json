@@ -4,7 +4,7 @@
   "release_id": "labor-union-validation-schema-controlled-purpose-media-reference-v1",
   "source_bindings": {
     "assembly_sha256": "d9fb5cc1c8ac5117f6dce7b974a82da88871ba8d3140cd2ad48ad6f337c319e4",
-    "validation_manifest_sha256": "952c8bd67a638cc5af7a0477f87cd9dc4447deb2534d18ae8375d05f2b106aaa",
+    "validation_manifest_sha256": "e54f6e8f9db43efee7f11dd0c04e1f33c62fb1a522017d192a3a396c80f909ef",
     "retirement_policy_sha256": "7c4bb6a731bdac3e08b028fa09dad016dffff33668c375ef8f38a506a8836e14"
   },
   "sql_sha256": "8baec372da390aa07e239fb6f791de5d97965987f3950d41134f72b1a25243a8",

@@ -19,7 +19,8 @@
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_controlled_purpose_media_reference_v1.sql",
     "database_token": "__LU_TEST_DATABASE__",
-    "generation": "base_schema_then_ordered_schema_parts"
+    "generation": "base_schema_then_ordered_schema_parts",
+    "source_line_whitespace": "trim-ascii-trailing-normal-sql-v1"
   },
   "postcheck": {
     "required_views": [

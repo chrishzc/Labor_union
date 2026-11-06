@@ -383,7 +383,7 @@ def test_malformed_real_contract_owner_receipt_stays_review_required_in_http_pre
     actual = MySqlControlledFileWorkflowRepository(Connection(events))
     actual.get_download_reference = repository.get_download_reference
     monkeypatch.setattr(owner.MySqlContractExternalSigningRepository, "get_controlled_file_reference",
-        lambda self, _: owner._final_contract_reference_members({"result_snapshot": {}}))
+        lambda self, _, **kwargs: owner._final_contract_reference_members({"result_snapshot": {}}))
     repository.reconciliation_reference_status = actual.reconciliation_reference_status
     http = FastAPI(); http.include_router(router)
     http.dependency_overrides[require_persisted_admin] = lambda: SimpleNamespace(id=7, is_root=True, effective_capabilities=lambda: ())

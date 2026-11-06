@@ -13,6 +13,7 @@
 - domain: `domains/government_subsidy/period_reconciliation.py`
 - application: `subsystems/government_subsidy/period_reconciliation.py`
 - adapter: `infrastructure/mysql/government_subsidy_period_repository.py`
+- manual initial source proof: `infrastructure/mysql/government_subsidy_manual_period_source.py` — exact period/amount/date/actor/key/intent evidence in the existing Finance Import row; initial receipt only, no provider/bank attestation or new table.
 - shared source/formula: `subsystems/government_subsidy/reconciliation_register_query.py`
 - API: `api/routes/government_subsidy_periods.py`
 - presentation: `ui_react/src/components/SubsidyPeriodWorkbench.tsx`
@@ -24,6 +25,7 @@
 - `document/架構重整/01_規格基線/14_Government_Subsidy_Domain.md`
 - Client Finance 出款不可變，期款不重付；年度 version 與來源／bank fresh locks，同一 application 單次 outer commit。
 - Finance Import 政府流水保留待選期間；核銷後標為已消費，不能再人工更正到其他 owner。
+- 首次人工收款沿原 period owner/UoW 與差額規則，原 key replay 先於 first-only gate；source 使用明示 manual 的 legacy FI row，後續補撥／退款沿原銀行來源。typed view precommit，來源標「人工補登」，不假設台新或拆逐案現金。
 - 原整期save後沿同一outer UoW借用Client Finance正式同步；只在共用案件Query確認本案客戶先墊後退及正式S時成立客戶應退，不由member快照拆造逐案政府現金，不增加commit或新銀行writer。
 
 ## Verification
@@ -34,3 +36,4 @@
 - integration_root: `tests/domains/government-subsidy/subsystems/government-subsidy/integration/test_period_reconciliation_mysql.py`
 - presentation_test_root: `ui_react/src/tests/domains/government-subsidy/subsystems/government-subsidy/modules/period-reconciliation/`
 - focused: `test_period_reconciliation.py`、`test_period_reconciliation_mysql.py`
+- no-SQL source/API/owner-port/readback oracles: `test_manual_initial_period_receipt.py` and `test_period_reconciliation_ports.py` beneath the module test root; real DB locking, persistence and transaction atomicity remain separate verification.

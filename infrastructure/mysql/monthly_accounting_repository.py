@@ -1,4 +1,4 @@
-"""Report only committed bank sources; do not expose statement payloads or accounts."""
+"""Report committed owner cash sources; do not expose payloads or accounts."""
 import calendar
 from datetime import date, datetime
 from shared_kernel.clock import TAIPEI_TIME_ZONE
@@ -10,6 +10,7 @@ from infrastructure.mysql.finance_import_repository import _integer_bank_amount
 from subsystems.finance_import.monthly_accounting import AccountingBankFact
 from subsystems.finance_import.monthly_accounting import MonthlyAccountingUnavailable
 from subsystems.finance_import.monthly_accounting import AccountingRecognition
+from infrastructure.mysql.government_subsidy_manual_period_source import verified_manual_initial_receipt, PERIOD_RECEIPT_PROOF_JSON_SQL
 
 
 _CASH_FACT_COLUMNS = """b.id,b.transaction_date,b.direction,b.credit,b.debit,b.format_id,p.case_no,
@@ -20,6 +21,10 @@ _CASH_FACT_COLUMNS = """b.id,b.transaction_date,b.direction,b.credit,b.debit,b.f
  (EXISTS(SELECT 1 FROM government_subsidy_transactions t WHERE t.finance_import_row_id=b.id AND t.transaction_status='succeeded')
  OR EXISTS(SELECT 1 FROM government_subsidy_period_entries e WHERE e.finance_import_row_id=b.id)) government_proof
 """
+_CASH_FACT_COLUMNS += (',b.currency,b.classification_type,b.reconciliation_status,b.bank_references,b.batch_id,b.source_file,'
+    'b.sheet_name,b.source_row,b.source_reference,b.source_bank_account,b.counterparty_account,b.resolved_counterparty_account,'
+    '(SELECT ' + PERIOD_RECEIPT_PROOF_JSON_SQL + ' FROM government_subsidy_period_entries entry '
+    'WHERE entry.finance_import_row_id=b.id AND entry.reversal_of_id IS NULL LIMIT 1) AS period_receipt')
 
 def _cash_flow(row):
     bank = row.get("format_id") if row.get("format_id") in {"sinopac", "taishin"} else None
@@ -28,6 +33,8 @@ def _cash_flow(row):
         return bank, None
     owner = proofs[0]
     incoming = row["direction"] == "incoming"
+    if owner == 'government' and incoming and verified_manual_initial_receipt(row, row.get('period_receipt')):
+        return None, 'G'
     flow = {("sinopac", True, "receipt"): "C", ("taishin", True, "government"): "G",
             ("sinopac", False, "staff"): "PS", ("taishin", False, "staff"): "PT",
             ("sinopac", False, "refund"): "RS", ("taishin", False, "subsidy_return"): "RT"}

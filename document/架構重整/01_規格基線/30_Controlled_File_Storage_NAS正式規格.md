@@ -60,6 +60,15 @@
 
 新增 purpose 必須先有唯一 owner 與 typed consumer；不得用自由字串繞過 registry。
 
+現行 runtime registry 以同一 typed record 保存上述十欄，原上傳／Staff 文件 reader 共用其中的 owner／MIME 限制。
+依 `00` §2.2，八種業務檔案的 metadata 與 NAS bytes 都需要 backup／restore／reconciliation；
+`backup_required=true` 不表示已有備份、隔離性或還原演練。長期保存與禁止自動清除 committed／frozen artifact
+是既有保留邊界，不推定法定保存年數。2026-11-06 最新使用者裁決：八類業務檔案由 NAS 管理者
+負責實體復原，原業務 owner 驗證檔案與業務關聯；`database_backup` 維持現行 NAS 備份，
+不要求備份產物額外副本（該 purpose 的 `backup_required=false` 僅表示不另要求副本），
+原 Global migration 復原責任不變。備份格式仍為 SQL.GZ＋SHA256 必須成對，不因這項政策宣稱完整 DR
+或豁免既有成功 receipt／checksum／復原驗證。本裁決不執行備份、復原或新增排程。
+
 ## 4. 正式檔案 metadata
 
 正式 record 至少可 read back：

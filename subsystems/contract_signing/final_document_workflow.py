@@ -41,6 +41,7 @@ from subsystems.controlled_files.workflow import (
     ControlledFileOwner,
     ControlledFilePurpose,
 )
+from subsystems.controlled_files.reconciliation import CommittedControlledFileApplyEvidenceReader
 from subsystems.orders.contract_completion_workflow import (
     ContractCompletionApplyRequest,
     ContractCompletionPreview,
@@ -176,6 +177,11 @@ def signed_contract_purpose(target: SignedContractDocumentTarget) -> ControlledF
             else ControlledFilePurpose.SIGNED_STAFF_AGREEMENT)
 
 
+def signed_contract_file_apply_key(parent: IdempotencyKey, target: SignedContractDocumentTarget) -> IdempotencyKey:
+    """The original per-target child identity, shared by Apply and evidence readback."""
+    return _derived_key(parent, "file-" + target.key)
+
+
 def signed_contract_intent(case_no: str, session_id: str, target: SignedContractDocumentTarget, staging_id: str) -> ControlledFileIntent:
     return ControlledFileIntent(
         staging_id, ControlledFileOwner.CONTRACT_SIGNING,
@@ -274,6 +280,11 @@ class FinalDocumentRepository(Protocol):
     def get_final_document(
         self, case_no: str
     ) -> FinalContractDocumentReadback | None: ...
+
+    def get_controlled_file_reference(
+        self, file_id: str, *,
+        apply_evidence_reader: CommittedControlledFileApplyEvidenceReader | None = None,
+    ) -> FinalContractFileReference | None: ...
 
 
 class BorrowedControlledFileWorkflow(Protocol):
@@ -633,7 +644,7 @@ def _controlled_apply(command, upload, preview):
         intent=upload.controlled_file_intent,
         expected_staging_version=upload.expected_staging_version,
         preview_fingerprint=preview.preview_fingerprint,
-        idempotency_key=_derived_key(command.idempotency_key, "file-" + upload.target.key),
+        idempotency_key=signed_contract_file_apply_key(command.idempotency_key, upload.target),
         actor=command.actor, correlation_id=command.correlation_id,
     )
 

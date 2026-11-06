@@ -53,7 +53,7 @@ class StaffSavedDocument:
         require_sha256_hex(self.sha256_digest, "Staff document SHA-256")
         if (not re.fullmatch(r"cf_[0-9a-f]{32}", self.file_id)
             or self.purpose not in {ControlledFilePurpose.STAFF_CERTIFICATE, ControlledFilePurpose.STAFF_HEALTH_EXAM}
-            or self.mime_type not in FILE_PURPOSE_REGISTRY[self.purpose][1]
+            or self.mime_type not in FILE_PURPOSE_REGISTRY[self.purpose].file_format
             or not isinstance(self.filename, str) or not self.filename.strip()
             or any(character in self.filename for character in ("/", "\\", "\n", "\r", "\x00"))):
             raise StaffProfileContractError("Staff saved document facts are invalid")

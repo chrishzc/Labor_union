@@ -13,7 +13,7 @@ from typing import Callable, Protocol
 
 from shared_kernel.clock import BusinessClock
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
-from shared_kernel.identities import ActorContext, CorrelationId
+from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from shared_kernel.ports import UnitOfWork
 from subsystems.controlled_files.contracts import (
     ControlledFileStorageError,
@@ -23,6 +23,7 @@ from subsystems.controlled_files.contracts import (
 from subsystems.controlled_files.workflow import (
     ControlledFileDownloadReference,
     ControlledFileStagingFacts,
+    ControlledFileApplyReceipt,
 )
 
 
@@ -32,6 +33,19 @@ class ControlledFileReconciliationOutcome(str, Enum):
     DIGEST_MISMATCH = "digest_mismatch"
     ORPHAN_OBJECT = "orphan_object"
     STILL_WRITING = "still_writing"
+
+
+@dataclass(frozen=True, slots=True)
+class CommittedControlledFileApplyEvidence:
+    """The original immutable per-file Apply receipt and command provenance."""
+    receipt: ControlledFileApplyReceipt
+    idempotency_key: IdempotencyKey
+    actor: ActorContext
+    correlation_id: CorrelationId
+
+
+class CommittedControlledFileApplyEvidenceReader(Protocol):
+    def get_committed_apply_evidence(self, file_id: str) -> CommittedControlledFileApplyEvidence | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +275,8 @@ def _utc(value: datetime) -> datetime:
 
 
 __all__ = [
+    "CommittedControlledFileApplyEvidence",
+    "CommittedControlledFileApplyEvidenceReader",
     "ControlledFileReconciler",
     "ControlledFileReconciliationEvent",
     "ControlledFileReconciliationOutcome",

@@ -1,0 +1,37 @@
+{
+  "contract": "labor-union-validation-schema/v1",
+  "release_id": "labor-union-validation-schema-staff-payout-payment-sources-v1",
+  "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
+  "base_schema": {
+    "path": "db/schema.sql",
+    "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
+  },
+  "schema_parts": {
+    "selection": "schema_assembly_active_bootstrap_through_terminal_v1",
+    "expected_count": 193,
+    "ordered_digest_sha256": "417c9607f8a1765ca193e331f58253c0166b4d2763c7bad143161d1f9011cb20",
+    "terminal_artifact": "1070_staff_payout_payment_sources.sql"
+  },
+  "schema_assembly": {
+    "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
+    "sha256": "d9fb5cc1c8ac5117f6dce7b974a82da88871ba8d3140cd2ad48ad6f337c319e4"
+  },
+  "full_release": {
+    "path": "db/releases/labor_union_validation_schema_staff_payout_payment_sources_v1.sql",
+    "database_token": "__LU_TEST_DATABASE__",
+    "generation": "base_schema_then_ordered_schema_parts",
+    "source_line_whitespace": "trim-ascii-trailing-normal-sql-v1"
+  },
+  "postcheck": {
+    "required_views": [
+      "v_order_details"
+    ],
+    "minimum_trigger_count": 417,
+    "require_no_missing_versioned_tables": true
+  },
+  "database_safety": {
+    "accepted_database_pattern": "^lu_test_[a-z0-9_]+$",
+    "confirmation_must_equal_database": true,
+    "old_candidate_database_is_read_only": "union_db_candidate_20260803_v5"
+  }
+}

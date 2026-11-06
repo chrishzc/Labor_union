@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
+from types import MappingProxyType
 from typing import Callable, Protocol
 
 from shared_kernel.clock import BusinessClock
@@ -68,19 +69,127 @@ class ControlledFileWorkflowError(RuntimeError):
 
 _PDF_AND_EXCEL = frozenset({"application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
 _PHOTOS = frozenset({"image/jpeg", "image/png"})
-# Runtime owner/format projection of spec30 §3. Backup remains an ops artifact
-# owned by spec10 §9.5, outside generic business-file registration/download.
-FILE_PURPOSE_REGISTRY = {
-    ControlledFilePurpose.FINAL_SIGNED_CONTRACT: (ControlledFileOwner.CONTRACT_SIGNING.value, _PDF_AND_EXCEL),
-    ControlledFilePurpose.SIGNED_STAFF_AGREEMENT: (ControlledFileOwner.CONTRACT_SIGNING.value, _PDF_AND_EXCEL),
-    ControlledFilePurpose.STAFF_RESUME: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf"})),
-    ControlledFilePurpose.STAFF_CERTIFICATE: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf", "image/jpeg"})),
-    ControlledFilePurpose.STAFF_HEALTH_EXAM: (ControlledFileOwner.STAFF.value, frozenset({"application/pdf", "image/jpeg"})),
-    ControlledFilePurpose.BABY_LOG_PHOTO: (ControlledFileOwner.SCHEDULING.value, _PHOTOS),
-    ControlledFilePurpose.MEAL_PHOTO: (ControlledFileOwner.SCHEDULING.value, _PHOTOS),
-    ControlledFilePurpose.RICH_MENU_BACKGROUND: (ControlledFileOwner.LINE_INTEGRATION.value, frozenset({"image/png"})),
-    ControlledFilePurpose.DATABASE_BACKUP: ("global_migration", frozenset({"application/gzip"})),
-}
+@dataclass(frozen=True, slots=True)
+class FilePurposePolicy:
+    """Spec30 §3 policy, distinct from observed backup/restore readiness.
+
+    The eight business formats are accepted primary MIME alternatives. Backup
+    formats describe a required gzip + SHA256 text sidecar pair, consumed only
+    by Global migration. No policy value establishes a successful drill.
+    A retention boundary states the current operation contract, not a legal age.
+    """
+
+    owner_domain: str
+    file_format: frozenset[str]
+    source_of_truth: tuple[str, ...]
+    generation_cadence: str
+    db_reference: tuple[str, ...]
+    consumers: tuple[str, ...]
+    overwrite_policy: str
+    retention_policy: str
+    backup_required: bool
+    restore_owner: str
+
+
+_ADDITIVE_REVISIONS = "additive_revision_preserve_frozen_lineage"
+_BUSINESS_RETENTION = "long_term_no_automatic_purge_of_committed_or_frozen_artifacts"
+# Business metadata AND bytes require backup/restore under Global §2.2. This
+# does not claim a destination, cadence, copy or readiness. The 2026-11-06
+# user decision assigns NAS restore to its administrator and verification to
+# each owning business Domain. Existing backup archives need no additional
+# replica under the same decision; their spec10 §9.5 restore boundary remains.
+FILE_PURPOSE_REGISTRY = MappingProxyType({
+    ControlledFilePurpose.FINAL_SIGNED_CONTRACT: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.CONTRACT_SIGNING.value,
+        file_format=_PDF_AND_EXCEL,
+        source_of_truth=("ContractSigning completed final owner receipt", "per-file immutable ControlledFile Apply receipt"),
+        generation_cadence="on_owner_signed_return",
+        db_reference=("contract_final_document_versions", "contract_external_signing_receipts.result_snapshot.documents", "controlled_file_apply_receipts"),
+        consumers=("ContractSigning external-final query", "authenticated final ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.SIGNED_STAFF_AGREEMENT: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.CONTRACT_SIGNING.value,
+        file_format=_PDF_AND_EXCEL,
+        source_of_truth=("ContractSigning completed final owner receipt", "per-staff immutable ControlledFile Apply receipt"),
+        generation_cadence="on_owner_signed_return",
+        db_reference=("contract_final_document_versions", "contract_external_signing_receipts.result_snapshot.documents", "controlled_file_apply_receipts"),
+        consumers=("ContractSigning staff external-final query", "authenticated final ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.STAFF_RESUME: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.STAFF.value,
+        file_format=frozenset({"application/pdf"}),
+        source_of_truth=("Staff root and current resume logical key", "immutable ControlledFile Apply receipt"),
+        generation_cadence="on_authenticated_owner_upload",
+        db_reference=("staff", "controlled_file_objects", "controlled_file_apply_receipts"),
+        consumers=("Staff current-resume query", "authenticated resume PDF download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.STAFF_CERTIFICATE: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.STAFF.value,
+        file_format=frozenset({"application/pdf", "image/jpeg"}),
+        source_of_truth=("Staff saved-document inventory membership; not qualification facts", "immutable ControlledFile Apply receipt"),
+        generation_cadence="on_authenticated_owner_upload",
+        db_reference=("staff", "controlled_file_objects", "controlled_file_apply_receipts"),
+        consumers=("Staff profile saved-document collection", "authenticated ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.STAFF_HEALTH_EXAM: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.STAFF.value,
+        file_format=frozenset({"application/pdf", "image/jpeg"}),
+        source_of_truth=("Staff saved-document inventory membership; not medical, police or validity facts", "immutable ControlledFile Apply receipt"),
+        generation_cadence="on_authenticated_owner_upload",
+        db_reference=("staff", "controlled_file_objects", "controlled_file_apply_receipts"),
+        consumers=("Staff profile saved-document collection", "authenticated ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.BABY_LOG_PHOTO: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.SCHEDULING.value,
+        file_format=_PHOTOS,
+        source_of_truth=("Scheduling submitted service-day log and attachment", "exact frozen ControlledFile reference"),
+        generation_cadence="on_verified_staff_service_day_submission",
+        db_reference=("scheduling_service_day_logs", "scheduling_service_day_log_events", "scheduling_service_day_log_attachments", "controlled_file_references"),
+        consumers=("Scheduling submitted-log photo list", "authenticated ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.MEAL_PHOTO: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.SCHEDULING.value,
+        file_format=_PHOTOS,
+        source_of_truth=("Scheduling submitted service-day log and attachment", "exact frozen ControlledFile reference"),
+        generation_cadence="on_verified_staff_service_day_submission",
+        db_reference=("scheduling_service_day_logs", "scheduling_service_day_log_events", "scheduling_service_day_log_attachments", "controlled_file_references"),
+        consumers=("Scheduling submitted-log photo list", "authenticated ControlledFile download", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.RICH_MENU_BACKGROUND: FilePurposePolicy(
+        owner_domain=ControlledFileOwner.LINE_INTEGRATION.value,
+        file_format=frozenset({"image/png"}),
+        source_of_truth=("LINE media asset and immutable ControlledFile Apply receipt", "outbound publication evidence only: published task frozen image and immutable upload acknowledgment"),
+        generation_cadence="on_owner_upload_or_rich_menu_generation",
+        db_reference=("media_assets.controlled_file_object_id", "line_configuration_revisions", "line_rich_menu_publication_tasks"),
+        consumers=("LINE Rich Menu preview", "committed Rich Menu publication worker", "ControlledFile reconciliation"),
+        overwrite_policy=_ADDITIVE_REVISIONS, retention_policy=_BUSINESS_RETENTION,
+        backup_required=True, restore_owner="nas_administrator",
+    ),
+    ControlledFilePurpose.DATABASE_BACKUP: FilePurposePolicy(
+        owner_domain="global_migration", file_format=frozenset({"application/gzip", "text/plain"}),
+        source_of_truth=("Global migration verified SQL.GZ and SHA256 pair", "completed backup success receipt"),
+        generation_cadence="configured_daily_default_18_00_or_manual",
+        db_reference=("no source-DB registration; Global migration backup success receipt",),
+        consumers=("Global migration Windows backup/restore maintenance", "Data Center backup readiness"),
+        overwrite_policy="new_backup_pair_preserve_existing_and_failed_materials",
+        retention_policy="no_automatic_delete_or_overwrite_of_backup_or_failure_materials",
+        backup_required=False, restore_owner="global_migration",
+    ),
+})
 # Retain the historical owner/purpose pairing for reads and exact receipt replay.
 # This set is deliberately not the active write policy.
 _ALLOWED_PURPOSES = {
@@ -596,9 +705,9 @@ def _require_current_purpose(owner, purpose, mime_type=None):
     policy = FILE_PURPOSE_REGISTRY.get(purpose)
     if policy is None:
         raise ControlledFileWorkflowError("controlled_file_purpose_retired", "此用途已停止建立永久檔案，歷史檔案仍可查閱。")
-    if owner.value != policy[0]:
+    if owner.value != policy.owner_domain:
         raise ControlledFileWorkflowError("controlled_file_purpose_owner_required", "此檔案用途須由原 owner 處理。")
-    if mime_type is not None and (not isinstance(mime_type, str) or mime_type.lower() not in policy[1]):
+    if mime_type is not None and (not isinstance(mime_type, str) or mime_type.lower() not in policy.file_format):
         raise ControlledFileWorkflowError("controlled_file_purpose_format_invalid", "檔案格式不符合此用途。")
 
 

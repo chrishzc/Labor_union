@@ -22,6 +22,7 @@ from domains.contract_signing.external_signing import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
+from shared_kernel.validation import require_sha256_hex
 from subsystems.contract_signing.external_signing_contracts import (
     ExternalCompletionReportScope,
     ExternalReportCommandType,
@@ -56,12 +57,19 @@ from subsystems.contract_signing.final_document_workflow import (
     FinalContractFileReference,
     signed_contract_object_key,
     signed_contract_purpose,
+    signed_contract_file_apply_key,
     SignedContractDocumentReadback,
     SignedContractDocumentPreview,
     FinalSignedContractApplyReceipt,
     StoredFinalSignedContractReceipt,
 )
-from subsystems.controlled_files.workflow import ControlledFileApplyReceipt, ControlledFilePurpose
+from subsystems.controlled_files.workflow import (
+    ControlledFileApplyReceipt, ControlledFileOwner, ControlledFilePurpose,
+    ControlledFileReadback, ControlledFileWorkflowError,
+)
+from subsystems.controlled_files.reconciliation import (
+    CommittedControlledFileApplyEvidence, CommittedControlledFileApplyEvidenceReader,
+)
 
 
 class MySqlContractExternalSigningRepository:
@@ -707,12 +715,15 @@ class MySqlContractExternalSigningRepository:
         row = self._one(_FINAL_DOCUMENT_READBACK_SQL, (case_no,))
         return None if row is None else _final_document_readback(row)
 
-    def get_controlled_file_reference(self, file_id: str) -> FinalContractFileReference | None:
+    def get_controlled_file_reference(
+        self, file_id: str, *,
+        apply_evidence_reader: CommittedControlledFileApplyEvidenceReader | None = None,
+    ) -> FinalContractFileReference | None:
         """Read exact immutable receipt members, including non-primary staff PDFs.
 
         No signing-completion receipt is treated as evidence of external delivery.
-        Legacy members without a digest are provable only through the original
-        primary final-document FK; a staff member cannot borrow the client hash.
+        Legacy members use only their original primary FK or their own exact
+        committed child Apply receipt; a staff file never borrows the client hash.
         """
         object_row = self._one(
             "SELECT id AS object_id,opaque_object_id,object_key,owner_type,purpose,"
@@ -726,7 +737,10 @@ class MySqlContractExternalSigningRepository:
         rows = self._all(
             "SELECT session.external_signing_session_id,document.case_no,document.final_document_id,"
             "receipt.receipt_id,receipt.result_status_version,"
+            "receipt.idempotency_key AS parent_idempotency_key,receipt.actor_ref AS parent_actor_ref,"
+            "receipt.correlation_id AS parent_correlation_id,"
             "document.controlled_file_object_id AS primary_object_id,"
+            "document.version_number AS primary_final_version,"
             "document.content_sha256 AS primary_content_sha256,"
             "document.size_bytes AS primary_size_bytes,receipt.result_snapshot,"
             "(document.id=(SELECT latest.id FROM contract_final_document_versions latest "
@@ -740,8 +754,14 @@ class MySqlContractExternalSigningRepository:
             (object_row["subject_reference"],),
         )
         for row in rows:
+            joined = {**object_row, **row}
+            members = _final_contract_reference_members(row)
+            aggregate = _legacy_aggregate_final_reference(joined)
+            if aggregate is not None:
+                return aggregate
+            evidence = _read_legacy_member_apply_evidence(joined, members, apply_evidence_reader)
             reference = _final_contract_file_reference(
-                {**object_row, **row}, _final_contract_reference_members(row)
+                joined, members, apply_evidence=evidence,
             )
             if reference is not None:
                 return reference
@@ -787,12 +807,10 @@ def _final_contract_reference_members(row):
     return _signed_document_members(snapshot)
 
 
-def _final_contract_file_reference(row, members):
-    """Project completion freeze evidence; never infer an outbound provider result."""
+def _bound_final_contract_member(row, members):
     member = next((item for item in members if item.file_id == row["opaque_object_id"]), None)
     if member is None:
         return None
-    purpose = ControlledFilePurpose(row["purpose"])
     if not (
         row["owner_type"] == "contract_signing"
         and row["subject_reference"] == row["case_no"]
@@ -803,6 +821,124 @@ def _final_contract_file_reference(row, members):
         and row["object_key"] == signed_contract_object_key(str(row["external_signing_session_id"]), member.target)
     ):
         return None
+    return member
+
+
+def _legacy_aggregate_final_reference(row):
+    """Read the original aggregate document, without inventing member targets.
+
+    Only the historical absent-documents shape is eligible. A modern empty or
+    malformed member collection cannot fall back to the aggregate contract.
+    Final-root and controlled-file versions are separate identity domains.
+    """
+    snapshot = _json_mapping(row.get("result_snapshot"))
+    if snapshot is None or "documents" in snapshot:
+        return None
+    _final_contract_reference_members(row)  # Original closed owner receipt/FK lineage.
+    document = snapshot["document"]
+    try:
+        for name in ("object_id", "primary_object_id", "primary_final_version", "version_number",
+                     "size_bytes", "primary_size_bytes", "result_status_version"):
+            if type(row[name]) is not int or row[name] <= 0:
+                return None
+        require_sha256_hex(row["primary_content_sha256"], "final document SHA-256")
+        applied_at = datetime.fromisoformat(document["applied_at"])
+        if applied_at.tzinfo is None or not (
+            row["object_id"] == row["primary_object_id"]
+            and row["owner_type"] == "contract_signing"
+            and row["purpose"] == ControlledFilePurpose.FINAL_SIGNED_CONTRACT.value
+            and row["subject_reference"] == row["case_no"]
+            and row["content_sha256"] == row["primary_content_sha256"]
+            and document["file_id"] == row["opaque_object_id"]
+            and document["filename"] == row["filename"]
+            and document["mime_type"] == row["content_type"] == "application/pdf"
+            and document["status"] == "completed"
+            and type(document["version"]) is int
+            and document["version"] == row["primary_final_version"]
+            and type(document["size_bytes"]) is int
+            and document["size_bytes"] == row["primary_size_bytes"] == row["size_bytes"]
+            and type(snapshot["resulting_status_version"]) is int
+            and row["is_current"] in (0, 1)
+        ):
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return FinalContractFileReference(
+        file_id=row["opaque_object_id"], case_no=row["case_no"],
+        sha256_digest=row["primary_content_sha256"], size_bytes=row["size_bytes"],
+        current=bool(row["is_current"]), completion_receipt_present=True,
+        file_version=row["version_number"], purpose=ControlledFilePurpose.FINAL_SIGNED_CONTRACT,
+        target=None, filename=row["filename"],
+    )
+
+
+def _read_legacy_member_apply_evidence(row, members, reader):
+    member = _bound_final_contract_member(row, members)
+    if (reader is None or member is None or member.sha256_digest is not None
+        or member.purpose is not None or row["object_id"] == row["primary_object_id"]
+        or row["purpose"] != ControlledFilePurpose.FINAL_SIGNED_CONTRACT.value
+        or _legacy_parent_file_identity(row, member) is None):
+        return None
+    try:
+        return reader.get_committed_apply_evidence(member.file_id)
+    except ControlledFileWorkflowError as error:
+        if error.code != "controlled_file_receipt_corrupt":
+            raise
+        raise _stored_fact_error("final_contract_apply_receipt_invalid") from None
+
+
+def _legacy_parent_file_identity(row, member):
+    parent_key, actor, correlation = (row.get("parent_idempotency_key"), row.get("parent_actor_ref"), row.get("parent_correlation_id"))
+    if not all(isinstance(value, str) and value for value in (parent_key, actor, correlation)):
+        return None
+    try:
+        return signed_contract_file_apply_key(IdempotencyKey(parent_key), member.target), actor, correlation
+    except (TypeError, ValueError):
+        return None
+
+
+def _legacy_member_apply_digest(row, member, purpose, evidence):
+    # The original separate-return writer stored legacy staff PDFs under FINAL.
+    # A new SIGNED_STAFF_AGREEMENT row may not bypass required member metadata.
+    if purpose is not ControlledFilePurpose.FINAL_SIGNED_CONTRACT: return None
+    if not isinstance(evidence, CommittedControlledFileApplyEvidence): return None
+    if (not isinstance(evidence.receipt, ControlledFileApplyReceipt)
+        or not isinstance(evidence.receipt.readback, ControlledFileReadback)
+        or not isinstance(evidence.idempotency_key, IdempotencyKey)
+        or not isinstance(evidence.actor, ActorContext)
+        or not isinstance(evidence.correlation_id, CorrelationId)):
+        return None
+    parent_identity = _legacy_parent_file_identity(row, member)
+    if parent_identity is None: return None
+    child_key, actor, correlation = parent_identity
+    try:
+        require_sha256_hex(evidence.receipt.readback.sha256_digest, "controlled file SHA-256")
+    except (TypeError, ValueError):
+        return None
+    child = evidence.receipt.readback
+    if not (
+        evidence.idempotency_key == child_key
+        and evidence.actor.actor_id == actor
+        and evidence.correlation_id.value == correlation
+        and child.file_id == member.file_id
+        and child.owner is ControlledFileOwner.CONTRACT_SIGNING
+        and child.purpose is purpose
+        and child.subject_reference == row["case_no"]
+        and type(child.version) is int and child.version == member.version
+        and child.filename == member.filename
+        and child.mime_type == member.mime_type
+        and type(child.size_bytes) is int and child.size_bytes == member.size_bytes
+        and child.sha256_digest == row["content_sha256"]
+    ):
+        return None
+    return child.sha256_digest
+
+
+def _final_contract_file_reference(row, members, *, apply_evidence=None):
+    """Project completion freeze evidence; never infer an outbound provider result."""
+    member = _bound_final_contract_member(row, members)
+    if member is None: return None
+    purpose = ControlledFilePurpose(row["purpose"])
     digest = member.sha256_digest
     primary = row["object_id"] == row["primary_object_id"]
     if primary and (
@@ -811,11 +947,13 @@ def _final_contract_file_reference(row, members):
     ):
         return None
     if digest is None:
-        # Historical JSON has no member hash/purpose. Only its exact primary FK
-        # supplies independent immutable bytes; do not copy that hash to staff.
-        if not primary or purpose is not ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
-            return None
-        digest = str(row["primary_content_sha256"])
+        # Keep historical JSON unchanged. Each non-primary file needs its own
+        # committed child receipt; never copy the primary document's hash.
+        if primary and purpose is ControlledFilePurpose.FINAL_SIGNED_CONTRACT:
+            digest = str(row["primary_content_sha256"])
+        elif not primary and member.purpose is None:
+            digest = _legacy_member_apply_digest(row, member, purpose, apply_evidence)
+        if digest is None: return None
     elif member.purpose is not purpose:
         return None
     return FinalContractFileReference(

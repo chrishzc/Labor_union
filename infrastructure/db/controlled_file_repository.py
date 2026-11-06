@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 from typing import Any
 import uuid
 from infrastructure.file.storage_layout import (
@@ -37,8 +38,9 @@ from subsystems.controlled_files.workflow import (
     ControlledFileStagingFacts,
     StoredControlledFileApplyReceipt,
     StageControlledFile,
+    ControlledFileWorkflowError,
 )
-from subsystems.controlled_files.reconciliation import ControlledFileReconciliationEvent
+from subsystems.controlled_files.reconciliation import ControlledFileReconciliationEvent, CommittedControlledFileApplyEvidence
 from subsystems.controlled_files.gc import ControlledFileGcCandidate, ControlledFileGcError
 from subsystems.controlled_files.cleanup import (
     CleanupControlledFileStaging,
@@ -333,13 +335,9 @@ class MySqlControlledFileWorkflowRepository:
         return None if row is None else _readback(row)
 
     def list_readbacks(self, *, limit: int | None = None) -> tuple[ControlledFileReadback, ...]:
-        if limit is not None and (type(limit) is not int or not 1 <= limit <= 100):
-            raise ValueError("controlled file list limit must be between 1 and 100")
+        statement, parameters = _bounded_readback_list_query(limit)
         with self._connection.cursor() as cursor:
-            if limit is None:
-                cursor.execute(_READBACK_LIST_SQL)
-            else:
-                cursor.execute(_READBACK_LIST_SQL + " LIMIT %s", (limit,))
+            cursor.execute(statement, parameters)
             rows = cursor.fetchall()
         return tuple(_readback(row) for row in rows)
 
@@ -369,6 +367,19 @@ class MySqlControlledFileWorkflowRepository:
             cursor.execute(_RECEIPT_ID_SELECT_SQL, (receipt_id,))
             row = cursor.fetchone()
         return None if row is None else _stored_receipt(row).receipt
+
+    def get_committed_apply_evidence(self, file_id: str) -> CommittedControlledFileApplyEvidence | None:
+        """Read this exact file's own immutable receipt; never infer a business fact."""
+        if not isinstance(file_id, str) or re.fullmatch(r"cf_[0-9a-f]{32}", file_id) is None:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(_COMMITTED_APPLY_EVIDENCE_SQL, (file_id,))
+            rows = tuple(cursor.fetchall())
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ControlledFileWorkflowError("controlled_file_receipt_corrupt", "受控檔案收據來源不唯一")
+        return _committed_apply_evidence(rows[0])
 
     def list_staging_gc_candidates(
         self, *, limit: int, observed_at: datetime
@@ -439,7 +450,8 @@ class MySqlControlledFileWorkflowRepository:
             from infrastructure.db.contract_external_signing_repository import MySqlContractExternalSigningRepository
             from subsystems.contract_signing.external_signing_contracts import ExternalSigningTypedError
             try:
-                reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(file_id)
+                reference = MySqlContractExternalSigningRepository(self._connection).get_controlled_file_reference(
+                    file_id, apply_evidence_reader=self)
             except ExternalSigningTypedError:
                 # Malformed owner lineage is unavailable authority, not a match
                 # or an exemption. Infrastructure errors still propagate to 503.
@@ -729,6 +741,29 @@ def _readback(row: Mapping[str, object]) -> ControlledFileReadback:
         status=_REGISTERED_STATUS,
         applied_at=_aware_utc(row["applied_at_utc"]),
     )
+
+
+def _bounded_readback_list_query(limit):
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 100):
+        raise ValueError("controlled file list limit must be between 1 and 100")
+    return _READBACK_LIST_SQL + " LIMIT %s", (100 if limit is None else limit,)
+
+
+def _committed_apply_evidence(row):
+    try:
+        if (row["command_type"] != "controlled_file_apply" or row["schema_version"] != "controlled-file-apply-receipt.v1"
+            or row["outcome_state"] != "created"
+            or any(type(row[key]) is not int or row[key] <= 0
+                   for key in ("object_database_id", "controlled_object_id", "source_staging_id", "staging_object_id"))
+            or row["controlled_object_id"] != row["object_database_id"]
+            or row["staging_object_id"] != row["source_staging_id"]
+            or row["receipt_actor_ref"] != row["object_actor_ref"]):
+            raise ValueError("receipt binding mismatch")
+        stored = _stored_receipt(row)
+        return CommittedControlledFileApplyEvidence(stored.receipt, IdempotencyKey(row["idempotency_key"]),
+            ActorContext(row["receipt_actor_ref"]), CorrelationId(row["correlation_id"]))
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        raise ControlledFileWorkflowError("controlled_file_receipt_corrupt", "受控檔案收據與不可變檔案來源不一致") from None
 
 
 def _stored_receipt(row: Mapping[str, object]) -> StoredControlledFileApplyReceipt:
@@ -1098,7 +1133,7 @@ _READBACK_COLUMNS = (
     "o.created_at_utc AS applied_at_utc"
 )
 _READBACK_SELECT_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o WHERE o.opaque_object_id=%s"
-_READBACK_LIST_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o ORDER BY o.id DESC LIMIT 100"
+_READBACK_LIST_SQL = "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o ORDER BY o.id DESC"
 _CURRENT_READBACK_SELECT_SQL = (
     "SELECT " + _READBACK_COLUMNS + " FROM controlled_file_objects o "
     "WHERE o.owner_type=%s AND o.purpose=%s AND o.subject_reference=%s "
@@ -1114,6 +1149,13 @@ _RECEIPT_SELECT_SQL = (
     + _READBACK_COLUMNS
     + " FROM controlled_file_apply_receipts r JOIN controlled_file_objects o "
     "ON o.id=r.controlled_object_id WHERE r.idempotency_key=%s"
+)
+_COMMITTED_APPLY_EVIDENCE_SQL = (
+    "SELECT r.receipt_id,r.command_type,r.schema_version,r.command_fingerprint,r.result_snapshot,r.outcome_state,"
+    "r.idempotency_key,r.actor_ref AS receipt_actor_ref,r.correlation_id,r.controlled_object_id,r.staging_object_id,"
+    "o.id AS object_database_id,o.source_staging_id,o.created_by_actor AS object_actor_ref," + _READBACK_COLUMNS
+    + " FROM controlled_file_apply_receipts r JOIN controlled_file_objects o ON o.id=r.controlled_object_id "
+    "WHERE o.opaque_object_id=%s LIMIT 2"
 )
 _RECEIPT_ID_SELECT_SQL = (
     "SELECT r.receipt_id,r.command_type,r.schema_version,r.command_fingerprint,r.result_snapshot,"

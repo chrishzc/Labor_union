@@ -6,7 +6,7 @@ Description: 驗證受控檔案 Preview/Apply 的 fresh-read、outer UoW、重�
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import FrozenInstanceError, dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -36,6 +36,7 @@ from subsystems.controlled_files.workflow import (
     StageControlledFile,
     StoredControlledFileApplyReceipt,
     FILE_PURPOSE_REGISTRY,
+    FilePurposePolicy,
 )
 
 
@@ -203,7 +204,57 @@ def test_current_purpose_registry_matches_formal_nine_without_legacy_permanent_o
         "final_signed_contract", "signed_staff_agreement", "staff_resume", "staff_certificate",
         "staff_health_exam", "baby_log_photo", "meal_photo", "rich_menu_background", "database_backup",
     }
-    assert FILE_PURPOSE_REGISTRY[ControlledFilePurpose.DATABASE_BACKUP][0] == "global_migration"
+    assert FILE_PURPOSE_REGISTRY[ControlledFilePurpose.DATABASE_BACKUP].owner_domain == "global_migration"
+
+
+def test_purpose_policies_define_the_formal_contract_without_claiming_dr_readiness():
+    assert {field.name for field in fields(FilePurposePolicy)} == {
+        "owner_domain", "file_format", "source_of_truth", "generation_cadence", "db_reference",
+        "consumers", "overwrite_policy", "retention_policy", "backup_required", "restore_owner",
+    }
+    for purpose, policy in FILE_PURPOSE_REGISTRY.items():
+        assert policy.owner_domain and policy.file_format and policy.source_of_truth
+        assert policy.generation_cadence and policy.db_reference and policy.consumers
+        if purpose is ControlledFilePurpose.DATABASE_BACKUP:
+            assert policy.backup_required is False  # User explicitly does not require an extra archive replica.
+            assert policy.restore_owner == "global_migration"
+            assert policy.file_format == frozenset({"application/gzip", "text/plain"})
+            assert policy.db_reference == ("no source-DB registration; Global migration backup success receipt",)
+        else:
+            assert policy.backup_required is True  # Global §2.2 metadata AND bytes requirement.
+            assert policy.restore_owner == "nas_administrator"  # User assigns restore; business owner verifies.
+            assert policy.retention_policy == "long_term_no_automatic_purge_of_committed_or_frozen_artifacts"
+
+
+def test_purpose_policy_and_registry_cannot_be_mutated_by_an_upload_consumer():
+    policy = FILE_PURPOSE_REGISTRY[ControlledFilePurpose.STAFF_RESUME]
+    with pytest.raises(FrozenInstanceError):
+        policy.backup_required = False
+    with pytest.raises(TypeError):
+        FILE_PURPOSE_REGISTRY[ControlledFilePurpose.STAFF_RESUME] = policy
+
+
+def test_backup_pair_policy_does_not_create_a_generic_business_upload_owner():
+    for owner in ControlledFileOwner:
+        with pytest.raises(ValueError, match="owner/purpose pairing"):
+            StageControlledFile(owner, ControlledFilePurpose.DATABASE_BACKUP, "ops", "backup", "backups",
+                "backup.sql.gz", "application/gzip", b"not-a-business-file",
+                IdempotencyKey("backup-must-use-migration"), ActorContext("admin-001"), CorrelationId("policy"))
+
+
+@pytest.mark.parametrize("purpose", [purpose for purpose in FILE_PURPOSE_REGISTRY
+    if purpose is not ControlledFilePurpose.DATABASE_BACKUP])
+def test_typed_registry_still_rejects_unsupported_mime_before_staging_effect(purpose, monkeypatch):
+    workflow, repository, storage, uow = _workflow()
+    policy = FILE_PURPOSE_REGISTRY[purpose]
+    monkeypatch.setattr(storage, "put_staged", lambda **_: pytest.fail("invalid MIME staged bytes"))
+    command = StageControlledFile(ControlledFileOwner(policy.owner_domain), purpose, "CASE-001", "file", "files",
+        "invalid.exe", "application/x-msdownload", CONTENT,
+        IdempotencyKey("invalid-policy-mime"), ActorContext("admin-001"), CorrelationId("policy"))
+    with pytest.raises(ControlledFileWorkflowError) as error:
+        workflow.stage(command)
+    assert error.value.code == "controlled_file_purpose_format_invalid"
+    assert storage.reads == repository.registered == uow.commits == 0
 
 
 @pytest.mark.parametrize("owner,purpose", [

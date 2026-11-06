@@ -18,6 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST_PATH = (
     PROJECT_ROOT / "db" / "cutover_releases" / "labor_union_validation_schema_v1.json"
 )
+TRIM_NORMAL_SQL_LINE_TAILS_V1 = "trim-ascii-trailing-normal-sql-v1"
+BOOTSTRAP_PREFIX_SELECTION_V1 = "schema_assembly_active_bootstrap_through_terminal_v1"
 
 
 def load_manifest(manifest_path: Path = DEFAULT_MANIFEST_PATH) -> dict[str, object]:
@@ -50,7 +52,17 @@ def selected_schema_parts(
             f"expected={expected_digest} actual={actual_digest}"
         )
     assembly = load_schema_assembly(assembly_path)
-    return list(assembly.active_artifact_paths)
+    paths = list(assembly.active_artifact_paths)
+    selection = manifest["schema_parts"].get("selection", "schema_assembly_active_bootstrap")
+    if selection == "schema_assembly_active_bootstrap":
+        return paths
+    if selection == BOOTSTRAP_PREFIX_SELECTION_V1:
+        terminal = str(manifest["schema_parts"].get("terminal_artifact", ""))
+        matches = [index for index, path in enumerate(paths) if path.name == terminal]
+        if len(matches) != 1:
+            raise ValueError("schema prefix terminal must name one active artifact")
+        return paths[:matches[0] + 1]
+    raise ValueError("unsupported schema part selection")
 
 
 def sha256_file(path: Path) -> str:
@@ -68,6 +80,9 @@ def verify_manifest(manifest: dict[str, object], project_root: Path = PROJECT_RO
     base_schema = manifest["base_schema"]
     base_path = project_root / str(base_schema["path"])
     errors = _base_schema_errors(base_path, base_schema)
+    policy = manifest.get("full_release", {}).get("source_line_whitespace")
+    if policy not in (None, TRIM_NORMAL_SQL_LINE_TAILS_V1):
+        errors.append("unsupported full release source whitespace policy")
     try:
         parts = selected_schema_parts(manifest, project_root)
     except (KeyError, OSError, ValueError) as error:

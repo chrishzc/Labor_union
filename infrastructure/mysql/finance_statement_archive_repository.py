@@ -3,6 +3,7 @@ import hashlib
 import json
 
 from subsystems.finance_import.query import BANK_CASE_PROOFS_SQL
+from infrastructure.mysql.government_subsidy_manual_period_source import verified_manual_initial_receipt, PERIOD_RECEIPT_PROOF_JSON_SQL
 from subsystems.finance_import.statement_archive import (
     StatementCommandConflict, StatementCommandReceipt, StatementExportRow, ManualStatementReplacementRequired,
 )
@@ -17,7 +18,11 @@ class MySqlStatementArchiveRepository:
     def export_rows(self):
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT b.id,b.format_id,b.raw_payload,p.case_no FROM finance_import_rows b JOIN ("
+                "SELECT b.id,b.format_id,b.raw_payload,p.case_no,b.transaction_date,b.direction,b.credit,b.debit,b.currency,"
+                "b.classification_type,b.reconciliation_status,b.bank_references,b.batch_id,b.source_file,b.sheet_name,b.source_row,"
+                "b.source_reference,b.source_bank_account,b.counterparty_account,b.resolved_counterparty_account,(SELECT " + PERIOD_RECEIPT_PROOF_JSON_SQL +
+                " FROM government_subsidy_period_entries entry WHERE entry.finance_import_row_id=b.id "
+                "AND entry.reversal_of_id IS NULL LIMIT 1) AS period_receipt FROM finance_import_rows b JOIN ("
                 + BANK_CASE_PROOFS_SQL + ") p ON p.row_id=b.id JOIN orders r ON r.case_no=p.case_no "
                 "LEFT JOIN finance_statement_exclusions x ON x.finance_import_row_id=b.id "
                 "WHERE x.finance_import_row_id IS NULL ORDER BY b.id,p.case_no"
@@ -25,14 +30,7 @@ class MySqlStatementArchiveRepository:
             canonical = cursor.fetchall()
             cursor.execute("SELECT id,fields FROM finance_manual_statements ORDER BY id")
             manual = cursor.fetchall()
-        by_id = {}
-        for row in canonical:
-            entry = by_id.setdefault(int(row["id"]), {"bank": row["format_id"], "fields": _object(row["raw_payload"]), "cases": []})
-            if row["case_no"] not in entry["cases"]:
-                entry["cases"].append(row["case_no"])
-        result = [StatementExportRow(f"bank:{identity}", row["bank"], "reconciled", tuple(row["cases"]), tuple(row["fields"].items())) for identity, row in by_id.items()]
-        result.extend(StatementExportRow(f"manual:{row['id']}", "manual", "manual", (), tuple(_object(row["fields"]).items())) for row in manual)
-        return tuple(result)
+        return _successful_statement_rows(canonical, manual)
 
     def create_manual(self, fields, key, actor, duplicate_of=None):
         command = {"operation": "manual", "fields": fields, "duplicate_of": duplicate_of, "actor": actor}
@@ -109,3 +107,17 @@ def _object(value):
     if not isinstance(result, dict):
         raise ValueError("statement_source_invalid")
     return result
+
+
+def _successful_statement_rows(canonical, manual):
+    by_id = {}
+    for row in canonical:
+        is_manual = verified_manual_initial_receipt(row, row.get('period_receipt'))
+        entry = by_id.setdefault(int(row['id']), {'bank': 'manual' if is_manual else row['format_id'],
+            'source': '人工補登' if is_manual else 'reconciled', 'fields': _object(row['raw_payload']), 'cases': []})
+        if row['case_no'] not in entry['cases']:
+            entry['cases'].append(row['case_no'])
+    result = [StatementExportRow(f'bank:{identity}', row['bank'], row['source'], tuple(row['cases']), tuple(row['fields'].items()))
+              for identity, row in by_id.items()]
+    result.extend(StatementExportRow(f"manual:{row['id']}", 'manual', 'manual', (), tuple(_object(row['fields']).items())) for row in manual)
+    return tuple(result)

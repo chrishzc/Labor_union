@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from scripts.verify_validation_schema_manifest import (
     DEFAULT_MANIFEST_PATH,
+    TRIM_NORMAL_SQL_LINE_TAILS_V1,
     load_manifest,
     selected_schema_parts,
     verify_manifest,
@@ -35,10 +36,11 @@ def build_release_text(manifest: dict[str, object]) -> str:
     base_text = (PROJECT_ROOT / str(base_schema["path"])).read_text(encoding="utf-8")
     base_text = base_text.replace("union_db", DATABASE_TOKEN)
     part_paths = selected_schema_parts(manifest)
-    sections = [_release_header(manifest), _source_section("db/schema.sql", base_text)]
+    policy = manifest["full_release"].get("source_line_whitespace")
+    sections = [_release_header(manifest), _source_section("db/schema.sql", base_text, policy)]
     for part_path in part_paths:
         relative_path = part_path.relative_to(PROJECT_ROOT).as_posix()
-        sections.append(_source_section(relative_path, part_path.read_text(encoding="utf-8")))
+        sections.append(_source_section(relative_path, part_path.read_text(encoding="utf-8"), policy))
     return "\n".join(sections)
 
 
@@ -76,8 +78,71 @@ def _release_header(manifest: dict[str, object]) -> str:
     )
 
 
-def _source_section(relative_path: str, sql_text: str) -> str:
-    return f"-- BEGIN SOURCE: {relative_path}\n{sql_text.rstrip()}\n-- END SOURCE: {relative_path}\n"
+def _source_section(relative_path: str, sql_text: str, policy: str | None = None) -> str:
+    # Keep the original section EOF rule and legacy bytes when no policy is set.
+    rendered = sql_text.rstrip()
+    if policy == TRIM_NORMAL_SQL_LINE_TAILS_V1:
+        rendered = _trim_normal_sql_line_tails(rendered)
+    elif policy is not None:
+        raise ValueError("unsupported full release source whitespace policy")
+    return f"-- BEGIN SOURCE: {relative_path}\n{rendered}\n-- END SOURCE: {relative_path}\n"
+
+
+def _trim_normal_sql_line_tails(text: str) -> str:
+    """Trim ASCII line tails outside SQL quotes/comments; never interpret SQL."""
+    output: list[str] = []
+    state = "normal"
+    escaped = False
+    index = 0
+    while index < len(text):
+        character = text[index]
+        next_character = text[index + 1] if index + 1 < len(text) else ""
+        if state == "line_comment":
+            output.append(character)
+            if character in "\r\n":
+                state = "normal"
+        elif state == "block_comment":
+            output.append(character)
+            if character == "*" and next_character == "/":
+                output.append(next_character)
+                index += 1
+                state = "normal"
+        elif state != "normal":
+            output.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == state:
+                if next_character == state:
+                    output.append(next_character)
+                    index += 1
+                else:
+                    state = "normal"
+        elif character in "\r\n":
+            while output and output[-1] in (" ", "\t"):
+                output.pop()
+            output.append(character)
+        elif character in "'\"`":
+            state = character
+            output.append(character)
+        elif character == "#" or (
+            character == "-" and next_character == "-"
+            and (index + 2 == len(text) or text[index + 2].isspace())
+        ):
+            state = "line_comment"
+            output.append(character)
+        elif character == "/" and next_character == "*":
+            state = "block_comment"
+            output.extend((character, next_character))
+            index += 1
+        else:
+            output.append(character)
+        index += 1
+    if state == "normal":
+        while output and output[-1] in (" ", "\t"):
+            output.pop()
+    return "".join(output)
 
 
 def main() -> int:
