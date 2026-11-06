@@ -34,7 +34,7 @@
 - `ui_react/src/api/scheduling/substitution_payables_lineage_client.ts`
 - `ui_react/src/adapters/scheduling/leave_substitution_flow_adapter.ts`
 - `ui_react/src/adapters/scheduling/leave_substitution_flow_store.ts` — 依已登入帳號與案件隔離尚未確認的 Apply；本機只保存原命令、預覽與操作識別，不保存登入憑證，重新開啟後沿原識別確認結果，觀察成功後清除。
-- `ui_react/src/pages/SchedulingPage.tsx`
+- `ui_react/src/pages/SchedulingPage.tsx` — 「請假與代班」分頁依序顯示全案待處理事項、手動調度與收合的歷史請假紀錄；舊受理／退回／取消審核按鈕依已退役的 review 路徑移除。
 - `ui_react/src/pages/ServiceHandoverPage.tsx` — 原案件／指定原服務段帶入剩餘日期，重用代班意願、邀請與加入，工會填交接日一次保存正式 handover 與帳務。
 - `ui_react/src/adapters/scheduling/service_handover_navigation.ts`
 

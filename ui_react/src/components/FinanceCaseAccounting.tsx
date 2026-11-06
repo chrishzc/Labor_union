@@ -15,6 +15,11 @@ import {useUnsavedChanges,useUnsavedNavigation} from './UnsavedChanges';
 import {ApiHttpError} from '../api/shared/typed_errors';
 import {FinanceSubsidyPlanForm,subsidyPlanLabels,subsidyPlanTargets} from './FinanceSubsidyPlanForm';
 import {FinanceCaseNotice,lastNotification,notificationTime,notificationStatus} from './FinanceCaseNotice';
+import {ClientReceiptReconciliationPanel} from './ClientReceiptReconciliationPanel';
+import {clientReceiptQueryClient} from '../api/client_finance/client_receipt_query_client';
+import type {ClientReceiptQuery} from '../api/client_finance/client_receipt_query_schemas';
+import {CaseDifferenceResolutionWorkbench} from './CaseDifferenceResolutionWorkbench';
+import {differenceResolutionClient,type ClientDifferenceView} from '../api/client_finance/difference_resolution_client';
 import './FinanceCaseAccounting.css';
 import './FinanceCompactCase.css';
 
@@ -35,6 +40,11 @@ export function formatBankDisplay(code: string | null | undefined): string {
   const bankName = TAIWAN_BANKS[head];
   if (!bankName) return branch ? `${head}（分行 ${branch}）` : head;
   return branch ? `${head} ${bankName}（分行 ${branch}）` : `${head} ${bankName}`;
+}
+
+export function isSameMonth(dateA?: string | null, dateB?: string | null): boolean {
+  if (!dateA || !dateB) return false;
+  return dateA.slice(0, 7) === dateB.slice(0, 7);
 }
 
 export function buildDefaultVirtualAccount(caseNo: string): string | null {
@@ -79,11 +89,12 @@ export function AccountingWarningList({ data, onChange }: { data: CaseAccounting
 
 export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,initialNoticeStage,onIdentity}: {initialCase?:string;embedded?:boolean;onChanged?:()=>void;initialNoticeStage?:Stage;onIdentity?:(caseNo:string,name:string)=>void;onBank?:()=>void;onSubsidy?:(caseNo:string)=>void;onLegacy?:(caseNo:string)=>void}){
  const {requestLeave}=useUnsavedNavigation();
- const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
+ const[state,setState]=useState<{caseNo:string;data?:CaseAccounting;order?:OrderDetail;notices?:CasePaymentReminder[];registry?:ClientRegistryDetail;accountView?:CaseVirtualAccountView;receiptFacts?:ClientReceiptQuery;diffClient?:ClientDifferenceView;error?:string;noticeError?:boolean;loading?:boolean}>({caseNo:initialCase,loading:true});
  const[revision,setRevision]=useState(0),[view,setView]=useState<Stage|'plan'|null>(initialNoticeStage??null);
+ const[activeDiffStage,setActiveDiffStage]=useState<Stage|null>(null);
  const[copied,setCopied]=useState(false);
  const section=useRef<HTMLElement>(null),returnScroll=useRef(0),returnFocus=useRef<HTMLElement|null>(null);
- useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal),caseVirtualAccountClient.query(initialCase,controller.signal)]).then(([accounting,order,notices,registry,accountView])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
+ useEffect(()=>{const controller=new AbortController();setState(old=>old.caseNo===initialCase?{...old,loading:true,error:undefined}:{caseNo:initialCase,loading:true});if(!initialCase)return()=>controller.abort();void Promise.allSettled([financeAccountingClient.query(initialCase,controller.signal),ordersQueryClient.getOrderDetail(initialCase,{signal:controller.signal}),paymentOverdueReminderClient.case(initialCase,controller.signal),clientRegistryClient.query(initialCase,controller.signal),caseVirtualAccountClient.query(initialCase,controller.signal),clientReceiptQueryClient.query(initialCase,{signal:controller.signal}),differenceResolutionClient.client(initialCase,controller.signal)]).then(([accounting,order,notices,registry,accountView,receiptFacts,diffClient])=>{if(controller.signal.aborted)return;if(accounting.status==='rejected'){const status=accounting.reason instanceof ApiHttpError?accounting.reason.status:0;setState({caseNo:initialCase,error:status===404?'找不到此案件，請確認案件編號。':status===401?'登入已失效，請重新登入後查詢。':status===403?'目前沒有查閱帳務的權限。':'帳務資料暫時無法取得，請稍後重新查詢。'});return;}setState({caseNo:initialCase,data:accounting.value,order:order.status==='fulfilled'?order.value:undefined,notices:notices.status==='fulfilled'?notices.value:undefined,registry:registry.status==='fulfilled'?registry.value:undefined,accountView:accountView.status==='fulfilled'?accountView.value:undefined,receiptFacts:receiptFacts.status==='fulfilled'?receiptFacts.value:undefined,diffClient:diffClient.status==='fulfilled'?diffClient.value:undefined,noticeError:notices.status==='rejected',loading:false});});return()=>controller.abort();},[initialCase,revision]);
  useLayoutEffect(()=>{if(view!==null){section.current?.querySelector<HTMLElement>('.finance-case-subview h3')?.focus();return;}if(view===null&&returnFocus.current){const body=section.current?.closest('.drawer-body');if(body)body.scrollTop=returnScroll.current;const trigger=returnFocus.current;const target=trigger.isConnected?trigger:section.current?.querySelector('summary');target?.focus({preventScroll:true});returnFocus.current=null;}},[view,!!state.data]);
  useEffect(()=>{if(state.caseNo===initialCase&&state.data)onIdentity?.(initialCase,state.data.client_name);},[initialCase,state.caseNo,state.data,onIdentity]);
  function refresh(){setRevision(v=>v+1);onChanged?.();}
@@ -95,6 +106,19 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  if(!initialCase)return <p>請從案件清單選擇案件。</p>;
  const selected=data?.subsidy_plan?.events.at(-1)?.scheme;
  const staff=data?[...new Set(data.staff_items.filter(row=>row.direction==='payable').map(row=>row.party))].join('、'):'';
+ const staffItems=data?.staff_items.filter(row=>row.direction==='payable')??[];
+ const staffTransactions=data?.transactions.filter(row=>row.kind==='payout'||staffItems.some(s=>s.identity===row.item_identity))??[];
+ const staffPayableTotal=staffItems.reduce((sum,item)=>sum+item.expected_ntd,0);
+ const staffPaidTotal=staffItems.reduce((sum,item)=>sum+item.actual_ntd,0);
+ const staffRemainingTotal=staffItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
+
+ const refundClientItems=data?.client_items.filter(row=>row.direction==='payable')??[];
+ const refundTransactions=data?.transactions.filter(row=>row.kind==='refund'||refundClientItems.some(r=>r.identity===row.item_identity))??[];
+ const refundRemainingTotal=refundClientItems.reduce((sum,item)=>sum+(item.remaining_ntd??Math.max(0,item.expected_ntd-item.actual_ntd)),0);
+
+ const subsidyTotal=data?.subsidy_ntd??0;
+ const govBankFacts=data?.bank_facts?.filter(b=>b.cash_flow==='G')??[];
+ const govReceivedNtd=data?.cash_by_flow?.G??govBankFacts.reduce((s,b)=>s+b.amount_ntd,0);
 
  const virtualAccount=state.accountView?.imported_virtual_accounts?.[0]??state.registry?.finance?.values?.virtual_account??state.accountView?.built_in_virtual_account??buildDefaultVirtualAccount(initialCase);
  const isImportedVirtual=(state.accountView?.imported_virtual_accounts?.length??0)>0;
@@ -179,9 +203,331 @@ export function FinanceCaseAccounting({initialCase='',embedded=false,onChanged,i
  const expected=item?.expected_ntd??(exempt?0:null),actual=item?.actual_ntd??(exempt?0:null),remaining=item?.remaining_ntd??(exempt?0:null);
  const notice=state.notices?.find(row=>row.payment_stage===stage),last=lastNotification(notice);
  const receipts=item?data.transactions.filter(row=>row.item_identity===item.identity&&row.kind==='receipt'&&row.amount_ntd>0).slice().sort((a,b)=>b.occurred_on.localeCompare(a.occurred_on)):[];
- return <tr key={stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{expected===0?'不需繳納':item?.due_date??'日期待確認'}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {money(row.amount_ntd)}</p>)}</details>}</>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'通知'+stageNames[stage]} disabled={remaining==null||remaining<=0||!notice?.can_send||!!state.loading} title={remaining===0?(expected===0?'本期免繳':'本期已繳齊'):notice?.unavailable_reason??(notice?'查看本期通知內容與紀錄':'通知來源待確認')} onClick={()=>open(stage)}>通知</button></td></tr>;
- })}</tbody></table></div>{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}</div></details>
+ const monthPending=item?.due_date&&remaining!=null&&remaining>0?state.receiptFacts?.bank_facts.filter(b=>isSameMonth(b.transaction_date,item.due_date))??[]:[];
+ const pendingSum=monthPending.reduce((sum,r)=>sum+r.amount_ntd,0);
+  const diff=pendingSum-(expected??0);
+  const hasDiff=(remaining!=null&&remaining>0&&((actual??0)>0||monthPending.length>0))||monthPending.length>0;
+  return <tr key={stage} data-payment-stage={stage} className={data.collection_progress?.stage===stage?'is-current':''}><td><strong>{stageNames[stage]}</strong>{stage==='deposit'&&<small>含樓層／其他費用</small>}</td><td>{expected===0?'不需繳納':item?.due_date??'日期待確認'}{remaining!=null&&remaining>0&&item?.due_date&&<small>{item.due_date>today?'未到期':item.due_date===today?'今日到期':'逾期'}</small>}</td><td>{money(expected)}</td><td><span>已收 {money(actual)}</span>{remaining===0?<small className="finance-paid">{expected===0?'免繳':'已繳齊'}</small>:<small>待收 {money(remaining)}</small>}</td><td>{receipts.length?<><span>{receipts[0].occurred_on} · {receipts[0].bank==='sinopac'?'永豐':receipts[0].bank==='taishin'?'台新':receipts[0].bank==='legacy'?'歷史來源':'原來源'}</span>{receipts.length>1&&<details><summary>{receipts.length} 筆入帳</summary>{receipts.map(row=><p key={row.identity}>{row.occurred_on} · {money(row.amount_ntd)}</p>)}</details>}{monthPending.length>0&&<div className="finance-pending-match-cell" data-testid={`pending-match-${stage}`}><span>待核對入款 {money(pendingSum)}</span><small className={diff<0?'finance-diff-under':diff>0?'finance-diff-over':'finance-paid'}>{diff<0?`短少 ${money(Math.abs(diff))}`:diff>0?`超收 ${money(diff)}`:'金額相符'}</small></div>}</>:monthPending.length>0?<div className="finance-pending-match-cell" data-testid={`pending-match-${stage}`}><span>待核對入款 {money(pendingSum)}</span><small className={diff<0?'finance-diff-under':diff>0?'finance-diff-over':'finance-paid'}>{diff<0?`短少 ${money(Math.abs(diff))}`:diff>0?`超收 ${money(diff)}`:'金額相符'}</small></div>:<span>{item||exempt?'尚無已核銷入帳':'來源待確認'}</span>}</td><td>{last?notificationTime(last):notice?(notice.history.length?'尚無成功通知':'尚未通知'):'待確認'}{notice&&notificationStatus(notice)&&<small>{notificationStatus(notice)}</small>}</td><td><div className="finance-case-period-actions">{hasDiff&&<button type="button" className="finance-btn-secondary finance-case-diff-button" aria-label={'處置'+stageNames[stage]+'差額'} onClick={()=>setActiveDiffStage(activeDiffStage===stage?null:stage)}>{activeDiffStage===stage?'收合處置':'處置差額'}</button>}<button type="button" className="finance-btn-primary finance-case-notice-button" aria-label={'通知'+stageNames[stage]} disabled={remaining==null||remaining<=0||!notice?.can_send||!!state.loading} title={remaining===0?(expected===0?'本期免繳':'本期已繳齊'):notice?.unavailable_reason??(notice?'查看本期通知內容與紀錄':'通知來源待確認')} onClick={()=>open(stage)}>{hasDiff&&diff<0?'通知補繳':'通知'}</button></div></td></tr>;
+  })}</tbody></table></div>{activeDiffStage&&<CaseDifferenceResolutionWorkbench caseNo={initialCase} stageName={stageNames[activeDiffStage]} stageKey={activeDiffStage} expectedNtd={data.client_items.find(row=>row.direction==='receivable'&&row.payment_stage===activeDiffStage)?.expected_ntd??0} actualNtd={data.client_items.find(row=>row.direction==='receivable'&&row.payment_stage===activeDiffStage)?.actual_ntd??0} remainingNtd={data.client_items.find(row=>row.direction==='receivable'&&row.payment_stage===activeDiffStage)?.remaining_ntd??0} diffNtd={(()=>{const item=data.client_items.find(row=>row.direction==='receivable'&&row.payment_stage===activeDiffStage);const rem=item?.remaining_ntd??0;const monthP=item?.due_date?state.receiptFacts?.bank_facts.filter(b=>isSameMonth(b.transaction_date,item.due_date))??[]:[];const pSum=monthP.reduce((s,r)=>s+r.amount_ntd,0);return pSum>0?(pSum-(item?.expected_ntd??0)):-rem;})()} diffClient={state.diffClient} recipientLabel={state.registry?.client?.values?.name?`${state.registry.client.values.name}（客戶LINE）`:undefined} onOpenNotice={()=>open(activeDiffStage)} onChanged={refresh} onClose={()=>setActiveDiffStage(null)}/>}{state.noticeError&&<p role="status">通知資料暫時無法取得，時間保留待確認。<button className="finance-btn-link" onClick={()=>setRevision(v=>v+1)}>重新讀取通知</button></p>}
+<div className="finance-case-reconciliation-wrapper">
+  <ClientReceiptReconciliationPanel caseNo={initialCase} onChanged={refresh} refreshVersion={revision}/>
+</div></div></details>
  <details className="finance-case-block" open><summary>02　補助退款方案</summary><div className="finance-case-block-body"><div className="finance-compact-plan"><div><small>本案補助 {money(data.subsidy_ntd)}</small><strong>{selected?subsidyPlanLabels[selected]:'尚未設定'}</strong><p>{selected?subsidyPlanTargets[selected]:'由人員設定補助款歸屬，不從歷史金流自動代選。'}</p></div><button type="button" className="finance-btn-primary" disabled={!data.subsidy_plan||!!state.loading} onClick={()=>open('plan')}>{selected?'修改補助退款方案':'設定補助退款方案'}</button></div><p>可提前設定，不改各期應繳。案件結束後再處理補助與應付清單。</p>{selected&&<p role="status">{data.ongoing_completed?'客戶款已齊且方案已保存，已移出進行中案件。':'方案已保存，客戶款未齊時仍保留在進行中案件。'}</p>}</div></details>
+ <details className="finance-case-block" open><summary>03　月嫂薪資</summary><div className="finance-case-block-body">
+  <div className="finance-staff-summary-cards" aria-label="月嫂薪資匯總">
+    <div className="finance-staff-summary-card">
+      <small>應付月嫂總額</small>
+      <strong>{money(staffPayableTotal || data.payable_ntd)}</strong>
+    </div>
+    <div className="finance-staff-summary-card">
+      <small>已出款金額</small>
+      <strong>{money(staffPaidTotal || data.paid_ntd)}</strong>
+    </div>
+    <div className="finance-staff-summary-card">
+      <small>尚待出款</small>
+      <strong className={staffRemainingTotal === 0 ? 'finance-paid' : ''}>
+        {staffRemainingTotal === 0 ? '已付齊' : money(staffRemainingTotal)}
+      </strong>
+    </div>
+  </div>
+
+  <div className="finance-table-container" tabIndex={0} role="region" aria-label="月嫂薪資與核銷明細，可左右捲動">
+    <table className="finance-table finance-case-periods">
+      <thead>
+        <tr>
+          <th>服務項目</th>
+          <th>預計撥款日</th>
+          <th>應付</th>
+          <th>已付／待付</th>
+          <th>出款資訊</th>
+          <th>核銷狀態</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {staffItems.length > 0 ? (
+          staffItems.map(item => {
+            const diff = item.expected_ntd - item.actual_ntd;
+            const isFeeSettled = diff > 0 && diff <= 100;
+            const isSettled = item.settled || item.remaining_ntd === 0 || (item.actual_ntd >= item.expected_ntd && item.has_payment);
+            return (
+              <tr key={item.identity}>
+                <td>
+                  <strong>{item.party}</strong>
+                  <small>{item.label || '月嫂服務費'}</small>
+                </td>
+                <td>
+                  <span>{item.due_date ?? '服務結束次月15日'}</span>
+                  {item.due_date && (
+                    <small>{item.due_date > today ? '未到期' : item.due_date === today ? '今日到期' : '已屆撥款日'}</small>
+                  )}
+                </td>
+                <td>{money(item.expected_ntd)}</td>
+                <td>
+                  <span>已付 {money(item.actual_ntd)}</span>
+                  {isFeeSettled ? (
+                    <small className="finance-paid">手續費內扣結清</small>
+                  ) : isSettled ? (
+                    <small className="finance-paid">已結清</small>
+                  ) : item.remaining_ntd != null && item.remaining_ntd > 0 ? (
+                    <small>待付 {money(item.remaining_ntd)}</small>
+                  ) : diff < 0 ? (
+                    <small className="finance-diff-over">超付 {money(Math.abs(diff))}</small>
+                  ) : (
+                    <small>{money(item.remaining_ntd)}</small>
+                  )}
+                </td>
+                <td>
+                  {staffTransactions.length > 0 ? (
+                    <>
+                      <span>{staffTransactions[0].occurred_on} · {staffTransactions[0].bank === 'taishin' ? '台新銀行' : staffTransactions[0].bank === 'sinopac' ? '永豐銀行' : (staffTransactions[0].bank ?? '銀行出款')}</span>
+                      {staffTransactions.length > 1 && (
+                        <details>
+                          <summary>{staffTransactions.length} 筆出款</summary>
+                          {staffTransactions.map(t => (
+                            <p key={t.identity}>{t.occurred_on} · {t.bank === 'taishin' ? '台新' : (t.bank ?? '銀行')} · {money(t.amount_ntd)}</p>
+                          ))}
+                        </details>
+                      )}
+                    </>
+                  ) : (
+                    <span>尚無已核銷出款</span>
+                  )}
+                </td>
+                <td>
+                  {isFeeSettled ? (
+                    <span className="finance-tag-imported" title="跨行轉帳 100 元以內手續費由收款方負擔並結清">手續費內扣結清</span>
+                  ) : diff < 0 ? (
+                    <span className="finance-tag-warn">超付款待核對</span>
+                  ) : isSettled ? (
+                    <span className="finance-paid">出款已結清</span>
+                  ) : item.has_payment ? (
+                    <span>部分出款</span>
+                  ) : (
+                    <span>待排程出款</span>
+                  )}
+                </td>
+                <td>
+                  <div className="finance-case-period-actions">
+                    {diff !== 0 && !isFeeSettled && (
+                      <button
+                        type="button"
+                        className="finance-btn-secondary finance-case-diff-button"
+                        title="處置月嫂薪資差額"
+                        onClick={() => alert(`月嫂款項差額 ${money(Math.abs(diff))}，請核對銀行出款流水。`) }
+                      >
+                        處置差額
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="finance-btn-primary finance-case-notice-button"
+                      disabled
+                      title="月嫂撥款通知由系統排程批次發送"
+                    >
+                      通知
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })
+        ) : (
+          <tr>
+            <td colSpan={7} className="finance-state">本案目前無月嫂應付項目。</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+ </div></details>
+
+ <details className="finance-case-block" open><summary>04　補助退款與核銷</summary><div className="finance-case-block-body">
+  <div className="finance-refund-summary-bar"><span>客戶退款待結：<strong>{refundRemainingTotal === 0 ? '已結清' : money(refundRemainingTotal)}</strong></span><span>政府款待入：<strong>{subsidyTotal > 0 ? (govReceivedNtd >= subsidyTotal ? '已全額入帳' : money(Math.max(0, subsidyTotal - govReceivedNtd))) : '無補助'}</strong></span></div>
+  <div className="finance-table-container" tabIndex={0} role="region" aria-label="補助退款與政府核銷明細，可左右捲動">
+    <table className="finance-table finance-case-periods">
+      <thead>
+        <tr>
+          <th>項目</th>
+          <th>原到期日</th>
+          <th>應退／應收</th>
+          <th>已退(收)／待退(收)</th>
+          <th>出款／入帳資訊</th>
+          <th>核銷狀態</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {refundClientItems.length > 0 ? (
+          refundClientItems.map(row => {
+            const isRefundSettled = row.settled || row.remaining_ntd === 0 || (row.actual_ntd >= row.expected_ntd && row.has_payment);
+            return (
+              <tr key={row.identity}>
+                <td>
+                  <strong>客戶退款</strong>
+                  <small>{row.party || refundName} · {row.label}</small>
+                </td>
+                <td>
+                  <span>{row.due_date ?? '市府核撥後退款'}</span>
+                  <small>{isRefundSettled ? '已結算' : '案件結束結算'}</small>
+                </td>
+                <td>{money(row.expected_ntd)}</td>
+                <td>
+                  <span>已退 {money(row.actual_ntd)}</span>
+                  {isRefundSettled ? (
+                    <small className="finance-paid">已結清</small>
+                  ) : (
+                    <small>待退 {money(row.remaining_ntd)}</small>
+                  )}
+                </td>
+                <td>
+                  {refundTransactions.length > 0 ? (
+                    <>
+                      <span>{refundTransactions[0].occurred_on} · {refundTransactions[0].bank === 'taishin' ? '台新銀行' : (refundTransactions[0].bank ?? '銀行退款')}</span>
+                      {refundTransactions.length > 1 && (
+                        <details>
+                          <summary>{refundTransactions.length} 筆退款</summary>
+                          {refundTransactions.map(t => (
+                            <p key={t.identity}>{t.occurred_on} · {money(t.amount_ntd)}</p>
+                          ))}
+                        </details>
+                      )}
+                    </>
+                  ) : (
+                    <div>
+                      <span>{refundBankCode ? formatBankDisplay(refundBankCode) : '未登記退款銀行'}</span>
+                      <small className="finance-mono-text">{refundAccountNo ? `末四碼 ${refundAccountNo.slice(-4)}` : '待補齊帳號'}</small>
+                    </div>
+                  )}
+                </td>
+                <td>
+                  {isRefundSettled ? (
+                    <span className="finance-paid">已完成退款</span>
+                  ) : refundAccountStatus === 'complete' ? (
+                    <span>待出款（帳戶齊全）</span>
+                  ) : (
+                    <span className="finance-diff-under">帳戶待補齊</span>
+                  )}
+                </td>
+                <td>
+                  <div className="finance-case-period-actions">
+                    <button
+                      type="button"
+                      className="finance-btn-primary finance-case-notice-button"
+                      disabled={isRefundSettled}
+                      title={isRefundSettled ? '退款已結清' : '退款進度通知'}
+                    >
+                      通知
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })
+        ) : (
+          <tr>
+            <td>
+              <strong>客戶退款</strong>
+              <small>正常履約無扣減</small>
+            </td>
+            <td>不需退款</td>
+            <td>NT$ 0</td>
+            <td>
+              <span>已退 NT$ 0</span>
+              <small className="finance-paid">無退款義務</small>
+            </td>
+            <td>
+              <span>預先登記備查</span>
+              <small>{refundBankCode ? formatBankDisplay(refundBankCode) : '未填銀行'} {refundAccountNo ? `(${refundAccountNo.slice(-4)})` : ''}</small>
+            </td>
+            <td>
+              <span className="finance-paid">免退款</span>
+            </td>
+            <td>
+              <div className="finance-case-period-actions">
+                <button type="button" className="finance-btn-secondary" disabled>免操作</button>
+              </div>
+            </td>
+          </tr>
+        )}
+
+        <tr>
+          <td>
+            <strong>政府補助款</strong>
+            <small>{selected ? subsidyPlanLabels[selected] : (data.scheme ?? '尚未設定方案')}</small>
+          </td>
+          <td>
+            <span>依市府審查期程</span>
+            <small>{subsidyTotal > 0 && govReceivedNtd >= subsidyTotal ? '款項已撥入' : '審核撥付中'}</small>
+          </td>
+          <td>{money(subsidyTotal)}</td>
+          <td>
+            <span>實撥 {money(govReceivedNtd)}</span>
+            {subsidyTotal === 0 ? (
+              <small className="finance-paid">自費案免請領</small>
+            ) : govReceivedNtd >= subsidyTotal ? (
+              <small className="finance-paid">已全額撥入</small>
+            ) : (
+              <small>待撥入 {money(Math.max(0, subsidyTotal - govReceivedNtd))}</small>
+            )}
+          </td>
+          <td>
+            {govBankFacts.length > 0 ? (
+              <>
+                <span>{govBankFacts[0].occurred_on} · 永豐 (G)</span>
+                {govBankFacts.length > 1 && (
+                  <details>
+                    <summary>{govBankFacts.length} 筆公款</summary>
+                    {govBankFacts.map((b, i) => (
+                      <p key={i}>{b.occurred_on} · {money(b.amount_ntd)}</p>
+                    ))}
+                  </details>
+                )}
+              </>
+            ) : (
+              <span>{subsidyTotal === 0 ? '自費案無公款' : '待市府公款撥入'}</span>
+            )}
+          </td>
+          <td>
+            {subsidyTotal === 0 ? (
+              <span className="finance-paid">自費案免核銷</span>
+            ) : govReceivedNtd >= subsidyTotal ? (
+              <span className="finance-paid">已全額沖正</span>
+            ) : govReceivedNtd > 0 ? (
+              <span>部分撥入沖正</span>
+            ) : (
+              <span>待撥入沖正</span>
+            )}
+          </td>
+          <td>
+            <div className="finance-case-period-actions">
+              <button
+                type="button"
+                className="finance-btn-secondary"
+                onClick={() => open('plan')}
+                title="修改補助款歸屬方案"
+              >
+                {selected ? '修改方案' : '設定方案'}
+              </button>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div className="finance-subsidy-flow-note">
+    <small><strong>金流規則說明：</strong>
+      {selected === 'advance'
+        ? '客戶先墊後退（方案二）：客戶繳全額，工會先撥付月嫂薪資，政府補助撥入 (G) 後，由工會自台新退款 (R台) 予客戶。'
+        : selected === 'split'
+        ? '分拆撥付（方案一）：客戶僅繳自備款，補助款由月嫂向政府申請領取；工會無墊付亦無退款。'
+        : selected === 'direct'
+        ? '政府直撥（方案三）：政府款逕付月嫂帳戶；工會不經手補助款流水。'
+        : '由人員設定補助款歸屬方案，結算時依方案進行金流沖正與核銷。'}
+    </small>
+  </div>
+ </div></details>
  </div>{view==='plan'&&data.subsidy_plan&&<FinanceSubsidyPlanForm key={initialCase} caseNo={initialCase} source={data.subsidy_plan} onBack={back} onSaved={()=>{setView(null);refresh();}}/>}{view&&view!=='plan'&&(state.notices?.find(row=>row.payment_stage===view)?<FinanceCaseNotice key={initialCase+view} item={state.notices.find(row=>row.payment_stage===view)!} onBack={back} onChanged={refresh}/>:<div><p>本期通知來源待確認。</p><button onClick={back}>返回案件</button></div>)}</>}
  </section>;
 }

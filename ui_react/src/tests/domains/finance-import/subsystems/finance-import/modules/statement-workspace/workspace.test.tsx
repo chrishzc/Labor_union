@@ -252,19 +252,17 @@ describe('正式案件與政府清單',()=>{
 });
 
 
-it('filters the complete ongoing scope with six columns and twenty-row display pages',async()=>{
+it('filters the complete ongoing scope with six columns and displays all ongoing cases without page limits',async()=>{
  const cases=Array.from({length:21},(_,i)=>'115'+String(i+1).padStart(6,'0'));
  vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValueOnce(orderPage(cases.slice(0,20),'Synthetic',cases[19])).mockResolvedValueOnce(orderPage(cases.slice(20)));
  vi.mocked(financeAccountingClient.query).mockImplementation(async caseNo=>({...detail(caseNo),collection_progress:{stage:caseNo===cases[20]?'scheme':'deposit',sources_complete:true,expected_ntd:6000,received_ntd:0,remaining_ntd:6000,due_date:'2099-11-05'}}));
  render(<FinanceCaseList onCase={vi.fn()}/>);
  await screen.findByText(/搜尋範圍共 21 案/);
  expect(screen.getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['案件／客戶','實際開始／結束日','相關月嫂','案件總額 T','應操作／目前狀態','操作']);
- expect(screen.queryByRole('button',{name:cases[20]})).not.toBeInTheDocument();
- fireEvent.click(screen.getByRole('button',{name:'下一頁'}));expect(screen.getByRole('button',{name:cases[20]})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:cases[20]})).toBeInTheDocument();
  fireEvent.change(screen.getByLabelText('目前階段'),{target:{value:'scheme'}});
  expect(screen.getByRole('button',{name:cases[20]})).toBeInTheDocument();
  expect(screen.getByText(/搜尋範圍共 1 案/)).toBeInTheDocument();
- expect(screen.getByRole('button',{name:'上一頁'})).toBeDisabled();
  const actions=within(screen.getByRole('row',{name:new RegExp(cases[20])})).getAllByRole('button');
  expect(actions.slice(-2).map(button=>button.textContent)).toEqual(['查看案件','發出提醒']);
  fireEvent.change(screen.getByLabelText('目前階段'),{target:{value:'all'}});
@@ -286,4 +284,52 @@ it('uses the canonical step8 projection without treating service dates as entry 
  expect(financeAccountingClient.query).toHaveBeenCalledTimes(1);
  expect(screen.getByText('待收訂金')).toBeInTheDocument();
  expect(screen.getByText('未到期')).toBeInTheDocument();
+});
+
+it('switches between ongoing cases and all cases tabs in case accounting workspace', async () => {
+ const page = orderPage(['115000701', '115000702']);
+ vi.mocked(ordersQueryClient.getOrderSummaries).mockResolvedValue(page);
+ vi.mocked(financeAccountingClient.query).mockImplementation(async (caseNo) => {
+  if (caseNo === '115000702') {
+   return {
+    ...detail(caseNo),
+    ongoing_completed: true,
+    collection_progress: null,
+   };
+  }
+  return {
+   ...detail(caseNo),
+   ongoing_completed: false,
+   collection_progress: {
+    stage: 'deposit',
+    sources_complete: true,
+    expected_ntd: 6000,
+    received_ntd: 0,
+    remaining_ntd: 6000,
+    due_date: '2099-11-05',
+   },
+  };
+ });
+ render(<FinanceCaseList onCase={vi.fn()} />);
+
+ expect(screen.getByRole('tab', { name: '進行中案件' })).toHaveClass('active');
+ expect(screen.getByRole('tab', { name: '所有案件' })).not.toHaveClass('active');
+
+ await screen.findByRole('button', { name: '115000701' });
+ expect(screen.queryByRole('button', { name: '115000702' })).not.toBeInTheDocument();
+ expect(screen.getByText(/已顯示全部進行中案件/)).toBeInTheDocument();
+
+ fireEvent.click(screen.getByRole('tab', { name: '所有案件' }));
+ expect(screen.getByRole('tab', { name: '所有案件' })).toHaveClass('active');
+ expect(screen.getByRole('tab', { name: '進行中案件' })).not.toHaveClass('active');
+
+ expect(screen.getByRole('button', { name: '115000701' })).toBeInTheDocument();
+ expect(screen.getByRole('button', { name: '115000702' })).toBeInTheDocument();
+ expect(screen.getByText('已結清')).toBeInTheDocument();
+ expect(screen.getByText(/已顯示全部案件/)).toBeInTheDocument();
+
+ fireEvent.click(screen.getByRole('tab', { name: '進行中案件' }));
+ expect(screen.getByRole('button', { name: '115000701' })).toBeInTheDocument();
+ expect(screen.queryByRole('button', { name: '115000702' })).not.toBeInTheDocument();
+ expect(screen.getByText(/已顯示全部進行中案件/)).toBeInTheDocument();
 });

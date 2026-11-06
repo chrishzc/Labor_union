@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useEffect, useState } from 'react';
 import { accountingPricingClient, PricingPolicySchema, pricingTermsError, pricingIdentityLabel, pricingPolicyDraft, type PricingCatalog, type PricingPolicy, type PricingTerms } from '../api/client_finance/accounting_pricing_client';
 import { ApiHttpError } from '../api/shared/typed_errors';
@@ -85,7 +86,11 @@ export function AccountingParametersPage() {
       <td><input aria-label={`${item.identity_name} 補助上限`} type="number" min="0" step="0.5" value={item.subsidy_hours} disabled={readOnly || item.rule === 'non_citizen'} onChange={event => update(index, { subsidy_hours: Number(event.target.value) })} /></td>
       {(['client', 'payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`${item.identity_name} ${owner === 'client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min={tier === 'covered' && item.subsidy_hours === 0 ? 0 : 1} step="1" value={item[owner][tier]} disabled={readOnly || (item.rule === 'non_citizen' && tier === 'covered')} onChange={event => update(index, { [owner]: { ...item[owner], [tier]: Number(event.target.value) } })} /></td>))}
     </tr>)}</tbody></table></div>;
-  return <main ref={unsavedRef} className="pricing-page"><header className="pricing-heading"><div><h1>帳務參數設定</h1><p>新增政策版本；既有案件維持原設定。</p></div><button className="pricing-reload" disabled={busy} onClick={() => requestLeave(() => window.location.reload())}>重新載入</button></header>
+  return <div ref={unsavedRef}>
+  <ManagementPageHeader title="帳務參數設定" description="新增政策版本；既有案件維持原設定。">
+    <button className="pricing-reload" disabled={busy} onClick={() => requestLeave(() => window.location.reload())}>重新載入</button>
+  </ManagementPageHeader>
+  <div className="pricing-page">
     <nav className="pricing-tabs" aria-label="帳務參數分頁" role="tablist">{(['pricing', 'history'] as const).map(value => <button key={value} role="tab" aria-selected={tab === value} disabled={busy} onClick={() => setTab(value)}>{value === 'pricing' ? '計價與補助' : '版本紀錄'}</button>)}</nav>
     <div className="pricing-notice">依案件首次建立時間套用；生效日當天 00:00 起適用（台灣時間）。補件、改期與新政策發布不更換既有案件版本。</div>
     {tab === 'pricing' && catalog?.versions[0]?.policy.identities.some(item => pricingIdentityLabel(item) !== item.identity_name) &&
@@ -115,5 +120,5 @@ export function AccountingParametersPage() {
       <section className="pricing-section"><h2>雙胞胎費率</h2><div className="pricing-table-wrap"><table className="pricing-table"><thead><tr><th>客戶補助內時薪</th><th>客戶用盡後時薪</th><th>月嫂補助內時薪</th><th>月嫂用盡後時薪</th></tr></thead><tbody><tr>{(['twins_client', 'twins_payroll'] as const).flatMap(owner => (['covered', 'excess'] as const).map(tier => <td key={`${owner}-${tier}`}><input aria-label={`雙胞胎${owner === 'twins_client' ? '客戶' : '月嫂'}${tier === 'covered' ? '補助內' : '用盡後'}時薪`} type="number" min="1" step="1" value={shown[owner][tier]} disabled={busy || status === 'loading' || tab === 'history'} onChange={event => setDraft(current => ({ ...current, [owner]: { ...current[owner], [tier]: Number(event.target.value) } }))} /></td>))}</tr></tbody></table></div><p className="pricing-note">單胞胎依身分設定；雙胞胎優先套用此處費率，補助上限仍依身分。</p></section>
       {tab === 'pricing' && <><section className="pricing-section"><label className="pricing-field">變更說明（選填）<textarea maxLength={500} value={reason} disabled={busy || status === 'loading'} onChange={event => setReason(event.target.value)} /></label></section><div className="pricing-actions"><button disabled={busy} onClick={() => requestLeave(() => { setDraft(copy(baseline)); setReason(''); setName(''); })}>取消修改</button><button className="pricing-primary" disabled={status === 'saving' || (!pending && !!subsidyError)} onClick={() => void save()}>{status === 'saving' ? '儲存中…' : pending ? '重試原儲存' : '儲存新版本'}</button></div></>}
     </>}
-  </main>;
+  </div></div>;
 }

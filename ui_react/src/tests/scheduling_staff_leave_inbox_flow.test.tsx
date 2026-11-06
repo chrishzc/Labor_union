@@ -1,6 +1,6 @@
 /**
  * File: scheduling_staff_leave_inbox_flow.test.tsx
- * Description: 驗證請假待辦受理、取消、完成回讀與一般畫面的業務化狀態文案。
+ * Description: 驗證手動調度、舊請假查閱、已受理舊案續辦與完成回讀。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,7 @@ import { transport } from '../api/shared/transport';
 import { leaveSubstitutionClient } from '../api/scheduling/leave_substitution_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { staffAssignmentOptionsClient } from '../api/scheduling/staff_assignment_options_client';
+import { serviceStartClient } from '../api/scheduling/service_start_client';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
 import { leaveSubstitutionFlowStore } from '../adapters/scheduling/leave_substitution_flow_store';
 import { SchedulingPage } from '../pages/SchedulingPage';
@@ -49,6 +50,12 @@ const RESOLVED_ITEM: LeaveInboxItem = {
   aggregate_version: 5,
 };
 
+const ACCEPTED_ITEM: LeaveInboxItem = {
+  ...PENDING_ITEM,
+  request_status: 'accepted_for_processing',
+  aggregate_version: 5,
+};
+
 function serviceCase(caseNo: string, orderStatus = '服務中') {
   return {
     case_no: caseNo, client_name: '去敏客戶甲', order_status: orderStatus,
@@ -77,6 +84,15 @@ function renderLeaveWorkspace(): void {
   render(<SchedulingPage />);
 }
 
+async function openLeaveHistory(status?: LeaveInboxItem['request_status']) {
+  fireEvent.click(screen.getByText('歷史請假紀錄'));
+  if (status) {
+    const filter = screen.getByRole('combobox', { name: '狀態' });
+    await waitFor(() => expect(filter).toBeEnabled());
+    fireEvent.change(filter, { target: { value: status } });
+  }
+}
+
 describe('Scheduling staff leave inbox flow', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -97,6 +113,8 @@ describe('Scheduling staff leave inbox flow', () => {
       next_cursor: null,
     });
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
+    vi.spyOn(serviceStartClient, 'todos').mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 });
+    vi.spyOn(serviceStartClient, 'options').mockResolvedValue({ items: [] });
   });
 
   it('下拉列出尚未服務完成且有正式服務日的案件，選取後仍重新查詢正式指派', async () => {
@@ -179,45 +197,39 @@ describe('Scheduling staff leave inbox flow', () => {
     expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeDisabled();
   });
 
-  it('保留受理後的最新狀態供代班檢查使用，且不顯示內部版本或宣稱已通知', async () => {
+  it('已受理的舊案可帶入手動調度，且不送出舊審核操作或宣稱已通知', async () => {
     seedQueryReady();
-    let accepted = false;
     vi.spyOn(staffLeaveInboxClient, 'list').mockImplementation(async (status) => (
-      status === 'pending' && !accepted ? [PENDING_ITEM] : []
+      status === 'accepted_for_processing' ? [ACCEPTED_ITEM] : []
     ));
-    vi.spyOn(staffLeaveInboxClient, 'review').mockImplementation(async (_item, action) => {
-      expect(action).toBe('accept');
-      accepted = true;
-      return { request_id: 77, status: 'accepted_for_processing', version: 5, actor: 'admin' };
-    });
+    const review = vi.spyOn(staffLeaveInboxClient, 'review');
 
     renderLeaveWorkspace();
-    fireEvent.click(await screen.findByRole('button', { name: '📋 受理並調度代班' }));
+    await openLeaveHistory('accepted_for_processing');
+    fireEvent.click(await screen.findByRole('button', { name: '選取並繼續調度' }));
 
-    expect(await screen.findByText(/已受理.*請假待辦/)).toHaveTextContent('尚未完成排班，也尚未建立 LINE 通知工作');
+    expect(review).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: '手動調度' })).toHaveFocus();
     expect(screen.getByText(/目前已連動 LINE 請假待辦/)).not.toHaveTextContent('版本');
     expect(document.body.textContent).not.toContain('請假待辦 #77');
     expect(screen.queryByText(/已通知月嫂/)).not.toBeInTheDocument();
   });
 
-  it('受理後預設選擇申請期間內的服務日，不使用較早的其他服務日', async () => {
+  it('續辦舊案時預設選擇申請期間內的服務日', async () => {
     leaveSubstitutionFlowStore.setQueryReady(LEAVE_CASE_NO, [{
       ...LEAVE_ASSIGNMENTS[0], official_schedules: [
         { schedule_id: 300, work_date: '2026-08-02' },
         { schedule_id: 301, work_date: '2026-08-03' },
       ],
     }]);
-    vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([PENDING_ITEM]);
-    vi.spyOn(staffLeaveInboxClient, 'review').mockResolvedValue({
-      request_id: 77, status: 'accepted_for_processing', version: 5, actor: 'admin',
-    });
+    vi.mocked(staffLeaveInboxClient.list).mockImplementation(async status => status === 'accepted_for_processing' ? [ACCEPTED_ITEM] : []);
     renderLeaveWorkspace();
-    fireEvent.click(await screen.findByRole('button', { name: '📋 受理並調度代班' }));
-    await screen.findByText(/已受理.*請假待辦/);
+    await openLeaveHistory('accepted_for_processing');
+    fireEvent.click(await screen.findByRole('button', { name: '選取並繼續調度' }));
     expect(screen.getByRole('combobox', { name: '服務日' })).toHaveValue('301');
   });
 
-  it('指派查詢晚於受理回來時仍選擇請假月嫂與申請日期', async () => {
+  it('指派查詢晚於選取舊案時仍選擇請假月嫂與申請日期', async () => {
     const rows = [{ ...LEAVE_ASSIGNMENTS[0], assignment_id: 30, staff_id: 12,
       official_schedules: [{ schedule_id: 300, work_date: '2026-08-01' }],
     }, ...LEAVE_ASSIGNMENTS];
@@ -225,14 +237,12 @@ describe('Scheduling staff leave inbox flow', () => {
     vi.mocked(leaveSubstitutionClient.listAssignments)
       .mockResolvedValueOnce(rows)
       .mockImplementationOnce(() => new Promise(resolve => { releaseQuery = resolve; }));
-    vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([PENDING_ITEM]);
-    vi.spyOn(staffLeaveInboxClient, 'review').mockResolvedValue({
-      request_id: 77, status: 'accepted_for_processing', version: 5, actor: 'admin',
-    });
+    vi.mocked(staffLeaveInboxClient.list).mockImplementation(async status => status === 'accepted_for_processing' ? [ACCEPTED_ITEM] : []);
     renderLeaveWorkspace();
     await waitFor(() => expect(document.querySelector('[data-control-id="scheduling.leave.query"]')).toBeEnabled());
     fireEvent.click(document.querySelector('[data-control-id="scheduling.leave.query"]')!);
-    fireEvent.click(await screen.findByRole('button', { name: '📋 受理並調度代班' }));
+    await openLeaveHistory('accepted_for_processing');
+    fireEvent.click(await screen.findByRole('button', { name: '選取並繼續調度' }));
     await screen.findByText(/目前已連動 LINE 請假待辦/);
     releaseQuery(rows);
     await waitFor(() => expect(screen.getByRole('combobox', { name: '原服務指派' })).toHaveValue(String(LEAVE_ASSIGNMENTS[0].assignment_id)));
@@ -325,28 +335,19 @@ describe('Scheduling staff leave inbox flow', () => {
       .toBe('2026-08-11');
   });
 
-  it('提供管理員取消 pending 待辦的原因與 typed receipt', async () => {
+  it('未受理的歷史申請可查閱，已退役的審核操作不出現在清單', async () => {
     seedQueryReady();
-    let cancelled = false;
     vi.spyOn(staffLeaveInboxClient, 'list').mockImplementation(async (status) => (
-      status === 'pending' && !cancelled ? [PENDING_ITEM] : []
+      status === 'pending' ? [PENDING_ITEM] : []
     ));
-    const review = vi.spyOn(staffLeaveInboxClient, 'review').mockImplementation(async (_item, action, reason) => {
-      expect(action).toBe('cancel');
-      expect(reason).toBe('電話確認撤回請假');
-      cancelled = true;
-      return { request_id: 77, status: 'cancelled', version: 5, actor: 'admin' };
-    });
+    const review = vi.spyOn(staffLeaveInboxClient, 'review');
 
     renderLeaveWorkspace();
-    fireEvent.change(await screen.findByRole('textbox', { name: '請假待辦處理原因（選填）' }), { target: { value: '電話確認撤回請假' } });
-    fireEvent.click(screen.getByRole('button', { name: '取消待辦' }));
-
-    await waitFor(() => expect(review).toHaveBeenCalledTimes(1));
-    expect(review).toHaveBeenCalledWith(PENDING_ITEM, 'cancel', '電話確認撤回請假');
-    expect(await screen.findByText(/已取消.*請假待辦/)).toHaveTextContent('待辦狀態已更新');
-    await waitFor(() => expect(screen.queryByRole('button', { name: '取消待辦' })).not.toBeInTheDocument());
-    expect(screen.queryByText(/已通知月嫂/)).not.toBeInTheDocument();
+    await openLeaveHistory('pending');
+    expect(await screen.findByText('僅供查閱。')).toBeVisible();
+    expect(screen.getByText(/個人事務/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: /受理並調度代班|退回|取消待辦/ })).not.toBeInTheDocument();
+    expect(review).not.toHaveBeenCalled();
   });
 
   it('terminal 待辦維持唯讀並顯示明確業務原因', async () => {
@@ -355,7 +356,8 @@ describe('Scheduling staff leave inbox flow', () => {
 
     renderLeaveWorkspace();
 
-    expect(await screen.findByText('此待辦已結束，僅供回讀。')).toBeInTheDocument();
+    await openLeaveHistory();
+    expect(await screen.findByText('僅供查閱。')).toBeVisible();
     expect(screen.getAllByText('已完成代班').length).toBeGreaterThan(0);
     expect(screen.queryByText('resolved')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '📋 受理並調度代班' })).not.toBeInTheDocument();
@@ -390,7 +392,8 @@ describe('Scheduling staff leave inbox flow', () => {
     renderLeaveWorkspace();
     expect(await screen.findByText(/本批日期已完成/)).toHaveTextContent('重新整理指派');
     expect(screen.getByText(/本批日期已完成/)).toHaveTextContent('案件選單');
-    expect(await screen.findByRole('button', { name: '📋 選取並繼續調度' })).toBeEnabled();
+    await openLeaveHistory();
+    expect(await screen.findByRole('button', { name: '選取並繼續調度' })).toBeEnabled();
     expect(screen.queryByText(/已確認關聯的請假待辦完成/)).not.toBeInTheDocument();
   });
 

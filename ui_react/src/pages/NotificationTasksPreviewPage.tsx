@@ -1,4 +1,5 @@
 /** Live notification workbench; pending facts and commands stay with their original owners. */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowRight, Bell, Check, ChevronLeft, ChevronRight,
@@ -143,11 +144,14 @@ export function NotificationTasksPage() {
       : item.source==='log' || item.payment?.payment_stage!=='deposit' && item.source==='overdue'
         ? `#line-management?tab=order_groups&group_q=${encodeURIComponent(item.case_no ?? '')}`:'#line-management?tab=binding';
   };
-  return <div className="notification-preview-page">
-    <header className="notification-preview-heading">
-      <div><p className="notification-preview-eyebrow">工會工作</p><h1><Bell aria-hidden="true" />通知事項</h1><p>集中查看需要處理的事項，接續原有工作流程。</p></div>
-      <button type="button" className="np-button" disabled={loading || busy} onClick={() => requestLeave(() => { setNotice('');setPage(1);setRevision(value=>value+1); })}><RefreshCw size={16} aria-hidden="true" />重新整理</button>
-    </header>
+  return <>
+    <ManagementPageHeader className="notification-preview-heading" title={<><Bell size={24} aria-hidden="true" />通知事項</>} description="集中查看需要處理的事項，接續原有工作流程。">
+      <div className="notification-preview-heading-actions">
+        <span className="notification-preview-eyebrow">工會工作</span>
+        <button type="button" className="np-button" disabled={loading || busy} onClick={() => requestLeave(() => { setNotice('');setPage(1);setRevision(value=>value+1); })}><RefreshCw size={16} aria-hidden="true" />重新整理</button>
+      </div>
+    </ManagementPageHeader>
+    <div className="notification-preview-page">
 
     {tab==='tasks' && (queryError || failedSources.length>0) && <div className="notification-preview-banner" role="alert"><strong>{queryError || failedSources.length===scopedSources.length?'目前無法讀取事項':'部分事項未能載入'}</strong>{queryError && <p>{queryError}</p>}{failedSources.map(s=><p key={s.source}>{s.label}：{failures[s.source]} <button type="button" className="np-button" onClick={()=>void refreshSource(s.source).catch(error=>setFailures(old=>({...old,[s.source]:notificationFailure(error)})))}>重試{s.label}</button></p>)}</div>}
     {loading && <p role="status">正在讀取待處理事項…</p>}
@@ -208,5 +212,5 @@ export function NotificationTasksPage() {
         </> : <div className="notification-preview-empty detail-empty"><Check size={28} aria-hidden="true" /><p>選擇事項後，在這裡查看詳細內容。</p></div>}
       </aside>
     </div>
-  </div>;
+  </div></>;
 }

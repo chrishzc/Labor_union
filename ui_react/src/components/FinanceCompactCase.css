@@ -24,3 +24,110 @@
 .finance-reconciliation-footer{margin-top:8px;padding-top:8px;border-top:1px dashed var(--md-sys-color-outline-variant,#eedfd5);font-size:.75rem;color:var(--md-sys-color-on-surface-variant,#776e65);line-height:1.6}
 @media(max-width:900px){.finance-reconciliation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.finance-reconciliation-grid{grid-template-columns:1fr}}
+
+/* Period action cell layout */
+.finance-case-period-actions{display:flex;flex-direction:column;gap:6px;align-items:stretch;white-space:nowrap}
+.finance-case-diff-button{font-size:.76rem;padding:4px 8px;min-height:28px;line-height:1.2;justify-content:center}
+.finance-case-period-actions .finance-case-notice-button{font-size:.76rem;padding:4px 8px;min-height:28px;line-height:1.2;justify-content:center}
+
+/* Difference Workbench */
+.finance-diff-workbench{background:#fff;border:2px solid var(--md-sys-color-primary,#c25e2e);border-radius:12px;padding:18px 20px;margin:16px 0;box-shadow:0 2px 8px rgba(194,94,46,0.08)}
+.finance-diff-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:1px solid #f0d9cf;flex-wrap:wrap;gap:8px}
+.finance-diff-title-group{display:flex;align-items:center;gap:10px}
+.finance-diff-indicator{width:10px;height:10px;border-radius:50%;background:var(--md-sys-color-primary,#c25e2e);flex-shrink:0}
+.finance-diff-title-group h4{margin:0;font-size:.95rem;font-weight:700;color:#2d2621}
+.finance-diff-title-group small{display:block;font-size:.75rem;color:#7d7268;margin-top:3px}
+.finance-diff-tag-group{display:flex;align-items:center;gap:10px;text-align:right}
+.finance-diff-tag-label{font-size:.75rem;color:#7d7268}
+.finance-diff-tag-group strong{font-size:1rem;font-weight:700}
+.finance-diff-close{background:transparent;border:0;color:#9e8e82;font-size:1.1rem;font-weight:700;cursor:pointer;padding:0 4px;margin-left:6px;line-height:1}
+.finance-diff-close:hover{color:#2d2621}
+
+/* Facts Bar */
+.finance-diff-facts-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;background:#faf7f2;border:1px solid #eddcd2;border-radius:8px;padding:12px 14px;margin:14px 0;text-align:center}
+.finance-diff-facts-bar span{display:block;font-size:.75rem;color:#7d7268;margin-bottom:4px}
+.finance-diff-facts-bar strong{font-size:.95rem;color:#2d2621}
+
+/* Dual-Track Grid */
+.finance-diff-dual-track{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:760px){.finance-diff-dual-track{grid-template-columns:1fr}}
+.finance-diff-card{border:1px solid #e8ded3;border-radius:9px;background:#fdfcf9;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.finance-diff-card-badge-row{display:flex;align-items:center;gap:8px}
+.finance-diff-badge-track{padding:2px 6px;border-radius:4px;font-size:.7rem;font-weight:700;background:#ffeedb;color:#a04010}
+.finance-diff-badge-notice{padding:2px 6px;border-radius:4px;font-size:.7rem;font-weight:700;background:#e8f5e9;color:#2e7d32}
+.finance-diff-card strong{font-size:.85rem;color:#2d2621}
+
+/* Options */
+.finance-diff-options{display:grid;gap:8px}
+.finance-diff-option{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid #dec8bd;border-radius:8px;background:#fff;cursor:pointer;transition:all .15s ease}
+.finance-diff-option.is-selected{border-color:var(--md-sys-color-primary,#c25e2e);background:#fff9f5}
+.finance-diff-option input{margin-top:3px}
+.finance-diff-option strong{display:block;font-size:.84rem;color:#2d2621}
+.finance-diff-option small{display:block;font-size:.75rem;color:#7d7268;margin-top:2px;line-height:1.4}
+
+.finance-diff-reason-field{display:grid;gap:5px;font-size:.78rem;font-weight:600;color:#2d2621}
+.finance-diff-reason-field small{font-weight:400;color:#9e8e82}
+.finance-diff-reason-field input{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #dec8bd;border-radius:6px;font-size:.8rem;background:#fff}
+
+.finance-diff-notice-desc{font-size:.78rem;color:#5a4f47;line-height:1.5;margin:0}
+.finance-diff-notice-info{background:#fff;border:1px solid #dec8bd;border-radius:6px;padding:10px;font-size:.78rem;display:grid;gap:4px}
+.finance-diff-notice-info div{display:flex;justify-content:space-between;color:#7d7268}
+.finance-diff-notice-info strong{color:#2d2621}
+
+.finance-diff-commit-btn{width:100%;justify-content:center;margin-top:auto}
+.finance-diff-notice-btn{width:100%;justify-content:center;border-color:#2e7d32;color:#2e7d32;margin-top:auto}
+.finance-diff-notice-btn:hover{background:#f1f8f3}
+
+/* Feedback & Success */
+.finance-diff-error{color:#b3261e;font-size:.8rem;margin:8px 0}
+.finance-diff-success-box{background:#f0f9f3;border:1px solid #a8dfbc;border-radius:8px;padding:12px 14px;margin-top:14px;color:#1e4620;font-size:.8rem}
+.finance-diff-success-header{display:flex;align-items:center;gap:8px}
+.finance-diff-success-actions{margin-top:8px;padding-top:8px;border-top:1px dashed #c0e8ce;display:flex;align-items:center;gap:10px}
+.finance-diff-btn-sm{padding:4px 10px;font-size:.75rem;min-height:26px}
+
+
+/* Staff and Refund blocks in Compact Case */
+.finance-staff-summary-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.finance-staff-summary-card{border:1px solid var(--md-sys-color-outline-variant,#e8ded3);border-radius:8px;background:#faf7f2;padding:10px 14px;text-align:center}
+.finance-staff-summary-card small{display:block;font-size:.75rem;color:var(--md-sys-color-on-surface-variant,#776e65);margin-bottom:4px}
+.finance-staff-summary-card strong{font-size:.95rem;color:var(--md-sys-color-on-surface,#1e1b19)}
+.finance-staff-table th:nth-child(1){width:22%}
+.finance-staff-table th:nth-child(2){width:18%}
+.finance-staff-table th:nth-child(3){width:15%}
+.finance-staff-table th:nth-child(4){width:15%}
+.finance-staff-table th:nth-child(5){width:15%}
+.finance-staff-table th:nth-child(6){width:15%}
+
+.finance-sub-transactions{margin-top:14px;padding-top:12px;border-top:1px dashed var(--md-sys-color-outline-variant,#eedfd5)}
+.finance-sub-transactions h5{margin:0 0 8px;font-size:.82rem;font-weight:600;color:var(--md-sys-color-on-surface,#2d2621)}
+.finance-trans-list{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.finance-trans-list li{display:flex;align-items:center;gap:12px;font-size:.8rem;padding:6px 10px;background:#fdfcf9;border:1px solid #ede4db;border-radius:6px}
+
+.finance-refund-section{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--md-sys-color-outline-variant,#f0e7e1)}
+.finance-refund-status-tag{font-size:.75rem;padding:2px 8px;border-radius:4px;background:#f5eee8;color:#776e65;font-weight:600}
+.finance-refund-empty{padding:10px 14px;background:#fdfcf9;border:1px solid #ede4db;border-radius:8px;font-size:.82rem;color:#776e65}
+.finance-refund-empty p{margin:0 0 6px}
+.finance-refund-bank-preview{display:flex;align-items:center;gap:10px;font-size:.8rem;color:#2d2621;flex-wrap:wrap}
+
+.finance-subsidy-flow-section{margin-top:12px}
+.finance-subsidy-badge{font-size:.72rem;padding:2px 8px;border-radius:4px;background:#e8f5e9;color:#2e7d32;font-weight:600}
+.finance-subsidy-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}
+.finance-subsidy-metric{border:1px solid #ede4db;background:#fdfcf9;border-radius:8px;padding:10px 12px;text-align:center}
+.finance-subsidy-metric small{display:block;font-size:.72rem;color:#776e65;margin-bottom:4px}
+.finance-subsidy-metric strong{font-size:.92rem;color:#2d2621}
+.finance-subsidy-flow-note{margin-top:10px;padding:10px 12px;background:#faf7f2;border-radius:6px;font-size:.78rem;color:#6b5f54;line-height:1.6}
+@media(max-width:700px){
+  .finance-staff-summary-cards,.finance-subsidy-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+/* Advanced Reconciliation Card Styling */
+.finance-advanced-reconciliation-card{border:1px dashed #d5c3b8;background:#fdfcfb;border-radius:10px;padding:16px 18px;margin-top:20px}
+.finance-reconciliation-heading-group{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.finance-reconciliation-heading-group h3{margin:0;font-size:.95rem;font-weight:700;color:#2d2621}
+.finance-advanced-reconciliation-guide{margin:8px 0 14px;padding:8px 12px;background:#f5efe8;border-left:3px solid #b57a58;border-radius:4px;font-size:.78rem;color:#5c4f45;line-height:1.5}
+.finance-reconciliation-empty-box{padding:14px 16px;background:#fff;border:1px solid #ebdcd1;border-radius:8px;font-size:.82rem;color:#6b5f54;line-height:1.6}
+.finance-reconciliation-empty-box p{margin:0 0 6px;font-weight:600;color:#3d342d}
+.finance-reconciliation-empty-box small{display:block;color:#7d7268;line-height:1.6}
+
+.finance-refund-summary-bar{display:flex;gap:20px;padding:8px 14px;background:#faf7f2;border:1px solid #eddcd2;border-radius:6px;margin-bottom:12px;font-size:.82rem;color:#6b5f54}
+.finance-refund-summary-bar strong{color:#2d2621;margin-left:4px}

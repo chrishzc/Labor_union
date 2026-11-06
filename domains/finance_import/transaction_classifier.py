@@ -264,6 +264,47 @@ def extract_client_name_from_memo(
     return None
 
 
+def extract_name_from_row_text(row: Mapping[str, Any], names: Sequence[str]) -> str | None:
+    if not names:
+        return None
+    memo = row.get("memo")
+    prefix_match = extract_client_name_from_memo(memo, names)
+    if prefix_match:
+        return prefix_match
+
+    cp_name = row.get("counterparty_name")
+    if cp_name and isinstance(cp_name, str):
+        normalized_cp = unicodedata.normalize("NFKC", cp_name).strip()
+        for name in names:
+            if name and (normalized_cp == name or normalized_cp.startswith(name)):
+                return name
+
+    search_targets = []
+    for val in (memo, cp_name, row.get("summary")):
+        if val and isinstance(val, str):
+            search_targets.append(unicodedata.normalize("NFKC", val))
+    bank_refs = row.get("bank_references")
+    if isinstance(bank_refs, Mapping):
+        for val in bank_refs.values():
+            if val and isinstance(val, str):
+                search_targets.append(unicodedata.normalize("NFKC", val))
+    combined = " ".join(search_targets)
+    for name in names:
+        if name and name in combined:
+            return name
+    return None
+
+
+def _is_valid_fee_diff(debit: Any, due_amount: Any) -> bool:
+    if debit is None or due_amount is None:
+        return False
+    try:
+        diff = Decimal(str(due_amount)) - Decimal(str(debit))
+        return Decimal("0") <= diff <= Decimal("100")
+    except Exception:
+        return False
+
+
 def _is_same_month(trans_date: Any, due_date: Any) -> bool:
     if not trans_date or not due_date:
         return False
@@ -286,6 +327,111 @@ def _is_same_amount(debit: Any, due_amount: Any) -> bool:
         return False
 
 
+def _classify_outgoing_by_name_month_fee(
+    row: Mapping[str, Any],
+    all_staff_names: Sequence[str],
+    staff_payout_candidates: Sequence[Mapping[str, Any]],
+    all_client_names: Sequence[str],
+    taishin_client_refund_candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    staff_pool = sorted(
+        set(all_staff_names) | {c["name"] for c in staff_payout_candidates if c.get("name")},
+        key=len,
+        reverse=True,
+    )
+    client_pool = sorted(
+        set(all_client_names) | {c["name"] for c in taishin_client_refund_candidates if c.get("name")},
+        key=len,
+        reverse=True,
+    )
+    if not staff_pool and not client_pool:
+        return None
+
+    matched_staff = extract_name_from_row_text(row, staff_pool) if staff_pool else None
+    matched_client = extract_name_from_row_text(row, client_pool) if client_pool else None
+
+    if matched_staff and matched_client:
+        if matched_staff != matched_client:
+            memo_text = unicodedata.normalize("NFKC", str(row.get("memo") or ""))
+            is_staff_kw = any(k in memo_text for k in ("服務人員", "月嫂", "薪資"))
+            is_client_kw = any(k in memo_text for k in ("退款", "退費", "客戶"))
+            if is_staff_kw and not is_client_kw:
+                matched_client = None
+            elif is_client_kw and not is_staff_kw:
+                matched_staff = None
+            else:
+                return _review("counterparty_identity_type_conflict")
+
+    trans_date = row.get("transaction_date")
+    debit_val = row.get("debit")
+
+    if matched_staff is not None:
+        matching_obligations = [
+            c for c in staff_payout_candidates if c.get("name") == matched_staff
+        ]
+        if not matching_obligations:
+            return _review("outgoing_staff_payout_no_open_obligation")
+
+        month_matched = [
+            c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
+        ]
+        if not month_matched:
+            return _review("outgoing_staff_payout_month_no_match")
+
+        fee_matched = [
+            c for c in month_matched if _is_valid_fee_diff(debit_val, c.get("amount_due_ntd"))
+        ]
+        if len(fee_matched) == 1:
+            cand = fee_matched[0]
+            diff = Decimal(str(cand["amount_due_ntd"])) - Decimal(str(debit_val))
+            if diff == 0:
+                reason = (
+                    "unique_staff_payout_name_and_month_matched"
+                    if len(matching_obligations) == 1
+                    else "staff_payout_disambiguated_by_month_and_amount"
+                )
+            else:
+                reason = "unique_staff_payout_name_month_fee_matched"
+            return _result("staff_salary", [cand["staff_id"]], reason, matched_staff)
+        if len(fee_matched) > 1:
+            return _review("outgoing_staff_payout_multiple_fee_matches")
+        return _review("outgoing_staff_payout_amount_mismatch")
+
+    if matched_client is not None:
+        matching_obligations = [
+            c for c in taishin_client_refund_candidates if c.get("name") == matched_client
+        ]
+        if not matching_obligations:
+            return _review("taishin_client_refund_no_open_obligation")
+
+        month_matched = [
+            c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
+        ]
+        if not month_matched:
+            return _review("taishin_client_refund_month_no_match")
+
+        fee_matched = [
+            c for c in month_matched if _is_valid_fee_diff(debit_val, c.get("amount_due_ntd"))
+        ]
+        if len(fee_matched) == 1:
+            cand = fee_matched[0]
+            diff = Decimal(str(cand["amount_due_ntd"])) - Decimal(str(debit_val))
+            if diff == 0:
+                reason = (
+                    "taishin_unique_client_refund_name_and_month_matched"
+                    if len(matching_obligations) == 1
+                    else "taishin_client_refund_disambiguated_by_month_and_amount"
+                )
+            else:
+                reason = "taishin_unique_client_refund_name_month_fee_matched"
+            return _result("client_refund", [cand["client_id"]], reason, matched_client)
+        if len(fee_matched) > 1:
+            return _review("taishin_client_refund_multiple_exact_matches")
+        return _review("taishin_client_refund_amount_mismatch")
+
+    return None
+
+
 def classify_finance_transaction(
     row: Mapping[str, Any],
     client_refund_accounts: Mapping[str, Any],
@@ -296,6 +442,8 @@ def classify_finance_transaction(
     client_refund_case_suffixes: Mapping[str, Any] | None = None,
     all_client_names: Sequence[str] = (),
     taishin_client_refund_candidates: Sequence[Mapping[str, Any]] = (),
+    all_staff_names: Sequence[str] = (),
+    staff_payout_candidates: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -309,6 +457,20 @@ def classify_finance_transaction(
     if client_subsidy_return_accounts is None:
         client_subsidy_return_accounts = client_refund_accounts
         client_refund_accounts = {}
+
+    if direction == "outgoing":
+        memo = row.get("memo")
+        government_memo = isinstance(memo, str) and "新竹市政府" in memo
+        if not government_memo:
+            fee_result = _classify_outgoing_by_name_month_fee(
+                row,
+                all_staff_names,
+                staff_payout_candidates,
+                all_client_names,
+                taishin_client_refund_candidates,
+            )
+            if fee_result is not None:
+                return fee_result
 
     if format_id in {"legacy", "sinopac"}:
         if direction == "incoming":
@@ -351,49 +513,7 @@ def classify_finance_transaction(
                 return _review("counterparty_identity_type_conflict")
             return _result("government_subsidy", [], "taishin_government_return_memo")
 
-        if all_client_names or taishin_client_refund_candidates:
-            names_pool = sorted(
-                set(all_client_names) | {c["name"] for c in taishin_client_refund_candidates if c.get("name")},
-                key=len,
-                reverse=True,
-            )
-            matched_name = extract_client_name_from_memo(memo, names_pool)
-            if matched_name is not None:
-                matching_obligations = [
-                    c for c in taishin_client_refund_candidates if c.get("name") == matched_name
-                ]
-                trans_date = row.get("transaction_date")
-                debit_val = row.get("debit")
-
-                if not matching_obligations:
-                    return _review("taishin_client_refund_no_open_obligation")
-
-                month_matched = [
-                    c for c in matching_obligations if _is_same_month(trans_date, c.get("due_date"))
-                ]
-                exact_matched = [
-                    c for c in month_matched if _is_same_amount(debit_val, c.get("amount_due_ntd"))
-                ]
-
-                if len(exact_matched) == 1:
-                    cand = exact_matched[0]
-                    reason = (
-                        "taishin_unique_client_refund_name_and_month_matched"
-                        if len(matching_obligations) == 1
-                        else "taishin_client_refund_disambiguated_by_month_and_amount"
-                    )
-                    return _result(
-                        "client_refund",
-                        [cand["client_id"]],
-                        reason,
-                        matched_name,
-                    )
-                if len(exact_matched) > 1:
-                    return _review("taishin_client_refund_multiple_exact_matches")
-                if month_matched:
-                    return _review("taishin_client_refund_amount_mismatch")
-                return _review("taishin_client_refund_month_no_match")
-
+        if all_client_names or taishin_client_refund_candidates or all_staff_names or staff_payout_candidates:
             return _review("taishin_outgoing_unrecognized")
 
         return _classify_taishin_outgoing(

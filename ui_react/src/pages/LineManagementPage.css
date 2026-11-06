@@ -11,11 +11,7 @@
 }
 
 .line-page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  margin-block-end: 0;
 }
 
 .line-query-badge {
@@ -2814,15 +2810,6 @@
     gap: 16px;
   }
 
-  .line-page-header {
-    align-items: flex-start;
-  }
-
-  .line-page-header .page-title {
-    font-size: clamp(1.45rem, 7vw, 2rem);
-    line-height: 1.25;
-  }
-
   .line-tab-bar {
     top: 56px;
     width: 100%;
@@ -3750,6 +3737,17 @@
   gap: 20px;
 }
 
+.ai-customer-service-page > .management-page-header {
+  margin-block-end: 0;
+}
+
+.ai-customer-service-page .management-page-header .line-hub-page-icon {
+  width: 28px;
+  height: 28px;
+  margin-inline-end: 8px;
+  vertical-align: middle;
+}
+
 .line-hub-page-header {
   display: flex;
   align-items: flex-start;
@@ -4175,14 +4173,14 @@
 .ai-router-result div { min-width: 0; padding: 10px; border: 1px solid var(--line-color-border-subtle); border-radius: 8px; background: var(--line-color-page); }
 .ai-router-result span { display: block; color: var(--line-color-text-muted); font-size: 0.72rem; }
 
-/* LINE 工作區的可讀性底線：主要內容與操作文字不得低於 14px。 */
+/* LINE 工作區的內容與操作文字至少 14px；頁首說明沿用管理端共用規格。 */
 :is(
   .line-page-wrapper,
   .ai-customer-service-page,
   .llm-config-page,
   .liff-studio-container,
   .alert-group-security-container
-) :where(p, span, label, button, a, input, select, textarea, code, small, td, th, summary) {
+) :where(p, span, label, button, a, input, select, textarea, code, small, td, th, summary):not(:where(.management-page-header-copy > p)) {
   font-size: max(0.875rem, 1em) !important;
 }
 

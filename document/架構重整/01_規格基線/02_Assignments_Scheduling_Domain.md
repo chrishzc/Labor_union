@@ -296,6 +296,8 @@ delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review 
 工會只記錄雙方談妥的結果或選人安排代班，不負責溝通協調。代班須願意、寄送原案件群組邀請並確認加入後，才由工會記錄實際日期。指定代班可同時保存明確新服務日，未指定時維持原日；不得重複計算服務日或更動其他日。
 既有 Scheduling result／candidate store 共用於服務開始與請假；請假 `execution_dates` 使用 `{kind:"leave-v1",decision,dates:[{original_date,new_date}],conflict_message?}`，與 service-start execution array／peer 決策隔離。只使用既有 awaiting_peers／substitute_required／applied 狀態；awaiting_peers 僅供同交易施工，不是人工等待。
 舊請假 request 的歷史資料、readback、取消與 canonical linked receipt 證據保留，不再接受新的 pending 請假 intake 或客戶同意順延操作。舊受理／退回入口及舊日常待辦已退役，僅保留歷史查閱及正式處理證據；不建立詢問客戶的工作，也不以退役入口宣稱已完成排班。不需要資料 backfill。
+
+桌面排班頁預設顯示排班月曆。「請假與代班」分頁依序提供全案待處理事項、電話或口頭請假的手動調度，以及預設收合的歷史請假紀錄。歷史區保留已受理舊案的續辦與回讀，省去已退役的審核操作。桌面通知照原單筆需求開啟，案件工作區依案號篩選，LINE 工會管理端沿用原入口。
 日期、Scheduling generation、Finance／Payroll impact、immutable leave outcomes、result receipt 及群組寄送工作共用一個 outer commit；衝突或中途失敗不能留下半套結果。原服務日不得已完成，新日期不可空白、重複或冒用他人指派。所有送出與人員操作需 replay 同一 key，內容不同回 typed conflict。
 
 Batch replay：

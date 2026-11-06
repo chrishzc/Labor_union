@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { loadAllCoreStageTimelines } from '../api/orders/load_all_core_stage_timelines';
 /**
  * File: OrderWorkbenchV2Page.tsx
@@ -240,13 +241,8 @@ export const OrderWorkbenchV2Page: FC<{ homeNavigationRequest?: number }> = ({ h
 
   return (
     <div className="order-v2-page">
+      <ManagementPageHeader className="orders-page-header" title="待辦看板" description="找到需要處理的案件，從目前步驟接著完成。" />
       {caseLinkError && <p role="alert">{caseLinkError}</p>}
-      <header className="page-header-banner orders-page-header">
-        <div>
-          <h1 className="page-title">待辦看板</h1>
-          <p className="page-subtitle">找到需要處理的案件，從目前步驟接著完成。</p>
-        </div>
-      </header>
 
       <details className="order-v2-overview-details">
         <summary>案件受理統計</summary>

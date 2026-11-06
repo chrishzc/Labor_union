@@ -2,6 +2,7 @@
  * File: AiCustomerServiceStudioPage.tsx
  * Description: AI 客服工作室，整合常見問答、引導動作、回答測試、回饋分析與 AI 模型設定。
  */
+import { ManagementPageHeader } from '../../components/ManagementPageHeader';
 import React, { useState } from 'react';
 import { useUnsavedNavigation } from '../../components/UnsavedChanges';
 import { Bot, BookOpenText, FlaskConical, KeyRound, MessageSquareHeart, Workflow } from 'lucide-react';
@@ -26,16 +27,9 @@ export const AiCustomerServiceStudioPage: React.FC = () => {
 
   return (
     <section className="line-hub-page ai-customer-service-page" aria-labelledby="ai-studio-title">
-      <header className="line-hub-page-header">
-        <div className="line-hub-page-heading">
-          <span className="line-hub-page-icon" aria-hidden="true"><Bot /></span>
-          <div>
-            <p className="line-hub-eyebrow">LINE 專區</p>
-            <h1 id="ai-studio-title">AI 客服工作室</h1>
-            <p>維護答案，測試回覆，持續改善客服品質，並管理 AI 模型設定。</p>
-          </div>
-        </div>
-      </header>
+      <ManagementPageHeader titleId="ai-studio-title" title={<><span className="line-hub-page-icon" aria-hidden="true"><Bot /></span>AI 客服工作室</>} description="維護答案，測試回覆，持續改善客服品質，並管理 AI 模型設定。">
+        <span className="line-hub-eyebrow">LINE 專區</span>
+      </ManagementPageHeader>
 
       <nav className="line-hub-section-tabs" aria-label="AI 客服工作室功能">
         <button type="button" className={activeTab === 'qa' ? 'active' : ''} aria-current={activeTab === 'qa' ? 'page' : undefined} onClick={() => requestLeave(() => { setQaTarget({}); setActiveTab('qa'); })}>

@@ -2,6 +2,7 @@
  * File: DataImportPage.tsx
  * Description: 提供四種工作簿匯入選檔、互斥結果筆數、未匯入明細與錯誤列號案件明細呈現。
  */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft } from '../components/UnsavedChanges';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptClientBeClassWorkbookPreview } from '../adapters/case_import/client_beclass_workbook_adapter';
@@ -385,12 +386,13 @@ export const DataImportPage: React.FC = () => {
     'historic-orders': { flow: historicalOrders, title: '歷史訂單匯入', inputLabel: '選擇歷史訂單 Workbook' },
   };
   const { flow, title, inputLabel } = cards[activeImportKind];
-  return <div data-surface-id="imports.page" className="import-page-container import-simple-page">
-    <header className="import-simple-page-heading"><h1>批次資料匯入</h1><p>選擇檔案後按「匯入」。</p></header>
+  return <div data-surface-id="imports.page">
+  <ManagementPageHeader title="批次資料匯入" description="選擇檔案後按「匯入」。" />
+  <div className="import-page-container import-simple-page">
     <nav className="import-kind-selector" aria-label="選擇匯入類型"><div>{WORKBOOK_IMPORT_OPTIONS.map(option => <button type="button" key={option.kind} className={activeImportKind === option.kind ? 'active' : ''} aria-pressed={activeImportKind === option.kind} onClick={() => setActiveImportKind(option.kind)}>{option.label}</button>)}</div></nav>
     <CaseWorkbookPreviewCard key={activeImportKind} id={activeImportKind} title={title} inputLabel={inputLabel} openPreviewControlId={activeImportKind === 'hcm-current' ? 'imports.hcm-current.open-preview' : undefined}
       selectedWorkbook={flow.selectedWorkbook} previewState={flow.previewState} applyState={flow.applyState} mutationLocked={mutationLocked}
       onSelect={flow.selectWorkbook} onClear={flow.clearWorkbook} onPreview={flow.previewWorkbook} onApply={flow.applyWorkbook} />
-  </div>;
+  </div></div>;
 };
 export default DataImportPage;

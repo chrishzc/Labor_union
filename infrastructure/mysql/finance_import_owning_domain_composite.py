@@ -50,6 +50,7 @@ from domains.finance_import.cancellation_code import (
     extract_sinopac_memo_case_suffix,
     resolve_finance_cancellation_code,
 )
+from domains.finance_import.transaction_classifier import _is_same_month
 from subsystems.client_finance.virtual_account_resolution import (
     resolve_client_virtual_account,
     resolve_client_virtual_account_suffix,
@@ -283,9 +284,13 @@ class MySqlFinanceImportOwningDomainComposite:
 
 def _resolve_client_receipt(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
-    case_no = None if client_id is not None else _virtual_account_case_no(
-        connection,
-        candidate.row_identity,
+    case_no, trans_date = (
+        (None, None)
+        if client_id is not None
+        else _virtual_account_case_info(
+            connection,
+            candidate.row_identity,
+        )
     )
     if client_id is None and case_no is None:
         return candidate
@@ -297,13 +302,106 @@ def _resolve_client_receipt(connection, candidate):
         )
         cursor.execute(statement, parameters)
         rows = tuple(cursor.fetchall())
-    if len(rows) != 1:
+    if len(rows) == 1:
+        target = str(rows[0]["obligation_identity"])
+        return _ready_candidate(
+            candidate,
+            (target,),
+            "exact-open-client-obligation",
+        )
+    # 2026-11-05 人工裁決：非精確匹配（未完全相符）時比對月份
+    if trans_date is None:
         return candidate
-    target = str(rows[0]["obligation_identity"])
-    return _ready_candidate(
-        candidate,
-        (target,),
-        "exact-open-client-obligation",
+    try:
+        with connection.cursor() as cursor:
+            statement, parameters = _client_receipt_open_obligations_query(
+                client_id,
+                case_no,
+            )
+            cursor.execute(statement, parameters)
+            open_rows = tuple(cursor.fetchall())
+    except StopIteration:
+        return candidate
+    if not open_rows:
+        return candidate
+    month_matched = [
+        row for row in open_rows
+        if _is_same_month(trans_date, row.get("due_date"))
+    ]
+    if len(month_matched) == 1:
+        target = str(month_matched[0]["obligation_identity"])
+        due_amount = int(month_matched[0]["amount_due_ntd"])
+        diff = candidate.amount.amount - due_amount
+        diff_tag = (
+            f"diff_over:{diff}"
+            if diff > 0
+            else f"diff_under:{abs(diff)}"
+            if diff < 0
+            else "diff_zero"
+        )
+        evidence = tuple(
+            sorted(
+                set((
+                    *candidate.evidence,
+                    "month-matched-client-obligation",
+                    diff_tag,
+                ))
+            )
+        )
+        return replace(candidate, target_identities=(target,), evidence=evidence)
+    if len(month_matched) > 1:
+        targets = tuple(
+            sorted(str(row["obligation_identity"]) for row in month_matched)
+        )
+        evidence = tuple(
+            sorted(set((*candidate.evidence, "month-matched-client-obligations")))
+        )
+        return replace(candidate, target_identities=targets, evidence=evidence)
+    return candidate
+
+
+def _virtual_account_case_info(connection, row_identity):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT format_id,cancellation_code,bank_references,transaction_date "
+            "FROM finance_import_rows WHERE id=%s",
+            (_row_id(row_identity),),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None, None
+        source = dict(row)
+        source["bank_references"] = _json_object(source.get("bank_references"))
+        cancellation_code = resolve_finance_cancellation_code(source)[
+            "cancellation_code"
+        ]
+        resolution = resolve_client_virtual_account(cursor, cancellation_code)
+    if resolution["result"] != "resolved":
+        return None, row.get("transaction_date")
+    return str(resolution["case_no"]), row.get("transaction_date")
+
+
+def _client_receipt_open_obligations_query(client_id, case_no):
+    base = (
+        "SELECT obligation.obligation_identity,obligation.due_date,obligation.amount_due_ntd "
+        "FROM client_obligations obligation "
+    )
+    predicates = (
+        "AND obligation.direction='receivable_from_client' "
+        "AND obligation.status='open' "
+        "ORDER BY obligation.due_date,obligation.obligation_identity"
+    )
+    if client_id is not None:
+        return (
+            base
+            + "JOIN orders order_row ON order_row.case_no=obligation.case_no "
+            + "WHERE order_row.client_id=%s "
+            + predicates,
+            (client_id,),
+        )
+    return (
+        base + "WHERE obligation.case_no=%s " + predicates,
+        (case_no,),
     )
 
 
@@ -388,18 +486,37 @@ def _resolve_client_refund(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
     if client_id is None:
         return candidate
-    memo_scoped, case_no = _sinopac_outgoing_case_no(connection, candidate.row_identity)
+    memo_scoped, case_no, _trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
     if memo_scoped and case_no is None:
         return candidate
     rows = _load_client_refund_targets(connection, client_id, case_no)
     targets = _unique_case_refund_targets(rows, candidate.amount.amount)
     if targets is None:
+        by_case = {}
+        for r in rows:
+            by_case.setdefault(str(r["case_no"]), []).append(r)
+        fee_eligible = []
+        for c_no, c_rows in by_case.items():
+            c_total = sum(int(r["amount_due_ntd"]) for r in c_rows)
+            c_diff = c_total - candidate.amount.amount
+            if 0 <= c_diff <= 100:
+                fee_eligible.append(tuple(str(r["obligation_identity"]) for r in c_rows))
+        if len(fee_eligible) == 1:
+            targets = fee_eligible[0]
+        else:
+            return candidate
+
+    selected_total = sum(int(row["amount_due_ntd"]) for row in rows if str(row["obligation_identity"]) in targets)
+    diff = selected_total - candidate.amount.amount
+    if not (0 <= diff <= 100):
         return candidate
-    if sum(int(row["amount_due_ntd"]) for row in rows if str(row["obligation_identity"]) in targets) != candidate.amount.amount:
-        # Partial refunds require the owner's explicit human-confirmed action;
-        # do not advertise them as an exact automatic dispatch.
-        return candidate
-    return _ready_candidate(candidate, targets, "unique-client-refund-obligation-balance")
+
+    evidence = (
+        "unique-client-refund-obligation-balance"
+        if diff == 0
+        else "unique-client-refund-transfer-fee-reconciled"
+    )
+    return _ready_candidate(candidate, targets, evidence)
 
 
 def _json_object(value):
@@ -407,7 +524,7 @@ def _json_object(value):
     return decoded if isinstance(decoded, dict) else {}
 
 
-def _sinopac_outgoing_case_no(connection, row_identity):
+def _sinopac_outgoing_case_info(connection, row_identity):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT format_id,direction,memo FROM finance_import_rows WHERE id=%s",
@@ -415,18 +532,24 @@ def _sinopac_outgoing_case_no(connection, row_identity):
         )
         row = cursor.fetchone()
         if row is None:
-            return True, None
+            return True, None, None
+        trans_date = row.get("transaction_date")
         if row["format_id"] != "sinopac":
-            return False, None
+            return False, None, trans_date
         if row["direction"] != "outgoing":
-            return True, None
+            return True, None, trans_date
         suffix = extract_sinopac_memo_case_suffix(row["memo"])
         if suffix is None:
-            return True, None
+            return True, None, trans_date
         resolution = resolve_client_virtual_account_suffix(cursor, suffix)
     if resolution["result"] != "resolved":
-        return True, None
-    return True, str(resolution["case_no"])
+        return True, None, trans_date
+    return True, str(resolution["case_no"]), trans_date
+
+
+def _sinopac_outgoing_case_no(connection, row_identity):
+    memo_scoped, case_no, _ = _sinopac_outgoing_case_info(connection, row_identity)
+    return memo_scoped, case_no
 
 
 def _load_client_refund_targets(connection, client_id, case_no=None):
@@ -491,14 +614,14 @@ def _resolve_staff_payout(connection, candidate):
     staff_id = _single_prefixed_identity(candidate, "staff:")
     if staff_id is None:
         return candidate
-    memo_scoped, case_no = _sinopac_outgoing_case_no(connection, candidate.row_identity)
+    memo_scoped, case_no, _trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
     if memo_scoped and case_no is None:
         return candidate
     case_predicate = "AND obligation.case_no=%s " if case_no is not None else ""
     parameters = (staff_id, case_no) if case_no is not None else (staff_id,)
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT obligation.obligation_identity,"
+            "SELECT obligation.obligation_identity,obligation.due_date,"
             "COALESCE(projection.balance_ntd,obligation.amount_due_ntd) "
             "AS balance_ntd "
             "FROM staff_obligations obligation "
@@ -514,14 +637,24 @@ def _resolve_staff_payout(connection, candidate):
             parameters,
         )
         rows = tuple(cursor.fetchall())
-    total = sum(int(row["balance_ntd"]) for row in rows)
-    if not rows or total != candidate.amount.amount:
+    if not rows:
         return candidate
+
+    total = sum(int(row["balance_ntd"]) for row in rows)
+    diff = total - candidate.amount.amount
+    if not (0 <= diff <= 100):
+        return candidate
+
     targets = tuple(str(row["obligation_identity"]) for row in rows)
+    evidence = (
+        "exact-staff-payable-total"
+        if diff == 0
+        else "unique-staff-payout-transfer-fee-reconciled"
+    )
     return _ready_candidate(
         candidate,
         targets,
-        "exact-staff-payable-total",
+        evidence,
     )
 
 

@@ -1,4 +1,5 @@
 /** Contract Signing template management; all validation and persistence belong to its API. */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Download, FileSpreadsheet, Link2, List, MousePointer2, Save, Search, ShieldCheck, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { contractTemplatesClient as client, type TemplateCatalog, type TemplateCell, type TemplateKey, type TemplateMutation, type TemplatePreview, type TemplateSave, type TemplateSource } from '../api/contract_templates/contract_templates_client';
@@ -156,8 +157,14 @@ export function ContractTemplatesPage() {
   const rows = preview ? Array.from({ length: preview.sheet.rows }, (_, i) => i + 1) : [];
   const columns = preview ? Array.from({ length: preview.sheet.columns }, (_, i) => i + 1) : [];
   const mappedEntries = Object.entries(assignments).filter(([ref, value]) => `${ref} ${fields.get(value)?.label ?? value}`.toLowerCase().includes(search.toLowerCase()));
-  return <section className="ctm-page" ref={unsaved}>
-    <div className="ctm-heading"><div><small>稽核與系統 ／ 契約模板</small><h1>契約模板與欄位映射 <span>{dirty ? '未保存修改' : '版本管理'}</span></h1><p>上傳你編好的 Excel，保留原有內容與版型，再指定資料要填在哪裡。</p></div><label>模板類型<select value={key} disabled={locked} onChange={event => { const next = event.target.value as TemplateKey; requestLeave(() => setKey(next)); }}><option value="contract_client_copy">客戶服務契約</option><option value="contract_staff_service">服務人員委任契約</option></select></label></div>
+  return <section ref={unsaved}>
+    <ManagementPageHeader className="ctm-heading" title={<>契約模板與欄位映射 <span>{dirty ? '未保存修改' : '版本管理'}</span></>} description="上傳你編好的 Excel，保留原有內容與版型，再指定資料要填在哪裡。">
+      <div className="ctm-heading-controls">
+        <small>稽核與系統 ／ 契約模板</small>
+        <label>模板類型<select value={key} disabled={locked} onChange={event => { const next = event.target.value as TemplateKey; requestLeave(() => setKey(next)); }}><option value="contract_client_copy">客戶服務契約</option><option value="contract_staff_service">服務人員委任契約</option></select></label>
+      </div>
+    </ManagementPageHeader>
+    <div className="ctm-page">
     <div className="ctm-steps"><span><Check />上傳 Excel 模板</span><i /><strong><b>2</b>調整映射欄位</strong><i /><button disabled={locked || !preview || unavailableMappings.length > 0} onClick={() => void sample()}><b>3</b>檢查套值結果</button></div>
     <div className="ctm-upload" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next && !locked) requestLeave(() => void upload(next)); }}>
       <div className="ctm-file"><FileSpreadsheet /><div><strong>{preview?.filename ?? '請先讀取或上傳 Excel 模板'}</strong><span>{file ? '新上傳，尚未保存' : currentVersion ? `${currentVersion.number === 0 ? '內建模板' : `保存版本 ${currentVersion.number}`} · ${preview?.sheet.rows ?? 0} 列 · ${preview?.sheet.merges.length ?? 0} 組合併格` : '讀取中'}</span></div></div>
@@ -181,5 +188,6 @@ export function ContractTemplatesPage() {
     <div className="ctm-bottom"><div><ShieldCheck /><span>目前啟用：{activeVersion ? activeVersion.number === 0 ? '內建模板' : `版本 ${activeVersion.number}` : '讀取中'}<small>新模板另存版本，既有契約保持原版本。</small></span></div><div className="ctm-bottom-actions"><button className="ctm-btn" disabled={locked || !catalog} onClick={() => setShowVersions(true)}><List />版本清單</button><button className="ctm-btn" disabled={locked || !dirty || !preview || missing.length > 0 || unavailableMappings.length > 0} onClick={save}><Save />保存版本</button><button className="ctm-btn primary" disabled={locked || dirty || !sourceVersionId || sourceVersionId === catalog?.active_version_id} onClick={() => setActivateConfirmation(true)}>啟用此版本<ArrowRight /></button></div></div>
     <dialog ref={versionsDialog} aria-labelledby="ctm-versions-title" className="ctm-dialog" onCancel={() => setShowVersions(false)}><div className="ctm-dialog-head"><h2 id="ctm-versions-title">模板版本清單</h2><button aria-label="關閉版本清單" onClick={() => setShowVersions(false)}><X /></button></div><p className="ctm-dialog-note">{templateName(key)} · 保存不會自動啟用，歷史版本持續保留。</p>{catalog?.versions.slice().reverse().map(version => <div className="ctm-version-row" key={version.version_id}><div><strong>{version.number === 0 ? '內建模板' : `版本 ${version.number}`} {version.version_id === catalog.active_version_id && <span>使用中</span>}</strong><p>{version.filename}</p><small>{version.created_at ? new Date(version.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '系統隨附'} · {actorLabel(version.created_by)}</small></div><button className="ctm-btn" onClick={() => { setShowVersions(false); requestLeave(() => void openVersion(version.version_id)); }}>查看</button></div>)}</dialog>
     <dialog ref={activationDialog} aria-labelledby="ctm-activate-title" className="ctm-dialog" onCancel={() => setActivateConfirmation(false)}><div className="ctm-dialog-head"><h2 id="ctm-activate-title">啟用此模板版本？</h2><button aria-label="關閉啟用確認" onClick={() => setActivateConfirmation(false)}><X /></button></div><p className="ctm-dialog-note">{currentVersion?.filename} · 版本 {currentVersion?.number ?? ''}</p><p className="ctm-dialog-copy">啟用後，後續明確產製的新契約來源會使用此模板與映射。已保存的契約、PDF 及簽回文件保留原版本。</p><div className="ctm-dialog-actions"><button className="ctm-btn" onClick={() => setActivateConfirmation(false)}><ArrowLeft />繼續檢查</button><button className="ctm-btn primary" onClick={() => { if (catalog && sourceVersionId) void runMutation({ key, id: crypto.randomUUID(), action: 'activate', versionId: sourceVersionId, expectedVersion: catalog.catalog_version }); }}>確認啟用</button></div></dialog>
+    </div>
   </section>;
 }

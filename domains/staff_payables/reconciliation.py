@@ -200,6 +200,7 @@ class StaffPayoutCandidate:
     resulting_status: StaffPayableStatus = StaffPayableStatus.COMPLETED
     difference_mode: StaffPayoutDifferenceMode | None = None
     recovery: "StaffOverpaymentRecoveryCandidate | None" = None
+    transfer_fee: MoneyNTD = MoneyNTD(0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,20 +344,48 @@ def _build_exact_payout(staff_id, ordered_banks, ordered_payables):
     obligation_total = MoneyNTD(
         sum(_allocatable_amount(item, True) for item in ordered_payables)
     )
-    if bank_total != obligation_total:
+    diff = obligation_total.amount - bank_total.amount
+    if not (0 <= diff <= 100):
         raise ValueError("staff_payout_amount_mismatch")
-    allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
-    _validate_exact_allocation(ordered_banks, ordered_payables, allocations)
-    candidate = _payout_candidate(
-        staff_id,
-        bank_total,
-        obligation_total,
-        allocations,
-        ordered_banks,
-    )
-    if bank_total.amount < sum(project_staff_payable(item).balance.amount for item in ordered_payables):
+    if diff == 0:
+        allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
+        _validate_exact_allocation(ordered_banks, ordered_payables, allocations)
+        candidate = _payout_candidate(
+            staff_id,
+            bank_total,
+            obligation_total,
+            allocations,
+            ordered_banks,
+            transfer_fee=MoneyNTD(0),
+        )
+    else:
+        allocations = _allocate_settlement(ordered_banks, ordered_payables)
+        candidate = _payout_candidate(
+            staff_id,
+            bank_total,
+            obligation_total,
+            allocations,
+            ordered_banks,
+            transfer_fee=MoneyNTD(diff),
+        )
+    if bank_total.amount + diff < sum(project_staff_payable(item).balance.amount for item in ordered_payables):
         return replace(candidate, resulting_status=StaffPayableStatus.PARTIALLY_PAID)
     return candidate
+
+
+def _allocate_settlement(ordered_banks, ordered_payables):
+    allocations = []
+    primary_bank = ordered_banks[0]
+    for payable in ordered_payables:
+        amount = _allocatable_amount(payable, True)
+        allocations.append(
+            StaffPayoutAllocation(
+                primary_bank.identity,
+                payable.obligation_identity,
+                MoneyNTD(amount),
+            )
+        )
+    return tuple(allocations)
 
 
 def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
@@ -402,6 +431,7 @@ def _payout_candidate(
     obligation_total,
     allocations,
     ordered_banks,
+    transfer_fee=MoneyNTD(0),
 ):
     events = tuple(_payout_event(bank_fact) for bank_fact in ordered_banks)
     links = _payout_links(events, allocations)
@@ -410,9 +440,10 @@ def _payout_candidate(
         bank_total,
         obligation_total,
         allocations,
-        fingerprint_payload(_candidate_payload(staff_id, allocations, events)),
+        fingerprint_payload(_candidate_payload(staff_id, allocations, events, transfer_fee_ntd=transfer_fee.amount)),
         events,
         links,
+        transfer_fee=transfer_fee,
     )
 
 
@@ -691,8 +722,8 @@ def _reopen_candidate(reopen_fact, links, payables) -> StaffPayoutReopenCandidat
     )
 
 
-def _candidate_payload(staff_id, allocations, events, difference_mode=None, recovery=None) -> dict[str, object]:
-    return {
+def _candidate_payload(staff_id, allocations, events, difference_mode=None, recovery=None, transfer_fee_ntd=0) -> dict[str, object]:
+    payload: dict[str, object] = {
         "staff_id": staff_id,
         "event_type": StaffPayoutEventType.PAYOUT.value,
         "events": tuple(_event_payload(item) for item in events),
@@ -703,6 +734,9 @@ def _candidate_payload(staff_id, allocations, events, difference_mode=None, reco
             "amount_ntd": recovery.original_amount.amount,
         },
     }
+    if transfer_fee_ntd > 0:
+        payload["transfer_fee_ntd"] = transfer_fee_ntd
+    return payload
 
 
 def _allocation_payload(allocation) -> dict[str, object]:

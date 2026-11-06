@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: LineManagementPage.tsx
@@ -777,14 +778,9 @@ export const LineManagementPage: React.FC<LineManagementPageProps> = ({
 
   return (
     <div className={`line-page-wrapper${runtimeOnly ? ' line-runtime-embedded' : ''}${activeTab === 'richmenu' ? ' line-richmenu-active' : ''}`} data-control-id="line.page">
-      {!runtimeOnly && <header className="page-header-banner line-page-header">
-        <div>
-          <p className="line-hub-eyebrow">LINE 專區</p>
-          <h1 className="page-title">{view.title}</h1>
-          <p className="page-subtitle">{view.subtitle}</p>
-        </div>
-
-      </header>}
+      {!runtimeOnly && <ManagementPageHeader className="line-page-header" title={view.title} description={view.subtitle}>
+        <span className="line-hub-eyebrow">LINE 專區</span>
+      </ManagementPageHeader>}
       {!runtimeOnly && <nav className="line-tab-bar" aria-label={view.title}>
         {[view.title].map((group) => <div key={group} className="line-nav-group" role="group" aria-label={group}>
           {TABS.filter(([tab]) => view.tabs.includes(tab)).map(([tab, label, id]) => <button key={tab} type="button" data-control-id={id} className={`line-tab-btn ${activeTab === tab ? 'active' : ''}`} disabled={richMenuBusy} aria-current={activeTab === tab ? 'page' : undefined} onClick={() => { if (activeTab !== tab) requestLeave(() => { if (activeTab === 'richmenu') setRichMenuLocalDefinition(null); setActiveTab(tab); }); }}>{label}</button>)}

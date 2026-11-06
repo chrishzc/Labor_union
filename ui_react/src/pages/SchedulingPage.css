@@ -1031,6 +1031,21 @@
   color: #292524;
 }
 
+.scheduling-leave-history {
+  padding: 14px 16px;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+}
+
+.scheduling-leave-history summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.scheduling-leave-history[open] > * + * {
+  margin-top: 12px;
+}
+
 .leave-substitution-header,
 .leave-substitution-query-row,
 .leave-substitution-actions {

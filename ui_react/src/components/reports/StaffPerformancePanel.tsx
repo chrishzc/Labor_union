@@ -103,7 +103,7 @@ export function StaffPerformancePanel({ initialStaffId }: { initialStaffId?: num
     finally { if (!controller.signal.aborted) setExporting(false); }
   };
   const periodLabel = `${filters.year}年${filters.period === 'month' ? `${filters.month}月` : filters.period === 'quarter' ? `第${filters.quarter}季` : '全年'}`;
-  return <div className="staff-performance" data-surface-id="reports.staff-performance"><header className="performance-heading"><h1>月嫂表現分析</h1><p>接案數、排班工時與本期認列金額</p></header>
+  return <div className="staff-performance" data-surface-id="reports.staff-performance">
     <section className="performance-filters" aria-label="月嫂表現分析篩選"><div className="performance-filter-row"><div className="performance-field"><span>統計週期</span><div className="performance-period">{(['month', 'quarter', 'year'] as const).map((period, i) => <button key={period} type="button" aria-pressed={filters.period === period} onClick={() => update({ ...filters, period })}>{['月', '季', '年'][i]}</button>)}</div></div>
       <label className="performance-field"><span>年度</span><select value={filters.year} onChange={event => update({ ...filters, year: Number(event.target.value) })}>{years.map(year => <option key={year} value={year}>{year - 1911} 年（{year}）</option>)}</select></label>
       {filters.period === 'month' && <label className="performance-field"><span>月份</span><select value={filters.month} onChange={event => update({ ...filters, month: Number(event.target.value) })}>{Array.from({ length: 12 }, (_, i) => <option key={i} value={i + 1}>{i + 1} 月</option>)}</select></label>}

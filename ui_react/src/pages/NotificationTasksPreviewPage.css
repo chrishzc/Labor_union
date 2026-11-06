@@ -2,11 +2,10 @@
 .notification-preview-page { max-width: 1320px; margin: 0 auto; color: var(--md-sys-color-on-surface); }
 .notification-preview-blocker { background: #fff2eb; border-left: 3px solid #c36a37; padding: 12px; font-size: .85rem; line-height: 1.6; }
 .notification-preview-page a.np-button { text-decoration: none; }
-.notification-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 0 0 23px; }
-.notification-preview-eyebrow { color: var(--md-sys-color-primary); font-size: .76rem; font-weight: 700; margin-bottom: 4px; letter-spacing: .08em; }
-.notification-preview-heading h1 { display: flex; gap: 12px; align-items: center; font-size: 1.85rem; line-height: 1.4; letter-spacing: -.02em; }
-.notification-preview-heading h1 svg { width: 27px; height: 27px; color: var(--md-sys-color-primary); }
-.notification-preview-heading h1 + p { font-size: .875rem; margin-top: 7px; color: var(--md-sys-color-on-surface-variant); }
+.notification-preview-heading { margin-block-end: 23px; }
+.notification-preview-heading-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.notification-preview-eyebrow { color: var(--md-sys-color-primary); font-size: .76rem; font-weight: 700; letter-spacing: .08em; }
+.notification-preview-heading h1 svg { color: var(--md-sys-color-primary); }
 .notification-preview-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 17px; background: #f4ede7; border: 1px solid #eadcd1; padding: 12px 17px; border-radius: 10px; color: #74593f; font-size: .79rem; margin-bottom: 20px; }
 .notification-preview-banner > span { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .notification-preview-tabs { display: flex; gap: 27px; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
@@ -89,9 +88,7 @@
 }
 @media (max-width: 600px) {
   .notification-preview-heading { align-items: flex-start; gap: 10px; margin-bottom: 17px; }
-  .notification-preview-heading h1 { font-size: 1.5rem; gap: 8px; }
-  .notification-preview-heading h1 + p { font-size: .78rem; }
-  .notification-preview-heading > button { padding-inline: 10px; font-size: .74rem; flex-shrink: 0; }
+  .notification-preview-heading-actions > button { padding-inline: 10px; font-size: .74rem; flex-shrink: 0; }
   .notification-preview-banner { font-size: .74rem; padding: 11px 13px; gap: 5px; }
   .notification-preview-toolbar { gap: 12px; }
   .notification-preview-groups { display: grid; grid-template-columns: 1fr 1fr; width: 100%; gap: 5px; }

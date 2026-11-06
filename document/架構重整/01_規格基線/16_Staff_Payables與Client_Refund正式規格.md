@@ -1,5 +1,7 @@
 # Staff Payables 與 Client Refund 正式規格
 
+> 2026-11-05 對帳單支出匯款手續費（100元以內）直接核銷最新裁決：依 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)，公會匯出月嫂薪資（P永／P台）及客戶退款／補助退還（R永／R台）時，跨行轉帳內扣 100 元以內之銀行手續費由收款方負擔（同行免手續費為 0 元，不得預設固定手續費）。支出對帳單經「月嫂或客戶姓名 → 交易日月份 → 金額差額 `0 <= 應付 - 實付 <= 100` 唯一綁定成功」後，動態計算 `手續費 = 應付 - 實付`（`0～100` 元），Staff Payables 與 Client Finance 直接核銷結清（`remaining = 0`、狀態轉 `completed`／`paid` 或 `refunded`），同時保留原應付全額、不可變銀行實付金額與匯款手續費紀錄。少付超過 100 元或實付大於應付（超付）仍維持待核對與警示。本輪僅更新規格與流程圖，未修改正式程式或資料庫。
+
 > 2026-11-05 帳務工作台收斂與應付帳款整併最新裁決：依使用者最新裁決，舊「其他帳務作業」折疊區塊退役清理，會計應付帳款清冊與十欄 Excel 匯出正式整併入「每月帳務」（WF-06）出款口徑與專屬匯出按鈕；舊人員付款維度由營運報表承接；舊資金預估由 WF-01 承接；原 APX-SOURCE-01～READONLY-07 與 APX-A01～09 之十欄格式、月嫂編號＋姓名、永豐／台新分列維持不變。詳見 [§2.5.4](#accounts-payable-excel-execution-20261105) 與既有工作包。
 
 > 2026-11-05 最新人工裁決：全額補助免自備依規格22 §17.4.1；補助市民／原住民且正式服務總時數≤本案有效補助上限，自動免自備、方案一、轉交月嫂。會計清冊須區分永豐／台新出款及月嫂／客戶對象，月嫂欄位顯示公會自訂編號＋姓名，完整契約及驗收見本文件 §2.5.4。文件階段之後，使用者已授權「執行程式修正、資料補登及修復後驗收」；實際通過範圍及7筆資料補登阻擋見[原工作包執行結果](../帳務工作台實作工作包.md#accounts-payable-excel-execution-20261105)。既有退款不得一律補快照當成已修復。
@@ -161,9 +163,9 @@ outcome／canonical bank fact 讀回判定。
 
 事件別 guard：
 
-- 一般 payout：選定銀行出款與選定 obligation 的當下剩餘款精確相等；
+- 一般 payout（2026-11-05 依 `22` §15.6.4 更新）：選定銀行出款滿足收款人姓名＋交易日月份唯一匹配，且差額落在 `0 <= (選定 obligation 當下剩餘款合計 - 銀行實付金額) <= 100` 時，動態計算收款方負擔之匯款手續費 `transfer_fee_ntd = remaining_total - bank_outflow`（可為 `0`～`100` 元，同行免手續費為 `0`，不得預設固定手續費），直接將該目標 obligation 核銷結清（`remaining = 0`、`completed`），保留原應付總額、銀行實付原額及手續費差額；**已取代，僅供歷史追溯**：舊一般 payout 僅接受 `差額 == 0` exact-only 之限制；
 - payout difference：只允許已確認唯一月嫂、唯一銀行帳戶 snapshot 與同一付款範圍內的
-  obligations；銀行總額可以小於或大於 obligation remaining，但每一元銀行出款都必須由
+  obligations；用於 `差額 > 100` 之真正部分付款／不足額核銷或 `實付 > 應付` 之超付追償，每一元銀行出款都必須由
   payout allocation 或 overpayment recovery root 完整表達；
 - return：必須指向一筆仍有效的 payout 與 canonical 銀行退匯入款，重開相同義務；
 - reversal：必須指向一筆仍有效的錯誤 payout，不要求銀行入款，但要求人工 reason、
@@ -171,15 +173,14 @@ outcome／canonical bank fact 讀回判定。
 - return／reversal 都不得超過目標 payout 的尚未重開金額。
 
 帳戶不一致、收款人不唯一或 allocation 不唯一時，整筆仍不得建立正式 payout，轉 typed
-blocker／anomaly。只有金額差異且 ownership 唯一時，才可使用專用 difference action；
-一般 payout action 仍維持 exact-only。
+blocker／anomaly。超過 100 元少付或任何超付且 ownership 唯一時，才使用專用 difference action。
 
-#### 2.4.1 公會對月嫂付款不足
+#### 2.4.1 公會對月嫂付款不足與 100 元內匯款手續費分界
 
-公會實際出款小於選定 obligation remaining 時，先核銷實際付款，剩餘款繼續列待付。
-後續補款沿同一 obligation 核銷剩餘款，不修改原應付全額或重複計算薪資。
+- **0～100 元內扣匯款手續費直接結清（2026-11-05 最新裁決，詳 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)）**：公會匯款月嫂薪資（P永／P台）符合「唯一月嫂姓名 → 交易日同月份 → `0 <= 應付 - 實付 <= 100` 唯一目標」時，差額即為月嫂負擔之跨行匯款手續費（可為 `0`～`100` 元），直接完成核銷結清（`remaining = 0`、狀態轉 `completed`／`paid`），不留待補付餘額，下期清冊不再輸出。
+- **少付超過 100 元（或人工明確選用部分付款）**：公會實際出款比選定 obligation remaining 少超過 100 元（`應付 - 實付 > 100`），或跨月／未滿足手續費結清條件而由人員確認屬部分付款時，先核銷實際付款，剩餘款繼續列待付。後續補款沿同一 obligation 核銷剩餘款，不修改原應付全額或重複計算薪資。
 
-2026-10-29 差額顯示補充：案件頁以應付減有效實付顯示手續費參考，不認列費用、不扣減 obligation，也不因差額在 100 元以內或人員解除警示而結清。少付超過 100 元及任何超付依 `22` §15.7–15.8 進共用帳務警示；恰好少付 100 元不觸發此新增門檻。這是顯示／警示契約，以下不足額核銷、remaining、補款、超額追償及原正式 owner 規則不變。
+**已取代，僅供歷史追溯（2026-10-29 差額不核銷舊補充）**：當時「案件頁以應付減有效實付顯示手續費參考，不認列費用、不扣減 obligation，也不因差額在 100 元以內而結清」之限制，於支出符合 `22` §15.6.4 範圍內已由「計算 0～100 元手續費並直接核銷結清」取代；少付超過 100 元及任何超付仍依 `22` §15.7–15.8 進共用帳務警示並走下述不足額／超額規則。
 
 `ApplyStaffPayoutDifference(mode=underpayment)` 必須在單一 Staff Payables UoW 內：
 
@@ -692,9 +693,10 @@ Apply：
 7. 更新 projection、version、outbox 與 receipt；
 8. outer Unit of Work 單次 commit。
 
-每一筆選定 bank outflow 的金額必須被完整表達；不足 obligation 全額時形成
-`partially_refunded`。超過 remaining refundable amount 時，`ApplyClientRefundWithOverage`
-必須依 3.2 建立超額追償應收，而不是拒絕並遺失銀行現金事實。
+每一筆選定 bank outflow 的金額必須被完整表達：
+- **2026-11-05 支出 100 元內手續費直接核銷（詳 [`22` §15.6.4](22_銀行流水匯入與帳務異常處理正式規格.md#outgoing-statement-fee-reconciliation-20261105)）**：客戶退款／補助退還支出（R永／R台）符合「唯一客戶姓名 → 交易日同月份 → `0 <= 應退餘額 - 銀行實付 <= 100` 唯一目標」時，動態計算收款方負擔手續費 `transfer_fee_ntd = remaining - bank_outflow`（可為 `0`～`100` 元），直接核銷結清為 `refunded`（`remaining = 0`），保留原應退總額、銀行實付原額及手續費差額；
+- 少退超過 100 元（或人工明確選用部分退款）時形成 `partially_refunded`，保留未退餘額；
+- 超過 remaining refundable amount（`銀行實付 > 應退餘額`）時，`ApplyClientRefundWithOverage` 必須依 3.2 建立超額追償應收，而不是拒絕並遺失銀行現金事實。
 
 ### 3.5 State machine
 

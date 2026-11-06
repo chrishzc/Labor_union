@@ -1,8 +1,9 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 import { useStaffIdentityDirectory, useStaffIdentityLabels } from '../components/StaffIdentityProvider';
 /**
  * File: FinancePage.tsx
- * Description: 呈現 Finance 四大主工作區（進行中案件、銀行對帳、政府補助清單、每月帳務），收斂舊作業工具並維護受控銀行交易明細。
+ * Description: 呈現 Finance 四大主工作區（案件帳務、銀行對帳、政府補助清單、每月帳務），收斂舊作業工具並維護受控銀行交易明細。
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Drawer } from '../components/Drawer';
@@ -98,6 +99,7 @@ export const FinancePage: React.FC = () => {
       overdue: params.get('view') === 'overdue',
       caseNo: (params.get('case_no') ?? '').slice(0, 50),
       fromWorkbench: params.get('from') === 'workbench',
+      subTab: params.get('subtab') === 'all' ? ('all' as const) : ('ongoing' as const),
     };
   });
   const [activeTab, setActiveTab] = useState<FinanceTab>(() =>
@@ -367,21 +369,21 @@ export const FinancePage: React.FC = () => {
 
   return (
     <div data-surface-id="finance.page">
-      {entry.fromWorkbench && entry.caseNo && (
-        <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>
-          ← 返回案件處理
-        </a>
-      )}
-      <header className="page-header-banner finance-page-header">
-        <div>
-          <h1 className="page-title">帳務工作台</h1>
-          <p className="page-subtitle">四大核心工作區：進行中案件、銀行對帳、政府補助清單、每月帳務。</p>
-        </div>
-      </header>
+      <ManagementPageHeader
+        className="finance-page-header"
+        title="帳務工作台"
+        description="四大核心工作區：案件帳務、銀行對帳、政府補助清單、每月帳務。"
+      >
+        {entry.fromWorkbench && entry.caseNo && (
+          <a className="finance-case-return" href={`#order-workbench-v2?case=${encodeURIComponent(entry.caseNo)}`}>
+            ← 返回案件處理
+          </a>
+        )}
+      </ManagementPageHeader>
 
       <nav className="finance-tab-bar finance-primary-tabs" aria-label="帳務工作區">
         {([
-          ['case-accounting', '進行中案件'],
+          ['case-accounting', '案件帳務'],
           ['finance-import', '銀行對帳'],
           ['government-list', '政府補助清單'],
           ['monthly', '每月帳務'],
@@ -402,6 +404,7 @@ export const FinancePage: React.FC = () => {
       {activeTab === 'case-accounting' && (
         <FinanceCaseList
           revision={reload}
+          initialSubTab={entry.subTab}
           onCase={openCase}
           onNotice={(caseNo, stage) => openCase(caseNo, stage)}
         />

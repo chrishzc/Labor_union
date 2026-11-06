@@ -278,6 +278,7 @@ class StaffPayoutCandidatePreviewView(_StrictModel):
     resulting_status: Literal["payable", "partially_paid", "completed", "recovery_required", "anomaly"]
     difference_mode: Literal["underpayment", "overpayment"] | None = None
     recovery: StaffOverpaymentRecoveryCandidateView | None = None
+    transfer_fee: StaffPayoutMoneyView | None = None
 
 
 class StaffPayoutReopenCandidatePreviewView(_StrictModel):

@@ -45,7 +45,7 @@ def get_staff_application():
 class DifferenceBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
     identity:str=Field(min_length=1,max_length=191)
-    action:Literal['loss','reduce_service_fee','union_bank_fee','absorb_overpayment','close_refund','manual_amount','adopt_calculation']
+    action:Literal['loss','reduce_service_fee','union_bank_fee','absorb_overpayment','close_refund','manual_amount','adopt_calculation','settle_direct','recognize_diff']
     amount_ntd:int|None=Field(default=None,ge=0,le=9999999999)
     reason:str=Field(default='',max_length=500)
     expected_version:int=Field(ge=0)
@@ -70,7 +70,19 @@ def client_query(case_no:str,principal=Depends(require_admin),application=Depend
 
 @router.post('/client-finance/differences',response_model=BaseResponse[ClientDifferenceView])
 def client_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_client_application)):
-    return _call(lambda:application.apply(ClientDifferenceCommand(case_no,body.identity,body.action,body.amount_ntd,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+    action = body.action
+    reason = body.reason.strip()
+    if action == 'settle_direct':
+        action = 'reduce_service_fee'
+        if not reason:
+            reason = '人員確認直接銷帳'
+    elif action == 'recognize_diff':
+        action = 'loss'
+        if not reason:
+            reason = '人員確認認列差額'
+    elif not reason and action in ('loss','reduce_service_fee','union_bank_fee','absorb_overpayment'):
+        reason = '人員確認差額處置'
+    return _call(lambda:application.apply(ClientDifferenceCommand(case_no,body.identity,action,body.amount_ntd,reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
 
 
 @router.get('/payroll/amount-corrections',response_model=BaseResponse[PayrollAmountView])
@@ -90,4 +102,16 @@ def staff_query(case_no:str,principal=Depends(require_admin),application=Depends
 
 @router.post('/staff-payables/recovery-dispositions',response_model=BaseResponse[StaffRecoveryDispositionView])
 def staff_apply(case_no:str,body:DifferenceBody,principal=Depends(require_system_admin),application=Depends(get_staff_application)):
-    return _call(lambda:application.apply(StaffRecoveryDispositionCommand(case_no,body.identity,body.action,body.amount_ntd or 0,body.reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))
+    action = body.action
+    reason = body.reason.strip()
+    if action == 'settle_direct':
+        action = 'absorb_overpayment'
+        if not reason:
+            reason = '人員確認直接銷帳'
+    elif action == 'recognize_diff':
+        action = 'loss'
+        if not reason:
+            reason = '人員確認認列差額'
+    elif not reason:
+        reason = '人員確認差額處置'
+    return _call(lambda:application.apply(StaffRecoveryDispositionCommand(case_no,body.identity,action,body.amount_ntd or 0,reason,body.expected_version,body.key,admin_actor_context(principal).actor_id)))

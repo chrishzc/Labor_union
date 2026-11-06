@@ -2,6 +2,7 @@
  * File: PaymentReminderSettingsPage.tsx
  * Description: 帳務通知設定專屬頁面，整合繳款提醒排程（通知條件）與帳務專用 LINE 訊息範本（10則內容維護）。
  */
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import React, { useState } from 'react';
 import { Bell, Clock, MessageSquareQuote } from 'lucide-react';
 import { PaymentReminderSchedulePanel } from '../components/PaymentReminderSchedulePanel';
@@ -37,19 +38,11 @@ export const PaymentReminderSettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="payment-reminder-page-container" data-surface-id="finance.payment-reminder-settings.page">
-      <header className="page-header-banner reminder-settings-header">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="reminder-badge"><Bell size={14} /> 帳務專區</span>
-              <h1 className="page-title">帳務通知設定</h1>
-            </div>
-            <p className="page-subtitle">維護客戶各期繳款排程提醒條件、逾期補寄門檻與 10 則帳務專用 LINE 訊息範本。</p>
-          </div>
-        </div>
-      </header>
-
+    <div data-surface-id="finance.payment-reminder-settings.page">
+      <ManagementPageHeader title="帳務通知設定" description="維護客戶各期繳款排程提醒條件、逾期補寄門檻與 10 則帳務專用 LINE 訊息範本。">
+        <span className="reminder-badge"><Bell size={14} /> 帳務專區</span>
+      </ManagementPageHeader>
+      <div className="payment-reminder-page-container">
       <nav className="reminder-settings-nav" role="tablist" aria-label="帳務通知設定">
         <button
           type="button"
@@ -104,6 +97,7 @@ export const PaymentReminderSettingsPage: React.FC = () => {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 };

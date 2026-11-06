@@ -4,7 +4,7 @@ import { serviceStartClient, type ServiceStartView, type StartCommand, type Hand
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import './ServiceStartSubstituteWorkbench.css';
 
-interface Props {caseNo?:string;requestId?:number;onCompleted?:()=>Promise<void>}
+interface Props {caseNo?:string;requestId?:number;onCompleted?:()=>Promise<void>;title?:string}
 interface Pending {id:number;action:'inquire'|'invite'|'dates'|'defer';body:StartCommand;observeOnly?:boolean}
 const storageKey=(id:number)=>`service-start-command:${id}`;
 const willingness={pending:'等待月嫂回覆',willing:'願意代班',unwilling:'無法代班'};
@@ -71,12 +71,12 @@ export function ServiceHandoverWorkbench({caseNo,assignmentId}:{caseNo:string;as
   </section>;
 }
 
-export function ServiceStartSubstituteWorkbench({caseNo,requestId,onCompleted}:Props) {
+export function ServiceStartSubstituteWorkbench({caseNo,requestId,onCompleted,title='服務開始、請假與代班待辦'}:Props) {
   const [page,setPage]=useState(1);
   const [total,setTotal]=useState(0);
   const [items,setItems]=useState<ServiceStartView[]>([]);
   const [error,setError]=useState('');
-  const [loading,setLoading]=useState(false);
+  const [loading,setLoading]=useState(true);
   const [options,setOptions]=useState<{staff_id:number;name:string}[]>([]);
   const generation=useRef(0);
   const refresh=useCallback(async()=>{
@@ -111,11 +111,11 @@ export function ServiceStartSubstituteWorkbench({caseNo,requestId,onCompleted}:P
     finally {if(current===generation.current)setLoading(false);}
   },[page,caseNo,requestId]);
   useEffect(()=>{void refresh();return()=>{generation.current++;};},[refresh]);
-  return <section className="service-start-workbench" aria-label="服務開始、請假與代班待辦">
-    <header><h2>服務開始、請假與代班待辦</h2><span>{total} 件待處理</span><button type="button" disabled={loading} onClick={()=>void refresh()}>重新查詢代班待辦</button></header>
+  return <section className="service-start-workbench" aria-label={title}>
+    <header><h2>{title}</h2>{!loading && !error && <span>{total} 件待處理</span>}<button type="button" disabled={loading} onClick={()=>void refresh()}>重新查詢代班待辦</button></header>
     {error && <p role="alert">{error}</p>}
     {loading && <p role="status">正在查詢…</p>}
-    {!loading && !error && items.length===0 && <p>目前沒有需要工會處理的排程衝突或代班。</p>}
+    {!loading && !error && items.length===0 && <p>目前沒有待處理事項。</p>}
     {items.map(item=><SubstituteCard key={item.request_id} initial={item} options={options} onCompleted={async()=>{if(requestId===undefined)setTotal((await serviceStartClient.todos(page,caseNo)).total);await onCompleted?.();}}/>)}
     {total>25 && <nav aria-label="代班待辦分頁"><button type="button" disabled={page===1 || loading} onClick={()=>setPage(p=>p-1)}>上一頁</button><span>{page} / {Math.ceil(total/25)}</span><button type="button" disabled={page*25>=total || loading} onClick={()=>setPage(p=>p+1)}>下一頁</button></nav>}
   </section>;

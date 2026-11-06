@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft } from '../components/UnsavedChanges';
 import { useSaveValidation } from '../components/useSaveValidation';
 /**
@@ -231,11 +232,7 @@ export const AccountManagementPage: React.FC = () => {
 
   return (
     <div className="account-page-container" data-surface-id="account.page">
-      <div className="page-header-banner account-page-header">
-        <div className="account-page-header-text">
-          <h1 className="page-title">👤 系統帳號與安全管理</h1>
-          <p className="page-subtitle">管理工作人員帳號、登入驗證與安全稽核。</p>
-        </div>
+      <ManagementPageHeader className="account-page-header" title="👤 系統帳號與安全管理" description="管理工作人員帳號、登入驗證與安全稽核。">
         <button
           type="button"
           className="account-primary-btn"
@@ -246,7 +243,7 @@ export const AccountManagementPage: React.FC = () => {
         >
           + 建立工作人員帳號
         </button>
-      </div>
+      </ManagementPageHeader>
 
       <div className="account-tab-bar" role="tablist" aria-label="帳號中心查詢分頁">
         <button

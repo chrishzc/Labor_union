@@ -23,6 +23,8 @@ from infrastructure.mysql.finance_import_owning_domain_composite import (
     MySqlFinanceImportOwningDomainComposite,
     _client_selection,
     _resolve_client_receipt,
+    _resolve_client_refund,
+    _resolve_staff_payout,
     _request_reason,
 )
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -313,3 +315,150 @@ def test_non_business_review_is_not_a_manual_correction_classification() -> None
             "reviewed",
             ("statement:1",),
         )
+
+
+def test_sinopac_receipt_non_exact_month_matched_pairs_target_and_computes_difference() -> None:
+    candidate = _pending_receipt(25900)
+    connection = _VirtualAccountConnection(
+        (
+            {
+                "format_id": "sinopac",
+                "cancellation_code": None,
+                "bank_references": '{"銷帳編號":"99781699115003"}',
+                "transaction_date": "2026-01-14",
+            },
+            ({"case_no": "115000003"},),
+            (),
+            (
+                {
+                    "obligation_identity": "client-obligation:115000003:first",
+                    "due_date": "2026-01-12",
+                    "amount_due_ntd": 36000,
+                },
+            ),
+        )
+    )
+    resolved = _resolve_client_receipt(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.target_identities == ("client-obligation:115000003:first",)
+    assert "month-matched-client-obligation" in resolved.evidence
+    assert "diff_under:10100" in resolved.evidence
+
+
+def test_sinopac_receipt_month_mismatch_remains_unpaired_pending() -> None:
+    candidate = _pending_receipt(25900)
+    connection = _VirtualAccountConnection(
+        (
+            {
+                "format_id": "sinopac",
+                "cancellation_code": None,
+                "bank_references": '{"銷帳編號":"99781699115003"}',
+                "transaction_date": "2026-03-14",
+            },
+            ({"case_no": "115000003"},),
+            (),
+            (
+                {
+                    "obligation_identity": "client-obligation:115000003:first",
+                    "due_date": "2026-01-12",
+                    "amount_due_ntd": 36000,
+                },
+            ),
+        )
+    )
+    resolved = _resolve_client_receipt(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.target_identities == ()
+    assert "month-matched-client-obligation" not in resolved.evidence
+
+
+def test_resolve_staff_payout_with_transfer_fee_within_100() -> None:
+    # 應付 12000，實付 11970（手續費 30 元 <= 100 元）：四階段配對成功並直接可核銷
+    candidate = CanonicalFinanceImportRow(
+        "finance-import-row:88",
+        0,
+        MoneyNTD(11970),
+        FinanceClassificationType.STAFF_PAYOUT,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint("a" * 64),
+        target_identities=("staff:7",),
+    )
+    connection = _VirtualAccountConnection(
+        (
+            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資"},
+            (
+                {
+                    "obligation_identity": "staff-obligation:7:oct",
+                    "due_date": "2026-10-15",
+                    "balance_ntd": 12000,
+                },
+            ),
+            {"transaction_date": "2026-10-20"},
+        )
+    )
+    resolved = _resolve_staff_payout(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.CREATE
+    assert resolved.target_identities == ("staff-obligation:7:oct",)
+    assert "unique-staff-payout-transfer-fee-reconciled" in resolved.evidence
+    assert resolved.available_actions == ("preview_apply",)
+
+
+def test_resolve_staff_payout_fee_over_100_remains_pending() -> None:
+    # 應付 12000，實付 11800（差額 200 元 > 100 元）：不得直接核銷，保持 pending
+    candidate = CanonicalFinanceImportRow(
+        "finance-import-row:88",
+        0,
+        MoneyNTD(11800),
+        FinanceClassificationType.STAFF_PAYOUT,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint("a" * 64),
+        target_identities=("staff:7",),
+    )
+    connection = _VirtualAccountConnection(
+        (
+            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資"},
+            (
+                {
+                    "obligation_identity": "staff-obligation:7:oct",
+                    "due_date": "2026-10-15",
+                    "balance_ntd": 12000,
+                },
+            ),
+            {"transaction_date": "2026-10-20"},
+        )
+    )
+    resolved = _resolve_staff_payout(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
+    assert resolved.available_actions == ()
+
+
+def test_resolve_client_refund_with_transfer_fee_within_100() -> None:
+    # 客戶退款：應付 10000，實付 9970（手續費 30 元 <= 100 元）：四階段配對成功並直接可核銷
+    candidate = CanonicalFinanceImportRow(
+        "finance-import-row:99",
+        0,
+        MoneyNTD(9970),
+        FinanceClassificationType.CLIENT_REFUND,
+        FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint("b" * 64),
+        target_identities=("client:101",),
+    )
+    connection = _VirtualAccountConnection(
+        (
+            {"format_id": "taishin", "direction": "outgoing", "memo": "林小美退款"},
+            (
+                {
+                    "case_no": "115001",
+                    "obligation_identity": "client-obligation:115001:refund",
+                    "due_date": "2026-10-15",
+                    "amount_due_ntd": 10000,
+                },
+            ),
+            {"transaction_date": "2026-10-20"},
+        )
+    )
+    resolved = _resolve_client_refund(connection, candidate)
+    assert resolved.disposition is FinanceImportDisposition.CREATE
+    assert resolved.target_identities == ("client-obligation:115001:refund",)
+    assert "unique-client-refund-transfer-fee-reconciled" in resolved.evidence
+    assert resolved.available_actions == ("preview_apply",)

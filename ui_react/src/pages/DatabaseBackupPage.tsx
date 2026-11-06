@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useEffect, useState } from 'react';
 import { Database, Save } from 'lucide-react';
 import { databaseBackupClient as client, type DatabaseBackupStatus } from '../api/database_backup_client';
@@ -32,8 +33,9 @@ export function DatabaseBackupPage() {
     } finally { setBusy(false); }
   }
 
-  return <div className="database-backup-page">
-    <header><Database size={28} aria-hidden="true" /><div><h1>資料庫備份</h1><p>每天保留一份資料，供需要時復原。</p></div></header>
+  return <>
+  <ManagementPageHeader title={<><Database size={24} aria-hidden="true" />資料庫備份</>} description="每天保留一份資料，供需要時復原。" />
+  <div className="database-backup-page">
     {error && <div className="backup-message backup-error" role="alert">{error}</div>}
     {notice && <div className="backup-message backup-success" role="status">{notice}</div>}
     {!status && !error && <p role="status">正在讀取備份狀態…</p>}
@@ -60,5 +62,5 @@ export function DatabaseBackupPage() {
       <section className="backup-card"><h2>需要升級或復原時</h2><p>請先停止工會系統，使用電腦上的「資料庫安全升級」或「復原資料庫備份」腳本，依中文提示操作。這兩項操作需要人工確認。</p>
         <p>備份包含資料庫資料。照片、附件及登入驗證金鑰，請依正式電腦的備份安排一併保存。</p></section>
     </>}
-  </div>;
+  </div></>;
 }

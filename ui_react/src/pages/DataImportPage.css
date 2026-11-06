@@ -115,9 +115,6 @@
 [data-surface-id="finance.historical-service-accounting.page"] :is(input, select, button):focus-visible { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
 
 .import-simple-page { max-width: 1040px; margin-inline: auto; width: 100%; gap: 20px; }
-.import-simple-page-heading { margin-bottom: 6px; }
-.import-simple-page-heading h1 { font-size: 27px; font-weight: 750; letter-spacing: -.5px; }
-.import-simple-page-heading p { margin-top: 7px; color: #795d43; font-size: 14px; }
 .import-simple-page .import-kind-selector { padding: 10px; margin: 0; }
 .import-simple-page .import-kind-selector > div { flex: 1; gap: 6px; padding: 0; }
 .import-simple-page .import-kind-selector button { flex: 1; min-height: 44px; border-color: transparent; background: transparent; font-size: 14px; }
@@ -163,7 +160,6 @@
 .import-error-details-table th { background: #fee2e2; color: #7f1d1d; white-space: nowrap; }
 .import-error-details-table :is(th, td) { border-bottom-color: #fecaca; }
 @media (max-width: 650px) {
-  .import-simple-page-heading h1 { font-size: 23px; }
   .import-simple-page .import-kind-selector > div { display: grid; grid-template-columns: 1fr 1fr; }
   .import-simple-page .import-kind-selector button { font-size: 13px; padding: 8px 6px; }
   .import-simple-page .import-workbench-card { padding: 20px 16px; gap: 20px; }

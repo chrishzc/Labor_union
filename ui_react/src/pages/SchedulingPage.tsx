@@ -1,4 +1,5 @@
 import { ServiceStartSubstituteWorkbench } from '../components/ServiceStartSubstituteWorkbench';
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: SchedulingPage.tsx
@@ -645,14 +646,15 @@ function LeaveSubstitutionWorkspace({
   const submittingRef = useRef(false);
   const [, setStoreRevision] = useState(0);
 
-  // LINE 請假待辦收件匣狀態
-  const [inboxStatus, setInboxStatus] = useState<LeaveInboxStatus>('pending');
+  // 舊 LINE 請假紀錄與已受理案件的調度回讀
+  const [inboxStatus, setInboxStatus] = useState<LeaveInboxStatus>('resolved');
   const [inboxItems, setInboxItems] = useState<readonly LeaveInboxItem[]>([]);
   const [selectedInboxItem, setSelectedInboxItem] = useState<LeaveInboxItem | null>(null);
   const [inboxBusy, setInboxBusy] = useState(false);
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [inboxReceipt, setInboxReceipt] = useState<string | null>(null);
-  const [inboxReasonById, setInboxReasonById] = useState<Record<number, string>>({});
+  const [linkedInboxError, setLinkedInboxError] = useState<string | null>(null);
+  const manualDispatchTitleRef = useRef<HTMLHeadingElement>(null);
   const inboxQueryGenerationRef = useRef(0);
   const observedInboxReceiptRef = useRef<string | null>(null);
   const [payablesReadback, setPayablesReadback] = useState<SubstitutionPayablesLineage | null>(null);
@@ -683,71 +685,17 @@ function LeaveSubstitutionWorkspace({
 
   useEffect(() => { void loadInbox(); }, [loadInbox]);
 
-  const handleAcceptAndDispatch = async (item: LeaveInboxItem) => {
-    setInboxBusy(true);
-    setInboxError(null);
+  const selectAcceptedLeave = (item: LeaveInboxItem) => {
+    setLinkedInboxError(null);
     setInboxReceipt(null);
-    try {
-      let selectedItem = item;
-      if (item.request_status === 'pending') {
-        const receipt = await staffLeaveInboxClient.review(item, 'accept', inboxReasonById[item.id]?.trim() ?? '');
-        selectedItem = {
-          ...item,
-          request_status: receipt.status,
-          aggregate_version: receipt.version,
-        };
-        setInboxReceipt(`已受理 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；尚未完成排班，也尚未建立 LINE 通知工作。`);
-        await loadInbox();
-      }
-      setSelectedInboxItem(selectedItem);
-      setReason('');
-      // 若當前案件指派中有該月嫂，自動選中該 assignment
-      const matchedAssignment = assignments.find((a) => a.staff_id === item.staff_id);
-      if (matchedAssignment) {
-        setAssignmentId(matchedAssignment.assignment_id);
-        setScheduleId(matchedAssignment.official_schedules.find((day) => day.work_date >= item.leave_start_date && day.work_date <= item.leave_end_date)?.schedule_id ?? null);
-      }
-    } catch (caught) {
-      setInboxError(caught instanceof Error ? caught.message : '受理待辦失敗。');
-    } finally {
-      setInboxBusy(false);
+    setSelectedInboxItem(item);
+    setReason('');
+    const matchedAssignment = assignments.find((assignment) => assignment.staff_id === item.staff_id);
+    if (matchedAssignment) {
+      setAssignmentId(matchedAssignment.assignment_id);
+      setScheduleId(matchedAssignment.official_schedules.find((day) => day.work_date >= item.leave_start_date && day.work_date <= item.leave_end_date)?.schedule_id ?? null);
     }
-  };
-
-  const handleRejectInbox = async (item: LeaveInboxItem) => {
-    const rejectReason = inboxReasonById[item.id]?.trim() ?? '';
-    setInboxBusy(true);
-    setInboxError(null);
-    try {
-      await staffLeaveInboxClient.review(item, 'reject', rejectReason);
-      setInboxReceipt(`已退回 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；待辦狀態已更新。`);
-      if (selectedInboxItem?.id === item.id) {
-        setSelectedInboxItem(null);
-      }
-      await loadInbox();
-    } catch (caught) {
-      setInboxError(caught instanceof Error ? caught.message : '退回申請失敗。');
-    } finally {
-      setInboxBusy(false);
-    }
-  };
-
-  const handleCancelInbox = async (item: LeaveInboxItem) => {
-    const cancelReason = inboxReasonById[item.id]?.trim() ?? '';
-    setInboxBusy(true);
-    setInboxError(null);
-    try {
-      await staffLeaveInboxClient.review(item, 'cancel', cancelReason);
-      setInboxReceipt(`已取消 ${staffIdentity.label(item.staff_id, item.staff_name, staffList.find(staff => staff.id === item.staff_id)?.unionNo)} 的請假待辦；待辦狀態已更新。`);
-      if (selectedInboxItem?.id === item.id) {
-        setSelectedInboxItem(null);
-      }
-      await loadInbox();
-    } catch (caught) {
-      setInboxError(caught instanceof Error ? caught.message : '取消待辦失敗。');
-    } finally {
-      setInboxBusy(false);
-    }
+    manualDispatchTitleRef.current?.focus();
   };
 
   useEffect(
@@ -851,6 +799,7 @@ function LeaveSubstitutionWorkspace({
     if (!linkedRequest) return;
     if (observedInboxReceiptRef.current === observedReceipt.batch_key) return;
     observedInboxReceiptRef.current = observedReceipt.batch_key;
+    setLinkedInboxError(null);
 
     if (linkedRequest.status === 'accepted_for_processing') {
       setInboxStatus('accepted_for_processing');
@@ -861,7 +810,7 @@ function LeaveSubstitutionWorkspace({
     if (linkedRequest.status !== 'resolved' || linkedRequest.resolved_version === null) return;
 
     if (linkedRequest.notification_intent !== 'enqueued') {
-      setInboxError('本次變更未建立 LINE 通知工作，請改由人工通知並確認。');
+      setLinkedInboxError('本次變更未建立 LINE 通知工作，請改由人工通知並確認。');
       return;
     }
 
@@ -889,7 +838,7 @@ function LeaveSubstitutionWorkspace({
       .catch((caught) => {
         if (generation === inboxQueryGenerationRef.current) {
           const message = caught instanceof Error ? caught.message : '請假待辦完成狀態查詢失敗。';
-          setInboxError(`變更已受理，但${message}`);
+          setLinkedInboxError(`變更已受理，但${message}`);
         }
       })
       .finally(() => {
@@ -983,7 +932,6 @@ function LeaveSubstitutionWorkspace({
   const errorText = error ? error.message : null;
   const defaultScheduleId = (selectedAssignment ?? assignments[0])?.official_schedules.find((day) => !selectedInboxItem || (day.work_date >= selectedInboxItem.leave_start_date && day.work_date <= selectedInboxItem.leave_end_date))?.schedule_id ?? null;
   useUnsavedDraft('請假代班', { '排班': scheduleId, '請假處理': resolutionType, '代班月嫂': substituteStaffId, '雙倍薪資': isDoublePay, '補班日': replacementWorkDate, '原因': reason }, { baseline: { '排班': defaultScheduleId, '請假處理': 'substitute', '代班月嫂': null, '雙倍薪資': false, '補班日': '', '原因': '' }, busy, resetKey: draft?.status === 'observed' ? draft.receipt : null });
-  useUnsavedDraft('LINE 請假申請處理', Object.fromEntries(inboxItems.filter(item => item.request_status === 'pending').map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, inboxReasonById[item.id] ?? ''])), { baseline: Object.fromEntries(inboxItems.map(item => [`${item.staff_name} 申請 ${item.id} 處理原因`, ''])), busy: inboxBusy });
 
 
   return (
@@ -991,170 +939,23 @@ function LeaveSubstitutionWorkspace({
       <header className="leave-substitution-header">
         <div>
           <p className="leave-substitution-kicker">查詢排班 → 儲存代班安排 → 回讀結果</p>
-          <h2>🚑 請假與緊急代班調度工作台</h2>
-          <p>整合 LINE 待辦與電話／口頭請假；選好代班安排後即可儲存，系統會檢查排班及相關條件。</p>
+          <h2 ref={manualDispatchTitleRef} tabIndex={-1}>手動調度</h2>
+          <p>處理電話或口頭請假。選定案件與服務日後，可安排代班或登記補班日期。</p>
         </div>
         <span className={`leave-substitution-state state-${machine.type}`}>{flowStateLabel(machine.type)}</span>
       </header>
 
-      {/* Section 1: LINE 月嫂請假待辦收件匣 */}
-      <div style={{ background: '#ffffff', border: '1.5px solid #fed7aa', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 2px 8px rgba(74, 69, 67, 0.04)', display: 'grid', gap: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.02rem', color: '#9a3412', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              📥 LINE 月嫂請假待辦收件匣
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: '0.84rem', color: '#74593f' }}>
-              月嫂由 LINE 官方帳號送出之請假申請，點擊「受理並調度」即可自動帶入下方排班進行代班指派。
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
-              狀態
-              <select
-                value={inboxStatus}
-                onChange={(e) => setInboxStatus(e.target.value as LeaveInboxStatus)}
-                disabled={inboxBusy}
-                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.84rem' }}
-              >
-                <option value="pending">待審核</option>
-                <option value="accepted_for_processing">已受理處理中</option>
-                <option value="resolved">已完成代班</option>
-                <option value="rejected">已退回</option>
-                <option value="cancelled">已取消</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="scheduling-action"
-              onClick={() => void loadInbox()}
-              disabled={inboxBusy}
-              style={{ padding: '6px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-            >
-              {inboxBusy ? '⏳ 載入中…' : '🔄 重新整理'}
-            </button>
-          </div>
+      {inboxReceipt && (
+        <div className="leave-substitution-notice success" style={{ margin: 0 }}>
+          {inboxReceipt}
         </div>
+      )}
 
-        {inboxReceipt && (
-          <div className="leave-substitution-notice success" style={{ margin: 0 }}>
-            {inboxReceipt}
-          </div>
-        )}
-
-        {inboxError && (
-          <div className="leave-substitution-notice error" style={{ margin: 0 }}>
-            {inboxError}
-          </div>
-        )}
-
-        {inboxItems.length === 0 && !inboxBusy && (
-          <div style={{ padding: '16px', textAlign: 'center', background: '#fffcfb', borderRadius: '8px', border: '1px dashed #dec0b6', color: '#8b7169', fontSize: '0.86rem' }}>
-            ✅ 目前此狀態沒有待處理的 LINE 請假申請。若為月嫂電話或線下口頭請假，直接於下方手動調度即可。
-          </div>
-        )}
-
-        {inboxItems.length > 0 && (
-          <div style={{ display: 'grid', gap: '10px' }}>
-            {inboxItems.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  background: selectedInboxItem?.id === item.id ? '#fff7ed' : '#fffaf8',
-                  borderRadius: '10px',
-                  border: selectedInboxItem?.id === item.id ? '2px solid #ea580c' : '1.5px solid #fed7aa',
-                }}
-              >
-                <div style={{ display: 'grid', gap: '4px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <strong style={{ fontSize: '0.98rem', color: '#1e1b19' }}>
-                      👩‍🍼 {staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)}
-                    </strong>
-                    <span className={`contract-status-pill ${item.request_status === 'pending' ? 'waiting' : item.request_status === 'accepted_for_processing' ? 'active' : 'signed'}`} style={{ fontSize: '0.78rem' }}>
-                      {leaveInboxStatusLabel(item.request_status)}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.86rem', color: '#9a3412', fontWeight: 600 }}>
-                    📅 請假期間：{item.leave_start_date} ～ {item.leave_end_date}
-                  </div>
-                  <div style={{ fontSize: '0.84rem', color: '#4b5563' }}>
-                    💬 事由：{item.request_reason || '未填寫請假說明'}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') && (
-                    <>
-                      <input
-                        placeholder="處理原因（選填）"
-                        aria-label="請假待辦處理原因（選填）"
-                        maxLength={500}
-                        disabled={inboxBusy}
-                        value={inboxReasonById[item.id] ?? ''}
-                        onChange={(e) => setInboxReasonById((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                        style={{ padding: '6px 10px', fontSize: '0.82rem', borderRadius: '6px', border: '1px solid #dec0b6', width: '130px' }}
-                      />
-                      {item.request_status === 'pending' && (
-                        <button
-                          type="button"
-                          className="scheduling-danger"
-                          onClick={() => void handleRejectInbox(item)}
-                          disabled={inboxBusy}
-                          style={{ padding: '6px 10px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-                        >
-                          退回
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="scheduling-action"
-                        onClick={() => void handleCancelInbox(item)}
-                        disabled={inboxBusy}
-                        style={{ padding: '6px 10px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-                      >
-                        取消待辦
-                      </button>
-                    </>
-                  )}
-                  {(item.request_status === 'pending' || item.request_status === 'accepted_for_processing') ? (
-                    <button
-                      type="button"
-                      className="scheduling-action"
-                      aria-pressed={selectedInboxItem?.id === item.id}
-                      onClick={() => void handleAcceptAndDispatch(item)}
-                      disabled={inboxBusy}
-                      style={{
-                        padding: '7px 14px',
-                        fontSize: '0.86rem',
-                        border: '1px solid',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 750,
-                      }}
-                    >
-                      {selectedInboxItem?.id === item.id
-                        ? '✓ 正在調度此案'
-                        : item.request_status === 'pending'
-                          ? '📋 受理並調度代班'
-                          : '📋 選取並繼續調度'}
-                    </button>
-                  ) : (
-                    <span style={{ color: '#74593f', fontSize: '0.82rem', fontWeight: 700 }}>
-                      此待辦已結束，僅供回讀。
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {linkedInboxError && (
+        <div className="leave-substitution-notice error" style={{ margin: 0 }}>
+          {linkedInboxError}
+        </div>
+      )}
 
       {/* 當前載入的 LINE 請假待辦提示橫幅 */}
       {selectedInboxItem && (
@@ -1180,7 +981,7 @@ function LeaveSubstitutionWorkspace({
       <div className="leave-substitution-query-row" style={{ background: '#fff8f6', padding: '16px 20px', borderRadius: '12px', border: '1.5px solid #fed7aa' }}>
         <div style={{ flex: '1 1 320px' }}>
           <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, color: '#9a3412', marginBottom: '6px' }}>
-            📋 選擇已排班案件／訂單編號 (支援電話／口頭／LINE 請假調度)
+            📋 選擇已排班案件／訂單編號
           </label>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <select
@@ -1493,6 +1294,111 @@ function LeaveSubstitutionWorkspace({
         </button>
       )}
       {machine.type === 'stale' && <button type="button" onClick={query}>重新查詢最新資料</button>}
+      <details className="scheduling-leave-history">
+        <summary>歷史請假紀錄</summary>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <p>查閱舊 LINE 請假申請。已受理的舊案可帶入上方手動調度繼續處理。</p>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.84rem', fontWeight: 700, color: '#57423b' }}>
+              狀態
+              <select
+                value={inboxStatus}
+                onChange={(e) => setInboxStatus(e.target.value as LeaveInboxStatus)}
+                disabled={inboxBusy}
+                style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #dec0b6', fontSize: '0.84rem' }}
+              >
+                <option value="pending">未受理</option>
+                <option value="accepted_for_processing">已受理處理中</option>
+                <option value="resolved">已完成代班</option>
+                <option value="rejected">已退回</option>
+                <option value="cancelled">已取消</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="scheduling-action"
+              onClick={() => void loadInbox()}
+              disabled={inboxBusy}
+              style={{ padding: '6px 12px', fontSize: '0.82rem', border: '1px solid', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+            >
+              {inboxBusy ? '⏳ 載入中…' : '🔄 重新整理'}
+            </button>
+          </div>
+        </div>
+
+        {inboxError && <p className="leave-substitution-notice error" role="alert">{inboxError}</p>}
+        {inboxItems.length === 0 && !inboxBusy && !inboxError && (
+          <div style={{ padding: '16px', textAlign: 'center', background: '#fffcfb', borderRadius: '8px', border: '1px dashed #dec0b6', color: '#8b7169', fontSize: '0.86rem' }}>
+            此狀態沒有歷史請假紀錄。
+          </div>
+        )}
+
+        {inboxItems.length > 0 && (
+          <div style={{ display: 'grid', gap: '10px' }}>
+            {inboxItems.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                  padding: '12px 16px',
+                  background: selectedInboxItem?.id === item.id ? '#fff7ed' : '#fffaf8',
+                  borderRadius: '10px',
+                  border: selectedInboxItem?.id === item.id ? '2px solid #ea580c' : '1.5px solid #fed7aa',
+                }}
+              >
+                <div style={{ display: 'grid', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <strong style={{ fontSize: '0.98rem', color: '#1e1b19' }}>
+                      👩‍🍼 {staffDisplayLabel(staffList.find(staff => staff.id === item.staff_id)?.unionNo, item.staff_name)}
+                    </strong>
+                    <span className={`contract-status-pill ${item.request_status === 'pending' ? 'waiting' : item.request_status === 'accepted_for_processing' ? 'active' : 'signed'}`} style={{ fontSize: '0.78rem' }}>
+                      {leaveInboxStatusLabel(item.request_status)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.86rem', color: '#9a3412', fontWeight: 600 }}>
+                    📅 請假期間：{item.leave_start_date} ～ {item.leave_end_date}
+                  </div>
+                  <div style={{ fontSize: '0.84rem', color: '#4b5563' }}>
+                    💬 事由：{item.request_reason || '未填寫請假說明'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {item.request_status === 'accepted_for_processing' ? (
+                    <button
+                      type="button"
+                      className="scheduling-action"
+                      aria-pressed={selectedInboxItem?.id === item.id}
+                      onClick={() => selectAcceptedLeave(item)}
+                      disabled={inboxBusy}
+                      style={{
+                        padding: '7px 14px',
+                        fontSize: '0.86rem',
+                        border: '1px solid',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 750,
+                      }}
+                    >
+                      {selectedInboxItem?.id === item.id
+                        ? '✓ 正在調度此案'
+                        : '選取並繼續調度'}
+                    </button>
+                  ) : (
+                    <span style={{ color: '#74593f', fontSize: '0.82rem', fontWeight: 700 }}>
+                      僅供查閱。
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
     </section>
   );
 }
@@ -2550,16 +2456,8 @@ const SchedulingWorkbench: React.FC = () => {
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
-      <a className="scheduling-tab-btn" href="#scheduling?tab=coordination">開工、順延與代班待辦 →</a>
       {/* Page Header */}
-      <header className="page-header-banner scheduling-page-header">
-        <div>
-          <h1 className="page-title">📅 排班日曆與調度</h1>
-          <p className="page-subtitle">
-            查看每月檔期；需要安排案件時，展開案件排查。
-          </p>
-        </div>
-      </header>
+      <ManagementPageHeader title="📅 排班日曆與調度" description="查看每月檔期；需要安排案件時，展開案件排查。" />
 
       {/* Sticky Tabs Bar */}
       <nav className="scheduling-tab-bar" aria-label="排班工作區">
@@ -3035,7 +2933,10 @@ const SchedulingWorkbench: React.FC = () => {
 
       {/* Other Tabs */}
       {activeTab === 'leave_sub' && (
-        <LeaveSubstitutionWorkspace suggestedCaseNo={eligibilityCaseNo.trim() || null} staffList={staffList} />
+        <>
+          <ServiceStartSubstituteWorkbench title="待處理事項" />
+          <LeaveSubstitutionWorkspace suggestedCaseNo={eligibilityCaseNo.trim() || null} staffList={staffList} />
+        </>
       )}
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
@@ -3350,7 +3251,7 @@ export const SchedulingPage: React.FC = () => {
   if(params.get('tab')==='coordination') {
     const raw=params.get('request');const id=raw===null?undefined:Number(raw);
     const invalid=id!==undefined && (!Number.isSafeInteger(id) || id<=0);
-    return <div className="scheduling-gantt-page"><header className="page-header-banner"><h1>開工、順延與代班</h1><a href="#scheduling">返回排班月曆</a></header>
+    return <div className="scheduling-gantt-page"><ManagementPageHeader title="開工、順延與代班"><a href="#scheduling">返回排班月曆</a></ManagementPageHeader>
       {invalid?<p role="alert">需求編號無效，請從通知事項重新開啟。</p>:<ServiceStartSubstituteWorkbench key={hash} requestId={id} caseNo={params.get('case_no') ?? undefined}/>}</div>;
   }
   return params.get('tab') === 'handover'

@@ -9,7 +9,7 @@
 .finance-page-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-4, 16px);
   margin-bottom: 20px;
   padding-bottom: 16px;
@@ -56,22 +56,6 @@
   .subsidy-refund-panel .finance-section-heading { flex-wrap: wrap; gap: 12px; }
   .subsidy-refund-period label, .subsidy-refund-list-heading label, .subsidy-refund-case-form label { width: 100%; }
   .subsidy-refund-panel .finance-input { width: 100%; min-width: 0; }
-}
-
-.finance-page-header .page-title {
-  margin: 0;
-  font-size: 1.45rem;
-  font-weight: 800;
-  color: #1e1b19;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.finance-page-header .page-subtitle {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
-  color: #74593f;
 }
 
 .finance-header-actions {
@@ -661,7 +645,7 @@
 .finance-tab-bar button small { display: block; margin-top: 3px; font-size: .75rem; font-weight: 400; }
 .finance-settings-nav { display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--md-sys-color-outline-variant); padding-left: 12px; }
 .finance-settings-nav > span { font-size: .75rem; color: var(--md-sys-color-on-surface-variant); }
-.finance-case-return { display: inline-block; margin-bottom: 18px; color: #9f421a; }
+.finance-case-return { display: inline-block; color: #9f421a; }
 .finance-case-return:focus-visible { outline: 3px solid #b95125; outline-offset: 4px; }
 
 /* Three shared workspaces, matching the approved accounting preview. */

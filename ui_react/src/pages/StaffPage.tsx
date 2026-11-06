@@ -1,3 +1,4 @@
+import { ManagementPageHeader } from '../components/ManagementPageHeader';
 import { useUnsavedDraft, useUnsavedNavigation } from '../components/UnsavedChanges';
 /**
  * File: StaffPage.tsx
@@ -1100,12 +1101,7 @@ export const StaffPage: React.FC = () => {
 
   return (
     <div data-surface-id="staff.page">
-      <div className="page-header-banner staff-page-header">
-        <div>
-          <h1 className="page-title">👥 服務人員與工會成員名冊</h1>
-          <p className="page-subtitle">即時搜尋月嫂、檢視資格主檔、設定接案偏好、維護長假留停與辦理人事異動。</p>
-        </div>
-      </div>
+      <ManagementPageHeader title="👥 服務人員與工會成員名冊" description="即時搜尋月嫂、檢視資格主檔、設定接案偏好、維護長假留停與辦理人事異動。" />
 
 
       <div className="staff-toolbar-card" data-surface-id="staff.toolbar">

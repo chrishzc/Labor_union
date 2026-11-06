@@ -1,7 +1,6 @@
-.pricing-page { color: var(--md-sys-color-on-surface, #1e1b19); max-width: 1440px; margin: 0 auto; padding: 24px; }
-.pricing-heading, .pricing-section-heading, .pricing-actions { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.pricing-heading h1 { margin: 0; font-size: 1.65rem; }
-.pricing-heading p, .pricing-note { color: #74593f; font-size: .875rem; line-height: 1.6; }
+.pricing-page { color: var(--md-sys-color-on-surface, #1e1b19); max-width: 1440px; margin: 0 auto; padding: 0 24px 24px; }
+.pricing-section-heading, .pricing-actions { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.pricing-note { color: #74593f; font-size: .875rem; line-height: 1.6; }
 .pricing-tabs { display: flex; gap: 24px; border-bottom: 1px solid #fed9b8; margin: 20px 0; }
 .pricing-tabs button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 12px 4px; color: #57423b; font: inherit; cursor: pointer; }
 .pricing-tabs button[aria-selected=true] { color: #c2410c; border-color: #c2410c; font-weight: 700; }

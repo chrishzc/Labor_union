@@ -1,6 +1,4 @@
-.database-backup-page { max-width: 900px; padding: 32px; color: var(--md-sys-color-on-surface, #243246); }
-.database-backup-page header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
-.database-backup-page h1 { font-size: 26px; margin: 0 0 6px; }
+.database-backup-page { max-width: 900px; padding: 0 32px 32px; color: var(--md-sys-color-on-surface, #243246); }
 .database-backup-page h2 { font-size: 18px; margin: 0 0 16px; }
 .database-backup-page p { line-height: 1.7; margin: 8px 0; }
 .backup-card { background: var(--color-bg-primary, #fff); border: 1px solid #dce3ea; border-radius: 12px; padding: 24px; margin-bottom: 20px; }

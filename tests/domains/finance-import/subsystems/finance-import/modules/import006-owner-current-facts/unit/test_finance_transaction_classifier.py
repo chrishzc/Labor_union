@@ -545,7 +545,7 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
         format_id="taishin",
         direction="outgoing",
         transaction_date="2026-10-14",
-        debit=Decimal("9970"),  # 手續費扣除或金額不合
+        debit=Decimal("9800"),  # 少付超過 100 元（差額 200 元），進入待核對
         credit=None,
         memo="林小美退款",
     )
@@ -567,6 +567,36 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
     )
     assert result["classification_type"] == "non_business_review"
     assert result["reason"] == "taishin_client_refund_amount_mismatch"
+
+
+def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-14",
+        debit=Decimal("9970"),  # 跨行手續費 30 元（<= 100 元），四階段配對成功
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [101]
+    assert result["reason"] == "taishin_unique_client_refund_name_month_fee_matched"
 
 
 def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
@@ -661,6 +691,189 @@ def test_taishin_outgoing_longest_prefix_match():
     )
     assert result["classification_type"] == "client_refund"
     assert result["matched_identity_ids"] == [301]
+
+
+def test_sinopac_outgoing_staff_payout_four_stage_fee_zero():
+    # 永豐支出：月嫂姓名 + 同月份 + 差額 0 元（同行免手續費）
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("12000"),
+        credit=None,
+        memo="薪資-張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_and_month_matched"
+
+
+def test_sinopac_outgoing_staff_payout_four_stage_fee_30():
+    # 永豐支出：月嫂姓名 + 同月份 + 差額 30 元（跨行手續費 30 元由月嫂負擔）
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("11970"),  # 應付 12000，實付 11970，手續費 30
+        credit=None,
+        memo="張美美月嫂薪資",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_month_fee_matched"
+
+
+def test_taishin_outgoing_staff_payout_four_stage_fee_100():
+    # 台新支出：月嫂姓名 + 同月份 + 差額 100 元（手續費上限 100 元）
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("19900"),  # 應付 20000，實付 19900，手續費 100
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 20000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_month_fee_matched"
+
+
+def test_taishin_outgoing_staff_payout_fee_over_100_enters_review():
+    # 台新支出：少付 101 元（差額 101 元超過 100 元手續費上限），進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("19899"),  # 差額 101 元
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 20000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+
+
+def test_taishin_outgoing_staff_payout_overpayment_enters_review():
+    # 台新支出：實付 12030 大於應付 12000（超付），進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("12030"),
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+
+
+def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
+    # 交易日 10 月 vs 應付月份 11 月，月份不合進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("11970"),
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-11-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_month_no_match"
     assert result["reason"] == "sinopac_unique_staff_case_suffix_in_memo"
 
 
@@ -778,7 +991,7 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
         format_id="taishin",
         direction="outgoing",
         transaction_date="2026-10-14",
-        debit=Decimal("9970"),  # 手續費扣除或金額不合
+        debit=Decimal("9800"),  # 少付超過 100 元（差額 200 元），進入待核對
         credit=None,
         memo="林小美退款",
     )
@@ -800,6 +1013,36 @@ def test_taishin_outgoing_scenario_b1_amount_mismatch_enters_review():
     )
     assert result["classification_type"] == "non_business_review"
     assert result["reason"] == "taishin_client_refund_amount_mismatch"
+
+
+def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-14",
+        debit=Decimal("9970"),  # 跨行手續費 30 元（<= 100 元），四階段配對成功
+        credit=None,
+        memo="林小美退款",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_client_names=("林小美",),
+        taishin_client_refund_candidates=(
+            {
+                "client_id": 101,
+                "name": "林小美",
+                "case_no": "115001",
+                "obligation_identity": "refund:115001",
+                "amount_due_ntd": 10000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "client_refund"
+    assert result["matched_identity_ids"] == [101]
+    assert result["reason"] == "taishin_unique_client_refund_name_month_fee_matched"
 
 
 def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
@@ -894,3 +1137,186 @@ def test_taishin_outgoing_longest_prefix_match():
     )
     assert result["classification_type"] == "client_refund"
     assert result["matched_identity_ids"] == [301]
+
+
+def test_sinopac_outgoing_staff_payout_four_stage_fee_zero():
+    # 永豐支出：月嫂姓名 + 同月份 + 差額 0 元（同行免手續費）
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("12000"),
+        credit=None,
+        memo="薪資-張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_and_month_matched"
+
+
+def test_sinopac_outgoing_staff_payout_four_stage_fee_30():
+    # 永豐支出：月嫂姓名 + 同月份 + 差額 30 元（跨行手續費 30 元由月嫂負擔）
+    row = _row(
+        format_id="sinopac",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("11970"),  # 應付 12000，實付 11970，手續費 30
+        credit=None,
+        memo="張美美月嫂薪資",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_month_fee_matched"
+
+
+def test_taishin_outgoing_staff_payout_four_stage_fee_100():
+    # 台新支出：月嫂姓名 + 同月份 + 差額 100 元（手續費上限 100 元）
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("19900"),  # 應付 20000，實付 19900，手續費 100
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 20000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "staff_salary"
+    assert result["matched_identity_ids"] == [88]
+    assert result["reason"] == "unique_staff_payout_name_month_fee_matched"
+
+
+def test_taishin_outgoing_staff_payout_fee_over_100_enters_review():
+    # 台新支出：少付 101 元（差額 101 元超過 100 元手續費上限），進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("19899"),  # 差額 101 元
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 20000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+
+
+def test_taishin_outgoing_staff_payout_overpayment_enters_review():
+    # 台新支出：實付 12030 大於應付 12000（超付），進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("12030"),
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-10-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_amount_mismatch"
+
+
+def test_taishin_outgoing_staff_payout_month_mismatch_enters_review():
+    # 交易日 10 月 vs 應付月份 11 月，月份不合進入 review
+    row = _row(
+        format_id="taishin",
+        direction="outgoing",
+        transaction_date="2026-10-20",
+        debit=Decimal("11970"),
+        credit=None,
+        memo="張美美",
+    )
+    result = classify_finance_transaction(
+        row,
+        client_refund_accounts={},
+        staff_accounts={},
+        all_staff_names=("張美美",),
+        staff_payout_candidates=(
+            {
+                "staff_id": 88,
+                "name": "張美美",
+                "case_no": "115088",
+                "obligation_identity": "staff-obl-88",
+                "amount_due_ntd": 12000,
+                "due_date": "2026-11-15",
+            },
+        ),
+    )
+    assert result["classification_type"] == "non_business_review"
+    assert result["reason"] == "outgoing_staff_payout_month_no_match"

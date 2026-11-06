@@ -417,12 +417,6 @@ export const OperationsReportsWorkspace: React.FC<{ mode: 'operations' | 'subsid
       : 'reports.export.annual-xlsx';
 
   return <div data-surface-id={subsidyOnly ? "finance.subsidy-reports" : "reports.page"}>
-    {!subsidyOnly && <header className="page-header-banner reports-page-header">
-      <div>
-        <h1 className="page-title">📊 工會營運報表</h1>
-        <p className="page-subtitle">查看案件受理與服務工時，下載完整營運報表。補助查詢統一由帳務工作台進入。</p>
-      </div>
-    </header>}
     {!subsidyOnly && <details className="reports-workspace"><summary>非市民案件統計</summary><WorkbenchCaseStatistics caseCategory="non_citizen" /></details>}
     <section className="reports-unified-entry"><div><strong>{subsidyOnly ? "政府補助清單｜報表與匯出" : "補助報表已集中至帳務工作台"}</strong><p>{subsidyOnly ? "沿用營運週報既有報表與 Excel；點案件編號開啟原案件抽屜處理安排及核銷。" : "週報補助統計、季度與年度補助，統一由政府補助清單查詢與匯出。"}</p></div>{!subsidyOnly && <a href="#finance?tab=government-list">前往政府補助清單 →</a>}</section>
     <section className="reports-workspace" aria-label={subsidyOnly ? "政府補助報表查詢工作區" : "營運報表查詢工作區"}>

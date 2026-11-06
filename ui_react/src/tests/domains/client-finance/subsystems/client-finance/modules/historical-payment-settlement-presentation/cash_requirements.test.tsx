@@ -118,7 +118,7 @@ describe('existing payable composition', () => {
     render(<FinancePage />);
     await screen.findByLabelText('付款摘要');
     expect(screen.queryByRole('tablist', { name: '應付帳款檢視' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['進行中案件', '銀行對帳', '政府補助清單', '每月帳務']);
+    expect(within(screen.getByRole('navigation', { name: '帳務工作區' })).getAllByRole('button').map(button => button.textContent)).toEqual(['案件帳務', '銀行對帳', '政府補助清單', '每月帳務']);
     expect(screen.getByRole('button', { name: '下載應付帳款 Excel' })).toBeEnabled();
     expect(screen.getByText('退款收款資料待確認')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('付款狀態'), { target: { value: 'partially_paid' } });

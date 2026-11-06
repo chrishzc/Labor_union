@@ -128,6 +128,7 @@ class ClientRefundReversalCandidate:
     reversal_entry_type: str | None
     recovery_amount: MoneyNTD
     fingerprint: PreviewFingerprint
+    transfer_fee: MoneyNTD = MoneyNTD(0)
 
 
 def build_client_refund_candidate(
@@ -149,6 +150,26 @@ def build_client_refund_candidate(
     )
     _validate_refund_obligation_types(ordered_obligations, purpose)
     entries = tuple(_refund_entry(item, purpose) for item in ordered_banks)
+    bank_total = sum(item.amount.amount for item in ordered_banks)
+    obligation_total = sum(item.amount_due.amount for item in ordered_obligations)
+    diff = obligation_total - bank_total
+    if purpose is ClientRefundPurpose.CUSTOMER_REFUND and 0 < diff <= 100:
+        allocations = tuple(
+            ClientCorrectionAllocation(
+                f"refund-bank:{ordered_banks[0].identity}",
+                obl.identity,
+                obl.amount_due,
+            )
+            for obl in ordered_obligations
+        )
+        return _candidate(
+            ClientFinanceCorrectionType.REFUND,
+            case_no,
+            entries,
+            allocations,
+            None,
+            transfer_fee=MoneyNTD(diff),
+        )
     allocations = _allocate_refund(ordered_banks, ordered_obligations)
     return _candidate(
         ClientFinanceCorrectionType.REFUND,
@@ -276,6 +297,8 @@ def _require_bank_total_is_payable(
         return
     if bank_total == obligation_total:
         return
+    if 0 <= obligation_total - bank_total <= 100:
+        return
     if allow_partial_refund_recovery and bank_total < obligation_total:
         return
     raise ValueError("refund_requires_exact_settlement")
@@ -368,10 +391,19 @@ def _candidate(
     reversal_entry_type,
     *,
     recovery_amount=MoneyNTD(0),
+    transfer_fee=MoneyNTD(0),
 ):
     amount = MoneyNTD(sum(item.amount.amount for item in entries))
     obligations = tuple(sorted({item.obligation_identity for item in allocations}))
-    payload = _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type, recovery_amount)
+    payload = _candidate_payload(
+        correction_type,
+        case_no,
+        entries,
+        allocations,
+        reversal_entry_type,
+        recovery_amount,
+        transfer_fee_ntd=transfer_fee.amount,
+    )
     return ClientRefundReversalCandidate(
         correction_type,
         case_no,
@@ -382,11 +414,20 @@ def _candidate(
         reversal_entry_type,
         recovery_amount,
         fingerprint_payload(payload),
+        transfer_fee=transfer_fee,
     )
 
 
-def _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type, recovery_amount):
-    return {
+def _candidate_payload(
+    correction_type,
+    case_no,
+    entries,
+    allocations,
+    reversal_entry_type,
+    recovery_amount,
+    transfer_fee_ntd=0,
+):
+    payload: dict[str, object] = {
         "correction_type": correction_type.value,
         "case_no": case_no,
         "reversal_entry_type": reversal_entry_type,
@@ -394,6 +435,9 @@ def _candidate_payload(correction_type, case_no, entries, allocations, reversal_
         "entries": tuple(_entry_payload(item) for item in entries),
         "allocations": tuple(_allocation_payload(item) for item in allocations),
     }
+    if transfer_fee_ntd > 0:
+        payload["transfer_fee_ntd"] = transfer_fee_ntd
+    return payload
 
 
 def _entry_payload(entry):

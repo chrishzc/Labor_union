@@ -1,6 +1,4 @@
-.client-registry-hub { padding: 24px; color: #432c23; }
-.client-registry-hub__header h1 { margin: 0; color: #7c2d12; }
-.client-registry-hub__header p { margin: 6px 0 18px; color: #74593f; }
+.client-registry-hub { padding: 0 24px 24px; color: #432c23; }
 .client-registry-tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid #ead3c8; }
 .client-registry-tabs button { margin-bottom: -1px; padding: 10px 16px; border: 1px solid transparent; border-radius: 9px 9px 0 0; background: transparent; color: #74593f; cursor: pointer; font-weight: 700; }
 .client-registry-tabs button[aria-selected="true"] { border-color: #ead3c8 #ead3c8 white; background: white; color: #9a3412; }

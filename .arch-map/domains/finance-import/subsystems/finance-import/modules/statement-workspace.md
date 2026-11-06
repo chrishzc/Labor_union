@@ -33,6 +33,7 @@
 - `ui_react/src/components/FinanceGovernmentSubsidyList.tsx` — 僅接入 Reporting 既有共用畫面（週報補助統計／季度／年度與 XLSX）；政府補助唯一作業入口，案件仍開原抽屜並在原操作成功後重查報表，沒有內部 CSV 或第二套公式。
 - `ui_react/src/api/finance_import/finance_import_query_schemas.ts`
 - `ui_react/src/components/FinanceCaseAccounting.tsx`
+- `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
 - `ui_react/src/components/FinanceCompactCase.css`
 - `ui_react/src/components/FinanceSubsidyPlanForm.tsx` — explicit three-choice manual form; early save, CAS conflict, original-key unknown-result recovery and unsaved draft protection.
@@ -59,7 +60,7 @@
 - case Query adds independent stage provenance, T/B/S, current collection gate and conservative scheme projection; absent government money is never direct-arrangement evidence. Direct arrangement facts are explicit append-only confirm_direct/withdraw_direct events, never inferred from missing government cash; same-case GET/POST arrangement is the authenticated metadata writer, with arrangement version, Orders identity lock and original-command replay.
 - arrangement confirmation fresh-reads the original paid-stage, T/B/S and bank facts; insufficient or contradictory sources reject confirmation. Later G/PT/RT or B/T conflicts leave the original arrangement intact and project scheme=unknown. History uses UTC ISO instants and Taipei display; formed service/due dates are untouched.
 - bank facts add uniquely proven C/G/PS/PT/RS/RT; monthly by original bank date, single-case totals unavailable for shared sources. Existing ledgers, allocations and due/service dates are read-only.
-- case drawer uses a compact identity/date/total summary and two independently collapsible same-page blocks: customer periods and manual subsidy plan. Posted receipt information comes only from the original allocation Query; no case-side bank reconciliation, duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
+- case drawer uses a compact identity/date/total summary and four independently collapsible same-page blocks: customer periods (with difference resolution workbench), manual subsidy plan, staff payables (with 100 NTD fee settlement notes and payout history), and client refunds & government subsidy flows. Posted receipt information comes only from the original allocation Query; no case-side bank reconciliation, duplicate cash/history sections or current-item strip. Notification subview is owned by LINE payment-overdue-reminders; bank/monthly/payable tools keep their original writers.
 
 ## Verification
 - layout_status: `custom_current`

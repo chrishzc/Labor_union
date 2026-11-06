@@ -1,11 +1,7 @@
 .payment-reminder-page-container {
-  padding: 24px;
+  padding: 0 24px 24px;
   max-width: 1400px;
   margin: 0 auto;
-}
-
-.reminder-settings-header {
-  margin-bottom: 20px;
 }
 
 .reminder-badge {
