@@ -11,6 +11,9 @@ def test_launcher_restores_operator_union_db_reset_and_delegates_targets():
     assert "Type RESET to continue" in SCRIPT
     assert "--confirm-apply RESET" in SCRIPT
     assert "-m scripts.reset_fake_database %*" in SCRIPT
+    assert SCRIPT.index('set "RESET_CONFIRM="') < SCRIPT.index("Type RESET to continue")
+    assert SCRIPT.index('if not "!RESET_CONFIRM!"=="RESET"') < SCRIPT.index("--apply --confirm-apply RESET")
+    assert "--confirm-database union_db" in SCRIPT
 
 
 def test_exit_code_uses_delayed_expansion():

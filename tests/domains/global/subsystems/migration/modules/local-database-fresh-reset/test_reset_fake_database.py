@@ -38,6 +38,32 @@ def test_validate_target_rejects_remote_and_production():
         resetter.validate_target(_config(host="db.example.com"), {"APP_ENV": "development"}, "lu_test_current")
     with pytest.raises(resetter.FakeDatabaseResetError, match="production"):
         resetter.validate_target(_config(), {"APP_ENV": "production"}, "lu_test_current")
+    with pytest.raises(resetter.FakeDatabaseResetError, match="production"):
+        resetter.validate_target(
+            _config(), {"APP_ENV": "production"}, "lu_test_current", operator_reset=True
+        )
+    with pytest.raises(resetter.FakeDatabaseResetError, match="local MySQL host"):
+        resetter.validate_target(
+            _config("union_db", host="db.example.com"), {"APP_ENV": "production"},
+            "union_db", operator_reset=True,
+        )
+
+
+def test_production_operator_launcher_requires_exact_confirmation(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(resetter, "DB_CONFIG", _config("union_db"))
+    assembly = _assembly(tmp_path)
+    monkeypatch.setattr(resetter, "_canonical_bootstrap_contract", lambda: (assembly, {"release_id": "r1"}))
+    monkeypatch.setenv("APP_ENV", "production")
+    plan = tmp_path / "plan.json"
+    args = ["--operator-reset", "--target-database", "union_db", "--plan-receipt", str(plan)]
+    monkeypatch.setattr(resetter, "_check_connected_identity", lambda *_a, **_k: pytest.fail("must not connect"))
+
+    assert resetter.main([*args, "--dry-run"]) == 0
+    assert '"side_effects": "none"' in capsys.readouterr().out
+    assert plan.is_file()
+
+    assert resetter.main([*args, "--apply", "--confirm-apply", "reset"]) == 2
+    assert "--confirm-apply must exactly equal 'RESET'" in capsys.readouterr().out
 
 
 def test_preview_uses_canonical_assembly_without_connecting(monkeypatch, tmp_path):
@@ -72,8 +98,9 @@ def test_union_db_requires_explicit_operator_route(monkeypatch, tmp_path):
         )
 
 
+@pytest.mark.parametrize("app_env", ["development", "production"])
 def test_operator_reset_uses_plan_and_preserves_root_before_drop(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, app_env
 ):
     assembly = _assembly(tmp_path)
     plan_path = tmp_path / "plan.json"
@@ -107,7 +134,7 @@ def test_operator_reset_uses_plan_and_preserves_root_before_drop(
         target_database="union_db",
         plan_receipt=plan_path,
         config=config,
-        environment={"APP_ENV": "development"},
+        environment={"APP_ENV": app_env},
     )
     result = resetter.reset(
         apply=True,
@@ -117,7 +144,7 @@ def test_operator_reset_uses_plan_and_preserves_root_before_drop(
         plan_receipt=plan_path,
         receipt_path=receipt_path,
         config=config,
-        environment={"APP_ENV": "development"},
+        environment={"APP_ENV": app_env},
     )
     assert result["status"] == "completed"
     assert result["backup_receipt"]["policy"] == "business_discard_root_auth_preserved"

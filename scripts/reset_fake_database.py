@@ -50,6 +50,8 @@ def validate_target(
     environment: dict[str, str] | None = None,
     target_database: str | None = None,
     host: str | None = None,
+    *,
+    operator_reset: bool = False,
 ) -> str:
     """Validate explicit target, configured identity, and local authority."""
     config = DB_CONFIG if config is None else config
@@ -77,8 +79,9 @@ def validate_target(
     if not configured_environment:
         configured_environment = str(environment.get("ENV") or "").strip().lower()
     if configured_environment in {"prod", "production"}:
-        raise FakeDatabaseResetError("production environment is not permitted")
-    if configured_environment not in _LOCAL_PROFILES:
+        if not operator_reset or target != _OPERATOR_TARGET:
+            raise FakeDatabaseResetError("production mode requires the local union_db operator reset route")
+    elif configured_environment not in _LOCAL_PROFILES:
         raise FakeDatabaseResetError("development or validation environment required")
     return target
 
@@ -365,7 +368,7 @@ def reset(
     connection_factory: Callable[..., Any] = pymysql.connect,
 ) -> dict[str, object]:
     config = DB_CONFIG if config is None else config
-    target = validate_target(config, environment, target_database)
+    target = validate_target(config, environment, target_database, operator_reset=operator_reset)
     if operator_reset and target != _OPERATOR_TARGET:
         raise FakeDatabaseResetError(
             "operator reset is restricted to union_db"
