@@ -19,7 +19,8 @@ from subsystems.finance_import.statement_archive import StatementCommandConflict
 
 
 class NoSqlConnection:
-    def __init__(self): self.commits = 0; self.rollbacks = 0
+    def __init__(self): self.commits = 0; self.rollbacks = 0; self.begins = 0
+    def begin(self): self.begins += 1
     def cursor(self): raise AssertionError("project SQL is forbidden")
     def commit(self): self.commits += 1
     def rollback(self): self.rollbacks += 1
@@ -169,7 +170,7 @@ def test_http_passes_explicit_choice_and_rolls_back_missing_refund_source(monkey
                 allow_overage_disposition=request["allow_overage_disposition"],
             )
 
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(routes.router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
@@ -182,6 +183,7 @@ def test_http_passes_explicit_choice_and_rolls_back_missing_refund_source(monkey
         })
     assert observed[0]["allow_overage_disposition"] is allow_overage
     assert response.status_code == (422 if allow_overage else 200)
+    assert connection.begins == 1
     assert connection.commits == (0 if allow_overage else 1)
     assert connection.rollbacks == (1 if allow_overage else 0)
     if allow_overage:
@@ -217,7 +219,7 @@ def test_manual_route_validates_readback_before_commit(monkeypatch, failure, exp
         if failure == "query_storage": raise MySQLError("synthetic_readback_unavailable")
         return CaseAccounting(None, "Synthetic", 1000, 1000, None, None, 0, (), (), (), ())
 
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(routes.router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(state=SimpleNamespace(connection=connection), query=query)
@@ -228,4 +230,4 @@ def test_manual_route_validates_readback_before_commit(monkeypatch, failure, exp
         })
     assert response.status_code == expected_status
     assert calls == ["execute", "query"]
-    assert connection.commits == 0 and connection.rollbacks == 1
+    assert connection.begins == 1 and connection.commits == 0 and connection.rollbacks == 1

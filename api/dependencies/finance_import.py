@@ -222,6 +222,15 @@ def get_accounting_workspace():
         connection.close()
 
 
+def get_case_manual_supplement_application(workspace=Depends(get_accounting_workspace)):
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService
+    from subsystems.finance_import.case_manual_supplement_application import CaseManualSupplementApplication
+    connection = workspace.state.connection
+    return CaseManualSupplementApplication(CaseManualSupplementService(connection), workspace.query,
+        lambda: MySqlUnitOfWork(connection))
+
+
 def get_monthly_accounting_query(application=Depends(get_accounting_workspace)):
     from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
     from subsystems.finance_import.monthly_accounting import MonthlyAccountingQuery

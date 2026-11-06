@@ -36,6 +36,7 @@ from subsystems.client_finance.client_refund_reversal_workflow import ClientRefu
 
 class NoSqlConnection:
     def __init__(self): self.events = []; self.on_rollback = lambda: None
+    def begin(self): self.events.append("begin")
     def cursor(self): raise AssertionError("Project SQL, including fake SQL, is forbidden")
     def commit(self): self.events.append("commit")
     def rollback(self): self.events.append("rollback"); self.on_rollback()
@@ -187,7 +188,7 @@ def make_client(monkeypatch, *, missing_refund_account=False, query_failure=Fals
     workspace = AccountingWorkspace(AccountingState(connection), owner.query_items, lambda *args, **kwargs: ((), ()), bank=bank)
     original_query = workspace.query
     def query(case_no):
-        assert connection.events == []  # Readback/view must succeed before outer commit.
+        assert connection.events == ["begin"]  # Readback/view must succeed before outer commit.
         if query_failure: raise ValueError("synthetic_readback_failure")
         return original_query(case_no)
     workspace.query = query
@@ -219,12 +220,13 @@ def test_public_case_command_runs_real_service_owner_and_typed_readback(monkeypa
     assert owner.refund == refund
     assert owner.request is None
     assert source.events == ["session", "case_lock", "command_lock", "target_lock", "resolve", "source", "owner_readback", "command_receipt"]
-    assert connection.events == ["commit"]
+    assert connection.events == ["begin", "commit"]
     command = manual._supplement_command("CASE", "sinopac", "client_receipt", "deposit:CASE", amount, "2026-11-06", "", "admin_user_id:1", allow_overage_disposition=allow_overage)
     assert source.commands["key"]["command_digest"] == fingerprint_payload(command).value
 
 
-def test_real_command_replays_original_ids_before_current_target_validation_and_rejects_mutation(monkeypatch):
+@pytest.mark.parametrize("mutation", ["amount", "target"])
+def test_real_command_replays_original_ids_before_current_target_validation_and_rejects_mutation(monkeypatch, mutation):
     client, connection, source, owner = make_client(monkeypatch)
     with client:
         first = client.post("/cases/CASE/manual-supplement", headers={"Idempotency-Key": "key"}, json=payload())
@@ -240,10 +242,11 @@ def test_real_command_replays_original_ids_before_current_target_validation_and_
             "CASE", "sinopac", "client_receipt", "deposit:CASE", 1000, "2026-11-06", "", "key", "admin_user_id:1")
         assert (result.row_id, result.entry_id) == (9, 41)
         connection.events.clear(); source.events.clear()
-        conflict = client.post("/cases/CASE/manual-supplement", headers={"Idempotency-Key": "key"}, json=payload(900))
+        changed = payload(900) if mutation == "amount" else {**payload(), "target_item": "first:CASE"}
+        conflict = client.post("/cases/CASE/manual-supplement", headers={"Idempotency-Key": "key"}, json=changed)
     assert conflict.status_code == 409
     assert source.events == ["session", "case_lock", "command_lock"]
-    assert connection.events == ["rollback"] and tuple(owner.effects) == effects
+    assert connection.events == ["begin", "rollback"] and tuple(owner.effects) == effects
 
 
 @pytest.mark.parametrize("failure,status,code", [("target", 409, "accounting_source_changed"), ("resolver", 422, "virtual_account_not_mapped"),
@@ -256,7 +259,7 @@ def test_real_command_failures_never_commit_and_preserve_owner_blocker(monkeypat
                                json=payload(1100 if failure in {"overage", "refund_account"} else 1000, failure == "refund_account"))
     assert response.status_code == status, response.text
     assert response.json()["detail"]["error"]["code"] == code
-    assert connection.events == ["rollback"]
+    assert connection.events == ["begin", "rollback"]
     if failure in {"target", "resolver"}:
         assert source.rows == source.commands == {} and owner.effects == []
     if failure in {"overage", "refund_account"}:
@@ -273,7 +276,7 @@ def test_replay_checks_original_source_and_owner_proof_without_new_writes(monkey
         response = client.post("/cases/CASE/manual-supplement", headers={"Idempotency-Key": "key"}, json=payload())
     assert response.status_code == 409
     assert source.events == ["session", "case_lock", "command_lock", "replay_source", "replay_owner"]
-    assert connection.events == ["rollback"]
+    assert connection.events == ["begin", "rollback"]
 
 
 def outgoing_metadata(source):
@@ -403,7 +406,7 @@ def make_outgoing_client(monkeypatch, direction, subtype, *, failure=None):
                                     items if direction == "staff_salary" else empty, bank=bank)
     actual_query = workspace.query
     def query(case_no):
-        assert connection.events == []
+        assert connection.events == ["begin"]
         return actual_query(case_no)
     workspace.query = query
     app = FastAPI(); app.include_router(routes.router)
@@ -438,7 +441,7 @@ def test_outgoing_public_command_runs_real_service_owner_query_and_original_id_r
         assert view["paid_ntd"] == min(amount, 1000) and view["remaining_out_ntd"] == remaining
         assert view["bank_facts"][0]["amount_ntd"] == view["transactions"][0]["amount_ntd"] == amount
         assert view["bank_facts"][0]["cash_flow"] == ("PS" if direction == "staff_salary" else "RT" if subtype == "subsidy_return" else "RS")
-        assert connection.events == ["commit"] and len(owners) == 1
+        assert connection.events == ["begin", "commit"] and len(owners) == 1
         owner = owners[0]
         assert owner.candidate.transfer_fee.amount == 0 and owner.loads == 2
         if direction == "staff_salary":
@@ -481,7 +484,7 @@ def test_outgoing_real_owner_refusal_rolls_back_staged_source_without_receipt(
     assert response.status_code == status, response.text
     error = response.json()["detail"]["error"]
     assert error["code"] == code and error["retryable"] is (failure == "storage")
-    assert connection.events == ["rollback"] and source.rows == source.commands == {} and source.entry is None
+    assert connection.events == ["begin", "rollback"] and source.rows == source.commands == {} and source.entry is None
     assert source.events == ["session", "case_lock", "command_lock", "target_lock", "resolve", "source"]
     assert len(owners) == 1 and owners[0].calls == []
     assert owners[0].loads == (1 if failure == "source" else 2)
@@ -493,5 +496,5 @@ def test_subsidy_return_never_borrows_general_refund_overage_intent_or_writes_so
         response = client.post("/cases/CASE/manual-supplement", headers={"Idempotency-Key": "outgoing-key"}, json=outgoing_payload(source, 1100, overage=True))
     assert response.status_code == 422
     assert response.json()["detail"]["error"]["code"] == "invalid_client_refund_intent"
-    assert connection.events == ["rollback"] and owners == [] and source.rows == source.commands == {}
+    assert connection.events == ["begin", "rollback"] and owners == [] and source.rows == source.commands == {}
     assert source.events == ["session", "case_lock", "command_lock", "target_lock"]

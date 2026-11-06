@@ -19,6 +19,7 @@ def test_legacy_government_route_returns_typed_period_instruction_without_commit
     from subsystems.finance_import.case_manual_supplement import ManualSupplementBlocked
     calls=[]
     class Connection:
+        def begin(self):calls.append("begin")
         def cursor(self):raise AssertionError("Project SQL is forbidden")
         def commit(self):calls.append("commit")
         def rollback(self):calls.append("rollback")
@@ -28,7 +29,7 @@ def test_legacy_government_route_returns_typed_period_instruction_without_commit
             assert command["direction"]=="government_subsidy"
             raise ManualSupplementBlocked("government_subsidy_period_selection_required")
     def query(case_no):raise AssertionError("Rejected period selection must not return success")
-    monkeypatch.setattr(routes,"CaseManualSupplementService",Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app=FastAPI();app.include_router(routes.router)
     app.dependency_overrides[require_admin]=lambda:SimpleNamespace(id=1,username="synthetic")
     app.dependency_overrides[get_accounting_workspace]=lambda:SimpleNamespace(state=SimpleNamespace(connection=Connection()),query=query)
@@ -41,7 +42,7 @@ def test_legacy_government_route_returns_typed_period_instruction_without_commit
     assert error["code"]=="government_subsidy_period_selection_required"
     assert error["category"]=="domain_blocked"
     assert error["message"]=="政府補助入款請從銀行對帳選取原政府流水，進入政府整期核對。"
-    assert calls==["rollback"]
+    assert calls==["begin","rollback"]
 
 
 def test_new_government_supplement_requires_original_period_owner_after_legacy_replay_before_writes():

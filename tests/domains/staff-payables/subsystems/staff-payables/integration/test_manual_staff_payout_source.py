@@ -182,7 +182,8 @@ def test_manual_staff_actual_workflow_reaches_original_route_commit_or_typed_rol
             super().append_events(candidate)
     port=BoundaryPort(source,row,target,obligation)
     class Connection(NoSqlConnection):
-        def __init__(self):self.commits=0;self.rollbacks=0
+        def __init__(self):self.commits=0;self.rollbacks=0;self.begins=0
+        def begin(self):self.begins+=1
         def commit(self):self.commits+=1
         def rollback(self):self.rollbacks+=1
     connection=Connection()
@@ -192,7 +193,7 @@ def test_manual_staff_actual_workflow_reaches_original_route_commit_or_typed_rol
             # Replace SQL staging only, then invoke the real service helper and owner.
             return self._post_staff_payout(command["case_no"],9,command["target_item"],7,command["amount_ntd"],900,
                 command["transaction_date"],command["idempotency_key"],command["actor"],command["reason"] or "",source.command_digest)
-    monkeypatch.setattr(routes,"CaseManualSupplementService",Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     case=CaseAccounting("CASE","Synthetic",None,None,1000,400,0,(),(),(),())
     query_calls=[]
     def query(case_no):
@@ -207,6 +208,7 @@ def test_manual_staff_actual_workflow_reaches_original_route_commit_or_typed_rol
             "bank":"sinopac","direction":"staff_salary","target_item":"staff:CASE","amount_ntd":300,
             "transaction_date":"2026-11-06"})
     assert response.status_code==status
+    assert connection.begins==1
     assert (connection.commits,connection.rollbacks)==((1,0) if failure is None else (0,1))
     if failure is None:assert port.result.balance.amount==600
     else:assert port.calls==[]

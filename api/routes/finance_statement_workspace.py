@@ -2,7 +2,7 @@
 from dataclasses import asdict
 from io import BytesIO
 from typing import Annotated, Literal
-from subsystems.finance_import.case_manual_supplement import CaseManualSupplementService, ManualSupplementBlocked
+from subsystems.finance_import.case_manual_supplement import ManualSupplementBlocked
 from subsystems.client_finance.reconciliation_workflow import ClientReconciliationError
 from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
 from infrastructure.mysql.client_receipt_reconciliation_repository import ClientReceiptRepositoryUnavailable
@@ -14,7 +14,7 @@ from openpyxl import Workbook
 from pymysql import MySQLError
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application, get_monthly_accounting_query
+from api.dependencies.finance_import import get_accounting_workspace, get_statement_archive_application, get_monthly_accounting_query, get_case_manual_supplement_application
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.finance_import import (
@@ -382,11 +382,12 @@ def create_case_manual_supplement(
     case_no: str,
     idempotency_key: Annotated[str, Header(min_length=1, max_length=191)],
     principal=Depends(require_admin),
-    application=Depends(get_accounting_workspace),
+    application=Depends(get_case_manual_supplement_application),
 ):
     try:
-        service = CaseManualSupplementService(application.state.connection)
-        service.execute(
+        def readback(case):
+            return BaseResponse(data=_case_view(case), message="人工補登成功，期款已自動銷帳")
+        return application.execute(
             case_no=case_no,
             bank=body.bank,
             direction=body.direction,
@@ -397,13 +398,7 @@ def create_case_manual_supplement(
             idempotency_key=idempotency_key,
             actor=_actor(principal),
             allow_overage_disposition=body.allow_overage_disposition,
+            readback=readback,
         )
-        response = BaseResponse(data=_case_view(application.query(case_no)), message="人工補登成功，期款已自動銷帳")
-        application.state.connection.commit()
-        return response
     except (LookupError, ValueError, MySQLError, ClientReconciliationError, ClientRefundReversalError, StaffPayoutReconciliationError, ClientReceiptRepositoryUnavailable) as error:
-        try:
-            application.state.connection.rollback()
-        except Exception:
-            pass
         raise _error(error) from None

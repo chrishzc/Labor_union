@@ -303,6 +303,7 @@ def test_manual_refund_http_preserves_owner_failure_without_success(monkeypatch,
     from shared_kernel.errors import ErrorCategory, TypedError
     events = []
     class Connection(NoSqlConnection):
+        def begin(self): events.append("begin")
         def rollback(self): events.append("rollback")
     class Service:
         def __init__(self, _connection): pass
@@ -312,7 +313,7 @@ def test_manual_refund_http_preserves_owner_failure_without_success(monkeypatch,
             raise ClientRefundReversalError(TypedError(ErrorCategory(category), code,
                 "Refund rejected.", CorrelationId("manual-test")))
     def query(_case): raise AssertionError("a failed refund must not produce a successful case view")
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(routes.router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=7)
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(state=SimpleNamespace(connection=Connection()), query=query)
@@ -322,7 +323,7 @@ def test_manual_refund_http_preserves_owner_failure_without_success(monkeypatch,
                   "amount_ntd": 1100, "transaction_date": "2026-11-06", "allow_overage_disposition": True})
     assert response.status_code == status
     assert response.json()["detail"]["error"]["code"] == code
-    assert events == ["rollback"]
+    assert events == ["begin", "rollback"]
 
 
 @pytest.mark.parametrize("retryable,status,category", [(True, 503, "unavailable"), (False, 500, "internal")])
@@ -335,6 +336,7 @@ def test_manual_refund_preview_storage_failure_reaches_typed_http_rollback(monke
     from api.dependencies.finance_import import get_accounting_workspace
     events = []
     class Connection(NoSqlConnection):
+        def begin(self): events.append("begin")
         def rollback(self): events.append("rollback")
     class Repository(MySqlClientRefundReversalRepository):
         def load(self, selection, *, for_update):
@@ -349,7 +351,7 @@ def test_manual_refund_preview_storage_failure_reaches_typed_http_rollback(monke
                 command["actor"], "", fingerprint_payload(payload).value)
     def query(_case): raise AssertionError("storage failure must not produce a successful case view")
     monkeypatch.setattr(service_module, "MySqlClientRefundReversalRepository", Repository)
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(routes.router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=7)
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(state=SimpleNamespace(connection=Connection()), query=query)
@@ -361,4 +363,4 @@ def test_manual_refund_preview_storage_failure_reaches_typed_http_rollback(monke
     error = response.json()["detail"]["error"]
     assert error["category"] == category and error["code"] == "transaction_failed"
     assert error["retryable"] is retryable
-    assert events == ["rollback"]
+    assert events == ["begin", "rollback"]

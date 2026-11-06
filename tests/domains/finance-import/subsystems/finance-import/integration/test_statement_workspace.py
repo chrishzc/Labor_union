@@ -698,6 +698,7 @@ def test_case_manual_supplement_api_endpoint_success(monkeypatch):
     calls = []
 
     class Connection:
+        def begin(self): calls.append("begin")
         def cursor(self): raise AssertionError("project SQL is forbidden in this transport test")
         def commit(self): calls.append("commit")
         def rollback(self): calls.append("rollback")
@@ -708,7 +709,7 @@ def test_case_manual_supplement_api_endpoint_success(monkeypatch):
         def __init__(self, actual): assert actual is connection
         def execute(self, **command): calls.append(command)
 
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
@@ -722,10 +723,11 @@ def test_case_manual_supplement_api_endpoint_success(monkeypatch):
         )
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert calls[0]["case_no"] == "115000001"
-    assert calls[0]["target_item"] == "deposit:case" and calls[0]["amount_ntd"] == 300
-    assert calls[0]["actor"] == "admin_user_id:1"
-    assert calls[1:] == ["commit"]
+    assert calls[0] == "begin"
+    assert calls[1]["case_no"] == "115000001"
+    assert calls[1]["target_item"] == "deposit:case" and calls[1]["amount_ntd"] == 300
+    assert calls[1]["actor"] == "admin_user_id:1"
+    assert calls[2:] == ["commit"]
 
 
 @pytest.mark.parametrize("failure,expected_status,expected_code", [
@@ -748,6 +750,7 @@ def test_case_manual_supplement_api_rejection_rolls_back_without_success(monkeyp
     calls = []
 
     class Connection:
+        def begin(self): calls.append("begin")
         def cursor(self): raise AssertionError("project SQL is forbidden in this transport test")
         def commit(self): calls.append("commit")
         def rollback(self): calls.append("rollback")
@@ -764,7 +767,7 @@ def test_case_manual_supplement_api_rejection_rolls_back_without_success(monkeyp
             ))
 
     def query(_): raise AssertionError("a rejected command must not return a successful case view")
-    monkeypatch.setattr(routes, "CaseManualSupplementService", Service)
+    monkeypatch.setattr("subsystems.finance_import.case_manual_supplement.CaseManualSupplementService", Service)
     app = FastAPI(); app.include_router(router)
     app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=1, username="synthetic")
     app.dependency_overrides[get_accounting_workspace] = lambda: SimpleNamespace(
@@ -778,7 +781,7 @@ def test_case_manual_supplement_api_rejection_rolls_back_without_success(monkeyp
         )
     assert response.status_code == expected_status
     assert response.json()["detail"]["error"]["code"] == expected_code
-    assert calls == ["rollback"]
+    assert calls == ["begin", "rollback"]
 
 @pytest.mark.parametrize("operation", ["manual", "exclude"])
 @pytest.mark.parametrize("fail", [False, True])

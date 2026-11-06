@@ -39,6 +39,7 @@
 - `ui_react/src/components/CaseManualSupplementWorkbench.tsx` — case accounting's existing manual input consumes exact remaining amounts.
 - `ui_react/src/api/finance_import/case_manual_supplement_pending.ts` — same-tab journal preserves the original case/command/key before POST and across remount/reload; fresh authenticated actor checks and storage failures block replacement. It stores no authentication token.
 - `subsystems/finance_import/case_manual_supplement.py` — §19 case-scoped manual command composition, immutable source provenance and typed source port. Production execute calls existing owner workflows; historical receipt proof is checked before mutable target validation. Acceptance follows current §19, not retired §15 manual-archive semantics.
+- `subsystems/finance_import/case_manual_supplement_application.py` — owns the original Unit of Work across command, same-connection query and strict transport readback; route does not commit/rollback. Unexpected failures also exit this UoW without a commit.
 - `infrastructure/mysql/case_manual_supplement_source_store.py` — source-specific typed port implementation borrows the original connection/cursor without transaction ownership.
 - `ui_react/src/components/CaseDifferenceResolutionWorkbench.tsx` — 案件期款差額處置工作台；雙軌處置（直接銷帳／認列差額）與補繳／退補通知連動。
 - `ui_react/src/components/FinanceCaseAccounting.css`
