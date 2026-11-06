@@ -91,6 +91,14 @@ _CLIENT_REFUND_RETURN = FinanceClassificationType.CLIENT_REFUND_RETURN
 _GOVERNMENT_SUBSIDY = FinanceClassificationType.GOVERNMENT_SUBSIDY
 _STAFF_PAYOUT = FinanceClassificationType.STAFF_PAYOUT
 _CLIENT_SUBSIDY_RETURN = FinanceClassificationType.CLIENT_SUBSIDY_RETURN
+_VERIFIED_OUTGOING_NAME_EVIDENCE = frozenset({
+    "unique_staff_payout_name_and_month_matched",
+    "staff_payout_disambiguated_by_month_and_amount",
+    "unique_staff_payout_name_month_fee_matched",
+    "taishin_unique_client_refund_name_and_month_matched",
+    "taishin_client_refund_disambiguated_by_month_and_amount",
+    "taishin_unique_client_refund_name_month_fee_matched",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,19 +461,19 @@ def _client_receipt_target_query(client_id, case_no, amount_ntd):
 
 def _resolve_client_subsidy_return(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
-    if client_id is None:
+    if client_id is None or _VERIFIED_OUTGOING_NAME_EVIDENCE.isdisjoint(candidate.evidence):
         return candidate
-    rows = _load_exact_subsidy_return_targets(
-        connection,
-        client_id,
-        candidate.amount.amount,
-    )
-    if len(rows) != 1:
+    memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
+    if memo_scoped and case_no is None:
+        return candidate
+    rows = _load_client_refund_targets(connection, client_id, case_no, subsidy_return=True)
+    targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount, by_case=True)
+    if targets is None:
         return candidate
     ready = _ready_candidate(
         candidate,
-        (str(rows[0]["obligation_identity"]),),
-        "exact-open-client-subsidy-return-obligation",
+        targets,
+        "unique-monthly-client-subsidy-return-obligations",
     )
     workflow = ClientRefundReversalWorkflow(
         MySqlClientRefundReversalRepository(connection), BorrowedTransactionUnitOfWork,
@@ -484,27 +492,15 @@ def _resolve_client_subsidy_return(connection, candidate):
 
 def _resolve_client_refund(connection, candidate):
     client_id = _single_prefixed_identity(candidate, "client:")
-    if client_id is None:
+    if client_id is None or _VERIFIED_OUTGOING_NAME_EVIDENCE.isdisjoint(candidate.evidence):
         return candidate
-    memo_scoped, case_no, _trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
+    memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
     if memo_scoped and case_no is None:
         return candidate
     rows = _load_client_refund_targets(connection, client_id, case_no)
-    targets = _unique_case_refund_targets(rows, candidate.amount.amount)
+    targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount, by_case=True)
     if targets is None:
-        by_case = {}
-        for r in rows:
-            by_case.setdefault(str(r["case_no"]), []).append(r)
-        fee_eligible = []
-        for c_no, c_rows in by_case.items():
-            c_total = sum(int(r["amount_due_ntd"]) for r in c_rows)
-            c_diff = c_total - candidate.amount.amount
-            if 0 <= c_diff <= 100:
-                fee_eligible.append(tuple(str(r["obligation_identity"]) for r in c_rows))
-        if len(fee_eligible) == 1:
-            targets = fee_eligible[0]
-        else:
-            return candidate
+        return candidate
 
     selected_total = sum(int(row["amount_due_ntd"]) for row in rows if str(row["obligation_identity"]) in targets)
     diff = selected_total - candidate.amount.amount
@@ -527,20 +523,20 @@ def _json_object(value):
 def _sinopac_outgoing_case_info(connection, row_identity):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT format_id,direction,memo FROM finance_import_rows WHERE id=%s",
+            "SELECT format_id,direction,memo,transaction_date FROM finance_import_rows WHERE id=%s",
             (_row_id(row_identity),),
         )
         row = cursor.fetchone()
         if row is None:
             return True, None, None
         trans_date = row.get("transaction_date")
-        if row["format_id"] != "sinopac":
+        if row["format_id"] not in {"sinopac", "taishin"}:
             return False, None, trans_date
         if row["direction"] != "outgoing":
             return True, None, trans_date
         suffix = extract_sinopac_memo_case_suffix(row["memo"])
         if suffix is None:
-            return True, None, trans_date
+            return False, None, trans_date
         resolution = resolve_client_virtual_account_suffix(cursor, suffix)
     if resolution["result"] != "resolved":
         return True, None, trans_date
@@ -552,17 +548,20 @@ def _sinopac_outgoing_case_no(connection, row_identity):
     return memo_scoped, case_no
 
 
-def _load_client_refund_targets(connection, client_id, case_no=None):
+def _load_client_refund_targets(connection, client_id, case_no, *, subsidy_return=False):
     case_predicate = "AND obligation.case_no=%s " if case_no is not None else ""
-    parameters = (client_id, case_no) if case_no is not None else (client_id,)
+    types = ("subsidy_return",) if subsidy_return else ("refund", "adjustment")
+    parameters = (client_id, *types)
+    if case_no is not None:
+        parameters += (case_no,)
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT obligation.case_no,obligation.obligation_identity,"
-            "obligation.amount_due_ntd FROM client_obligations obligation "
+            "obligation.due_date,obligation.amount_due_ntd FROM client_obligations obligation "
             "JOIN orders order_row ON order_row.case_no=obligation.case_no "
             "WHERE order_row.client_id=%s AND obligation.direction='payable_to_client' "
             "AND obligation.status='open' AND obligation.amount_due_ntd>0 "
-            "AND obligation.obligation_type IN ('refund','adjustment') "
+            f"AND obligation.obligation_type IN ({','.join('%s' for _ in types)}) "
             + case_predicate +
             "ORDER BY obligation.case_no,obligation.due_date,obligation.obligation_identity",
             parameters,
@@ -570,51 +569,30 @@ def _load_client_refund_targets(connection, client_id, case_no=None):
         return tuple(cursor.fetchall())
 
 
-def _unique_case_refund_targets(rows, amount):
-    by_case = {}
+def _unique_monthly_payout_targets(rows, trans_date, amount, *, by_case=False):
+    groups = {}
     for row in rows:
-        by_case.setdefault(str(row["case_no"]), []).append(row)
-    eligible = [
-        _refund_target_prefix(values, amount)
-        for values in by_case.values()
-        if sum(int(row["amount_due_ntd"]) for row in values) >= amount
-    ]
+        if _is_same_month(trans_date, row["due_date"]):
+            group = row["case_no"] if by_case else None
+            groups.setdefault(group, []).append(row)
+
+    eligible = []
+    for group in groups.values():
+        selections = [(row,) for row in group]
+        if len(group) > 1:
+            selections.append(tuple(group))
+        for selection in selections:
+            total = sum(int(row["amount_due_ntd"]) for row in selection)
+            if 0 <= total - amount <= 100:
+                eligible.append(tuple(str(row["obligation_identity"]) for row in selection))
     return eligible[0] if len(eligible) == 1 else None
-
-
-def _refund_target_prefix(rows, amount):
-    remaining = amount
-    targets = []
-    for row in rows:
-        targets.append(str(row["obligation_identity"]))
-        remaining -= min(remaining, int(row["amount_due_ntd"]))
-        if remaining == 0:
-            return tuple(targets)
-    raise RuntimeError("client_refund_target_selection_invalid")
-
-
-def _load_exact_subsidy_return_targets(connection, client_id, amount_ntd):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT obligation.obligation_identity "
-            "FROM client_obligations obligation "
-            "JOIN orders order_row ON order_row.case_no=obligation.case_no "
-            "WHERE order_row.client_id=%s "
-            "AND obligation.direction='payable_to_client' "
-            "AND obligation.obligation_type='subsidy_return' "
-            "AND obligation.status='open' "
-            "AND obligation.amount_due_ntd=%s "
-            "ORDER BY obligation.obligation_identity",
-            (client_id, amount_ntd),
-        )
-        return tuple(cursor.fetchall())
 
 
 def _resolve_staff_payout(connection, candidate):
     staff_id = _single_prefixed_identity(candidate, "staff:")
-    if staff_id is None:
+    if staff_id is None or _VERIFIED_OUTGOING_NAME_EVIDENCE.isdisjoint(candidate.evidence):
         return candidate
-    memo_scoped, case_no, _trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
+    memo_scoped, case_no, trans_date = _sinopac_outgoing_case_info(connection, candidate.row_identity)
     if memo_scoped and case_no is None:
         return candidate
     case_predicate = "AND obligation.case_no=%s " if case_no is not None else ""
@@ -623,7 +601,7 @@ def _resolve_staff_payout(connection, candidate):
         cursor.execute(
             "SELECT obligation.obligation_identity,obligation.due_date,"
             "COALESCE(projection.balance_ntd,obligation.amount_due_ntd) "
-            "AS balance_ntd "
+            "AS amount_due_ntd "
             "FROM staff_obligations obligation "
             "LEFT JOIN staff_payable_projections projection "
             "ON projection.obligation_identity=obligation.obligation_identity "
@@ -637,15 +615,12 @@ def _resolve_staff_payout(connection, candidate):
             parameters,
         )
         rows = tuple(cursor.fetchall())
-    if not rows:
+    targets = _unique_monthly_payout_targets(rows, trans_date, candidate.amount.amount)
+    if targets is None:
         return candidate
 
-    total = sum(int(row["balance_ntd"]) for row in rows)
+    total = sum(int(row["amount_due_ntd"]) for row in rows if str(row["obligation_identity"]) in targets)
     diff = total - candidate.amount.amount
-    if not (0 <= diff <= 100):
-        return candidate
-
-    targets = tuple(str(row["obligation_identity"]) for row in rows)
     evidence = (
         "exact-staff-payable-total"
         if diff == 0

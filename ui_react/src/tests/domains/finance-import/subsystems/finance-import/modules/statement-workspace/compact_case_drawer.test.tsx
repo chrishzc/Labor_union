@@ -124,7 +124,7 @@ describe('精簡案件抽屜',()=>{
   expect(screen.getByTestId('refund-account-missing')).toHaveTextContent('待補齊 / 未填寫帳號');
   expect(screen.getByText('未填寫')).toBeVisible();
  });
- it('未完全相符但同月份待核對入款主動呈現於期款列，抽屜不重複嵌入銀行對帳核銷面板',async()=>{
+ it('同月待核對入款不計入期款，案件抽屜保留正式已收與待收',async()=>{
   vi.mocked(clientReceiptQueryClient.query).mockResolvedValue({
     case_no: caseNo,
     account_version: 1,
@@ -136,9 +136,13 @@ describe('精簡案件抽屜',()=>{
     ]
   });
   wrapper(<FinanceCaseAccounting initialCase={caseNo} embedded/>);
-  const matchTag = await screen.findByTestId('pending-match-first');
-  expect(matchTag).toHaveTextContent('待核對入款 NT$ 10,000');
-  expect(matchTag).toHaveTextContent('短少 NT$ 5,000');
+  const first = await screen.findByRole('row',{name:/第一期/});
+  expect(first).toHaveTextContent('2026-11-02 · 永豐');
+  expect(first).toHaveTextContent('已收 NT$ 14,000');
+  expect(first).toHaveTextContent('待收 NT$ 1,000');
+  expect(first).not.toHaveTextContent(/待核對入款|短少|超收/);
+  expect(within(first).queryByRole('button',{name:/處置.*差額/})).not.toBeInTheDocument();
+  expect(clientReceiptQueryClient.query).not.toHaveBeenCalled();
   expect(screen.queryByRole('region',{name:'本案待核對客戶入款'})).not.toBeInTheDocument();
  });
 });

@@ -189,6 +189,30 @@ describe('FinanceBankReconciliationWorkspace (WF-03 / WF-04)', () => {
     expect(onPostedManual).toHaveBeenCalledWith('row:101');
   });
 
+  it.each(['sinopac', 'taishin'])('keeps historical %s review visible and counts reimport once', (bank) => {
+    const sourceReview = {
+      ...defaultProps.sourceReview,
+      data: {
+        ...defaultProps.sourceReview.data,
+        items: defaultProps.sourceReview.data.items.map(row => ({ ...row, transaction_date: '2026-01-09' })),
+      },
+    };
+    render(<FinanceBankReconciliationWorkspace
+      {...defaultProps}
+      batches={[{ ...defaultProps.batches[0], format_id: bank }]}
+      sourceReview={sourceReview}
+      financeWorkbook={new File(['test'], 'test.xlsx')}
+      ingestion={{ kind: 'ready', data: {
+        batch_identity: 'batch:2', source_content_digest: 'a'.repeat(64), source_row_count: 2,
+        canonical_created_count: 0, duplicate_occurrence_count: 2,
+        source_warning_count: 0, source_warning_created_count: 0, replayed: false,
+      } }}
+    />);
+    expect(screen.getByText(/本次自動核銷 0 筆.*新增流水 0 筆.*重複來源列 2 筆.*仍待核對 1 筆/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText('篩選銀行'), { target: { value: bank } });
+    expect(screen.getByRole('button', { name: '核對交易 Sheet1#2' })).toBeVisible();
+  });
+
   it('displays posted bank facts and opens readonly fact drawer', async () => {
     render(<FinanceBankReconciliationWorkspace {...defaultProps} />);
 

@@ -294,7 +294,7 @@ def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
     try:
         cursor.execute(
             """SELECT order_row.client_id, client.name, obligation.case_no,
-                      obligation.obligation_identity, obligation.amount_due_ntd,
+                      obligation.obligation_identity, obligation.obligation_type, obligation.amount_due_ntd,
                       obligation.due_date
                FROM client_obligations obligation
                JOIN orders order_row ON order_row.case_no=obligation.case_no
@@ -321,6 +321,7 @@ def _client_refund_name_candidates(cursor: Any) -> tuple[dict[str, Any], ...]:
                     "name": name,
                     "case_no": str(row.get("case_no") or ""),
                     "obligation_identity": str(row.get("obligation_identity") or ""),
+                    "obligation_type": row.get("obligation_type"),
                     "amount_due_ntd": int(row.get("amount_due_ntd") or 0),
                     "due_date": due_date_str,
                 }

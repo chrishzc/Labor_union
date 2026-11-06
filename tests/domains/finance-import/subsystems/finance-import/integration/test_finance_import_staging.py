@@ -361,7 +361,7 @@ def test_same_fingerprint_changed_bank_fact_preserves_occurrence_and_blocks(form
     assert not any(sql.startswith("UPDATE finance_import_rows") for sql, _ in cursor.executed)
 
 
-def test_taishin_outgoing_scenario_c1_unrecognized_skipped(monkeypatch):
+def test_taishin_outgoing_unknown_recipient_is_preserved_for_review():
     cursor = FakeCursor()
     row_known = _row(17)
     row_known["memo"] = "林小美退款"
@@ -378,12 +378,13 @@ def test_taishin_outgoing_scenario_c1_unrecognized_skipped(monkeypatch):
         },
     )
 
-    assert len(result["staged_rows"]) == 1
+    assert len(result["staged_rows"]) == 2
+    assert result["staged_rows"][1]["classification_type"] == "non_business_review"
     insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
-    assert len(insert_calls) == 1
+    assert len(insert_calls) == 2
 
 
-def test_sinopac_unmatched_business_rows_skipped():
+def test_sinopac_unmatched_rows_remain_separate_bank_facts():
     cursor = FakeCursor()
     row_valid_incoming = {
         "format_id": "sinopac",
@@ -478,8 +479,8 @@ def test_sinopac_unmatched_business_rows_skipped():
         },
     )
 
-    # 只有有效虛擬帳號的客戶入款被保留，水電費與利息等非業務明細直接捨棄
-    assert len(result["staged_rows"]) == 1
-    assert result["staged_rows"][0]["classification_type"] == "client_receipt"
+    assert [row["classification_type"] for row in result["staged_rows"]] == [
+        "client_receipt", "non_business_review", "non_business_review",
+    ]
     insert_calls = [sql for sql, _ in cursor.executed if sql.startswith("INSERT INTO finance_import_rows")]
-    assert len(insert_calls) == 1
+    assert len(insert_calls) == 3

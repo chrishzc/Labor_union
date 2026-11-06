@@ -9,7 +9,6 @@ from datetime import date, datetime, time
 from decimal import Decimal
 import json
 from typing import Any, Mapping
-import unicodedata
 
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import (
@@ -171,59 +170,6 @@ def stage_finance_rows(
         if row.get("format_id") != format_id or row.get("sheet_name") != sheet_name:
             raise ValueError("normalized row metadata does not match its batch")
 
-        # 台新銀行：無配對案件編號、月嫂、客戶退款或政府入款明細直接捨棄
-        if format_id == "taishin":
-            memo = row.get("memo") or ""
-            memo_text = unicodedata.normalize("NFKC", memo) if isinstance(memo, str) else ""
-            is_government = "新竹市政府" in memo_text or "新竹市府" in memo_text
-            if row.get("direction") == "incoming":
-                if not is_government and (all_client_names or taishin_candidates or all_staff_names):
-                    continue
-            elif row.get("direction") == "outgoing":
-                if not is_government and (all_client_names or taishin_candidates or all_staff_names):
-                    from domains.finance_import.transaction_classifier import (
-                        extract_client_name_from_memo,
-                    )
-                    from domains.finance_import.cancellation_code import (
-                        extract_sinopac_memo_case_suffix,
-                    )
-                    matched_client = extract_client_name_from_memo(memo, all_client_names) if all_client_names else None
-                    matched_staff = extract_client_name_from_memo(memo, all_staff_names) if all_staff_names else None
-                    suffix = extract_sinopac_memo_case_suffix(memo)
-                    is_kw = any(k in memo_text for k in ("服務人員", "月嫂", "薪資", "補助款", "退款", "退費"))
-                    cp_acc = row.get("counterparty_account")
-                    acc_match = bool(cp_acc and (cp_acc in client_accounts or cp_acc in staff_accounts or (subsidy_return_accounts and cp_acc in subsidy_return_accounts)))
-                    if not (matched_client or matched_staff or suffix or is_kw or acc_match):
-                        continue
-
-        # 永豐銀行：沒有配對案件編號或月嫂或政府成功的明細直接捨棄
-        pre_classification = None
-        if format_id in {"sinopac", "legacy"}:
-            try:
-                pre_classification = classify_finance_transaction(
-                    row,
-                    client_accounts,
-                    staff_accounts,
-                    subsidy_return_accounts,
-                    receipt_candidates,
-                    staff_case_suffixes,
-                    client_refund_case_suffixes,
-                    all_client_names,
-                    taishin_candidates,
-                    all_staff_names,
-                    staff_payout_candidates,
-                )
-            except TypeError:
-                pre_classification = classify_finance_transaction(
-                    row,
-                    client_accounts,
-                    staff_accounts,
-                    subsidy_return_accounts,
-                    receipt_candidates,
-                )
-            if pre_classification.get("classification_type") == "non_business_review":
-                continue
-
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
             """SELECT id, classification_type, matched_identity_ids,
@@ -355,31 +301,28 @@ def stage_finance_rows(
             ),
         )
 
-        if pre_classification is not None:
-            classification = pre_classification
-        else:
-            try:
-                classification = classify_finance_transaction(
-                    row,
-                    client_accounts,
-                    staff_accounts,
-                    subsidy_return_accounts,
-                    receipt_candidates,
-                    staff_case_suffixes,
-                    client_refund_case_suffixes,
-                    all_client_names,
-                    taishin_candidates,
-                    all_staff_names,
-                    staff_payout_candidates,
-                )
-            except TypeError:
-                classification = classify_finance_transaction(
-                    row,
-                    client_accounts,
-                    staff_accounts,
-                    subsidy_return_accounts,
-                    receipt_candidates,
-                )
+        try:
+            classification = classify_finance_transaction(
+                row,
+                client_accounts,
+                staff_accounts,
+                subsidy_return_accounts,
+                receipt_candidates,
+                staff_case_suffixes,
+                client_refund_case_suffixes,
+                all_client_names,
+                taishin_candidates,
+                all_staff_names,
+                staff_payout_candidates,
+            )
+        except TypeError:
+            classification = classify_finance_transaction(
+                row,
+                client_accounts,
+                staff_accounts,
+                subsidy_return_accounts,
+                receipt_candidates,
+            )
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])
         resolved_counterparty_account = classification.get("resolved_counterparty_account")

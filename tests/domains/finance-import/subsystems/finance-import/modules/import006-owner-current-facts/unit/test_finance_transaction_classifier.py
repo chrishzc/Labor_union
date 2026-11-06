@@ -599,7 +599,7 @@ def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
     assert result["reason"] == "taishin_unique_client_refund_name_month_fee_matched"
 
 
-def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
+def test_taishin_same_name_clients_require_independent_identity_evidence():
     row = _row(
         format_id="taishin",
         direction="outgoing",
@@ -608,7 +608,7 @@ def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
         credit=None,
         memo="陳小芬",
     )
-    # 同名同姓或多筆案件，只有 10 月份且金額 5000 的唯一符合
+    # 即使月份和金額只符合其中一筆，仍須有證據辨識同名客戶。
     result = classify_finance_transaction(
         row,
         client_refund_accounts={},
@@ -631,9 +631,9 @@ def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
             },
         ),
     )
-    assert result["classification_type"] == "client_refund"
-    assert result["matched_identity_ids"] == [202]
-    assert result["reason"] == "taishin_client_refund_disambiguated_by_month_and_amount"
+    assert result["classification_type"] == "non_business_review"
+    assert result["matched_identity_ids"] == []
+    assert result["reason"] == "outgoing_client_refund_name_ambiguous"
 
 
 def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():
@@ -1045,7 +1045,7 @@ def test_taishin_outgoing_scenario_b1_transfer_fee_within_100_matches():
     assert result["reason"] == "taishin_unique_client_refund_name_month_fee_matched"
 
 
-def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
+def test_taishin_same_name_clients_require_independent_identity_evidence():
     row = _row(
         format_id="taishin",
         direction="outgoing",
@@ -1054,7 +1054,7 @@ def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
         credit=None,
         memo="陳小芬",
     )
-    # 同名同姓或多筆案件，只有 10 月份且金額 5000 的唯一符合
+    # 即使月份和金額只符合其中一筆，仍須有證據辨識同名客戶。
     result = classify_finance_transaction(
         row,
         client_refund_accounts={},
@@ -1077,9 +1077,9 @@ def test_taishin_outgoing_scenario_b2_disambiguated_by_month_and_amount():
             },
         ),
     )
-    assert result["classification_type"] == "client_refund"
-    assert result["matched_identity_ids"] == [202]
-    assert result["reason"] == "taishin_client_refund_disambiguated_by_month_and_amount"
+    assert result["classification_type"] == "non_business_review"
+    assert result["matched_identity_ids"] == []
+    assert result["reason"] == "outgoing_client_refund_name_ambiguous"
 
 
 def test_taishin_outgoing_scenario_b3_month_mismatch_enters_review():

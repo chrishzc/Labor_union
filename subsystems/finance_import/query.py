@@ -15,6 +15,20 @@ from domains.finance_import.statement_archive import bank_import_type
 
 _MAXIMUM_PAGE_SIZE = 100
 _REVIEW_DISPOSITIONS = ("manual_review", "business_pending", "blocked", "create")
+# A reimport links to the original bank fact and its latest classification.
+_REVIEW_ROW_JOINS = """
+JOIN finance_import_rows finance_row
+  ON EXISTS (
+      SELECT 1 FROM finance_import_occurrences occurrence
+       WHERE occurrence.batch_id=contract.batch_id
+         AND occurrence.finance_import_row_id=finance_row.id
+  )
+JOIN finance_import_classification_events event
+  ON event.id=(
+      SELECT MAX(latest.id) FROM finance_import_classification_events latest
+       WHERE latest.finance_import_row_id=finance_row.id
+  )
+"""
 # Every unresolved canonical bank fact is visible, including unmatched and
 # blocked rows. Formal owner postings take precedence over stale classifications.
 _REVIEW_ROW_PREDICATE = """
@@ -310,22 +324,14 @@ class FinanceImportQueryService:
                           FROM finance_import_occurrences occurrence
                          WHERE occurrence.batch_id=batch.id)
                            AS occurrence_count,
-                       (SELECT COUNT(*)
-                          FROM finance_import_classification_events event
-                          JOIN finance_import_rows finance_row
-                            ON finance_row.id=event.finance_import_row_id
-                         WHERE event.batch_id=batch.id
-                           AND event.disposition IN (
+                        (SELECT COUNT(*)
+                           FROM finance_import_batch_contracts contract
+                           {_REVIEW_ROW_JOINS}
+                          WHERE contract.batch_id=batch.id
+                            AND event.disposition IN (
                                'manual_review','business_pending','blocked','create'
                            )
-                           AND {_REVIEW_ROW_PREDICATE}
-                           AND event.classification_version=(
-                               SELECT MAX(latest.classification_version)
-                                 FROM finance_import_classification_events latest
-                                WHERE latest.batch_id=batch.id
-                                  AND latest.finance_import_row_id=
-                                      event.finance_import_row_id
-                           )) AS review_count,
+                            AND {_REVIEW_ROW_PREDICATE}) AS review_count,
                        (SELECT COUNT(*)
                           FROM finance_import_dispatch_events dispatch
                          WHERE dispatch.batch_id=batch.id)
@@ -370,22 +376,7 @@ class FinanceImportQueryService:
                            AND occurrence.finance_import_row_id=finance_row.id)
                            AS occurrence_count
                 FROM finance_import_batch_contracts contract
-                JOIN finance_import_rows finance_row
-                  ON EXISTS (
-                      SELECT 1 FROM finance_import_occurrences occurrence
-                       WHERE occurrence.batch_id=contract.batch_id
-                         AND occurrence.finance_import_row_id=finance_row.id
-                  )
-                JOIN finance_import_classification_events event
-                  ON event.id=(
-                      SELECT latest.id
-                        FROM finance_import_classification_events latest
-                         WHERE latest.batch_id=contract.batch_id
-                           AND latest.finance_import_row_id=finance_row.id
-                       ORDER BY latest.classification_version DESC,
-                                latest.id DESC
-                       LIMIT 1
-                  )
+                 {_REVIEW_ROW_JOINS}
                 WHERE contract.batch_identity=%s
                   AND (%s IS NULL OR finance_row.id>%s)
                   AND event.disposition IN (%s,%s,%s,%s)

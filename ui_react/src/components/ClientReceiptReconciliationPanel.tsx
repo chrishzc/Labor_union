@@ -20,7 +20,9 @@ function getObligationLabel(identity: string, stage?: string | null): string {
   return identity;
 }
 
-export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersion=0}:{caseNo:string;onChanged:()=>void;refreshVersion?:number}){
+export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersion=0,requiredBankRowId,onBusyChange}:{
+  caseNo:string;onChanged:()=>void;refreshVersion?:number;requiredBankRowId?:number;onBusyChange?:(busy:boolean)=>void;
+}){
   const [facts,setFacts]=useState<ClientReceiptQuery>();
   const [selectedBanks,setSelectedBanks]=useState<number[]>([]);
   const [selectedItems,setSelectedItems]=useState<string[]>([]);
@@ -34,15 +36,26 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
   const command=useRef<ReceiptCommand|undefined>(undefined);
   const operationPending=useRef(false);operationPending.current=busy||unknown;
   useUnsavedChanges('客戶收款核銷',[],{busy:busy||unknown});
+  useEffect(() => { onBusyChange?.(busy || unknown); return () => onBusyChange?.(false); }, [busy, unknown, onBusyChange]);
   useEffect(()=>{
     if(operationPending.current)return;
     command.current=undefined;setAction('');
     const controller=new AbortController();setFacts(undefined);setPreview(undefined);setError('');
     queueMicrotask(()=>{if(controller.signal.aborted)return;
-    void clientReceiptQueryClient.query(caseNo,{signal:controller.signal}).then(value=>{if(!controller.signal.aborted){setFacts(value);setSelectedBanks(value.bank_facts.map(row=>row.finance_import_row_id));setSelectedItems(value.obligations.map(row=>row.obligation_identity));}}).catch(()=>{if(!controller.signal.aborted)setError('本案待核對入款暫時無法取得，請重新查詢。');});
+    void clientReceiptQueryClient.query(caseNo,{signal:controller.signal}).then(value=>{
+      if(controller.signal.aborted)return;
+      const banks=value.bank_facts.map(row=>row.finance_import_row_id);
+      if(requiredBankRowId!==undefined&&!banks.includes(requiredBankRowId)){
+        setError('此筆交易尚未辨識為本案入款，請返回單筆核對確認歸屬。');
+        return;
+      }
+      setFacts(value);
+      setSelectedBanks(requiredBankRowId===undefined?banks:[requiredBankRowId]);
+      setSelectedItems(requiredBankRowId===undefined?value.obligations.map(row=>row.obligation_identity):[]);
+    }).catch(()=>{if(!controller.signal.aborted)setError('本案待核對入款暫時無法取得，請重新查詢。');});
     });
     return()=>controller.abort();
-  },[caseNo,revision,refreshVersion]);
+  },[caseNo,revision,refreshVersion,requiredBankRowId]);
 
   const selection=():ReceiptSelection=>({payment_stage:null,finance_import_row_ids:selectedBanks,obligation_identities:selectedItems});
   const bankTotal=facts?.bank_facts.filter(row=>selectedBanks.includes(row.finance_import_row_id)).reduce((sum,row)=>sum+row.amount_ntd,0)??0;
@@ -85,7 +98,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
         {!facts.bank_facts.length ? (
           <div className="finance-reconciliation-empty-box">
             <p>目前沒有已辨識為本案、尚未核銷的客戶入款。</p>
-            <small>• 單期差額處理：若各期款已核銷但金額有短少或超收，請直接在上方各期款表格點選「處置差額」進行直接銷帳或認列差額。<br/>• 若客戶表示已匯款但未出現：請確認客戶匯入之虛擬帳號是否相符，或至銀行匯入對帳查詢。</small>
+            <small>若客戶已匯款，請確認匯入流水與案件虛擬帳號是否相符。</small>
           </div>
         ) : (
           <div className="finance-recon-deck">
@@ -113,7 +126,7 @@ export function ClientReceiptReconciliationPanel({caseNo,onChanged,refreshVersio
                             <input
                               aria-label={`納入銀行款 ${row.finance_import_row_id}`}
                               type="checkbox"
-                              disabled={busy||unknown}
+                              disabled={busy||unknown||row.finance_import_row_id===requiredBankRowId}
                               checked={selectedBanks.includes(row.finance_import_row_id)}
                               onChange={event => {
                                 invalidate();

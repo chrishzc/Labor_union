@@ -93,8 +93,11 @@ def test_subsidy_return_ready_requires_owner_funding_preview(monkeypatch, blocke
     from shared_kernel.errors import ErrorCategory, TypedError
     from subsystems.client_finance.client_refund_reversal_workflow import ClientRefundReversalError
     candidate = replace(_pending_receipt(), classification_type=FinanceClassificationType.CLIENT_SUBSIDY_RETURN,
-                        target_identities=('client:7',), evidence=('z-existing-evidence',))
-    monkeypatch.setattr(module, '_load_exact_subsidy_return_targets', lambda *args: ({'obligation_identity':'subsidy:case'},))
+                        target_identities=('client:7',), evidence=('taishin_unique_client_refund_name_and_month_matched', 'z-existing-evidence'))
+    monkeypatch.setattr(module, '_sinopac_outgoing_case_info', lambda *args: (False, None, '2026-10-20'))
+    monkeypatch.setattr(module, '_load_client_refund_targets', lambda *args, **kwargs: (
+        {'obligation_identity': 'subsidy:case', 'case_no': 'test-case', 'due_date': '2026-10-15', 'amount_due_ntd': 12000},
+    ))
     selection = object()
     monkeypatch.setattr(module, '_client_subsidy_return_selection', lambda *args: selection)
     preview = Mock()
@@ -382,18 +385,18 @@ def test_resolve_staff_payout_with_transfer_fee_within_100() -> None:
         FinanceImportDisposition.BUSINESS_PENDING,
         PreviewFingerprint("a" * 64),
         target_identities=("staff:7",),
+        evidence=("unique_staff_payout_name_month_fee_matched",),
     )
     connection = _VirtualAccountConnection(
         (
-            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資"},
+            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資", "transaction_date": "2026-10-20"},
             (
                 {
                     "obligation_identity": "staff-obligation:7:oct",
                     "due_date": "2026-10-15",
-                    "balance_ntd": 12000,
+                    "amount_due_ntd": 12000,
                 },
             ),
-            {"transaction_date": "2026-10-20"},
         )
     )
     resolved = _resolve_staff_payout(connection, candidate)
@@ -413,23 +416,50 @@ def test_resolve_staff_payout_fee_over_100_remains_pending() -> None:
         FinanceImportDisposition.BUSINESS_PENDING,
         PreviewFingerprint("a" * 64),
         target_identities=("staff:7",),
+        evidence=("unique_staff_payout_name_month_fee_matched",),
     )
     connection = _VirtualAccountConnection(
         (
-            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資"},
+            {"format_id": "taishin", "direction": "outgoing", "memo": "張美美薪資", "transaction_date": "2026-10-20"},
             (
                 {
                     "obligation_identity": "staff-obligation:7:oct",
                     "due_date": "2026-10-15",
-                    "balance_ntd": 12000,
+                    "amount_due_ntd": 12000,
                 },
             ),
-            {"transaction_date": "2026-10-20"},
         )
     )
     resolved = _resolve_staff_payout(connection, candidate)
     assert resolved.disposition is FinanceImportDisposition.BUSINESS_PENDING
     assert resolved.available_actions == ()
+
+
+@pytest.mark.parametrize('bank', ['sinopac', 'taishin'])
+@pytest.mark.parametrize(('second_month', 'expected'), [
+    ('10', ('staff:first', 'staff:second')),
+    ('11', ()),
+])
+def test_staff_payout_can_only_combine_obligations_in_the_transaction_month(bank, second_month, expected):
+    candidate = CanonicalFinanceImportRow(
+        'finance-import-row:88', 0, MoneyNTD(11970),
+        FinanceClassificationType.STAFF_PAYOUT, FinanceImportDisposition.BUSINESS_PENDING,
+        PreviewFingerprint('a' * 64), target_identities=('staff:7',),
+        evidence=('unique_staff_payout_name_month_fee_matched',),
+    )
+    connection = _VirtualAccountConnection((
+        {'format_id': bank, 'direction': 'outgoing', 'memo': '合成月嫂', 'transaction_date': '2026-10-20'},
+        (
+            {'obligation_identity': 'staff:first', 'due_date': '2026-10-05', 'amount_due_ntd': 7000},
+            {'obligation_identity': 'staff:second', 'due_date': f'2026-{second_month}-15', 'amount_due_ntd': 5000},
+        ),
+    ))
+    resolved = _resolve_staff_payout(connection, candidate)
+    if expected:
+        assert resolved.disposition is FinanceImportDisposition.CREATE
+        assert resolved.target_identities == expected
+    else:
+        assert resolved == candidate
 
 
 def test_resolve_client_refund_with_transfer_fee_within_100() -> None:
@@ -442,10 +472,11 @@ def test_resolve_client_refund_with_transfer_fee_within_100() -> None:
         FinanceImportDisposition.BUSINESS_PENDING,
         PreviewFingerprint("b" * 64),
         target_identities=("client:101",),
+        evidence=("taishin_unique_client_refund_name_month_fee_matched",),
     )
     connection = _VirtualAccountConnection(
         (
-            {"format_id": "taishin", "direction": "outgoing", "memo": "林小美退款"},
+            {"format_id": "taishin", "direction": "outgoing", "memo": "林小美退款", "transaction_date": "2026-10-20"},
             (
                 {
                     "case_no": "115001",
@@ -454,7 +485,6 @@ def test_resolve_client_refund_with_transfer_fee_within_100() -> None:
                     "amount_due_ntd": 10000,
                 },
             ),
-            {"transaction_date": "2026-10-20"},
         )
     )
     resolved = _resolve_client_refund(connection, candidate)

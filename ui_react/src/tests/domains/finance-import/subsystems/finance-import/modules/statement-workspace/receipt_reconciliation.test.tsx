@@ -41,4 +41,21 @@ describe('本案客戶入款核銷',()=>{
     expect(vi.mocked(clientReceiptReconciliationClient.apply).mock.calls[0]).toEqual(vi.mocked(clientReceiptReconciliationClient.apply).mock.calls[1]);
     expect(await screen.findByText('已記錄實際收款，剩餘款項繼續待收。')).toBeInTheDocument();
   });
+  it('starts from the selected bank transaction and only includes explicitly selected related rows and periods', async () => {
+    render(<ClientReceiptReconciliationPanel caseNo="CASE" requiredBankRowId={9} onChanged={vi.fn()} />);
+    const source = await screen.findByRole('checkbox', { name: '納入銀行款 9' });
+    const related = screen.getByRole('checkbox', { name: '納入銀行款 10' });
+    expect(source).toBeChecked();
+    expect(source).toBeDisabled();
+    expect(related).not.toBeChecked();
+    const periods = screen.getAllByRole('checkbox').slice(2);
+    for (const period of periods) expect(period).not.toBeChecked();
+    fireEvent.click(related);
+    for (const period of periods) fireEvent.click(period);
+    fireEvent.click(screen.getByRole('button', { name: '核對本案入款' }));
+    await waitFor(() => expect(clientReceiptReconciliationClient.preview).toHaveBeenCalledWith(
+      'CASE', { payment_stage: null, finance_import_row_ids: [9, 10], obligation_identities: ['first', 'second'] }, 'exact',
+    ));
+    expect(clientReceiptReconciliationClient.apply).not.toHaveBeenCalled();
+  });
 });

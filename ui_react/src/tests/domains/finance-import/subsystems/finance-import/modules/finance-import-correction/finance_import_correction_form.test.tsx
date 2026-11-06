@@ -61,12 +61,14 @@ async function preview() {
   fireEvent.click(screen.getByText('查詢待核銷款項'));
   fireEvent.click(await screen.findByRole('checkbox'));
   fireEvent.change(screen.getByLabelText('更正原因（選填）'), { target: { value: '核對原始收款' } });
-  fireEvent.click(screen.getByText('儲存更正並核銷'));
+  fireEvent.click(screen.getByText('預覽核銷'));
 }
 
-it('uses one click and requires a matching terminal receipt before declaring completion', async () => {
+it('previews before confirmation and requires a matching terminal receipt before declaring completion', async () => {
   await preview();
   expect(await screen.findByText(/本次核銷 NT\$/)).toHaveTextContent('100');
+  expect(corrections.apply).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '確認核銷' }));
   await waitFor(() => expect(corrections.apply).toHaveBeenCalledOnce());
   expect(await screen.findByText('更正收據尚未確認，不能判定完成。')).toBeInTheDocument();
   vi.mocked(corrections.queryOutcome).mockResolvedValue({ status: 'succeeded', receipt: { row_identity: 'row:1', batch_identity: 'batch:1', preview_fingerprint: 'a'.repeat(64) } } as never);
@@ -81,9 +83,9 @@ it('clears old selections when the target changes before saving', async () => {
   fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-1' } });
   fireEvent.click(screen.getByText('查詢待核銷款項'));
   fireEvent.click(await screen.findByRole('checkbox'));
-  expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '預覽核銷' })).toBeEnabled();
   fireEvent.change(screen.getByLabelText('案件編號'), { target: { value: 'CASE-2' } });
-  expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '預覽核銷' })).toBeDisabled();
   expect(corrections.apply).not.toHaveBeenCalled();
 });
 
@@ -104,7 +106,7 @@ it('searches partial case numbers and client names, pages results and only queri
   await waitFor(() => expect(clientReceiptQueryClient.query).toHaveBeenCalledWith('CASE-3'));
   fireEvent.click(await screen.findByRole('checkbox'));
   fireEvent.change(screen.getByLabelText('搜尋案件'), { target: { value: '測試客戶' } });
-  expect(screen.getByRole('button', { name: '儲存更正並核銷' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '預覽核銷' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '查詢待核銷款項' })).toBeDisabled();
   await waitFor(() => expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith({ query_text: '測試客戶', page_size: 50 }, expect.anything()));
 });
@@ -148,7 +150,8 @@ it('offers a partial customer refund from the original bank row, including not-y
   fireEvent.click(screen.getByText('查詢待核銷款項'));
   fireEvent.click(await screen.findByRole('checkbox'));
   fireEvent.change(screen.getByLabelText('退款核銷方式'), { target: { value: 'partial' } });
-  fireEvent.click(screen.getByText('儲存更正並核銷'));
+  fireEvent.click(screen.getByText('預覽核銷'));
+  fireEvent.click(await screen.findByRole('button', { name: '確認核銷' }));
   await waitFor(() => expect(corrections.apply).toHaveBeenCalledOnce());
   expect(clientSettlementRemediationClient.query).toHaveBeenCalledWith('CASE-1', { includeNotDue: true });
   expect(corrections.preview).toHaveBeenCalledWith(expect.objectContaining({
@@ -185,7 +188,8 @@ it('requires an explicit overage choice to delegate excess refund cash to recove
   expect(screen.getByLabelText('退款核銷方式')).toHaveValue('exact');
   expect(corrections.preview).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('退款核銷方式'),{target:{value:'overage'}});
-  fireEvent.click(screen.getByText('儲存更正並核銷'));
+  fireEvent.click(screen.getByText('預覽核銷'));
+  fireEvent.click(await screen.findByRole('button', { name: '確認核銷' }));
   await screen.findByText('退款核銷完成；超退金額已另列待追回款，請至案件帳務查看。');
   expect(corrections.preview).toHaveBeenCalledWith(expect.objectContaining({
     classification_type:'client_refund',target_obligation_identities:['refund:1'],

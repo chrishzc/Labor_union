@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from dataclasses import asdict
+from datetime import date
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,8 @@ import pandas as pd
 import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
+from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 DATABASE = os.getenv('LABOR_UNION_TEST_MYSQL_DATABASE')
 pytestmark = pytest.mark.skipif(not DATABASE, reason='requires disposable MySQL')
@@ -86,6 +89,81 @@ def _seed_deposit(case_no, token):
         connection.commit()
     finally:
         connection.close()
+
+
+def test_both_banks_first_import_and_new_key_reimport(tmp_path):
+    bootstrap(_arguments())
+    from api.dependencies.finance_import import build_finance_import_application
+    from infrastructure.mysql.finance_import_owning_domain_composite import MySqlFinanceImportOwningDomainComposite
+    from infrastructure.mysql.monthly_accounting_repository import MySqlMonthlyAccountingSource
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
+    from subsystems.finance_import.import_workflow import FinanceImportApplyRequest
+    from subsystems.finance_import.ingestion import ingest_finance_workbook
+    from subsystems.finance_import.query import FinanceImportQueryService
+
+    _seed_deposit('115000003', 'synthetic-first-and-repeat')
+    sinopac = tmp_path / 'sinopac.xlsx'
+    pd.DataFrame([
+        ['123456789012', f'2026/09/0{day} 09:00:00', f'2026/09/0{day}', f'2026/09/0{day}',
+         '轉帳', 'TWD', None, amount, balance, None, '99781699115003', f'test-{day}', None, None, None]
+        for day, amount, balance in [(1, 300, 300), (2, 259, 559), (3, 204, 763)]
+    ], columns=SINOPAC_HEADERS).to_excel(sinopac, index=False)
+    taishin = tmp_path / 'taishin.xlsx'
+    taishin_headers = ['序號', '交易日期', '交易時間', '帳務日期', '摘要', '支出金額', '存入金額', '帳戶餘額', '備註']
+    pd.DataFrame([
+        ['說明'], taishin_headers,
+        ['0001', '2026/09/01', '09:00:00', '2026/09/01', '政府補助', '', '500', '80000', '新竹市政府補助入款'],
+        ['0002', '2026/09/02', '09:00:00', '2026/09/02', '轉出', '80', '', '79920', '對象未知'],
+    ]).to_excel(taishin, index=False, header=False)
+
+    actor = ActorContext('isolated-finance-test')
+    correlation = CorrelationId('first-and-repeat')
+    for workbook, source_count, posted_count, pending_amounts in (
+        (sinopac, 3, 1, [204, 259]), (taishin, 2, 0, [80, 500]),
+    ):
+        before = _counts()
+        first = ingest_finance_workbook(str(workbook), IdempotencyKey(f'{workbook.stem}:first'), actor,
+                                        connection_factory=get_connection, normalizer=normalize_workbook)
+        assert (first.source_row_count, first.canonical_created_count, first.duplicate_occurrence_count) == (source_count, source_count, 0)
+        connection = get_connection()
+        try:
+            application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+            plan = application.preview_batch(first.batch_identity, correlation)
+            assert plan.counts.ready_dispatch == posted_count
+            if posted_count:
+                result = application.apply_batch(FinanceImportApplyRequest(
+                    first.batch_identity, ExpectedVersion(plan.batch_version), plan.fingerprint,
+                    IdempotencyKey(f'{workbook.stem}:apply'), actor, 'Synthetic workbook', correlation,
+                ))
+                assert result.reconciled_count == posted_count
+        finally:
+            connection.close()
+        repeat = ingest_finance_workbook(str(workbook), IdempotencyKey(f'{workbook.stem}:repeat'), actor,
+                                         connection_factory=get_connection, normalizer=normalize_workbook)
+        assert first.batch_identity != repeat.batch_identity
+        assert (repeat.source_row_count, repeat.canonical_created_count, repeat.duplicate_occurrence_count) == (source_count, 0, source_count)
+        connection = get_connection()
+        try:
+            query = FinanceImportQueryService(connection)
+            first_pending = query.list_review_rows(first.batch_identity, limit=50)
+            repeat_pending = query.list_review_rows(repeat.batch_identity, limit=50)
+            assert sorted(row.amount_ntd for row in first_pending) == pending_amounts
+            assert [row.row_id for row in repeat_pending] == [row.row_id for row in first_pending]
+            manifest = query.get_manifest(repeat.batch_identity)
+            assert manifest.format_id == workbook.stem
+            assert manifest.review_count == len(pending_amounts)
+            application = build_finance_import_application(connection, MySqlFinanceImportOwningDomainComposite(connection))
+            plan = application.preview_batch(repeat.batch_identity, correlation)
+            assert (plan.counts.ready_dispatch, plan.counts.existing) == (0, posted_count)
+            cash = MySqlMonthlyAccountingSource(connection).bank_facts(date(2026, 9, 1), date(2026, 9, 1))
+            assert [(row.bank, row.amount_ntd) for row in cash] == [('sinopac', 300)]
+        finally:
+            connection.close()
+        after = _counts()
+        assert after['finance_import_rows'] - before['finance_import_rows'] == source_count
+        assert after['finance_import_occurrences'] - before['finance_import_occurrences'] == source_count * 2
+        assert after['client_ledger_entries'] - before['client_ledger_entries'] == posted_count
 
 
 def test_t11_source_review_query_apply_and_replay(tmp_path):

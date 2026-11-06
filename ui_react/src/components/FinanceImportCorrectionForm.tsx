@@ -8,6 +8,7 @@ import { staffPayablesQueryClient } from '../api/staff_payables/staff_payables_q
 import { clientSettlementRemediationClient } from '../api/client_finance/client_settlement_remediation_client';
 import { subsidyPeriodClient, type SubsidyPeriod, type SubsidyPeriodView, type GovernmentDifferenceCommand } from '../api/government_subsidy/period_reconciliation_client';
 import { financeMoney } from './FinanceReceiptsWorkspace';
+import { ClientReceiptReconciliationPanel } from './ClientReceiptReconciliationPanel';
 
 type CorrectionCommand = {
   preview: FinanceImportCorrectionPreview;
@@ -23,12 +24,14 @@ const refundModes = {
 export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, bankAmount, initialKind = 'client_receipt', onPosted, onBusyChange }: {
   rowIdentity: string; sourceLabel: string; staff: readonly { id: number; label: string }[];
   bankAmount?: number;
-  initialKind?: 'client_receipt' | 'staff_payout' | 'client_refund' | 'government_subsidy';
+  initialKind?: 'client_receipt' | 'staff_payout' | 'client_refund' | 'client_subsidy_return' | 'government_subsidy';
   onPosted?: () => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
   const [payoutTarget, setPayoutTarget] = useState<StaffPayoutRemediationTarget | null>(null);
   const [payoutBusy, setPayoutBusy] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
   const bankRow = /^finance-import-row:([1-9][0-9]*)$/.exec(rowIdentity);
   const [kind, setKind] = useState(initialKind);
   const [refundMode, setRefundMode] = useState<keyof typeof refundModes>('exact');
@@ -51,7 +54,7 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
   const [completed, setCompleted] = useState(false);
   const [identity] = useState(() => ({ idempotencyKey: `finance-correction-${crypto.randomUUID()}`, correlationId: `finance-correction-${crypto.randomUUID()}` }));
   const [retryCommand, setRetryCommand] = useState<CorrectionCommand | null>(null);
-  const closeLocked = busy || payoutBusy || (!!retryCommand && !submitted) || (!!jobId && !completed);
+  const closeLocked = busy || payoutBusy || groupBusy || (!!retryCommand && !submitted) || (!!jobId && !completed);
   useEffect(() => { onBusyChange?.(closeLocked); return () => onBusyChange?.(false); }, [closeLocked, onBusyChange]);
   const loadCases = async (query: string, after?: string) => {
     caseRequest.current?.abort();
@@ -158,9 +161,11 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       if (kind === 'client_receipt') {
         const data = await clientReceiptQueryClient.query(target);
         setOptions(data.obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · ${{ deposit: '訂金', first: '第一期', second: '第二期', adjustment: '調整款' }[item.payment_stage] ?? item.payment_stage} · NT$ ${item.amount_due_ntd.toLocaleString()}` })));
-      } else if (kind === 'client_refund') {
+      } else if (kind === 'client_refund' || kind === 'client_subsidy_return') {
         const data = await clientSettlementRemediationClient.query(target, { includeNotDue: true });
-        setOptions(data.refund_obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · 客戶退款 · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}` })));
+        const obligations = kind === 'client_refund' ? data.refund_obligations : data.subsidy_return_obligations;
+        const label = kind === 'client_refund' ? '客戶退款' : '退客戶先墊補助';
+        setOptions(obligations.map((item) => ({ id: item.obligation_identity, label: `${data.case_no} · ${label} · 待退 NT$ ${item.amount_due_ntd.toLocaleString()}` })));
       } else {
         const data = await staffPayablesQueryClient.query(Number(target));
         setOptions(data.obligations.filter((item) => item.balance_ntd > 0).map((item) => ({ id: item.obligation_identity, label: `${item.case_no} · 未付 NT$ ${item.balance_ntd.toLocaleString()}` })));
@@ -179,7 +184,6 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
       if (result.candidate.row_identity !== rowIdentity || result.candidate.classification_type !== kind) throw new Error('更正預覽對象不一致。');
       if (!result.candidate.allocations.length || result.candidate.allocations.some((item) => !selected.includes(item.obligation_identity))) throw new Error('更正預覽包含未選取的款項。');
       setSelection(request); setPreview(result);
-      await apply({ preview: result, selection: request, identity });
     } catch (error) { setMessage(error instanceof Error ? error.message : '更正預覽失敗。'); }
     finally { setBusy(false); }
   };
@@ -229,12 +233,12 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
     } catch (error) { setMessage(error instanceof Error ? error.message : '無法讀取結果。'); }
     finally { setBusy(false); }
   };
-  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '退款核銷方式': refundModes[refundMode], '原因': reason }, { enabled: (kind !== 'staff_payout' || !payoutTarget) && kind !== 'government_subsidy', busy: closeLocked, resetKey: completed, save: review, discard: () => { setSelected([]); setTarget(''); setReason(''); setRefundMode('exact'); invalidate(); } });
+  useUnsavedDraft('匯入帳務修正', { '款項類別': kind, '指定對象': target, '選取項目': selected, '退款核銷方式': refundModes[refundMode], '原因': reason }, { enabled: !groupOpen && (kind !== 'staff_payout' || !payoutTarget) && kind !== 'government_subsidy', busy: closeLocked, resetKey: completed, discard: () => { setSelected([]); setTarget(''); setReason(''); setRefundMode('exact'); invalidate(); } });
 
   return <section aria-label="銀行款項更正" className="order-case-review-note finance-correction-form">
     <p>將這筆銀行紀錄對應至正確的客戶收款、客戶退款、月嫂付款或政府整期入款。金額由後端核對，不可手動標記已付。</p>
-    <fieldset disabled={busy || payoutBusy || submitted || retryCommand !== null}>
-      <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setRefundMode('exact'); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="staff_payout">月嫂付款</option><option value="government_subsidy">政府入款</option></select></label>
+    <fieldset disabled={busy || payoutBusy || groupOpen || submitted || retryCommand !== null}>
+      <label>款項用途<select value={kind} onChange={(event) => { if (retryCommand) return; setKind(event.target.value as typeof kind); setCaseSearch(''); setRefundMode('exact'); setTarget(''); setOptions([]); setSelected([]); invalidate(); }}><option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_subsidy_return">退客戶先墊補助</option><option value="staff_payout">月嫂付款</option><option value="government_subsidy">政府入款</option></select></label>
       {kind === 'government_subsidy' ? (
         <div className="government-subsidy-correction-section" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -360,16 +364,33 @@ export function FinanceImportCorrectionForm({ rowIdentity, sourceLabel, staff, b
             {caseCursor && <button type="button" disabled={caseSearching} onClick={() => void loadCases(caseSearch.trim(), caseCursor)}>載入更多案件</button>}
           </> : <label>月嫂<select aria-label="月嫂" value={target} onChange={(event) => { if (retryCommand) return; setTarget(event.target.value); setOptions([]); setSelected([]); invalidate(); }}><option value="">請選擇</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label>}
           <button type="button" disabled={!target.trim()} onClick={() => void load()}>查詢待核銷款項</button>
+          {kind === 'client_receipt' && target && bankRow && (
+            <button type="button" onClick={() => { invalidate(); setGroupOpen(true); }}>核對同案多筆入款</button>
+          )}
           {options.map((item) => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} onChange={() => { if (retryCommand) return; setSelected((items) => items.includes(item.id) ? items.filter((id) => id !== item.id) : [...items, item.id]); invalidate(); }} />{item.label}</label>)}
           {kind === 'staff_payout' && bankRow && <button type="button" disabled={!selected.length} onClick={() => setPayoutTarget({ staffId: Number(target), obligationIdentity: selected[0], obligationIdentities: selected })}>處理付款不足或超額</button>}
           {kind === 'client_refund' && <><label>退款核銷方式<select value={refundMode} onChange={(event) => { setRefundMode(event.target.value as keyof typeof refundModes); invalidate(); }}>{Object.entries(refundModes).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{refundMode === 'overage' && <p>銀行多退的金額會另列待追回款；原銀行支出保留全額。</p>}</>}
           <label>更正原因（選填）<input maxLength={500} value={reason} onChange={(event) => { if (retryCommand) return; setReason(event.target.value); invalidate(); }} /></label>
-          <button type="button" disabled={!selected.length} onClick={() => void review()}>儲存更正並核銷</button>
+          <button type="button" disabled={!selected.length} onClick={() => void review()}>預覽核銷</button>
         </>
       )}
     </fieldset>
+    {groupOpen && bankRow && (
+      <>
+        <ClientReceiptReconciliationPanel
+          caseNo={target}
+          requiredBankRowId={Number(bankRow[1])}
+          onBusyChange={setGroupBusy}
+          onChanged={() => { setGroupOpen(false); setCompleted(true); onPosted?.(); }}
+        />
+        <button type="button" disabled={groupBusy} onClick={() => setGroupOpen(false)}>返回單筆核對</button>
+      </>
+    )}
     {payoutTarget && bankRow && <div><StaffPayoutRemediationWorkbench target={payoutTarget} financeImportRowId={Number(bankRow[1])} onBusyChange={setPayoutBusy} onPosted={() => setSubmitted(true)}/><button type="button" disabled={payoutBusy} onClick={() => setPayoutTarget(null)}>關閉差額核銷</button></div>}
     {preview && <div><p>銀行金額 NT$ {preview.candidate.bank_amount_ntd.toLocaleString()}，將核銷 {preview.candidate.allocations.length} 筆款項。</p><ul>{preview.candidate.allocations.map((item) => <li key={item.obligation_identity}>{options.find((option) => option.id === item.obligation_identity)?.label ?? '待確認款項'}：本次核銷 NT$ {item.amount_ntd.toLocaleString()}</li>)}</ul></div>}
+    {preview && selection && !retryCommand && !submitted && (
+      <button type="button" disabled={busy} onClick={() => void apply()}>確認核銷</button>
+    )}
     {retryCommand && <button type="button" disabled={busy || submitted} onClick={() => void apply()}>以原操作確認更正結果</button>}
     {jobId && <button type="button" disabled={busy} onClick={() => void readOutcome()}>重新查詢更正結果</button>}
     {message && <p role="status">{message}</p>}

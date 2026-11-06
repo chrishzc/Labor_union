@@ -90,7 +90,7 @@ export function FinanceBankReconciliationWorkspace({
   selectedBatchIdentity,
   onSelectBatch,
   sourceReview,
-  onReloadSourceReview: _onReloadSourceReview,
+  onReloadSourceReview,
   financeWorkbook,
   onWorkbookChange,
   applyReason: _applyReason,
@@ -110,7 +110,8 @@ export function FinanceBankReconciliationWorkspace({
   submittedFinanceCommand,
 }: FinanceBankReconciliationWorkspaceProps) {
   // 1. 日期與篩選狀態
-  const [dates, setDates] = useState(() => {
+  const [dateFilter, setDateFilter] = useState<{ start: string; end: string } | null>(null);
+  const [currentMonth] = useState(() => {
     const d = new Date();
     const m = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
     return {
@@ -118,6 +119,17 @@ export function FinanceBankReconciliationWorkspace({
       end: m + '-' + String(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()),
     };
   });
+  const reviewItems: ReviewRow[] = sourceReview.kind === 'ready' ? sourceReview.data.items : [];
+  const dates = dateFilter ?? reviewItems.reduce((range, row) => {
+    const day = row.transaction_date;
+    return day ? {
+      start: day < range.start ? day : range.start,
+      end: day > range.end ? day : range.end,
+    } : range;
+  }, currentMonth);
+  useEffect(() => {
+    if (sourceReview.kind === 'ready' && dateFilter === null) setDateFilter(dates);
+  }, [sourceReview.kind, dateFilter, dates]);
   const [filterBank, setFilterBank] = useState('all');
   const [filterDir, setFilterDir] = useState('all');
   const [filterStatus, setFilterStatus] = useState<'pending' | 'posted' | 'all'>('pending');
@@ -141,8 +153,8 @@ export function FinanceBankReconciliationWorkspace({
     void monthlyAccountingClient
       .query(
         {
-          start_month: dates.start.slice(0, 7),
-          end_month: dates.end.slice(0, 7),
+          start_month: (dates.start || currentMonth.start).slice(0, 7),
+          end_month: (dates.end || currentMonth.end).slice(0, 7),
           category: 'all',
         },
         controller.signal
@@ -154,14 +166,14 @@ export function FinanceBankReconciliationWorkspace({
         if (!controller.signal.aborted) setPostedState({ error: '已核銷銀行交易暫時無法取得，請重新查詢。' });
       });
     return () => controller.abort();
-  }, [dates, revision]);
+  }, [dates.start, dates.end, currentMonth, revision]);
 
   // 整理已核銷清單
   const postedRows: MonthlyBankFact[] =
     postedState.data?.rows
       .flatMap((row) => row.bank_facts)
       .filter((row) => {
-        const dateMatch = row.occurred_on >= dates.start && row.occurred_on <= dates.end;
+        const dateMatch = (!dates.start || row.occurred_on >= dates.start) && (!dates.end || row.occurred_on <= dates.end);
         const bankMatch = filterBank === 'all' || row.bank === filterBank;
         const dirMatch =
           filterDir === 'all' ||
@@ -172,7 +184,6 @@ export function FinanceBankReconciliationWorkspace({
       }) ?? [];
 
   // 整理待核對清單 (來自 sourceReview)
-  const reviewItems: ReviewRow[] = sourceReview.kind === 'ready' ? sourceReview.data.items : [];
   const selectedBatch = batches.find((b) => b.batch_identity === selectedBatchIdentity);
   const batchBankFormat = selectedBatch?.format_id; // 'taishin' | 'sinopac' | etc.
 
@@ -278,7 +289,7 @@ export function FinanceBankReconciliationWorkspace({
                 batchOutcome.kind === 'loading' ||
                 submittedFinanceCommand !== undefined
               }
-              onClick={onIngest}
+              onClick={() => { setDateFilter(null); onIngest(); }}
               style={{ padding: '7px 14px' }}
             >
               {ingestion.kind === 'loading' ||
@@ -337,15 +348,16 @@ export function FinanceBankReconciliationWorkspace({
           (ingestion.kind === 'ready' && !importBusy)) && (
           <div className="finance-meta" style={{ marginTop: '10px' }}>
             <span>
-              本次已銷帳 {(confirmedImportReceipt?.reconciled_count ?? 0) + manuallyPostedRows.size} 筆｜重複／已存在略過{' '}
-              {confirmedImportReceipt?.existing_count ??
-                (batchPreview.kind === 'ready'
-                  ? batchPreview.data.counts.existing + batchPreview.data.counts.duplicate_occurrences
-                  : (ingestion.kind === 'ready' ? ingestion.data.duplicate_occurrence_count : 0))} 筆
+              {submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready'
+                ? '本次自動核銷結果待確認'
+                : `本次自動核銷 ${confirmedImportReceipt?.reconciled_count ?? 0} 筆`}
+              {ingestion.kind === 'ready' && <>｜新增流水 {ingestion.data.canonical_created_count} 筆｜重複來源列 {ingestion.data.duplicate_occurrence_count} 筆</>}
+              {sourceReview.kind === 'ready' && <>｜仍待核對 {sourceReview.data.reviewCount} 筆</>}
+              {ingestion.kind === 'ready' && ingestion.data.source_warning_count > 0 && <>｜來源格式異常 {ingestion.data.source_warning_count} 筆</>}
             </span>
             {batchPreview.kind === 'ready' && !batchPreview.data.apply_allowed && (
               <span style={{ color: '#c5221f', fontWeight: 700 }} role="alert">
-                （自動銷帳未執行：{financeImportBlockerMessage(batchPreview.data.blocking_codes)}。資料已匯入入帳，請查看未銷帳明細與原因）
+                （自動核銷受阻：{financeImportBlockerMessage(batchPreview.data.blocking_codes)}。流水已保存，請查看待核對明細）
               </span>
             )}
           </div>
@@ -372,7 +384,9 @@ export function FinanceBankReconciliationWorkspace({
               <select
                 id="filter-batch"
                 value={selectedBatchIdentity}
-                onChange={(e) => onSelectBatch(e.target.value)}
+                disabled={importBusy || applyJob.kind === 'loading' || batchOutcome.kind === 'loading' ||
+                  (submittedFinanceCommand !== undefined && batchOutcome.kind !== 'ready')}
+                onChange={(e) => { setDateFilter(null); onSelectBatch(e.target.value); }}
                 aria-label="篩選匯入批次"
               >
                 {batches.map((b) => (
@@ -431,7 +445,7 @@ export function FinanceBankReconciliationWorkspace({
               id="filter-start-date"
               type="date"
               value={dates.start}
-              onChange={(e) => setDates({ ...dates, start: e.target.value })}
+              onChange={(e) => setDateFilter({ ...dates, start: e.target.value })}
               aria-label="交易起日"
             />
           </div>
@@ -442,7 +456,7 @@ export function FinanceBankReconciliationWorkspace({
               id="filter-end-date"
               type="date"
               value={dates.end}
-              onChange={(e) => setDates({ ...dates, end: e.target.value })}
+              onChange={(e) => setDateFilter({ ...dates, end: e.target.value })}
               aria-label="交易迄日"
             />
           </div>
@@ -580,7 +594,13 @@ export function FinanceBankReconciliationWorkspace({
           </table>
 
           {/* 空狀態顯示 */}
-          {((filterStatus === 'pending' && pendingRows.length === 0) ||
+          {sourceReview.kind === 'error' && filterStatus !== 'posted' && (
+            <div className="finance-state" role="alert">
+              {sourceReview.message}
+              <button type="button" onClick={() => onReloadSourceReview(selectedBatchIdentity)}>重新載入待核對交易</button>
+            </div>
+          )}
+          {sourceReview.kind !== 'error' && sourceReview.kind !== 'loading' && ((filterStatus === 'pending' && pendingRows.length === 0) ||
             (filterStatus === 'posted' && postedRows.length === 0) ||
             (filterStatus === 'all' && pendingRows.length === 0 && postedRows.length === 0)) && (
             <div className="finance-state" style={{ padding: '36px 20px' }}>
@@ -639,8 +659,8 @@ export function FinanceBankReconciliationWorkspace({
             sourceLabel={`${correctionRow.source_sheet} 第 ${correctionRow.source_row} 列`}
             staff={staff}
             initialKind={
-              correctionRow.classification_type === 'client_refund'
-                ? 'client_refund'
+              (correctionRow.classification_type === 'client_refund' || correctionRow.classification_type === 'client_subsidy_return')
+                ? correctionRow.classification_type
                 : (correctionRow.classification_type === 'staff_payout' || correctionRow.classification_type === 'staff_salary')
                 ? 'staff_payout'
                 : correctionRow.classification_type === 'government_subsidy'

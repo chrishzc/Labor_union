@@ -226,6 +226,17 @@ export const FinancePage: React.FC = () => {
         setSourceReview({ kind: 'error', message: '未銷帳明細與統計不一致，請重新查詢。' });
         return;
       }
+      setSelectedBatchIdentity(manifest.batch_identity);
+      setBatches(previous => [
+        {
+          batch_id: manifest.batch_id, batch_identity: manifest.batch_identity,
+          format_id: manifest.format_id, source_file: manifest.source_file,
+          row_count: manifest.source_row_count, status: manifest.status,
+          batch_version: manifest.batch_version, architecture_ready: true,
+          created_at: manifest.created_at,
+        },
+        ...previous.filter(batch => batch.batch_identity !== manifest.batch_identity),
+      ].sort((left, right) => right.batch_id - left.batch_id));
       setSourceReview({
         kind: 'ready',
         data: { batchIdentity: manifest.batch_identity, reviewCount: items.length, items, sourceReviews: [] },
@@ -247,21 +258,9 @@ export const FinancePage: React.FC = () => {
         setBatches(list);
         const valid = list.filter((b) => b.batch_identity && b.batch_identity.trim() !== '');
         if (valid.length > 0) {
-          let chosen = valid[0].batch_identity!;
-          for (const b of valid) {
-            try {
-              const rows = await financeImportQueryClient.listReviewRows(b.batch_identity!);
-              if (rows.items.length > 0) {
-                chosen = b.batch_identity!;
-                break;
-              }
-            } catch {
-              // ignore
-            }
-          }
-          if (!active) return;
-          setSelectedBatchIdentity(chosen);
           if (sourceReview.kind === 'idle' && batchPreview.kind === 'idle') {
+            const chosen = valid[0].batch_identity!;
+            setSelectedBatchIdentity(chosen);
             void loadSourceReview(chosen);
           }
         }
@@ -274,6 +273,7 @@ export const FinancePage: React.FC = () => {
 
   const handleSelectBatch = (identity: string) => {
     setSelectedBatchIdentity(identity);
+    setIngestion({ kind: 'idle' });
     setBatchPreview({ kind: 'idle' });
     setBatchOutcome({ kind: 'idle' });
     void loadSourceReview(identity);
@@ -288,6 +288,7 @@ export const FinancePage: React.FC = () => {
       const snapshot = await FinanceWorkbookSnapshot.fromFile(financeWorkbook);
       const receipt = await financeImportMutationClient.ingest(snapshot, { idempotencyKey: `ui-finance-ingest-${crypto.randomUUID()}`, correlationId: `ui-finance-ingest-${crypto.randomUUID()}` });
       setIngestion({ kind: 'ready', data: receipt });
+      setSelectedBatchIdentity(receipt.batch_identity);
       await previewImportedBatch(receipt);
     } catch (error) { setIngestion({ kind: 'error', message: financeErrorMessage(error, '銀行交易明細上傳失敗，請重新選擇檔案。') }); }
     finally { setImportBusy(false); }
